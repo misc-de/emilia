@@ -1,0 +1,12 @@
+# Rust-Build-Artefakte
+/target
+
+# Cargo.lock wird bewusst eingecheckt (Binär-App, reproduzierbare Builds)
+
+# Editor / OS
+*.rs.bk
+*~
+.DS_Store
+
+# Claude-Code: maschinenlokale Einstellungen (Berechtigungen etc.)
+.claude/settings.local.json

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <!-- Handmikrofon, aufrecht konstruiert und sauber um 45° diagonal gedreht. -->
+  <g fill="#2e3436" transform="rotate(45 8 8)">
+    <!-- Griff: dicke Linie mit rundem Ende, sitzt tief unter dem Kopf. -->
+    <line x1="8" y1="6.2" x2="8" y2="13.2"
+          stroke="#2e3436" stroke-width="3" stroke-linecap="round"/>
+    <!-- Kopf (Kugel) mit drei Gitter-Schlitzen in der oberen Hälfte
+         (evenodd = Löcher), die die Griff-Anbindung frei lassen. -->
+    <path fill-rule="evenodd"
+          d="M4.8 4.3 a3.2 3.2 0 1 0 6.4 0 a3.2 3.2 0 1 0 -6.4 0 Z
+             M6.10 1.95 L9.90 1.95 L9.90 2.45 L6.10 2.45 Z
+             M5.55 2.80 L10.45 2.80 L10.45 3.30 L5.55 3.30 Z
+             M5.40 3.65 L10.60 3.65 L10.60 4.15 L5.40 4.15 Z"/>
+  </g>
+</svg>

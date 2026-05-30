@@ -1,0 +1,794 @@
+//! SQLite-Bibliotheksindex (rusqlite).
+
+use anyhow::Result;
+use rusqlite::{Connection, OptionalExtension};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use crate::model::{AlbumMeta, ArtistMeta, Track, TrackMeta};
+
+/// Speicherort der Datenbank: `$XDG_DATA_HOME/emilia/library.db`.
+pub fn db_path() -> PathBuf {
+    let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("emilia");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.push("library.db");
+    dir
+}
+
+pub struct Library {
+    conn: Connection,
+}
+
+impl Library {
+    pub fn open() -> Result<Self> {
+        let conn = Connection::open(db_path())?;
+        // Mehrere Verbindungen (UI-Thread + Online-Worker) greifen parallel zu:
+        // kurz warten statt sofort mit „database is locked“ abzubrechen.
+        conn.busy_timeout(Duration::from_secs(10))?;
+        let lib = Self { conn };
+        lib.migrate()?;
+        Ok(lib)
+    }
+
+    /// In-Memory-DB (für Tests).
+    pub fn open_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        let lib = Self { conn };
+        lib.migrate()?;
+        Ok(lib)
+    }
+
+    fn migrate(&self) -> Result<()> {
+        self.conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS track (
+                id          INTEGER PRIMARY KEY,
+                path        TEXT UNIQUE NOT NULL,
+                title       TEXT NOT NULL,
+                artist      TEXT,
+                album       TEXT,
+                track_no    INTEGER,
+                duration_ms INTEGER,
+                resume_ms   INTEGER NOT NULL DEFAULT 0,
+                last_played INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS eq_preset (
+                id     INTEGER PRIMARY KEY,
+                preamp REAL NOT NULL DEFAULT 0,
+                bands  TEXT NOT NULL          -- JSON [g0..g9] in dB
+            );
+
+            CREATE TABLE IF NOT EXISTS eq_binding (
+                scope     TEXT NOT NULL CHECK(scope IN ('global','artist','album','track')),
+                target_id INTEGER,
+                preset_id INTEGER NOT NULL REFERENCES eq_preset(id),
+                PRIMARY KEY(scope, target_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS setting (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            -- Online angereicherte Albumdaten (MusicBrainz / Cover Art Archive).
+            -- Bewusst getrennt von den Audiodateien: nichts hiervon wird je in
+            -- die Tags zurückgeschrieben.
+            CREATE TABLE IF NOT EXISTS album_meta (
+                artist     TEXT NOT NULL,
+                album      TEXT NOT NULL,
+                mbid       TEXT,
+                cover_path TEXT,
+                year       INTEGER,
+                status     TEXT NOT NULL DEFAULT 'pending',
+                fetched_at INTEGER,
+                PRIMARY KEY (artist, album)
+            );
+
+            -- Künstlerfotos (Deezer). Ebenfalls getrennt von den Dateien.
+            CREATE TABLE IF NOT EXISTS artist_meta (
+                name       TEXT PRIMARY KEY,
+                image_path TEXT,
+                status     TEXT NOT NULL DEFAULT 'pending',
+                fetched_at INTEGER
+            );
+
+            -- Per Fingerprint (AcoustID) erkannte Titeldaten – reine Vorschläge,
+            -- werden nie in die Tags der Datei zurückgeschrieben.
+            CREATE TABLE IF NOT EXISTS track_meta (
+                path           TEXT PRIMARY KEY,
+                recording_mbid TEXT,
+                title          TEXT,
+                artist         TEXT,
+                album          TEXT,
+                status         TEXT NOT NULL DEFAULT 'pending',
+                fetched_at     INTEGER
+            );
+
+            -- Vom Nutzer als Konzert markierte Ordner/Dateien.
+            CREATE TABLE IF NOT EXISTS concert (
+                path     TEXT PRIMARY KEY,
+                title    TEXT NOT NULL,
+                is_dir   INTEGER NOT NULL DEFAULT 0,
+                added_at INTEGER
+            );
+
+            -- Inhalts-Merkmal (Musik/Konzert/Podcast/Hörbuch) je Ebene.
+            -- Vererbung Titel → Album → Interpret → Standard; nur Abweichungen
+            -- werden gespeichert. key = Pfad | Interpret\1Album | Interpretname.
+            CREATE TABLE IF NOT EXISTS category (
+                scope TEXT NOT NULL CHECK(scope IN ('artist','album','track')),
+                key   TEXT NOT NULL,
+                value TEXT NOT NULL,
+                PRIMARY KEY (scope, key)
+            );
+
+            -- Equalizer-Einstellungen je Ausgang und Ebene (10 Bänder als JSON).
+            -- Vererbung Titel → Album → Interpret → Global; zusätzlich fällt ein
+            -- gerätespezifischer Ausgang auf den Standard-Ausgang ('') zurück.
+            -- output: '' (alle/Standard) | Sink-Name.  key: '' (global) |
+            -- Interpretname | Interpret\1Album | Pfad.
+            CREATE TABLE IF NOT EXISTS eq_setting (
+                output TEXT NOT NULL DEFAULT '',
+                scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track')),
+                key    TEXT NOT NULL,
+                bands  TEXT NOT NULL,
+                PRIMARY KEY (output, scope, key)
+            );
+
+            -- Mehrere Bilder je Album bzw. Interpret (Galerie). Das in
+            -- album_meta/artist_meta gespeicherte Einzelbild bleibt das
+            -- primaer angezeigte; diese Tabellen halten den vollen Vorrat.
+            CREATE TABLE IF NOT EXISTS album_image (
+                artist TEXT NOT NULL,
+                album  TEXT NOT NULL,
+                idx    INTEGER NOT NULL,
+                path   TEXT NOT NULL,
+                kind   TEXT,
+                source TEXT,
+                PRIMARY KEY (artist, album, idx)
+            );
+
+            CREATE TABLE IF NOT EXISTS artist_image (
+                name   TEXT NOT NULL,
+                idx    INTEGER NOT NULL,
+                path   TEXT NOT NULL,
+                kind   TEXT,
+                source TEXT,
+                PRIMARY KEY (name, idx)
+            );
+            "#,
+        )?;
+
+        // Migration: frühere eq_setting-Version ohne `output`-Spalte nachrüsten.
+        let has_output = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('eq_setting') WHERE name = 'output'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_output {
+            self.conn.execute_batch(
+                r#"
+                ALTER TABLE eq_setting RENAME TO eq_setting_old;
+                CREATE TABLE eq_setting (
+                    output TEXT NOT NULL DEFAULT '',
+                    scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track')),
+                    key    TEXT NOT NULL,
+                    bands  TEXT NOT NULL,
+                    PRIMARY KEY (output, scope, key)
+                );
+                INSERT INTO eq_setting (output, scope, key, bands)
+                    SELECT '', scope, key, bands FROM eq_setting_old;
+                DROP TABLE eq_setting_old;
+                "#,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Markiert einen Ordner/eine Datei als Konzert.
+    pub fn add_concert(&self, path: &str, title: &str, is_dir: bool) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO concert (path, title, is_dir, added_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(path) DO UPDATE SET title = excluded.title",
+            rusqlite::params![path, title, is_dir as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Entfernt eine Konzert-Markierung.
+    pub fn remove_concert(&self, path: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM concert WHERE path = ?1", [path])?;
+        Ok(())
+    }
+
+    /// Alle Konzerte (Pfad, Titel, is_dir), neueste zuerst.
+    pub fn concerts(&self) -> Result<Vec<(String, String, bool)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, title, is_dir FROM concert ORDER BY added_at DESC, title",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)? != 0,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Pfade aller markierten Konzerte (für die Kandidaten-Filterung).
+    pub fn concert_paths(&self) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare("SELECT path FROM concert")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+    }
+
+    // ---- Merkmale (Kategorie mit Vererbung) ----
+
+    /// Setzt (oder löscht bei `None`) die Festlegung einer Ebene.
+    /// `scope` ∈ {`artist`,`album`,`track`}.
+    pub fn set_category(&self, scope: &str, key: &str, value: Option<&str>) -> Result<()> {
+        match value {
+            Some(v) => self.conn.execute(
+                "INSERT INTO category (scope, key, value) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![scope, key, v],
+            )?,
+            None => self.conn.execute(
+                "DELETE FROM category WHERE scope = ?1 AND key = ?2",
+                rusqlite::params![scope, key],
+            )?,
+        };
+        Ok(())
+    }
+
+    /// Liest die Festlegung einer einzelnen Ebene (ohne Vererbung).
+    pub fn get_category(&self, scope: &str, key: &str) -> Result<Option<String>> {
+        let v = self
+            .conn
+            .query_row(
+                "SELECT value FROM category WHERE scope = ?1 AND key = ?2",
+                rusqlite::params![scope, key],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(v)
+    }
+
+    /// Löst das effektive Merkmal eines Titels auf (spezifischste Ebene gewinnt).
+    /// Liefert (Wert, Quell-Ebene ∈ {`track`,`album`,`artist`,`default`}).
+    pub fn resolve_category(
+        &self,
+        artist: Option<&str>,
+        album: Option<&str>,
+        path: &str,
+    ) -> (String, &'static str) {
+        if let Ok(Some(v)) = self.get_category("track", path) {
+            return (v, "track");
+        }
+        if let Some(album) = album {
+            let key = crate::core::category::album_key(artist.unwrap_or(""), album);
+            if let Ok(Some(v)) = self.get_category("album", &key) {
+                return (v, "album");
+            }
+        }
+        if let Some(artist) = artist {
+            if let Ok(Some(v)) = self.get_category("artist", artist) {
+                return (v, "artist");
+            }
+        }
+        (
+            crate::core::category::Category::DEFAULT.as_str().to_string(),
+            "default",
+        )
+    }
+
+    // ---- Equalizer (10 Bänder, mit Vererbung) ----
+
+    /// Speichert die 10 Band-Verstärkungen (dB) für einen Ausgang + eine Ebene.
+    pub fn set_eq(&self, output: &str, scope: &str, key: &str, bands: &[f64; 10]) -> Result<()> {
+        let json = serde_json::to_string(bands)?;
+        self.conn.execute(
+            "INSERT INTO eq_setting (output, scope, key, bands) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(output, scope, key) DO UPDATE SET bands = excluded.bands",
+            rusqlite::params![output, scope, key, json],
+        )?;
+        Ok(())
+    }
+
+    /// Liest die Bänder einer einzelnen Ausgang/Ebene-Kombination (ohne Vererbung).
+    pub fn get_eq(&self, output: &str, scope: &str, key: &str) -> Result<Option<[f64; 10]>> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT bands FROM eq_setting WHERE output = ?1 AND scope = ?2 AND key = ?3",
+                rusqlite::params![output, scope, key],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(json.and_then(|j| serde_json::from_str::<[f64; 10]>(&j).ok()))
+    }
+
+    /// Entfernt die Festlegung (fällt auf die geerbte/den Standard-Ausgang zurück).
+    pub fn clear_eq(&self, output: &str, scope: &str, key: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM eq_setting WHERE output = ?1 AND scope = ?2 AND key = ?3",
+            rusqlite::params![output, scope, key],
+        )?;
+        Ok(())
+    }
+
+    /// Effektiver Equalizer für Titel + Ausgang. Reihenfolge: erst der konkrete
+    /// Ausgang (Titel→Album→Interpret→Global), dann der Standard-Ausgang ('')
+    /// als Basis. `None`, wenn nirgends etwas gesetzt ist (→ neutral).
+    pub fn resolve_eq(
+        &self,
+        output: &str,
+        artist: Option<&str>,
+        album: Option<&str>,
+        path: &str,
+    ) -> Option<[f64; 10]> {
+        let album_key = album.map(|al| crate::core::category::album_key(artist.unwrap_or(""), al));
+
+        // Konkreter Ausgang zuerst, dann der Standard-Ausgang als Basis.
+        let mut outputs: Vec<&str> = Vec::new();
+        if !output.is_empty() {
+            outputs.push(output);
+        }
+        outputs.push("");
+
+        for out in outputs {
+            if let Ok(Some(b)) = self.get_eq(out, "track", path) {
+                return Some(b);
+            }
+            if let Some(key) = &album_key {
+                if let Ok(Some(b)) = self.get_eq(out, "album", key) {
+                    return Some(b);
+                }
+            }
+            if let Some(artist) = artist {
+                if let Ok(Some(b)) = self.get_eq(out, "artist", artist) {
+                    return Some(b);
+                }
+            }
+            if let Ok(Some(b)) = self.get_eq(out, "global", "") {
+                return Some(b);
+            }
+        }
+        None
+    }
+
+    /// Liest einen Einstellungswert (z. B. den Musikordner).
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let value = self
+            .conn
+            .query_row("SELECT value FROM setting WHERE key = ?1", [key], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?;
+        Ok(value)
+    }
+
+    /// Speichert einen Einstellungswert.
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Fügt einen Track ein oder aktualisiert dessen Metadaten (Schlüssel: Pfad).
+    pub fn upsert_track(&self, t: &Track) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO track (path, title, artist, album, track_no, duration_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(path) DO UPDATE SET
+                title       = excluded.title,
+                artist      = excluded.artist,
+                album       = excluded.album,
+                track_no    = excluded.track_no,
+                duration_ms = excluded.duration_ms
+            "#,
+            rusqlite::params![
+                t.path,
+                t.title,
+                t.artist,
+                t.album,
+                t.track_no,
+                t.duration_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Speichert die Wiedergabeposition (Resume) für einen Track.
+    pub fn set_resume(&self, track_id: i64, resume_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE track SET resume_ms = ?1 WHERE id = ?2",
+            rusqlite::params![resume_ms, track_id],
+        )?;
+        Ok(())
+    }
+
+    /// Alle Tracks, nach Album und Tracknummer sortiert.
+    pub fn all_tracks(&self) -> Result<Vec<Track>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms
+             FROM track
+             ORDER BY album, track_no, title",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Track {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                title: r.get(2)?,
+                artist: r.get(3)?,
+                album: r.get(4)?,
+                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+                duration_ms: r.get(6)?,
+                resume_ms: r.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn track_count(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM track", [], |r| r.get(0))?)
+    }
+
+    /// Anzahl eindeutiger Alben – **gleiche Gruppierung** wie [`Self::albums_overview`]
+    /// und [`Self::albums_missing_cover`] (nach `COALESCE(artist,''), album`). Dient
+    /// als Gesamtsumme für die Fortschrittsanzeige des Cover-Abrufs.
+    pub fn album_count(&self) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM (
+                 SELECT 1 FROM track
+                 WHERE album IS NOT NULL AND album <> ''
+                 GROUP BY COALESCE(artist, ''), album
+             )",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Eindeutige (Interpret, Album)-Paare mit ausgefüllten Werten –
+    /// Grundlage für die Online-Zuordnung.
+    pub fn distinct_albums(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT artist, album FROM track
+             WHERE artist IS NOT NULL AND artist <> ''
+               AND album  IS NOT NULL AND album  <> ''
+             ORDER BY artist, album",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Liest die Online-Metadaten zu einem Album (falls bereits gesucht).
+    pub fn get_album_meta(&self, artist: &str, album: &str) -> Result<Option<AlbumMeta>> {
+        let meta = self
+            .conn
+            .query_row(
+                "SELECT artist, album, mbid, cover_path, year, status
+                 FROM album_meta WHERE artist = ?1 AND album = ?2",
+                rusqlite::params![artist, album],
+                Self::map_album_meta,
+            )
+            .optional()?;
+        Ok(meta)
+    }
+
+    /// Irgendein vorhandenes Cover zu einem Albumnamen (interpretenübergreifend) –
+    /// nützlich für Einzeltitel, deren Album zwar bekannt ist, aber unter einem
+    /// anderen Interpreten-Credit gespeichert wurde.
+    pub fn album_cover(&self, album: &str) -> Result<Option<String>> {
+        let cover = self
+            .conn
+            .query_row(
+                "SELECT cover_path FROM album_meta
+                 WHERE album = ?1 AND cover_path IS NOT NULL AND cover_path <> ''
+                 LIMIT 1",
+                [album],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(cover)
+    }
+
+    /// Speichert/aktualisiert die Online-Metadaten eines Albums.
+    pub fn upsert_album_meta(&self, m: &AlbumMeta) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO album_meta (artist, album, mbid, cover_path, year, status, fetched_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'))
+            ON CONFLICT(artist, album) DO UPDATE SET
+                mbid       = excluded.mbid,
+                cover_path = excluded.cover_path,
+                year       = excluded.year,
+                status     = excluded.status,
+                fetched_at = excluded.fetched_at
+            "#,
+            rusqlite::params![m.artist, m.album, m.mbid, m.cover_path, m.year, m.status],
+        )?;
+        Ok(())
+    }
+
+    /// Album-Übersicht für die UI: alle eindeutigen Alben aus der Bibliothek,
+    /// angereichert mit (ggf. vorhandenen) Online-Metadaten und der Titelanzahl.
+    /// Nach Albumname sortiert (wie die Dateiansicht – ohne Interpreten-Gruppen).
+    pub fn albums_overview(&self) -> Result<Vec<AlbumMeta>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
+                    COALESCE(m.status, 'pending'), COUNT(*)
+             FROM track t
+             LEFT JOIN album_meta m
+                    ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
+             WHERE t.album IS NOT NULL AND t.album <> ''
+             GROUP BY COALESCE(t.artist, ''), t.album
+             ORDER BY t.album COLLATE NOCASE, t.artist COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(AlbumMeta {
+                artist: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                album: r.get(1)?,
+                mbid: r.get(2)?,
+                cover_path: r.get(3)?,
+                year: r.get(4)?,
+                status: r.get(5)?,
+                track_count: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn map_album_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumMeta> {
+        Ok(AlbumMeta {
+            artist: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            album: r.get(1)?,
+            mbid: r.get(2)?,
+            cover_path: r.get(3)?,
+            year: r.get(4)?,
+            status: r.get(5)?,
+            track_count: 0,
+        })
+    }
+
+    /// Alben **ohne** Cover, je mit einem Beispiel-Track-Pfad. Grundlage für die
+    /// lokale Cover-Extraktion (eingebettetes Bild) und die Online-Lückenfüllung.
+    pub fn albums_missing_cover(&self) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(t.artist, ''), t.album, MIN(t.path)
+             FROM track t
+             LEFT JOIN album_meta m
+                    ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
+             WHERE t.album IS NOT NULL AND t.album <> ''
+               AND (m.cover_path IS NULL OR m.cover_path = '')
+             GROUP BY COALESCE(t.artist, ''), t.album
+             ORDER BY t.album COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    // ---- Interpreten ----
+
+    /// Eindeutige **Einzel**-Interpreten aus der Bibliothek. Zusammengesetzte
+    /// Angaben („A feat. B & C") werden in ihre Künstler zerlegt
+    /// (siehe [`crate::core::artist::split_artists`]) und case-insensitiv
+    /// dedupliziert. Alphabetisch sortiert.
+    pub fn distinct_artists(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT artist FROM track
+             WHERE artist IS NOT NULL AND artist <> ''",
+        )?;
+        let raws = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for raw in &raws {
+            for name in crate::core::artist::split_artists(raw) {
+                if seen.insert(name.to_lowercase()) {
+                    out.push(name);
+                }
+            }
+        }
+        out.sort_by_key(|s| s.to_lowercase());
+        Ok(out)
+    }
+
+    pub fn get_artist_meta(&self, name: &str) -> Result<Option<ArtistMeta>> {
+        let meta = self
+            .conn
+            .query_row(
+                "SELECT name, image_path, status FROM artist_meta WHERE name = ?1",
+                [name],
+                Self::map_artist_meta,
+            )
+            .optional()?;
+        Ok(meta)
+    }
+
+    pub fn upsert_artist_meta(&self, m: &ArtistMeta) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO artist_meta (name, image_path, status, fetched_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(name) DO UPDATE SET
+                image_path = excluded.image_path,
+                status     = excluded.status,
+                fetched_at = excluded.fetched_at",
+            rusqlite::params![m.name, m.image_path, m.status],
+        )?;
+        Ok(())
+    }
+
+    /// Interpreten-Übersicht für die UI: jede(r) Einzelkünstler(in) – auch aus
+    /// „feat."-Angaben – mit (ggf. vorhandenem) Foto.
+    pub fn artists_overview(&self) -> Result<Vec<ArtistMeta>> {
+        let names = self.distinct_artists()?;
+        let mut out = Vec::with_capacity(names.len());
+        for name in names {
+            let meta = self
+                .get_artist_meta(&name)?
+                .unwrap_or_else(|| ArtistMeta::pending(&name));
+            out.push(meta);
+        }
+        Ok(out)
+    }
+
+    fn map_artist_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistMeta> {
+        Ok(ArtistMeta {
+            name: r.get(0)?,
+            image_path: r.get(1)?,
+            status: r.get(2)?,
+        })
+    }
+
+    // ---- Fingerprint-Erkennung (AcoustID) ----
+
+    /// Tracks mit lückenhaften Tags (Interpret oder Album fehlt) – Kandidaten
+    /// für die Fingerprint-Erkennung.
+    pub fn tracks_needing_id(&self) -> Result<Vec<Track>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms
+             FROM track
+             WHERE artist IS NULL OR artist = '' OR album IS NULL OR album = ''
+             ORDER BY path",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Track {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                title: r.get(2)?,
+                artist: r.get(3)?,
+                album: r.get(4)?,
+                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+                duration_ms: r.get(6)?,
+                resume_ms: r.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn get_track_meta(&self, path: &str) -> Result<Option<TrackMeta>> {
+        let meta = self
+            .conn
+            .query_row(
+                "SELECT path, recording_mbid, title, artist, album, status
+                 FROM track_meta WHERE path = ?1",
+                [path],
+                Self::map_track_meta,
+            )
+            .optional()?;
+        Ok(meta)
+    }
+
+    pub fn upsert_track_meta(&self, m: &TrackMeta) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO track_meta
+                (path, recording_mbid, title, artist, album, status, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'))
+             ON CONFLICT(path) DO UPDATE SET
+                recording_mbid = excluded.recording_mbid,
+                title          = excluded.title,
+                artist         = excluded.artist,
+                album          = excluded.album,
+                status         = excluded.status,
+                fetched_at     = excluded.fetched_at",
+            rusqlite::params![m.path, m.recording_mbid, m.title, m.artist, m.album, m.status],
+        )?;
+        Ok(())
+    }
+
+    fn map_track_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<TrackMeta> {
+        Ok(TrackMeta {
+            path: r.get(0)?,
+            recording_mbid: r.get(1)?,
+            title: r.get(2)?,
+            artist: r.get(3)?,
+            album: r.get(4)?,
+            status: r.get(5)?,
+        })
+    }
+
+    // ---- Mehrere Bilder je Album / Interpret (Galerie) ----
+
+    /// Ersetzt die gespeicherten Album-Bilder (Reihenfolge = idx).
+    /// `images`: je (Pfad, Art, Quelle).
+    pub fn set_album_images(
+        &self,
+        artist: &str,
+        album: &str,
+        images: &[(String, String, String)],
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM album_image WHERE artist = ?1 AND album = ?2",
+            rusqlite::params![artist, album],
+        )?;
+        for (i, (path, kind, source)) in images.iter().enumerate() {
+            self.conn.execute(
+                "INSERT INTO album_image (artist, album, idx, path, kind, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![artist, album, i as i64, path, kind, source],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Alle gespeicherten Bildpfade eines Albums (in Reihenfolge).
+    pub fn album_images(&self, artist: &str, album: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path FROM album_image WHERE artist = ?1 AND album = ?2 ORDER BY idx",
+        )?;
+        let rows =
+            stmt.query_map(rusqlite::params![artist, album], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Ersetzt die gespeicherten Interpreten-Bilder (Reihenfolge = idx).
+    pub fn set_artist_images(
+        &self,
+        name: &str,
+        images: &[(String, String, String)],
+    ) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM artist_image WHERE name = ?1", [name])?;
+        for (i, (path, kind, source)) in images.iter().enumerate() {
+            self.conn.execute(
+                "INSERT INTO artist_image (name, idx, path, kind, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![name, i as i64, path, kind, source],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Alle gespeicherten Bildpfade eines Interpreten (in Reihenfolge).
+    pub fn artist_images(&self, name: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM artist_image WHERE name = ?1 ORDER BY idx")?;
+        let rows = stmt.query_map([name], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
