@@ -26,7 +26,8 @@ Bibliotheksindex in **SQLite**.
   - **Konzerte** – Live-/Unplugged-Aufnahmen markieren und sammeln; ein Import
     schlägt passende Kandidaten vor.
 - **Wiedergabe** – Play/Pause, Vor/Zurück, Zufallswiedergabe, Warteschlange und
-  ein Mini-Player am unteren Rand.
+  ein Mini-Player am unteren Rand mit **Seekleiste** (Positionsregler zum Spulen
+  in langen Titeln).
 - **Resume für Hörspiele** – lange Titel (ab 15 min oder als Hörbuch/Podcast
   eingestuft) merken sich die Hörposition und laufen beim nächsten Mal dort
   weiter; bei Titelende wird wieder von vorn begonnen.

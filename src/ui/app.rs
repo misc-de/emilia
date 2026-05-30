@@ -106,6 +106,10 @@ pub struct App {
     playing_path: Option<PathBuf>,
     now_playing: Option<String>,
     playing: bool,
+    /// Aktuelle Position und Gesamtdauer des laufenden Titels (ms) – für die
+    /// Seekleiste im Mini-Player.
+    position_ms: i64,
+    track_duration_ms: i64,
     shuffle: bool,
     context_target: Option<CtxTarget>,
     toast_overlay: adw::ToastOverlay,
@@ -169,6 +173,10 @@ pub enum Msg {
     PersistResume,
     /// Befehl vom Sperrbildschirm / von Medientasten (MPRIS).
     Mpris(crate::core::mpris::MprisCommand),
+    /// 1-s-Tick: Position/Dauer der Seekleiste aktualisieren.
+    Tick,
+    /// Sprung an eine Position (ms) durch Ziehen/Klicken der Seekleiste.
+    Seek(i64),
     Next,
     Prev,
     ToggleShuffle,
@@ -592,6 +600,39 @@ impl Component for App {
                             },
                         },
 
+                        // Seekleiste: Position / Regler / Gesamtdauer.
+                        gtk::Box {
+                            set_spacing: 6,
+                            set_margin_start: 4,
+                            set_margin_end: 4,
+                            #[watch]
+                            set_visible: model.now_playing.is_some(),
+
+                            gtk::Label {
+                                add_css_class: "caption",
+                                add_css_class: "numeric",
+                                #[watch]
+                                set_label: &fmt_clock(model.position_ms),
+                            },
+                            #[name = "seek_scale"]
+                            gtk::Scale {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_hexpand: true,
+                                set_draw_value: false,
+                                set_valign: gtk::Align::Center,
+                                #[watch]
+                                set_range: (0.0, model.track_duration_ms.max(1000) as f64),
+                                #[watch]
+                                set_value: model.position_ms as f64,
+                            },
+                            gtk::Label {
+                                add_css_class: "caption",
+                                add_css_class: "numeric",
+                                #[watch]
+                                set_label: &fmt_clock(model.track_duration_ms),
+                            },
+                        },
+
                         gtk::CenterBox {
                             // Zufall linksbündig, Transport-Tasten mittig
                             #[wrap(Some)]
@@ -760,6 +801,15 @@ impl Component for App {
             });
         }
 
+        // Sekündlicher Tick für die Seekleiste (Position/Dauer aktualisieren).
+        {
+            let sender = sender.clone();
+            gtk::glib::timeout_add_seconds_local(1, move || {
+                sender.input(Msg::Tick);
+                gtk::glib::ControlFlow::Continue
+            });
+        }
+
         // MPRIS-Dienst starten: Befehle vom Sperrbildschirm/von Medientasten
         // werden als Msg::Mpris in die Komponente eingespeist.
         let mpris = crate::core::mpris::Mpris::start({
@@ -798,6 +848,8 @@ impl Component for App {
             playing_path: None,
             now_playing: None,
             playing: false,
+            position_ms: 0,
+            track_duration_ms: 0,
             shuffle: false,
             context_target: None,
             toast_overlay: toast_overlay.clone(),
@@ -825,6 +877,17 @@ impl Component for App {
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
+
+        // Seekleiste: Ziehen/Klicken springt im laufenden Titel an die Position.
+        // `change-value` feuert nur bei Nutzer-Interaktion (nicht beim
+        // programmatischen `set_value` des Ticks), darum gibt es kein Zerren.
+        {
+            let sender = sender.clone();
+            widgets.seek_scale.connect_change_value(move |_, _, value| {
+                sender.input(Msg::Seek(value as i64));
+                gtk::glib::Propagation::Proceed
+            });
+        }
 
         // Scrollposition der Übersicht über Navigation hinweg erhalten:
         // `adw::NavigationView` setzt die Position beim Wieder-Einblenden auf 0
@@ -1217,6 +1280,23 @@ impl Component for App {
                     }
                 }
             }
+            Msg::Tick => {
+                if self.playing {
+                    if let Some(pos) = self.player.position_ms() {
+                        self.position_ms = pos;
+                    }
+                    if let Some(dur) = self.player.duration_ms() {
+                        self.track_duration_ms = dur;
+                    }
+                }
+            }
+            Msg::Seek(ms) => {
+                let ms = ms.max(0);
+                self.position_ms = ms;
+                if self.player.seek_ms(ms).is_ok() {
+                    self.mpris.seeked(ms);
+                }
+            }
             Msg::Mpris(cmd) => {
                 use crate::core::mpris::MprisCommand as M;
                 match cmd {
@@ -1257,6 +1337,8 @@ impl Component for App {
                         self.player.stop();
                         self.playing = false;
                         self.playing_path = None;
+                        self.position_ms = 0;
+                        self.track_duration_ms = 0;
                         self.mpris.set_stopped();
                         self.refresh_queue_icons();
                     }
@@ -1621,6 +1703,17 @@ fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
 }
 
 /// Rechtsbündige, dezente Dauer-Beschriftung für eine Titel-Zeile.
+/// Zeitangabe „m:ss" bzw. „h:mm:ss" (für die Seekleiste).
+fn fmt_clock(ms: i64) -> String {
+    let secs = (ms.max(0) / 1000) as u64;
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
 fn duration_label(ms: i64) -> gtk::Label {
     gtk::Label::builder()
         .label(fmt_duration(ms))
@@ -3887,6 +3980,8 @@ impl App {
             self.player.stop();
             self.playing = false;
             self.playing_path = None;
+            self.position_ms = 0;
+            self.track_duration_ms = 0;
             self.mpris.set_stopped();
             self.refresh_queue_icons();
             return;
@@ -3997,6 +4092,13 @@ impl App {
                 let start = self.player.position_ms().unwrap_or(resume_ms.max(0));
                 self.mpris.set_position(start);
                 self.mpris.seeked(start);
+                // Seekleiste auf den neuen Titel setzen (Dauer verfeinert der Tick).
+                self.position_ms = start;
+                self.track_duration_ms = self
+                    .player
+                    .duration_ms()
+                    .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
+                    .unwrap_or(0);
                 // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
                 self.refresh_queue_icons();
             }
@@ -4387,5 +4489,22 @@ impl App {
 
         dialog.add(&page);
         dialog.present(Some(root));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_clock;
+
+    #[test]
+    fn fmt_clock_formats_minutes_and_hours() {
+        assert_eq!(fmt_clock(0), "0:00");
+        assert_eq!(fmt_clock(5_000), "0:05");
+        assert_eq!(fmt_clock(65_000), "1:05");
+        assert_eq!(fmt_clock(600_000), "10:00");
+        // Hörspiel-Längen mit Stunden.
+        assert_eq!(fmt_clock(3_661_000), "1:01:01");
+        // Negativwerte werden auf 0 geklemmt.
+        assert_eq!(fmt_clock(-1), "0:00");
     }
 }
