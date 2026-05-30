@@ -103,13 +103,13 @@ CREATE TABLE eq_binding (
 - [ ] Dateisystem-Browser (erste Navigation)
 - [ ] Playback via `playbin3`: Play/Pause/Next/Prev, Position-Slider
 - [ ] Mini-Player-Leiste
-- [ ] MPRIS-Anbindung (Lockscreen/Medientasten)
+- [x] MPRIS-Anbindung (Lockscreen/Medientasten)
 
 ### Phase 2 – Bibliothek
 - [ ] Interpreten- & Album-Ansicht aus Metadaten
 - [ ] Cover-Cache (XDG-Cache)
 - [ ] Queue / Wiedergabeliste
-- [ ] **Resume-Position pro Track** speichern & anbieten
+- [x] **Resume-Position pro Track** speichern & anbieten
 
 ### Phase 3 – Equalizer
 - [ ] `equalizer-10bands` im Audio-Graph

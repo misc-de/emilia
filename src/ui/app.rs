@@ -70,6 +70,8 @@ const RESUME_END_GUARD_MS: i64 = 10_000;
 pub struct App {
     library: Library,
     player: Player,
+    /// Sperrbildschirm-/Medientasten-Steuerung (MPRIS, optional).
+    mpris: crate::core::mpris::Mpris,
     entries: FactoryVecDeque<FsRow>,
     albums: FactoryVecDeque<AlbumCard>,
     album_count: usize,
@@ -165,6 +167,8 @@ pub enum Msg {
     TrackFinished,
     /// Periodischer Tick: Resume-Position des laufenden Titels sichern.
     PersistResume,
+    /// Befehl vom Sperrbildschirm / von Medientasten (MPRIS).
+    Mpris(crate::core::mpris::MprisCommand),
     Next,
     Prev,
     ToggleShuffle,
@@ -756,12 +760,20 @@ impl Component for App {
             });
         }
 
+        // MPRIS-Dienst starten: Befehle vom Sperrbildschirm/von Medientasten
+        // werden als Msg::Mpris in die Komponente eingespeist.
+        let mpris = crate::core::mpris::Mpris::start({
+            let sender = sender.clone();
+            move |cmd| sender.input(Msg::Mpris(cmd))
+        });
+
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
 
         let mut model = App {
             library,
             player,
+            mpris,
             entries,
             albums,
             album_count: 0,
@@ -970,6 +982,7 @@ impl Component for App {
                                 self.player.resume();
                             }
                             self.playing = !self.playing;
+                            self.mpris.set_playing(self.playing);
                             self.refresh_queue_icons();
                         } else {
                             // Einzeltitel: Warteschlange = nur dieser Titel.
@@ -1199,6 +1212,68 @@ impl Component for App {
             Msg::PersistResume => {
                 if self.playing {
                     self.save_resume();
+                    if let Some(pos) = self.player.position_ms() {
+                        self.mpris.set_position(pos);
+                    }
+                }
+            }
+            Msg::Mpris(cmd) => {
+                use crate::core::mpris::MprisCommand as M;
+                match cmd {
+                    M::PlayPause => {
+                        if self.now_playing.is_some() {
+                            if self.playing {
+                                self.save_resume();
+                                self.player.pause();
+                            } else {
+                                self.player.resume();
+                            }
+                            self.playing = !self.playing;
+                            self.mpris.set_playing(self.playing);
+                            self.refresh_queue_icons();
+                        }
+                    }
+                    M::Play => {
+                        if self.now_playing.is_some() && !self.playing {
+                            self.player.resume();
+                            self.playing = true;
+                            self.mpris.set_playing(true);
+                            self.refresh_queue_icons();
+                        }
+                    }
+                    M::Pause => {
+                        if self.now_playing.is_some() && self.playing {
+                            self.save_resume();
+                            self.player.pause();
+                            self.playing = false;
+                            self.mpris.set_playing(false);
+                            self.refresh_queue_icons();
+                        }
+                    }
+                    M::Next => self.play_next(),
+                    M::Prev => self.play_prev(),
+                    M::Stop => {
+                        self.save_resume();
+                        self.player.stop();
+                        self.playing = false;
+                        self.playing_path = None;
+                        self.mpris.set_stopped();
+                        self.refresh_queue_icons();
+                    }
+                    M::Raise => root.present(),
+                    M::SeekBy(offset_us) => {
+                        let cur = self.player.position_ms().unwrap_or(0);
+                        let target = (cur + offset_us / 1000).max(0);
+                        if self.player.seek_ms(target).is_ok() {
+                            self.mpris.seeked(target);
+                        }
+                    }
+                    M::SetPosition(pos_us) => {
+                        let target = (pos_us / 1000).max(0);
+                        if self.player.seek_ms(target).is_ok() {
+                            self.mpris.seeked(target);
+                        }
+                    }
                 }
             }
             Msg::Next => self.play_next(),
@@ -1382,6 +1457,7 @@ impl Component for App {
                     self.player.resume();
                 }
                 self.playing = !self.playing;
+                self.mpris.set_playing(self.playing);
                 // Play-/Pause-Icon des aktiven Titels in der Liste anpassen.
                 self.refresh_queue_icons();
             }
@@ -3811,6 +3887,7 @@ impl App {
             self.player.stop();
             self.playing = false;
             self.playing_path = None;
+            self.mpris.set_stopped();
             self.refresh_queue_icons();
             return;
         };
@@ -3914,11 +3991,42 @@ impl App {
                 // Aktiven Ausgang (kann sich geändert haben) auffrischen.
                 self.active_output = crate::core::output::default_output().unwrap_or_default();
                 self.apply_current_eq();
+                // Sperrbildschirm/Medientasten über den neuen Titel informieren.
+                self.update_mpris_metadata(&path, track.as_ref());
+                self.mpris.set_playing(true);
+                let start = self.player.position_ms().unwrap_or(resume_ms.max(0));
+                self.mpris.set_position(start);
+                self.mpris.seeked(start);
                 // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
                 self.refresh_queue_icons();
             }
             Err(e) => tracing::error!("Wiedergabe fehlgeschlagen: {e}"),
         }
+    }
+
+    /// Schickt die Metadaten des laufenden Titels an den MPRIS-Dienst
+    /// (Sperrbildschirm). Cover wird – falls vorhanden – best effort ergänzt.
+    fn update_mpris_metadata(&self, path: &std::path::Path, track: Option<&Track>) {
+        let (title, artist, album, length) = match track {
+            Some(t) => (
+                t.title.clone(),
+                t.artist.clone(),
+                t.album.clone(),
+                t.duration_ms,
+            ),
+            None => (Self::track_display_name(path), None, None, None),
+        };
+        let art = album
+            .as_deref()
+            .and_then(|al| self.library.album_cover(al).ok().flatten());
+        self.mpris.set_metadata(
+            self.queue_pos,
+            &title,
+            artist.as_deref(),
+            album.as_deref(),
+            length,
+            art.as_deref(),
+        );
     }
 
     /// Löst den Equalizer für den laufenden Titel + aktiven Ausgang auf

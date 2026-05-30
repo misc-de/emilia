@@ -27,6 +27,11 @@ Bibliotheksindex in **SQLite**.
     schlägt passende Kandidaten vor.
 - **Wiedergabe** – Play/Pause, Vor/Zurück, Zufallswiedergabe, Warteschlange und
   ein Mini-Player am unteren Rand.
+- **Resume für Hörspiele** – lange Titel (ab 15 min oder als Hörbuch/Podcast
+  eingestuft) merken sich die Hörposition und laufen beim nächsten Mal dort
+  weiter; bei Titelende wird wieder von vorn begonnen.
+- **Sperrbildschirm & Medientasten** – Steuerung über **MPRIS**
+  (Play/Pause, Vor/Zurück, Spulen) samt Titel-/Albumanzeige.
 - **Equalizer mit Kaskade** – 10-Band-EQ (`equalizer-10bands`), live während der
   Wiedergabe. Einstellungen wirken in der Reihenfolge
   **Global → Interpret → Album → Titel** (spezifischste Ebene gewinnt),
@@ -43,12 +48,9 @@ Bibliotheksindex in **SQLite**.
 
 ### Geplant (Roadmap)
 
-- Resume-Position pro Titel (über Tage gehörte Hörspiele) – Datenmodell steht,
-  Wiedergabe-Anbindung folgt
 - Playlisten
 - Streaming-Backend (Subsonic/Navidrome oder Jellyfin)
 - Podcasts
-- MPRIS-Anbindung (Sperrbildschirm/Medientasten)
 
 ---
 
