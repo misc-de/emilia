@@ -891,4 +891,84 @@ mod tests {
         let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
         assert_eq!((cat.as_str(), src), ("music", "track"));
     }
+
+    // ---- Equalizer-Kaskade ----
+
+    fn bands(v: f64) -> [f64; 10] {
+        [v; 10]
+    }
+
+    #[test]
+    fn eq_none_when_unset() {
+        let lib = Library::open_in_memory().unwrap();
+        assert_eq!(lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"), None);
+        assert_eq!(lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"), None);
+    }
+
+    #[test]
+    fn eq_specificity_track_over_album_over_artist_over_global() {
+        let lib = Library::open_in_memory().unwrap();
+        let ak = crate::core::category::album_key("X", "Y");
+        lib.set_eq("", "global", "", &bands(1.0)).unwrap();
+        lib.set_eq("", "artist", "X", &bands(2.0)).unwrap();
+        lib.set_eq("", "album", &ak, &bands(3.0)).unwrap();
+        lib.set_eq("", "track", "/a/1.mp3", &bands(4.0)).unwrap();
+
+        // Spezifischste Ebene gewinnt; nach dem Entfernen greift die nächsthöhere.
+        let r = |l: &Library| l.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3");
+        assert_eq!(r(&lib), Some(bands(4.0)));
+        lib.clear_eq("", "track", "/a/1.mp3").unwrap();
+        assert_eq!(r(&lib), Some(bands(3.0)));
+        lib.clear_eq("", "album", &ak).unwrap();
+        assert_eq!(r(&lib), Some(bands(2.0)));
+        lib.clear_eq("", "artist", "X").unwrap();
+        assert_eq!(r(&lib), Some(bands(1.0)));
+        lib.clear_eq("", "global", "").unwrap();
+        assert_eq!(r(&lib), None);
+    }
+
+    #[test]
+    fn eq_concrete_output_cascade_beats_default_output() {
+        let lib = Library::open_in_memory().unwrap();
+        // Standard-Ausgang: spezifische Titel-Einstellung.
+        lib.set_eq("", "track", "/a/1.mp3", &bands(4.0)).unwrap();
+        // Konkreter Ausgang: nur eine globale Einstellung.
+        lib.set_eq("sink1", "global", "", &bands(9.0)).unwrap();
+        // Dokumentiertes Verhalten: der konkrete Ausgang wird komplett zuerst
+        // aufgelöst – dessen Global schlägt den Titel des Standard-Ausgangs.
+        assert_eq!(
+            lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"),
+            Some(bands(9.0))
+        );
+        // Für den Standard-Ausgang selbst gilt weiter die Titel-Einstellung.
+        assert_eq!(
+            lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
+            Some(bands(4.0))
+        );
+    }
+
+    #[test]
+    fn eq_falls_back_to_default_output() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.set_eq("", "global", "", &bands(1.0)).unwrap();
+        // Konkreter Ausgang hat nichts → Rückfall auf den Standard-Ausgang.
+        assert_eq!(
+            lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"),
+            Some(bands(1.0))
+        );
+    }
+
+    #[test]
+    fn eq_album_key_avoids_cross_artist_collision() {
+        let lib = Library::open_in_memory().unwrap();
+        let ak = crate::core::category::album_key("X", "Y");
+        lib.set_eq("", "album", &ak, &bands(3.0)).unwrap();
+        // Gleicher Albumname, anderer Interpret → kein Treffer auf Album-Ebene.
+        assert_eq!(lib.resolve_eq("", Some("Z"), Some("Y"), "/a/1.mp3"), None);
+        // Richtiger Interpret → Treffer.
+        assert_eq!(
+            lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
+            Some(bands(3.0))
+        );
+    }
 }
