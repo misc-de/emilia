@@ -100,14 +100,15 @@ pub fn read_track(path: &Path) -> Result<Track> {
         .unwrap_or("Unbekannt")
         .to_string();
 
-    let (title, artist, album, track_no) = match tag {
+    let (title, artist, album, track_no, disc_no) = match tag {
         Some(tag) => (
             tag.title().map(|c| c.to_string()).unwrap_or(file_stem),
             tag.artist().map(|c| c.to_string()),
             tag.album().map(|c| c.to_string()),
             tag.track(),
+            tag.disk(),
         ),
-        None => (file_stem, None, None, None),
+        None => (file_stem, None, None, None, None),
     };
 
     let duration_ms = tagged.properties().duration().as_millis() as i64;
@@ -119,6 +120,7 @@ pub fn read_track(path: &Path) -> Result<Track> {
         artist,
         album,
         track_no,
+        disc_no,
         duration_ms: Some(duration_ms),
         resume_ms: 0,
     })

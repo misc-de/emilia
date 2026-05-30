@@ -8,6 +8,8 @@ pub struct Track {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub track_no: Option<u32>,
+    /// Disc-/CD-Nummer bei Mehr-CD-Alben (None = einzelne CD).
+    pub disc_no: Option<u32>,
     pub duration_ms: Option<i64>,
     pub resume_ms: i64,
 }

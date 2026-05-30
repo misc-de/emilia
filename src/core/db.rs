@@ -49,6 +49,7 @@ impl Library {
                 artist      TEXT,
                 album       TEXT,
                 track_no    INTEGER,
+                disc_no     INTEGER,
                 duration_ms INTEGER,
                 resume_ms   INTEGER NOT NULL DEFAULT 0,
                 last_played INTEGER
@@ -187,6 +188,21 @@ impl Library {
                 DROP TABLE eq_setting_old;
                 "#,
             )?;
+        }
+
+        // Migration: disc_no (Disc-Nummer für Mehr-CD-Alben) nachrüsten.
+        let has_disc = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('track') WHERE name = 'disc_no'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_disc {
+            self.conn
+                .execute_batch("ALTER TABLE track ADD COLUMN disc_no INTEGER;")?;
         }
         Ok(())
     }
@@ -391,13 +407,14 @@ impl Library {
     pub fn upsert_track(&self, t: &Track) -> Result<()> {
         self.conn.execute(
             r#"
-            INSERT INTO track (path, title, artist, album, track_no, duration_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(path) DO UPDATE SET
                 title       = excluded.title,
                 artist      = excluded.artist,
                 album       = excluded.album,
                 track_no    = excluded.track_no,
+                disc_no     = excluded.disc_no,
                 duration_ms = excluded.duration_ms
             "#,
             rusqlite::params![
@@ -406,6 +423,7 @@ impl Library {
                 t.artist,
                 t.album,
                 t.track_no,
+                t.disc_no,
                 t.duration_ms,
             ],
         )?;
@@ -436,7 +454,7 @@ impl Library {
         let track = self
             .conn
             .query_row(
-                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms
+                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
                  FROM track WHERE path = ?1",
                 [path],
                 |r| {
@@ -449,6 +467,7 @@ impl Library {
                         track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                         duration_ms: r.get(6)?,
                         resume_ms: r.get(7)?,
+                        disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
                     })
                 },
             )
@@ -459,9 +478,9 @@ impl Library {
     /// Alle Tracks, nach Album und Tracknummer sortiert.
     pub fn all_tracks(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
              FROM track
-             ORDER BY album, track_no, title",
+             ORDER BY album, COALESCE(disc_no, 1), track_no, title",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(Track {
@@ -473,6 +492,7 @@ impl Library {
                 track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                 duration_ms: r.get(6)?,
                 resume_ms: r.get(7)?,
+                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -705,7 +725,7 @@ impl Library {
     /// für die Fingerprint-Erkennung.
     pub fn tracks_needing_id(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
              FROM track
              WHERE artist IS NULL OR artist = '' OR album IS NULL OR album = ''
              ORDER BY path",
@@ -720,6 +740,7 @@ impl Library {
                 track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                 duration_ms: r.get(6)?,
                 resume_ms: r.get(7)?,
+                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -840,9 +861,44 @@ mod tests {
             artist: artist.map(String::from),
             album: album.map(String::from),
             track_no: None,
+            disc_no: None,
             duration_ms: Some(60_000),
             resume_ms: 0,
         }
+    }
+
+    #[test]
+    fn multi_disc_tracks_ordered_by_disc_then_track() {
+        let lib = Library::open_in_memory().unwrap();
+        // Zwei CDs, absichtlich „verkehrt herum" eingefügt.
+        let rows = [
+            ("/al/d2t2.mp3", 2u32, 2u32),
+            ("/al/d1t1.mp3", 1, 1),
+            ("/al/d2t1.mp3", 2, 1),
+            ("/al/d1t2.mp3", 1, 2),
+        ];
+        for (path, disc, no) in rows {
+            let mut t = track(path, Some("X"), Some("Doppelalbum"));
+            t.disc_no = Some(disc);
+            t.track_no = Some(no);
+            lib.upsert_track(&t).unwrap();
+        }
+        let got: Vec<(Option<u32>, Option<u32>)> = lib
+            .all_tracks()
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.disc_no, t.track_no))
+            .collect();
+        // Erst Disc 1 (Track 1,2), dann Disc 2 (Track 1,2).
+        assert_eq!(
+            got,
+            vec![
+                (Some(1), Some(1)),
+                (Some(1), Some(2)),
+                (Some(2), Some(1)),
+                (Some(2), Some(2)),
+            ]
+        );
     }
 
     #[test]

@@ -2630,11 +2630,15 @@ impl App {
             .margin_end(12)
             .build();
 
-        let group = adw::PreferencesGroup::builder()
-            .title(gtk::glib::markup_escape_text(album))
-            .description(album_subtitle(year, tracks.len()))
-            .build();
-        for t in &tracks {
+        // Vorhandene Discs ermitteln (None gilt als CD 1). Mehr als eine → die
+        // Titel werden nach „CD 1" / „CD 2" … getrennt dargestellt.
+        let mut discs: Vec<u32> = tracks.iter().map(|t| t.disc_no.unwrap_or(1)).collect();
+        discs.sort_unstable();
+        discs.dedup();
+        let multi_disc = discs.len() > 1;
+
+        // Baut eine Titelzeile (Cover, Tracknummer, Dauer, Play + Gesten).
+        let make_row = |t: &Track| -> adw::ActionRow {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&t.title))
                 .activatable(true)
@@ -2687,9 +2691,35 @@ impl App {
                 });
                 row.add_controller(gesture);
             }
-            group.add(&row);
+            row
+        };
+
+        if multi_disc {
+            for (i, disc) in discs.iter().enumerate() {
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("CD {disc}"))
+                    .build();
+                // Album-Jahr/Titelzahl als Untertitel der ersten Disc-Gruppe.
+                if i == 0 {
+                    group.set_description(Some(
+                        album_subtitle(year, tracks.len()).as_str(),
+                    ));
+                }
+                for t in tracks.iter().filter(|t| t.disc_no.unwrap_or(1) == *disc) {
+                    group.add(&make_row(t));
+                }
+                content.append(&group);
+            }
+        } else {
+            let group = adw::PreferencesGroup::builder()
+                .title(gtk::glib::markup_escape_text(album))
+                .description(album_subtitle(year, tracks.len()))
+                .build();
+            for t in &tracks {
+                group.add(&make_row(t));
+            }
+            content.append(&group);
         }
-        content.append(&group);
 
         // Kopfzeile: bevorzugt der Album-Interpret, sonst der Seiten-Interpret.
         let header_artist = if display_artist.is_empty() {
