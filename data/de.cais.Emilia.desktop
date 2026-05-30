@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Emilia
+GenericName=Musikplayer
+Comment=Musik- und Hörspielplayer für Phosh
+Exec=emilia
+Icon=de.cais.Emilia
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=Musik;Music;Player;Hörspiel;Hörbuch;Audiobook;Podcast;
+StartupNotify=true
+X-Purism-FormFactor=Workstation;Mobile;

@@ -121,10 +121,25 @@ cargo build --release
 ./target/release/emilia
 ```
 
-> Hinweis: Die mitgelieferten Icons werden über den Projektordner gefunden
-> (`data/icons`). Starte das optimierte Binary daher am besten aus dem
-> Projektverzeichnis. Eine systemweite Installation mit `.desktop`-Datei/Icons
-> ist noch nicht eingerichtet.
+> Hinweis: Beim Start aus dem Projektordner (`cargo run`) werden die Icons aus
+> `data/icons` gefunden. Für den dauerhaften Betrieb lieber installieren (unten).
+
+### 3. Installieren (optional)
+
+Damit Emilia im App-Raster erscheint und ihr Icon am Sperrbildschirm zeigt,
+installiert das `Makefile` Binary, `.desktop`-Datei, App-Icon und
+AppStream-Metainfo an die richtigen XDG-Orte:
+
+```bash
+# systemweit (braucht Root):
+sudo make install
+
+# oder nur für den eigenen Benutzer (gut fürs Phone, ohne Root):
+make install PREFIX=$HOME/.local
+```
+
+Wieder entfernen mit `make uninstall` (gleicher `PREFIX`). `make check` prüft
+`.desktop` und Metainfo mit `desktop-file-validate` bzw. `appstreamcli`.
 
 ---
 

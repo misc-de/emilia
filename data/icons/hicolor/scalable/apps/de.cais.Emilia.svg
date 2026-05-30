@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="emilia-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9141ac"/>
+      <stop offset="1" stop-color="#613583"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#emilia-bg)"/>
+  <g fill="#ffffff">
+    <!-- Notenhals -->
+    <rect x="72" y="36" width="7" height="52" rx="3.5"/>
+    <!-- Fähnchen -->
+    <path d="M79 36 c16 4 23 15 18 31 c-1-11-8-17-18-19 z"/>
+    <!-- Notenkopf -->
+    <ellipse cx="58" cy="88" rx="16" ry="12" transform="rotate(-20 58 88)"/>
+  </g>
+</svg>

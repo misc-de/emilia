@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.cais.Emilia</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Emilia</name>
+  <summary>Musik- und Hörspielplayer für Phosh</summary>
+
+  <description>
+    <p>
+      Emilia ist ein adaptiver Musik- und Hörspielplayer für Linux-Phones mit
+      Phosh (Librem 5, PinePhone &amp; Co.) und läuft genauso am Desktop. Die
+      Oberfläche passt sich an das schmale Hochformat an und klappt mobil
+      automatisch ein.
+    </p>
+    <p>Funktionen:</p>
+    <ul>
+      <li>Bibliothek nach Dateisystem, Interpret und Album durchstöbern</li>
+      <li>Wiedergabe mit Warteschlange, Zufall und Seekleiste</li>
+      <li>Resume-Position für lange Hörspiele und Hörbücher</li>
+      <li>10-Band-Equalizer mit Kaskade (Global → Interpret → Album → Titel)</li>
+      <li>Steuerung über Sperrbildschirm und Medientasten (MPRIS)</li>
+      <li>Optionaler Online-Abruf von Cover und Metadaten aus offenen Quellen</li>
+    </ul>
+    <p>
+      Audiodateien werden ausschließlich gelesen, niemals verändert; online
+      abgerufene Daten landen nur in der lokalen Datenbank bzw. im Cache.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">de.cais.Emilia.desktop</launchable>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+
+  <keywords>
+    <keyword>Musik</keyword>
+    <keyword>Player</keyword>
+    <keyword>Hörspiel</keyword>
+    <keyword>Hörbuch</keyword>
+    <keyword>Podcast</keyword>
+  </keywords>
+
+  <recommends>
+    <control>touch</control>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <content_rating type="oars-1.1"/>
+
+  <developer id="de.cais">
+    <name>cais.de</name>
+  </developer>
+
+  <url type="homepage">https://cais.de</url>
+
+  <releases>
+    <release version="0.1.0" date="2026-05-30">
+      <description>
+        <p>Erste Version: Bibliothek, Wiedergabe, Equalizer, Resume, MPRIS.</p>
+      </description>
+    </release>
+  </releases>
+</component>
