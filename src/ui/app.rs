@@ -59,6 +59,14 @@ const SECTIONS: [(&str, &str, &str); 5] = [
     ("playlists", "Playlisten", "view-list-symbolic"),
 ];
 
+/// Ab dieser Spieldauer gilt ein Titel als „Lang-Inhalt" und bekommt
+/// automatisch eine Resume-Position (15 Minuten).
+const RESUME_MIN_DURATION_MS: i64 = 15 * 60 * 1000;
+/// Vor dieser Position wird kein Resume gemerkt (zu nah am Anfang).
+const RESUME_MIN_POS_MS: i64 = 5_000;
+/// So nah vor dem Ende gilt der Titel als fertig → Resume auf 0 zurücksetzen.
+const RESUME_END_GUARD_MS: i64 = 10_000;
+
 pub struct App {
     library: Library,
     player: Player,
@@ -91,6 +99,9 @@ pub struct App {
     loading: bool,
     queue: Vec<PathBuf>,
     queue_pos: usize,
+    /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
+    /// Resume-Position beim Wechsel auf einen anderen Titel).
+    playing_path: Option<PathBuf>,
     now_playing: Option<String>,
     playing: bool,
     shuffle: bool,
@@ -152,6 +163,8 @@ pub enum Msg {
     ShareHost,
     ShareScan,
     TrackFinished,
+    /// Periodischer Tick: Resume-Position des laufenden Titels sichern.
+    PersistResume,
     Next,
     Prev,
     ToggleShuffle,
@@ -733,6 +746,16 @@ impl Component for App {
             player.connect_eos(move || sender.input(Msg::TrackFinished));
         }
 
+        // Während der Wiedergabe regelmäßig die Resume-Position sichern, damit
+        // ein Hörspiel auch nach einem Absturz/Schließen dort weiterläuft.
+        {
+            let sender = sender.clone();
+            gtk::glib::timeout_add_seconds_local(5, move || {
+                sender.input(Msg::PersistResume);
+                gtk::glib::ControlFlow::Continue
+            });
+        }
+
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
 
@@ -760,6 +783,7 @@ impl Component for App {
             loading: false,
             queue: Vec::new(),
             queue_pos: 0,
+            playing_path: None,
             now_playing: None,
             playing: false,
             shuffle: false,
@@ -940,6 +964,7 @@ impl Component for App {
                             && self.queue.get(self.queue_pos) == Some(&path);
                         if is_active {
                             if self.playing {
+                                self.save_resume();
                                 self.player.pause();
                             } else {
                                 self.player.resume();
@@ -1162,7 +1187,20 @@ impl Component for App {
             Msg::ShareScan => {
                 self.toast("QR-Code einlesen – kommt bald");
             }
-            Msg::TrackFinished => self.play_next(),
+            Msg::TrackFinished => {
+                // Titel zu Ende gehört → Resume vergessen, nächstes Mal von vorn.
+                // `take()` verhindert, dass play_current die (End-)Position erneut
+                // als Resume-Punkt speichert.
+                if let Some(path) = self.playing_path.take() {
+                    let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
+                }
+                self.play_next();
+            }
+            Msg::PersistResume => {
+                if self.playing {
+                    self.save_resume();
+                }
+            }
             Msg::Next => self.play_next(),
             Msg::Prev => self.play_prev(),
             Msg::ToggleShuffle => self.shuffle = !self.shuffle,
@@ -1338,6 +1376,7 @@ impl Component for App {
                     return;
                 }
                 if self.playing {
+                    self.save_resume();
                     self.player.pause();
                 } else {
                     self.player.resume();
@@ -3768,8 +3807,10 @@ impl App {
         } else if self.queue_pos + 1 < len {
             self.queue_pos + 1
         } else {
+            self.save_resume();
             self.player.stop();
             self.playing = false;
+            self.playing_path = None;
             self.refresh_queue_icons();
             return;
         };
@@ -3811,12 +3852,63 @@ impl App {
         }
     }
 
+    /// Ob für diesen Titel eine Resume-Position geführt werden soll: bei langen
+    /// Titeln (Hörspiele) immer, sonst nur, wenn er als Hörbuch oder Podcast
+    /// eingestuft ist. Normale (kurze) Musiktitel starten stets von vorn.
+    fn should_resume(&self, t: &Track) -> bool {
+        if t.duration_ms.unwrap_or(0) >= RESUME_MIN_DURATION_MS {
+            return true;
+        }
+        let (cat, _) =
+            self.library
+                .resolve_category(t.artist.as_deref(), t.album.as_deref(), &t.path);
+        matches!(cat.as_str(), "audiobook" | "podcast")
+    }
+
+    /// Sichert die aktuelle Wiedergabeposition des geladenen Titels als
+    /// Resume-Punkt. Nahe Anfang oder Ende wird auf 0 zurückgesetzt, damit ein
+    /// quasi fertiger Titel beim nächsten Mal von vorn beginnt.
+    fn save_resume(&self) {
+        let Some(path) = self.playing_path.clone() else {
+            return;
+        };
+        let path_str = path.to_string_lossy();
+        let Some(track) = self.library.track_by_path(&path_str).ok().flatten() else {
+            return;
+        };
+        if !self.should_resume(&track) {
+            return;
+        }
+        let Some(pos) = self.player.position_ms() else {
+            return;
+        };
+        let dur = self.player.duration_ms().or(track.duration_ms).unwrap_or(0);
+        let resume = if pos < RESUME_MIN_POS_MS {
+            0
+        } else if dur > 0 && pos > dur - RESUME_END_GUARD_MS {
+            0
+        } else {
+            pos
+        };
+        let _ = self.library.set_resume_path(&path_str, resume);
+    }
+
     fn play_current(&mut self) {
+        // Position des bisher laufenden Titels sichern, bevor ein neuer geladen wird.
+        self.save_resume();
         let Some(path) = self.queue.get(self.queue_pos).cloned() else {
             return;
         };
-        match self.player.play_file(&path.to_string_lossy()) {
+        let path_str = path.to_string_lossy().to_string();
+        // Gespeicherte Resume-Position – nur für Lang-Inhalte (s. should_resume).
+        let track = self.library.track_by_path(&path_str).ok().flatten();
+        let resume_ms = match &track {
+            Some(t) if self.should_resume(t) => t.resume_ms,
+            _ => 0,
+        };
+        match self.player.play_file(&path_str, resume_ms) {
             Ok(()) => {
+                self.playing_path = Some(path.clone());
                 self.now_playing = Some(Self::track_display_name(&path));
                 self.playing = true;
                 // Aktiven Ausgang (kann sich geändert haben) auffrischen.

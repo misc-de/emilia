@@ -421,6 +421,41 @@ impl Library {
         Ok(())
     }
 
+    /// Speichert die Wiedergabeposition (Resume) anhand des Pfads. Die
+    /// Warteschlange ist pfadbasiert; bei unbekanntem Pfad passiert nichts.
+    pub fn set_resume_path(&self, path: &str, resume_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE track SET resume_ms = ?1 WHERE path = ?2",
+            rusqlite::params![resume_ms, path],
+        )?;
+        Ok(())
+    }
+
+    /// Liest einen einzelnen Track anhand seines Pfads (inkl. Resume-Position).
+    pub fn track_by_path(&self, path: &str) -> Result<Option<Track>> {
+        let track = self
+            .conn
+            .query_row(
+                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms
+                 FROM track WHERE path = ?1",
+                [path],
+                |r| {
+                    Ok(Track {
+                        id: r.get(0)?,
+                        path: r.get(1)?,
+                        title: r.get(2)?,
+                        artist: r.get(3)?,
+                        album: r.get(4)?,
+                        track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+                        duration_ms: r.get(6)?,
+                        resume_ms: r.get(7)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(track)
+    }
+
     /// Alle Tracks, nach Album und Tracknummer sortiert.
     pub fn all_tracks(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
@@ -790,5 +825,70 @@ impl Library {
             .prepare("SELECT path FROM artist_image WHERE name = ?1 ORDER BY idx")?;
         let rows = stmt.query_map([name], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(path: &str, artist: Option<&str>, album: Option<&str>) -> Track {
+        Track {
+            id: 0,
+            path: path.to_string(),
+            title: "T".to_string(),
+            artist: artist.map(String::from),
+            album: album.map(String::from),
+            track_no: None,
+            duration_ms: Some(60_000),
+            resume_ms: 0,
+        }
+    }
+
+    #[test]
+    fn resume_roundtrip_by_path() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/a/hoerspiel.mp3", Some("X"), Some("Y")))
+            .unwrap();
+
+        // Frisch eingelesener Track hat keine Resume-Position.
+        let t = lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap();
+        assert_eq!(t.resume_ms, 0);
+
+        // Position speichern und wieder auslesen.
+        lib.set_resume_path("/a/hoerspiel.mp3", 123_456).unwrap();
+        let t = lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap();
+        assert_eq!(t.resume_ms, 123_456);
+
+        // Zurücksetzen (Titel zu Ende gehört).
+        lib.set_resume_path("/a/hoerspiel.mp3", 0).unwrap();
+        assert_eq!(lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap().resume_ms, 0);
+    }
+
+    #[test]
+    fn track_by_path_unknown_is_none_and_setresume_noop() {
+        let lib = Library::open_in_memory().unwrap();
+        assert!(lib.track_by_path("/nicht/da.mp3").unwrap().is_none());
+        // Unbekannter Pfad: kein Fehler, kein Effekt.
+        lib.set_resume_path("/nicht/da.mp3", 5000).unwrap();
+        assert!(lib.track_by_path("/nicht/da.mp3").unwrap().is_none());
+    }
+
+    #[test]
+    fn category_cascade_drives_resume_gate() {
+        let lib = Library::open_in_memory().unwrap();
+        // Ohne Festlegung: Standard = Musik (kein Resume-Trigger).
+        let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
+        assert_eq!((cat.as_str(), src), ("music", "default"));
+
+        // Interpret-Ebene als Hörbuch markieren → vererbt auf Titel.
+        lib.set_category("artist", "X", Some("audiobook")).unwrap();
+        let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
+        assert_eq!((cat.as_str(), src), ("audiobook", "artist"));
+
+        // Titel-Ebene gewinnt über die Interpret-Ebene.
+        lib.set_category("track", "/a/1.mp3", Some("music")).unwrap();
+        let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
+        assert_eq!((cat.as_str(), src), ("music", "track"));
     }
 }

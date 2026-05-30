@@ -37,8 +37,9 @@ impl Player {
         }
     }
 
-    /// Lädt eine lokale Datei und startet die Wiedergabe.
-    pub fn play_file(&self, path: &str) -> Result<()> {
+    /// Lädt eine lokale Datei und startet die Wiedergabe. Ist `resume_ms > 0`,
+    /// wird vor dem Start an diese Position gesprungen (Resume bei Hörspielen).
+    pub fn play_file(&self, path: &str, resume_ms: i64) -> Result<()> {
         let uri = gst::glib::filename_to_uri(path, None)
             .map_err(|e| anyhow!("Ungültiger Pfad {path}: {e}"))?;
         // playbin3 liest die `uri` nur beim Zustandswechsel neu ein – läuft schon
@@ -48,6 +49,16 @@ impl Player {
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Konnte Pipeline nicht zurücksetzen: {e}"))?;
         self.playbin.set_property("uri", uri.as_str());
+        if resume_ms > 0 {
+            // Für einen zuverlässigen Sprung muss die Pipeline erst prerollen:
+            // kurz nach PAUSED, auf den Preroll warten (bei lokalen Dateien nur
+            // wenige Millisekunden), dann an die Resume-Position springen.
+            self.playbin
+                .set_state(gst::State::Paused)
+                .map_err(|e| anyhow!("Konnte Pipeline nicht vorbereiten: {e}"))?;
+            let _ = self.playbin.state(gst::ClockTime::from_seconds(5));
+            let _ = self.seek_ms(resume_ms);
+        }
         self.playbin
             .set_state(gst::State::Playing)
             .map_err(|e| anyhow!("Konnte nicht abspielen: {e}"))?;
