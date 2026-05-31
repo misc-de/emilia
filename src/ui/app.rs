@@ -1244,6 +1244,45 @@ impl Component for App {
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
         };
 
+        // Warteschlange vom letzten Mal wiederherstellen (nur noch vorhandene
+        // Dateien). Es wird **nicht** automatisch abgespielt – der Titel steht
+        // bereit im Mini-Player und startet beim Druck auf „Play".
+        let saved_pos: usize = model
+            .library
+            .get_setting("queue_pos")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let raw_queue: Vec<PathBuf> = model
+            .library
+            .get_setting("queue_paths")
+            .ok()
+            .flatten()
+            .map(|s| {
+                s.split('\n')
+                    .filter(|l| !l.is_empty())
+                    .map(PathBuf::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut q = Vec::new();
+        let mut q_pos = 0usize;
+        for (i, p) in raw_queue.iter().enumerate() {
+            if p.exists() {
+                if i <= saved_pos {
+                    q_pos = q.len();
+                }
+                q.push(p.clone());
+            }
+        }
+        if !q.is_empty() {
+            q_pos = q_pos.min(q.len() - 1);
+            model.now_playing = Some(Self::track_display_name(&q[q_pos]));
+            model.queue = q;
+            model.queue_pos = q_pos;
+        }
+
         model.load_dir(&sender);
         model.reload_albums();
         model.reload_artists();
@@ -1518,6 +1557,7 @@ impl Component for App {
                         self.toast("Zum nächsten Abspielen vorgemerkt");
                     }
                     self.refresh_queue_icons();
+                    self.save_queue();
                 }
             }
             Msg::ShowContextMenu(index) => {
@@ -1999,6 +2039,7 @@ impl Component for App {
                     }
                     self.reload_queue_list(&sender);
                     self.refresh_queue_icons();
+                    self.save_queue();
                 }
             }
             Msg::QueueClear => {
@@ -2016,6 +2057,7 @@ impl Component for App {
                 self.mpris.set_stopped();
                 self.reload_queue_list(&sender);
                 self.refresh_queue_icons();
+                self.save_queue();
                 self.toast("Warteschlange geleert");
             }
             Msg::QueueMove { from, to } => {
@@ -2039,6 +2081,7 @@ impl Component for App {
                     };
                     self.reload_queue_list(&sender);
                     self.refresh_queue_icons();
+                    self.save_queue();
                 }
             }
             Msg::SetMusicDir(path) => {

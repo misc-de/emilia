@@ -104,6 +104,7 @@ impl App {
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
                 self.refresh_queue_icons();
+                self.save_queue();
             }
         }
     }
@@ -187,6 +188,21 @@ impl App {
             .contains(&crate::core::category::Area::Audiobooks)
     }
 
+    /// Sichert die aktuelle Warteschlange (Pfade + Position) für die
+    /// Wiederherstellung nach einem Neustart der App.
+    pub(crate) fn save_queue(&self) {
+        let paths = self
+            .queue
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = self.library.set_setting("queue_paths", &paths);
+        let _ = self
+            .library
+            .set_setting("queue_pos", &self.queue_pos.to_string());
+    }
+
     /// Sichert die aktuelle Wiedergabeposition des geladenen Titels als
     /// Resume-Punkt. Nahe Anfang oder Ende wird auf 0 zurückgesetzt, damit ein
     /// quasi fertiger Titel beim nächsten Mal von vorn beginnt.
@@ -262,6 +278,8 @@ impl App {
                     .then(|| (path_str.clone(), start, self.track_duration_ms));
                 // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
                 self.refresh_queue_icons();
+                // Warteschlange + Position für den nächsten Start sichern.
+                self.save_queue();
             }
             Err(e) => tracing::error!("Wiedergabe fehlgeschlagen: {e}"),
         }
