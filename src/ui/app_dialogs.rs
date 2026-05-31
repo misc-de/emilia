@@ -129,6 +129,27 @@ impl App {
             action_group.add(&play_row);
         }
 
+        // Favorit-Stern (Markieren/Entfernen).
+        let is_fav = self.target_is_favorite(entry);
+        let fav_row = adw::ActionRow::builder()
+            .title(if is_fav {
+                "Aus Favoriten entfernen"
+            } else {
+                "Zu Favoriten"
+            })
+            .activatable(true)
+            .build();
+        fav_row.add_prefix(&gtk::Image::from_icon_name("emilia-favorite-symbolic"));
+        {
+            let sender = sender.clone();
+            let dialog = dialog.clone();
+            fav_row.connect_activated(move |_| {
+                sender.input(Msg::ToggleFavorite);
+                dialog.close();
+            });
+        }
+        action_group.add(&fav_row);
+
         // Übrige Aktionen.
         let mut actions: Vec<(&str, &str, fn() -> Msg)> = vec![
             ("Zur Queue hinzufügen", "list-add-symbolic", || Msg::CtxAddQueue),
@@ -389,27 +410,23 @@ impl App {
             .title("Ansicht")
             .icon_name("view-list-symbolic")
             .build();
-        // Menüpunkte ein-/ausblenden – ein Schalter je Navigationsbereich.
+        // Menüpunkte ein-/ausblenden **und** per Ziehgriff umsortieren. Die
+        // Reihenfolge/Sichtbarkeit wird sofort in die Navigation übernommen.
         let sections_group = adw::PreferencesGroup::builder()
             .title("Menüpunkte")
             .description(
-                "Ausgeblendete Menüpunkte verschwinden aus der Navigation und aus der Eigenschaften-Auswahl.",
+                "Ziehgriff zum Umsortieren; der Schalter blendet einen Menüpunkt aus. Beides wirkt sofort in der Navigation und der Eigenschaften-Auswahl.",
             )
             .build();
-        for (name, label, _icon) in crate::ui::app::SECTIONS {
-            let row = adw::SwitchRow::builder()
-                .title(label)
-                .active(!self.hidden_sections.contains(name))
-                .build();
-            let sender = sender.clone();
-            row.connect_active_notify(move |r| {
-                sender.input(Msg::SetSectionVisible {
-                    section: name,
-                    visible: r.is_active(),
-                });
-            });
-            sections_group.add(&row);
-        }
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
+            .build();
+        // Gemeinsamer, lokaler Zustand des Dialogs (parallel zum Modell).
+        let order = std::rc::Rc::new(std::cell::RefCell::new(self.section_order.clone()));
+        let hidden = std::rc::Rc::new(std::cell::RefCell::new(self.hidden_sections.clone()));
+        rebuild_section_rows(&list, &order, &hidden, sender);
+        sections_group.add(&list);
         page.add(&sections_group);
 
         dialog.add(&page);
@@ -495,4 +512,99 @@ fn store_custom_image(src: &std::path::Path, is_artist: bool) -> Option<String> 
     let out = dir.join(format!("custom_{stamp}.{ext}"));
     std::fs::copy(src, &out).ok()?;
     Some(out.to_string_lossy().into_owned())
+}
+
+/// Baut die Menüpunkt-Zeilen (Ziehgriff, Beschriftung, Sichtbarkeits-Schalter)
+/// in der aktuellen Reihenfolge neu auf. Per Ziehen umsortierbar; jede Änderung
+/// aktualisiert den lokalen Dialog-Zustand (`order`/`hidden`) und meldet sie dem
+/// Modell, das Navigation und Reihenfolge sofort übernimmt.
+fn rebuild_section_rows(
+    list: &gtk::ListBox,
+    order: &std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
+    hidden: &std::rc::Rc<std::cell::RefCell<std::collections::HashSet<String>>>,
+    sender: &ComponentSender<App>,
+) {
+    while let Some(c) = list.first_child() {
+        list.remove(&c);
+    }
+    let names: Vec<&'static str> = order.borrow().clone();
+    for (idx, &name) in names.iter().enumerate() {
+        let Some((label, _icon)) = crate::ui::app::section_meta(name) else {
+            continue;
+        };
+        let row = adw::ActionRow::builder().title(label).build();
+
+        // Ziehgriff links (Hinweis); gezogen wird die ganze Zeile.
+        let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+        handle.set_tooltip_text(Some("Zum Umsortieren ziehen"));
+        row.add_prefix(&handle);
+
+        let drag = gtk::DragSource::new();
+        drag.set_actions(gtk::gdk::DragAction::MOVE);
+        {
+            let name = name.to_string();
+            drag.connect_prepare(move |_, _, _| {
+                Some(gtk::gdk::ContentProvider::for_value(&name.to_value()))
+            });
+        }
+        row.add_controller(drag);
+
+        // DropTarget auf der ganzen Zeile: Quelle an diese Position verschieben.
+        let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        {
+            let (list, order, hidden, sender) =
+                (list.clone(), order.clone(), hidden.clone(), sender.clone());
+            drop.connect_drop(move |_, value, _, _| {
+                let Ok(src) = value.get::<String>() else {
+                    return false;
+                };
+                let to = idx;
+                let from = order.borrow().iter().position(|n| *n == src.as_str());
+                let (Some(from), Some(name_static)) = (
+                    from,
+                    crate::ui::app::SECTIONS
+                        .iter()
+                        .map(|(n, _, _)| *n)
+                        .find(|n| *n == src.as_str()),
+                ) else {
+                    return false;
+                };
+                if from == to {
+                    return false;
+                }
+                {
+                    let mut o = order.borrow_mut();
+                    o.remove(from);
+                    o.insert(to, name_static);
+                }
+                sender.input(Msg::MoveSection { from, to });
+                rebuild_section_rows(&list, &order, &hidden, &sender);
+                true
+            });
+        }
+        row.add_controller(drop);
+
+        // Sichtbarkeits-Schalter rechts.
+        let sw = gtk::Switch::builder()
+            .active(!hidden.borrow().contains(name))
+            .valign(gtk::Align::Center)
+            .build();
+        {
+            let (hidden, sender) = (hidden.clone(), sender.clone());
+            sw.connect_active_notify(move |s| {
+                if s.is_active() {
+                    hidden.borrow_mut().remove(name);
+                } else {
+                    hidden.borrow_mut().insert(name.to_string());
+                }
+                sender.input(Msg::SetSectionVisible {
+                    section: name,
+                    visible: s.is_active(),
+                });
+            });
+        }
+        row.add_suffix(&sw);
+
+        list.append(&row);
+    }
 }

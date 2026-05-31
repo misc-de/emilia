@@ -50,15 +50,27 @@ pub(crate) enum FsKind {
     Album { artist: String, album: String },
 }
 
-/// Navigationsbereiche: (Stack-Name, Tooltip, Icon). Reihenfolge = Anzeige.
-pub(crate) const SECTIONS: [(&str, &str, &str); 6] = [
+/// Navigationsbereiche: (Stack-Name, Tooltip, Icon). Die **Standard**-Reihenfolge;
+/// die tatsächliche Anzeige-/Menüreihenfolge ist in `section_order` gespeichert
+/// und vom Nutzer verschiebbar.
+pub(crate) const SECTIONS: [(&str, &str, &str); 8] = [
     ("files", "Dateisystem", "folder-symbolic"),
     ("artists", "Interpreten", "avatar-default-symbolic"),
     ("albums", "Alben", "media-optical-symbolic"),
+    ("favorites", "Favoriten", "emilia-favorite-symbolic"),
+    ("audiobooks", "Hörbücher", "emilia-audiobook-symbolic"),
     ("concerts", "Konzerte", "emilia-concert-symbolic"),
     ("podcasts", "Podcasts", "microphone-symbolic"),
     ("playlists", "Playlisten", "view-list-symbolic"),
 ];
+
+/// Liefert (Tooltip/Label, Icon) eines Bereichs anhand seines Stack-Namens.
+pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
+    SECTIONS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, label, icon)| (*label, *icon))
+}
 
 /// Ab dieser Spieldauer gilt ein Titel als „Lang-Inhalt" und bekommt
 /// automatisch eine Resume-Position (15 Minuten).
@@ -148,9 +160,21 @@ pub struct App {
     /// Ausgeblendete Navigations-Menüpunkte (Stack-Namen). Betrifft sowohl die
     /// Navigation als auch die Auswahl in den Eigenschaften.
     pub(crate) hidden_sections: std::collections::HashSet<String>,
-    /// Alle Navigations-Schaltflächen (Seitenleiste **und** obere Leiste) je
-    /// Menüpunkt – zum Ein-/Ausblenden zur Laufzeit.
-    pub(crate) nav_buttons: Vec<(&'static str, gtk::ToggleButton)>,
+    /// Anzeige-Reihenfolge der Menüpunkte (Stack-Namen). Vom Nutzer verschiebbar.
+    pub(crate) section_order: Vec<&'static str>,
+    /// Alle Navigations-Schaltflächen je Menüpunkt mit Container-Kennung
+    /// (`true` = Seitenleiste, `false` = obere Leiste) – zum Ein-/Ausblenden und
+    /// Umsortieren zur Laufzeit.
+    pub(crate) nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)>,
+    /// Navigations-Container (Seitenleiste, obere Leiste) zum Umsortieren.
+    pub(crate) sidebar_nav: gtk::Box,
+    pub(crate) top_nav: gtk::Box,
+    // Favoriten: (scope, key, Titel, is_dir)
+    pub(crate) favorite_items: Vec<(String, String, String, bool)>,
+    pub(crate) favorites_list: gtk::ListBox,
+    // Hörbücher: (Pfad, Titel, is_dir)
+    pub(crate) audiobook_items: Vec<(String, String, bool)>,
+    pub(crate) audiobooks_list: gtk::ListBox,
     // Playlisten
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
     pub(crate) playlists_list: gtk::ListBox,
@@ -286,6 +310,25 @@ pub enum Msg {
         section: &'static str,
         visible: bool,
     },
+    /// Menüpunkt in der Reihenfolge verschieben (Indizes in `section_order`).
+    MoveSection {
+        from: usize,
+        to: usize,
+    },
+    // Favoriten
+    /// Aktuelles Detailziel als Favorit setzen/entfernen.
+    ToggleFavorite,
+    /// Favorit (Index in `favorite_items`) abspielen.
+    PlayFavorite(usize),
+    /// Favorit (Index) entfernen.
+    FavoriteRemove(usize),
+    /// Detailansicht eines Favoriten öffnen.
+    ShowFavoriteDetail(usize),
+    // Hörbücher
+    /// Hörbuch (Index in `audiobook_items`) abspielen.
+    PlayAudiobook(usize),
+    /// Detailansicht eines Hörbuchs öffnen.
+    ShowAudiobookDetail(usize),
     // Playlisten
     /// „Neue Playlist"-Dialog öffnen.
     PlaylistNew,
@@ -403,9 +446,13 @@ impl Component for App {
                     add_top_bar = &adw::HeaderBar {
                         #[wrap(Some)]
                         set_title_widget = &adw::WindowTitle::new("Emilia", ""),
+                        // Einstellungen oben nur im schmalen (mobilen) Modus – im
+                        // Desktop-Modus sitzt der Punkt unten in der Seitenleiste.
+                        #[name = "settings_top_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emblem-system-symbolic",
                             set_tooltip_text: Some("Einstellungen"),
+                            set_visible: false,
                             connect_clicked => Msg::OpenSettings,
                         },
                         pack_start = &gtk::Button {
@@ -723,6 +770,62 @@ impl Component for App {
                                         },
                                     },
                                 },
+                            add_titled_with_icon[Some("favorites"), "Favoriten", "emilia-favorite-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.favorite_items.is_empty(),
+                                        #[local_ref]
+                                        favorites_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 12,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+
+                                    adw::StatusPage {
+                                        set_icon_name: Some("emilia-favorite-symbolic"),
+                                        set_title: "Keine Favoriten",
+                                        set_description: Some("Markiere Titel, Alben oder Interpreten mit dem Stern unter „Mehr Infos“."),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.favorite_items.is_empty(),
+                                    },
+                                },
+                            add_titled_with_icon[Some("audiobooks"), "Hörbücher", "emilia-audiobook-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.audiobook_items.is_empty(),
+                                        #[local_ref]
+                                        audiobooks_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 12,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+
+                                    adw::StatusPage {
+                                        set_icon_name: Some("emilia-audiobook-symbolic"),
+                                        set_title: "Keine Hörbücher",
+                                        set_description: Some("Markiere Alben, Ordner oder Titel über die Eigenschaften als „Hörbücher“."),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.audiobook_items.is_empty(),
+                                    },
+                                },
                         },
 
                         // Zentrierter Spinner während des Einlesens
@@ -968,6 +1071,26 @@ impl Component for App {
         ) {
             hidden_sections.insert("concerts".to_string());
         }
+        // Menü-Reihenfolge (kommaseparierte Stack-Namen). Unbekannte Namen werden
+        // verworfen, neue Bereiche in Standardreihenfolge hinten ergänzt – so
+        // tauchen künftige Menüpunkte automatisch auf.
+        let mut section_order: Vec<&'static str> = library
+            .get_setting("section_order")
+            .ok()
+            .flatten()
+            .map(|s| {
+                s.split(',')
+                    .filter_map(|name| {
+                        SECTIONS.iter().find(|(n, _, _)| *n == name.trim()).map(|(n, _, _)| *n)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (name, _, _) in SECTIONS {
+            if !section_order.contains(&name) {
+                section_order.push(name);
+            }
+        }
         // Automatischer Online-Abruf (Standard: an; nur „0" schaltet ihn aus).
         let auto_enrich = !matches!(
             library.get_setting("auto_enrich").ok().flatten().as_deref(),
@@ -1042,6 +1165,8 @@ impl Component for App {
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
         let podcasts_list = gtk::ListBox::new();
+        let favorites_list = gtk::ListBox::new();
+        let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
 
         let mut model = App {
@@ -1085,6 +1210,10 @@ impl Component for App {
             toast_overlay: toast_overlay.clone(),
             concert_items: Vec::new(),
             concerts_list: concerts_list.clone(),
+            favorite_items: Vec::new(),
+            favorites_list: favorites_list.clone(),
+            audiobook_items: Vec::new(),
+            audiobooks_list: audiobooks_list.clone(),
             playlist_items: Vec::new(),
             playlists_list: playlists_list.clone(),
             podcast_items: Vec::new(),
@@ -1092,7 +1221,10 @@ impl Component for App {
             queue_list: queue_list.clone(),
             concert_hint_dismissed,
             hidden_sections,
+            section_order,
             nav_buttons: Vec::new(),
+            sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
+            top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
             view_stack: adw::ViewStack::new(),
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -1102,6 +1234,8 @@ impl Component for App {
         model.reload_albums();
         model.reload_artists();
         model.load_concerts(&sender);
+        model.load_favorites(&sender);
+        model.load_audiobooks(&sender);
         model.reload_playlists(&sender);
         model.reload_podcasts(&sender);
         // Bibliothek beim Start automatisch einlesen und – bei WLAN/LAN und
@@ -1166,18 +1300,25 @@ impl Component for App {
         let yes = true.to_value();
         breakpoint.add_setter(&widgets.split, "collapsed", Some(&yes));
         breakpoint.add_setter(&widgets.top_nav, "visible", Some(&yes));
+        // Einstellungen oben nur im schmalen Modus zeigen (Desktop: Seitenleiste).
+        breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
         root.add_breakpoint(breakpoint);
 
-        // Icon-only Navigation (Seitenleiste + oben) erzeugen und an den Stack koppeln.
-        // Alle Schaltflächen werden erzeugt; ausgeblendete Menüpunkte sind nur
-        // unsichtbar, damit sie sich zur Laufzeit wieder einblenden lassen.
-        let mut nav_buttons: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
+        // Icon-only Navigation (Seitenleiste + oben) in der **gespeicherten
+        // Reihenfolge** erzeugen und an den Stack koppeln. Alle Schaltflächen
+        // werden erzeugt; ausgeblendete Menüpunkte sind nur unsichtbar.
+        model.sidebar_nav = widgets.sidebar_nav.clone();
+        model.top_nav = widgets.top_nav.clone();
+        let mut nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)> = Vec::new();
         for (is_sidebar, container) in [
             (true, widgets.sidebar_nav.clone()),
             (false, widgets.top_nav.clone()),
         ] {
             let mut group_leader: Option<gtk::ToggleButton> = None;
-            for (name, label, icon) in SECTIONS {
+            for &name in &model.section_order {
+                let Some((label, icon)) = section_meta(name) else {
+                    continue;
+                };
                 let btn = gtk::ToggleButton::builder().build();
                 btn.set_visible(!model.hidden_sections.contains(name));
                 btn.add_css_class("flat");
@@ -1211,7 +1352,7 @@ impl Component for App {
                     });
                 }
                 container.append(&btn);
-                nav_buttons.push((name, btn));
+                nav_buttons.push((name, is_sidebar, btn));
             }
         }
         model.nav_buttons = nav_buttons.clone();
@@ -1236,22 +1377,25 @@ impl Component for App {
         widgets.sidebar_nav.append(&settings_btn);
 
         // Aktiven Button passend zur sichtbaren Stack-Seite setzen.
-        let sync_active = move |stack: &adw::ViewStack, buttons: &[(&'static str, gtk::ToggleButton)]| {
-            let cur = stack.visible_child_name();
-            let cur = cur.as_deref().unwrap_or("files");
-            for (name, btn) in buttons {
-                btn.set_active(*name == cur);
-            }
-        };
+        let sync_active =
+            move |stack: &adw::ViewStack, buttons: &[(&'static str, bool, gtk::ToggleButton)]| {
+                let cur = stack.visible_child_name();
+                let cur = cur.as_deref().unwrap_or("files");
+                for (name, _is_sidebar, btn) in buttons {
+                    btn.set_active(*name == cur);
+                }
+            };
         // Zuletzt offenen Navigationspunkt wiederherstellen – aber keinen
-        // ausgeblendeten. Notfalls auf den ersten sichtbaren Menüpunkt fallen.
+        // ausgeblendeten. Notfalls auf den ersten sichtbaren Menüpunkt (in der
+        // gewählten Reihenfolge) fallen.
         let restore = saved_section
             .as_deref()
             .filter(|s| !model.hidden_sections.contains(*s))
             .or_else(|| {
-                SECTIONS
+                model
+                    .section_order
                     .iter()
-                    .map(|(n, _, _)| *n)
+                    .copied()
                     .find(|n| !model.hidden_sections.contains(*n))
             });
         if let Some(section) = restore {
@@ -1937,6 +2081,7 @@ impl Component for App {
                 self.reload_albums();
                 self.reload_artists();
                 self.load_concerts(&sender);
+                self.load_audiobooks(&sender);
                 self.load_dir(&sender);
             }
             Msg::SetEq {
@@ -1995,6 +2140,62 @@ impl Component for App {
             }
             Msg::SetSectionVisible { section, visible } => {
                 self.set_section_visible(section, visible);
+            }
+            Msg::MoveSection { from, to } => {
+                if from < self.section_order.len() && to < self.section_order.len() && from != to {
+                    let name = self.section_order.remove(from);
+                    self.section_order.insert(to, name);
+                    let value = self.section_order.join(",");
+                    let _ = self.library.set_setting("section_order", &value);
+                    // Reihenfolge auf die vorhandenen Schaltflächen anwenden.
+                    self.apply_section_order();
+                }
+            }
+            Msg::ToggleFavorite => {
+                if let Some(target) = self.context_target.clone() {
+                    let (scope, key, title, is_dir) = self.favorite_ref(&target);
+                    let on = !self.library.is_favorite(scope, &key);
+                    let _ = self.library.set_favorite(scope, &key, &title, is_dir, on);
+                    self.load_favorites(&sender);
+                    self.toast(if on {
+                        "Zu Favoriten hinzugefügt"
+                    } else {
+                        "Aus Favoriten entfernt"
+                    });
+                }
+            }
+            Msg::PlayFavorite(index) => {
+                self.play_favorite(index);
+            }
+            Msg::FavoriteRemove(index) => {
+                if let Some((scope, key, _, _)) = self.favorite_items.get(index).cloned() {
+                    let _ = self.library.set_favorite(&scope, &key, "", false, false);
+                    self.load_favorites(&sender);
+                    self.toast("Aus Favoriten entfernt");
+                }
+            }
+            Msg::ShowFavoriteDetail(index) => {
+                if let Some(target) = self.favorite_target(index) {
+                    self.context_target = Some(target);
+                    self.open_context_menu(root, &sender);
+                }
+            }
+            Msg::PlayAudiobook(index) => {
+                if let Some((path, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                    self.play_path(&path, is_dir);
+                }
+            }
+            Msg::ShowAudiobookDetail(index) => {
+                if let Some((path, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                    let path = PathBuf::from(path);
+                    let entry = if is_dir {
+                        FsEntry::dir(path)
+                    } else {
+                        FsEntry::file(path)
+                    };
+                    self.context_target = Some(CtxTarget::Fs(entry));
+                    self.open_context_menu(root, &sender);
+                }
             }
             Msg::TogglePlay => {
                 if self.playing {
@@ -2307,23 +2508,44 @@ impl App {
             .join(",");
         let _ = self.library.set_setting("hidden_sections", &value);
 
-        for (name, btn) in &self.nav_buttons {
+        for (name, _is_sidebar, btn) in &self.nav_buttons {
             if *name == section {
                 btn.set_visible(visible);
             }
         }
 
         // Wird der gerade sichtbare Bereich ausgeblendet, auf den ersten
-        // sichtbaren Menüpunkt wechseln.
+        // sichtbaren Menüpunkt (in der gewählten Reihenfolge) wechseln.
         if !visible {
             let cur = self.view_stack.visible_child_name();
             if cur.as_deref() == Some(section) {
-                if let Some(next) = SECTIONS
+                if let Some(next) = self
+                    .section_order
                     .iter()
-                    .map(|(n, _, _)| *n)
+                    .copied()
                     .find(|n| !self.hidden_sections.contains(*n))
                 {
                     self.view_stack.set_visible_child_name(next);
+                }
+            }
+        }
+    }
+
+    /// Wendet `section_order` auf die Navigations-Container an, indem die
+    /// vorhandenen Schaltflächen umsortiert werden (Seitenleisten-Knöpfe vor dem
+    /// Abstandshalter + „Einstellungen", die unberührt am Ende bleiben).
+    pub(crate) fn apply_section_order(&self) {
+        for sidebar in [true, false] {
+            let container = if sidebar { &self.sidebar_nav } else { &self.top_nav };
+            let mut prev: Option<gtk::Widget> = None;
+            for &name in &self.section_order {
+                if let Some((_, _, btn)) = self
+                    .nav_buttons
+                    .iter()
+                    .find(|(n, s, _)| *n == name && *s == sidebar)
+                {
+                    container.reorder_child_after(btn, prev.as_ref());
+                    prev = Some(btn.clone().upcast());
                 }
             }
         }

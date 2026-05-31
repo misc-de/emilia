@@ -55,6 +55,10 @@ modules:
         /app/share/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg
     sources:
       - type: dir
         path: .

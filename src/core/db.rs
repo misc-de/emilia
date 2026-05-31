@@ -119,6 +119,17 @@ impl Library {
                 added_at INTEGER
             );
 
+            -- Favoriten (Stern in „Mehr Infos"). scope ∈ {track,folder,album,artist};
+            -- key = Pfad | Interpret\1Album | Interpretname. title = Anzeigename.
+            CREATE TABLE IF NOT EXISTS favorite (
+                scope    TEXT NOT NULL,
+                key      TEXT NOT NULL,
+                title    TEXT NOT NULL,
+                is_dir   INTEGER NOT NULL DEFAULT 0,
+                added_at INTEGER,
+                PRIMARY KEY (scope, key)
+            );
+
             -- Inhalts-Merkmal (Musik/Konzert/Podcast/Hörbuch) je Ebene.
             -- Vererbung Titel → Album → Interpret → Standard; nur Abweichungen
             -- werden gespeichert. key = Pfad | Interpret\1Album | Interpretname.
@@ -340,6 +351,155 @@ impl Library {
         let mut stmt = self.conn.prepare("SELECT path FROM concert")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+    }
+
+    // ---- Favoriten ----
+
+    /// Setzt/entfernt einen Favoriten (Stern). `scope` ∈ {track,folder,album,artist}.
+    pub fn set_favorite(
+        &self,
+        scope: &str,
+        key: &str,
+        title: &str,
+        is_dir: bool,
+        on: bool,
+    ) -> Result<()> {
+        if on {
+            self.conn.execute(
+                "INSERT INTO favorite (scope, key, title, is_dir, added_at)
+                 VALUES (?1, ?2, ?3, ?4, strftime('%s','now'))
+                 ON CONFLICT(scope, key) DO UPDATE SET title = excluded.title",
+                rusqlite::params![scope, key, title, is_dir as i64],
+            )?;
+        } else {
+            self.conn.execute(
+                "DELETE FROM favorite WHERE scope = ?1 AND key = ?2",
+                rusqlite::params![scope, key],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Ob eine Ebene als Favorit markiert ist.
+    pub fn is_favorite(&self, scope: &str, key: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM favorite WHERE scope = ?1 AND key = ?2",
+                rusqlite::params![scope, key],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    /// Alle Favoriten (scope, key, title, is_dir), neueste zuerst.
+    pub fn favorites(&self) -> Result<Vec<(String, String, String, bool)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT scope, key, title, is_dir FROM favorite ORDER BY added_at DESC, title",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)? != 0,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    // ---- Hörbücher (aus dem Bereich „Hörbücher") ----
+
+    /// Inhalte, deren Eigenschaften den Bereich **Hörbücher** enthalten – aus den
+    /// Festlegungen (category) abgeleitet: Alben (Ordner eines Albumtitels),
+    /// Ordner und einzelne Titel. Liefert (Pfad, Titel, is_dir), dedupliziert.
+    pub fn audiobook_entries(&self) -> Result<Vec<(String, String, bool)>> {
+        use crate::core::category::{parse_areas, Area};
+        let mut stmt = self
+            .conn
+            .prepare("SELECT scope, key, value FROM category")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<(String, String, bool)> = Vec::new();
+        for (scope, key, value) in rows {
+            if !parse_areas(&value).contains(&Area::Audiobooks) {
+                continue;
+            }
+            let entry = match scope.as_str() {
+                "track" => {
+                    let title = self
+                        .track_by_path(&key)
+                        .ok()
+                        .flatten()
+                        .map(|t| t.title)
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or_else(|| {
+                            std::path::Path::new(&key)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or(&key)
+                                .to_string()
+                        });
+                    Some((key.clone(), title, false))
+                }
+                "folder" => {
+                    let name = std::path::Path::new(&key)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(&key)
+                        .to_string();
+                    Some((key.clone(), name, true))
+                }
+                "album" => {
+                    // key = „Interpret\1Album"; Ordner = Verzeichnis eines Titels.
+                    let mut parts = key.splitn(2, '\u{1}');
+                    let artist = parts.next().unwrap_or("");
+                    let album = parts.next().unwrap_or("").to_string();
+                    self.album_sample_dir(artist, &album)
+                        .map(|d| (d, album, true))
+                }
+                _ => None, // Interpret-Ebene: kein einzelner Pfad
+            };
+            if let Some((path, title, is_dir)) = entry {
+                if seen.insert(path.clone()) {
+                    out.push((path, title, is_dir));
+                }
+            }
+        }
+        out.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        Ok(out)
+    }
+
+    /// Verzeichnis eines Albums (übergeordneter Ordner eines seiner Titel, dessen
+    /// Haupt-Interpret `artist` ist). Grundlage für Konzert-/Hörbuch-Einträge.
+    pub fn album_sample_dir(&self, artist: &str, album: &str) -> Option<String> {
+        let target = crate::core::artist::norm_key(artist);
+        let sample = self
+            .all_tracks()
+            .ok()?
+            .into_iter()
+            .find(|t| {
+                t.album.as_deref() == Some(album)
+                    && t.artist.as_deref().is_some_and(|a| {
+                        crate::core::artist::split_artists(a)
+                            .first()
+                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
+                    })
+            })?;
+        std::path::Path::new(&sample.path)
+            .parent()
+            .map(|d| d.to_string_lossy().into_owned())
     }
 
     // ---- Merkmale (Kategorie mit Vererbung) ----
