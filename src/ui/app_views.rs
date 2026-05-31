@@ -1064,13 +1064,22 @@ impl App {
                         .resolve_areas(track.artist.as_deref(), track.album.as_deref(), &path);
                 ("track", path, eff)
             }
-            CtxTarget::Fs(e) => match self.fs_music_kind(e)? {
-                FsKind::Album { artist, album } => (
+            CtxTarget::Fs(e) => match self.fs_music_kind(e) {
+                Some(FsKind::Album { artist, album }) => (
                     "album",
                     album_key(&artist, &album),
                     self.library.album_areas(&artist, &album),
                 ),
-                FsKind::Artist(name) => ("artist", name.clone(), self.library.artist_areas(&name)),
+                Some(FsKind::Artist(name)) => {
+                    ("artist", name.clone(), self.library.artist_areas(&name))
+                }
+                // Generischer Ordner (z. B. erste Ebene): Ordner-Ebene, vererbt
+                // an alles darunter.
+                None => {
+                    let path = e.path().to_string_lossy().into_owned();
+                    let eff = self.library.folder_areas(&path);
+                    ("folder", path, eff)
+                }
             },
         };
         Some(self.build_area_group(scope, key, &effective, sender))

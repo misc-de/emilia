@@ -123,7 +123,7 @@ impl Library {
             -- Vererbung Titel → Album → Interpret → Standard; nur Abweichungen
             -- werden gespeichert. key = Pfad | Interpret\1Album | Interpretname.
             CREATE TABLE IF NOT EXISTS category (
-                scope TEXT NOT NULL CHECK(scope IN ('artist','album','track')),
+                scope TEXT NOT NULL,
                 key   TEXT NOT NULL,
                 value TEXT NOT NULL,
                 PRIMARY KEY (scope, key)
@@ -275,6 +275,30 @@ impl Library {
                  ELSE value END
              WHERE value IN ('music','concert','audiobook','podcast');",
         )?;
+
+        // Migration: alte CHECK-Beschränkung auf scope entfernen, damit auch die
+        // Ordner-Ebene ('folder') gespeichert werden kann.
+        let has_old_check = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='category'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .map(|s| s.contains("CHECK(scope"))
+            .unwrap_or(false);
+        if has_old_check {
+            self.conn.execute_batch(
+                "ALTER TABLE category RENAME TO category_old;
+                 CREATE TABLE category (
+                     scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+                     PRIMARY KEY (scope, key)
+                 );
+                 INSERT INTO category SELECT * FROM category_old;
+                 DROP TABLE category_old;",
+            )?;
+        }
         Ok(())
     }
 
@@ -371,6 +395,27 @@ impl Library {
             if let Ok(Some(v)) = self.get_category("artist", artist) {
                 return parse_areas(&v);
             }
+        }
+        // Ordner-Kette: vom Verzeichnis der Datei aufwärts (tiefste Festlegung gewinnt).
+        let mut dir = std::path::Path::new(path).parent();
+        while let Some(d) = dir {
+            if let Ok(Some(v)) = self.get_category("folder", &d.to_string_lossy()) {
+                return parse_areas(&v);
+            }
+            dir = d.parent();
+        }
+        Area::DEFAULT.to_vec()
+    }
+
+    /// Effektive Bereiche eines Ordners (dieser Ordner aufwärts → Standard).
+    pub fn folder_areas(&self, folder: &str) -> Vec<crate::core::category::Area> {
+        use crate::core::category::{parse_areas, Area};
+        let mut dir = Some(std::path::Path::new(folder));
+        while let Some(d) = dir {
+            if let Ok(Some(v)) = self.get_category("folder", &d.to_string_lossy()) {
+                return parse_areas(&v);
+            }
+            dir = d.parent();
         }
         Area::DEFAULT.to_vec()
     }

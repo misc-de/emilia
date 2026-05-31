@@ -2135,7 +2135,19 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
     // sichtbar. Ordner werden nicht gefiltert (bleiben navigierbar).
     let lib = Library::open().ok();
     let mut out = Vec::with_capacity(dirs.len() + files.len());
-    out.extend(dirs.into_iter().map(FsEntry::dir));
+    // Ordner ausblenden, deren Ordner-Eigenschaft „Dateisystem" nicht enthält
+    // (vererbt von übergeordneten Ordnern).
+    for d in dirs {
+        let visible = match &lib {
+            Some(lib) => lib
+                .folder_areas(&d.to_string_lossy())
+                .contains(&crate::core::category::Area::Filesystem),
+            None => true,
+        };
+        if visible {
+            out.push(FsEntry::dir(d));
+        }
+    }
     for f in files {
         let visible = match &lib {
             Some(lib) => match lib.track_by_path(&f.to_string_lossy()).ok().flatten() {
