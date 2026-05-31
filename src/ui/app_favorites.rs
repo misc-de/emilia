@@ -10,6 +10,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::category::album_key;
+use crate::i18n::gettext;
 use crate::ui::app::{cover_widget, App, CtxTarget, Msg};
 use crate::ui::fs_row::FsEntry;
 
@@ -70,18 +71,25 @@ impl App {
             &items,
             sender,
             Msg::PlayFavorite,
-            Some(Msg::FavoriteRemove),
+            // Kein Mülleimer – Entfernen über langes Drücken („Mehr Infos" → Stern).
+            None,
             Msg::ShowFavoriteDetail,
             Some(|from, to| Msg::MoveFavorite { from, to }),
+            true,
+            false,
         );
     }
 
-    /// Lädt die Hörbücher (Bereich „Hörbücher") – ohne Ordner, dafür mit
-    /// Interpreten/Komponisten und den eigentlichen Hörbüchern (Alben/Titel).
+    /// Lädt die Hörbücher (Bereich „Hörbücher") – gelistet werden nur **Alben
+    /// und Einzelstücke**. Ein als Hörbuch markierter Ordner wird in die darin
+    /// enthaltenen Alben und losen Titel aufgelöst (kein Ordner-Eintrag).
     pub(crate) fn load_audiobooks(&mut self, sender: &ComponentSender<Self>) {
-        self.audiobook_items =
-            self.library
-                .area_entries(crate::core::category::Area::Audiobooks, false, true);
+        // Ordner mitnehmen, um sie in Alben/Einzelstücke aufzulösen; keine
+        // Interpreten – gelistet werden nur Alben und Einzelstücke.
+        let raw = self
+            .library
+            .area_entries(crate::core::category::Area::Audiobooks, true, false);
+        self.audiobook_items = self.expand_area_items(raw);
         let items = self.audiobook_items.clone();
         self.fill_entry_list(
             &self.audiobooks_list,
@@ -91,6 +99,8 @@ impl App {
             None,
             Msg::ShowAudiobookDetail,
             None,
+            false,
+            true,
         );
     }
 
@@ -107,22 +117,78 @@ impl App {
         remove: Option<fn(usize) -> Msg>,
         detail: fn(usize) -> Msg,
         move_msg: Option<fn(usize, usize) -> Msg>,
+        // Bei Titel-Einträgen statt „Track" den Untertitel „<Album> / <Dauer>".
+        track_subtitle: bool,
+        // Ordner-Einträge als Alben darstellen (Untertitel „Album", Album-Icon).
+        folder_as_album: bool,
     ) {
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
         for (i, (scope, key, title, is_dir)) in items.iter().enumerate() {
+            let subtitle = if track_subtitle && scope == "track" {
+                self.track_meta_subtitle(key)
+            } else if folder_as_album && scope == "folder" {
+                gettext("Album")
+            } else {
+                entry_kind(scope)
+            };
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(title))
-                .subtitle(entry_kind(scope))
+                .subtitle(&subtitle)
                 .activatable(true)
                 .build();
+            // Cover/Icon bündig nach ganz links (kein Prefix-Innenabstand).
+            row.add_css_class("emilia-flush");
 
-            // Ziehgriff zum Umsortieren (falls erlaubt).
+            // Cover (Album/Interpret/Titel) oder passendes Platzhalter-Icon.
+            let icon = if folder_as_album && scope == "folder" {
+                "media-optical-symbolic"
+            } else {
+                entry_icon(scope)
+            };
+            let cover = self.entry_cover(scope, key, *is_dir);
+            row.add_prefix(&cover_widget(cover.as_deref(), icon));
+
+            if let Some(remove) = remove {
+                let btn = gtk::Button::builder()
+                    .icon_name("user-trash-symbolic")
+                    .tooltip_text(&gettext("Remove"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                let sender = sender.clone();
+                btn.connect_clicked(move |b| {
+                    crate::ui::app::confirm_destructive(
+                        b,
+                        &gettext("Remove this entry?"),
+                        &gettext("Remove"),
+                        sender.clone(),
+                        remove(i),
+                    );
+                });
+                row.add_suffix(&btn);
+            }
+            // Läuft genau dieser Titel gerade, ein Pause-Symbol zeigen.
+            let is_active = scope == "track"
+                && self
+                    .playing_path
+                    .as_ref()
+                    .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
+            let play_icon = if is_active && self.playing {
+                "media-playback-pause-symbolic"
+            } else {
+                "media-playback-start-symbolic"
+            };
+            row.add_suffix(&gtk::Image::from_icon_name(play_icon));
+
+            // Ziehgriff zum Umsortieren (falls erlaubt) – ganz rechts. Die
+            // DragSource sitzt auf der ganzen Zeile; der Griff ist nur die
+            // sichtbare Greifzone.
             if let Some(move_msg) = move_msg {
                 let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-                handle.set_tooltip_text(Some("Zum Umsortieren ziehen"));
-                row.add_prefix(&handle);
+                handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
+                row.add_suffix(&handle);
 
                 let drag = gtk::DragSource::new();
                 drag.set_actions(gtk::gdk::DragAction::MOVE);
@@ -144,23 +210,6 @@ impl App {
                 }
                 row.add_controller(drop);
             }
-
-            // Cover (Album/Interpret/Titel) oder passendes Platzhalter-Icon.
-            let cover = self.entry_cover(scope, key, *is_dir);
-            row.add_prefix(&cover_widget(cover.as_deref(), entry_icon(scope)));
-
-            if let Some(remove) = remove {
-                let btn = gtk::Button::builder()
-                    .icon_name("user-trash-symbolic")
-                    .tooltip_text("Entfernen")
-                    .valign(gtk::Align::Center)
-                    .css_classes(["flat"])
-                    .build();
-                let sender = sender.clone();
-                btn.connect_clicked(move |_| sender.input(remove(i)));
-                row.add_suffix(&btn);
-            }
-            row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
 
             {
                 let sender = sender.clone();
@@ -197,7 +246,8 @@ impl App {
                 .get_artist_meta(key)
                 .ok()
                 .flatten()
-                .and_then(|m| m.image_path),
+                .and_then(|m| m.image_path)
+                .or_else(|| self.artist_album_cover(key)),
             "track" => crate::core::online::local_track_cover(key).or_else(|| {
                 let t = self.library.track_by_path(key).ok().flatten()?;
                 let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
@@ -206,6 +256,14 @@ impl App {
             "folder" => self.folder_cover(key),
             _ => None,
         }
+    }
+
+    /// Fallback-Bild für einen Interpreten **ohne Foto**: das Cover eines seiner
+    /// Alben (das erste mit Cover).
+    pub(crate) fn artist_album_cover(&self, name: &str) -> Option<String> {
+        self.artist_albums(name)
+            .into_iter()
+            .find_map(|(album, _)| self.album_cover_for(name, &album))
     }
 
     /// Album-Cover: erst exakt (Interpret, Album), sonst irgendeines des Albums.
@@ -284,6 +342,26 @@ impl App {
         }
     }
 
+    /// Untertitel eines Titel-Eintrags: „<Album> / <Dauer>" (vorhandene Teile).
+    fn track_meta_subtitle(&self, path: &str) -> String {
+        let Some(t) = self.library.track_by_path(path).ok().flatten() else {
+            return entry_kind("track");
+        };
+        let album = t.album.unwrap_or_default();
+        let album = album.trim();
+        let dur = t
+            .duration_ms
+            .filter(|ms| *ms > 0)
+            .map(crate::ui::app::fmt_duration)
+            .unwrap_or_default();
+        match (album.is_empty(), dur.is_empty()) {
+            (false, false) => format!("{album} / {dur}"),
+            (false, true) => album.to_string(),
+            (true, false) => dur,
+            (true, true) => entry_kind("track"),
+        }
+    }
+
     /// Queue = übergebene Dateien ab Titel 1, sofern nicht leer.
     fn play_track_set(&mut self, files: Vec<PathBuf>) {
         if files.is_empty() {
@@ -307,11 +385,11 @@ fn entry_icon(scope: &str) -> &'static str {
 }
 
 /// Untertitel-Kennzeichnung je Ebene.
-fn entry_kind(scope: &str) -> &'static str {
+fn entry_kind(scope: &str) -> String {
     match scope {
-        "album" => "Album",
-        "artist" => "Interpret",
-        "folder" => "Ordner",
-        _ => "Titel",
+        "album" => gettext("Album"),
+        "artist" => gettext("Artist"),
+        "folder" => gettext("Folder"),
+        _ => gettext("Track"),
     }
 }

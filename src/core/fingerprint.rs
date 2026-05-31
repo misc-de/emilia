@@ -32,7 +32,7 @@ pub fn compute(path: &Path) -> Result<Fingerprint> {
     let output = Command::new("fpcalc").arg("-json").arg(path).output()?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("fpcalc fehlgeschlagen: {}", err.trim()));
+        return Err(anyhow!("fpcalc failed: {}", err.trim()));
     }
     let fp: Fingerprint = serde_json::from_slice(&output.stdout)?;
     Ok(fp)

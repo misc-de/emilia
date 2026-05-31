@@ -5,6 +5,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use crate::i18n::gettext;
 use crate::ui::app::{App, Msg};
 
 impl App {
@@ -42,7 +43,7 @@ impl App {
         let header = adw::HeaderBar::new();
         let clear = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
-            .tooltip_text("Warteschlange leeren")
+            .tooltip_text(&gettext("Clear queue"))
             .css_classes(["flat"])
             .build();
         {
@@ -50,11 +51,11 @@ impl App {
             let root = root.clone();
             clear.connect_clicked(move |_| {
                 let confirm = adw::AlertDialog::new(
-                    Some("Warteschlange leeren?"),
-                    Some("Alle Titel werden aus der Warteschlange entfernt."),
+                    Some(&gettext("Clear queue?")),
+                    Some(&gettext("All tracks will be removed from the queue.")),
                 );
-                confirm.add_response("cancel", "Abbrechen");
-                confirm.add_response("clear", "Leeren");
+                confirm.add_response("cancel", &gettext("Cancel"));
+                confirm.add_response("clear", &gettext("Clear"));
                 confirm.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
                 confirm.set_default_response(Some("cancel"));
                 confirm.set_close_response("cancel");
@@ -72,7 +73,7 @@ impl App {
         toolbar.set_content(Some(&scroller));
 
         let dialog = adw::Dialog::builder()
-            .title("Warteschlange")
+            .title(&gettext("Queue"))
             .content_width(400)
             .content_height(620)
             .build();
@@ -88,7 +89,7 @@ impl App {
         }
         if self.queue.is_empty() {
             self.queue_list
-                .append(&adw::ActionRow::builder().title("Die Warteschlange ist leer").build());
+                .append(&adw::ActionRow::builder().title(&gettext("The queue is empty")).build());
             return;
         }
 
@@ -101,12 +102,12 @@ impl App {
                 .build();
 
             if is_current {
-                row.set_subtitle("Läuft gerade");
+                row.set_subtitle(&gettext("Now playing"));
                 row.add_prefix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
             } else {
                 // Ziehgriff (links) zum Umsortieren.
                 let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-                handle.set_tooltip_text(Some("Zum Umsortieren ziehen"));
+                handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
                 row.add_prefix(&handle);
 
                 let drag = gtk::DragSource::new();
@@ -136,7 +137,7 @@ impl App {
             // Mülleimer (rechts) zum Entfernen.
             let trash = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
-                .tooltip_text("Aus der Warteschlange entfernen")
+                .tooltip_text(&gettext("Remove from queue"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();

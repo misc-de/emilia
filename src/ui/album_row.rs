@@ -9,6 +9,7 @@ use adw::prelude::*;
 use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
 use relm4::{adw, gtk};
 
+use crate::i18n::ngettext_n;
 use crate::model::AlbumMeta;
 
 fn esc(s: &str) -> String {
@@ -25,8 +26,7 @@ fn subtitle(m: &AlbumMeta) -> String {
         parts.push(year.to_string());
     }
     if m.track_count > 0 {
-        let word = if m.track_count == 1 { "Lied" } else { "Lieder" };
-        parts.push(format!("{} {word}", m.track_count));
+        parts.push(ngettext_n("{n} song", "{n} songs", m.track_count as u32));
     }
     parts.join(" · ")
 }

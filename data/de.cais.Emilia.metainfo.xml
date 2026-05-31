@@ -5,25 +5,43 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>Emilia</name>
-  <summary>Musik- und Hörspielplayer für Phosh</summary>
+  <summary>Music &amp; audio-drama player for Phosh</summary>
+  <summary xml:lang="de">Musik- und Hörspielplayer für Phosh</summary>
 
   <description>
     <p>
+      Emilia is an adaptive music and audio-drama player for Linux phones
+      running Phosh (Librem 5, PinePhone &amp; Co.) and works just as well on
+      the desktop. The interface adapts to narrow portrait mode and collapses
+      automatically on mobile.
+    </p>
+    <p xml:lang="de">
       Emilia ist ein adaptiver Musik- und Hörspielplayer für Linux-Phones mit
       Phosh (Librem 5, PinePhone &amp; Co.) und läuft genauso am Desktop. Die
       Oberfläche passt sich an das schmale Hochformat an und klappt mobil
       automatisch ein.
     </p>
-    <p>Funktionen:</p>
+    <p>Features:</p>
+    <p xml:lang="de">Funktionen:</p>
     <ul>
-      <li>Bibliothek nach Dateisystem, Interpret und Album durchstöbern</li>
-      <li>Wiedergabe mit Warteschlange, Zufall und Seekleiste</li>
-      <li>Resume-Position für lange Hörspiele und Hörbücher</li>
-      <li>10-Band-Equalizer mit Kaskade (Global → Interpret → Album → Titel)</li>
-      <li>Steuerung über Sperrbildschirm und Medientasten (MPRIS)</li>
-      <li>Optionaler Online-Abruf von Cover und Metadaten aus offenen Quellen</li>
+      <li>Browse the library by file system, artist and album</li>
+      <li xml:lang="de">Bibliothek nach Dateisystem, Interpret und Album durchstöbern</li>
+      <li>Playback with queue, shuffle and a seek bar</li>
+      <li xml:lang="de">Wiedergabe mit Warteschlange, Zufall und Seekleiste</li>
+      <li>Resume position for long audio dramas and audiobooks</li>
+      <li xml:lang="de">Resume-Position für lange Hörspiele und Hörbücher</li>
+      <li>10-band equalizer with cascade (global → artist → album → track)</li>
+      <li xml:lang="de">10-Band-Equalizer mit Kaskade (Global → Interpret → Album → Titel)</li>
+      <li>Control via lock screen and media keys (MPRIS)</li>
+      <li xml:lang="de">Steuerung über Sperrbildschirm und Medientasten (MPRIS)</li>
+      <li>Optional online fetch of cover art and metadata from open sources</li>
+      <li xml:lang="de">Optionaler Online-Abruf von Cover und Metadaten aus offenen Quellen</li>
     </ul>
     <p>
+      Audio files are only ever read, never modified; data fetched online lands
+      only in the local database or cache.
+    </p>
+    <p xml:lang="de">
       Audiodateien werden ausschließlich gelesen, niemals verändert; online
       abgerufene Daten landen nur in der lokalen Datenbank bzw. im Cache.
     </p>
@@ -38,10 +56,13 @@
   </categories>
 
   <keywords>
-    <keyword>Musik</keyword>
+    <keyword>Music</keyword>
+    <keyword xml:lang="de">Musik</keyword>
     <keyword>Player</keyword>
-    <keyword>Hörspiel</keyword>
-    <keyword>Hörbuch</keyword>
+    <keyword>Audio drama</keyword>
+    <keyword xml:lang="de">Hörspiel</keyword>
+    <keyword>Audiobook</keyword>
+    <keyword xml:lang="de">Hörbuch</keyword>
     <keyword>Podcast</keyword>
   </keywords>
 
@@ -65,7 +86,8 @@
   <releases>
     <release version="0.1.0" date="2026-05-30">
       <description>
-        <p>Erste Version: Bibliothek, Wiedergabe, Equalizer, Resume, MPRIS.</p>
+        <p>First release: library, playback, equalizer, resume, MPRIS.</p>
+        <p xml:lang="de">Erste Version: Bibliothek, Wiedergabe, Equalizer, Resume, MPRIS.</p>
       </description>
     </release>
   </releases>

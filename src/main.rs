@@ -1,4 +1,5 @@
 mod core;
+mod i18n;
 mod model;
 mod ui;
 
@@ -13,6 +14,14 @@ fn main() {
                 .unwrap_or_else(|_| "emilia=info".into()),
         )
         .init();
+
+    // i18n vor jedem UI-Aufbau initialisieren. Die gespeicherte Sprache hat
+    // Vorrang vor der System-Locale; "system"/kein Eintrag folgt der Locale.
+    let lang = core::db::Library::open()
+        .ok()
+        .and_then(|lib| lib.get_setting("ui_language").ok().flatten())
+        .filter(|code| code == "de" || code == "en");
+    i18n::init(lang.as_deref());
 
     // NON_UNIQUE: jede Ausführung öffnet ein eigenes Fenster (kein „Reuse" einer
     // bereits laufenden Instanz). Während der Entwicklung verlässlich; für ein

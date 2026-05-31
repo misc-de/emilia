@@ -13,6 +13,7 @@ use relm4::{adw, gtk};
 use crate::core::category;
 use crate::core::db::Library;
 use crate::core::{cover, scanner};
+use crate::i18n::{gettext, ngettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
     album_subtitle, cover_widget, duration_label, find_scroller, fmt_duration, most_common_artist,
@@ -28,6 +29,58 @@ enum AlbumPlay {
     Artist(String),
     /// Alben-Übersicht: alle Titel des Albumnamens (Interpret egal).
     Name(String),
+}
+
+/// Album-Name ohne CD-/Disc-Suffix, damit Mehr-CD-Alben zusammenfallen:
+/// „… Disc 2", „… CD 1", „… Cd 2 v 7", „… CD3" → der gemeinsame Basistitel.
+fn album_base(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let clean = |w: &str| {
+        w.to_lowercase()
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_string()
+    };
+    const MARKERS: [&str; 8] = ["disc", "disk", "cd", "teil", "part", "folge", "vol", "volume"];
+    let is_marker = |w: &str| {
+        let c = clean(w);
+        MARKERS.iter().any(|m| {
+            c == *m
+                || (c.starts_with(m) && c.len() > m.len() && c[m.len()..].chars().all(|d| d.is_ascii_digit()))
+        })
+    };
+    const CONNECTORS: [&str; 6] = ["v", "von", "of", "x", "u", "und"];
+    let is_suffix_tok = |w: &str| {
+        let c = clean(w);
+        c.is_empty()
+            || c.chars().all(|d| d.is_ascii_digit())
+            || CONNECTORS.contains(&c.as_str())
+            || is_marker(w)
+    };
+    // Erste Marker-Position, ab der bis zum Ende nur noch Suffix-Tokens stehen.
+    let cut = (0..words.len()).find(|&i| is_marker(words[i]) && words[i..].iter().all(|w| is_suffix_tok(w)));
+    let base = match cut {
+        Some(i) => words[..i].join(" "),
+        None => name.trim().to_string(),
+    };
+    let base = base.trim_matches(|c: char| c == '-' || c == ':' || c.is_whitespace());
+    if base.is_empty() {
+        name.trim().to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// Häufigster Album-Basistitel einer Titelmenge (für den Anzeigetitel eines
+/// als Album zusammengefassten Unterordners).
+fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for t in tracks {
+        if let Some(al) = t.album.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+            *counts.entry(album_base(al)).or_default() += 1;
+        }
+    }
+    counts.into_iter().max_by_key(|(_, c)| *c).map(|(b, _)| b)
 }
 
 impl App {
@@ -83,10 +136,10 @@ impl App {
             match Library::open() {
                 Ok(lib) => {
                     if let Err(e) = scanner::scan_into(&lib, &root) {
-                        tracing::warn!("Bibliotheks-Scan fehlgeschlagen: {e}");
+                        tracing::warn!("Library scan failed: {e}");
                     }
                 }
-                Err(e) => tracing::error!("DB für Scan nicht erreichbar: {e}"),
+                Err(e) => tracing::error!("Database unavailable for scan: {e}"),
             }
             Cmd::ScanDone { then_enrich }
         });
@@ -99,7 +152,7 @@ impl App {
     /// werden in beiden Fällen übersprungen.
     pub(crate) fn run_enrich(&mut self, sender: &ComponentSender<Self>, scan_first: bool) {
         let Some(root) = self.root_dir.clone() else {
-            self.toast("Kein Musikordner festgelegt – bitte in den Einstellungen wählen");
+            self.toast(&gettext("No music folder set – please choose one in the settings"));
             return;
         };
         if self.enriching {
@@ -114,18 +167,24 @@ impl App {
         // Neuer Lauf → Fortschritts-Leiste wieder einblenden.
         self.enrich_banner_hidden = false;
         self.enrich_status = if scan_first {
-            "Bibliothek wird eingelesen …".to_string()
+            gettext("Reading library …")
         } else {
-            "Cover & Metadaten werden gesucht …".to_string()
+            gettext("Searching for cover & metadata …")
         };
         sender
             .spawn_command(move |out| enrich_worker(root, key, fkey, cancel, scan_first, &out));
     }
 
     /// Lädt die Interpreten-Übersicht aus der DB in die Factory (inkl. Foto).
+    /// Fehlt das Interpretenfoto, wird ersatzweise ein Album-Cover eingebunden.
     pub(crate) fn reload_artists(&mut self) {
-        let artists = self.library.artists_overview().unwrap_or_default();
+        let mut artists = self.library.artists_overview().unwrap_or_default();
         self.artist_count = artists.len();
+        for a in &mut artists {
+            if a.image_path.as_deref().map_or(true, |p| p.trim().is_empty()) {
+                a.image_path = self.artist_album_cover(&a.name);
+            }
+        }
         let mut guard = self.artists.guard();
         guard.clear();
         for a in artists {
@@ -392,8 +451,8 @@ impl App {
             content.append(
                 &adw::StatusPage::builder()
                     .icon_name("avatar-default-symbolic")
-                    .title("Keine Titel")
-                    .description("Für diesen Interpreten sind keine Lieder in der Bibliothek.")
+                    .title(&gettext("No tracks"))
+                    .description(&gettext("There are no songs for this artist in the library."))
                     .build(),
             );
         }
@@ -402,8 +461,8 @@ impl App {
         if !album_groups.is_empty() {
             let n = album_groups.len();
             let group = adw::PreferencesGroup::builder()
-                .title("Alben")
-                .description(format!("{n} {}", if n == 1 { "Album" } else { "Alben" }))
+                .title(&gettext("Albums"))
+                .description(ngettext_n("{n} album", "{n} albums", n as u32))
                 .build();
             for (album, display_artist, tracks) in &album_groups {
                 let album_meta = self
@@ -432,7 +491,7 @@ impl App {
                 let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
                 play.add_css_class("flat");
                 play.set_valign(gtk::Align::Center);
-                play.set_tooltip_text(Some("Album abspielen"));
+                play.set_tooltip_text(Some(&gettext("Play album")));
                 {
                     let sender = sender.clone();
                     let name = meta.name.clone();
@@ -482,8 +541,8 @@ impl App {
         if !singles.is_empty() {
             let n = singles.len();
             let group = adw::PreferencesGroup::builder()
-                .title("Einzellieder")
-                .description(format!("{n} {}", if n == 1 { "Lied" } else { "Lieder" }))
+                .title(&gettext("Singles"))
+                .description(ngettext_n("{n} song", "{n} songs", n as u32))
                 .build();
             for t in &singles {
                 // Cover-Reihenfolge (nie ein fremdes Ordnerbild):
@@ -731,6 +790,112 @@ impl App {
         }
     }
 
+    /// Wandelt rohe Bereichs-Einträge (Konzerte/Hörbücher) in eine Liste aus
+    /// **Alben und Einzelstücken** um: „album"/„track" bleiben; ein markierter
+    /// „folder" wird in seine Alben und losen Titel aufgelöst; „artist" entfällt.
+    /// Dedupliziert nach (scope, key), alphabetisch nach Titel.
+    pub(crate) fn expand_area_items(
+        &self,
+        raw: Vec<(String, String, String, bool)>,
+    ) -> Vec<(String, String, String, bool)> {
+        use std::collections::HashSet;
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        let mut out: Vec<(String, String, String, bool)> = Vec::new();
+        for (scope, key, title, is_dir) in raw {
+            let expanded = match scope.as_str() {
+                "album" | "track" => vec![(scope, key, title, is_dir)],
+                "folder" => self.folder_albums_and_tracks(&key),
+                _ => vec![], // „artist" o. Ä. nicht als solchen listen
+            };
+            for e in expanded {
+                if seen.insert((e.0.clone(), e.1.clone())) {
+                    out.push(e);
+                }
+            }
+        }
+        out.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        out
+    }
+
+    /// Löst einen Ordner in **Alben** und **Einzelstücke** auf:
+    /// * Jeder unmittelbare **Unterordner** ist ein Album (Mehr-CD-Inhalte darin
+    ///   fallen zu einem Eintrag zusammen; Titel = häufigster Album-Tag ohne
+    ///   CD/Disc-Suffix, sonst Ordnername).
+    /// * Dateien **direkt** im Ordner werden nach **Album-Tag** zu Album-Einträgen
+    ///   gruppiert (dedupliziert mit bereits als Album markierten Konzerten);
+    ///   **keine** Einzeldateien aus einem Album.
+    /// * Nur Dateien **ohne** Album-Tag sind lose **Einzelstücke**.
+    pub(crate) fn folder_albums_and_tracks(&self, dir: &str) -> Vec<(String, String, String, bool)> {
+        use crate::core::category::album_key;
+        use std::collections::BTreeMap;
+
+        let base = dir.trim_end_matches('/');
+        let prefix = format!("{base}/");
+        let tracks: Vec<Track> = self
+            .library
+            .all_tracks()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.path.starts_with(&prefix))
+            .collect();
+
+        // Nach unmittelbarem Unterordner gruppieren; ohne Unterordner = lose Datei.
+        let mut subfolders: BTreeMap<String, Vec<&Track>> = BTreeMap::new();
+        let mut loose: Vec<&Track> = Vec::new();
+        for t in &tracks {
+            let rel = &t.path[prefix.len()..];
+            match rel.find('/') {
+                Some(i) => subfolders.entry(rel[..i].to_string()).or_default().push(t),
+                None => loose.push(t),
+            }
+        }
+
+        let mut out = Vec::new();
+        // Jeder Unterordner = ein Album (alle CDs/Teile zusammen).
+        for (sub, grp) in &subfolders {
+            let key = format!("{base}/{sub}");
+            let title = most_common_album_base(grp).unwrap_or_else(|| sub.clone());
+            out.push(("folder".to_string(), key, title, true));
+        }
+        // Lose Dateien: nach **Album-Tag** zu einem Album-Eintrag gruppieren – kein
+        // Einzeltitel aus einem Album. Der Schlüssel nutzt den häufigsten
+        // Haupt-Interpreten (feat. abgetrennt) wie `albums_overview`, damit ein
+        // bereits als Album markiertes Konzert dedupliziert wird.
+        use crate::core::artist::primary_artist;
+        let mut by_album: BTreeMap<String, Vec<&Track>> = BTreeMap::new();
+        for t in &loose {
+            match t.album.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+                Some(al) => by_album.entry(al.to_string()).or_default().push(t),
+                None => {
+                    let title = if t.title.trim().is_empty() {
+                        std::path::Path::new(&t.path)
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    } else {
+                        t.title.clone()
+                    };
+                    out.push(("track".to_string(), t.path.clone(), title, false));
+                }
+            }
+        }
+        for (al, grp) in &by_album {
+            let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for t in grp {
+                *counts
+                    .entry(primary_artist(t.artist.as_deref().unwrap_or("")))
+                    .or_default() += 1;
+            }
+            let artist = counts
+                .into_iter()
+                .max_by_key(|(_, n)| *n)
+                .map(|(a, _)| a)
+                .unwrap_or_default();
+            out.push(("album".to_string(), album_key(&artist, al), al.clone(), false));
+        }
+        out
+    }
+
     /// Cover-/Foto-Textur plus passendes Platzhalter-Icon.
     /// Erkennt, ob ein Dateisystem-Ordner einem Interpreten oder einem Album
     /// entspricht, und liefert die passende EQ-Ebene als
@@ -783,18 +948,18 @@ impl App {
     ) -> Option<(&'static str, String, Option<&'static str>, &'static str, String)> {
         match self.fs_music_kind(entry)? {
             FsKind::Artist(name) => Some((
-                "den Interpreten",
+                "the artist",
                 name.clone(),
-                Some("Gilt auch für die Alben und Lieder dieses Interpreten."),
+                Some("Also applies to this artist's albums and tracks."),
                 "artist",
                 name,
             )),
             FsKind::Album { artist, album } => {
                 let key = category::album_key(&artist, &album);
                 Some((
-                    "das Album",
+                    "the album",
                     album,
-                    Some("Gilt auch für die Lieder dieses Albums."),
+                    Some("Also applies to this album's tracks."),
                     "album",
                     key,
                 ))
@@ -891,8 +1056,8 @@ impl App {
         years.dedup();
         match years.as_slice() {
             [] => None,
-            [y] => Some(("Jahr", y.to_string())),
-            _ => Some(("Jahre", format!("{} – {}", years[0], years[years.len() - 1]))),
+            [y] => Some(("Year", y.to_string())),
+            _ => Some(("Years", format!("{} – {}", years[0], years[years.len() - 1]))),
         }
     }
 
@@ -923,10 +1088,9 @@ impl App {
                 }
             }
             CtxTarget::Artist(m) => {
-                let tex = m
-                    .image_path
-                    .as_deref()
-                    .and_then(|p| gtk::gdk::Texture::from_filename(p).ok());
+                // Foto, sonst ersatzweise ein Album-Cover des Interpreten.
+                let img = m.image_path.clone().or_else(|| self.artist_album_cover(&m.name));
+                let tex = img.and_then(|p| gtk::gdk::Texture::from_filename(&p).ok());
                 (tex, "avatar-default-symbolic")
             }
             CtxTarget::Album(m) => {
@@ -1061,35 +1225,35 @@ impl App {
     }
 
     /// Detailzeilen für die "Mehr Infos"-Aufklappung.
-    pub(crate) fn ctx_info_lines(&self, target: &CtxTarget) -> Vec<(&'static str, String)> {
+    pub(crate) fn ctx_info_lines(&self, target: &CtxTarget) -> Vec<(String, String)> {
         match target {
             CtxTarget::Fs(e) => self.info_lines(e),
             CtxTarget::Artist(m) => {
                 let files = self.artist_files(&m.name);
-                let mut lines = vec![("Interpret", m.name.clone())];
+                let mut lines = vec![(gettext("Artist"), m.name.clone())];
                 // Jahr/Jahre der Alben, je nach Album-Metadaten.
                 let year = self.artist_year_range(&m.name);
                 let year_shown = year.is_some();
                 if let Some((label, value)) = year {
-                    lines.push((label, value));
+                    lines.push((gettext(label), value));
                 }
-                lines.push(("Sammlung", Self::files_summary(&files, !year_shown)));
+                lines.push((gettext("Collection"), Self::files_summary(&files, !year_shown)));
                 lines
             }
             CtxTarget::Album(m) => {
                 let mut lines = Vec::new();
                 if !m.artist.is_empty() {
-                    lines.push(("Interpret", m.artist.clone()));
+                    lines.push((gettext("Artist"), m.artist.clone()));
                 }
-                lines.push(("Album", m.album.clone()));
+                lines.push((gettext("Album"), m.album.clone()));
                 let files = self.album_files(&m.artist, &m.album);
                 if let Some(g) = Self::first_genre(&files) {
-                    lines.push(("Genre", g));
+                    lines.push((gettext("Genre"), g));
                 }
                 if let Some(y) = m.year {
-                    lines.push(("Jahr", y.to_string()));
+                    lines.push((gettext("Year"), y.to_string()));
                 }
-                lines.push(("Sammlung", Self::files_summary(&files, m.year.is_none())));
+                lines.push((gettext("Collection"), Self::files_summary(&files, m.year.is_none())));
                 lines
             }
         }
@@ -1165,14 +1329,14 @@ impl App {
                 .collect(),
         );
         let group = adw::PreferencesGroup::builder().build();
-        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
-        let active: Vec<&str> = visible_areas
+        let expander = adw::ExpanderRow::builder().title(&gettext("Properties")).build();
+        let active: Vec<String> = visible_areas
             .iter()
             .filter(|a| effective.contains(a))
-            .map(|a| a.label())
+            .map(|a| gettext(a.label()))
             .collect();
         let subtitle = if active.is_empty() {
-            "Ausgeblendet".to_string()
+            gettext("Hidden")
         } else {
             active.join(", ")
         };
@@ -1183,7 +1347,7 @@ impl App {
 
         // „Ausblenden": alle sichtbaren Bereiche aus → überall unsichtbar.
         let hide_row = adw::SwitchRow::builder()
-            .title("Ausblenden")
+            .title(&gettext("Hide"))
             .active(!visible_areas.iter().any(|a| effective.contains(a)))
             .build();
         expander.add_row(&hide_row);
@@ -1194,7 +1358,7 @@ impl App {
                 .iter()
                 .map(|&area| {
                     let row = adw::SwitchRow::builder()
-                        .title(area.label())
+                        .title(&gettext(area.label()))
                         .active(effective.contains(&area))
                         .build();
                     expander.add_row(&row);
@@ -1307,9 +1471,9 @@ impl App {
         let mut value = String::new();
         let n = albums.len();
         if n > 0 {
-            value.push_str(&format!("{n} {} - ", if n == 1 { "Album" } else { "Alben" }));
+            value.push_str(&format!("{} - ", ngettext_n("{n} album", "{n} albums", n as u32)));
         }
-        value.push_str(&format!("{songs} {}", if songs == 1 { "Lied" } else { "Lieder" }));
+        value.push_str(&ngettext_n("{n} song", "{n} songs", songs as u32));
         if with_year {
             if let (Some(a), Some(b)) = (min_year, max_year) {
                 let span = if a == b {
@@ -1381,7 +1545,7 @@ impl App {
     }
 
     /// Detailzeilen für die "Mehr Infos"-Aufklappung.
-    pub(crate) fn info_lines(&self, entry: &FsEntry) -> Vec<(&'static str, String)> {
+    pub(crate) fn info_lines(&self, entry: &FsEntry) -> Vec<(String, String)> {
         let mut lines = Vec::new();
         if entry.is_dir() {
             // Als Album/Interpret erkannte Ordner zeigen passende Infos inkl. Jahr.
@@ -1390,11 +1554,11 @@ impl App {
             match self.fs_music_kind(entry) {
                 Some(FsKind::Album { artist, album }) => {
                     if !artist.is_empty() {
-                        lines.push(("Interpret", artist.clone()));
+                        lines.push((gettext("Artist"), artist.clone()));
                     }
-                    lines.push(("Album", album.clone()));
+                    lines.push((gettext("Album"), album.clone()));
                     if let Some(g) = Self::first_genre(&files) {
-                        lines.push(("Genre", g));
+                        lines.push((gettext("Genre"), g));
                     }
                     if let Some(y) = self
                         .library
@@ -1403,24 +1567,24 @@ impl App {
                         .flatten()
                         .and_then(|m| m.year)
                     {
-                        lines.push(("Jahr", y.to_string()));
+                        lines.push((gettext("Year"), y.to_string()));
                         year_shown = true;
                     }
                 }
                 Some(FsKind::Artist(name)) => {
-                    lines.push(("Interpret", name.clone()));
+                    lines.push((gettext("Artist"), name.clone()));
                     if let Some((label, value)) = self.artist_year_range(&name) {
-                        lines.push((label, value));
+                        lines.push((gettext(label), value));
                         year_shown = true;
                     }
                 }
                 None => {}
             }
-            lines.push(("Sammlung", Self::files_summary(&files, !year_shown)));
+            lines.push((gettext("Collection"), Self::files_summary(&files, !year_shown)));
         } else {
             match scanner::read_track(entry.path()) {
                 Ok(t) => {
-                    lines.push(("Titel", t.title));
+                    lines.push((gettext("Title"), t.title));
                     // Interpret/Album für die Jahres-Auflösung merken (werden
                     // beim Anzeigen verbraucht).
                     let (artist, album) = (t.artist.clone(), t.album.clone());
@@ -1429,19 +1593,19 @@ impl App {
                     // für Klassik/Hörspiele); das Genre, wann immer vorhanden.
                     let (genre, composer) = scanner::read_genre_composer(entry.path());
                     if let Some(a) = t.artist {
-                        lines.push(("Interpret", a));
+                        lines.push((gettext("Artist"), a));
                     }
                     if let Some(c) = composer {
-                        lines.push(("Komponist", c));
+                        lines.push((gettext("Composer"), c));
                     }
                     if let Some(al) = t.album {
-                        lines.push(("Album", al));
+                        lines.push((gettext("Album"), al));
                     }
                     if let Some(g) = genre {
-                        lines.push(("Genre", g));
+                        lines.push((gettext("Genre"), g));
                     }
                     if let Some(d) = t.duration_ms {
-                        lines.push(("Dauer", fmt_duration(d)));
+                        lines.push((gettext("Duration"), fmt_duration(d)));
                     }
                     // Jahr (aus den Album-Metadaten) direkt unter der Dauer.
                     if let (Some(artist), Some(album)) = (artist, album) {
@@ -1452,7 +1616,7 @@ impl App {
                             .flatten()
                             .and_then(|m| m.year)
                         {
-                            lines.push(("Jahr", y.to_string()));
+                            lines.push((gettext("Year"), y.to_string()));
                         }
                     }
                 }
@@ -1467,13 +1631,13 @@ impl App {
             {
                 if m.status == "matched" {
                     if let Some(t) = m.title {
-                        lines.push(("Erkannt (Titel)", t));
+                        lines.push((gettext("Detected (title)"), t));
                     }
                     if let Some(a) = m.artist {
-                        lines.push(("Erkannt (Interpret)", a));
+                        lines.push((gettext("Detected (artist)"), a));
                     }
                     if let Some(al) = m.album {
-                        lines.push(("Erkannt (Album)", al));
+                        lines.push((gettext("Detected (album)"), al));
                     }
                 }
             }

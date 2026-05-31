@@ -7,6 +7,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::category;
+use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, CtxTarget, Msg};
 
 impl App {
@@ -30,21 +31,21 @@ impl App {
             String,
         ) = match entry {
             CtxTarget::Artist(m) => (
-                "den Interpreten",
+                "the artist",
                 m.name.clone(),
-                Some("Gilt auch für die Alben und Lieder dieses Interpreten."),
+                Some("Also applies to this artist's albums and tracks."),
                 "artist",
                 m.name.clone(),
             ),
             CtxTarget::Album(m) => (
-                "das Album",
+                "the album",
                 m.album.clone(),
-                Some("Gilt auch für die Lieder dieses Albums."),
+                Some("Also applies to this album's tracks."),
                 "album",
                 category::album_key(&m.artist, &m.album),
             ),
             CtxTarget::Fs(e) if !e.is_dir() => (
-                "den Titel",
+                "the track",
                 e.display_title(),
                 None,
                 "track",
@@ -54,7 +55,7 @@ impl App {
             CtxTarget::Fs(e) => match self.fs_eq_level(e) {
                 Some(level) => level,
                 None => {
-                    self.toast("Equalizer ist hier nicht verfügbar");
+                    self.toast(&gettext("Equalizer is not available here"));
                     return;
                 }
             },
@@ -69,9 +70,9 @@ impl App {
         self.open_eq_editor(
             root,
             sender,
-            "den globalen Equalizer",
+            "the global equalizer",
             "",
-            Some("Gilt für alles ohne eigene Einstellung für Interpret, Album oder Titel."),
+            Some("Applies to everything without its own artist, album or track setting."),
             "global",
             String::new(),
         );
@@ -94,7 +95,7 @@ impl App {
 
         // Ausgänge: „Standard (alle)" als Basis + automatisch erkannte Geräte.
         let mut outputs: Vec<(String, String)> =
-            vec![("Standard (alle Ausgänge)".to_string(), String::new())];
+            vec![(gettext("Default (all outputs)"), String::new())];
         for o in crate::core::output::list_outputs() {
             outputs.push((o.name, o.id));
         }
@@ -116,7 +117,7 @@ impl App {
         let loading = Rc::new(Cell::new(false));
 
         let dialog = adw::Dialog::builder()
-            .title("Equalizer")
+            .title(&gettext("Equalizer"))
             .content_width(440)
             .content_height(620)
             .build();
@@ -143,7 +144,10 @@ impl App {
             vec!["title-2"]
         };
         let prefix = gtk::Label::builder()
-            .label(format!("Einstellungen für {subject}"))
+            .label(gettext_f(
+                "Settings for {subject}",
+                &[("subject", &gettext(subject))],
+            ))
             .halign(gtk::Align::Center)
             .justify(gtk::Justification::Center)
             .wrap(true)
@@ -162,7 +166,7 @@ impl App {
         }
         if let Some(n) = note {
             let note_label = gtk::Label::builder()
-                .label(n)
+                .label(gettext(n))
                 .halign(gtk::Align::Center)
                 .justify(gtk::Justification::Center)
                 .wrap(true)
@@ -177,8 +181,8 @@ impl App {
 
         let out_labels: Vec<&str> = outputs.iter().map(|(l, _)| l.as_str()).collect();
         let out_combo = adw::ComboRow::builder()
-            .title("Ausgang")
-            .subtitle("Gerät / Bluetooth")
+            .title(&gettext("Output"))
+            .subtitle(&gettext("Device / Bluetooth"))
             .model(&gtk::StringList::new(&out_labels))
             .build();
         out_combo.set_selected(out_default as u32);
@@ -265,7 +269,7 @@ impl App {
 
         // Aktuelle Auswahl neutralstellen und auf „erben" zurücksetzen.
         let reset = gtk::Button::builder()
-            .label("Zurücksetzen")
+            .label(gettext("Reset"))
             .css_classes(["pill"])
             .halign(gtk::Align::Center)
             .build();

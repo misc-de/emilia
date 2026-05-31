@@ -43,14 +43,15 @@ impl Area {
         }
     }
 
-    /// Anzeigename (Deutsch) – passend zu den Navigations-Menüpunkten.
+    /// Anzeigename als englische gettext-`msgid` – passend zu den
+    /// Navigations-Menüpunkten. Am Anzeigeort mit `i18n::gettext()` übersetzen.
     pub fn label(self) -> &'static str {
         match self {
-            Area::Filesystem => "Dateisystem",
-            Area::Artists => "Interpreten",
-            Area::Albums => "Alben",
-            Area::Concerts => "Konzerte",
-            Area::Audiobooks => "Hörbücher",
+            Area::Filesystem => "Files",
+            Area::Artists => "Artists",
+            Area::Albums => "Albums",
+            Area::Concerts => "Concerts",
+            Area::Audiobooks => "Audiobooks",
         }
     }
 

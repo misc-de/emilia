@@ -357,7 +357,30 @@ impl Library {
         Ok(())
     }
 
-    /// Markiert einen Ordner/eine Datei als Konzert.
+    /// Ergänzt einen Bereich in den Eigenschaften einer Ebene, ohne vorhandene
+    /// Bereiche zu verlieren. Fehlt eine Festlegung, wird vom Standard
+    /// ausgegangen. Genutzt vom Konzert-Import (markiert die Kategorie
+    /// „Konzerte"), damit Konzerte allein über die Eigenschaften verwaltet werden.
+    pub fn add_category_area(
+        &self,
+        scope: &str,
+        key: &str,
+        area: crate::core::category::Area,
+    ) -> Result<()> {
+        use crate::core::category::{areas_value, parse_areas, Area};
+        let mut areas = match self.get_category(scope, key)? {
+            Some(v) => parse_areas(&v),
+            None => Area::DEFAULT.to_vec(),
+        };
+        if !areas.contains(&area) {
+            areas.push(area);
+        }
+        self.set_category(scope, key, Some(&areas_value(&areas)))
+    }
+
+    /// Trägt einen Ordner/eine Datei in die Konzert-Tabelle ein – nur noch für
+    /// die Kandidaten-Filterung beim Import (damit bereits hinzugefügte nicht
+    /// erneut vorgeschlagen werden). Die Anzeige läuft über die Eigenschaften.
     pub fn add_concert(&self, path: &str, title: &str, is_dir: bool) -> Result<()> {
         self.conn.execute(
             "INSERT INTO concert (path, title, is_dir, added_at)
@@ -366,28 +389,6 @@ impl Library {
             rusqlite::params![path, title, is_dir as i64],
         )?;
         Ok(())
-    }
-
-    /// Entfernt eine Konzert-Markierung.
-    pub fn remove_concert(&self, path: &str) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM concert WHERE path = ?1", [path])?;
-        Ok(())
-    }
-
-    /// Alle Konzerte (Pfad, Titel, is_dir), neueste zuerst.
-    pub fn concerts(&self) -> Result<Vec<(String, String, bool)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT path, title, is_dir FROM concert ORDER BY added_at DESC, title",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)? != 0,
-            ))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Pfade aller markierten Konzerte (für die Kandidaten-Filterung).
@@ -562,23 +563,6 @@ impl Library {
         out
     }
 
-    /// Entfernt einen einzelnen Bereich aus den Eigenschaften einer Ebene. Wird
-    /// die Liste dadurch leer (was „ausgeblendet" hieße), wird stattdessen die
-    /// Festlegung gelöscht (zurück auf Standard/Vererbung).
-    pub fn clear_area(&self, scope: &str, key: &str, area: crate::core::category::Area) -> Result<()> {
-        use crate::core::category::{areas_value, parse_areas};
-        if let Some(v) = self.get_category(scope, key)? {
-            let mut areas = parse_areas(&v);
-            areas.retain(|a| *a != area);
-            if areas.is_empty() {
-                self.set_category(scope, key, None)?;
-            } else {
-                self.set_category(scope, key, Some(&areas_value(&areas)))?;
-            }
-        }
-        Ok(())
-    }
-
     // ---- Merkmale (Kategorie mit Vererbung) ----
 
     /// Setzt (oder löscht bei `None`) die Festlegung einer Ebene.
@@ -609,6 +593,17 @@ impl Library {
             )
             .optional()?;
         Ok(v)
+    }
+
+    /// Alle gespeicherten Kategorie-Festlegungen (für die Geräte-Synchronisierung).
+    pub fn all_categories(&self) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT scope, key, value FROM category")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     /// Effektive **Bereiche** eines Titels (spezifischste Ebene gewinnt:
@@ -725,6 +720,29 @@ impl Library {
             )
             .optional()?;
         Ok(json.and_then(|j| serde_json::from_str::<[f64; 10]>(&j).ok()))
+    }
+
+    /// Alle gespeicherten Equalizer-Einstellungen (für die Geräte-Synchronisierung).
+    pub fn all_eq_settings(&self) -> Result<Vec<(String, String, String, [f64; 10])>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT output, scope, key, bands FROM eq_setting")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows.filter_map(|r| r.ok()) {
+            let (output, scope, key, json) = row;
+            if let Ok(bands) = serde_json::from_str::<[f64; 10]>(&json) {
+                out.push((output, scope, key, bands));
+            }
+        }
+        Ok(out)
     }
 
     /// Entfernt die Festlegung (fällt auf die geerbte/den Standard-Ausgang zurück).
@@ -1542,6 +1560,28 @@ impl Library {
                 audio_url: r.get(2)?,
                 published: r.get(3)?,
                 duration: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Alle Episoden samt Podcast-Infos (für die „Neuste"-Ansicht). Die
+    /// chronologische Sortierung nach Veröffentlichungsdatum übernimmt die UI
+    /// (das gespeicherte Datum ist nur Text).
+    pub fn all_episodes(&self) -> Result<Vec<crate::model::EpisodeRef>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.title, p.image_url, e.title, e.audio_url, e.published, e.duration
+             FROM episode e JOIN podcast p ON p.id = e.podcast_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(crate::model::EpisodeRef {
+                podcast_id: r.get(0)?,
+                podcast_title: r.get(1)?,
+                podcast_image: r.get(2)?,
+                title: r.get(3)?,
+                audio_url: r.get(4)?,
+                published: r.get(5)?,
+                duration: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

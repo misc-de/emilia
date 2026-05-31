@@ -8,6 +8,7 @@ pub mod app_concert;
 pub mod app_favorites;
 pub mod app_eq;
 pub mod app_dialogs;
+pub mod app_sync;
 pub mod app_views;
 pub mod artist_row;
 pub mod enrich;

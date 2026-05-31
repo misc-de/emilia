@@ -101,6 +101,19 @@ pub struct Episode {
     pub duration: Option<String>,
 }
 
+/// Eine Episode samt zugehörigem Podcast – für die podcastübergreifende
+/// „Neuste"-Ansicht (neueste Beiträge aller Abos).
+#[derive(Debug, Clone)]
+pub struct EpisodeRef {
+    pub podcast_id: i64,
+    pub podcast_title: String,
+    pub podcast_image: Option<String>,
+    pub title: String,
+    pub audio_url: String,
+    pub published: Option<String>,
+    pub duration: Option<String>,
+}
+
 impl TrackMeta {
     pub fn pending(path: impl Into<String>) -> Self {
         Self {

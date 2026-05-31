@@ -5,6 +5,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use crate::i18n::gettext;
 use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
 impl App {
@@ -30,10 +31,10 @@ impl App {
 
         // "Mehr Infos" – aufklappbar mit Detailzeilen
         let info_group = adw::PreferencesGroup::new();
-        let expander = adw::ExpanderRow::builder().title("Mehr Infos").build();
+        let expander = adw::ExpanderRow::builder().title(&gettext("More info")).build();
         for (label, value) in self.ctx_info_lines(entry) {
             let row = adw::ActionRow::builder()
-                .title(label)
+                .title(&label)
                 .subtitle(gtk::glib::markup_escape_text(&value))
                 .build();
             row.set_subtitle_lines(2);
@@ -83,11 +84,23 @@ impl App {
             false
         };
 
+        // Interpret mit nur **einem** Lied: „Interpret abspielen" + Reihenfolge
+        // ist unsinnig (und die Reihenfolge erfasst Einzellieder ohne Album gar
+        // nicht). Daher wie ein einzelnes Stück behandeln – schlichtes
+        // „Abspielen", Klick startet genau dieses Lied (`CtxPlay`).
+        let play_kind = if matches!(play_kind, PlayKind::Artist)
+            && self.ctx_artist().is_some_and(|n| self.artist_files(&n).len() == 1)
+        {
+            PlayKind::Other
+        } else {
+            play_kind
+        };
+
         let play_row = adw::ActionRow::builder()
-            .title(match play_kind {
-                PlayKind::Album => "Album abspielen",
-                PlayKind::Artist => "Interpreten abspielen",
-                PlayKind::Other => "Abspielen",
+            .title(&match play_kind {
+                PlayKind::Album => gettext("Play album"),
+                PlayKind::Artist => gettext("Play artist"),
+                PlayKind::Other => gettext("Play"),
             })
             .activatable(true)
             .build();
@@ -95,9 +108,9 @@ impl App {
         match play_kind {
             PlayKind::Artist => {
                 // Album-Reihenfolge wählbar, auf gleicher Höhe wie die Aktion.
-                let order = gtk::DropDown::from_strings(&["Älteste zuerst", "Neueste zuerst"]);
+                let order = gtk::DropDown::from_strings(&[&gettext("Oldest first"), &gettext("Newest first")]);
                 order.set_valign(gtk::Align::Center);
-                order.set_tooltip_text(Some("Reihenfolge der Alben"));
+                order.set_tooltip_text(Some(&gettext("Album order")));
                 play_row.add_suffix(&order);
                 let sender = sender.clone();
                 let dialog = dialog.clone();
@@ -132,10 +145,10 @@ impl App {
         // Favorit-Stern (Markieren/Entfernen).
         let is_fav = self.target_is_favorite(entry);
         let fav_row = adw::ActionRow::builder()
-            .title(if is_fav {
-                "Aus Favoriten entfernen"
+            .title(&if is_fav {
+                gettext("Remove from favorites")
             } else {
-                "Zu Favoriten"
+                gettext("Add to favorites")
             })
             .activatable(true)
             .build();
@@ -151,21 +164,21 @@ impl App {
         action_group.add(&fav_row);
 
         // Übrige Aktionen.
-        let mut actions: Vec<(&str, &str, fn() -> Msg)> = vec![
-            ("Zur Queue hinzufügen", "list-add-symbolic", || Msg::CtxAddQueue),
-            ("Zur Playlist hinzufügen", "view-list-symbolic", || {
+        let mut actions: Vec<(String, &str, fn() -> Msg)> = vec![
+            (gettext("Add to queue"), "list-add-symbolic", || Msg::CtxAddQueue),
+            (gettext("Add to playlist"), "view-list-symbolic", || {
                 Msg::CtxAddPlaylist
             }),
         ];
         if show_eq {
-            actions.push(("Equalizer-Einstellungen", "preferences-other-symbolic", || {
+            actions.push((gettext("Equalizer settings"), "preferences-other-symbolic", || {
                 Msg::CtxEqualizer
             }));
         }
-        actions.push(("Teilen", "emblem-shared-symbolic", || Msg::CtxShare));
+        actions.push((gettext("Share"), "emblem-shared-symbolic", || Msg::CtxShare));
         for (label, icon, make_msg) in actions {
             let row = adw::ActionRow::builder()
-                .title(label)
+                .title(&label)
                 .activatable(true)
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name(icon));
@@ -201,7 +214,7 @@ impl App {
     /// „Teilen"-Dialog: Verbindung anbieten (Dienst starten) oder QR-Code einlesen.
     /// Die eigentliche Geräte-Sync-Logik folgt später.
     pub(crate) fn open_share_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
-        let dialog = adw::Dialog::builder().title("Teilen").build();
+        let dialog = adw::Dialog::builder().title(&gettext("Share")).build();
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -213,19 +226,19 @@ impl App {
             .build();
 
         let group = adw::PreferencesGroup::builder()
-            .description("Mit einem anderen Gerät verbinden, um Inhalte zu synchronisieren.")
+            .description(&gettext("Connect to another device to sync content."))
             .build();
 
-        let actions: [(&str, &str, &str, fn() -> Msg); 2] = [
+        let actions: [(String, String, &str, fn() -> Msg); 2] = [
             (
-                "Verbindung anbieten",
-                "Dienst starten und auf ein anderes Gerät warten",
+                gettext("Offer connection"),
+                gettext("Start the service and wait for another device"),
                 "network-wireless-symbolic",
                 || Msg::ShareHost,
             ),
             (
-                "QR-Code einlesen",
-                "Den Code eines anderen Geräts scannen",
+                gettext("Scan QR code"),
+                gettext("Scan another device's code"),
                 "camera-photo-symbolic",
                 || Msg::ShareScan,
             ),
@@ -233,8 +246,8 @@ impl App {
 
         for (title, subtitle, icon, make_msg) in actions {
             let row = adw::ActionRow::builder()
-                .title(title)
-                .subtitle(subtitle)
+                .title(&title)
+                .subtitle(&subtitle)
                 .activatable(true)
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name(icon));
@@ -270,24 +283,25 @@ impl App {
     pub(crate) fn open_settings(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let dialog = adw::PreferencesDialog::new();
         let page = adw::PreferencesPage::builder()
-            .title("Bibliothek")
+            .title(&gettext("Library"))
             .icon_name("folder-symbolic")
             .build();
         let group = adw::PreferencesGroup::builder()
-            .title("Startordner")
-            .description("Ordner für die Dateisystem-Ansicht")
+            .title(&gettext("Start folder"))
+            .description(&gettext("Folder for the file system view"))
             .build();
 
-        let current = self.music_dir.as_deref().unwrap_or("Nicht festgelegt");
+        let not_set = gettext("Not set");
+        let current = self.music_dir.as_deref().unwrap_or(&not_set);
         let row = adw::ActionRow::builder()
-            .title("Musikordner")
+            .title(&gettext("Music folder"))
             .subtitle(gtk::glib::markup_escape_text(current))
             .subtitle_lines(2)
             .build();
 
         let button = gtk::Button::builder()
             .icon_name("folder-open-symbolic")
-            .tooltip_text("Ordner wählen")
+            .tooltip_text(&gettext("Choose folder"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
@@ -298,7 +312,7 @@ impl App {
             let row = row.clone();
             button.connect_clicked(move |_| {
                 let chooser = gtk::FileDialog::builder()
-                    .title("Musikordner wählen")
+                    .title(&gettext("Choose music folder"))
                     .build();
                 let sender = sender.clone();
                 let row = row.clone();
@@ -319,24 +333,56 @@ impl App {
         row.set_activatable_widget(Some(&button));
         group.add(&row);
         page.add(&group);
+
+        // --- Anzeigesprache (greift nach einem Neustart der App) ---
+        let lang_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Language"))
+            .build();
+        // Stabile Codes parallel zu den Anzeige-Labels. „Deutsch"/„English"
+        // sind Eigennamen und bleiben unübersetzt.
+        let lang_codes = ["system", "de", "en"];
+        let lang_labels = [gettext("System default"), "Deutsch".into(), "English".into()];
+        let lang_label_refs: Vec<&str> = lang_labels.iter().map(String::as_str).collect();
+        let lang_row = adw::ComboRow::builder()
+            .title(&gettext("Display language"))
+            .subtitle(&gettext("Takes effect after a restart"))
+            .model(&gtk::StringList::new(&lang_label_refs))
+            .build();
+        let current_idx = lang_codes
+            .iter()
+            .position(|c| *c == self.ui_language)
+            .unwrap_or(0);
+        lang_row.set_selected(current_idx as u32);
+        {
+            // Handler erst nach `set_selected` verbinden, damit die Vorauswahl
+            // keinen Sprachwechsel auslöst.
+            let sender = sender.clone();
+            lang_row.connect_selected_notify(move |r| {
+                let code = lang_codes.get(r.selected() as usize).copied().unwrap_or("system");
+                sender.input(Msg::SetLanguage(code.to_string()));
+            });
+        }
+        lang_group.add(&lang_row);
+        page.add(&lang_group);
+
         dialog.add(&page);
 
         // --- Kategorie: Klang ---
         let page = adw::PreferencesPage::builder()
-            .title("Klang")
+            .title(&gettext("Sound"))
             .icon_name("preferences-other-symbolic")
             .build();
         // Globaler Equalizer (Basis für alles ohne eigene Interpret-/Album-/Titel-EQ).
         let eq_group = adw::PreferencesGroup::builder()
-            .title("Equalizer")
-            .description(
-                "Globale Klangregelung. Sie gilt überall, sofern nicht für einen \
-                 Interpreten, ein Album oder einen Titel eine eigene Einstellung gesetzt ist.",
-            )
+            .title(&gettext("Equalizer"))
+            .description(&gettext(
+                "Global sound control. It applies everywhere unless a custom \
+                 setting is set for an artist, an album or a track.",
+            ))
             .build();
         let eq_row = adw::ActionRow::builder()
-            .title("Globaler Equalizer")
-            .subtitle("Zehn Bänder, je Ausgang")
+            .title(&gettext("Global equalizer"))
+            .subtitle(&gettext("Ten bands, per output"))
             .activatable(true)
             .build();
         eq_row.add_prefix(&gtk::Image::from_icon_name("preferences-other-symbolic"));
@@ -351,19 +397,19 @@ impl App {
 
         // --- Kategorie: Online ---
         let page = adw::PreferencesPage::builder()
-            .title("Online")
+            .title(&gettext("Online"))
             .icon_name("network-wireless-symbolic")
             .build();
         // Online-Erkennung: AcoustID-Key für die Titel-Erkennung per Fingerprint.
         let online_group = adw::PreferencesGroup::builder()
-            .title("Online-Erkennung")
-            .description(
-                "Optionaler AcoustID-Key für die Titel-Erkennung per Fingerprint \
-                 (kostenlos unter acoustid.org/new-application). Cover & Künstlerfotos \
-                 funktionieren ohne Key.",
-            )
+            .title(&gettext("Online detection"))
+            .description(&gettext(
+                "Optional AcoustID key for fingerprint-based track detection \
+                 (free at acoustid.org/new-application). Cover art and artist photos \
+                 work without a key.",
+            ))
             .build();
-        let key_row = adw::EntryRow::builder().title("AcoustID API-Key").build();
+        let key_row = adw::EntryRow::builder().title(&gettext("AcoustID API key")).build();
         key_row.set_text(self.acoustid_key.as_deref().unwrap_or(""));
         key_row.set_show_apply_button(true);
         {
@@ -375,7 +421,7 @@ impl App {
         online_group.add(&key_row);
 
         let fanart_row = adw::EntryRow::builder()
-            .title("fanart.tv API-Key (optional, für mehrere Interpreten-Fotos)")
+            .title(&gettext("fanart.tv API key (optional, for multiple artist photos)"))
             .build();
         fanart_row.set_text(self.fanart_key.as_deref().unwrap_or(""));
         fanart_row.set_show_apply_button(true);
@@ -388,11 +434,11 @@ impl App {
         online_group.add(&fanart_row);
 
         let auto_row = adw::SwitchRow::builder()
-            .title("Automatisch abrufen (nur WLAN)")
-            .subtitle(
-                "Beim Start fehlende Cover, Fotos & Titel im Hintergrund laden – \
-                 nur bei nicht-getakteter Verbindung",
-            )
+            .title(&gettext("Fetch automatically (Wi-Fi only)"))
+            .subtitle(&gettext(
+                "Load missing cover art, photos and tracks in the background at \
+                 startup – only on an unmetered connection",
+            ))
             .active(self.auto_enrich)
             .build();
         {
@@ -403,20 +449,42 @@ impl App {
         }
         online_group.add(&auto_row);
         page.add(&online_group);
+
+        // --- Geräte-Synchronisierung ---
+        let sync_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Devices"))
+            .description(&gettext(
+                "Transfer favorites, playlists, podcasts and music between two \
+                 devices on the same network.",
+            ))
+            .build();
+        let sync_row = adw::ActionRow::builder()
+            .title(&gettext("Device sync"))
+            .subtitle(&gettext("Create a server or scan another device's code"))
+            .activatable(true)
+            .build();
+        sync_row.add_prefix(&gtk::Image::from_icon_name("network-transmit-receive-symbolic"));
+        sync_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        {
+            let sender = sender.clone();
+            sync_row.connect_activated(move |_| sender.input(Msg::OpenSyncDialog));
+        }
+        sync_group.add(&sync_row);
+        page.add(&sync_group);
         dialog.add(&page);
 
         // --- Kategorie: Ansicht ---
         let page = adw::PreferencesPage::builder()
-            .title("Ansicht")
+            .title(&gettext("View"))
             .icon_name("view-list-symbolic")
             .build();
         // Menüpunkte ein-/ausblenden **und** per Ziehgriff umsortieren. Die
         // Reihenfolge/Sichtbarkeit wird sofort in die Navigation übernommen.
         let sections_group = adw::PreferencesGroup::builder()
-            .title("Menüpunkte")
-            .description(
-                "Ziehgriff zum Umsortieren; der Schalter blendet einen Menüpunkt aus. Beides wirkt sofort in der Navigation und der Eigenschaften-Auswahl.",
-            )
+            .title(&gettext("Menu items"))
+            .description(&gettext(
+                "Drag handle to reorder; the switch hides a menu item. Both take effect immediately in the navigation and the properties selection.",
+            ))
             .build();
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
@@ -432,27 +500,27 @@ impl App {
 
         // --- Kategorie: Ausgeblendet (ganz rechts) ---
         let page = adw::PreferencesPage::builder()
-            .title("Ausgeblendet")
+            .title(&gettext("Hidden"))
             .icon_name("view-conceal-symbolic")
             .build();
         let hidden_group = adw::PreferencesGroup::builder()
-            .title("Ausgeblendete Inhalte")
-            .description(
-                "Interpreten, Alben und Titel, deren Eigenschaften nirgends sichtbar sind – jeweils das Objekt, das die Festlegung trägt. Über das Auge wieder einblenden.",
-            )
+            .title(&gettext("Hidden content"))
+            .description(&gettext(
+                "Artists, albums and tracks whose properties are visible nowhere – each the object that carries the setting. Use the eye to show them again.",
+            ))
             .build();
         let entries = self.library.hidden_entries();
         if entries.is_empty() {
             hidden_group.add(
                 &adw::ActionRow::builder()
-                    .title("Nichts ausgeblendet")
+                    .title(&gettext("Nothing hidden"))
                     .build(),
             );
         }
         for (scope, key, title, is_dir) in entries {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&title))
-                .subtitle(hidden_kind(&scope))
+                .subtitle(&hidden_kind(&scope))
                 .build();
             row.add_prefix(&cover_widget(
                 self.entry_cover(&scope, &key, is_dir).as_deref(),
@@ -460,7 +528,7 @@ impl App {
             ));
             let reveal = gtk::Button::builder()
                 .icon_name("view-reveal-symbolic")
-                .tooltip_text("Wieder einblenden")
+                .tooltip_text(&gettext("Show again"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
@@ -507,15 +575,15 @@ impl App {
             },
         };
         let Some(dest) = dest else {
-            self.toast("Hier lässt sich kein eigenes Bild setzen");
+            self.toast(&gettext("No custom image can be set here"));
             return;
         };
 
         let filter = gtk::FileFilter::new();
         filter.add_pixbuf_formats();
-        filter.set_name(Some("Bilder"));
+        filter.set_name(Some(&gettext("Images")));
         let chooser = gtk::FileDialog::builder()
-            .title("Eigenes Bild auswählen")
+            .title(&gettext("Choose a custom image"))
             .default_filter(&filter)
             .build();
 
@@ -588,7 +656,7 @@ fn rebuild_section_rows(
 
         // Ziehgriff links (Hinweis); gezogen wird die ganze Zeile.
         let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-        handle.set_tooltip_text(Some("Zum Umsortieren ziehen"));
+        handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
         row.add_prefix(&handle);
 
         let drag = gtk::DragSource::new();
@@ -683,11 +751,11 @@ fn hidden_icon(scope: &str) -> &'static str {
 }
 
 /// Untertitel-Kennzeichnung je Ebene in der Übersicht „Ausgeblendet".
-fn hidden_kind(scope: &str) -> &'static str {
+fn hidden_kind(scope: &str) -> String {
     match scope {
-        "album" => "Album",
-        "artist" => "Interpret",
-        "folder" => "Ordner",
-        _ => "Titel",
+        "album" => gettext("Album"),
+        "artist" => gettext("Artist"),
+        "folder" => gettext("Folder"),
+        _ => gettext("Track"),
     }
 }

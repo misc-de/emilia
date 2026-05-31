@@ -9,4 +9,5 @@ pub mod online;
 pub mod output;
 pub mod podcast;
 pub mod player;
+pub mod sync;
 pub mod scanner;

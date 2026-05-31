@@ -19,13 +19,13 @@ impl Player {
         gst::init()?;
         let playbin = gst::ElementFactory::make("playbin3")
             .build()
-            .map_err(|_| anyhow!("playbin3 nicht verfügbar – ist gstreamer installiert?"))?;
+            .map_err(|_| anyhow!("playbin3 unavailable – is gstreamer installed?"))?;
 
         // Equalizer als Audio-Filter einhängen (optional – nur wenn verfügbar).
         let equalizer = gst::ElementFactory::make("equalizer-10bands").build().ok();
         match &equalizer {
             Some(eq) => playbin.set_property("audio-filter", eq),
-            None => tracing::warn!("equalizer-10bands nicht verfügbar – EQ deaktiviert"),
+            None => tracing::warn!("equalizer-10bands unavailable – EQ disabled"),
         }
 
         Ok(Self {
@@ -49,13 +49,13 @@ impl Player {
     /// wird vor dem Start an diese Position gesprungen (Resume bei Hörspielen).
     pub fn play_file(&self, path: &str, resume_ms: i64) -> Result<()> {
         let uri = gst::glib::filename_to_uri(path, None)
-            .map_err(|e| anyhow!("Ungültiger Pfad {path}: {e}"))?;
+            .map_err(|e| anyhow!("Invalid path {path}: {e}"))?;
         // playbin3 liest die `uri` nur beim Zustandswechsel neu ein – läuft schon
         // ein Titel, muss die Pipeline erst zurückgesetzt werden, sonst spielt
         // der alte Titel weiter.
         self.playbin
             .set_state(gst::State::Ready)
-            .map_err(|e| anyhow!("Konnte Pipeline nicht zurücksetzen: {e}"))?;
+            .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri.as_str());
         if resume_ms > 0 {
             // Für einen zuverlässigen Sprung muss die Pipeline erst prerollen:
@@ -63,13 +63,13 @@ impl Player {
             // wenige Millisekunden), dann an die Resume-Position springen.
             self.playbin
                 .set_state(gst::State::Paused)
-                .map_err(|e| anyhow!("Konnte Pipeline nicht vorbereiten: {e}"))?;
+                .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
             let _ = self.playbin.state(gst::ClockTime::from_seconds(5));
             let _ = self.seek_ms(resume_ms);
         }
         self.playbin
             .set_state(gst::State::Playing)
-            .map_err(|e| anyhow!("Konnte nicht abspielen: {e}"))?;
+            .map_err(|e| anyhow!("Failed to start playback: {e}"))?;
         Ok(())
     }
 
@@ -78,11 +78,11 @@ impl Player {
     pub fn play_uri(&self, uri: &str) -> Result<()> {
         self.playbin
             .set_state(gst::State::Ready)
-            .map_err(|e| anyhow!("Konnte Pipeline nicht zurücksetzen: {e}"))?;
+            .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri);
         self.playbin
             .set_state(gst::State::Playing)
-            .map_err(|e| anyhow!("Konnte nicht abspielen: {e}"))?;
+            .map_err(|e| anyhow!("Failed to start playback: {e}"))?;
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl Player {
                     gst::MessageView::Eos(_) => on_eos(),
                     gst::MessageView::Error(err) => {
                         tracing::error!(
-                            "GStreamer-Fehler: {} ({:?})",
+                            "GStreamer error: {} ({:?})",
                             err.error(),
                             err.debug()
                         );
@@ -141,7 +141,7 @@ impl Player {
                 gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
                 gst::ClockTime::from_mseconds(ms.max(0) as u64),
             )
-            .map_err(|e| anyhow!("Seek fehlgeschlagen: {e}"))?;
+            .map_err(|e| anyhow!("Seek failed: {e}"))?;
         Ok(())
     }
 }

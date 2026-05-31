@@ -6,45 +6,33 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use crate::i18n::{gettext, ngettext_n};
 use crate::ui::app::{App, Msg};
 
 impl App {
-    /// Lädt die Konzerte und baut die Liste neu auf. Quelle ist die **Vereinigung**
-    /// aus importierten Markierungen (concert-Tabelle) und allen Inhalten, deren
-    /// Eigenschaften den Bereich „Konzerte" enthalten (Alben/Ordner/Titel) –
-    /// dedupliziert nach (scope, key), mit Album-/Interpreten-Cover.
+    /// Lädt die Konzerte und baut die Liste neu auf. Einzige Quelle sind die
+    /// Inhalte, deren **Eigenschaften** den Bereich „Konzerte" enthalten
+    /// (Alben/Ordner/Titel). So lässt sich ein Konzert allein über die
+    /// Eigenschaften (Detailansicht) wieder entfernen. Markierte Ordner werden
+    /// in ihre Alben/Einzelstücke aufgelöst (kein Ordner-Eintrag).
     pub(crate) fn load_concerts(&mut self, sender: &ComponentSender<Self>) {
-        use std::collections::HashSet;
-        let mut seen: HashSet<(String, String)> = HashSet::new();
-        let mut items: Vec<(String, String, String, bool)> = Vec::new();
-
-        // 1) Importierte/markierte Konzerte (Pfad → Ordner bzw. Titel).
-        for (path, title, is_dir) in self.library.concerts().unwrap_or_default() {
-            let scope = if is_dir { "folder" } else { "track" };
-            if seen.insert((scope.to_string(), path.clone())) {
-                items.push((scope.to_string(), path, title, is_dir));
-            }
-        }
-        // 2) Über die Eigenschaften als „Konzerte" markierte Inhalte (live).
-        for entry in
-            self.library
-                .area_entries(crate::core::category::Area::Concerts, true, false)
-        {
-            if seen.insert((entry.0.clone(), entry.1.clone())) {
-                items.push(entry);
-            }
-        }
-
-        self.concert_items = items;
+        let raw = self
+            .library
+            .area_entries(crate::core::category::Area::Concerts, true, false);
+        self.concert_items = self.expand_area_items(raw);
         let items = self.concert_items.clone();
         self.fill_entry_list(
             &self.concerts_list,
             &items,
             sender,
             Msg::PlayConcert,
-            Some(Msg::ConcertRemove),
+            // Kein Mülleimer in der Konzertliste – Entfernen läuft über die
+            // Eigenschaften (Bereich „Konzerte" abwählen).
+            None,
             Msg::ShowConcertDetail,
             None,
+            false,
+            true,
         );
     }
 
@@ -58,7 +46,7 @@ impl App {
         use std::rc::Rc;
 
         let dialog = adw::Dialog::builder()
-            .title("Konzerte importieren")
+            .title(&gettext("Import concerts"))
             .content_width(440)
             .content_height(560)
             .build();
@@ -75,7 +63,7 @@ impl App {
         // Alle-auswählen-Schalter
         let all_group = adw::PreferencesGroup::new();
         let all = adw::SwitchRow::builder()
-            .title("Alle auswählen")
+            .title(&gettext("Select all"))
             .active(true)
             .build();
         all_group.add(&all);
@@ -83,7 +71,11 @@ impl App {
 
         // Kandidaten
         let group = adw::PreferencesGroup::builder()
-            .title(format!("{} Kandidaten", candidates.len()))
+            .title(ngettext_n(
+                "{n} candidate",
+                "{n} candidates",
+                candidates.len() as u32,
+            ))
             .build();
         let mut rows = Vec::with_capacity(candidates.len());
         for c in candidates {
@@ -109,7 +101,7 @@ impl App {
         }
 
         let add = gtk::Button::builder()
-            .label("Hinzufügen")
+            .label(&gettext("Add"))
             .css_classes(["suggested-action", "pill"])
             .hexpand(true)
             .build();

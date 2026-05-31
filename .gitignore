@@ -1,6 +1,9 @@
 # Rust-Build-Artefakte
 /target
 
+# Kompilierte Übersetzungskataloge (werden aus po/<lang>.po via msgfmt gebaut)
+po/*/LC_MESSAGES/*.mo
+
 # Cargo.lock wird bewusst eingecheckt (Binär-App, reproduzierbare Builds)
 
 # Editor / OS

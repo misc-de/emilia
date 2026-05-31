@@ -153,7 +153,7 @@ impl OnlineClient {
         Ok(None)
     }
 
-    fn get_image(&self, url: &str) -> Result<Option<Vec<u8>>> {
+    pub(crate) fn get_image(&self, url: &str) -> Result<Option<Vec<u8>>> {
         match self.agent.get(url).set("User-Agent", USER_AGENT).call() {
             Ok(resp) => {
                 let mut buf = Vec::new();
@@ -359,6 +359,34 @@ pub fn local_track_cover(path: &str) -> Option<String> {
     Some(cache.to_string_lossy().into_owned())
 }
 
+/// Lokaler Cache-Pfad eines Podcast-Bilds (Schlüssel = Bild-URL), **nur falls die
+/// Datei bereits vorliegt** – ohne Netzzugriff (für die Anzeige im UI-Thread).
+pub fn podcast_image_path(url: &str) -> Option<String> {
+    if url.trim().is_empty() {
+        return None;
+    }
+    let mut p = cover_cache_dir();
+    p.push(format!("podcast_{}.img", name_hash(url)));
+    p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
+/// Lädt das Podcast-Bild (RSS/iTunes) bei Bedarf in den Cache und gibt den
+/// lokalen Pfad zurück. **Netzzugriff** – nur aus Worker-/Hintergrund-Threads
+/// aufrufen. Bereits gecachte Bilder werden nicht erneut geladen.
+pub fn cache_podcast_image(url: &str) -> Option<String> {
+    if let Some(p) = podcast_image_path(url) {
+        return Some(p);
+    }
+    if url.trim().is_empty() {
+        return None;
+    }
+    let bytes = OnlineClient::new().get_image(url).ok().flatten()?;
+    let mut p = cover_cache_dir();
+    p.push(format!("podcast_{}.img", name_hash(url)));
+    std::fs::write(&p, &bytes).ok()?;
+    Some(p.to_string_lossy().into_owned())
+}
+
 /// Cache-Pfad für ein lokal extrahiertes Album-Cover (Schlüssel: Interpret+Album).
 fn save_local_cover(artist: &str, album: &str, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = cover_cache_dir();
@@ -384,21 +412,21 @@ pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &
             match client.fetch_cover(&rel) {
                 Ok(Some(bytes)) => match save_cover(&rel.mbid, &bytes) {
                     Ok(path) => meta.cover_path = Some(path.to_string_lossy().into_owned()),
-                    Err(e) => tracing::warn!("Cover konnte nicht gespeichert werden: {e}"),
+                    Err(e) => tracing::warn!("Failed to save cover art: {e}"),
                 },
                 Ok(None) => {}
-                Err(e) => tracing::warn!("Cover-Abruf fehlgeschlagen ({artist} – {album}): {e}"),
+                Err(e) => tracing::warn!("Cover art fetch failed ({artist} – {album}): {e}"),
             }
         }
         Ok(None) => meta.status = "notfound".to_string(),
         Err(e) => {
-            tracing::warn!("MusicBrainz-Suche fehlgeschlagen ({artist} – {album}): {e}");
+            tracing::warn!("MusicBrainz search failed ({artist} – {album}): {e}");
             meta.status = "error".to_string();
         }
     }
 
     if let Err(e) = lib.upsert_album_meta(&meta) {
-        tracing::error!("album_meta konnte nicht gespeichert werden: {e}");
+        tracing::error!("Failed to save album_meta: {e}");
     }
     meta
 }
@@ -423,7 +451,7 @@ pub fn store_artist_image(name: &str, image: Option<Vec<u8>>, errored: bool) -> 
                 meta.status = "matched".to_string();
             }
             Err(e) => {
-                tracing::warn!("Künstlerfoto nicht speicherbar ({name}): {e}");
+                tracing::warn!("Failed to save artist photo ({name}): {e}");
                 meta.status = "error".to_string();
             }
         },
@@ -522,7 +550,7 @@ pub fn store_album_gallery(
             Ok(pp) => {
                 stored.push((pp.to_string_lossy().into_owned(), kind.clone(), "caa".to_string()))
             }
-            Err(e) => tracing::warn!("Galerie-Bild nicht speicherbar: {e}"),
+            Err(e) => tracing::warn!("Failed to save gallery image: {e}"),
         }
     }
     if !stored.is_empty() {
@@ -542,14 +570,14 @@ pub fn enrich_artist_gallery(
         Ok(Some(id)) => id,
         Ok(None) => return 0,
         Err(e) => {
-            tracing::warn!("Artist-MBID fehlgeschlagen ({name}): {e}");
+            tracing::warn!("Artist MBID lookup failed ({name}): {e}");
             return 0;
         }
     };
     let imgs = match client.fetch_artist_gallery(api_key, &mbid) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("Interpret-Galerie fehlgeschlagen ({name}): {e}");
+            tracing::warn!("Artist gallery failed ({name}): {e}");
             return 0;
         }
     };
@@ -559,7 +587,7 @@ pub fn enrich_artist_gallery(
             Ok(pp) => {
                 stored.push((pp.to_string_lossy().into_owned(), kind.clone(), "fanart".to_string()))
             }
-            Err(e) => tracing::warn!("Interpret-Bild nicht speicherbar: {e}"),
+            Err(e) => tracing::warn!("Failed to save artist image: {e}"),
         }
     }
     if !stored.is_empty() {
@@ -583,7 +611,7 @@ pub fn enrich_track_fingerprint(
     let fp = match fingerprint::compute(path) {
         Ok(fp) => fp,
         Err(e) => {
-            tracing::warn!("Fingerprint fehlgeschlagen ({}): {e}", path.display());
+            tracing::warn!("Fingerprint failed ({}): {e}", path.display());
             meta.status = "error".to_string();
             let _ = lib.upsert_track_meta(&meta);
             return meta;
@@ -600,13 +628,13 @@ pub fn enrich_track_fingerprint(
         }
         Ok(None) => meta.status = "notfound".to_string(),
         Err(e) => {
-            tracing::warn!("AcoustID-Abruf fehlgeschlagen ({}): {e}", path.display());
+            tracing::warn!("AcoustID fetch failed ({}): {e}", path.display());
             meta.status = "error".to_string();
         }
     }
 
     if let Err(e) = lib.upsert_track_meta(&meta) {
-        tracing::error!("track_meta konnte nicht gespeichert werden: {e}");
+        tracing::error!("Failed to save track_meta: {e}");
     }
     meta
 }

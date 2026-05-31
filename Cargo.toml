@@ -22,6 +22,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 mpris-server = "0.10.0"
 rss = { version = "2.0.13", default-features = false }
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
+tiny_http = { version = "0.12.0", features = ["ssl-rustls"] }
+rcgen = { version = "0.14.8", default-features = false, features = ["ring", "pem"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging"] }
+x509-parser = "0.18.1"
+sha2 = "0.11.0"
+base64 = "0.22"
+getrandom = "0.2"
+qrcode = { version = "0.14.1", default-features = false }
 
 [profile.release]
 opt-level = "s"

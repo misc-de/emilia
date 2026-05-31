@@ -24,10 +24,17 @@ finish-args:
   - --device=dri
   # Audio (PipeWire über die Pulse-Kompatibilität der Runtime)
   - --socket=pulseaudio
-  # Online-Metadaten (optional, nur auf Knopfdruck)
+  # Online-Metadaten **und** Geräte-Synchronisierung im LAN (HTTPS-Server/-Client)
   - --share=network
-  # Musikbibliothek nur lesen (Dateien werden nie verändert)
-  - --filesystem=home:ro
+  # Geräte-Synchronisierung: Webcam für den QR-Scan. (Benötigt zur Laufzeit die
+  # GStreamer-Plugins `zxing` aus gst-plugins-bad und `gtk4paintablesink` aus
+  # gst-plugins-rs; fehlen sie, meldet der Scan einen Fehler statt abzustürzen.)
+  - --device=all
+  # Musikbibliothek: bestehende Dateien werden nie verändert. Schreibzugriff ist
+  # nur nötig, um per Sync **empfangene** Audiodateien in den Musikordner zu
+  # legen. Wer keine Dateien empfangen will, kann auf `home:ro` zurückstellen
+  # (Metadaten-Sync funktioniert dann weiterhin).
+  - --filesystem=home
   # Sperrbildschirm/Medientasten: eigener MPRIS-Name (pro Prozess-Suffix)
   - --own-name=org.mpris.MediaPlayer2.Emilia.*
 
@@ -45,6 +52,9 @@ modules:
     build-commands:
       - cargo build --release
       - install -Dm755 target/release/emilia /app/bin/emilia
+      # Übersetzungskataloge (.po → .mo) bauen und installieren.
+      - mkdir -p /app/share/locale/de/LC_MESSAGES
+      - msgfmt --check po/de.po -o /app/share/locale/de/LC_MESSAGES/emilia.mo
       - install -Dm644 data/de.cais.Emilia.desktop
         /app/share/applications/de.cais.Emilia.desktop
       - install -Dm644 data/de.cais.Emilia.metainfo.xml

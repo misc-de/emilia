@@ -9,6 +9,54 @@ use anyhow::{anyhow, Result};
 
 use crate::model::Episode;
 
+/// Wandelt ein RFC-2822-Veröffentlichungsdatum („Fri, 29 May 2026 22:00:00
+/// -0000") in einen **sortierbaren** Schlüssel `YYYYMMDDHHMMSS`. Zeitzone wird
+/// für die Sortierung ignoriert; unparsbare/fehlende Daten ergeben `0`.
+pub fn pubdate_key(s: Option<&str>) -> i64 {
+    let Some(s) = s else { return 0 };
+    let tokens: Vec<&str> = s.split_whitespace().collect();
+    let month_num = |m: &str| -> Option<i64> {
+        [
+            "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+        ]
+        .iter()
+        .position(|x| m.to_ascii_lowercase().starts_with(x))
+        .map(|i| i as i64 + 1)
+    };
+    // Monatsnamen suchen; davor steht der Tag, danach Jahr und Uhrzeit.
+    let mi = tokens.iter().position(|t| month_num(t).is_some());
+    let Some(mi) = mi.filter(|&i| i >= 1) else { return 0 };
+    let month = month_num(tokens[mi]).unwrap_or(0);
+    let day: i64 = tokens[mi - 1].trim_matches(',').parse().unwrap_or(0);
+    let year: i64 = tokens.get(mi + 1).and_then(|y| y.parse().ok()).unwrap_or(0);
+    let (mut h, mut m, mut sec) = (0i64, 0i64, 0i64);
+    if let Some(t) = tokens.get(mi + 2) {
+        let p: Vec<&str> = t.split(':').collect();
+        h = p.first().and_then(|x| x.parse().ok()).unwrap_or(0);
+        m = p.get(1).and_then(|x| x.parse().ok()).unwrap_or(0);
+        sec = p.get(2).and_then(|x| x.parse().ok()).unwrap_or(0);
+    }
+    ((((year * 100 + month) * 100 + day) * 100 + h) * 100 + m) * 100 + sec
+}
+
+/// Kurzform eines RFC-2822-Datums für die Anzeige: „29 May 2026" (ohne Wochentag,
+/// Uhrzeit und Zeitzone). Unparsbares wird unverändert zurückgegeben.
+pub fn pubdate_short(s: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    let t: Vec<&str> = s.split_whitespace().collect();
+    let mi = t
+        .iter()
+        .position(|x| MONTHS.iter().any(|m| x.to_ascii_lowercase().starts_with(m)));
+    match mi {
+        Some(i) if i >= 1 && i + 1 < t.len() => {
+            format!("{} {} {}", t[i - 1].trim_matches(','), t[i], t[i + 1])
+        }
+        _ => s.trim().to_string(),
+    }
+}
+
 /// Ergebnis des Feed-Einlesens: Kanaldaten plus Episoden (mit Audio).
 pub struct PodcastFeed {
     pub title: String,
@@ -58,7 +106,7 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
         });
     }
     if episodes.is_empty() {
-        return Err(anyhow!("keine Episoden mit Audio im Feed gefunden"));
+        return Err(anyhow!("no episodes with audio found in the feed"));
     }
     Ok(PodcastFeed {
         title,

@@ -8,7 +8,7 @@ use relm4::gtk;
 
 use crate::core::scanner;
 use crate::model::Track;
-use crate::ui::app::{guarded_resume, App, RESUME_MIN_DURATION_MS};
+use crate::ui::app::{guarded_resume, App};
 use crate::ui::fs_row::FsInput;
 
 impl App {
@@ -176,16 +176,12 @@ impl App {
         }
     }
 
-    /// Ob für diesen Titel eine Resume-Position geführt werden soll: bei langen
-    /// Titeln (Hörspiele) immer, sonst nur, wenn er als Hörbuch oder Podcast
-    /// eingestuft ist. Normale (kurze) Musiktitel starten stets von vorn.
-    pub(crate) fn should_resume(&self, t: &Track) -> bool {
-        if t.duration_ms.unwrap_or(0) >= RESUME_MIN_DURATION_MS {
-            return true;
-        }
-        self.library
-            .resolve_areas(t.artist.as_deref(), t.album.as_deref(), &t.path)
-            .contains(&crate::core::category::Area::Audiobooks)
+    /// Für **alle** Titel wird eine Resume-Position geführt: beim nächsten Start
+    /// läuft der Titel dort weiter, wo er gestoppt wurde. Die `guarded_resume`-
+    /// Wächter sorgen dafür, dass ein quasi fertiger oder gerade erst begonnener
+    /// Titel wieder von vorn startet.
+    pub(crate) fn should_resume(&self, _t: &Track) -> bool {
+        true
     }
 
     /// Sichert die aktuelle Warteschlange (Pfade + Position) für die
@@ -245,7 +241,7 @@ impl App {
             }
         }
         let path_str = path.to_string_lossy().to_string();
-        // Gespeicherte Resume-Position – nur für Lang-Inhalte (s. should_resume).
+        // Gespeicherte Resume-Position (für alle Titel; s. should_resume).
         let track = self.library.track_by_path(&path_str).ok().flatten();
         let resume_ms = match &track {
             Some(t) if self.should_resume(t) => t.resume_ms,
@@ -281,7 +277,7 @@ impl App {
                 // Warteschlange + Position für den nächsten Start sichern.
                 self.save_queue();
             }
-            Err(e) => tracing::error!("Wiedergabe fehlgeschlagen: {e}"),
+            Err(e) => tracing::error!("Playback failed: {e}"),
         }
     }
 

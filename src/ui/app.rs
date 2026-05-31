@@ -10,6 +10,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::core::player::Player;
 use crate::core::scanner;
+use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::model::{AlbumMeta, ArtistMeta, Track};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
 use crate::ui::app_podcast::fetch_and_store_podcast;
@@ -53,18 +54,21 @@ pub(crate) enum FsKind {
 /// Navigationsbereiche: (Stack-Name, Tooltip, Icon). Die **Standard**-Reihenfolge;
 /// die tatsächliche Anzeige-/Menüreihenfolge ist in `section_order` gespeichert
 /// und vom Nutzer verschiebbar.
+// Die Labels sind englische gettext-`msgid`; am Anzeigeort mit `gettext()`
+// übersetzen (siehe Nutzung in `build_nav` / `win_title`).
 pub(crate) const SECTIONS: [(&str, &str, &str); 8] = [
-    ("files", "Dateisystem", "folder-symbolic"),
-    ("artists", "Interpreten", "avatar-default-symbolic"),
-    ("albums", "Alben", "media-optical-symbolic"),
-    ("favorites", "Favoriten", "emilia-favorite-symbolic"),
-    ("audiobooks", "Hörbücher", "emilia-audiobook-symbolic"),
-    ("concerts", "Konzerte", "emilia-concert-symbolic"),
+    ("files", "Files", "folder-symbolic"),
+    ("artists", "Artists", "avatar-default-symbolic"),
+    ("albums", "Albums", "media-optical-symbolic"),
+    ("favorites", "Favorites", "emilia-favorite-symbolic"),
+    ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
+    ("concerts", "Concerts", "emilia-concert-symbolic"),
     ("podcasts", "Podcasts", "microphone-symbolic"),
-    ("playlists", "Playlisten", "view-list-symbolic"),
+    ("playlists", "Playlists", "view-list-symbolic"),
 ];
 
-/// Liefert (Tooltip/Label, Icon) eines Bereichs anhand seines Stack-Namens.
+/// Liefert (Tooltip/Label als msgid, Icon) eines Bereichs anhand seines
+/// Stack-Namens. Das Label am Anzeigeort mit `gettext()` übersetzen.
 pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
     SECTIONS
         .iter()
@@ -72,9 +76,35 @@ pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
         .map(|(_, label, icon)| (*label, *icon))
 }
 
-/// Ab dieser Spieldauer gilt ein Titel als „Lang-Inhalt" und bekommt
-/// automatisch eine Resume-Position (15 Minuten).
-pub(crate) const RESUME_MIN_DURATION_MS: i64 = 15 * 60 * 1000;
+/// Sicherheitsabfrage vor destruktiven Aktionen (Löschen/Entfernen). Zeigt einen
+/// Bestätigungsdialog relativ zu `parent` (irgendein Widget im Fenster) und
+/// sendet `msg` erst nach Bestätigung. `confirm_label` beschriftet den
+/// (destruktiven) Bestätigungsknopf, z. B. `gettext("Delete")` / `gettext("Remove")`.
+pub(crate) fn confirm_destructive(
+    parent: &impl IsA<gtk::Widget>,
+    heading: &str,
+    confirm_label: &str,
+    sender: ComponentSender<App>,
+    msg: Msg,
+) {
+    let confirm = adw::AlertDialog::new(Some(heading), None);
+    confirm.add_response("cancel", &gettext("Cancel"));
+    confirm.add_response("ok", confirm_label);
+    confirm.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
+    confirm.set_default_response(Some("cancel"));
+    confirm.set_close_response("cancel");
+    // `connect_response` ist `Fn`; die Nachricht daher nur einmalig entnehmen.
+    let msg = std::cell::RefCell::new(Some(msg));
+    confirm.connect_response(None, move |_, resp| {
+        if resp == "ok" {
+            if let Some(m) = msg.borrow_mut().take() {
+                sender.input(m);
+            }
+        }
+    });
+    confirm.present(Some(parent));
+}
+
 /// Vor dieser Position wird kein Resume gemerkt (zu nah am Anfang).
 const RESUME_MIN_POS_MS: i64 = 5_000;
 /// So nah vor dem Ende gilt der Titel als fertig → Resume auf 0 zurücksetzen.
@@ -90,6 +120,15 @@ pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     } else {
         pos_ms
     }
+}
+
+/// Welche Ansicht die Podcast-Seite zeigt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PodcastView {
+    /// Neueste Episoden (Beiträge) über alle Abos hinweg.
+    Newest,
+    /// Übersicht der abonnierten Podcasts.
+    Overview,
 }
 
 pub struct App {
@@ -113,6 +152,9 @@ pub struct App {
     pub(crate) enrich_cancel: Arc<AtomicBool>,
     pub(crate) acoustid_key: Option<String>,
     pub(crate) fanart_key: Option<String>,
+    /// Anzeigesprache: "system" (System-Locale), "de" oder "en". In den
+    /// Einstellungen umschaltbar; greift nach einem Neustart der App.
+    pub(crate) ui_language: String,
     /// Aktuell aktiver Audio-Ausgang (PipeWire-Sink), für die EQ-Auflösung.
     pub(crate) active_output: String,
     pub(crate) music_dir: Option<String>,
@@ -185,6 +227,11 @@ pub struct App {
     // Podcasts: (id, Titel, Bild-URL, Episodenzahl)
     pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
     pub(crate) podcasts_list: gtk::ListBox,
+    /// Welche Podcast-Ansicht sichtbar ist: neueste Episoden oder Abo-Übersicht.
+    pub(crate) podcast_view: PodcastView,
+    /// Neueste Episoden über alle Abos (für die „Neuste"-Ansicht).
+    pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
+    pub(crate) newest_list: gtk::ListBox,
     /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
     pub(crate) queue_list: gtk::ListBox,
     pub(crate) view_stack: adw::ViewStack,
@@ -193,6 +240,8 @@ pub struct App {
     /// Gemerkte Scrollposition der zuletzt verlassenen Übersichtsseite
     /// (Scroller + Wert), um sie beim Zurücknavigieren wiederherzustellen.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
+    /// Zustand der Geräte-Synchronisierung (Server/Client + Dialog-Widgets).
+    pub(crate) sync: crate::ui::app_sync::SyncState,
 }
 
 #[derive(Debug)]
@@ -239,6 +288,17 @@ pub enum Msg {
     CtxShare,
     ShareHost,
     ShareScan,
+    // --- Geräte-Synchronisierung ---
+    /// Öffnet den Synchronisierungs-Dialog (Moduswahl).
+    OpenSyncDialog,
+    /// Server-Modus starten (QR-Code anzeigen, auf Kopplung warten).
+    SyncStartServer,
+    /// Client-Modus starten (Webcam-Scan).
+    SyncStartScan,
+    /// Ein QR-Code wurde dekodiert (URL als Text).
+    SyncQrDecoded(String),
+    /// Der Sync-Dialog wurde geschlossen – Server/Kamera aufräumen.
+    SyncDialogClosed,
     TrackFinished,
     /// Periodischer Tick: Resume-Position des laufenden Titels sichern.
     PersistResume,
@@ -284,6 +344,8 @@ pub enum Msg {
     SetFanartKey(String),
     /// Automatischen Online-Abruf an-/ausschalten.
     SetAutoEnrich(bool),
+    /// Anzeigesprache umstellen ("system"/"de"/"en"); startet die App neu.
+    SetLanguage(String),
     /// Merkmal einer Ebene setzen (oder bei `None` auf „erben" zurücksetzen).
     /// Bereiche (Eigenschaften) einer Ebene setzen; leerer Wert = ausgeblendet.
     SetAreas {
@@ -310,7 +372,6 @@ pub enum Msg {
     ConcertHideSection,
     ConcertAdd(Vec<(String, String, bool)>),
     PlayConcert(usize),
-    ConcertRemove(usize),
     /// Einen Navigations-Menüpunkt ein-/ausblenden (Stack-Name).
     SetSectionVisible {
         section: &'static str,
@@ -331,8 +392,6 @@ pub enum Msg {
     ToggleFavorite,
     /// Favorit (Index in `favorite_items`) abspielen.
     PlayFavorite(usize),
-    /// Favorit (Index) entfernen.
-    FavoriteRemove(usize),
     /// Detailansicht eines Favoriten öffnen.
     ShowFavoriteDetail(usize),
     /// Favoriten umsortieren (Indizes in `favorite_items`).
@@ -378,6 +437,12 @@ pub enum Msg {
     PodcastRefresh(i64),
     /// Eine Episode streamen.
     PlayEpisode { url: String, title: String },
+    /// Podcast-Ansicht umschalten (Neuste / Übersicht).
+    SetPodcastView(PodcastView),
+    /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste (Index).
+    ShowEpisodeDetail(usize),
+    /// Detailansicht/Verwaltung eines Abos (Podcast-Id) – Aktualisieren/Entfernen.
+    ShowPodcastDetail(i64),
 }
 
 /// Ergebnisse der Hintergrund-Worker (Ordner lesen bzw. Online-Anreicherung).
@@ -396,6 +461,10 @@ pub enum Cmd {
     Candidates(Vec<crate::core::concert::Candidate>),
     /// Podcast-Feed geholt: `Some(Titel)` bei Erfolg, sonst `None`.
     PodcastFetched(Option<String>),
+    /// Podcast-Liste neu aufbauen (z. B. nachdem Feed-Bilder gecacht wurden).
+    ReloadPodcasts,
+    /// Ereignis aus dem Sync-Server-Thread bzw. Client-Worker.
+    Sync(crate::core::sync::SyncEvent),
 }
 
 #[relm4::component(pub)]
@@ -465,13 +534,13 @@ impl Component for App {
                         #[name = "settings_top_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emblem-system-symbolic",
-                            set_tooltip_text: Some("Einstellungen"),
+                            set_tooltip_text: Some(&gettext("Settings")),
                             set_visible: false,
                             connect_clicked => Msg::OpenSettings,
                         },
                         pack_start = &gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
-                            set_tooltip_text: Some("Ordner neu einlesen"),
+                            set_tooltip_text: Some(&gettext("Rescan folder")),
                             connect_clicked => Msg::Refresh,
                         },
                         pack_start = &gtk::Button {
@@ -483,10 +552,10 @@ impl Component for App {
                                 "folder-download-symbolic"
                             },
                             #[watch]
-                            set_tooltip_text: Some(if model.enriching {
-                                "Abruf abbrechen"
+                            set_tooltip_text: Some(&if model.enriching {
+                                gettext("Cancel fetch")
                             } else {
-                                "Cover & Metadaten online abrufen"
+                                gettext("Fetch cover & metadata online")
                             }),
                             connect_clicked => Msg::ToggleEnrich,
                         },
@@ -510,7 +579,7 @@ impl Component for App {
                         set_revealed: model.enriching && !model.enrich_banner_hidden,
                         #[watch]
                         set_title: &model.enrich_status,
-                        set_button_label: Some("Ausblenden"),
+                        set_button_label: Some(&gettext("Hide")),
                         connect_button_clicked => Msg::HideEnrichBanner,
                     },
 
@@ -520,7 +589,7 @@ impl Component for App {
                         #[wrap(Some)]
                         #[name = "view_stack"]
                         set_child = &adw::ViewStack {
-                            add_titled_with_icon[Some("files"), "Dateisystem", "folder-symbolic"] =
+                            add_titled_with_icon[Some("files"), &gettext("Files"), "folder-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -537,7 +606,7 @@ impl Component for App {
                                             set_visible: model.can_go_up(),
                                             gtk::Button {
                                                 set_icon_name: "go-previous-symbolic",
-                                                set_tooltip_text: Some("Zurück"),
+                                                set_tooltip_text: Some(&gettext("Back")),
                                                 add_css_class: "flat",
                                                 #[watch]
                                                 set_sensitive: model.can_go_up(),
@@ -567,7 +636,7 @@ impl Component for App {
                                         },
                                     },
                                 },
-                            add_titled_with_icon[Some("artists"), "Interpreten", "avatar-default-symbolic"] =
+                            add_titled_with_icon[Some("artists"), &gettext("Artists"), "avatar-default-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -579,9 +648,9 @@ impl Component for App {
 
                                     adw::StatusPage {
                                         set_icon_name: Some("avatar-default-symbolic"),
-                                        set_title: "Keine Interpreten",
+                                        set_title: &gettext("No artists"),
                                         set_description: Some(
-                                            "Musikordner einlesen und „Online-Metadaten“ abrufen",
+                                            &gettext("Scan a music folder and fetch online metadata"),
                                         ),
                                         set_vexpand: true,
                                         #[watch]
@@ -603,7 +672,7 @@ impl Component for App {
                                         },
                                     },
                                 },
-                            add_titled_with_icon[Some("albums"), "Alben", "media-optical-symbolic"] =
+                            add_titled_with_icon[Some("albums"), &gettext("Albums"), "media-optical-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -617,9 +686,9 @@ impl Component for App {
                                     // Leerzustand, solange keine Alben bekannt sind
                                     adw::StatusPage {
                                         set_icon_name: Some("media-optical-symbolic"),
-                                        set_title: "Keine Alben",
+                                        set_title: &gettext("No albums"),
                                         set_description: Some(
-                                            "Musikordner einlesen und „Online-Metadaten“ abrufen",
+                                            &gettext("Scan a music folder and fetch online metadata"),
                                         ),
                                         set_vexpand: true,
                                         #[watch]
@@ -641,7 +710,7 @@ impl Component for App {
                                         },
                                     },
                                 },
-                            add_titled_with_icon[Some("concerts"), "Konzerte", "emilia-concert-symbolic"] =
+                            add_titled_with_icon[Some("concerts"), &gettext("Concerts"), "emilia-concert-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -664,8 +733,8 @@ impl Component for App {
                                     // Hinweis + Aktionen (leer & Hinweis aktiv)
                                     adw::StatusPage {
                                         set_icon_name: Some("emilia-concert-symbolic"),
-                                        set_title: "Konzerte",
-                                        set_description: Some("Hier kannst du deine gesammelten Konzerte auflisten. Über Konzerte importieren bekommst du eine Übersicht vermuteter Konzerte: Alben mit live, unplugged oder concert im Namen sowie Einzeldateien ab 30 Minuten. Markiere sie als Konzert, dann erscheinen sie hier. Du kannst Konzerte auch jederzeit später über die Optionen hinzufügen."),
+                                        set_title: &gettext("Concerts"),
+                                        set_description: Some(&gettext("Here you can list your collected concerts. Via Import concerts you get an overview of likely concerts: albums with live, unplugged or concert in the name, plus single files of 30 minutes or more. Mark them as a concert and they'll appear here. You can also add concerts later at any time via the options.")),
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.concert_items.is_empty() && !model.concert_hint_dismissed,
@@ -675,17 +744,17 @@ impl Component for App {
                                             set_spacing: 8,
                                             set_halign: gtk::Align::Center,
                                             gtk::Button {
-                                                set_label: "Konzerte importieren",
+                                                set_label: &gettext("Import concerts"),
                                                 set_css_classes: &["suggested-action", "pill"],
                                                 connect_clicked => Msg::ConcertImport,
                                             },
                                             gtk::Button {
-                                                set_label: "Das mache ich selber",
+                                                set_label: &gettext("I'll do it myself"),
                                                 add_css_class: "pill",
                                                 connect_clicked => Msg::ConcertDismissHint,
                                             },
                                             gtk::Button {
-                                                set_label: "Menüpunkt ausblenden",
+                                                set_label: &gettext("Hide menu item"),
                                                 add_css_class: "pill",
                                                 connect_clicked => Msg::ConcertHideSection,
                                             },
@@ -697,14 +766,14 @@ impl Component for App {
                                     // bewusst KEIN Import-Button mehr.
                                     adw::StatusPage {
                                         set_icon_name: Some("emilia-concert-symbolic"),
-                                        set_title: "Keine Konzerte",
-                                        set_description: Some("Markiere ein Album oder einen Titel über die Optionen als Konzert."),
+                                        set_title: &gettext("No concerts"),
+                                        set_description: Some(&gettext("Mark an album or a track as a concert via the options.")),
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.concert_items.is_empty() && model.concert_hint_dismissed,
                                     },
                                 },
-                            add_titled_with_icon[Some("playlists"), "Playlisten", "view-list-symbolic"] =
+                            add_titled_with_icon[Some("playlists"), &gettext("Playlists"), "view-list-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -725,8 +794,8 @@ impl Component for App {
 
                                     adw::StatusPage {
                                         set_icon_name: Some("view-list-symbolic"),
-                                        set_title: "Keine Playlisten",
-                                        set_description: Some("Erstelle eine Playlist oder füge Titel über die Optionen hinzu."),
+                                        set_title: &gettext("No playlists"),
+                                        set_description: Some(&gettext("Create a playlist or add tracks via the options.")),
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.playlist_items.is_empty(),
@@ -738,20 +807,74 @@ impl Component for App {
                                         set_margin_top: 6,
                                         set_margin_bottom: 10,
                                         gtk::Button {
-                                            set_label: "Neue Playlist",
+                                            set_label: &gettext("New playlist"),
                                             set_css_classes: &["suggested-action", "pill"],
                                             connect_clicked => Msg::PlaylistNew,
                                         },
                                     },
                                 },
-                            add_titled_with_icon[Some("podcasts"), "Podcasts", "microphone-symbolic"] =
+                            add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "microphone-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
+                                    // Kopf: Umschalter „Neuste" / „Übersicht" und „+" zum Abonnieren.
+                                    gtk::Box {
+                                        set_orientation: gtk::Orientation::Horizontal,
+                                        set_spacing: 6,
+                                        set_margin_top: 8,
+                                        set_margin_start: 12,
+                                        set_margin_end: 12,
+
+                                        gtk::ToggleButton {
+                                            set_label: &gettext("Newest"),
+                                            set_hexpand: true,
+                                            #[watch]
+                                            set_active: model.podcast_view == PodcastView::Newest,
+                                            connect_clicked => Msg::SetPodcastView(PodcastView::Newest),
+                                        },
+                                        gtk::ToggleButton {
+                                            set_label: &gettext("Overview"),
+                                            set_hexpand: true,
+                                            #[watch]
+                                            set_active: model.podcast_view == PodcastView::Overview,
+                                            connect_clicked => Msg::SetPodcastView(PodcastView::Overview),
+                                        },
+                                        gtk::Button {
+                                            set_icon_name: "list-add-symbolic",
+                                            set_tooltip_text: Some(&gettext("Subscribe to podcast")),
+                                            add_css_class: "flat",
+                                            connect_clicked => Msg::PodcastSubscribe,
+                                        },
+                                    },
+
+                                    // „Neuste": neueste Episoden über alle Abos.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.podcast_items.is_empty(),
+                                        set_visible: model.podcast_view == PodcastView::Newest && !model.newest_items.is_empty(),
+                                        #[local_ref]
+                                        newest_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 12,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    adw::StatusPage {
+                                        set_icon_name: Some("microphone-symbolic"),
+                                        set_title: &gettext("No episodes"),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.podcast_view == PodcastView::Newest && model.newest_items.is_empty(),
+                                    },
+
+                                    // „Übersicht": abonnierte Podcasts.
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty(),
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -762,29 +885,16 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-
                                     adw::StatusPage {
                                         set_icon_name: Some("microphone-symbolic"),
-                                        set_title: "Keine Podcasts",
-                                        set_description: Some("Abonniere einen Podcast über seine Feed-Adresse (RSS)."),
+                                        set_title: &gettext("No podcasts"),
+                                        set_description: Some(&gettext("Subscribe to a podcast via its feed address (RSS).")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_items.is_empty(),
-                                    },
-
-                                    // Aktion ganz unten.
-                                    gtk::Box {
-                                        set_halign: gtk::Align::Center,
-                                        set_margin_top: 6,
-                                        set_margin_bottom: 10,
-                                        gtk::Button {
-                                            set_label: "Podcast abonnieren",
-                                            set_css_classes: &["suggested-action", "pill"],
-                                            connect_clicked => Msg::PodcastSubscribe,
-                                        },
+                                        set_visible: model.podcast_view == PodcastView::Overview && model.podcast_items.is_empty(),
                                     },
                                 },
-                            add_titled_with_icon[Some("favorites"), "Favoriten", "emilia-favorite-symbolic"] =
+                            add_titled_with_icon[Some("favorites"), &gettext("Favorites"), "emilia-favorite-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -805,14 +915,14 @@ impl Component for App {
 
                                     adw::StatusPage {
                                         set_icon_name: Some("emilia-favorite-symbolic"),
-                                        set_title: "Keine Favoriten",
-                                        set_description: Some("Markiere Titel, Alben oder Interpreten mit dem Stern unter „Mehr Infos“."),
+                                        set_title: &gettext("No favorites"),
+                                        set_description: Some(&gettext("Mark tracks, albums or artists with the star under \"More info\".")),
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.favorite_items.is_empty(),
                                     },
                                 },
-                            add_titled_with_icon[Some("audiobooks"), "Hörbücher", "emilia-audiobook-symbolic"] =
+                            add_titled_with_icon[Some("audiobooks"), &gettext("Audiobooks"), "emilia-audiobook-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -833,8 +943,8 @@ impl Component for App {
 
                                     adw::StatusPage {
                                         set_icon_name: Some("emilia-audiobook-symbolic"),
-                                        set_title: "Keine Hörbücher",
-                                        set_description: Some("Markiere Alben, Ordner oder Titel über die Eigenschaften als „Hörbücher“."),
+                                        set_title: &gettext("No audiobooks"),
+                                        set_description: Some(&gettext("Mark albums, folders or tracks as audiobooks via the properties.")),
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.audiobook_items.is_empty(),
@@ -857,7 +967,7 @@ impl Component for App {
                                 set_size_request: (48, 48),
                             },
                             gtk::Label {
-                                set_label: "Musikdaten werden eingelesen",
+                                set_label: &gettext("Reading music data"),
                                 add_css_class: "dim-label",
                             },
                         },
@@ -874,7 +984,7 @@ impl Component for App {
 
                         gtk::Button {
                             add_css_class: "flat",
-                            set_tooltip_text: Some("Details zum laufenden Titel"),
+                            set_tooltip_text: Some(&gettext("Details of the current track")),
                             // Nur anklickbar, wenn etwas läuft.
                             #[watch]
                             set_sensitive: model.now_playing.is_some(),
@@ -924,40 +1034,38 @@ impl Component for App {
                         },
 
                         gtk::CenterBox {
-                            // Zufall linksbündig, Transport-Tasten mittig
+                            // EQ ganz links, Transport-Tasten + Zufall mittig.
                             #[wrap(Some)]
-                            set_start_widget = &gtk::ToggleButton {
-                                set_icon_name: "media-playlist-shuffle-symbolic",
-                                set_tooltip_text: Some("Zufall"),
+                            set_start_widget = &gtk::Button {
+                                set_label: "EQ",
+                                set_tooltip_text: Some(&gettext("Equalizer for this track")),
                                 set_valign: gtk::Align::Center,
                                 add_css_class: "flat",
-                                // Nur sinnvoll ab zwei Titeln in der Queue.
                                 #[watch]
-                                set_visible: model.queue.len() >= 2,
-                                #[watch]
-                                set_active: model.shuffle,
-                                // Aktiv = weiß (volle Deckkraft), sonst ausgegraut.
-                                #[watch]
-                                set_opacity: if model.shuffle { 1.0 } else { 0.4 },
-                                connect_clicked => Msg::ToggleShuffle,
+                                set_sensitive: model.now_playing.is_some(),
+                                connect_clicked => Msg::OpenCurrentEq,
                             },
                             #[wrap(Some)]
                             set_center_widget = &gtk::Box {
                                 set_spacing: 6,
-                                // Equalizer für den laufenden Titel – als „EQ"-Text,
-                                // mittig ausgerichtet.
-                                gtk::Button {
-                                    set_label: "EQ",
-                                    set_tooltip_text: Some("Equalizer für diesen Titel"),
+                                // Zufall mittig bei den Transport-Tasten (nur ab 2 Titeln).
+                                gtk::ToggleButton {
+                                    set_icon_name: "media-playlist-shuffle-symbolic",
+                                    set_tooltip_text: Some(&gettext("Shuffle")),
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
-                                    connect_clicked => Msg::OpenCurrentEq,
+                                    set_visible: model.queue.len() >= 2,
+                                    #[watch]
+                                    set_active: model.shuffle,
+                                    // Aktiv = weiß (volle Deckkraft), sonst ausgegraut.
+                                    #[watch]
+                                    set_opacity: if model.shuffle { 1.0 } else { 0.4 },
+                                    connect_clicked => Msg::ToggleShuffle,
                                 },
                                 gtk::Button {
                                     set_icon_name: "media-skip-backward-symbolic",
-                                    set_tooltip_text: Some("Zurück"),
+                                    set_tooltip_text: Some(&gettext("Back")),
                                     add_css_class: "flat",
                                     // Nichts ausgewählt → ausgegraut.
                                     #[watch]
@@ -971,7 +1079,7 @@ impl Component for App {
                                     } else {
                                         "media-playback-start-symbolic"
                                     },
-                                    set_tooltip_text: Some("Wiedergabe/Pause"),
+                                    set_tooltip_text: Some(&gettext("Play/Pause")),
                                     add_css_class: "circular",
                                     #[watch]
                                     set_sensitive: model.now_playing.is_some(),
@@ -979,7 +1087,7 @@ impl Component for App {
                                 },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
-                                    set_tooltip_text: Some("Vorwärts"),
+                                    set_tooltip_text: Some(&gettext("Forward")),
                                     add_css_class: "flat",
                                     #[watch]
                                     set_sensitive: model.now_playing.is_some(),
@@ -990,7 +1098,7 @@ impl Component for App {
                             #[wrap(Some)]
                             set_end_widget = &gtk::Button {
                                 set_icon_name: "list-high-priority-symbolic",
-                                set_tooltip_text: Some("Warteschlange"),
+                                set_tooltip_text: Some(&gettext("Queue")),
                                 set_valign: gtk::Align::Center,
                                 add_css_class: "flat",
                                 #[watch]
@@ -1030,8 +1138,8 @@ impl Component for App {
             );
         }
 
-        let library = Library::open().expect("Konnte Bibliotheks-DB nicht öffnen");
-        let player = Player::new().expect("Konnte GStreamer nicht initialisieren");
+        let library = Library::open().expect("Failed to open the library database");
+        let player = Player::new().expect("Failed to initialize GStreamer");
         let music_dir = library.get_setting("music_dir").ok().flatten();
         let root_dir = music_dir.as_ref().map(PathBuf::from);
         // Zuletzt offenen Ordner wiederherstellen – nur wenn er noch existiert
@@ -1113,6 +1221,14 @@ impl Component for App {
             library.get_setting("auto_enrich").ok().flatten().as_deref(),
             Some("0")
         );
+        // Anzeigesprache (Standard: System-Locale). Wirksam wurde sie bereits
+        // beim Start in `main` über `i18n::init`; hier nur für die Anzeige im
+        // Einstellungs-Umschalter.
+        let ui_language = library
+            .get_setting("ui_language")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "system".to_string());
         // Zuletzt offener Navigationspunkt (nur gültige Sektionsnamen zulassen).
         let saved_section = library
             .get_setting("active_section")
@@ -1182,6 +1298,7 @@ impl Component for App {
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
         let podcasts_list = gtk::ListBox::new();
+        let newest_list = gtk::ListBox::new();
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
@@ -1202,6 +1319,7 @@ impl Component for App {
             enrich_cancel: Arc::new(AtomicBool::new(false)),
             acoustid_key,
             fanart_key,
+            ui_language,
             active_output,
             music_dir,
             root_dir,
@@ -1236,6 +1354,9 @@ impl Component for App {
             playlists_list: playlists_list.clone(),
             podcast_items: Vec::new(),
             podcasts_list: podcasts_list.clone(),
+            podcast_view: PodcastView::Newest,
+            newest_items: Vec::new(),
+            newest_list: newest_list.clone(),
             queue_list: queue_list.clone(),
             concert_hint_dismissed,
             hidden_sections,
@@ -1246,6 +1367,7 @@ impl Component for App {
             view_stack: adw::ViewStack::new(),
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            sync: crate::ui::app_sync::SyncState::default(),
         };
 
         // Warteschlange vom letzten Mal wiederherstellen (nur noch vorhandene
@@ -1295,6 +1417,18 @@ impl Component for App {
         model.load_audiobooks(&sender);
         model.reload_playlists(&sender);
         model.reload_podcasts(&sender);
+        // Podcast-Feed-Bilder einmalig im Hintergrund cachen, dann die Liste neu
+        // aufbauen, damit die Cover erscheinen (kein UI-Block beim Start).
+        sender.spawn_oneshot_command(|| {
+            if let Ok(lib) = Library::open() {
+                for (_, _, image, _) in lib.podcasts().unwrap_or_default() {
+                    if let Some(url) = image {
+                        crate::core::online::cache_podcast_image(&url);
+                    }
+                }
+            }
+            Cmd::ReloadPodcasts
+        });
         // Bibliothek beim Start automatisch einlesen und – bei WLAN/LAN und
         // aktiviertem Schalter – fehlende Cover/Metadaten im Hintergrund nachladen.
         model.start_scan(&sender, true);
@@ -1383,13 +1517,13 @@ impl Component for App {
                     // Desktop-Seitenleiste: Icon **mit Beschriftung**.
                     let inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
                     inner.append(&gtk::Image::from_icon_name(icon));
-                    inner.append(&gtk::Label::new(Some(label)));
+                    inner.append(&gtk::Label::new(Some(&gettext(label))));
                     btn.set_child(Some(&inner));
                     btn.set_hexpand(true);
                 } else {
                     // Mobile Top-Leiste: nur Icon (Platz).
                     btn.set_icon_name(icon);
-                    btn.set_tooltip_text(Some(label));
+                    btn.set_tooltip_text(Some(&gettext(label)));
                 }
                 match &group_leader {
                     Some(leader) => btn.set_group(Some(leader)),
@@ -1425,7 +1559,7 @@ impl Component for App {
         settings_btn.set_hexpand(true);
         let settings_inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         settings_inner.append(&gtk::Image::from_icon_name("emblem-system-symbolic"));
-        settings_inner.append(&gtk::Label::new(Some("Einstellungen")));
+        settings_inner.append(&gtk::Label::new(Some(&gettext("Settings"))));
         settings_btn.set_child(Some(&settings_inner));
         {
             let sender = sender.clone();
@@ -1443,7 +1577,11 @@ impl Component for App {
                 for (name, _is_sidebar, btn) in buttons {
                     btn.set_active(*name == cur);
                 }
-                win_title.set_subtitle(section_meta(cur).map(|(l, _)| l).unwrap_or(""));
+                win_title.set_subtitle(
+                    &section_meta(cur)
+                        .map(|(l, _)| gettext(l))
+                        .unwrap_or_default(),
+                );
             };
         // Zuletzt offenen Navigationspunkt wiederherstellen – aber keinen
         // ausgeblendeten. Notfalls auf den ersten sichtbaren Menüpunkt (in der
@@ -1564,10 +1702,10 @@ impl Component for App {
                         if self.queue_pos > pos {
                             self.queue_pos -= 1;
                         }
-                        self.toast("Aus der Warteschlange entfernt");
+                        self.toast(&gettext("Removed from queue"));
                     } else {
                         self.queue.push(path);
-                        self.toast("Zum nächsten Abspielen vorgemerkt");
+                        self.toast(&gettext("Will play next"));
                     }
                     self.refresh_queue_icons();
                     self.save_queue();
@@ -1756,7 +1894,10 @@ impl Component for App {
                         self.play_current();
                     }
                     self.refresh_queue_icons();
-                    self.toast(&format!("{n} Titel zur Queue hinzugefügt"));
+                    self.toast(&gettext_f(
+                        "Added {n} tracks to the queue",
+                        &[("n", &n.to_string())],
+                    ));
                 }
             }
             Msg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, &sender),
@@ -1766,7 +1907,7 @@ impl Component for App {
                 if !name.is_empty() {
                     let _ = self.library.create_playlist(name);
                     self.reload_playlists(&sender);
-                    self.toast("Playlist erstellt");
+                    self.toast(&gettext("Playlist created"));
                 }
             }
             Msg::PlaylistCreateAddTo(name) => {
@@ -1812,7 +1953,7 @@ impl Component for App {
             Msg::PlaylistDelete(id) => {
                 let _ = self.library.delete_playlist(id);
                 self.reload_playlists(&sender);
-                self.toast("Playlist gelöscht");
+                self.toast(&gettext("Playlist deleted"));
             }
             Msg::PlaylistRemoveTrack { id, path } => {
                 let _ = self.library.remove_from_playlist(id, &path);
@@ -1837,7 +1978,7 @@ impl Component for App {
             Msg::PodcastSubscribeUrl(url) => {
                 let url = url.trim().to_string();
                 if !url.is_empty() {
-                    self.toast("Feed wird geladen …");
+                    self.toast(&gettext("Loading feed …"));
                     sender.spawn_command(move |out| {
                         let _ = out.send(Cmd::PodcastFetched(fetch_and_store_podcast(&url)));
                     });
@@ -1845,7 +1986,7 @@ impl Component for App {
             }
             Msg::PodcastRefresh(id) => {
                 if let Ok(Some(url)) = self.library.podcast_feed_url(id) {
-                    self.toast("Feed wird aktualisiert …");
+                    self.toast(&gettext("Updating feed …"));
                     sender.spawn_command(move |out| {
                         let _ = out.send(Cmd::PodcastFetched(fetch_and_store_podcast(&url)));
                     });
@@ -1861,17 +2002,27 @@ impl Component for App {
             Msg::PodcastDelete(id) => {
                 let _ = self.library.delete_podcast(id);
                 self.reload_podcasts(&sender);
-                self.toast("Podcast entfernt");
+                self.toast(&gettext("Podcast removed"));
             }
             Msg::PlayEpisode { url, title } => self.play_episode(&url, &title),
+            Msg::SetPodcastView(view) => self.podcast_view = view,
+            Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
+            Msg::ShowPodcastDetail(id) => self.open_podcast_detail(root, &sender, id),
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.open_share_dialog(root, &sender),
             Msg::ShareHost => {
-                self.toast("Verbindungsdienst – kommt bald");
+                self.open_sync_dialog(root, &sender);
+                self.start_sync_server(&sender);
             }
             Msg::ShareScan => {
-                self.toast("QR-Code einlesen – kommt bald");
+                self.open_sync_dialog(root, &sender);
+                self.start_sync_scan(&sender);
             }
+            Msg::OpenSyncDialog => self.open_sync_dialog(root, &sender),
+            Msg::SyncStartServer => self.start_sync_server(&sender),
+            Msg::SyncStartScan => self.start_sync_scan(&sender),
+            Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
+            Msg::SyncDialogClosed => self.teardown_sync(),
             Msg::TrackFinished => {
                 // Titel zu Ende gehört → Resume vergessen, nächstes Mal von vorn.
                 // `take()` verhindert, dass play_current die (End-)Position erneut
@@ -2021,7 +2172,7 @@ impl Component for App {
             Msg::ToggleEnrich => {
                 if self.enriching {
                     self.enrich_cancel.store(true, Ordering::Relaxed);
-                    self.enrich_status = "Wird abgebrochen …".to_string();
+                    self.enrich_status = gettext("Cancelling …");
                 } else {
                     // Manuell ausgelöst: einlesen + Online-Abruf. Dauerhaft erfolglose
                     // Einträge (≥ 3 Versuche) werden trotzdem übersprungen.
@@ -2035,7 +2186,7 @@ impl Component for App {
                 if let Some(path) = self.queue.get(self.queue_pos).cloned() {
                     let key = path.to_string_lossy().into_owned();
                     let name = Self::track_display_name(&path);
-                    self.open_eq_editor(root, &sender, "den Titel", &name, None, "track", key);
+                    self.open_eq_editor(root, &sender, "the track", &name, None, "track", key);
                 }
             }
             Msg::ShowQueue => self.open_queue_dialog(root, &sender),
@@ -2084,7 +2235,7 @@ impl Component for App {
                 self.reload_queue_list(&sender);
                 self.refresh_queue_icons();
                 self.save_queue();
-                self.toast("Warteschlange geleert");
+                self.toast(&gettext("Queue cleared"));
             }
             Msg::QueueMove { from, to } => {
                 let len = self.queue.len();
@@ -2113,7 +2264,7 @@ impl Component for App {
             Msg::SetMusicDir(path) => {
                 let dir = path.to_string_lossy().into_owned();
                 if let Err(e) = self.library.set_setting("music_dir", &dir) {
-                    tracing::error!("Konnte Musikordner nicht speichern: {e}");
+                    tracing::error!("Failed to save music folder: {e}");
                 }
                 self.music_dir = Some(dir);
                 self.root_dir = Some(path.clone());
@@ -2166,9 +2317,21 @@ impl Component for App {
                     .library
                     .set_setting("auto_enrich", if on { "1" } else { "0" });
             }
+            Msg::SetLanguage(lang) => {
+                if lang != self.ui_language {
+                    self.ui_language = lang.clone();
+                    let _ = self.library.set_setting("ui_language", &lang);
+                    // gettext liest die Sprache nur beim Start; daher die App
+                    // neu starten, damit die ganze Oberfläche umschaltet.
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe).spawn();
+                    }
+                    std::process::exit(0);
+                }
+            }
             Msg::SetAreas { scope, key, value } => {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
-                    tracing::error!("Eigenschaften konnten nicht gespeichert werden: {e}");
+                    tracing::error!("Failed to save properties: {e}");
                 }
                 // Sichtbarkeit/Zuordnung kann sich überall geändert haben →
                 // Ansichten neu laden. Konzerte/Hörbücher werden dabei live aus
@@ -2196,11 +2359,11 @@ impl Component for App {
             }
             Msg::ConcertImport => {
                 let Some(root) = self.root_dir.clone() else {
-                    self.toast("Kein Musikordner festgelegt");
+                    self.toast(&gettext("No music folder set"));
                     return;
                 };
                 let existing = self.library.concert_paths().unwrap_or_default();
-                self.toast("Suche nach Konzerten läuft …");
+                self.toast(&gettext("Searching for concerts …"));
                 sender.spawn_oneshot_command(move || {
                     Cmd::Candidates(crate::core::concert::scan_candidates(&root, &existing))
                 });
@@ -2211,31 +2374,39 @@ impl Component for App {
             }
             Msg::ConcertHideSection => {
                 self.set_section_visible("concerts", false);
-                self.toast("Menüpunkt Konzerte ausgeblendet");
+                self.toast(&gettext("Hid the Concerts menu item"));
             }
             Msg::ConcertAdd(items) => {
                 let n = items.len();
                 for (path, title, is_dir) in &items {
+                    // Tabelle: nur für die Kandidaten-Filterung beim nächsten Import.
                     let _ = self.library.add_concert(path, title, *is_dir);
+                    // Anzeige/Verwaltung über die Eigenschaften: den Bereich
+                    // „Konzerte" auf den enthaltenen Alben/Titeln markieren, damit
+                    // das Konzert auch wieder darüber entfernt werden kann.
+                    let entries = if *is_dir {
+                        self.folder_albums_and_tracks(path)
+                    } else {
+                        vec![("track".to_string(), path.clone(), title.clone(), false)]
+                    };
+                    for (scope, key, _, _) in entries {
+                        let _ = self.library.add_category_area(
+                            &scope,
+                            &key,
+                            crate::core::category::Area::Concerts,
+                        );
+                    }
                 }
                 self.load_concerts(&sender);
-                self.toast(&format!("{n} Konzert(e) hinzugefügt"));
+                self.toast(&ngettext_n(
+                    "Added {n} concert",
+                    "Added {n} concerts",
+                    n as u32,
+                ));
             }
             Msg::PlayConcert(index) => {
                 if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
                     self.play_entry(&scope, &key, is_dir);
-                }
-            }
-            Msg::ConcertRemove(index) => {
-                if let Some((scope, key, _, _)) = self.concert_items.get(index).cloned() {
-                    // Sowohl importierte Markierung (Pfad) als auch die Eigenschaft
-                    // „Konzerte" entfernen, damit der Eintrag wirklich verschwindet.
-                    let _ = self.library.remove_concert(&key);
-                    let _ = self
-                        .library
-                        .clear_area(&scope, &key, crate::core::category::Area::Concerts);
-                    self.load_concerts(&sender);
-                    self.toast("Konzert entfernt");
                 }
             }
             Msg::SetSectionVisible { section, visible } => {
@@ -2259,7 +2430,7 @@ impl Component for App {
                 self.load_concerts(&sender);
                 self.load_audiobooks(&sender);
                 self.load_dir(&sender);
-                self.toast("Wieder eingeblendet");
+                self.toast(&gettext("Shown again"));
             }
             Msg::ToggleFavorite => {
                 if let Some(target) = self.context_target.clone() {
@@ -2267,23 +2438,35 @@ impl Component for App {
                     let on = !self.library.is_favorite(scope, &key);
                     let _ = self.library.set_favorite(scope, &key, &title, is_dir, on);
                     self.load_favorites(&sender);
-                    self.toast(if on {
-                        "Zu Favoriten hinzugefügt"
+                    self.toast(&if on {
+                        gettext("Added to favorites")
                     } else {
-                        "Aus Favoriten entfernt"
+                        gettext("Removed from favorites")
                     });
                 }
             }
             Msg::PlayFavorite(index) => {
                 if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
-                    self.play_entry(&scope, &key, is_dir);
-                }
-            }
-            Msg::FavoriteRemove(index) => {
-                if let Some((scope, key, _, _)) = self.favorite_items.get(index).cloned() {
-                    let _ = self.library.set_favorite(&scope, &key, "", false, false);
+                    if scope == "track" {
+                        // Ganze Favoriten-Titelliste als Queue (vorherige leeren),
+                        // ab dem angeklickten Titel.
+                        let tracks: Vec<PathBuf> = self
+                            .favorite_items
+                            .iter()
+                            .filter(|(s, _, _, _)| s == "track")
+                            .map(|(_, k, _, _)| PathBuf::from(k))
+                            .collect();
+                        let pos = tracks.iter().position(|p| *p == PathBuf::from(&key)).unwrap_or(0);
+                        self.shuffle = false;
+                        self.queue = tracks;
+                        self.queue_pos = pos;
+                        self.play_current();
+                        self.refresh_queue_icons();
+                    } else {
+                        self.play_entry(&scope, &key, is_dir);
+                    }
+                    // Aktiv-Markierung (Pause-Icon) in der Favoritenliste aktualisieren.
                     self.load_favorites(&sender);
-                    self.toast("Aus Favoriten entfernt");
                 }
             }
             Msg::ShowFavoriteDetail(index) => {
@@ -2420,7 +2603,7 @@ impl Component for App {
             }
             Cmd::Candidates(candidates) => {
                 if candidates.is_empty() {
-                    self.toast("Keine neuen Konzert-Kandidaten gefunden");
+                    self.toast(&gettext("No new concert candidates found"));
                 } else {
                     self.open_concert_import_dialog(root, &sender, candidates);
                 }
@@ -2428,10 +2611,12 @@ impl Component for App {
             Cmd::PodcastFetched(title) => {
                 self.reload_podcasts(&sender);
                 match title {
-                    Some(t) => self.toast(&format!("Abonniert: {t}")),
-                    None => self.toast("Feed konnte nicht geladen werden"),
+                    Some(t) => self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)])),
+                    None => self.toast(&gettext("Could not load feed")),
                 }
             }
+            Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
+            Cmd::Sync(ev) => self.on_sync_event(ev, &sender),
         }
     }
 }
@@ -2491,10 +2676,7 @@ pub(crate) fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
     if let Some(y) = year {
         parts.push(y.to_string());
     }
-    parts.push(format!(
-        "{track_count} {}",
-        if track_count == 1 { "Lied" } else { "Lieder" }
-    ));
+    parts.push(ngettext_n("{n} song", "{n} songs", track_count as u32));
     parts.join(" · ")
 }
 
@@ -2605,7 +2787,7 @@ impl App {
                 .and_then(|n| n.to_str())
                 .unwrap_or("/")
                 .to_string(),
-            None => "Kein Musikordner – bitte in den Einstellungen festlegen".to_string(),
+            None => gettext("No music folder – please set one in settings"),
         }
     }
 

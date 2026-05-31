@@ -5,6 +5,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
 
 impl App {
@@ -18,14 +19,14 @@ impl App {
         for (id, name, count) in self.playlist_items.clone() {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&name))
-                .subtitle(format!("{count} Titel"))
+                .subtitle(ngettext_n("{n} track", "{n} tracks", count as u32))
                 .activatable(true)
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name("view-list-symbolic"));
 
             let play = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
-                .tooltip_text("Playlist abspielen")
+                .tooltip_text(&gettext("Play playlist"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
@@ -37,13 +38,21 @@ impl App {
 
             let del = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
-                .tooltip_text("Playlist löschen")
+                .tooltip_text(&gettext("Delete playlist"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
             {
                 let sender = sender.clone();
-                del.connect_clicked(move |_| sender.input(Msg::PlaylistDelete(id)));
+                del.connect_clicked(move |b| {
+                    crate::ui::app::confirm_destructive(
+                        b,
+                        &gettext("Delete this playlist?"),
+                        &gettext("Delete"),
+                        sender.clone(),
+                        Msg::PlaylistDelete(id),
+                    );
+                });
             }
             row.add_suffix(&del);
 
@@ -80,11 +89,11 @@ impl App {
 
         let group = adw::PreferencesGroup::builder()
             .title(gtk::glib::markup_escape_text(name))
-            .description(format!("{} Titel", paths.len()))
+            .description(ngettext_n("{n} track", "{n} tracks", paths.len() as u32))
             .build();
 
         if paths.is_empty() {
-            group.add(&adw::ActionRow::builder().title("Noch keine Titel").build());
+            group.add(&adw::ActionRow::builder().title(&gettext("No tracks yet")).build());
         }
         for path in &paths {
             let display = Self::track_display_name(std::path::Path::new(path));
@@ -95,18 +104,24 @@ impl App {
             row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
             let remove = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
-                .tooltip_text("Aus Playlist entfernen")
+                .tooltip_text(&gettext("Remove from playlist"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
             {
                 let sender = sender.clone();
                 let path = path.clone();
-                remove.connect_clicked(move |_| {
-                    sender.input(Msg::PlaylistRemoveTrack {
-                        id,
-                        path: path.clone(),
-                    });
+                remove.connect_clicked(move |b| {
+                    crate::ui::app::confirm_destructive(
+                        b,
+                        &gettext("Remove this track from the playlist?"),
+                        &gettext("Remove"),
+                        sender.clone(),
+                        Msg::PlaylistRemoveTrack {
+                            id,
+                            path: path.clone(),
+                        },
+                    );
                 });
             }
             row.add_suffix(&remove);
@@ -124,7 +139,7 @@ impl App {
             group.add(&row);
         }
         content.append(&group);
-        self.push_subpage(&format!("Playlist – {name}"), &content);
+        self.push_subpage(&gettext_f("Playlist – {name}", &[("name", name)]), &content);
     }
 
     /// Dialog: Name eingeben und eine neue (leere) Playlist anlegen.
@@ -133,13 +148,16 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let dialog = adw::AlertDialog::new(Some("Neue Playlist"), None);
+        let dialog = adw::AlertDialog::new(Some(&gettext("New playlist")), None);
         let entry = gtk::Entry::builder()
-            .placeholder_text("Name der Playlist")
+            .placeholder_text(&gettext("Playlist name"))
             .activates_default(true)
             .build();
         dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[("cancel", "Abbrechen"), ("create", "Erstellen")]);
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("create", &gettext("Create")),
+        ]);
         dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("create"));
         {
@@ -163,7 +181,7 @@ impl App {
         let playlists = self.library.playlists().unwrap_or_default();
 
         let dialog = adw::Dialog::builder()
-            .title("Zur Playlist hinzufügen")
+            .title(&gettext("Add to playlist"))
             .build();
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());
@@ -177,8 +195,8 @@ impl App {
             .build();
 
         // Neue Playlist anlegen (Name eingeben, Enter bestätigt).
-        let new_group = adw::PreferencesGroup::builder().title("Neue Playlist").build();
-        let entry = adw::EntryRow::builder().title("Name").build();
+        let new_group = adw::PreferencesGroup::builder().title(&gettext("New playlist")).build();
+        let entry = adw::EntryRow::builder().title(&gettext("Name")).build();
         new_group.add(&entry);
         content.append(&new_group);
         {
@@ -195,11 +213,11 @@ impl App {
 
         // Bestehende Playlisten (Tippen = hinzufügen).
         if !playlists.is_empty() {
-            let group = adw::PreferencesGroup::builder().title("Bestehende").build();
+            let group = adw::PreferencesGroup::builder().title(&gettext("Existing")).build();
             for (id, name, count) in playlists {
                 let row = adw::ActionRow::builder()
                     .title(gtk::glib::markup_escape_text(&name))
-                    .subtitle(format!("{count} Titel"))
+                    .subtitle(ngettext_n("{n} track", "{n} tracks", count as u32))
                     .activatable(true)
                     .build();
                 row.add_prefix(&gtk::Image::from_icon_name("view-list-symbolic"));
@@ -238,13 +256,16 @@ impl App {
             .find(|(pid, _, _)| *pid == id)
             .map(|(_, n, _)| n.clone())
             .unwrap_or_default();
-        let dialog = adw::AlertDialog::new(Some("Playlist umbenennen"), None);
+        let dialog = adw::AlertDialog::new(Some(&gettext("Rename playlist")), None);
         let entry = gtk::Entry::builder()
             .text(&current)
             .activates_default(true)
             .build();
         dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[("cancel", "Abbrechen"), ("rename", "Umbenennen")]);
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("rename", &gettext("Rename")),
+        ]);
         dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("rename"));
         {
@@ -274,6 +295,6 @@ impl App {
         let n = files.len();
         let _ = self.library.add_to_playlist(id, &files);
         self.reload_playlists(sender);
-        self.toast(&format!("{n} zur Playlist hinzugefügt"));
+        self.toast(&gettext_f("Added {n} to the playlist", &[("n", &n.to_string())]));
     }
 }

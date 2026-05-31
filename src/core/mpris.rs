@@ -68,7 +68,7 @@ impl Mpris {
             {
                 Ok(p) => p,
                 Err(e) => {
-                    tracing::warn!("MPRIS nicht verfügbar: {e}");
+                    tracing::warn!("MPRIS unavailable: {e}");
                     return;
                 }
             };

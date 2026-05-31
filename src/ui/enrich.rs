@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::core::db::Library;
 use crate::core::{online, scanner};
+use crate::i18n::gettext;
 use crate::ui::app::Cmd;
 
 /// Hintergrund-Worker für die Online-Anreicherung. Öffnet eine eigene
@@ -33,7 +34,7 @@ pub(crate) fn enrich_worker(
     let lib = match Library::open() {
         Ok(lib) => lib,
         Err(e) => {
-            tracing::error!("DB für Online-Abruf nicht erreichbar: {e}");
+            tracing::error!("Database unavailable for online fetch: {e}");
             let _ = out.send(Cmd::EnrichDone);
             return;
         }
@@ -43,7 +44,7 @@ pub(crate) fn enrich_worker(
     // automatischen Lauf entfällt das – der lokale Scan lief bereits.
     if scan_first {
         if let Err(e) = scanner::scan_into(&lib, &root) {
-            tracing::warn!("Scan vor Online-Abruf fehlgeschlagen: {e}");
+            tracing::warn!("Scan before online fetch failed: {e}");
         }
     }
 
@@ -72,7 +73,7 @@ pub(crate) fn enrich_worker(
                 let _ = lib.upsert_album_meta(&m);
             }
             let _ = out.send(Cmd::EnrichProgress {
-                phase: "Cover".to_string(),
+                phase: gettext("Cover"),
                 done: base + i + 1,
                 total: total_albums,
             });
@@ -120,7 +121,7 @@ pub(crate) fn enrich_worker(
                 std::thread::sleep(online::RATE_LIMIT);
             }
             let _ = out.send(Cmd::EnrichProgress {
-                phase: "Cover".to_string(),
+                phase: gettext("Cover"),
                 done: base + i + 1,
                 total: total_albums,
             });
@@ -149,13 +150,13 @@ pub(crate) fn enrich_worker(
                         std::thread::sleep(online::ACOUSTID_DELAY);
                     }
                     let _ = out.send(Cmd::EnrichProgress {
-                        phase: "Titel".to_string(),
+                        phase: gettext("Tracks"),
                         done: base + i + 1,
                         total: total_tracks,
                     });
                 }
             } else {
-                tracing::info!("Fingerprint-Phase übersprungen (fpcalc fehlt)");
+                tracing::info!("Fingerprint phase skipped (fpcalc missing)");
             }
         }
 
@@ -184,7 +185,7 @@ pub(crate) fn enrich_worker(
                 online::enrich_artist_gallery(&client, &lib, name, &fkey);
                 std::thread::sleep(online::RATE_LIMIT);
                 let _ = out.send(Cmd::EnrichProgress {
-                    phase: "Interpreten-Bilder".to_string(),
+                    phase: gettext("Artist photos"),
                     done: i + 1,
                     total: fa_total,
                 });
@@ -258,7 +259,7 @@ fn fetch_artists_parallel(
         let _ = lib.upsert_artist_meta(&meta);
         done += 1;
         let _ = out.send(Cmd::EnrichProgress {
-            phase: "Interpreten".to_string(),
+            phase: gettext("Artists"),
             done: done_base + done,
             total: grand_total,
         });
@@ -323,7 +324,7 @@ fn fetch_album_galleries_parallel(
         online::store_album_gallery(lib, &artist, &album, &imgs);
         done += 1;
         let _ = out.send(Cmd::EnrichProgress {
-            phase: "Album-Bilder".to_string(),
+            phase: gettext("Album art"),
             done,
             total,
         });

@@ -159,7 +159,7 @@ pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
                     count += 1;
                 }
             }
-            Err(e) => tracing::warn!("Konnte {} nicht lesen: {e}", path.display()),
+            Err(e) => tracing::warn!("Failed to read {}: {e}", path.display()),
         }
     }
     Ok(count)
