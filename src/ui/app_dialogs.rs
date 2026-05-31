@@ -74,6 +74,15 @@ impl App {
         );
 
         // Play-Aktion: bei Album/Interpret eigener Text und eigene Reihenfolge.
+        // Beim gerade laufenden Titel keine „Abspielen"-Aktion anbieten.
+        let is_current = if let CtxTarget::Fs(e) = entry {
+            !e.is_dir()
+                && self.now_playing.is_some()
+                && self.queue.get(self.queue_pos).map(|p| p.as_path()) == Some(e.path().as_path())
+        } else {
+            false
+        };
+
         let play_row = adw::ActionRow::builder()
             .title(match play_kind {
                 PlayKind::Album => "Album abspielen",
@@ -116,7 +125,9 @@ impl App {
                 });
             }
         }
-        action_group.add(&play_row);
+        if !is_current {
+            action_group.add(&play_row);
+        }
 
         // Übrige Aktionen.
         let mut actions: Vec<(&str, &str, fn() -> Msg)> = vec![

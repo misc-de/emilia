@@ -1026,10 +1026,13 @@ impl App {
                     lines.push(("Interpret", m.artist.clone()));
                 }
                 lines.push(("Album", m.album.clone()));
+                let files = self.album_files(&m.artist, &m.album);
+                if let Some(g) = Self::first_genre(&files) {
+                    lines.push(("Genre", g));
+                }
                 if let Some(y) = m.year {
                     lines.push(("Jahr", y.to_string()));
                 }
-                let files = self.album_files(&m.artist, &m.album);
                 lines.push(("Kurzübersicht", Self::files_summary(&files, m.year.is_none())));
                 lines
             }
@@ -1100,15 +1103,75 @@ impl App {
         expander.set_subtitle(&subtitle);
 
         let state = Rc::new(RefCell::new(effective.to_vec()));
-        for area in Area::ALL {
-            let row = adw::SwitchRow::builder()
-                .title(area.label())
-                .active(effective.contains(&area))
-                .build();
-            let sender = sender.clone();
-            let state = state.clone();
-            let key = key.clone();
+        let syncing = Rc::new(std::cell::Cell::new(false));
+
+        // „Ausblenden": alle Bereiche aus → überall unsichtbar. Standard: aus.
+        let hide_row = adw::SwitchRow::builder()
+            .title("Ausblenden")
+            .active(effective.is_empty())
+            .build();
+        expander.add_row(&hide_row);
+
+        // Ein Schalter je Bereich.
+        let area_rows: Rc<Vec<(Area, adw::SwitchRow)>> = Rc::new(
+            Area::ALL
+                .iter()
+                .map(|&area| {
+                    let row = adw::SwitchRow::builder()
+                        .title(area.label())
+                        .active(effective.contains(&area))
+                        .build();
+                    expander.add_row(&row);
+                    (area, row)
+                })
+                .collect(),
+        );
+
+        // Ausblenden: leert bzw. setzt den Standard und gleicht die Schalter an.
+        {
+            let (sender, key, state, syncing, area_rows) = (
+                sender.clone(),
+                key.clone(),
+                state.clone(),
+                syncing.clone(),
+                area_rows.clone(),
+            );
+            hide_row.connect_active_notify(move |r| {
+                if syncing.get() {
+                    return;
+                }
+                if r.is_active() {
+                    state.borrow_mut().clear();
+                } else {
+                    *state.borrow_mut() = Area::DEFAULT.to_vec();
+                }
+                syncing.set(true);
+                for (area, sw) in area_rows.iter() {
+                    sw.set_active(state.borrow().contains(area));
+                }
+                syncing.set(false);
+                sender.input(Msg::SetAreas {
+                    scope,
+                    key: key.clone(),
+                    value: areas_value(&state.borrow()),
+                });
+            });
+        }
+
+        // Bereichs-Schalter: Zustand anpassen und „Ausblenden" spiegeln.
+        for (area, row) in area_rows.iter() {
+            let area = *area;
+            let (sender, key, state, syncing, hide_row) = (
+                sender.clone(),
+                key.clone(),
+                state.clone(),
+                syncing.clone(),
+                hide_row.clone(),
+            );
             row.connect_active_notify(move |r| {
+                if syncing.get() {
+                    return;
+                }
                 {
                     let mut s = state.borrow_mut();
                     if r.is_active() {
@@ -1119,14 +1182,17 @@ impl App {
                         s.retain(|a| *a != area);
                     }
                 }
+                syncing.set(true);
+                hide_row.set_active(state.borrow().is_empty());
+                syncing.set(false);
                 sender.input(Msg::SetAreas {
                     scope,
                     key: key.clone(),
                     value: areas_value(&state.borrow()),
                 });
             });
-            expander.add_row(&row);
         }
+
         group.add(&expander);
         group
     }
@@ -1219,11 +1285,20 @@ impl App {
         gtk::gdk::Texture::from_filename(&path).ok()
     }
 
+    /// Erstes gesetztes Genre einer Dateimenge (für die Album-Anzeige). Alben
+    /// sind in der Regel genre-einheitlich, daher genügt der erste Treffer.
+    fn first_genre(files: &[PathBuf]) -> Option<String> {
+        files
+            .iter()
+            .find_map(|f| scanner::read_genre_composer(f).0)
+    }
+
     /// Detailzeilen für die "Mehr Infos"-Aufklappung.
     pub(crate) fn info_lines(&self, entry: &FsEntry) -> Vec<(&'static str, String)> {
         let mut lines = Vec::new();
         if entry.is_dir() {
             // Als Album/Interpret erkannte Ordner zeigen passende Infos inkl. Jahr.
+            let files = self.entry_files(entry);
             let mut year_shown = false;
             match self.fs_music_kind(entry) {
                 Some(FsKind::Album { artist, album }) => {
@@ -1231,6 +1306,9 @@ impl App {
                         lines.push(("Interpret", artist.clone()));
                     }
                     lines.push(("Album", album.clone()));
+                    if let Some(g) = Self::first_genre(&files) {
+                        lines.push(("Genre", g));
+                    }
                     if let Some(y) = self
                         .library
                         .get_album_meta(&artist, &album)
@@ -1251,7 +1329,6 @@ impl App {
                 }
                 None => {}
             }
-            let files = self.entry_files(entry);
             lines.push(("Kurzübersicht", Self::files_summary(&files, !year_shown)));
         } else {
             match scanner::read_track(entry.path()) {
@@ -1260,11 +1337,21 @@ impl App {
                     // Interpret/Album für die Jahres-Auflösung merken (werden
                     // beim Anzeigen verbraucht).
                     let (artist, album) = (t.artist.clone(), t.album.clone());
+                    // Genre + Komponist aus den Datei-Tags (nur Anzeige). Der
+                    // Komponist wird immer gezeigt, wenn er getaggt ist (relevant
+                    // für Klassik/Hörspiele); das Genre, wann immer vorhanden.
+                    let (genre, composer) = scanner::read_genre_composer(entry.path());
                     if let Some(a) = t.artist {
                         lines.push(("Interpret", a));
                     }
+                    if let Some(c) = composer {
+                        lines.push(("Komponist", c));
+                    }
                     if let Some(al) = t.album {
                         lines.push(("Album", al));
+                    }
+                    if let Some(g) = genre {
+                        lines.push(("Genre", g));
                     }
                     if let Some(d) = t.duration_ms {
                         lines.push(("Dauer", fmt_duration(d)));

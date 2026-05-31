@@ -52,6 +52,27 @@ pub fn read_album_year(path: &Path) -> (Option<String>, Option<u32>) {
     (album, tag.year())
 }
 
+/// Liest Genre und Komponist aus den Datei-Tags (für „Mehr Infos").
+/// Beide nur, wenn tatsächlich gesetzt; leere Tags ergeben `None`. Wie überall
+/// hier wird die Datei dabei ausschließlich gelesen, nie verändert.
+pub fn read_genre_composer(path: &Path) -> (Option<String>, Option<String>) {
+    let Ok(tagged) = lofty::read_from_path(path) else {
+        return (None, None);
+    };
+    let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
+        return (None, None);
+    };
+    let genre = tag
+        .genre()
+        .map(|c| c.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let composer = tag
+        .get_string(&lofty::tag::ItemKey::Composer)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    (genre, composer)
+}
+
 /// Spieldauer einer Audiodatei in Sekunden (0, wenn nicht lesbar).
 pub fn duration_secs(path: &Path) -> u64 {
     lofty::read_from_path(path)

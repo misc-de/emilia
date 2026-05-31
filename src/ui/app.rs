@@ -350,8 +350,8 @@ impl Component for App {
                 set_collapsed: false,
                 set_enable_show_gesture: false,
                 set_enable_hide_gesture: false,
-                set_min_sidebar_width: 64.0,
-                set_max_sidebar_width: 84.0,
+                set_min_sidebar_width: 180.0,
+                set_max_sidebar_width: 240.0,
 
                 // Seitenleiste (Desktop): icon-only Navigation links
                 #[wrap(Some)]
@@ -368,7 +368,7 @@ impl Component for App {
                         set_margin_top: 8,
                         set_margin_start: 6,
                         set_margin_end: 6,
-                        set_halign: gtk::Align::Center,
+                        set_halign: gtk::Align::Fill,
                         set_valign: gtk::Align::Start,
                     },
                 },
@@ -1111,18 +1111,30 @@ impl Component for App {
         // Icon-only Navigation (Seitenleiste + oben) erzeugen und an den Stack koppeln.
         let mut nav_buttons: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
         let mut concert_btns: Vec<gtk::ToggleButton> = Vec::new();
-        for container in [widgets.sidebar_nav.clone(), widgets.top_nav.clone()] {
+        for (is_sidebar, container) in [
+            (true, widgets.sidebar_nav.clone()),
+            (false, widgets.top_nav.clone()),
+        ] {
             let mut group_leader: Option<gtk::ToggleButton> = None;
             for (name, label, icon) in SECTIONS {
                 // „Konzerte"-Menüpunkt ggf. komplett auslassen.
                 if name == "concerts" && concerts_hidden {
                     continue;
                 }
-                let btn = gtk::ToggleButton::builder()
-                    .icon_name(icon)
-                    .tooltip_text(label)
-                    .build();
+                let btn = gtk::ToggleButton::builder().build();
                 btn.add_css_class("flat");
+                if is_sidebar {
+                    // Desktop-Seitenleiste: Icon **mit Beschriftung**.
+                    let inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+                    inner.append(&gtk::Image::from_icon_name(icon));
+                    inner.append(&gtk::Label::new(Some(label)));
+                    btn.set_child(Some(&inner));
+                    btn.set_hexpand(true);
+                } else {
+                    // Mobile Top-Leiste: nur Icon (Platz).
+                    btn.set_icon_name(icon);
+                    btn.set_tooltip_text(Some(label));
+                }
                 match &group_leader {
                     Some(leader) => btn.set_group(Some(leader)),
                     None => group_leader = Some(btn.clone()),
