@@ -15,12 +15,12 @@ use crate::model::{AlbumMeta, ArtistMeta, Track};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
 use crate::ui::enrich::enrich_worker;
-use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow, RowOpts};
+use crate::ui::fs_row::{FsEntry, FsOutput, FsRow, RowOpts};
 
 /// Ziel der Detailansicht (langes Drücken): eine Datei/ein Ordner im
 /// Dateibrowser, ein Interpret, ein Album oder ein Konzert (= Pfad → `Fs`).
 #[derive(Clone)]
-enum CtxTarget {
+pub(crate) enum CtxTarget {
     Fs(FsEntry),
     Artist(ArtistMeta),
     Album(AlbumMeta),
@@ -44,7 +44,7 @@ impl CtxTarget {
 }
 
 /// Musikalische Bedeutung eines Dateisystem-Ordners (für Wiedergabe & EQ).
-enum FsKind {
+pub(crate) enum FsKind {
     /// Ordner eines Interpreten (Name = bekannter Interpret).
     Artist(String),
     /// Ordner genau eines Albums.
@@ -62,7 +62,7 @@ const SECTIONS: [(&str, &str, &str); 5] = [
 
 /// Ab dieser Spieldauer gilt ein Titel als „Lang-Inhalt" und bekommt
 /// automatisch eine Resume-Position (15 Minuten).
-const RESUME_MIN_DURATION_MS: i64 = 15 * 60 * 1000;
+pub(crate) const RESUME_MIN_DURATION_MS: i64 = 15 * 60 * 1000;
 /// Vor dieser Position wird kein Resume gemerkt (zu nah am Anfang).
 const RESUME_MIN_POS_MS: i64 = 5_000;
 /// So nah vor dem Ende gilt der Titel als fertig → Resume auf 0 zurücksetzen.
@@ -70,7 +70,7 @@ const RESUME_END_GUARD_MS: i64 = 10_000;
 
 /// Resume-Position mit Wächtern: nahe Anfang oder Ende wird auf 0 gesetzt,
 /// damit ein quasi fertiger Titel beim nächsten Mal von vorn beginnt.
-fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
+pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     if pos_ms < RESUME_MIN_POS_MS {
         0
     } else if dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS {
@@ -81,67 +81,67 @@ fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
 }
 
 pub struct App {
-    library: Library,
-    player: Player,
+    pub(crate) library: Library,
+    pub(crate) player: Player,
     /// Sperrbildschirm-/Medientasten-Steuerung (MPRIS, optional).
-    mpris: crate::core::mpris::Mpris,
-    entries: FactoryVecDeque<FsRow>,
-    albums: FactoryVecDeque<AlbumCard>,
-    album_count: usize,
-    artists: FactoryVecDeque<ArtistCard>,
-    artist_count: usize,
-    enriching: bool,
-    enrich_status: String,
+    pub(crate) mpris: crate::core::mpris::Mpris,
+    pub(crate) entries: FactoryVecDeque<FsRow>,
+    pub(crate) albums: FactoryVecDeque<AlbumCard>,
+    pub(crate) album_count: usize,
+    pub(crate) artists: FactoryVecDeque<ArtistCard>,
+    pub(crate) artist_count: usize,
+    pub(crate) enriching: bool,
+    pub(crate) enrich_status: String,
     /// Cover & Metadaten beim Start automatisch online nachladen (nur bei
     /// nicht-getakteter Verbindung; in den Einstellungen abschaltbar).
-    auto_enrich: bool,
+    pub(crate) auto_enrich: bool,
     /// Fortschritts-Leiste vom Nutzer ausgeblendet? (Abruf läuft im Hintergrund weiter.)
-    enrich_banner_hidden: bool,
+    pub(crate) enrich_banner_hidden: bool,
     /// Abbruch-Flag für den Anreicherungs-Worker.
-    enrich_cancel: Arc<AtomicBool>,
-    acoustid_key: Option<String>,
-    fanart_key: Option<String>,
+    pub(crate) enrich_cancel: Arc<AtomicBool>,
+    pub(crate) acoustid_key: Option<String>,
+    pub(crate) fanart_key: Option<String>,
     /// Aktuell aktiver Audio-Ausgang (PipeWire-Sink), für die EQ-Auflösung.
-    active_output: String,
-    music_dir: Option<String>,
-    root_dir: Option<PathBuf>,
-    browse_dir: Option<PathBuf>,
+    pub(crate) active_output: String,
+    pub(crate) music_dir: Option<String>,
+    pub(crate) root_dir: Option<PathBuf>,
+    pub(crate) browse_dir: Option<PathBuf>,
     /// Aktuell im Dateibrowser angezeigter Ordner (für das Merken der Scrollposition).
-    shown_dir: Option<PathBuf>,
+    pub(crate) shown_dir: Option<PathBuf>,
     /// Gemerkte Scrollpositionen je Ordner im Dateibrowser, damit man beim
     /// Zurücknavigieren wieder auf gleicher Höhe landet.
-    fs_scroll: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<PathBuf, f64>>>,
-    loading: bool,
-    queue: Vec<PathBuf>,
-    queue_pos: usize,
+    pub(crate) fs_scroll: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<PathBuf, f64>>>,
+    pub(crate) loading: bool,
+    pub(crate) queue: Vec<PathBuf>,
+    pub(crate) queue_pos: usize,
     /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
     /// Resume-Position beim Wechsel auf einen anderen Titel).
-    playing_path: Option<PathBuf>,
+    pub(crate) playing_path: Option<PathBuf>,
     /// Schnappschuss (Pfad, Position, Dauer) des laufenden Resume-Titels, vom
     /// 1-s-Tick aktualisiert. Wird beim Schließen einmalig in die DB geschrieben,
     /// damit beim harten Beenden höchstens ~1 s Hörposition verloren geht.
-    close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
-    now_playing: Option<String>,
-    playing: bool,
+    pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
+    pub(crate) now_playing: Option<String>,
+    pub(crate) playing: bool,
     /// Aktuelle Position und Gesamtdauer des laufenden Titels (ms) – für die
     /// Seekleiste im Mini-Player.
-    position_ms: i64,
-    track_duration_ms: i64,
-    shuffle: bool,
-    context_target: Option<CtxTarget>,
-    toast_overlay: adw::ToastOverlay,
+    pub(crate) position_ms: i64,
+    pub(crate) track_duration_ms: i64,
+    pub(crate) shuffle: bool,
+    pub(crate) context_target: Option<CtxTarget>,
+    pub(crate) toast_overlay: adw::ToastOverlay,
     // Konzerte
-    concert_items: Vec<(String, String, bool)>,
-    concerts_list: gtk::ListBox,
-    concert_hint_dismissed: bool,
-    concerts_hidden: bool,
-    concert_nav_buttons: Vec<gtk::ToggleButton>,
-    view_stack: adw::ViewStack,
+    pub(crate) concert_items: Vec<(String, String, bool)>,
+    pub(crate) concerts_list: gtk::ListBox,
+    pub(crate) concert_hint_dismissed: bool,
+    pub(crate) concerts_hidden: bool,
+    pub(crate) concert_nav_buttons: Vec<gtk::ToggleButton>,
+    pub(crate) view_stack: adw::ViewStack,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
-    nav_view: adw::NavigationView,
+    pub(crate) nav_view: adw::NavigationView,
     /// Gemerkte Scrollposition der zuletzt verlassenen Übersichtsseite
     /// (Scroller + Wert), um sie beim Zurücknavigieren wiederherzustellen.
-    overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
+    pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
 }
 
 #[derive(Debug)]
@@ -1797,7 +1797,7 @@ fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
 
 impl App {
     /// Scroller der Dateiliste (Vorfahre der Einträge-`ListBox`).
-    fn fs_scroller(&self) -> Option<gtk::ScrolledWindow> {
+    pub(crate) fn fs_scroller(&self) -> Option<gtk::ScrolledWindow> {
         self.entries
             .widget()
             .ancestor(gtk::ScrolledWindow::static_type())
@@ -1805,7 +1805,7 @@ impl App {
     }
 
     /// Startet das Einlesen des aktuellen Ordners im Hintergrund (mit Spinner).
-    fn load_dir(&mut self, sender: &ComponentSender<Self>) {
+    pub(crate) fn load_dir(&mut self, sender: &ComponentSender<Self>) {
         // Scrollposition des gerade gezeigten Ordners merken, bevor er ersetzt wird.
         if let (Some(dir), Some(sc)) = (self.shown_dir.clone(), self.fs_scroller()) {
             self.fs_scroll
@@ -1827,7 +1827,7 @@ impl App {
     }
 
     /// Lädt die Album-Übersicht aus der DB in die Factory (inkl. Online-Cover).
-    fn reload_albums(&mut self) {
+    pub(crate) fn reload_albums(&mut self) {
         let albums = self.library.albums_overview().unwrap_or_default();
         self.album_count = albums.len();
         let mut guard = self.albums.guard();
@@ -1840,7 +1840,7 @@ impl App {
     /// Liest die Bibliothek (Tags → DB) **im Hintergrund** ein – rein lokal, ohne
     /// Netz. `then_enrich`: danach ggf. automatisch online nachladen (entscheidet
     /// der `ScanDone`-Handler anhand Schalter + Verbindung).
-    fn start_scan(&self, sender: &ComponentSender<Self>, then_enrich: bool) {
+    pub(crate) fn start_scan(&self, sender: &ComponentSender<Self>, then_enrich: bool) {
         let Some(root) = self.root_dir.clone() else {
             return;
         };
@@ -1861,7 +1861,7 @@ impl App {
     /// Tags einlesen (beim manuellen Abruf) – beim automatischen Lauf entfällt das,
     /// weil der lokale Scan bereits durchlief. Die Audiodateien werden dabei nur
     /// gelesen, niemals verändert.
-    fn run_enrich(&mut self, sender: &ComponentSender<Self>, scan_first: bool) {
+    pub(crate) fn run_enrich(&mut self, sender: &ComponentSender<Self>, scan_first: bool) {
         let Some(root) = self.root_dir.clone() else {
             self.toast("Kein Musikordner festgelegt – bitte in den Einstellungen wählen");
             return;
@@ -1886,7 +1886,7 @@ impl App {
     }
 
     /// Lädt die Interpreten-Übersicht aus der DB in die Factory (inkl. Foto).
-    fn reload_artists(&mut self) {
+    pub(crate) fn reload_artists(&mut self) {
         let artists = self.library.artists_overview().unwrap_or_default();
         self.artist_count = artists.len();
         let mut guard = self.artists.guard();
@@ -1898,7 +1898,7 @@ impl App {
 
     /// Liefert die abspielbaren Dateien eines Eintrags: bei Ordnern rekursiv,
     /// bei Dateien nur die eine.
-    fn entry_files(&self, entry: &FsEntry) -> Vec<PathBuf> {
+    pub(crate) fn entry_files(&self, entry: &FsEntry) -> Vec<PathBuf> {
         if entry.is_dir() {
             scanner::collect_audio_files(entry.path())
         } else {
@@ -1907,7 +1907,7 @@ impl App {
     }
 
     /// Alle Dateien eines Interpreten (aus der Bibliothek), in Abspielreihenfolge.
-    fn artist_files(&self, name: &str) -> Vec<PathBuf> {
+    pub(crate) fn artist_files(&self, name: &str) -> Vec<PathBuf> {
         // Wie die Interpreten-Liste (artist_sections/artist_albums): ein Titel
         // zählt zum Interpreten, wenn dessen Name in der – ggf. aus „feat."
         // zerlegten – Interpreten-Angabe vorkommt (case-insensitiv). Sonst zählte
@@ -1930,7 +1930,7 @@ impl App {
     }
 
     /// Alle Dateien eines Albums (Interpret + Album), in Abspielreihenfolge.
-    fn album_files(&self, artist: &str, album: &str) -> Vec<PathBuf> {
+    pub(crate) fn album_files(&self, artist: &str, album: &str) -> Vec<PathBuf> {
         self.library
             .all_tracks()
             .unwrap_or_default()
@@ -1948,7 +1948,7 @@ impl App {
     /// passend zur Interpreten-Liste, die ebenfalls „feat."-Angaben aufteilt.
     /// Alben in der Reihenfolge aus `all_tracks` (alphabetisch), Titel je Album
     /// nach Tracknummer.
-    fn artist_albums(&self, name: &str) -> Vec<(String, Vec<Track>)> {
+    pub(crate) fn artist_albums(&self, name: &str) -> Vec<(String, Vec<Track>)> {
         let target = name.to_lowercase();
         let mut order: Vec<String> = Vec::new();
         let mut groups: std::collections::HashMap<String, Vec<Track>> =
@@ -1986,7 +1986,7 @@ impl App {
     /// * Titel ganz ohne Album sind ebenfalls Einzellieder.
     ///
     /// Alben in der Reihenfolge aus `all_tracks`; Titel je Album nach Tracknummer.
-    fn artist_sections(&self, name: &str) -> (Vec<(String, String, Vec<Track>)>, Vec<Track>) {
+    pub(crate) fn artist_sections(&self, name: &str) -> (Vec<(String, String, Vec<Track>)>, Vec<Track>) {
         let target = name.to_lowercase();
         let all = self.library.all_tracks().unwrap_or_default();
 
@@ -2047,7 +2047,7 @@ impl App {
     /// Titel, die zu „diesem Album dieses Interpreten" gehören: alle Bibliotheks-
     /// titel mit dem Albumnamen, in deren (zerlegter) Interpreten-Angabe `name`
     /// vorkommt. Bereits nach Tracknummer sortiert (Reihenfolge aus `all_tracks`).
-    fn album_tracks_for_artist(&self, name: &str, album: &str) -> Vec<Track> {
+    pub(crate) fn album_tracks_for_artist(&self, name: &str, album: &str) -> Vec<Track> {
         let target = name.to_lowercase();
         self.library
             .all_tracks()
@@ -2066,7 +2066,7 @@ impl App {
 
     /// Hüllt einen Inhalt in eine scrollbare Unterseite (mit Kopfleiste +
     /// Zurück-Pfeil) und schiebt sie auf den Navigations-Stapel.
-    fn push_subpage(&self, title: &str, content: &gtk::Box) {
+    pub(crate) fn push_subpage(&self, title: &str, content: &gtk::Box) {
         // Verlassen wir die Wurzel-Übersicht, die aktuelle Scrollposition der
         // sichtbaren Sektion merken (wird beim Zurückkehren wiederhergestellt).
         let leaving_root = self
@@ -2105,7 +2105,7 @@ impl App {
     /// dessen **Alben** (mit Cover) und danach die **Einzellieder** (Titel ohne
     /// Album, mit Cover) auflistet. Tippen auf ein Album öffnet dessen Titel als
     /// weitere Unterseite; Tippen auf ein Einzellied spielt es ab.
-    fn open_artist_tracks(&self, sender: &ComponentSender<Self>, meta: &ArtistMeta) {
+    pub(crate) fn open_artist_tracks(&self, sender: &ComponentSender<Self>, meta: &ArtistMeta) {
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(18)
@@ -2293,7 +2293,7 @@ impl App {
     /// Tippen auf ein Album in der Interpreten-Unterseite: listet dessen Titel
     /// (mit Album-Cover) als weitere Unterseite auf. Tippen auf einen Titel
     /// spielt das gesamte Album ab diesem Titel ab.
-    fn open_album_tracks(&self, sender: &ComponentSender<Self>, name: &str, album: &str) {
+    pub(crate) fn open_album_tracks(&self, sender: &ComponentSender<Self>, name: &str, album: &str) {
         // Titel des Albums – `all_tracks` liefert bereits nach Tracknummer sortiert.
         let tracks = self.album_tracks_for_artist(name, album);
 
@@ -2428,7 +2428,7 @@ impl App {
     // ---- Ziel-abhängige Helfer für die Detailansicht (Datei/Ordner, Interpret, Album) ----
 
     /// Abspielbare Dateien des Detailziels.
-    fn ctx_files(&self, target: &CtxTarget) -> Vec<PathBuf> {
+    pub(crate) fn ctx_files(&self, target: &CtxTarget) -> Vec<PathBuf> {
         match target {
             CtxTarget::Fs(e) => self.entry_files(e),
             CtxTarget::Artist(m) => self.artist_files(&m.name),
@@ -2446,7 +2446,7 @@ impl App {
     /// Erkennt, ob ein Dateisystem-Ordner einem Interpreten oder einem Album
     /// entspricht. Grundlage für Wiedergabe („Album/Interpreten abspielen") und
     /// die EQ-Ebene aus der Dateiansicht.
-    fn fs_music_kind(&self, entry: &FsEntry) -> Option<FsKind> {
+    pub(crate) fn fs_music_kind(&self, entry: &FsEntry) -> Option<FsKind> {
         if !entry.is_dir() {
             return None;
         }
@@ -2482,7 +2482,7 @@ impl App {
 
     /// EQ-Ebene `(Überschrift, Hinweis, scope, key)` eines Dateisystem-Ordners,
     /// passend zu [`Self::open_eq_editor`] – leitet sich aus [`Self::fs_music_kind`] ab.
-    fn fs_eq_level(
+    pub(crate) fn fs_eq_level(
         &self,
         entry: &FsEntry,
     ) -> Option<(&'static str, String, Option<&'static str>, &'static str, String)> {
@@ -2509,7 +2509,7 @@ impl App {
 
     /// Album-Identität (Interpret, Album) des aktuellen Kontextziels, falls es ein
     /// Album ist (Album-Karte oder als Album erkannter Ordner).
-    fn ctx_album(&self) -> Option<(String, String)> {
+    pub(crate) fn ctx_album(&self) -> Option<(String, String)> {
         match self.context_target.as_ref()? {
             CtxTarget::Album(m) => Some((m.artist.clone(), m.album.clone())),
             CtxTarget::Fs(e) => match self.fs_music_kind(e)? {
@@ -2522,7 +2522,7 @@ impl App {
 
     /// Interpretenname des aktuellen Kontextziels, falls es ein Interpret ist
     /// (Interpreten-Karte oder als Interpret erkannter Ordner).
-    fn ctx_artist(&self) -> Option<String> {
+    pub(crate) fn ctx_artist(&self) -> Option<String> {
         match self.context_target.as_ref()? {
             CtxTarget::Artist(m) => Some(m.name.clone()),
             CtxTarget::Fs(e) => match self.fs_music_kind(e)? {
@@ -2536,7 +2536,7 @@ impl App {
     /// Alben eines Interpreten mit (sofern bekannt) Erscheinungsjahr aus den
     /// Album-Metadaten. Titel je Album bereits nach Tracknummer (siehe
     /// [`Self::artist_albums`]).
-    fn artist_albums_dated(&self, name: &str) -> Vec<(Option<i32>, String, Vec<Track>)> {
+    pub(crate) fn artist_albums_dated(&self, name: &str) -> Vec<(Option<i32>, String, Vec<Track>)> {
         self.artist_albums(name)
             .into_iter()
             .map(|(album, tracks)| {
@@ -2558,7 +2558,7 @@ impl App {
     /// Alle Titel eines Interpreten in Abspielreihenfolge: Alben nach Jahr
     /// (älteste bzw. neueste zuerst, unbekannte Jahre ans Ende), je Album von
     /// Track 1 top-down.
-    fn artist_files_ordered(&self, name: &str, newest_first: bool) -> Vec<PathBuf> {
+    pub(crate) fn artist_files_ordered(&self, name: &str, newest_first: bool) -> Vec<PathBuf> {
         let mut albums = self.artist_albums_dated(name);
         albums.sort_by(|a, b| {
             use std::cmp::Ordering;
@@ -2586,7 +2586,7 @@ impl App {
     /// Jahres-Info der Alben eines Interpreten als `(Label, Wert)`: bei mindestens
     /// zwei **unterschiedlichen** Jahren „Jahre" + „von – bis", bei genau einem
     /// bekannten Jahr „Jahr" + Einzeljahr. `None`, wenn kein Jahr bekannt ist.
-    fn artist_year_range(&self, name: &str) -> Option<(&'static str, String)> {
+    pub(crate) fn artist_year_range(&self, name: &str) -> Option<(&'static str, String)> {
         let mut years: Vec<i32> = self
             .artist_albums_dated(name)
             .into_iter()
@@ -2601,7 +2601,7 @@ impl App {
         }
     }
 
-    fn ctx_cover(&self, target: &CtxTarget) -> (Option<gtk::gdk::Texture>, &'static str) {
+    pub(crate) fn ctx_cover(&self, target: &CtxTarget) -> (Option<gtk::gdk::Texture>, &'static str) {
         match target {
             CtxTarget::Fs(e) => {
                 // Zuerst ein (Album-)Cover: Cover-Datei, eingebettet, oder online
@@ -2647,7 +2647,7 @@ impl App {
 
     /// Hängt das Cover/Foto an: bei mehreren Bildern ein Karussell mit Punkten,
     /// sonst das einzelne (primäre) Bild wie bisher.
-    fn append_cover_or_gallery(
+    pub(crate) fn append_cover_or_gallery(
         &self,
         content: &gtk::Box,
         entry: &CtxTarget,
@@ -2726,7 +2726,7 @@ impl App {
     }
 
     /// Gespeicherte Galerie-Bildpfade eines Ziels (nur existierende Dateien).
-    fn ctx_gallery_paths(&self, entry: &CtxTarget) -> Vec<String> {
+    pub(crate) fn ctx_gallery_paths(&self, entry: &CtxTarget) -> Vec<String> {
         let stored = match entry {
             CtxTarget::Artist(m) => self.library.artist_images(&m.name).unwrap_or_default(),
             CtxTarget::Album(m) => {
@@ -2741,7 +2741,7 @@ impl App {
     }
 
     /// Detailzeilen für die "Mehr Infos"-Aufklappung.
-    fn ctx_info_lines(&self, target: &CtxTarget) -> Vec<(&'static str, String)> {
+    pub(crate) fn ctx_info_lines(&self, target: &CtxTarget) -> Vec<(&'static str, String)> {
         match target {
             CtxTarget::Fs(e) => self.info_lines(e),
             CtxTarget::Artist(m) => {
@@ -2773,7 +2773,7 @@ impl App {
     }
 
     /// "Merkmale"-Gruppe des Detailziels (Datei: alle Ebenen; Interpret/Album: passend).
-    fn ctx_merkmale(
+    pub(crate) fn ctx_merkmale(
         &self,
         target: &CtxTarget,
         sender: &ComponentSender<Self>,
@@ -2786,7 +2786,7 @@ impl App {
     }
 
     /// "Merkmale"-Gruppe für einen Interpreten: eine Auswahl auf Interpret-Ebene.
-    fn artist_merkmale(
+    pub(crate) fn artist_merkmale(
         &self,
         name: &str,
         sender: &ComponentSender<Self>,
@@ -2814,7 +2814,7 @@ impl App {
     }
 
     /// "Merkmale"-Gruppe für ein Album: Album-Ebene plus geerbte Interpret-Ebene.
-    fn album_merkmale(
+    pub(crate) fn album_merkmale(
         &self,
         artist: &str,
         album: &str,
@@ -2864,7 +2864,7 @@ impl App {
     /// Kurzübersicht „N Alben - M Lieder[ - Jahr/Bereich]". Das Jahr wird nur
     /// angehängt, wenn `with_year` gesetzt ist – sobald eine eigene „Jahr"/„Jahre"-
     /// Zeile angezeigt wird, entfällt es hier (Dopplung vermeiden).
-    fn files_summary(files: &[PathBuf], with_year: bool) -> String {
+    pub(crate) fn files_summary(files: &[PathBuf], with_year: bool) -> String {
         let songs = files.len();
         let mut albums = std::collections::HashSet::new();
         let mut min_year: Option<u32> = None;
@@ -2899,12 +2899,12 @@ impl App {
         value
     }
 
-    fn toast(&self, msg: &str) {
+    pub(crate) fn toast(&self, msg: &str) {
         self.toast_overlay.add_toast(adw::Toast::new(msg));
     }
 
     /// Aktionsmenü beim langen Drücken (Ordner oder Titel).
-    fn open_context_menu(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_context_menu(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let Some(entry) = self.context_target.as_ref() else {
             return;
         };
@@ -3063,7 +3063,7 @@ impl App {
 
     /// „Teilen"-Dialog: Verbindung anbieten (Dienst starten) oder QR-Code einlesen.
     /// Die eigentliche Geräte-Sync-Logik folgt später.
-    fn open_share_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_share_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let dialog = adw::Dialog::builder().title("Teilen").build();
 
         let content = gtk::Box::builder()
@@ -3135,7 +3135,7 @@ impl App {
     /// ein Titel kein fremdes Cover aus einem geteilten Ordner erbt – stattdessen
     /// das eingebettete Bild der Datei bzw. das online zugeordnete Album-Cover.
     /// `None`, wenn nichts Passendes gefunden wird.
-    fn cover_texture(&self, entry: &FsEntry) -> Option<gtk::gdk::Texture> {
+    pub(crate) fn cover_texture(&self, entry: &FsEntry) -> Option<gtk::gdk::Texture> {
         if entry.is_dir() {
             if let Some(path) = cover::find_cover_file(entry.path()) {
                 if let Ok(texture) = gtk::gdk::Texture::from_filename(&path) {
@@ -3178,7 +3178,7 @@ impl App {
     /// Baut die „Merkmale"-Gruppe für einen Titel: je eine Auswahl für die
     /// Titel-, Album- und Interpret-Ebene. Höhere Ebenen werden vererbt, jede
     /// kann individuell übersteuert werden. Für Ordner: `None`.
-    fn build_merkmale(
+    pub(crate) fn build_merkmale(
         &self,
         entry: &FsEntry,
         sender: &ComponentSender<Self>,
@@ -3234,7 +3234,7 @@ impl App {
     }
 
     /// Eine Auswahl-Zeile („Erben" + die vier Merkmale) für eine Ebene.
-    fn add_category_row(
+    pub(crate) fn add_category_row(
         &self,
         expander: &adw::ExpanderRow,
         sender: &ComponentSender<Self>,
@@ -3277,7 +3277,7 @@ impl App {
     /// Änderungen wirken sofort und werden je Ausgang+Ebene gespeichert; beim
     /// Abspielen greift die Vererbung (Titel→Album→Interpret→Global, dann der
     /// Standard-Ausgang als Basis).
-    fn open_eq_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_eq_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let Some(entry) = self.context_target.as_ref() else {
             return;
         };
@@ -3327,7 +3327,7 @@ impl App {
 
     /// Globaler Equalizer (aus den Einstellungen): Basis für alles ohne eigene
     /// Festlegung auf Interpret-, Album- oder Titel-Ebene.
-    fn open_global_eq(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_global_eq(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         self.open_eq_editor(
             root,
             sender,
@@ -3341,7 +3341,7 @@ impl App {
 
     /// Equalizer-Editor für genau eine Ebene (scope/key) mit Ausgang-Auswahl.
     /// Genutzt vom Detail-EQ (Interpret/Album/Titel) und vom globalen EQ.
-    fn open_eq_editor(
+    pub(crate) fn open_eq_editor(
         &self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
@@ -3571,7 +3571,7 @@ impl App {
     }
 
     /// Detailzeilen für die "Mehr Infos"-Aufklappung.
-    fn info_lines(&self, entry: &FsEntry) -> Vec<(&'static str, String)> {
+    pub(crate) fn info_lines(&self, entry: &FsEntry) -> Vec<(&'static str, String)> {
         let mut lines = Vec::new();
         if entry.is_dir() {
             // Als Album/Interpret erkannte Ordner zeigen passende Infos inkl. Jahr.
@@ -3658,240 +3658,8 @@ impl App {
         lines
     }
 
-    /// Aktualisiert die Queue-Markierung aller sichtbaren Dateizeilen.
-    fn refresh_queue_icons(&mut self) {
-        let queue = self.queue.clone();
-        // Aktuell laufender Titel (für die Play-Markierung).
-        let active_path = self.queue.get(self.queue_pos).cloned();
-        let states: Vec<(usize, bool, bool)> = {
-            let guard = self.entries.guard();
-            (0..guard.len())
-                .filter_map(|i| {
-                    guard.get(i).map(|r| {
-                        let is_file = !r.entry.is_dir();
-                        let q = is_file && queue.iter().any(|p| p == r.entry.path());
-                        let a = is_file
-                            && active_path.as_deref() == Some(r.entry.path().as_path());
-                        (i, q, a)
-                    })
-                })
-                .collect()
-        };
-        let playing = self.playing;
-        for (i, q, a) in states {
-            self.entries.send(i, FsInput::SetQueued(q));
-            self.entries.send(i, FsInput::SetActive { active: a, playing });
-        }
-    }
-
-    /// Nächster Titel: bei Zufall ein zufälliger, sonst der folgende.
-    /// Am sequentiellen Ende wird gestoppt.
-    fn play_next(&mut self) {
-        if self.queue.is_empty() {
-            return;
-        }
-        let len = self.queue.len();
-        let next = if self.shuffle {
-            gtk::glib::random_int_range(0, len as i32) as usize
-        } else if self.queue_pos + 1 < len {
-            self.queue_pos + 1
-        } else {
-            self.save_resume();
-            self.player.stop();
-            self.playing = false;
-            self.playing_path = None;
-            self.position_ms = 0;
-            self.track_duration_ms = 0;
-            *self.close_resume.borrow_mut() = None;
-            self.mpris.set_stopped();
-            self.refresh_queue_icons();
-            return;
-        };
-        self.queue_pos = next;
-        self.play_current();
-    }
-
-    /// Vorheriger Titel (sequentiell).
-    fn play_prev(&mut self) {
-        if !self.queue.is_empty() && self.queue_pos > 0 {
-            self.queue_pos -= 1;
-            self.play_current();
-        }
-    }
-
-    /// Spielt den aktuellen Eintrag der Warteschlange ab.
-    /// Anzeigename eines Titels für die Leiste: „Interpret - Titel" aus den Tags,
-    /// notfalls der Dateiname.
-    fn track_display_name(path: &std::path::Path) -> String {
-        let stem = || {
-            path.file_stem()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string()
-        };
-        match scanner::read_track(path) {
-            Ok(t) => {
-                let title = if t.title.trim().is_empty() {
-                    stem()
-                } else {
-                    t.title
-                };
-                match t.artist {
-                    Some(a) if !a.trim().is_empty() => format!("{a} - {title}"),
-                    _ => title,
-                }
-            }
-            Err(_) => stem(),
-        }
-    }
-
-    /// Ob für diesen Titel eine Resume-Position geführt werden soll: bei langen
-    /// Titeln (Hörspiele) immer, sonst nur, wenn er als Hörbuch oder Podcast
-    /// eingestuft ist. Normale (kurze) Musiktitel starten stets von vorn.
-    fn should_resume(&self, t: &Track) -> bool {
-        if t.duration_ms.unwrap_or(0) >= RESUME_MIN_DURATION_MS {
-            return true;
-        }
-        let (cat, _) =
-            self.library
-                .resolve_category(t.artist.as_deref(), t.album.as_deref(), &t.path);
-        matches!(cat.as_str(), "audiobook" | "podcast")
-    }
-
-    /// Sichert die aktuelle Wiedergabeposition des geladenen Titels als
-    /// Resume-Punkt. Nahe Anfang oder Ende wird auf 0 zurückgesetzt, damit ein
-    /// quasi fertiger Titel beim nächsten Mal von vorn beginnt.
-    fn save_resume(&self) {
-        let Some(path) = self.playing_path.clone() else {
-            return;
-        };
-        let path_str = path.to_string_lossy();
-        let Some(track) = self.library.track_by_path(&path_str).ok().flatten() else {
-            return;
-        };
-        if !self.should_resume(&track) {
-            return;
-        }
-        let Some(pos) = self.player.position_ms() else {
-            return;
-        };
-        let dur = self.player.duration_ms().or(track.duration_ms).unwrap_or(0);
-        let _ = self
-            .library
-            .set_resume_path(&path_str, guarded_resume(pos, dur));
-    }
-
-    fn play_current(&mut self) {
-        // Position des bisher laufenden Titels sichern, bevor ein neuer geladen wird.
-        self.save_resume();
-        let Some(path) = self.queue.get(self.queue_pos).cloned() else {
-            return;
-        };
-        let path_str = path.to_string_lossy().to_string();
-        // Gespeicherte Resume-Position – nur für Lang-Inhalte (s. should_resume).
-        let track = self.library.track_by_path(&path_str).ok().flatten();
-        let resume_ms = match &track {
-            Some(t) if self.should_resume(t) => t.resume_ms,
-            _ => 0,
-        };
-        match self.player.play_file(&path_str, resume_ms) {
-            Ok(()) => {
-                self.playing_path = Some(path.clone());
-                self.now_playing = Some(Self::track_display_name(&path));
-                self.playing = true;
-                // Aktiven Ausgang (kann sich geändert haben) auffrischen.
-                self.active_output = crate::core::output::default_output().unwrap_or_default();
-                self.apply_current_eq();
-                // Sperrbildschirm/Medientasten über den neuen Titel informieren.
-                self.update_mpris_metadata(&path, track.as_ref());
-                self.mpris.set_playing(true);
-                let start = self.player.position_ms().unwrap_or(resume_ms.max(0));
-                self.mpris.set_position(start);
-                self.mpris.seeked(start);
-                // Seekleiste auf den neuen Titel setzen (Dauer verfeinert der Tick).
-                self.position_ms = start;
-                self.track_duration_ms = self
-                    .player
-                    .duration_ms()
-                    .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
-                    .unwrap_or(0);
-                // Schnappschuss für das Sichern beim Schließen (nur Resume-Titel).
-                let resumable = matches!(&track, Some(t) if self.should_resume(t));
-                *self.close_resume.borrow_mut() = resumable
-                    .then(|| (path_str.clone(), start, self.track_duration_ms));
-                // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
-                self.refresh_queue_icons();
-            }
-            Err(e) => tracing::error!("Wiedergabe fehlgeschlagen: {e}"),
-        }
-    }
-
-    /// Schickt die Metadaten des laufenden Titels an den MPRIS-Dienst
-    /// (Sperrbildschirm). Cover wird – falls vorhanden – best effort ergänzt.
-    fn update_mpris_metadata(&self, path: &std::path::Path, track: Option<&Track>) {
-        let (title, artist, album, length) = match track {
-            Some(t) => (
-                t.title.clone(),
-                t.artist.clone(),
-                t.album.clone(),
-                t.duration_ms,
-            ),
-            None => (Self::track_display_name(path), None, None, None),
-        };
-        let art = album
-            .as_deref()
-            .and_then(|al| self.library.album_cover(al).ok().flatten());
-        self.mpris.set_metadata(
-            self.queue_pos,
-            &title,
-            artist.as_deref(),
-            album.as_deref(),
-            length,
-            art.as_deref(),
-        );
-    }
-
-    /// Löst den Equalizer für den laufenden Titel + aktiven Ausgang auf
-    /// (Titel→Album→Interpret→Global, dann Standard-Ausgang) und setzt ihn live.
-    /// Ohne Festlegung: neutral (alle Bänder 0).
-    fn apply_current_eq(&self) {
-        let Some(path) = self.queue.get(self.queue_pos) else {
-            return;
-        };
-        let (artist, album) = match scanner::read_track(path) {
-            Ok(t) => (t.artist, t.album),
-            Err(_) => (None, None),
-        };
-        let bands = self
-            .library
-            .resolve_eq(
-                &self.active_output,
-                artist.as_deref(),
-                album.as_deref(),
-                &path.to_string_lossy(),
-            )
-            .unwrap_or([0.0; 10]);
-        self.player.set_eq_bands(&bands);
-    }
-
-    /// Spielt einen Pfad ab (Ordner rekursiv bzw. Einzeldatei) als neue Queue.
-    fn play_path(&mut self, path: &str, is_dir: bool) {
-        let p = PathBuf::from(path);
-        let files = if is_dir {
-            scanner::collect_audio_files(&p)
-        } else {
-            vec![p]
-        };
-        if !files.is_empty() {
-            self.queue = files;
-            self.queue_pos = 0;
-            self.play_current();
-            self.refresh_queue_icons();
-        }
-    }
-
     /// Lädt die markierten Konzerte aus der DB und baut die Liste neu auf.
-    fn load_concerts(&mut self, sender: &ComponentSender<Self>) {
+    pub(crate) fn load_concerts(&mut self, sender: &ComponentSender<Self>) {
         self.concert_items = self.library.concerts().unwrap_or_default();
 
         while let Some(child) = self.concerts_list.first_child() {
@@ -3945,7 +3713,7 @@ impl App {
     }
 
     /// Import-Dialog: Liste der Kandidaten zum Markieren + „Hinzufügen".
-    fn open_concert_import_dialog(
+    pub(crate) fn open_concert_import_dialog(
         &self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
@@ -4046,7 +3814,7 @@ impl App {
     }
 
     /// Nur nach oben, solange wir innerhalb des Startordners bleiben.
-    fn can_go_up(&self) -> bool {
+    pub(crate) fn can_go_up(&self) -> bool {
         match (&self.browse_dir, &self.root_dir) {
             (Some(cur), Some(root)) => cur != root && cur.starts_with(root),
             _ => false,
@@ -4054,7 +3822,7 @@ impl App {
     }
 
     /// Beschriftung der Pfadleiste (aktueller Ordnername bzw. Hinweis).
-    fn folder_label(&self) -> String {
+    pub(crate) fn folder_label(&self) -> String {
         match &self.browse_dir {
             Some(dir) => dir
                 .file_name()
@@ -4066,7 +3834,7 @@ impl App {
     }
 
     /// Öffnet den Einstellungsdialog (u. a. Musikordner festlegen).
-    fn open_settings(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_settings(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let dialog = adw::PreferencesDialog::new();
         let page = adw::PreferencesPage::builder()
             .title("Einstellungen")
