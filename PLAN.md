@@ -92,30 +92,30 @@ CREATE TABLE eq_binding (
 ## Roadmap
 
 ### Phase 0 – Setup
-- [ ] Rust-Toolchain installieren (`rustup`), Ziel-Profil festlegen
-- [ ] Cargo-Projekt + `Cargo.toml` mit Crates
-- [ ] Kompilierende Adw-App: `NavigationSplitView`, leere Module
+- [x] Rust-Toolchain installieren (`rustup`), Ziel-Profil festlegen
+- [x] Cargo-Projekt + `Cargo.toml` mit Crates
+- [x] Kompilierende Adw-App: `NavigationSplitView`, leere Module
 - [ ] Flatpak-Manifest-Stub (optional, für späteres Packaging)
 
 ### Phase 1 – MVP
-- [ ] DB-Schema + Migrations (`rusqlite`)
-- [ ] Scanner: Ordner rekursiv, `lofty`-Metadaten → DB (Hintergrund-Worker)
-- [ ] Dateisystem-Browser (erste Navigation)
-- [ ] Playback via `playbin3`: Play/Pause/Next/Prev, Position-Slider
-- [ ] Mini-Player-Leiste
+- [x] DB-Schema + Migrations (`rusqlite`)
+- [x] Scanner: Ordner rekursiv, `lofty`-Metadaten → DB (Hintergrund-Worker)
+- [x] Dateisystem-Browser (erste Navigation)
+- [x] Playback via `playbin3`: Play/Pause/Next/Prev, Position-Slider
+- [x] Mini-Player-Leiste
 - [x] MPRIS-Anbindung (Lockscreen/Medientasten)
 
 ### Phase 2 – Bibliothek
-- [ ] Interpreten- & Album-Ansicht aus Metadaten
-- [ ] Cover-Cache (XDG-Cache)
-- [ ] Queue / Wiedergabeliste
+- [x] Interpreten- & Album-Ansicht aus Metadaten
+- [x] Cover-Cache (XDG-Cache)
+- [x] Queue / Wiedergabeliste
 - [x] **Resume-Position pro Track** speichern & anbieten
 
 ### Phase 3 – Equalizer
-- [ ] `equalizer-10bands` im Audio-Graph
-- [ ] EQ-Editor-UI (10 Bänder + Preamp)
-- [ ] Kaskaden-Auflösung global → Interpret → Album → Track
-- [ ] Kopfhörer-/Ausgabe-Profile
+- [x] `equalizer-10bands` im Audio-Graph
+- [x] EQ-Editor-UI (10 Bänder + Preamp)
+- [x] Kaskaden-Auflösung global → Interpret → Album → Track
+- [x] Kopfhörer-/Ausgabe-Profile
 
 ### Phase 4 – Erweiterungen
 - [ ] Streaming-Backend (Subsonic/Navidrome oder Jellyfin)

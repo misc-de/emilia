@@ -32,6 +32,7 @@ impl Library {
     }
 
     /// In-Memory-DB (für Tests).
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let lib = Self { conn };
@@ -430,15 +431,6 @@ impl Library {
         Ok(())
     }
 
-    /// Speichert die Wiedergabeposition (Resume) für einen Track.
-    pub fn set_resume(&self, track_id: i64, resume_ms: i64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE track SET resume_ms = ?1 WHERE id = ?2",
-            rusqlite::params![resume_ms, track_id],
-        )?;
-        Ok(())
-    }
-
     /// Speichert die Wiedergabeposition (Resume) anhand des Pfads. Die
     /// Warteschlange ist pfadbasiert; bei unbekanntem Pfad passiert nichts.
     pub fn set_resume_path(&self, path: &str, resume_ms: i64) -> Result<()> {
@@ -517,19 +509,6 @@ impl Library {
             [],
             |r| r.get(0),
         )?)
-    }
-
-    /// Eindeutige (Interpret, Album)-Paare mit ausgefüllten Werten –
-    /// Grundlage für die Online-Zuordnung.
-    pub fn distinct_albums(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT artist, album FROM track
-             WHERE artist IS NOT NULL AND artist <> ''
-               AND album  IS NOT NULL AND album  <> ''
-             ORDER BY artist, album",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Liest die Online-Metadaten zu einem Album (falls bereits gesucht).

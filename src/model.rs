@@ -2,6 +2,9 @@
 
 #[derive(Debug, Clone)]
 pub struct Track {
+    /// DB-Primärschlüssel. Aktuell wird intern alles über den (eindeutigen)
+    /// Pfad adressiert; das Feld bleibt für künftige Nutzung (z. B. Playlisten).
+    #[allow(dead_code)]
     pub id: i64,
     pub path: String,
     pub title: String,

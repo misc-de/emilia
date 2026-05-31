@@ -119,6 +119,9 @@ pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
     // Auf Anzeigegröße herunterskalieren: Ein Paintable behält sonst seine
     // Originalgröße als „natürliche" Größe, wodurch der Rahmen in höheren
     // (mehrzeiligen) Zeilen mitwächst und den Titeltext nach rechts schiebt.
+    // `pixbuf_get_from_texture` ist seit GTK 4.12 deprecated; bewusst beibehalten,
+    // bis ein deprecation-freier Downscale visuell verifiziert ist (Thumbnail-Größe).
+    #[allow(deprecated)]
     let small = gtk::gdk::pixbuf_get_from_texture(texture)
         .and_then(|pb| pb.scale_simple(size, size, gtk::gdk_pixbuf::InterpType::Bilinear))
         .map(|pb| gtk::gdk::Texture::for_pixbuf(&pb));
