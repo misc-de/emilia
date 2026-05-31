@@ -8,6 +8,10 @@ pub struct Player {
     playbin: gst::Element,
     /// 10-Band-Equalizer als `audio-filter` (falls das Plugin vorhanden ist).
     equalizer: Option<gst::Element>,
+    /// Hält die Bus-Überwachung am Leben. `add_watch_local` gibt einen Guard
+    /// zurück, der die Überwachung beim Verwerfen wieder **entfernt** – ohne ihn
+    /// festzuhalten käme nie ein EOS an (kein automatisches Weiterschalten).
+    bus_watch: std::cell::RefCell<Option<gst::bus::BusWatchGuard>>,
 }
 
 impl Player {
@@ -24,7 +28,11 @@ impl Player {
             None => tracing::warn!("equalizer-10bands nicht verfügbar – EQ deaktiviert"),
         }
 
-        Ok(Self { playbin, equalizer })
+        Ok(Self {
+            playbin,
+            equalizer,
+            bus_watch: std::cell::RefCell::new(None),
+        })
     }
 
     /// Setzt die 10 Band-Verstärkungen (dB, jeweils −24…+12) live.
@@ -82,7 +90,7 @@ impl Player {
     /// für das Weiterschalten in der Warteschlange. Läuft im Main-Loop.
     pub fn connect_eos<F: Fn() + 'static>(&self, on_eos: F) {
         if let Some(bus) = self.playbin.bus() {
-            let _ = bus.add_watch_local(move |_, msg| {
+            let guard = bus.add_watch_local(move |_, msg| {
                 match msg.view() {
                     gst::MessageView::Eos(_) => on_eos(),
                     gst::MessageView::Error(err) => {
@@ -96,6 +104,9 @@ impl Player {
                 }
                 gst::glib::ControlFlow::Continue
             });
+            // Guard festhalten – sonst wird die Überwachung sofort wieder entfernt
+            // und es käme nie ein EOS (kein automatisches Weiterschalten).
+            *self.bus_watch.borrow_mut() = guard.ok();
         }
     }
 
