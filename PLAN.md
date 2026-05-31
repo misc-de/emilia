@@ -95,7 +95,7 @@ CREATE TABLE eq_binding (
 - [x] Rust-Toolchain installieren (`rustup`), Ziel-Profil festlegen
 - [x] Cargo-Projekt + `Cargo.toml` mit Crates
 - [x] Kompilierende Adw-App: `NavigationSplitView`, leere Module
-- [ ] Flatpak-Manifest-Stub (optional, für späteres Packaging)
+- [x] Flatpak-Manifest-Stub (optional, für späteres Packaging)
 
 ### Phase 1 – MVP
 - [x] DB-Schema + Migrations (`rusqlite`)

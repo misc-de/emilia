@@ -143,6 +143,10 @@ make install PREFIX=$HOME/.local
 Wieder entfernen mit `make uninstall` (gleicher `PREFIX`). `make check` prüft
 `.desktop` und Metainfo mit `desktop-file-validate` bzw. `appstreamcli`.
 
+**Flatpak:** Ein Manifest liegt unter [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml)
+(GNOME-Runtime + rust-stable-SDK). Bauen mit `flatpak-builder` – die genauen
+Befehle stehen im Kopf des Manifests.
+
 ---
 
 ## Erste Schritte
