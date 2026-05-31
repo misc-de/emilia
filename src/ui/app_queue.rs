@@ -40,7 +40,11 @@ impl App {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         toolbar.set_content(Some(&scroller));
 
-        let dialog = adw::Dialog::builder().title("Warteschlange").build();
+        let dialog = adw::Dialog::builder()
+            .title("Warteschlange")
+            .content_width(400)
+            .content_height(620)
+            .build();
         dialog.set_child(Some(&toolbar));
         dialog.present(Some(root));
     }

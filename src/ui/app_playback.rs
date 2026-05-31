@@ -89,12 +89,18 @@ impl App {
                 self.play_current();
             }
             None => {
+                // Ende der Wiedergabe: anhalten und an den Anfang der Queue
+                // zurückspulen, damit die Play-Taste wieder auf „Play" steht und
+                // ein erneuter Druck von vorn beginnt (siehe TogglePlay).
                 self.save_resume();
                 self.player.stop();
                 self.playing = false;
                 self.playing_path = None;
+                self.queue_pos = 0;
                 self.position_ms = 0;
                 self.track_duration_ms = 0;
+                self.shuffle_order.clear();
+                self.shuffle_idx = 0;
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
                 self.refresh_queue_icons();

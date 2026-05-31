@@ -25,6 +25,7 @@ install: build
 	install -Dm644 data/$(APPID).metainfo.xml $(META_DIR)/$(APPID).metainfo.xml
 	install -Dm644 data/icons/hicolor/scalable/apps/$(APPID).svg $(ICON_APP)/$(APPID).svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg $(ICON_ACT)/emilia-concert-symbolic.svg
+	install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg $(ICON_ACT)/list-high-priority-symbolic.svg
 	@echo "Installiert nach $(PREFIX). Ggf. Icon-Cache/Desktop-DB aktualisieren:"
 	@echo "  gtk4-update-icon-cache $(PREFIX)/share/icons/hicolor"
 	@echo "  update-desktop-database $(PREFIX)/share/applications"

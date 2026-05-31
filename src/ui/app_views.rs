@@ -1073,7 +1073,7 @@ impl App {
                 if let Some((label, value)) = year {
                     lines.push((label, value));
                 }
-                lines.push(("Kurzübersicht", Self::files_summary(&files, !year_shown)));
+                lines.push(("Sammlung", Self::files_summary(&files, !year_shown)));
                 lines
             }
             CtxTarget::Album(m) => {
@@ -1089,7 +1089,7 @@ impl App {
                 if let Some(y) = m.year {
                     lines.push(("Jahr", y.to_string()));
                 }
-                lines.push(("Kurzübersicht", Self::files_summary(&files, m.year.is_none())));
+                lines.push(("Sammlung", Self::files_summary(&files, m.year.is_none())));
                 lines
             }
         }
@@ -1416,7 +1416,7 @@ impl App {
                 }
                 None => {}
             }
-            lines.push(("Kurzübersicht", Self::files_summary(&files, !year_shown)));
+            lines.push(("Sammlung", Self::files_summary(&files, !year_shown)));
         } else {
             match scanner::read_track(entry.path()) {
                 Ok(t) => {

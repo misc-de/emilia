@@ -388,10 +388,13 @@ impl Component for App {
                         set_orientation: gtk::Orientation::Vertical,
                         set_spacing: 4,
                         set_margin_top: 8,
+                        set_margin_bottom: 8,
                         set_margin_start: 6,
                         set_margin_end: 6,
                         set_halign: gtk::Align::Fill,
-                        set_valign: gtk::Align::Start,
+                        // Volle Höhe, damit „Einstellungen" ganz unten sitzt.
+                        set_valign: gtk::Align::Fill,
+                        set_vexpand: true,
                     },
                 },
 
@@ -764,9 +767,9 @@ impl Component for App {
                                 set_xalign: 0.5,
                                 set_ellipsize: gtk::pango::EllipsizeMode::End,
                                 add_css_class: "caption",
+                                // Nichts ausgewählt → kein Text (Leiste wirkt inaktiv).
                                 #[watch]
-                                set_label: model.now_playing.as_deref()
-                                    .unwrap_or("Nichts ausgewählt"),
+                                set_label: model.now_playing.as_deref().unwrap_or(""),
                             },
                         },
 
@@ -821,10 +824,12 @@ impl Component for App {
                             #[wrap(Some)]
                             set_center_widget = &gtk::Box {
                                 set_spacing: 6,
-                                // Equalizer für den laufenden Titel.
+                                // Equalizer für den laufenden Titel – als „EQ"-Text,
+                                // mittig ausgerichtet.
                                 gtk::Button {
-                                    set_icon_name: "preferences-other-symbolic",
+                                    set_label: "EQ",
                                     set_tooltip_text: Some("Equalizer für diesen Titel"),
+                                    set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
                                     #[watch]
                                     set_sensitive: model.now_playing.is_some(),
@@ -834,6 +839,9 @@ impl Component for App {
                                     set_icon_name: "media-skip-backward-symbolic",
                                     set_tooltip_text: Some("Zurück"),
                                     add_css_class: "flat",
+                                    // Nichts ausgewählt → ausgegraut.
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::Prev,
                                 },
                                 gtk::Button {
@@ -845,22 +853,28 @@ impl Component for App {
                                     },
                                     set_tooltip_text: Some("Wiedergabe/Pause"),
                                     add_css_class: "circular",
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
                                     set_tooltip_text: Some("Vorwärts"),
                                     add_css_class: "flat",
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::Next,
                                 },
                             },
                             // Warteschlange (rechts unten).
                             #[wrap(Some)]
                             set_end_widget = &gtk::Button {
-                                set_icon_name: "media-playlist-consecutive-symbolic",
+                                set_icon_name: "list-high-priority-symbolic",
                                 set_tooltip_text: Some("Warteschlange"),
                                 set_valign: gtk::Align::Center,
                                 add_css_class: "flat",
+                                #[watch]
+                                set_sensitive: model.now_playing.is_some(),
                                 connect_clicked => Msg::ShowQueue,
                             },
                         },
@@ -1201,6 +1215,26 @@ impl Component for App {
             }
         }
         model.nav_buttons = nav_buttons.clone();
+
+        // Desktop-Seitenleiste: „Einstellungen" ganz unten – Aufbau/Design wie
+        // die Menüpunkte darüber (Icon + Beschriftung). Ein dehnbarer Zwischen-
+        // raum schiebt den Knopf ans untere Ende.
+        let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        spacer.set_vexpand(true);
+        widgets.sidebar_nav.append(&spacer);
+        let settings_btn = gtk::Button::builder().build();
+        settings_btn.add_css_class("flat");
+        settings_btn.set_hexpand(true);
+        let settings_inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        settings_inner.append(&gtk::Image::from_icon_name("emblem-system-symbolic"));
+        settings_inner.append(&gtk::Label::new(Some("Einstellungen")));
+        settings_btn.set_child(Some(&settings_inner));
+        {
+            let sender = sender.clone();
+            settings_btn.connect_clicked(move |_| sender.input(Msg::OpenSettings));
+        }
+        widgets.sidebar_nav.append(&settings_btn);
+
         // Aktiven Button passend zur sichtbaren Stack-Seite setzen.
         let sync_active = move |stack: &adw::ViewStack, buttons: &[(&'static str, gtk::ToggleButton)]| {
             let cur = stack.visible_child_name();
@@ -1963,16 +1997,23 @@ impl Component for App {
                 self.set_section_visible(section, visible);
             }
             Msg::TogglePlay => {
-                if self.now_playing.is_none() {
-                    return;
-                }
                 if self.playing {
                     self.save_resume();
                     self.player.pause();
-                } else {
+                    self.playing = false;
+                } else if self.playing_path.is_some() {
+                    // Pausiert → fortsetzen.
                     self.player.resume();
+                    self.playing = true;
+                } else if !self.queue.is_empty() {
+                    // Wiedergabe war beendet → von der aktuellen Position (nach dem
+                    // Ende auf 0 zurückgespult) neu starten. play_current setzt
+                    // playing/MPRIS/Icons selbst.
+                    self.play_current();
+                    return;
+                } else {
+                    return;
                 }
-                self.playing = !self.playing;
                 self.mpris.set_playing(self.playing);
                 // Play-/Pause-Icon des aktiven Titels in der Liste anpassen.
                 self.refresh_queue_icons();

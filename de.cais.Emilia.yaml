@@ -53,6 +53,8 @@ modules:
         /app/share/icons/hicolor/scalable/apps/de.cais.Emilia.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
     sources:
       - type: dir
         path: .
