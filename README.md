@@ -36,6 +36,8 @@ Bibliotheksindex in **SQLite**.
 - **Playlisten** – eigene Playlisten anlegen, Titel/Alben/Ordner über die
   Optionen hinzufügen, abspielen, umbenennen und einzelne Titel wieder
   entfernen.
+- **Podcasts** – Feeds per RSS-Adresse abonnieren; Episoden werden direkt
+  **gestreamt** (kein Download). Feed aktualisieren, Podcast entfernen.
 - **Equalizer mit Kaskade** – 10-Band-EQ (`equalizer-10bands`), live während der
   Wiedergabe. Einstellungen wirken in der Reihenfolge
   **Global → Interpret → Album → Titel** (spezifischste Ebene gewinnt),
@@ -53,7 +55,6 @@ Bibliotheksindex in **SQLite**.
 ### Geplant (Roadmap)
 
 - Streaming-Backend (Subsonic/Navidrome oder Jellyfin)
-- Podcasts
 
 ---
 
@@ -193,6 +194,7 @@ src/
     app_views.rs     Laden/Gruppieren, Unterseiten, ctx-/Cover-Helfer
     app_playback.rs  Wiedergabe, Warteschlange, Resume
     app_playlist.rs  Playlisten (Liste, Unterseite, Dialoge)
+    app_podcast.rs   Podcasts (Feeds abonnieren, Episoden streamen)
     app_eq.rs        Equalizer-Editor + Merkmal-Dialoge
     app_dialogs.rs   Kontextmenü, Teilen, Einstellungen
     app_concert.rs   Konzerte
@@ -207,6 +209,7 @@ src/
     db.rs            SQLite (rusqlite, gebündelt) + Abfragen
     player.rs        GStreamer-Wrapper (playbin3 + equalizer-10bands)
     online.rs        Online-Anreicherung (MusicBrainz/CAA/Deezer/AcoustID/fanart)
+    podcast.rs       Podcast-Feeds (RSS) einlesen, Episoden bereitstellen
     fingerprint.rs   Chromaprint (fpcalc) für die Titel-Erkennung
     cover.rs         eingebettete & Ordner-Cover
     category.rs      EQ-/Merkmals-Schlüssel und Kaskaden-Auflösung

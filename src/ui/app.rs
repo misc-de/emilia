@@ -12,6 +12,7 @@ use crate::core::player::Player;
 use crate::core::scanner;
 use crate::model::{AlbumMeta, ArtistMeta, Track};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
+use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
 use crate::ui::fs_row::{FsEntry, FsOutput, FsRow, RowOpts};
 
@@ -50,12 +51,13 @@ pub(crate) enum FsKind {
 }
 
 /// Navigationsbereiche: (Stack-Name, Tooltip, Icon). Reihenfolge = Anzeige.
-const SECTIONS: [(&str, &str, &str); 5] = [
+const SECTIONS: [(&str, &str, &str); 6] = [
     ("files", "Dateisystem", "folder-symbolic"),
     ("artists", "Interpreten", "avatar-default-symbolic"),
     ("albums", "Alben", "media-optical-symbolic"),
     ("concerts", "Konzerte", "emilia-concert-symbolic"),
     ("playlists", "Playlisten", "view-list-symbolic"),
+    ("podcasts", "Podcasts", "microphone-symbolic"),
 ];
 
 /// Ab dieser Spieldauer gilt ein Titel als „Lang-Inhalt" und bekommt
@@ -137,6 +139,9 @@ pub struct App {
     // Playlisten
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
     pub(crate) playlists_list: gtk::ListBox,
+    // Podcasts: (id, Titel, Bild-URL, Episodenzahl)
+    pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
+    pub(crate) podcasts_list: gtk::ListBox,
     pub(crate) view_stack: adw::ViewStack,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
     pub(crate) nav_view: adw::NavigationView,
@@ -269,6 +274,19 @@ pub enum Msg {
     PlaylistRenameDialog(i64),
     /// Playlist umbenennen.
     PlaylistRename { id: i64, name: String },
+    // Podcasts
+    /// Abo-Dialog (Feed-Adresse) öffnen.
+    PodcastSubscribe,
+    /// Feed unter dieser Adresse abonnieren (im Hintergrund holen).
+    PodcastSubscribeUrl(String),
+    /// Episoden-Unterseite eines Podcasts öffnen.
+    OpenPodcast(i64),
+    /// Podcast entfernen.
+    PodcastDelete(i64),
+    /// Feed eines Podcasts neu laden.
+    PodcastRefresh(i64),
+    /// Eine Episode streamen.
+    PlayEpisode { url: String, title: String },
 }
 
 /// Ergebnisse der Hintergrund-Worker (Ordner lesen bzw. Online-Anreicherung).
@@ -285,6 +303,8 @@ pub enum Cmd {
     ScanDone { then_enrich: bool },
     /// Gefundene Konzert-Kandidaten (für den Import-Dialog).
     Candidates(Vec<crate::core::concert::Candidate>),
+    /// Podcast-Feed geholt: `Some(Titel)` bei Erfolg, sonst `None`.
+    PodcastFetched(Option<String>),
 }
 
 #[relm4::component(pub)]
@@ -624,6 +644,45 @@ impl Component for App {
                                         set_visible: model.playlist_items.is_empty(),
                                     },
                                 },
+                            add_titled_with_icon[Some("podcasts"), "Podcasts", "microphone-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    gtk::Box {
+                                        set_halign: gtk::Align::Center,
+                                        set_margin_top: 12,
+                                        set_margin_bottom: 6,
+                                        gtk::Button {
+                                            set_label: "Podcast abonnieren",
+                                            set_css_classes: &["suggested-action", "pill"],
+                                            connect_clicked => Msg::PodcastSubscribe,
+                                        },
+                                    },
+
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.podcast_items.is_empty(),
+                                        #[local_ref]
+                                        podcasts_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+
+                                    adw::StatusPage {
+                                        set_icon_name: Some("microphone-symbolic"),
+                                        set_title: "Keine Podcasts",
+                                        set_description: Some("Abonniere einen Podcast über seine Feed-Adresse (RSS)."),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.podcast_items.is_empty(),
+                                    },
+                                },
                         },
 
                         // Zentrierter Spinner während des Einlesens
@@ -894,6 +953,7 @@ impl Component for App {
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
+        let podcasts_list = gtk::ListBox::new();
 
         let mut model = App {
             library,
@@ -933,6 +993,8 @@ impl Component for App {
             concerts_list: concerts_list.clone(),
             playlist_items: Vec::new(),
             playlists_list: playlists_list.clone(),
+            podcast_items: Vec::new(),
+            podcasts_list: podcasts_list.clone(),
             concert_hint_dismissed,
             concerts_hidden,
             concert_nav_buttons: Vec::new(),
@@ -946,6 +1008,7 @@ impl Component for App {
         model.reload_artists();
         model.load_concerts(&sender);
         model.reload_playlists(&sender);
+        model.reload_podcasts(&sender);
         // Bibliothek beim Start automatisch einlesen und – bei WLAN/LAN und
         // aktiviertem Schalter – fehlende Cover/Metadaten im Hintergrund nachladen.
         model.start_scan(&sender, true);
@@ -1414,6 +1477,37 @@ impl Component for App {
                     self.reload_playlists(&sender);
                 }
             }
+            Msg::PodcastSubscribe => self.open_subscribe_podcast_dialog(root, &sender),
+            Msg::PodcastSubscribeUrl(url) => {
+                let url = url.trim().to_string();
+                if !url.is_empty() {
+                    self.toast("Feed wird geladen …");
+                    sender.spawn_command(move |out| {
+                        let _ = out.send(Cmd::PodcastFetched(fetch_and_store_podcast(&url)));
+                    });
+                }
+            }
+            Msg::PodcastRefresh(id) => {
+                if let Ok(Some(url)) = self.library.podcast_feed_url(id) {
+                    self.toast("Feed wird aktualisiert …");
+                    sender.spawn_command(move |out| {
+                        let _ = out.send(Cmd::PodcastFetched(fetch_and_store_podcast(&url)));
+                    });
+                }
+            }
+            Msg::OpenPodcast(id) => {
+                if let Some((_, title, _, _)) =
+                    self.podcast_items.iter().find(|(pid, _, _, _)| *pid == id).cloned()
+                {
+                    self.open_podcast(&sender, id, &title);
+                }
+            }
+            Msg::PodcastDelete(id) => {
+                let _ = self.library.delete_podcast(id);
+                self.reload_podcasts(&sender);
+                self.toast("Podcast entfernt");
+            }
+            Msg::PlayEpisode { url, title } => self.play_episode(&url, &title),
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.open_share_dialog(root, &sender),
             Msg::ShareHost => {
@@ -1800,6 +1894,13 @@ impl Component for App {
                     self.toast("Keine neuen Konzert-Kandidaten gefunden");
                 } else {
                     self.open_concert_import_dialog(root, &sender, candidates);
+                }
+            }
+            Cmd::PodcastFetched(title) => {
+                self.reload_podcasts(&sender);
+                match title {
+                    Some(t) => self.toast(&format!("Abonniert: {t}")),
+                    None => self.toast("Feed konnte nicht geladen werden"),
                 }
             }
         }

@@ -88,6 +88,19 @@ pub struct TrackMeta {
     pub status: String,
 }
 
+/// Eine Podcast-Episode aus einem RSS-Feed (Reihenfolge = Feed-Reihenfolge).
+/// Audio wird direkt von `audio_url` gestreamt, nichts wird heruntergeladen.
+#[derive(Debug, Clone)]
+pub struct Episode {
+    pub guid: Option<String>,
+    pub title: String,
+    pub audio_url: String,
+    /// Veröffentlichungsdatum als Originaltext aus dem Feed (nur Anzeige).
+    pub published: Option<String>,
+    /// Dauer als Text (z. B. „00:42:13" oder Sekunden), falls im Feed angegeben.
+    pub duration: Option<String>,
+}
+
 impl TrackMeta {
     pub fn pending(path: impl Into<String>) -> Self {
         Self {

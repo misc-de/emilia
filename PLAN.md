@@ -119,7 +119,7 @@ CREATE TABLE eq_binding (
 
 ### Phase 4 – Erweiterungen
 - [ ] Streaming-Backend (Subsonic/Navidrome oder Jellyfin)
-- [ ] Podcasts (Feeds abonnieren, Episoden laden)
+- [x] Podcasts (Feeds abonnieren, Episoden laden)
 
 ## Offene Entscheidungen
 

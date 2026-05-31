@@ -7,5 +7,6 @@ pub mod fingerprint;
 pub mod mpris;
 pub mod online;
 pub mod output;
+pub mod podcast;
 pub mod player;
 pub mod scanner;

@@ -65,6 +65,19 @@ impl Player {
         Ok(())
     }
 
+    /// Spielt eine beliebige URI (z. B. eine http-Podcast-Episode). Anders als
+    /// `play_file` wird die URI unverändert übernommen (kein Datei-Pfad).
+    pub fn play_uri(&self, uri: &str) -> Result<()> {
+        self.playbin
+            .set_state(gst::State::Ready)
+            .map_err(|e| anyhow!("Konnte Pipeline nicht zurücksetzen: {e}"))?;
+        self.playbin.set_property("uri", uri);
+        self.playbin
+            .set_state(gst::State::Playing)
+            .map_err(|e| anyhow!("Konnte nicht abspielen: {e}"))?;
+        Ok(())
+    }
+
     /// Registriert einen Callback, der bei Titelende (EOS) aufgerufen wird –
     /// für das Weiterschalten in der Warteschlange. Läuft im Main-Loop.
     pub fn connect_eos<F: Fn() + 'static>(&self, on_eos: F) {

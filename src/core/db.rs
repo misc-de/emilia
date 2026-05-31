@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::model::{AlbumMeta, ArtistMeta, Track, TrackMeta};
+use crate::model::{AlbumMeta, ArtistMeta, Episode, Track, TrackMeta};
 
 /// Speicherort der Datenbank: `$XDG_DATA_HOME/emilia/library.db`.
 pub fn db_path() -> PathBuf {
@@ -173,6 +173,26 @@ impl Library {
                 position    INTEGER NOT NULL,
                 path        TEXT NOT NULL,
                 PRIMARY KEY (playlist_id, position)
+            );
+
+            -- Abonnierte Podcasts und ihre Episoden (aus RSS-Feeds; Audio wird
+            -- gestreamt, nichts heruntergeladen).
+            CREATE TABLE IF NOT EXISTS podcast (
+                id        INTEGER PRIMARY KEY,
+                title     TEXT NOT NULL,
+                feed_url  TEXT NOT NULL UNIQUE,
+                image_url TEXT,
+                added_at  INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS episode (
+                podcast_id INTEGER NOT NULL,
+                position   INTEGER NOT NULL,
+                guid       TEXT,
+                title      TEXT NOT NULL,
+                audio_url  TEXT NOT NULL,
+                published  TEXT,
+                duration   TEXT,
+                PRIMARY KEY (podcast_id, position)
             );
             "#,
         )?;
@@ -921,6 +941,107 @@ impl Library {
         )?;
         Ok(())
     }
+
+    // ---- Podcasts ----
+
+    /// Abonniert einen Feed (oder aktualisiert Titel/Bild bei bekanntem Feed)
+    /// und gibt die Podcast-ID zurück.
+    pub fn subscribe_podcast(
+        &self,
+        title: &str,
+        feed_url: &str,
+        image_url: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO podcast (title, feed_url, image_url, added_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(feed_url) DO UPDATE SET
+                title = excluded.title, image_url = excluded.image_url",
+            rusqlite::params![title, feed_url, image_url],
+        )?;
+        Ok(self
+            .conn
+            .query_row("SELECT id FROM podcast WHERE feed_url = ?1", [feed_url], |r| {
+                r.get(0)
+            })?)
+    }
+
+    /// Alle Podcasts als (id, Titel, Bild-URL, Episodenzahl), neueste zuerst.
+    pub fn podcasts(&self) -> Result<Vec<(i64, String, Option<String>, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.title, p.image_url, COUNT(e.audio_url)
+             FROM podcast p LEFT JOIN episode e ON e.podcast_id = p.id
+             GROUP BY p.id ORDER BY p.added_at DESC, p.title COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Feed-URL eines Podcasts (für die Aktualisierung).
+    pub fn podcast_feed_url(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT feed_url FROM podcast WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
+    /// Entfernt einen Podcast samt Episoden.
+    pub fn delete_podcast(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM episode WHERE podcast_id = ?1", [id])?;
+        self.conn.execute("DELETE FROM podcast WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Ersetzt die Episoden eines Podcasts (Reihenfolge = Feed-Reihenfolge).
+    pub fn set_episodes(&self, podcast_id: i64, episodes: &[Episode]) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM episode WHERE podcast_id = ?1", [podcast_id])?;
+        for (i, ep) in episodes.iter().enumerate() {
+            self.conn.execute(
+                "INSERT INTO episode
+                    (podcast_id, position, guid, title, audio_url, published, duration)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    podcast_id,
+                    i as i64,
+                    ep.guid,
+                    ep.title,
+                    ep.audio_url,
+                    ep.published,
+                    ep.duration
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Episoden eines Podcasts in Feed-Reihenfolge.
+    pub fn episodes(&self, podcast_id: i64) -> Result<Vec<Episode>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT guid, title, audio_url, published, duration FROM episode
+             WHERE podcast_id = ?1 ORDER BY position",
+        )?;
+        let rows = stmt.query_map([podcast_id], |r| {
+            Ok(Episode {
+                guid: r.get(0)?,
+                title: r.get(1)?,
+                audio_url: r.get(2)?,
+                published: r.get(3)?,
+                duration: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
 }
 
 #[cfg(test)]
@@ -939,6 +1060,50 @@ mod tests {
             duration_ms: Some(60_000),
             resume_ms: 0,
         }
+    }
+
+    #[test]
+    fn podcast_subscribe_and_episodes() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib
+            .subscribe_podcast("Mein Podcast", "https://feed.example/rss", Some("https://img"))
+            .unwrap();
+        // Erneutes Abo desselben Feeds → gleiche ID (Upsert), kein Duplikat.
+        let id2 = lib
+            .subscribe_podcast("Mein Podcast (neu)", "https://feed.example/rss", None)
+            .unwrap();
+        assert_eq!(id, id2);
+
+        let eps = vec![
+            Episode {
+                guid: Some("g1".into()),
+                title: "E1".into(),
+                audio_url: "https://a/1.mp3".into(),
+                published: Some("Mon, 01 Jan 2024".into()),
+                duration: Some("10:00".into()),
+            },
+            Episode {
+                guid: None,
+                title: "E2".into(),
+                audio_url: "https://a/2.mp3".into(),
+                published: None,
+                duration: None,
+            },
+        ];
+        lib.set_episodes(id, &eps).unwrap();
+
+        let got = lib.episodes(id).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].title, "E1");
+        assert_eq!(got[1].audio_url, "https://a/2.mp3");
+
+        let list = lib.podcasts().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!((list[0].0, list[0].1.as_str(), list[0].3), (id, "Mein Podcast (neu)", 2));
+
+        lib.delete_podcast(id).unwrap();
+        assert!(lib.podcasts().unwrap().is_empty());
+        assert!(lib.episodes(id).unwrap().is_empty());
     }
 
     #[test]
