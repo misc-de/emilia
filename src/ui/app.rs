@@ -629,7 +629,7 @@ impl Component for App {
                                 add_css_class: "caption",
                                 add_css_class: "numeric",
                                 #[watch]
-                                set_label: &fmt_clock(model.position_ms),
+                                set_label: &fmt_duration(model.position_ms),
                             },
                             #[name = "seek_scale"]
                             gtk::Scale {
@@ -646,7 +646,7 @@ impl Component for App {
                                 add_css_class: "caption",
                                 add_css_class: "numeric",
                                 #[watch]
-                                set_label: &fmt_clock(model.track_duration_ms),
+                                set_label: &fmt_duration(model.track_duration_ms),
                             },
                         },
 
@@ -1685,9 +1685,9 @@ fn save_window_state(width: i32, height: i32, maximized: bool, section: Option<&
     }
 }
 
-/// Formatiert Millisekunden als `m:ss` bzw. `h:mm:ss`.
+/// Formatiert Millisekunden als `m:ss` bzw. `h:mm:ss` (Negatives → 0).
 pub(crate) fn fmt_duration(ms: i64) -> String {
-    let secs = ms / 1000;
+    let secs = ms.max(0) / 1000;
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     if h > 0 {
         format!("{h}:{m:02}:{s:02}")
@@ -1735,17 +1735,6 @@ fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
 }
 
 /// Rechtsbündige, dezente Dauer-Beschriftung für eine Titel-Zeile.
-/// Zeitangabe „m:ss" bzw. „h:mm:ss" (für die Seekleiste).
-fn fmt_clock(ms: i64) -> String {
-    let secs = (ms.max(0) / 1000) as u64;
-    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
-
 fn duration_label(ms: i64) -> gtk::Label {
     gtk::Label::builder()
         .label(fmt_duration(ms))
@@ -4225,7 +4214,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{fmt_clock, guarded_resume};
+    use super::{fmt_duration, guarded_resume};
 
     #[test]
     fn guarded_resume_clamps_start_and_end() {
@@ -4241,14 +4230,14 @@ mod tests {
     }
 
     #[test]
-    fn fmt_clock_formats_minutes_and_hours() {
-        assert_eq!(fmt_clock(0), "0:00");
-        assert_eq!(fmt_clock(5_000), "0:05");
-        assert_eq!(fmt_clock(65_000), "1:05");
-        assert_eq!(fmt_clock(600_000), "10:00");
+    fn fmt_duration_formats_minutes_and_hours() {
+        assert_eq!(fmt_duration(0), "0:00");
+        assert_eq!(fmt_duration(5_000), "0:05");
+        assert_eq!(fmt_duration(65_000), "1:05");
+        assert_eq!(fmt_duration(600_000), "10:00");
         // Hörspiel-Längen mit Stunden.
-        assert_eq!(fmt_clock(3_661_000), "1:01:01");
+        assert_eq!(fmt_duration(3_661_000), "1:01:01");
         // Negativwerte werden auf 0 geklemmt.
-        assert_eq!(fmt_clock(-1), "0:00");
+        assert_eq!(fmt_duration(-1), "0:00");
     }
 }
