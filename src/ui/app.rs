@@ -2170,9 +2170,6 @@ impl Component for App {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
                     tracing::error!("Eigenschaften konnten nicht gespeichert werden: {e}");
                 }
-                // Übergeordnete Festlegung → abweichende Einstellungen darunter
-                // entfernen, damit Alben/Titel die neue Einstellung erben.
-                let _ = self.library.clear_child_categories(scope, &key);
                 // Sichtbarkeit/Zuordnung kann sich überall geändert haben →
                 // Ansichten neu laden. Konzerte/Hörbücher werden dabei live aus
                 // den Eigenschaften abgeleitet (kein separater Abgleich nötig).
