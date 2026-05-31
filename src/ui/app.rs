@@ -67,6 +67,18 @@ const RESUME_MIN_POS_MS: i64 = 5_000;
 /// So nah vor dem Ende gilt der Titel als fertig → Resume auf 0 zurücksetzen.
 const RESUME_END_GUARD_MS: i64 = 10_000;
 
+/// Resume-Position mit Wächtern: nahe Anfang oder Ende wird auf 0 gesetzt,
+/// damit ein quasi fertiger Titel beim nächsten Mal von vorn beginnt.
+fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
+    if pos_ms < RESUME_MIN_POS_MS {
+        0
+    } else if dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS {
+        0
+    } else {
+        pos_ms
+    }
+}
+
 pub struct App {
     library: Library,
     player: Player,
@@ -104,6 +116,10 @@ pub struct App {
     /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
     /// Resume-Position beim Wechsel auf einen anderen Titel).
     playing_path: Option<PathBuf>,
+    /// Schnappschuss (Pfad, Position, Dauer) des laufenden Resume-Titels, vom
+    /// 1-s-Tick aktualisiert. Wird beim Schließen einmalig in die DB geschrieben,
+    /// damit beim harten Beenden höchstens ~1 s Hörposition verloren geht.
+    close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
     now_playing: Option<String>,
     playing: bool,
     /// Aktuelle Position und Gesamtdauer des laufenden Titels (ms) – für die
@@ -846,6 +862,7 @@ impl Component for App {
             queue: Vec::new(),
             queue_pos: 0,
             playing_path: None,
+            close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
             now_playing: None,
             playing: false,
             position_ms: 0,
@@ -1009,7 +1026,14 @@ impl Component for App {
             root.maximize();
         }
         let stack_for_close = widgets.view_stack.clone();
+        let close_resume = model.close_resume.clone();
         root.connect_close_request(move |win| {
+            // Letzte Hörposition sichern (deckt den Spalt zum 5-s-Speichern).
+            if let Some((path, pos, dur)) = close_resume.borrow().clone() {
+                if let Ok(lib) = Library::open() {
+                    let _ = lib.set_resume_path(&path, guarded_resume(pos, dur));
+                }
+            }
             let section = stack_for_close.visible_child_name();
             save_window_state(
                 win.default_width(),
@@ -1270,6 +1294,7 @@ impl Component for App {
                 if let Some(path) = self.playing_path.take() {
                     let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
                 }
+                *self.close_resume.borrow_mut() = None;
                 self.play_next();
             }
             Msg::PersistResume => {
@@ -1287,6 +1312,11 @@ impl Component for App {
                     }
                     if let Some(dur) = self.player.duration_ms() {
                         self.track_duration_ms = dur;
+                    }
+                    // Close-Schnappschuss mitführen.
+                    if let Some(entry) = self.close_resume.borrow_mut().as_mut() {
+                        entry.1 = self.position_ms;
+                        entry.2 = self.track_duration_ms;
                     }
                 }
             }
@@ -1339,6 +1369,7 @@ impl Component for App {
                         self.playing_path = None;
                         self.position_ms = 0;
                         self.track_duration_ms = 0;
+                        *self.close_resume.borrow_mut() = None;
                         self.mpris.set_stopped();
                         self.refresh_queue_icons();
                     }
@@ -4012,6 +4043,7 @@ impl App {
             self.playing_path = None;
             self.position_ms = 0;
             self.track_duration_ms = 0;
+            *self.close_resume.borrow_mut() = None;
             self.mpris.set_stopped();
             self.refresh_queue_icons();
             return;
@@ -4085,14 +4117,9 @@ impl App {
             return;
         };
         let dur = self.player.duration_ms().or(track.duration_ms).unwrap_or(0);
-        let resume = if pos < RESUME_MIN_POS_MS {
-            0
-        } else if dur > 0 && pos > dur - RESUME_END_GUARD_MS {
-            0
-        } else {
-            pos
-        };
-        let _ = self.library.set_resume_path(&path_str, resume);
+        let _ = self
+            .library
+            .set_resume_path(&path_str, guarded_resume(pos, dur));
     }
 
     fn play_current(&mut self) {
@@ -4129,6 +4156,10 @@ impl App {
                     .duration_ms()
                     .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
                     .unwrap_or(0);
+                // Schnappschuss für das Sichern beim Schließen (nur Resume-Titel).
+                let resumable = matches!(&track, Some(t) if self.should_resume(t));
+                *self.close_resume.borrow_mut() = resumable
+                    .then(|| (path_str.clone(), start, self.track_duration_ms));
                 // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
                 self.refresh_queue_icons();
             }
@@ -4524,7 +4555,20 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::fmt_clock;
+    use super::{fmt_clock, guarded_resume};
+
+    #[test]
+    fn guarded_resume_clamps_start_and_end() {
+        let dur = 3_600_000; // 1 h
+        // Mittendrin → unverändert.
+        assert_eq!(guarded_resume(1_000_000, dur), 1_000_000);
+        // Nahe Anfang (< 5 s) → 0.
+        assert_eq!(guarded_resume(3_000, dur), 0);
+        // Nahe Ende (< 10 s Rest) → 0 (nächstes Mal von vorn).
+        assert_eq!(guarded_resume(dur - 5_000, dur), 0);
+        // Unbekannte Dauer (0) → keine Ende-Prüfung, Position bleibt.
+        assert_eq!(guarded_resume(1_000_000, 0), 1_000_000);
+    }
 
     #[test]
     fn fmt_clock_formats_minutes_and_hours() {
