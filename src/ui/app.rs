@@ -265,6 +265,8 @@ pub enum Msg {
     ShowQueue,
     /// Einen Eintrag aus der Warteschlange entfernen (Queue-Index).
     QueueRemove(usize),
+    /// Die gesamte Warteschlange leeren (nach Rückfrage) und Wiedergabe stoppen.
+    QueueClear,
     /// Einen Warteschlangen-Eintrag verschieben (Queue-Indizes).
     QueueMove { from: usize, to: usize },
     SetMusicDir(PathBuf),
@@ -445,6 +447,7 @@ impl Component for App {
                 set_content = &adw::ToolbarView {
                     add_top_bar = &adw::HeaderBar {
                         #[wrap(Some)]
+                        #[name = "win_title"]
                         set_title_widget = &adw::WindowTitle::new("Emilia", ""),
                         // Einstellungen oben nur im schmalen (mobilen) Modus – im
                         // Desktop-Modus sitzt der Punkt unten in der Seitenleiste.
@@ -922,6 +925,9 @@ impl Component for App {
                                 set_visible: model.queue.len() >= 2,
                                 #[watch]
                                 set_active: model.shuffle,
+                                // Aktiv = weiß (volle Deckkraft), sonst ausgegraut.
+                                #[watch]
+                                set_opacity: if model.shuffle { 1.0 } else { 0.4 },
                                 connect_clicked => Msg::ToggleShuffle,
                             },
                             #[wrap(Some)]
@@ -1376,7 +1382,9 @@ impl Component for App {
         }
         widgets.sidebar_nav.append(&settings_btn);
 
-        // Aktiven Button passend zur sichtbaren Stack-Seite setzen.
+        // Aktiven Button passend zur sichtbaren Stack-Seite setzen und den Namen
+        // des Menüpunkts dezent als Untertitel der Kopfzeile anzeigen.
+        let win_title = widgets.win_title.clone();
         let sync_active =
             move |stack: &adw::ViewStack, buttons: &[(&'static str, bool, gtk::ToggleButton)]| {
                 let cur = stack.visible_child_name();
@@ -1384,6 +1392,7 @@ impl Component for App {
                 for (name, _is_sidebar, btn) in buttons {
                     btn.set_active(*name == cur);
                 }
+                win_title.set_subtitle(section_meta(cur).map(|(l, _)| l).unwrap_or(""));
             };
         // Zuletzt offenen Navigationspunkt wiederherstellen – aber keinen
         // ausgeblendeten. Notfalls auf den ersten sichtbaren Menüpunkt (in der
@@ -1992,6 +2001,23 @@ impl Component for App {
                     self.refresh_queue_icons();
                 }
             }
+            Msg::QueueClear => {
+                self.player.stop();
+                self.queue.clear();
+                self.queue_pos = 0;
+                self.shuffle_order.clear();
+                self.shuffle_idx = 0;
+                self.playing = false;
+                self.now_playing = None;
+                self.playing_path = None;
+                self.position_ms = 0;
+                self.track_duration_ms = 0;
+                *self.close_resume.borrow_mut() = None;
+                self.mpris.set_stopped();
+                self.reload_queue_list(&sender);
+                self.refresh_queue_icons();
+                self.toast("Warteschlange geleert");
+            }
             Msg::QueueMove { from, to } => {
                 let len = self.queue.len();
                 if from < len && to < len && from != to {
@@ -2495,6 +2521,16 @@ impl App {
     /// obere Leiste) und wechselt beim Ausblenden des aktiven Punkts auf den
     /// ersten sichtbaren.
     pub(crate) fn set_section_visible(&mut self, section: &str, visible: bool) {
+        // Mindestens ein Menüpunkt muss sichtbar bleiben.
+        if !visible {
+            let visible_count = SECTIONS
+                .iter()
+                .filter(|(n, _, _)| !self.hidden_sections.contains(*n))
+                .count();
+            if visible_count <= 1 {
+                return;
+            }
+        }
         if visible {
             self.hidden_sections.remove(section);
         } else {

@@ -592,6 +592,17 @@ fn rebuild_section_rows(
         {
             let (hidden, sender) = (hidden.clone(), sender.clone());
             sw.connect_active_notify(move |s| {
+                // Mindestens ein Menüpunkt muss sichtbar bleiben.
+                if !s.is_active() {
+                    let visible = crate::ui::app::SECTIONS
+                        .iter()
+                        .filter(|(n, _, _)| !hidden.borrow().contains(*n))
+                        .count();
+                    if visible <= 1 {
+                        s.set_active(true);
+                        return;
+                    }
+                }
                 if s.is_active() {
                     hidden.borrow_mut().remove(name);
                 } else {

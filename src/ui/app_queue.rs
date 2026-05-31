@@ -37,7 +37,38 @@ impl App {
             .child(&content)
             .build();
         let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
+
+        // Kopfzeile mit Mülleimer links oben zum Leeren (mit Rückfrage).
+        let header = adw::HeaderBar::new();
+        let clear = gtk::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .tooltip_text("Warteschlange leeren")
+            .css_classes(["flat"])
+            .build();
+        {
+            let sender = sender.clone();
+            let root = root.clone();
+            clear.connect_clicked(move |_| {
+                let confirm = adw::AlertDialog::new(
+                    Some("Warteschlange leeren?"),
+                    Some("Alle Titel werden aus der Warteschlange entfernt."),
+                );
+                confirm.add_response("cancel", "Abbrechen");
+                confirm.add_response("clear", "Leeren");
+                confirm.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+                confirm.set_default_response(Some("cancel"));
+                confirm.set_close_response("cancel");
+                let sender = sender.clone();
+                confirm.connect_response(None, move |_, resp| {
+                    if resp == "clear" {
+                        sender.input(Msg::QueueClear);
+                    }
+                });
+                confirm.present(Some(&root));
+            });
+        }
+        header.pack_start(&clear);
+        toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&scroller));
 
         let dialog = adw::Dialog::builder()
