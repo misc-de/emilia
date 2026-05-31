@@ -106,10 +106,9 @@ impl App {
         if t.duration_ms.unwrap_or(0) >= RESUME_MIN_DURATION_MS {
             return true;
         }
-        let (cat, _) =
-            self.library
-                .resolve_category(t.artist.as_deref(), t.album.as_deref(), &t.path);
-        matches!(cat.as_str(), "audiobook" | "podcast")
+        self.library
+            .resolve_areas(t.artist.as_deref(), t.album.as_deref(), &t.path)
+            .contains(&crate::core::category::Area::Audiobooks)
     }
 
     /// Sichert die aktuelle Wiedergabeposition des geladenen Titels als

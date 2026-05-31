@@ -263,6 +263,18 @@ impl Library {
                 ))?;
             }
         }
+
+        // Migration: alte Einzel-Merkmale (music/concert/…) auf die neue
+        // Bereichsliste (Eigenschaften) abbilden. Idempotent.
+        self.conn.execute_batch(
+            "UPDATE category SET value = CASE value
+                 WHEN 'music'     THEN 'filesystem,artists,albums'
+                 WHEN 'concert'   THEN 'concerts'
+                 WHEN 'audiobook' THEN 'audiobooks'
+                 WHEN 'podcast'   THEN 'filesystem,artists,albums'
+                 ELSE value END
+             WHERE value IN ('music','concert','audiobook','podcast');",
+        )?;
         Ok(())
     }
 
@@ -338,32 +350,50 @@ impl Library {
         Ok(v)
     }
 
-    /// Löst das effektive Merkmal eines Titels auf (spezifischste Ebene gewinnt).
-    /// Liefert (Wert, Quell-Ebene ∈ {`track`,`album`,`artist`,`default`}).
-    pub fn resolve_category(
+    /// Effektive **Bereiche** eines Titels (spezifischste Ebene gewinnt:
+    /// Titel → Album → Interpret → Standard). Leere Liste = ausgeblendet.
+    pub fn resolve_areas(
         &self,
         artist: Option<&str>,
         album: Option<&str>,
         path: &str,
-    ) -> (String, &'static str) {
+    ) -> Vec<crate::core::category::Area> {
+        use crate::core::category::{album_key, parse_areas, Area};
         if let Ok(Some(v)) = self.get_category("track", path) {
-            return (v, "track");
+            return parse_areas(&v);
         }
         if let Some(album) = album {
-            let key = crate::core::category::album_key(artist.unwrap_or(""), album);
-            if let Ok(Some(v)) = self.get_category("album", &key) {
-                return (v, "album");
+            if let Ok(Some(v)) = self.get_category("album", &album_key(artist.unwrap_or(""), album)) {
+                return parse_areas(&v);
             }
         }
         if let Some(artist) = artist {
             if let Ok(Some(v)) = self.get_category("artist", artist) {
-                return (v, "artist");
+                return parse_areas(&v);
             }
         }
-        (
-            crate::core::category::Category::DEFAULT.as_str().to_string(),
-            "default",
-        )
+        Area::DEFAULT.to_vec()
+    }
+
+    /// Effektive Bereiche eines Albums (Album → Interpret → Standard).
+    pub fn album_areas(&self, artist: &str, album: &str) -> Vec<crate::core::category::Area> {
+        use crate::core::category::{album_key, parse_areas, Area};
+        if let Ok(Some(v)) = self.get_category("album", &album_key(artist, album)) {
+            return parse_areas(&v);
+        }
+        if let Ok(Some(v)) = self.get_category("artist", artist) {
+            return parse_areas(&v);
+        }
+        Area::DEFAULT.to_vec()
+    }
+
+    /// Effektive Bereiche eines Interpreten (Interpret → Standard).
+    pub fn artist_areas(&self, name: &str) -> Vec<crate::core::category::Area> {
+        use crate::core::category::{parse_areas, Area};
+        if let Ok(Some(v)) = self.get_category("artist", name) {
+            return parse_areas(&v);
+        }
+        Area::DEFAULT.to_vec()
     }
 
     // ---- Equalizer (10 Bänder, mit Vererbung) ----
@@ -723,6 +753,11 @@ impl Library {
             }
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
+        // Eigenschaften: nur Alben zeigen, die im Bereich „Alben" sichtbar sind.
+        out.retain(|a| {
+            self.album_areas(&a.artist, &a.album)
+                .contains(&crate::core::category::Area::Albums)
+        });
         out.sort_by(|a, b| {
             a.album
                 .to_lowercase()
@@ -829,6 +864,13 @@ impl Library {
         let names = self.distinct_artists()?;
         let mut out = Vec::with_capacity(names.len());
         for name in names {
+            // Eigenschaften: nur im Bereich „Interpreten" sichtbare zeigen.
+            if !self
+                .artist_areas(&name)
+                .contains(&crate::core::category::Area::Artists)
+            {
+                continue;
+            }
             let meta = self
                 .get_artist_meta(&name)?
                 .unwrap_or_else(|| ArtistMeta::pending(&name));
@@ -1275,6 +1317,31 @@ mod tests {
     }
 
     #[test]
+    fn area_filtering_hides_from_listings() {
+        use crate::core::category::{album_key, areas_value, Area};
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/x/1.mp3", Some("X"), Some("Y")))
+            .unwrap();
+        // Standard: in Alben und Interpreten sichtbar.
+        assert_eq!(lib.albums_overview().unwrap().len(), 1);
+        assert_eq!(lib.artists_overview().unwrap().len(), 1);
+
+        // Album aus „Alben" nehmen (nur noch Dateisystem + Interpreten).
+        lib.set_category(
+            "album",
+            &album_key("X", "Y"),
+            Some(&areas_value(&[Area::Filesystem, Area::Artists])),
+        )
+        .unwrap();
+        assert!(lib.albums_overview().unwrap().is_empty());
+        assert_eq!(lib.artists_overview().unwrap().len(), 1);
+
+        // Interpret komplett ausblenden.
+        lib.set_category("artist", "X", Some("")).unwrap();
+        assert!(lib.artists_overview().unwrap().is_empty());
+    }
+
+    #[test]
     fn albums_overview_merges_feat_variants() {
         let lib = Library::open_in_memory().unwrap();
         for (path, artist) in [
@@ -1360,21 +1427,30 @@ mod tests {
     }
 
     #[test]
-    fn category_cascade_drives_resume_gate() {
+    fn area_cascade_resolution() {
+        use crate::core::category::Area;
         let lib = Library::open_in_memory().unwrap();
-        // Ohne Festlegung: Standard = Musik (kein Resume-Trigger).
-        let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
-        assert_eq!((cat.as_str(), src), ("music", "default"));
+        // Ohne Festlegung: Standard = Dateisystem/Interpreten/Alben.
+        assert_eq!(
+            lib.resolve_areas(Some("X"), Some("Y"), "/a/1.mp3"),
+            Area::DEFAULT.to_vec()
+        );
 
-        // Interpret-Ebene als Hörbuch markieren → vererbt auf Titel.
-        lib.set_category("artist", "X", Some("audiobook")).unwrap();
-        let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
-        assert_eq!((cat.as_str(), src), ("audiobook", "artist"));
+        // Interpret-Ebene = nur Hörbücher → vererbt auf Album und Titel.
+        lib.set_category("artist", "X", Some("audiobooks")).unwrap();
+        assert_eq!(
+            lib.resolve_areas(Some("X"), Some("Y"), "/a/1.mp3"),
+            vec![Area::Audiobooks]
+        );
+        assert_eq!(lib.album_areas("X", "Y"), vec![Area::Audiobooks]);
 
-        // Titel-Ebene gewinnt über die Interpret-Ebene.
-        lib.set_category("track", "/a/1.mp3", Some("music")).unwrap();
-        let (cat, src) = lib.resolve_category(Some("X"), Some("Y"), "/a/1.mp3");
-        assert_eq!((cat.as_str(), src), ("music", "track"));
+        // Titel-Ebene gewinnt: leere Liste = ausgeblendet.
+        lib.set_category("track", "/a/1.mp3", Some("")).unwrap();
+        assert!(lib
+            .resolve_areas(Some("X"), Some("Y"), "/a/1.mp3")
+            .is_empty());
+        // album_areas/artist_areas ignorieren die Titel-Ebene.
+        assert_eq!(lib.album_areas("X", "Y"), vec![Area::Audiobooks]);
     }
 
     // ---- Equalizer-Kaskade ----

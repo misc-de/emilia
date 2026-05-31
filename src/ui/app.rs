@@ -227,10 +227,11 @@ pub enum Msg {
     /// Automatischen Online-Abruf an-/ausschalten.
     SetAutoEnrich(bool),
     /// Merkmal einer Ebene setzen (oder bei `None` auf „erben" zurücksetzen).
-    SetCategory {
+    /// Bereiche (Eigenschaften) einer Ebene setzen; leerer Wert = ausgeblendet.
+    SetAreas {
         scope: &'static str,
         key: String,
-        value: Option<&'static str>,
+        value: String,
     },
     /// Equalizer-Bänder eines Ausgangs + einer Ebene speichern und anwenden.
     SetEq {
@@ -1714,10 +1715,14 @@ impl Component for App {
                     .library
                     .set_setting("auto_enrich", if on { "1" } else { "0" });
             }
-            Msg::SetCategory { scope, key, value } => {
-                if let Err(e) = self.library.set_category(scope, &key, value) {
-                    tracing::error!("Merkmal konnte nicht gespeichert werden: {e}");
+            Msg::SetAreas { scope, key, value } => {
+                if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
+                    tracing::error!("Eigenschaften konnten nicht gespeichert werden: {e}");
                 }
+                // Sichtbarkeit kann sich überall geändert haben → Ansichten neu laden.
+                self.reload_albums();
+                self.reload_artists();
+                self.load_dir(&sender);
             }
             Msg::SetEq {
                 output,
@@ -2024,9 +2029,26 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
     dirs.sort();
     files.sort();
 
+    // Eigenschaften: Dateien ausblenden, die nicht im Bereich „Dateisystem"
+    // sichtbar sind (geerbt von Album/Interpret). Dateien ohne DB-Eintrag bleiben
+    // sichtbar. Ordner werden nicht gefiltert (bleiben navigierbar).
+    let lib = Library::open().ok();
     let mut out = Vec::with_capacity(dirs.len() + files.len());
     out.extend(dirs.into_iter().map(FsEntry::dir));
-    out.extend(files.into_iter().map(FsEntry::file));
+    for f in files {
+        let visible = match &lib {
+            Some(lib) => match lib.track_by_path(&f.to_string_lossy()).ok().flatten() {
+                Some(t) => lib
+                    .resolve_areas(t.artist.as_deref(), t.album.as_deref(), &t.path)
+                    .contains(&crate::core::category::Area::Filesystem),
+                None => true,
+            },
+            None => true,
+        };
+        if visible {
+            out.push(FsEntry::file(f));
+        }
+    }
     out
 }
 

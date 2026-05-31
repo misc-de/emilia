@@ -10,7 +10,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::core::category::{self, Category};
+use crate::core::category;
 use crate::core::db::Library;
 use crate::core::{cover, scanner};
 use crate::model::{ArtistMeta, Track};
@@ -1039,90 +1039,97 @@ impl App {
         }
     }
 
-    /// "Eigenschaften"-Gruppe des Detailziels (Datei: alle Ebenen; Interpret/Album: passend).
+    /// „Eigenschaften"-Gruppe des Detailziels: Mehrfachauswahl der Bereiche, in
+    /// denen der Inhalt erscheint (leer = ausgeblendet). Festgelegt wird auf der
+    /// passenden Ebene (Titel/Album/Interpret); die Vererbung übernimmt
+    /// `resolve_areas`.
     pub(crate) fn ctx_merkmale(
         &self,
         target: &CtxTarget,
         sender: &ComponentSender<Self>,
     ) -> Option<adw::PreferencesGroup> {
-        match target {
-            CtxTarget::Fs(e) => self.build_merkmale(e, sender),
-            CtxTarget::Artist(m) => Some(self.artist_merkmale(&m.name, sender)),
-            CtxTarget::Album(m) => Some(self.album_merkmale(&m.artist, &m.album, sender)),
-        }
-    }
-
-    /// "Eigenschaften"-Gruppe für einen Interpreten: eine Auswahl auf Interpret-Ebene.
-    pub(crate) fn artist_merkmale(
-        &self,
-        name: &str,
-        sender: &ComponentSender<Self>,
-    ) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().build();
-        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
-
-        let (eff, src) = self.library.resolve_category(Some(name), None, "");
-        let eff_label = Category::from_str(&eff).unwrap_or(Category::DEFAULT).label();
-        let src_label = if src == "artist" { "Interpret" } else { "Standard" };
-        expander.set_subtitle(&format!("{eff_label} (von: {src_label})"));
-
-        let cur = self.library.get_category("artist", name).ok().flatten();
-        self.add_category_row(
-            &expander,
-            sender,
-            &format!("Interpret: {name}"),
-            "artist",
-            name.to_string(),
-            cur,
-        );
-
-        group.add(&expander);
-        group
-    }
-
-    /// "Eigenschaften"-Gruppe für ein Album: Album-Ebene plus geerbte Interpret-Ebene.
-    pub(crate) fn album_merkmale(
-        &self,
-        artist: &str,
-        album: &str,
-        sender: &ComponentSender<Self>,
-    ) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().build();
-        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
-
-        let (eff, src) = self.library.resolve_category(Some(artist), Some(album), "");
-        let eff_label = Category::from_str(&eff).unwrap_or(Category::DEFAULT).label();
-        let src_label = match src {
-            "album" => "Album",
-            "artist" => "Interpret",
-            _ => "Standard",
+        use crate::core::category::{album_key, Area};
+        let (scope, key, effective): (&'static str, String, Vec<Area>) = match target {
+            CtxTarget::Artist(m) => ("artist", m.name.clone(), self.library.artist_areas(&m.name)),
+            CtxTarget::Album(m) => (
+                "album",
+                album_key(&m.artist, &m.album),
+                self.library.album_areas(&m.artist, &m.album),
+            ),
+            CtxTarget::Fs(e) if !e.is_dir() => {
+                let track = scanner::read_track(e.path()).ok()?;
+                let path = e.path().to_string_lossy().into_owned();
+                let eff =
+                    self.library
+                        .resolve_areas(track.artist.as_deref(), track.album.as_deref(), &path);
+                ("track", path, eff)
+            }
+            CtxTarget::Fs(e) => match self.fs_music_kind(e)? {
+                FsKind::Album { artist, album } => (
+                    "album",
+                    album_key(&artist, &album),
+                    self.library.album_areas(&artist, &album),
+                ),
+                FsKind::Artist(name) => ("artist", name.clone(), self.library.artist_areas(&name)),
+            },
         };
-        expander.set_subtitle(&format!("{eff_label} (von: {src_label})"));
+        Some(self.build_area_group(scope, key, &effective, sender))
+    }
 
-        // Album-Ebene
-        let key = category::album_key(artist, album);
-        let cur = self.library.get_category("album", &key).ok().flatten();
-        self.add_category_row(
-            &expander,
-            sender,
-            &format!("Album: {album}"),
-            "album",
-            key,
-            cur,
-        );
-        // Interpret-Ebene (geerbt)
-        if !artist.is_empty() {
-            let cur = self.library.get_category("artist", artist).ok().flatten();
-            self.add_category_row(
-                &expander,
-                sender,
-                &format!("Interpret: {artist}"),
-                "artist",
-                artist.to_string(),
-                cur,
-            );
+    /// Bereichs-Auswahl (ein Schalter je Bereich) für eine Ebene. Alle Schalter
+    /// aus = ausgeblendet.
+    fn build_area_group(
+        &self,
+        scope: &'static str,
+        key: String,
+        effective: &[crate::core::category::Area],
+        sender: &ComponentSender<Self>,
+    ) -> adw::PreferencesGroup {
+        use crate::core::category::{areas_value, Area};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let group = adw::PreferencesGroup::builder().build();
+        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
+        let subtitle = if effective.is_empty() {
+            "Ausgeblendet".to_string()
+        } else {
+            effective
+                .iter()
+                .map(|a| a.label())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        expander.set_subtitle(&subtitle);
+
+        let state = Rc::new(RefCell::new(effective.to_vec()));
+        for area in Area::ALL {
+            let row = adw::SwitchRow::builder()
+                .title(area.label())
+                .active(effective.contains(&area))
+                .build();
+            let sender = sender.clone();
+            let state = state.clone();
+            let key = key.clone();
+            row.connect_active_notify(move |r| {
+                {
+                    let mut s = state.borrow_mut();
+                    if r.is_active() {
+                        if !s.contains(&area) {
+                            s.push(area);
+                        }
+                    } else {
+                        s.retain(|a| *a != area);
+                    }
+                }
+                sender.input(Msg::SetAreas {
+                    scope,
+                    key: key.clone(),
+                    value: areas_value(&state.borrow()),
+                });
+            });
+            expander.add_row(&row);
         }
-
         group.add(&expander);
         group
     }
