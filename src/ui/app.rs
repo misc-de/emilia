@@ -56,8 +56,8 @@ const SECTIONS: [(&str, &str, &str); 6] = [
     ("artists", "Interpreten", "avatar-default-symbolic"),
     ("albums", "Alben", "media-optical-symbolic"),
     ("concerts", "Konzerte", "emilia-concert-symbolic"),
-    ("playlists", "Playlisten", "view-list-symbolic"),
     ("podcasts", "Podcasts", "microphone-symbolic"),
+    ("playlists", "Playlisten", "view-list-symbolic"),
 ];
 
 /// Ab dieser Spieldauer gilt ein Titel als „Lang-Inhalt" und bekommt
@@ -609,17 +609,6 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    gtk::Box {
-                                        set_halign: gtk::Align::Center,
-                                        set_margin_top: 12,
-                                        set_margin_bottom: 6,
-                                        gtk::Button {
-                                            set_label: "Neue Playlist",
-                                            set_css_classes: &["suggested-action", "pill"],
-                                            connect_clicked => Msg::PlaylistNew,
-                                        },
-                                    },
-
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -627,7 +616,7 @@ impl Component for App {
                                         #[local_ref]
                                         playlists_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 0,
+                                            set_margin_top: 12,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -643,21 +632,22 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.playlist_items.is_empty(),
                                     },
+
+                                    // Aktion ganz unten.
+                                    gtk::Box {
+                                        set_halign: gtk::Align::Center,
+                                        set_margin_top: 6,
+                                        set_margin_bottom: 10,
+                                        gtk::Button {
+                                            set_label: "Neue Playlist",
+                                            set_css_classes: &["suggested-action", "pill"],
+                                            connect_clicked => Msg::PlaylistNew,
+                                        },
+                                    },
                                 },
                             add_titled_with_icon[Some("podcasts"), "Podcasts", "microphone-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-
-                                    gtk::Box {
-                                        set_halign: gtk::Align::Center,
-                                        set_margin_top: 12,
-                                        set_margin_bottom: 6,
-                                        gtk::Button {
-                                            set_label: "Podcast abonnieren",
-                                            set_css_classes: &["suggested-action", "pill"],
-                                            connect_clicked => Msg::PodcastSubscribe,
-                                        },
-                                    },
 
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
@@ -666,7 +656,7 @@ impl Component for App {
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 0,
+                                            set_margin_top: 12,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -681,6 +671,18 @@ impl Component for App {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.podcast_items.is_empty(),
+                                    },
+
+                                    // Aktion ganz unten.
+                                    gtk::Box {
+                                        set_halign: gtk::Align::Center,
+                                        set_margin_top: 6,
+                                        set_margin_bottom: 10,
+                                        gtk::Button {
+                                            set_label: "Podcast abonnieren",
+                                            set_css_classes: &["suggested-action", "pill"],
+                                            connect_clicked => Msg::PodcastSubscribe,
+                                        },
                                     },
                                 },
                         },
@@ -1647,7 +1649,8 @@ impl Component for App {
                     self.enrich_cancel.store(true, Ordering::Relaxed);
                     self.enrich_status = "Wird abgebrochen …".to_string();
                 } else {
-                    self.run_enrich(&sender, true);
+                    // Manuell ausgelöst: alles erneut versuchen (Zähler ignorieren).
+                    self.run_enrich(&sender, true, false);
                 }
             }
             Msg::HideEnrichBanner => self.enrich_banner_hidden = true,
@@ -1886,7 +1889,8 @@ impl Component for App {
                     && self.root_dir.is_some()
                     && online_unmetered()
                 {
-                    self.run_enrich(&sender, false);
+                    // Automatischer Lauf: erschöpfte Einträge werden übersprungen.
+                    self.run_enrich(&sender, false, true);
                 }
             }
             Cmd::Candidates(candidates) => {

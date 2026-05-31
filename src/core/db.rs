@@ -85,6 +85,7 @@ impl Library {
                 year       INTEGER,
                 status     TEXT NOT NULL DEFAULT 'pending',
                 fetched_at INTEGER,
+                attempts   INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (artist, album)
             );
 
@@ -93,7 +94,8 @@ impl Library {
                 name       TEXT PRIMARY KEY,
                 image_path TEXT,
                 status     TEXT NOT NULL DEFAULT 'pending',
-                fetched_at INTEGER
+                fetched_at INTEGER,
+                attempts   INTEGER NOT NULL DEFAULT 0
             );
 
             -- Per Fingerprint (AcoustID) erkannte Titeldaten – reine Vorschläge,
@@ -105,7 +107,8 @@ impl Library {
                 artist         TEXT,
                 album          TEXT,
                 status         TEXT NOT NULL DEFAULT 'pending',
-                fetched_at     INTEGER
+                fetched_at     INTEGER,
+                attempts       INTEGER NOT NULL DEFAULT 0
             );
 
             -- Vom Nutzer als Konzert markierte Ordner/Dateien.
@@ -238,6 +241,27 @@ impl Library {
         if !has_disc {
             self.conn
                 .execute_batch("ALTER TABLE track ADD COLUMN disc_no INTEGER;")?;
+        }
+
+        // Migration: attempts-Zähler in den Meta-Tabellen nachrüsten (begrenzt das
+        // wiederholte Anfragen erfolglos gebliebener Online-Abrufe).
+        for table in ["album_meta", "artist_meta", "track_meta"] {
+            let has = self
+                .conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = 'attempts'"
+                    ),
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if !has {
+                self.conn.execute_batch(&format!(
+                    "ALTER TABLE {table} ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;"
+                ))?;
+            }
         }
         Ok(())
     }
@@ -530,6 +554,41 @@ impl Library {
             .query_row("SELECT COUNT(*) FROM track", [], |r| r.get(0))?)
     }
 
+    // ---- Fehlversuchs-Zähler (begrenzen das wiederholte Online-Anfragen) ----
+
+    /// Bisherige erfolglose Online-Versuche für ein Album (0, wenn unbekannt).
+    pub fn album_attempts(&self, artist: &str, album: &str) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT attempts FROM album_meta WHERE artist = ?1 AND album = ?2",
+                rusqlite::params![artist, album],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    /// Bisherige erfolglose Online-Versuche für einen Interpreten.
+    pub fn artist_attempts(&self, name: &str) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT attempts FROM artist_meta WHERE name = ?1",
+                [name],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    /// Bisherige erfolglose Fingerprint-Versuche für einen Titel (Pfad).
+    pub fn track_attempts(&self, path: &str) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT attempts FROM track_meta WHERE path = ?1",
+                [path],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+
     /// Anzahl eindeutiger Alben – **gleiche Gruppierung** wie [`Self::albums_overview`]
     /// und [`Self::albums_missing_cover`] (nach `COALESCE(artist,''), album`). Dient
     /// als Gesamtsumme für die Fortschrittsanzeige des Cover-Abrufs.
@@ -580,14 +639,17 @@ impl Library {
     pub fn upsert_album_meta(&self, m: &AlbumMeta) -> Result<()> {
         self.conn.execute(
             r#"
-            INSERT INTO album_meta (artist, album, mbid, cover_path, year, status, fetched_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'))
+            INSERT INTO album_meta (artist, album, mbid, cover_path, year, status, fetched_at, attempts)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'),
+                    CASE WHEN ?6 IN ('matched','local') THEN 0 ELSE 1 END)
             ON CONFLICT(artist, album) DO UPDATE SET
                 mbid       = excluded.mbid,
                 cover_path = excluded.cover_path,
                 year       = excluded.year,
                 status     = excluded.status,
-                fetched_at = excluded.fetched_at
+                fetched_at = excluded.fetched_at,
+                attempts   = CASE WHEN excluded.status IN ('matched','local') THEN 0
+                                  ELSE album_meta.attempts + 1 END
             "#,
             rusqlite::params![m.artist, m.album, m.mbid, m.cover_path, m.year, m.status],
         )?;
@@ -699,12 +761,15 @@ impl Library {
 
     pub fn upsert_artist_meta(&self, m: &ArtistMeta) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO artist_meta (name, image_path, status, fetched_at)
-             VALUES (?1, ?2, ?3, strftime('%s','now'))
+            "INSERT INTO artist_meta (name, image_path, status, fetched_at, attempts)
+             VALUES (?1, ?2, ?3, strftime('%s','now'),
+                     CASE WHEN ?3 = 'matched' THEN 0 ELSE 1 END)
              ON CONFLICT(name) DO UPDATE SET
                 image_path = excluded.image_path,
                 status     = excluded.status,
-                fetched_at = excluded.fetched_at",
+                fetched_at = excluded.fetched_at,
+                attempts   = CASE WHEN excluded.status = 'matched' THEN 0
+                                  ELSE artist_meta.attempts + 1 END",
             rusqlite::params![m.name, m.image_path, m.status],
         )?;
         Ok(())
@@ -775,15 +840,18 @@ impl Library {
     pub fn upsert_track_meta(&self, m: &TrackMeta) -> Result<()> {
         self.conn.execute(
             "INSERT INTO track_meta
-                (path, recording_mbid, title, artist, album, status, fetched_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'))
+                (path, recording_mbid, title, artist, album, status, fetched_at, attempts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'),
+                     CASE WHEN ?6 = 'matched' THEN 0 ELSE 1 END)
              ON CONFLICT(path) DO UPDATE SET
                 recording_mbid = excluded.recording_mbid,
                 title          = excluded.title,
                 artist         = excluded.artist,
                 album          = excluded.album,
                 status         = excluded.status,
-                fetched_at     = excluded.fetched_at",
+                fetched_at     = excluded.fetched_at,
+                attempts       = CASE WHEN excluded.status = 'matched' THEN 0
+                                      ELSE track_meta.attempts + 1 END",
             rusqlite::params![m.path, m.recording_mbid, m.title, m.artist, m.album, m.status],
         )?;
         Ok(())
@@ -1060,6 +1128,31 @@ mod tests {
             duration_ms: Some(60_000),
             resume_ms: 0,
         }
+    }
+
+    #[test]
+    fn meta_attempts_count_failures_and_reset_on_success() {
+        let lib = Library::open_in_memory().unwrap();
+        let mut m = AlbumMeta::pending("A", "B");
+
+        // Jeder erfolglose Abruf zählt hoch.
+        m.status = "notfound".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        assert_eq!(lib.album_attempts("A", "B"), 1);
+        m.status = "error".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        assert_eq!(lib.album_attempts("A", "B"), 2);
+
+        // Erfolg ('matched' oder lokal gefundenes Cover) setzt zurück.
+        m.status = "matched".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        assert_eq!(lib.album_attempts("A", "B"), 0);
+
+        m.status = "notfound".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        m.status = "local".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        assert_eq!(lib.album_attempts("A", "B"), 0);
     }
 
     #[test]

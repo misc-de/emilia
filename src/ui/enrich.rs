@@ -17,12 +17,19 @@ use crate::ui::app::Cmd;
 ///   2. Interpreten → Deezer (Fotos)
 ///   3. Titel  → Chromaprint/AcoustID (nur Dateien mit lückenhaften Tags;
 ///      benötigt einen AcoustID-Key, sonst wird die Phase übersprungen)
+/// Nach so vielen erfolglosen Versuchen wird ein Eintrag beim **automatischen**
+/// Sync nicht erneut online abgefragt (manuell auf Knopfdruck schon).
+const MAX_AUTO_ATTEMPTS: i64 = 3;
+
 pub(crate) fn enrich_worker(
     root: PathBuf,
     acoustid_key: Option<String>,
     fanart_key: Option<String>,
     cancel: Arc<AtomicBool>,
     scan_first: bool,
+    // `true` = automatischer Lauf (überspringt erschöpfte Einträge),
+    // `false` = manuell ausgelöst (versucht alles erneut).
+    auto: bool,
     out: &relm4::Sender<Cmd>,
 ) {
     let lib = match Library::open() {
@@ -86,17 +93,22 @@ pub(crate) fn enrich_worker(
         let all_artists = lib.distinct_artists().unwrap_or_default();
         let total_artists = all_artists.len();
         let mut to_fetch = Vec::new();
+        let mut artists_skipped = 0usize;
         for name in all_artists {
             match lib.get_artist_meta(&name).ok().flatten() {
                 Some(m) if m.status == "matched" => artists_matched += 1,
+                // Automatik: nach zu vielen Fehlversuchen nicht erneut anfragen.
+                _ if auto && lib.artist_attempts(&name) >= MAX_AUTO_ATTEMPTS => {
+                    artists_skipped += 1
+                }
                 _ => to_fetch.push(name),
             }
         }
         if stopped() {
             break 'work;
         }
-        // Bereits zugeordnete Interpreten zählen als „erledigt" (Fortschritts-Basis).
-        let artists_base = artists_matched;
+        // Zugeordnete + übersprungene Interpreten zählen als „erledigt".
+        let artists_base = artists_matched + artists_skipped;
         artists_matched +=
             fetch_artists_parallel(&client, to_fetch, &cancel, &lib, artists_base, total_artists, out);
         let _ = out.send(Cmd::ReloadViews);
@@ -111,12 +123,16 @@ pub(crate) fn enrich_worker(
             if stopped() {
                 break 'work;
             }
-            if !artist.is_empty()
-                && online::enrich_album(&client, &lib, artist, album).status == "matched"
-            {
-                covers += 1;
+            // Automatik: nach zu vielen erfolglosen Versuchen überspringen.
+            let exhausted = auto && lib.album_attempts(artist, album) >= MAX_AUTO_ATTEMPTS;
+            if !exhausted {
+                if !artist.is_empty()
+                    && online::enrich_album(&client, &lib, artist, album).status == "matched"
+                {
+                    covers += 1;
+                }
+                std::thread::sleep(online::RATE_LIMIT);
             }
-            std::thread::sleep(online::RATE_LIMIT);
             let _ = out.send(Cmd::EnrichProgress {
                 phase: "Cover".to_string(),
                 done: base + i + 1,
@@ -140,6 +156,8 @@ pub(crate) fn enrich_worker(
                     let already = lib.get_track_meta(&track.path).ok().flatten();
                     if already.as_ref().map(|m| m.status.as_str()) == Some("matched") {
                         tracks_matched += 1;
+                    } else if auto && lib.track_attempts(&track.path) >= MAX_AUTO_ATTEMPTS {
+                        // Automatik: erschöpfte Titel nicht erneut anfragen.
                     } else {
                         if online::enrich_track_fingerprint(&client, &lib, &key, &path).status
                             == "matched"

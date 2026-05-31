@@ -87,7 +87,12 @@ impl App {
     /// Tags einlesen (beim manuellen Abruf) – beim automatischen Lauf entfällt das,
     /// weil der lokale Scan bereits durchlief. Die Audiodateien werden dabei nur
     /// gelesen, niemals verändert.
-    pub(crate) fn run_enrich(&mut self, sender: &ComponentSender<Self>, scan_first: bool) {
+    pub(crate) fn run_enrich(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        scan_first: bool,
+        auto: bool,
+    ) {
         let Some(root) = self.root_dir.clone() else {
             self.toast("Kein Musikordner festgelegt – bitte in den Einstellungen wählen");
             return;
@@ -108,7 +113,8 @@ impl App {
         } else {
             "Cover & Metadaten werden gesucht …".to_string()
         };
-        sender.spawn_command(move |out| enrich_worker(root, key, fkey, cancel, scan_first, &out));
+        sender
+            .spawn_command(move |out| enrich_worker(root, key, fkey, cancel, scan_first, auto, &out));
     }
 
     /// Lädt die Interpreten-Übersicht aus der DB in die Factory (inkl. Foto).
