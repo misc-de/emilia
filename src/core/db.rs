@@ -20,6 +20,24 @@ pub struct Library {
     conn: Connection,
 }
 
+/// Dateiname ohne Endung (Rückfall: der ganze Schlüssel).
+fn file_stem_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// Letzter Pfadbestandteil (Ordner-/Dateiname; Rückfall: der ganze Schlüssel).
+fn file_name_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
 impl Library {
     pub fn open() -> Result<Self> {
         let conn = Connection::open(db_path())?;
@@ -127,6 +145,7 @@ impl Library {
                 title    TEXT NOT NULL,
                 is_dir   INTEGER NOT NULL DEFAULT 0,
                 added_at INTEGER,
+                pos      INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (scope, key)
             );
 
@@ -275,6 +294,29 @@ impl Library {
             }
         }
 
+        // Migration: Sortierspalte für Favoriten (für manuelles Umsortieren).
+        let has_pos = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('favorite') WHERE name = 'pos'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_pos {
+            self.conn
+                .execute_batch("ALTER TABLE favorite ADD COLUMN pos INTEGER NOT NULL DEFAULT 0;")?;
+            // Bestehende Favoriten in bisheriger Reihenfolge durchnummerieren.
+            self.conn.execute_batch(
+                "UPDATE favorite SET pos = (
+                     SELECT COUNT(*) FROM favorite f2
+                     WHERE COALESCE(f2.added_at,0) < COALESCE(favorite.added_at,0)
+                        OR (COALESCE(f2.added_at,0) = COALESCE(favorite.added_at,0) AND f2.key <= favorite.key)
+                 );",
+            )?;
+        }
+
         // Migration: alte Einzel-Merkmale (music/concert/…) auf die neue
         // Bereichsliste (Eigenschaften) abbilden. Idempotent.
         self.conn.execute_batch(
@@ -365,11 +407,18 @@ impl Library {
         on: bool,
     ) -> Result<()> {
         if on {
+            // Neue Favoriten ans Ende sortieren (max pos + 1).
+            let next_pos: i64 = self
+                .conn
+                .query_row("SELECT COALESCE(MAX(pos), -1) + 1 FROM favorite", [], |r| {
+                    r.get(0)
+                })
+                .unwrap_or(0);
             self.conn.execute(
-                "INSERT INTO favorite (scope, key, title, is_dir, added_at)
-                 VALUES (?1, ?2, ?3, ?4, strftime('%s','now'))
+                "INSERT INTO favorite (scope, key, title, is_dir, added_at, pos)
+                 VALUES (?1, ?2, ?3, ?4, strftime('%s','now'), ?5)
                  ON CONFLICT(scope, key) DO UPDATE SET title = excluded.title",
-                rusqlite::params![scope, key, title, is_dir as i64],
+                rusqlite::params![scope, key, title, is_dir as i64, next_pos],
             )?;
         } else {
             self.conn.execute(
@@ -394,10 +443,10 @@ impl Library {
             .is_some()
     }
 
-    /// Alle Favoriten (scope, key, title, is_dir), neueste zuerst.
+    /// Alle Favoriten (scope, key, title, is_dir) in gespeicherter Reihenfolge.
     pub fn favorites(&self) -> Result<Vec<(String, String, String, bool)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT scope, key, title, is_dir FROM favorite ORDER BY added_at DESC, title",
+            "SELECT scope, key, title, is_dir FROM favorite ORDER BY pos, added_at, title",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -410,30 +459,52 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    // ---- Hörbücher (aus dem Bereich „Hörbücher") ----
+    /// Speichert die Reihenfolge der Favoriten (pos = Index in `ordered`).
+    pub fn set_favorite_order(&self, ordered: &[(String, String)]) -> Result<()> {
+        for (i, (scope, key)) in ordered.iter().enumerate() {
+            self.conn.execute(
+                "UPDATE favorite SET pos = ?1 WHERE scope = ?2 AND key = ?3",
+                rusqlite::params![i as i64, scope, key],
+            )?;
+        }
+        Ok(())
+    }
 
-    /// Inhalte, deren Eigenschaften den Bereich **Hörbücher** enthalten – aus den
-    /// Festlegungen (category) abgeleitet: Alben (Ordner eines Albumtitels),
-    /// Ordner und einzelne Titel. Liefert (Pfad, Titel, is_dir), dedupliziert.
-    pub fn audiobook_entries(&self) -> Result<Vec<(String, String, bool)>> {
-        use crate::core::category::{parse_areas, Area};
-        let mut stmt = self
-            .conn
-            .prepare("SELECT scope, key, value FROM category")?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+    // ---- Bereichs-Einträge (Konzerte / Hörbücher aus den Eigenschaften) ----
+
+    /// Inhalte, deren Eigenschaften den Bereich `area` enthalten – **live** aus
+    /// den Festlegungen (category) abgeleitet. Liefert je Eintrag
+    /// `(scope, key, Titel, is_dir)` (dieselbe Form wie Favoriten), damit
+    /// Abspielen/Detail/Cover einheitlich aufgelöst werden können.
+    ///
+    /// `include_folders`/`include_artists` steuern, ob Ordner- bzw. Interpreten-
+    /// Festlegungen mitgenommen werden (z. B. Hörbücher: ohne Ordner, mit
+    /// Interpreten/Komponisten).
+    pub fn area_entries(
+        &self,
+        area: crate::core::category::Area,
+        include_folders: bool,
+        include_artists: bool,
+    ) -> Vec<(String, String, String, bool)> {
+        use crate::core::category::parse_areas;
+        let Ok(mut stmt) = self.conn.prepare("SELECT scope, key, value FROM category") else {
+            return Vec::new();
+        };
+        let Ok(rows) = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        }) else {
+            return Vec::new();
+        };
 
         let mut seen = std::collections::HashSet::new();
-        let mut out: Vec<(String, String, bool)> = Vec::new();
-        for (scope, key, value) in rows {
-            if !parse_areas(&value).contains(&Area::Audiobooks) {
+        let mut out: Vec<(String, String, String, bool)> = Vec::new();
+        for row in rows.flatten() {
+            let (scope, key, value) = row;
+            if !parse_areas(&value).contains(&area) {
                 continue;
             }
             let entry = match scope.as_str() {
@@ -444,62 +515,43 @@ impl Library {
                         .flatten()
                         .map(|t| t.title)
                         .filter(|s| !s.trim().is_empty())
-                        .unwrap_or_else(|| {
-                            std::path::Path::new(&key)
-                                .file_stem()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or(&key)
-                                .to_string()
-                        });
-                    Some((key.clone(), title, false))
-                }
-                "folder" => {
-                    let name = std::path::Path::new(&key)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(&key)
-                        .to_string();
-                    Some((key.clone(), name, true))
+                        .unwrap_or_else(|| file_stem_of(&key));
+                    Some(("track", title, false))
                 }
                 "album" => {
-                    // key = „Interpret\1Album"; Ordner = Verzeichnis eines Titels.
-                    let mut parts = key.splitn(2, '\u{1}');
-                    let artist = parts.next().unwrap_or("");
-                    let album = parts.next().unwrap_or("").to_string();
-                    self.album_sample_dir(artist, &album)
-                        .map(|d| (d, album, true))
+                    // key = „Interpret\1Album" → Titel = Albumname.
+                    let album = key.splitn(2, '\u{1}').nth(1).unwrap_or("").to_string();
+                    Some(("album", album, false))
                 }
-                _ => None, // Interpret-Ebene: kein einzelner Pfad
+                "folder" if include_folders => Some(("folder", file_name_of(&key), true)),
+                "artist" if include_artists => Some(("artist", key.clone(), false)),
+                _ => None,
             };
-            if let Some((path, title, is_dir)) = entry {
-                if seen.insert(path.clone()) {
-                    out.push((path, title, is_dir));
+            if let Some((scope, title, is_dir)) = entry {
+                if seen.insert((scope, key.clone())) {
+                    out.push((scope.to_string(), key, title, is_dir));
                 }
             }
         }
-        out.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
-        Ok(out)
+        out.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        out
     }
 
-    /// Verzeichnis eines Albums (übergeordneter Ordner eines seiner Titel, dessen
-    /// Haupt-Interpret `artist` ist). Grundlage für Konzert-/Hörbuch-Einträge.
-    pub fn album_sample_dir(&self, artist: &str, album: &str) -> Option<String> {
-        let target = crate::core::artist::norm_key(artist);
-        let sample = self
-            .all_tracks()
-            .ok()?
-            .into_iter()
-            .find(|t| {
-                t.album.as_deref() == Some(album)
-                    && t.artist.as_deref().is_some_and(|a| {
-                        crate::core::artist::split_artists(a)
-                            .first()
-                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
-                    })
-            })?;
-        std::path::Path::new(&sample.path)
-            .parent()
-            .map(|d| d.to_string_lossy().into_owned())
+    /// Entfernt einen einzelnen Bereich aus den Eigenschaften einer Ebene. Wird
+    /// die Liste dadurch leer (was „ausgeblendet" hieße), wird stattdessen die
+    /// Festlegung gelöscht (zurück auf Standard/Vererbung).
+    pub fn clear_area(&self, scope: &str, key: &str, area: crate::core::category::Area) -> Result<()> {
+        use crate::core::category::{areas_value, parse_areas};
+        if let Some(v) = self.get_category(scope, key)? {
+            let mut areas = parse_areas(&v);
+            areas.retain(|a| *a != area);
+            if areas.is_empty() {
+                self.set_category(scope, key, None)?;
+            } else {
+                self.set_category(scope, key, Some(&areas_value(&areas)))?;
+            }
+        }
+        Ok(())
     }
 
     // ---- Merkmale (Kategorie mit Vererbung) ----

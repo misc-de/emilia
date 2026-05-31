@@ -9,117 +9,43 @@ use relm4::{adw, gtk};
 use crate::ui::app::{App, Msg};
 
 impl App {
-    /// Lädt die markierten Konzerte aus der DB und baut die Liste neu auf.
+    /// Lädt die Konzerte und baut die Liste neu auf. Quelle ist die **Vereinigung**
+    /// aus importierten Markierungen (concert-Tabelle) und allen Inhalten, deren
+    /// Eigenschaften den Bereich „Konzerte" enthalten (Alben/Ordner/Titel) –
+    /// dedupliziert nach (scope, key), mit Album-/Interpreten-Cover.
     pub(crate) fn load_concerts(&mut self, sender: &ComponentSender<Self>) {
-        self.concert_items = self.library.concerts().unwrap_or_default();
+        use std::collections::HashSet;
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        let mut items: Vec<(String, String, String, bool)> = Vec::new();
 
-        while let Some(child) = self.concerts_list.first_child() {
-            self.concerts_list.remove(&child);
-        }
-        for (i, (_, title, is_dir)) in self.concert_items.iter().enumerate() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(title))
-                .subtitle(if *is_dir { "Album" } else { "Datei" })
-                .activatable(true)
-                .build();
-            let icon = if *is_dir {
-                "folder-symbolic"
-            } else {
-                "audio-x-generic-symbolic"
-            };
-            row.add_prefix(&gtk::Image::from_icon_name(icon));
-
-            // Entfernen-Knopf (Markierung löschen, Dateien bleiben unberührt).
-            let remove = gtk::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .tooltip_text("Konzert entfernen")
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            {
-                let sender = sender.clone();
-                remove.connect_clicked(move |_| sender.input(Msg::ConcertRemove(i)));
-            }
-            row.add_suffix(&remove);
-            row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-
-            {
-                let sender = sender.clone();
-                row.connect_activated(move |_| sender.input(Msg::PlayConcert(i)));
-            }
-
-            // Langes Drücken: Detailansicht – wie unter „Dateisystem".
-            let long_press = gtk::GestureLongPress::new();
-            {
-                let sender = sender.clone();
-                long_press.connect_pressed(move |gesture, _, _| {
-                    gesture.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::ShowConcertDetail(i));
-                });
-            }
-            row.add_controller(long_press);
-
-            self.concerts_list.append(&row);
-        }
-    }
-
-    /// Hält die Konzert-Liste mit der Eigenschaft „Konzerte" in Einklang: wird
-    /// der Bereich „Konzerte" für ein Album/einen Ordner/einen Titel gesetzt,
-    /// erscheint er in der Konzerte-Liste; wird er entfernt, verschwindet er.
-    /// So wirkt die Eigenschaften-Auswahl wie bei den übrigen Bereichen.
-    pub(crate) fn sync_concert_marker(&self, scope: &str, key: &str, value: &str) {
-        use crate::core::category::{parse_areas, Area};
-        let is_concert = parse_areas(value).contains(&Area::Concerts);
-
-        // Pfad/Titel/Ordner-Kennung der Ebene bestimmen.
-        let entry: Option<(String, String, bool)> = match scope {
-            "track" => {
-                let title = self
-                    .library
-                    .track_by_path(key)
-                    .ok()
-                    .flatten()
-                    .map(|t| t.title)
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or_else(|| {
-                        std::path::Path::new(key)
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or(key)
-                            .to_string()
-                    });
-                Some((key.to_string(), title, false))
-            }
-            "folder" => {
-                let name = std::path::Path::new(key)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(key)
-                    .to_string();
-                Some((key.to_string(), name, true))
-            }
-            "album" => {
-                // Schlüssel = „Interpret\u{1}Album". Repräsentativer Ordner =
-                // übergeordneter Ordner eines Albumtitels.
-                let mut parts = key.splitn(2, '\u{1}');
-                let artist = parts.next().unwrap_or("");
-                let album = parts.next().unwrap_or("");
-                self.album_files(artist, album)
-                    .first()
-                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                    .map(|d| (d.to_string_lossy().into_owned(), album.to_string(), true))
-            }
-            // Interpret-Ebene hat keinen einzelnen Pfad – hier nicht abgebildet.
-            _ => None,
-        };
-
-        if let Some((path, title, is_dir)) = entry {
-            if is_concert {
-                let _ = self.library.add_concert(&path, &title, is_dir);
-            } else {
-                let _ = self.library.remove_concert(&path);
+        // 1) Importierte/markierte Konzerte (Pfad → Ordner bzw. Titel).
+        for (path, title, is_dir) in self.library.concerts().unwrap_or_default() {
+            let scope = if is_dir { "folder" } else { "track" };
+            if seen.insert((scope.to_string(), path.clone())) {
+                items.push((scope.to_string(), path, title, is_dir));
             }
         }
+        // 2) Über die Eigenschaften als „Konzerte" markierte Inhalte (live).
+        for entry in
+            self.library
+                .area_entries(crate::core::category::Area::Concerts, true, false)
+        {
+            if seen.insert((entry.0.clone(), entry.1.clone())) {
+                items.push(entry);
+            }
+        }
+
+        self.concert_items = items;
+        let items = self.concert_items.clone();
+        self.fill_entry_list(
+            &self.concerts_list,
+            &items,
+            sender,
+            Msg::PlayConcert,
+            Some(Msg::ConcertRemove),
+            Msg::ShowConcertDetail,
+            None,
+        );
     }
 
     /// Import-Dialog: Liste der Kandidaten zum Markieren + „Hinzufügen".

@@ -1,5 +1,7 @@
-//! Favoriten (Stern in „Mehr Infos") und Hörbücher (Bereich „Hörbücher"):
-//! Listen aufbauen, Favoritenstatus umschalten und Einträge abspielen.
+//! Favoriten (Stern in „Mehr Infos"), Hörbücher und Konzerte teilen sich ein
+//! einheitliches Eintrags-Modell `(scope, key, Titel, is_dir)`. Dieses Modul
+//! baut die Listen (mit Album-/Interpreten-Cover), schaltet den Favoritenstatus
+//! um und löst Abspielen/Detail/Cover einheitlich auf.
 
 use std::path::PathBuf;
 
@@ -8,7 +10,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::category::album_key;
-use crate::ui::app::{App, CtxTarget, Msg};
+use crate::ui::app::{cover_widget, App, CtxTarget, Msg};
 use crate::ui::fs_row::FsEntry;
 
 impl App {
@@ -56,62 +58,96 @@ impl App {
         self.library.is_favorite(scope, &key)
     }
 
-    /// Lädt die Favoriten aus der DB und baut die Liste neu auf.
+    // ---- Listen aufbauen ----
+
+    /// Lädt die Favoriten und baut die Liste neu auf (mit Cover, Mülleimer,
+    /// Ziehgriff zum Umsortieren).
     pub(crate) fn load_favorites(&mut self, sender: &ComponentSender<Self>) {
         self.favorite_items = self.library.favorites().unwrap_or_default();
-        Self::fill_entry_list(
+        let items = self.favorite_items.clone();
+        self.fill_entry_list(
             &self.favorites_list,
-            self.favorite_items
-                .iter()
-                .map(|(scope, _key, title, is_dir)| (fav_icon(scope), title.clone(), fav_kind(scope), *is_dir)),
+            &items,
             sender,
-            |i| Msg::PlayFavorite(i),
-            Some(|i| Msg::FavoriteRemove(i)),
-            |i| Msg::ShowFavoriteDetail(i),
+            Msg::PlayFavorite,
+            Some(Msg::FavoriteRemove),
+            Msg::ShowFavoriteDetail,
+            Some(|from, to| Msg::MoveFavorite { from, to }),
         );
     }
 
-    /// Lädt die Hörbücher (aus dem Bereich „Hörbücher") und baut die Liste auf.
+    /// Lädt die Hörbücher (Bereich „Hörbücher") – ohne Ordner, dafür mit
+    /// Interpreten/Komponisten und den eigentlichen Hörbüchern (Alben/Titel).
     pub(crate) fn load_audiobooks(&mut self, sender: &ComponentSender<Self>) {
-        self.audiobook_items = self.library.audiobook_entries().unwrap_or_default();
-        Self::fill_entry_list(
+        self.audiobook_items =
+            self.library
+                .area_entries(crate::core::category::Area::Audiobooks, false, true);
+        let items = self.audiobook_items.clone();
+        self.fill_entry_list(
             &self.audiobooks_list,
-            self.audiobook_items.iter().map(|(_p, title, is_dir)| {
-                let icon = if *is_dir {
-                    "folder-symbolic"
-                } else {
-                    "audio-x-generic-symbolic"
-                };
-                let kind = if *is_dir { "Album/Ordner" } else { "Datei" };
-                (icon, title.clone(), kind, *is_dir)
-            }),
+            &items,
             sender,
-            |i| Msg::PlayAudiobook(i),
+            Msg::PlayAudiobook,
             None,
-            |i| Msg::ShowAudiobookDetail(i),
+            Msg::ShowAudiobookDetail,
+            None,
         );
     }
 
-    /// Baut eine einfache Eintragsliste (Icon, Titel, Untertitel) mit Abspielen
-    /// (Tippen), optionalem Mülleimer und Detailansicht (langes Drücken).
-    fn fill_entry_list(
+    /// Baut eine Eintragsliste: Cover (Album/Interpret), Titel, Untertitel,
+    /// Abspielen (Tippen), Detail (langes Drücken), optional Mülleimer und
+    /// optional Ziehgriff zum Umsortieren.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn fill_entry_list(
+        &self,
         list: &gtk::ListBox,
-        rows: impl Iterator<Item = (&'static str, String, &'static str, bool)>,
+        items: &[(String, String, String, bool)],
         sender: &ComponentSender<Self>,
         play: fn(usize) -> Msg,
         remove: Option<fn(usize) -> Msg>,
         detail: fn(usize) -> Msg,
+        move_msg: Option<fn(usize, usize) -> Msg>,
     ) {
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
-        for (i, (icon, title, kind, _is_dir)) in rows.enumerate() {
+        for (i, (scope, key, title, is_dir)) in items.iter().enumerate() {
             let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&title))
-                .subtitle(kind)
+                .title(gtk::glib::markup_escape_text(title))
+                .subtitle(entry_kind(scope))
                 .activatable(true)
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name(icon));
+
+            // Ziehgriff zum Umsortieren (falls erlaubt).
+            if let Some(move_msg) = move_msg {
+                let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+                handle.set_tooltip_text(Some("Zum Umsortieren ziehen"));
+                row.add_prefix(&handle);
+
+                let drag = gtk::DragSource::new();
+                drag.set_actions(gtk::gdk::DragAction::MOVE);
+                drag.connect_prepare(move |_, _, _| {
+                    Some(gtk::gdk::ContentProvider::for_value(&(i as i32).to_value()))
+                });
+                row.add_controller(drag);
+
+                let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
+                {
+                    let sender = sender.clone();
+                    drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
+                        Ok(from) => {
+                            sender.input(move_msg(from as usize, i));
+                            true
+                        }
+                        Err(_) => false,
+                    });
+                }
+                row.add_controller(drop);
+            }
+
+            // Cover (Album/Interpret/Titel) oder passendes Platzhalter-Icon.
+            let cover = self.entry_cover(scope, key, *is_dir);
+            row.add_prefix(&cover_widget(cover.as_deref(), entry_icon(scope)));
 
             if let Some(remove) = remove {
                 let btn = gtk::Button::builder()
@@ -144,14 +180,64 @@ impl App {
         }
     }
 
-    /// Spielt einen Favoriten anhand seiner gespeicherten Kennung ab.
-    pub(crate) fn play_favorite(&mut self, index: usize) {
-        let Some((scope, key, _title, is_dir)) = self.favorite_items.get(index).cloned() else {
-            return;
-        };
-        match scope.as_str() {
-            "track" => self.play_path(&key, false),
-            "folder" => self.play_path(&key, is_dir),
+    // ---- Auflösung (Cover / Abspielen / Detail) ----
+
+    /// Cover eines Eintrags: Album-Cover, Interpreten-Foto oder (bei Titeln) das
+    /// eingebettete bzw. das Album-Cover des Titels.
+    pub(crate) fn entry_cover(&self, scope: &str, key: &str, _is_dir: bool) -> Option<String> {
+        match scope {
+            "album" => {
+                let mut parts = key.splitn(2, '\u{1}');
+                let artist = parts.next().unwrap_or("");
+                let album = parts.next().unwrap_or("");
+                self.album_cover_for(artist, album)
+            }
+            "artist" => self
+                .library
+                .get_artist_meta(key)
+                .ok()
+                .flatten()
+                .and_then(|m| m.image_path),
+            "track" => crate::core::online::local_track_cover(key).or_else(|| {
+                let t = self.library.track_by_path(key).ok().flatten()?;
+                let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
+                self.album_cover_for(t.artist.as_deref().unwrap_or(""), album)
+            }),
+            "folder" => self.folder_cover(key),
+            _ => None,
+        }
+    }
+
+    /// Album-Cover: erst exakt (Interpret, Album), sonst irgendeines des Albums.
+    fn album_cover_for(&self, artist: &str, album: &str) -> Option<String> {
+        self.library
+            .get_album_meta(artist, album)
+            .ok()
+            .flatten()
+            .and_then(|m| m.cover_path)
+            .or_else(|| self.library.album_cover(album).ok().flatten())
+    }
+
+    /// Cover eines Ordners: Cover eines beliebigen Titels darin.
+    fn folder_cover(&self, folder: &str) -> Option<String> {
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        let t = self
+            .library
+            .all_tracks()
+            .ok()?
+            .into_iter()
+            .find(|t| t.path.starts_with(&prefix))?;
+        crate::core::online::local_track_cover(&t.path).or_else(|| {
+            let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
+            self.album_cover_for(t.artist.as_deref().unwrap_or(""), album)
+        })
+    }
+
+    /// Spielt einen Eintrag (scope/key) ab.
+    pub(crate) fn play_entry(&mut self, scope: &str, key: &str, is_dir: bool) {
+        match scope {
+            "track" => self.play_path(key, false),
+            "folder" => self.play_path(key, is_dir),
             "album" => {
                 let mut parts = key.splitn(2, '\u{1}');
                 let artist = parts.next().unwrap_or("").to_string();
@@ -164,17 +250,16 @@ impl App {
                 self.play_track_set(files);
             }
             "artist" => {
-                let files = self.artist_files(&key);
+                let files = self.artist_files(key);
                 self.play_track_set(files);
             }
             _ => {}
         }
     }
 
-    /// Detailziel eines Favoriten (für die Detailansicht/„Mehr Infos").
-    pub(crate) fn favorite_target(&self, index: usize) -> Option<CtxTarget> {
-        let (scope, key, title, is_dir) = self.favorite_items.get(index).cloned()?;
-        Some(match scope.as_str() {
+    /// Detailziel (für „Mehr Infos") eines Eintrags.
+    pub(crate) fn entry_target(&self, scope: &str, key: &str, is_dir: bool) -> CtxTarget {
+        match scope {
             "album" => {
                 let mut parts = key.splitn(2, '\u{1}');
                 let artist = parts.next().unwrap_or("").to_string();
@@ -187,16 +272,16 @@ impl App {
                     .unwrap_or_else(|| crate::model::AlbumMeta::pending(artist, album));
                 CtxTarget::Album(meta)
             }
-            "artist" => CtxTarget::Artist(crate::model::ArtistMeta::pending(title)),
+            "artist" => CtxTarget::Artist(crate::model::ArtistMeta::pending(key.to_string())),
             _ => {
-                let path = PathBuf::from(&key);
+                let path = PathBuf::from(key);
                 CtxTarget::Fs(if is_dir {
                     FsEntry::dir(path)
                 } else {
                     FsEntry::file(path)
                 })
             }
-        })
+        }
     }
 
     /// Queue = übergebene Dateien ab Titel 1, sofern nicht leer.
@@ -211,7 +296,8 @@ impl App {
     }
 }
 
-fn fav_icon(scope: &str) -> &'static str {
+/// Platzhalter-Icon je Ebene (falls kein Cover vorhanden).
+fn entry_icon(scope: &str) -> &'static str {
     match scope {
         "album" => "media-optical-symbolic",
         "artist" => "avatar-default-symbolic",
@@ -220,7 +306,8 @@ fn fav_icon(scope: &str) -> &'static str {
     }
 }
 
-fn fav_kind(scope: &str) -> &'static str {
+/// Untertitel-Kennzeichnung je Ebene.
+fn entry_kind(scope: &str) -> &'static str {
     match scope {
         "album" => "Album",
         "artist" => "Interpret",

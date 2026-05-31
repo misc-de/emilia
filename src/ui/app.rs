@@ -154,7 +154,8 @@ pub struct App {
     pub(crate) context_target: Option<CtxTarget>,
     pub(crate) toast_overlay: adw::ToastOverlay,
     // Konzerte
-    pub(crate) concert_items: Vec<(String, String, bool)>,
+    // Konzerte/Hörbücher: (scope, key, Titel, is_dir) – wie Favoriten.
+    pub(crate) concert_items: Vec<(String, String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
     pub(crate) concert_hint_dismissed: bool,
     /// Ausgeblendete Navigations-Menüpunkte (Stack-Namen). Betrifft sowohl die
@@ -173,7 +174,7 @@ pub struct App {
     pub(crate) favorite_items: Vec<(String, String, String, bool)>,
     pub(crate) favorites_list: gtk::ListBox,
     // Hörbücher: (Pfad, Titel, is_dir)
-    pub(crate) audiobook_items: Vec<(String, String, bool)>,
+    pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
     pub(crate) audiobooks_list: gtk::ListBox,
     // Playlisten
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
@@ -326,6 +327,8 @@ pub enum Msg {
     FavoriteRemove(usize),
     /// Detailansicht eines Favoriten öffnen.
     ShowFavoriteDetail(usize),
+    /// Favoriten umsortieren (Indizes in `favorite_items`).
+    MoveFavorite { from: usize, to: usize },
     // Hörbücher
     /// Hörbuch (Index in `audiobook_items`) abspielen.
     PlayAudiobook(usize),
@@ -1561,16 +1564,8 @@ impl Component for App {
                 }
             }
             Msg::ShowConcertDetail(index) => {
-                // Ein Konzert ist ein Pfad – als Datei/Ordner-Eintrag in denselben
-                // Dialog wie im Dateibrowser geben.
-                if let Some((path, _, is_dir)) = self.concert_items.get(index).cloned() {
-                    let path = PathBuf::from(path);
-                    let entry = if is_dir {
-                        FsEntry::dir(path)
-                    } else {
-                        FsEntry::file(path)
-                    };
-                    self.context_target = Some(CtxTarget::Fs(entry));
+                if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
+                    self.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -2101,9 +2096,9 @@ impl Component for App {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
                     tracing::error!("Eigenschaften konnten nicht gespeichert werden: {e}");
                 }
-                // Bereich „Konzerte" in die Konzerte-Liste übernehmen/entfernen.
-                self.sync_concert_marker(scope, &key, &value);
-                // Sichtbarkeit kann sich überall geändert haben → Ansichten neu laden.
+                // Sichtbarkeit/Zuordnung kann sich überall geändert haben →
+                // Ansichten neu laden. Konzerte/Hörbücher werden dabei live aus
+                // den Eigenschaften abgeleitet (kein separater Abgleich nötig).
                 self.reload_albums();
                 self.reload_artists();
                 self.load_concerts(&sender);
@@ -2153,13 +2148,18 @@ impl Component for App {
                 self.toast(&format!("{n} Konzert(e) hinzugefügt"));
             }
             Msg::PlayConcert(index) => {
-                if let Some((path, _, is_dir)) = self.concert_items.get(index).cloned() {
-                    self.play_path(&path, is_dir);
+                if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
+                    self.play_entry(&scope, &key, is_dir);
                 }
             }
             Msg::ConcertRemove(index) => {
-                if let Some((path, _, _)) = self.concert_items.get(index).cloned() {
-                    let _ = self.library.remove_concert(&path);
+                if let Some((scope, key, _, _)) = self.concert_items.get(index).cloned() {
+                    // Sowohl importierte Markierung (Pfad) als auch die Eigenschaft
+                    // „Konzerte" entfernen, damit der Eintrag wirklich verschwindet.
+                    let _ = self.library.remove_concert(&key);
+                    let _ = self
+                        .library
+                        .clear_area(&scope, &key, crate::core::category::Area::Concerts);
                     self.load_concerts(&sender);
                     self.toast("Konzert entfernt");
                 }
@@ -2191,7 +2191,9 @@ impl Component for App {
                 }
             }
             Msg::PlayFavorite(index) => {
-                self.play_favorite(index);
+                if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
+                    self.play_entry(&scope, &key, is_dir);
+                }
             }
             Msg::FavoriteRemove(index) => {
                 if let Some((scope, key, _, _)) = self.favorite_items.get(index).cloned() {
@@ -2201,25 +2203,32 @@ impl Component for App {
                 }
             }
             Msg::ShowFavoriteDetail(index) => {
-                if let Some(target) = self.favorite_target(index) {
-                    self.context_target = Some(target);
+                if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
+                    self.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
+            Msg::MoveFavorite { from, to } => {
+                if from < self.favorite_items.len() && to < self.favorite_items.len() && from != to {
+                    let item = self.favorite_items.remove(from);
+                    self.favorite_items.insert(to, item);
+                    let order: Vec<(String, String)> = self
+                        .favorite_items
+                        .iter()
+                        .map(|(s, k, _, _)| (s.clone(), k.clone()))
+                        .collect();
+                    let _ = self.library.set_favorite_order(&order);
+                    self.load_favorites(&sender);
+                }
+            }
             Msg::PlayAudiobook(index) => {
-                if let Some((path, _, is_dir)) = self.audiobook_items.get(index).cloned() {
-                    self.play_path(&path, is_dir);
+                if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                    self.play_entry(&scope, &key, is_dir);
                 }
             }
             Msg::ShowAudiobookDetail(index) => {
-                if let Some((path, _, is_dir)) = self.audiobook_items.get(index).cloned() {
-                    let path = PathBuf::from(path);
-                    let entry = if is_dir {
-                        FsEntry::dir(path)
-                    } else {
-                        FsEntry::file(path)
-                    };
-                    self.context_target = Some(CtxTarget::Fs(entry));
+                if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                    self.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
