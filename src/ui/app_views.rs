@@ -258,28 +258,25 @@ impl App {
                 singles.extend(mine);
                 continue;
             }
-            // „Eigenes Album": der Interpret ist auf der Mehrheit der ihm
-            // zugeordneten Titel der erstgenannte (Haupt-)Interpret. Ist er
-            // überall nur Gast (… feat. <name>), zählen die Titel als Einzellieder.
-            let own = mine
-                .iter()
-                .filter(|t| {
+            // Nur Titel, bei denen dieser Interpret der **Haupt-Interpret** ist,
+            // bilden ein Album. Reine Gast-/Feature-Titel (Namensnennung) fließen
+            // NICHT in den Album-Aufbau ein – sie zählen als Einzellieder.
+            let (own_tracks, guest_tracks): (Vec<Track>, Vec<Track>) =
+                mine.into_iter().partition(|t| {
                     t.artist.as_deref().is_some_and(|a| {
                         crate::core::artist::split_artists(a)
                             .first()
                             .is_some_and(|p| crate::core::artist::norm_key(p) == target)
                     })
-                })
-                .count();
-            // Nur als Album zeigen, wenn mindestens zwei Titel vorhanden sind –
-            // ein einzelnes Lied (z. B. nur ein Stück eines Albums in der
-            // Bibliothek) zählt als Einzellied, nicht als Album.
-            if mine.len() >= 2 && own > 0 && own * 2 >= mine.len() {
-                let display_artist = most_common_artist(&mine);
-                albums.push((album, display_artist, mine));
+                });
+            // Album nur ab zwei eigenen Titeln; sonst zählen sie als Einzellieder.
+            if own_tracks.len() >= 2 {
+                let display_artist = most_common_artist(&own_tracks);
+                albums.push((album, display_artist, own_tracks));
             } else {
-                singles.extend(mine);
+                singles.extend(own_tracks);
             }
+            singles.extend(guest_tracks);
         }
         (albums, singles)
     }

@@ -142,6 +142,8 @@ pub struct App {
     // Podcasts: (id, Titel, Bild-URL, Episodenzahl)
     pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
     pub(crate) podcasts_list: gtk::ListBox,
+    /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
+    pub(crate) queue_list: gtk::ListBox,
     pub(crate) view_stack: adw::ViewStack,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
     pub(crate) nav_view: adw::NavigationView,
@@ -215,6 +217,14 @@ pub enum Msg {
     OpenNowPlaying,
     OpenSettings,
     OpenGlobalEq,
+    /// Equalizer für den gerade laufenden Titel öffnen.
+    OpenCurrentEq,
+    /// Warteschlangen-Dialog öffnen.
+    ShowQueue,
+    /// Einen Eintrag aus der Warteschlange entfernen (Queue-Index).
+    QueueRemove(usize),
+    /// Einen Warteschlangen-Eintrag verschieben (Queue-Indizes).
+    QueueMove { from: usize, to: usize },
     SetMusicDir(PathBuf),
     SetAcoustidKey(String),
     /// Primäres Cover eines Albums festlegen (zuletzt im Galerie-Karussell gezeigt).
@@ -786,6 +796,15 @@ impl Component for App {
                             #[wrap(Some)]
                             set_center_widget = &gtk::Box {
                                 set_spacing: 6,
+                                // Equalizer für den laufenden Titel.
+                                gtk::Button {
+                                    set_icon_name: "preferences-other-symbolic",
+                                    set_tooltip_text: Some("Equalizer für diesen Titel"),
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
+                                    connect_clicked => Msg::OpenCurrentEq,
+                                },
                                 gtk::Button {
                                     set_icon_name: "media-skip-backward-symbolic",
                                     set_tooltip_text: Some("Zurück"),
@@ -809,6 +828,15 @@ impl Component for App {
                                     add_css_class: "flat",
                                     connect_clicked => Msg::Next,
                                 },
+                            },
+                            // Warteschlange (rechts unten).
+                            #[wrap(Some)]
+                            set_end_widget = &gtk::Button {
+                                set_icon_name: "media-playlist-consecutive-symbolic",
+                                set_tooltip_text: Some("Warteschlange"),
+                                set_valign: gtk::Align::Center,
+                                add_css_class: "flat",
+                                connect_clicked => Msg::ShowQueue,
                             },
                         },
                     },
@@ -959,6 +987,7 @@ impl Component for App {
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
         let podcasts_list = gtk::ListBox::new();
+        let queue_list = gtk::ListBox::new();
 
         let mut model = App {
             library,
@@ -1000,6 +1029,7 @@ impl Component for App {
             playlists_list: playlists_list.clone(),
             podcast_items: Vec::new(),
             podcasts_list: podcasts_list.clone(),
+            queue_list: queue_list.clone(),
             concert_hint_dismissed,
             concerts_hidden,
             concert_nav_buttons: Vec::new(),
@@ -1659,6 +1689,65 @@ impl Component for App {
             Msg::HideEnrichBanner => self.enrich_banner_hidden = true,
             Msg::OpenSettings => self.open_settings(root, &sender),
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
+            Msg::OpenCurrentEq => {
+                if let Some(path) = self.queue.get(self.queue_pos).cloned() {
+                    let key = path.to_string_lossy().into_owned();
+                    let name = Self::track_display_name(&path);
+                    self.open_eq_editor(root, &sender, "den Titel", &name, None, "track", key);
+                }
+            }
+            Msg::ShowQueue => self.open_queue_dialog(root, &sender),
+            Msg::QueueRemove(idx) => {
+                if idx < self.queue.len() {
+                    let was_current = idx == self.queue_pos;
+                    self.queue.remove(idx);
+                    if self.queue_pos > idx {
+                        self.queue_pos -= 1;
+                    }
+                    if was_current {
+                        // Lief der entfernte Titel → den nun an dieser Stelle
+                        // stehenden spielen (oder stoppen, wenn leer).
+                        if self.queue.is_empty() {
+                            self.player.stop();
+                            self.playing = false;
+                            self.now_playing = None;
+                            self.playing_path = None;
+                            self.position_ms = 0;
+                            self.track_duration_ms = 0;
+                            *self.close_resume.borrow_mut() = None;
+                            self.mpris.set_stopped();
+                        } else {
+                            self.queue_pos = self.queue_pos.min(self.queue.len() - 1);
+                            self.play_current();
+                        }
+                    }
+                    self.reload_queue_list(&sender);
+                    self.refresh_queue_icons();
+                }
+            }
+            Msg::QueueMove { from, to } => {
+                let len = self.queue.len();
+                if from < len && to < len && from != to {
+                    let item = self.queue.remove(from);
+                    self.queue.insert(to, item);
+                    // queue_pos so anpassen, dass derselbe Titel weiterläuft.
+                    let cur = self.queue_pos;
+                    self.queue_pos = if cur == from {
+                        to
+                    } else {
+                        let mut p = cur;
+                        if from < cur {
+                            p -= 1;
+                        }
+                        if to <= p {
+                            p += 1;
+                        }
+                        p
+                    };
+                    self.reload_queue_list(&sender);
+                    self.refresh_queue_icons();
+                }
+            }
             Msg::SetMusicDir(path) => {
                 let dir = path.to_string_lossy().into_owned();
                 if let Err(e) = self.library.set_setting("music_dir", &dir) {
