@@ -54,6 +54,20 @@ impl Area {
         }
     }
 
+    /// Zugehöriger Navigations-Menüpunkt (Stack-Name), falls vorhanden. Wird ein
+    /// Menüpunkt ausgeblendet, verschwindet der zugehörige Bereich auch aus der
+    /// Eigenschaften-Auswahl. `Hörbücher` hat keinen eigenen Menüpunkt und bleibt
+    /// daher immer wählbar.
+    pub fn section(self) -> Option<&'static str> {
+        match self {
+            Area::Filesystem => Some("files"),
+            Area::Artists => Some("artists"),
+            Area::Albums => Some("albums"),
+            Area::Concerts => Some("concerts"),
+            Area::Audiobooks => None,
+        }
+    }
+
     pub fn from_str(s: &str) -> Option<Area> {
         match s {
             "filesystem" => Some(Area::Filesystem),

@@ -389,20 +389,27 @@ impl App {
             .title("Ansicht")
             .icon_name("view-list-symbolic")
             .build();
-        // Menüpunkte ein-/ausblenden.
-        let sections_group = adw::PreferencesGroup::builder().title("Menüpunkte").build();
-        let concerts_row = adw::SwitchRow::builder()
-            .title("Konzerte anzeigen")
-            .subtitle("Menüpunkt „Konzerte“ in der Navigation")
-            .active(!self.concerts_hidden)
+        // Menüpunkte ein-/ausblenden – ein Schalter je Navigationsbereich.
+        let sections_group = adw::PreferencesGroup::builder()
+            .title("Menüpunkte")
+            .description(
+                "Ausgeblendete Menüpunkte verschwinden aus der Navigation und aus der Eigenschaften-Auswahl.",
+            )
             .build();
-        {
+        for (name, label, _icon) in crate::ui::app::SECTIONS {
+            let row = adw::SwitchRow::builder()
+                .title(label)
+                .active(!self.hidden_sections.contains(name))
+                .build();
             let sender = sender.clone();
-            concerts_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetConcertsVisible(r.is_active()));
+            row.connect_active_notify(move |r| {
+                sender.input(Msg::SetSectionVisible {
+                    section: name,
+                    visible: r.is_active(),
+                });
             });
+            sections_group.add(&row);
         }
-        sections_group.add(&concerts_row);
         page.add(&sections_group);
 
         dialog.add(&page);

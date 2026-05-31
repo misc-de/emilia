@@ -51,7 +51,7 @@ pub(crate) enum FsKind {
 }
 
 /// Navigationsbereiche: (Stack-Name, Tooltip, Icon). Reihenfolge = Anzeige.
-const SECTIONS: [(&str, &str, &str); 6] = [
+pub(crate) const SECTIONS: [(&str, &str, &str); 6] = [
     ("files", "Dateisystem", "folder-symbolic"),
     ("artists", "Interpreten", "avatar-default-symbolic"),
     ("albums", "Alben", "media-optical-symbolic"),
@@ -134,8 +134,12 @@ pub struct App {
     pub(crate) concert_items: Vec<(String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
     pub(crate) concert_hint_dismissed: bool,
-    pub(crate) concerts_hidden: bool,
-    pub(crate) concert_nav_buttons: Vec<gtk::ToggleButton>,
+    /// Ausgeblendete Navigations-Menüpunkte (Stack-Namen). Betrifft sowohl die
+    /// Navigation als auch die Auswahl in den Eigenschaften.
+    pub(crate) hidden_sections: std::collections::HashSet<String>,
+    /// Alle Navigations-Schaltflächen (Seitenleiste **und** obere Leiste) je
+    /// Menüpunkt – zum Ein-/Ausblenden zur Laufzeit.
+    pub(crate) nav_buttons: Vec<(&'static str, gtk::ToggleButton)>,
     // Playlisten
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
     pub(crate) playlists_list: gtk::ListBox,
@@ -263,7 +267,11 @@ pub enum Msg {
     ConcertAdd(Vec<(String, String, bool)>),
     PlayConcert(usize),
     ConcertRemove(usize),
-    SetConcertsVisible(bool),
+    /// Einen Navigations-Menüpunkt ein-/ausblenden (Stack-Name).
+    SetSectionVisible {
+        section: &'static str,
+        visible: bool,
+    },
     // Playlisten
     /// „Neue Playlist"-Dialog öffnen.
     PlaylistNew,
@@ -909,10 +917,26 @@ impl Component for App {
                 .as_deref(),
             Some("1")
         );
-        let concerts_hidden = matches!(
+        // Ausgeblendete Menüpunkte (kommasepariert). Alter Schlüssel
+        // „concerts_hidden=1" wird weiterhin berücksichtigt.
+        let mut hidden_sections: std::collections::HashSet<String> = library
+            .get_setting("hidden_sections")
+            .ok()
+            .flatten()
+            .map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if matches!(
             library.get_setting("concerts_hidden").ok().flatten().as_deref(),
             Some("1")
-        );
+        ) {
+            hidden_sections.insert("concerts".to_string());
+        }
         // Automatischer Online-Abruf (Standard: an; nur „0" schaltet ihn aus).
         let auto_enrich = !matches!(
             library.get_setting("auto_enrich").ok().flatten().as_deref(),
@@ -1031,8 +1055,8 @@ impl Component for App {
             podcasts_list: podcasts_list.clone(),
             queue_list: queue_list.clone(),
             concert_hint_dismissed,
-            concerts_hidden,
-            concert_nav_buttons: Vec::new(),
+            hidden_sections,
+            nav_buttons: Vec::new(),
             view_stack: adw::ViewStack::new(),
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -1109,19 +1133,17 @@ impl Component for App {
         root.add_breakpoint(breakpoint);
 
         // Icon-only Navigation (Seitenleiste + oben) erzeugen und an den Stack koppeln.
+        // Alle Schaltflächen werden erzeugt; ausgeblendete Menüpunkte sind nur
+        // unsichtbar, damit sie sich zur Laufzeit wieder einblenden lassen.
         let mut nav_buttons: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
-        let mut concert_btns: Vec<gtk::ToggleButton> = Vec::new();
         for (is_sidebar, container) in [
             (true, widgets.sidebar_nav.clone()),
             (false, widgets.top_nav.clone()),
         ] {
             let mut group_leader: Option<gtk::ToggleButton> = None;
             for (name, label, icon) in SECTIONS {
-                // „Konzerte"-Menüpunkt ggf. komplett auslassen.
-                if name == "concerts" && concerts_hidden {
-                    continue;
-                }
                 let btn = gtk::ToggleButton::builder().build();
+                btn.set_visible(!model.hidden_sections.contains(name));
                 btn.add_css_class("flat");
                 if is_sidebar {
                     // Desktop-Seitenleiste: Icon **mit Beschriftung**.
@@ -1153,13 +1175,10 @@ impl Component for App {
                     });
                 }
                 container.append(&btn);
-                if name == "concerts" {
-                    concert_btns.push(btn.clone());
-                }
                 nav_buttons.push((name, btn));
             }
         }
-        model.concert_nav_buttons = concert_btns;
+        model.nav_buttons = nav_buttons.clone();
         // Aktiven Button passend zur sichtbaren Stack-Seite setzen.
         let sync_active = move |stack: &adw::ViewStack, buttons: &[(&'static str, gtk::ToggleButton)]| {
             let cur = stack.visible_child_name();
@@ -1168,8 +1187,18 @@ impl Component for App {
                 btn.set_active(*name == cur);
             }
         };
-        // Zuletzt offenen Navigationspunkt wiederherstellen.
-        if let Some(section) = saved_section.as_deref() {
+        // Zuletzt offenen Navigationspunkt wiederherstellen – aber keinen
+        // ausgeblendeten. Notfalls auf den ersten sichtbaren Menüpunkt fallen.
+        let restore = saved_section
+            .as_deref()
+            .filter(|s| !model.hidden_sections.contains(*s))
+            .or_else(|| {
+                SECTIONS
+                    .iter()
+                    .map(|(n, _, _)| *n)
+                    .find(|n| !model.hidden_sections.contains(*n))
+            });
+        if let Some(section) = restore {
             widgets.view_stack.set_visible_child_name(section);
         }
         sync_active(&widgets.view_stack, &nav_buttons);
@@ -1856,19 +1885,7 @@ impl Component for App {
                 let _ = self.library.set_setting("concert_hint_dismissed", "1");
             }
             Msg::ConcertHideSection => {
-                self.concerts_hidden = true;
-                let _ = self.library.set_setting("concerts_hidden", "1");
-                for btn in &self.concert_nav_buttons {
-                    btn.set_visible(false);
-                }
-                // Auf den vorherigen Menüpunkt wechseln (Konzerte ist nun weg).
-                let prev = SECTIONS
-                    .iter()
-                    .position(|(n, _, _)| *n == "concerts")
-                    .and_then(|i| i.checked_sub(1))
-                    .map(|i| SECTIONS[i].0)
-                    .unwrap_or("files");
-                self.view_stack.set_visible_child_name(prev);
+                self.set_section_visible("concerts", false);
                 self.toast("Menüpunkt Konzerte ausgeblendet");
             }
             Msg::ConcertAdd(items) => {
@@ -1891,14 +1908,8 @@ impl Component for App {
                     self.toast("Konzert entfernt");
                 }
             }
-            Msg::SetConcertsVisible(visible) => {
-                self.concerts_hidden = !visible;
-                let _ = self
-                    .library
-                    .set_setting("concerts_hidden", if visible { "0" } else { "1" });
-                for btn in &self.concert_nav_buttons {
-                    btn.set_visible(visible);
-                }
+            Msg::SetSectionVisible { section, visible } => {
+                self.set_section_visible(section, visible);
             }
             Msg::TogglePlay => {
                 if self.now_playing.is_none() {
@@ -2186,6 +2197,45 @@ impl App {
         }
     }
 
+    /// Blendet einen Navigations-Menüpunkt ein/aus: aktualisiert den Zustand,
+    /// speichert ihn, schaltet alle zugehörigen Schaltflächen (Seitenleiste +
+    /// obere Leiste) und wechselt beim Ausblenden des aktiven Punkts auf den
+    /// ersten sichtbaren.
+    pub(crate) fn set_section_visible(&mut self, section: &str, visible: bool) {
+        if visible {
+            self.hidden_sections.remove(section);
+        } else {
+            self.hidden_sections.insert(section.to_string());
+        }
+        let value = SECTIONS
+            .iter()
+            .map(|(n, _, _)| *n)
+            .filter(|n| self.hidden_sections.contains(*n))
+            .collect::<Vec<_>>()
+            .join(",");
+        let _ = self.library.set_setting("hidden_sections", &value);
+
+        for (name, btn) in &self.nav_buttons {
+            if *name == section {
+                btn.set_visible(visible);
+            }
+        }
+
+        // Wird der gerade sichtbare Bereich ausgeblendet, auf den ersten
+        // sichtbaren Menüpunkt wechseln.
+        if !visible {
+            let cur = self.view_stack.visible_child_name();
+            if cur.as_deref() == Some(section) {
+                if let Some(next) = SECTIONS
+                    .iter()
+                    .map(|(n, _, _)| *n)
+                    .find(|n| !self.hidden_sections.contains(*n))
+                {
+                    self.view_stack.set_visible_child_name(next);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

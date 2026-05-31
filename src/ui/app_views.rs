@@ -1098,32 +1098,43 @@ impl App {
         use std::cell::RefCell;
         use std::rc::Rc;
 
+        // Nur Bereiche zeigen, deren Menüpunkt sichtbar ist (Hörbücher hat keinen
+        // eigenen Menüpunkt und bleibt immer wählbar). Werte ausgeblendeter
+        // Bereiche bleiben im Zustand erhalten und werden nicht angetastet.
+        let visible_areas: Rc<Vec<Area>> = Rc::new(
+            Area::ALL
+                .iter()
+                .copied()
+                .filter(|a| a.section().map_or(true, |s| !self.hidden_sections.contains(s)))
+                .collect(),
+        );
         let group = adw::PreferencesGroup::builder().build();
         let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
-        let subtitle = if effective.is_empty() {
+        let active: Vec<&str> = visible_areas
+            .iter()
+            .filter(|a| effective.contains(a))
+            .map(|a| a.label())
+            .collect();
+        let subtitle = if active.is_empty() {
             "Ausgeblendet".to_string()
         } else {
-            effective
-                .iter()
-                .map(|a| a.label())
-                .collect::<Vec<_>>()
-                .join(", ")
+            active.join(", ")
         };
         expander.set_subtitle(&subtitle);
 
         let state = Rc::new(RefCell::new(effective.to_vec()));
         let syncing = Rc::new(std::cell::Cell::new(false));
 
-        // „Ausblenden": alle Bereiche aus → überall unsichtbar. Standard: aus.
+        // „Ausblenden": alle sichtbaren Bereiche aus → überall unsichtbar.
         let hide_row = adw::SwitchRow::builder()
             .title("Ausblenden")
-            .active(effective.is_empty())
+            .active(!visible_areas.iter().any(|a| effective.contains(a)))
             .build();
         expander.add_row(&hide_row);
 
-        // Ein Schalter je Bereich.
+        // Ein Schalter je sichtbarem Bereich.
         let area_rows: Rc<Vec<(Area, adw::SwitchRow)>> = Rc::new(
-            Area::ALL
+            visible_areas
                 .iter()
                 .map(|&area| {
                     let row = adw::SwitchRow::builder()
@@ -1136,23 +1147,32 @@ impl App {
                 .collect(),
         );
 
-        // Ausblenden: leert bzw. setzt den Standard und gleicht die Schalter an.
+        // Ausblenden: entfernt alle sichtbaren Bereiche bzw. setzt die sichtbaren
+        // Standardbereiche und gleicht die Schalter an.
         {
-            let (sender, key, state, syncing, area_rows) = (
+            let (sender, key, state, syncing, area_rows, visible_areas) = (
                 sender.clone(),
                 key.clone(),
                 state.clone(),
                 syncing.clone(),
                 area_rows.clone(),
+                visible_areas.clone(),
             );
             hide_row.connect_active_notify(move |r| {
                 if syncing.get() {
                     return;
                 }
-                if r.is_active() {
-                    state.borrow_mut().clear();
-                } else {
-                    *state.borrow_mut() = Area::DEFAULT.to_vec();
+                {
+                    let mut s = state.borrow_mut();
+                    if r.is_active() {
+                        s.retain(|a| !visible_areas.contains(a));
+                    } else {
+                        for a in Area::DEFAULT {
+                            if visible_areas.contains(&a) && !s.contains(&a) {
+                                s.push(a);
+                            }
+                        }
+                    }
                 }
                 syncing.set(true);
                 for (area, sw) in area_rows.iter() {
@@ -1170,12 +1190,13 @@ impl App {
         // Bereichs-Schalter: Zustand anpassen und „Ausblenden" spiegeln.
         for (area, row) in area_rows.iter() {
             let area = *area;
-            let (sender, key, state, syncing, hide_row) = (
+            let (sender, key, state, syncing, hide_row, visible_areas) = (
                 sender.clone(),
                 key.clone(),
                 state.clone(),
                 syncing.clone(),
                 hide_row.clone(),
+                visible_areas.clone(),
             );
             row.connect_active_notify(move |r| {
                 if syncing.get() {
@@ -1192,7 +1213,8 @@ impl App {
                     }
                 }
                 syncing.set(true);
-                hide_row.set_active(state.borrow().is_empty());
+                let hidden = !visible_areas.iter().any(|a| state.borrow().contains(a));
+                hide_row.set_active(hidden);
                 syncing.set(false);
                 sender.input(Msg::SetAreas {
                     scope,
