@@ -560,6 +560,95 @@ impl Library {
         out
     }
 
+    /// Beim Setzen einer **übergeordneten** Eigenschaft die abweichenden
+    /// Festlegungen der darunterliegenden Ebenen entfernen, damit Alben/Titel die
+    /// neue Einstellung erben (Interpret → seine Alben + Titel; Album → seine
+    /// Titel; Ordner → alles darunter inkl. zugehöriger Alben).
+    pub fn clear_child_categories(&self, scope: &str, key: &str) -> Result<()> {
+        use crate::core::artist::{norm_key, primary_artist, split_artists};
+        use crate::core::category::album_key;
+        let is_primary = |t: &Track, target: &str| {
+            t.artist.as_deref().is_some_and(|a| {
+                split_artists(a)
+                    .first()
+                    .is_some_and(|p| norm_key(p) == target)
+            })
+        };
+        match scope {
+            "artist" => {
+                // Alben dieses Interpreten (Schlüssel beginnt mit „Interpret\1").
+                let prefix = format!("{key}\u{1}");
+                let album_keys: Vec<String> = {
+                    let mut stmt =
+                        self.conn.prepare("SELECT key FROM category WHERE scope='album'")?;
+                    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+                    rows.flatten().filter(|k| k.starts_with(&prefix)).collect()
+                };
+                for k in album_keys {
+                    self.conn
+                        .execute("DELETE FROM category WHERE scope='album' AND key=?1", [&k])?;
+                }
+                // Titel dieses (Haupt-)Interpreten.
+                let target = norm_key(key);
+                for t in self.all_tracks().unwrap_or_default() {
+                    if is_primary(&t, &target) {
+                        self.conn.execute(
+                            "DELETE FROM category WHERE scope='track' AND key=?1",
+                            [&t.path],
+                        )?;
+                    }
+                }
+            }
+            "album" => {
+                let mut parts = key.splitn(2, '\u{1}');
+                let artist = parts.next().unwrap_or("");
+                let album = parts.next().unwrap_or("");
+                let target = norm_key(artist);
+                for t in self.all_tracks().unwrap_or_default() {
+                    if t.album.as_deref() == Some(album) && is_primary(&t, &target) {
+                        self.conn.execute(
+                            "DELETE FROM category WHERE scope='track' AND key=?1",
+                            [&t.path],
+                        )?;
+                    }
+                }
+            }
+            "folder" => {
+                let prefix = format!("{}/", key.trim_end_matches('/'));
+                // Titel- und Unterordner-Festlegungen unterhalb des Ordners.
+                let child: Vec<(String, String)> = {
+                    let mut stmt = self.conn.prepare(
+                        "SELECT scope, key FROM category WHERE scope IN ('track','folder')",
+                    )?;
+                    let rows =
+                        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                    rows.flatten().filter(|(_, k)| k.starts_with(&prefix)).collect()
+                };
+                for (s, k) in child {
+                    self.conn.execute(
+                        "DELETE FROM category WHERE scope=?1 AND key=?2",
+                        rusqlite::params![s, k],
+                    )?;
+                }
+                // Alben, deren Titel unter dem Ordner liegen.
+                let mut album_keys = std::collections::HashSet::new();
+                for t in self.all_tracks().unwrap_or_default() {
+                    if t.path.starts_with(&prefix) {
+                        if let (Some(a), Some(al)) = (t.artist.as_deref(), t.album.as_deref()) {
+                            album_keys.insert(album_key(&primary_artist(a), al));
+                        }
+                    }
+                }
+                for k in album_keys {
+                    self.conn
+                        .execute("DELETE FROM category WHERE scope='album' AND key=?1", [&k])?;
+                }
+            }
+            _ => {} // Titel-Ebene hat keine Kinder
+        }
+        Ok(())
+    }
+
     /// Entfernt einen einzelnen Bereich aus den Eigenschaften einer Ebene. Wird
     /// die Liste dadurch leer (was „ausgeblendet" hieße), wird stattdessen die
     /// Festlegung gelöscht (zurück auf Standard/Vererbung).
@@ -1660,6 +1749,28 @@ mod tests {
         // Interpret komplett ausblenden.
         lib.set_category("artist", "X", Some("")).unwrap();
         assert!(lib.artists_overview().unwrap().is_empty());
+    }
+
+    #[test]
+    fn setting_parent_clears_child_overrides() {
+        use crate::core::category::album_key;
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/a/1.mp3", Some("X"), Some("Album")))
+            .unwrap();
+        lib.upsert_track(&track("/a/2.mp3", Some("X"), Some("Album")))
+            .unwrap();
+        // Abweichende Festlegungen auf Titel- und Album-Ebene.
+        lib.set_category("track", "/a/1.mp3", Some("")).unwrap();
+        lib.set_category("album", &album_key("X", "Album"), Some("filesystem"))
+            .unwrap();
+        // Übergeordnet (Interpret) setzen → Kinder verlieren ihre Festlegung und
+        // erben damit die Interpret-Einstellung.
+        lib.clear_child_categories("artist", "X").unwrap();
+        assert!(lib.get_category("track", "/a/1.mp3").unwrap().is_none());
+        assert!(lib
+            .get_category("album", &album_key("X", "Album"))
+            .unwrap()
+            .is_none());
     }
 
     #[test]

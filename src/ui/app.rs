@@ -137,6 +137,9 @@ pub struct App {
     pub(crate) skip_history_push: bool,
     /// Zeitpunkt des letzten Zurück-Klicks (Doppelklick-Erkennung, < 1 s).
     pub(crate) last_prev: Option<std::time::Instant>,
+    /// Pausierte Warteschlange, während ein einzelnes Lied dazwischengespielt
+    /// wird (Liste + Position). Nach dem Einzellied wird sie fortgesetzt.
+    pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
     /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
     /// Resume-Position beim Wechsel auf einen anderen Titel).
     pub(crate) playing_path: Option<PathBuf>,
@@ -1213,6 +1216,7 @@ impl Component for App {
             play_history: Vec::new(),
             skip_history_push: false,
             last_prev: None,
+            interrupted_queue: None,
             playing_path: None,
             close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
             now_playing: None,
@@ -1529,7 +1533,16 @@ impl Component for App {
                             self.mpris.set_playing(self.playing);
                             self.refresh_queue_icons();
                         } else {
-                            // Einzeltitel: Warteschlange = nur dieser Titel.
+                            // Läuft gerade eine echte Warteschlange? Dann das
+                            // Einzellied dazwischenschieben und die Warteschlange
+                            // danach an ihrer Stelle fortsetzen (sie bleibt erhalten).
+                            if self.playing
+                                && self.queue.len() > 1
+                                && self.interrupted_queue.is_none()
+                            {
+                                self.interrupted_queue =
+                                    Some((self.queue.clone(), self.queue_pos));
+                            }
                             self.queue = vec![path];
                             self.queue_pos = 0;
                             self.play_current();
@@ -1867,7 +1880,20 @@ impl Component for App {
                     let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
                 }
                 *self.close_resume.borrow_mut() = None;
-                self.play_next();
+                // War ein Einzellied dazwischengeschoben, jetzt die unterbrochene
+                // Warteschlange an ihrer Stelle fortsetzen.
+                if self.queue.len() == 1 && self.interrupted_queue.is_some() {
+                    if let Some((q, pos)) = self.interrupted_queue.take() {
+                        self.queue = q;
+                        self.queue_pos = pos;
+                        self.play_current();
+                    }
+                } else {
+                    // Eine neue (mehrteilige) Wiedergabe verwirft eine evtl.
+                    // gemerkte Unterbrechung.
+                    self.interrupted_queue = None;
+                    self.play_next();
+                }
             }
             Msg::PersistResume => {
                 if self.playing {
@@ -2144,6 +2170,9 @@ impl Component for App {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
                     tracing::error!("Eigenschaften konnten nicht gespeichert werden: {e}");
                 }
+                // Übergeordnete Festlegung → abweichende Einstellungen darunter
+                // entfernen, damit Alben/Titel die neue Einstellung erben.
+                let _ = self.library.clear_child_categories(scope, &key);
                 // Sichtbarkeit/Zuordnung kann sich überall geändert haben →
                 // Ansichten neu laden. Konzerte/Hörbücher werden dabei live aus
                 // den Eigenschaften abgeleitet (kein separater Abgleich nötig).
