@@ -5,7 +5,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::ui::app::{App, CtxTarget, FsKind, Msg};
+use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
 impl App {
     /// Aktionsmenü beim langen Drücken (Ordner oder Titel).
@@ -428,8 +428,60 @@ impl App {
         rebuild_section_rows(&list, &order, &hidden, sender);
         sections_group.add(&list);
         page.add(&sections_group);
-
         dialog.add(&page);
+
+        // --- Kategorie: Ausgeblendet (ganz rechts) ---
+        let page = adw::PreferencesPage::builder()
+            .title("Ausgeblendet")
+            .icon_name("view-conceal-symbolic")
+            .build();
+        let hidden_group = adw::PreferencesGroup::builder()
+            .title("Ausgeblendete Inhalte")
+            .description(
+                "Interpreten, Alben und Titel, deren Eigenschaften nirgends sichtbar sind – jeweils das Objekt, das die Festlegung trägt. Über das Auge wieder einblenden.",
+            )
+            .build();
+        let entries = self.library.hidden_entries();
+        if entries.is_empty() {
+            hidden_group.add(
+                &adw::ActionRow::builder()
+                    .title("Nichts ausgeblendet")
+                    .build(),
+            );
+        }
+        for (scope, key, title, is_dir) in entries {
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&title))
+                .subtitle(hidden_kind(&scope))
+                .build();
+            row.add_prefix(&cover_widget(
+                self.entry_cover(&scope, &key, is_dir).as_deref(),
+                hidden_icon(&scope),
+            ));
+            let reveal = gtk::Button::builder()
+                .icon_name("view-reveal-symbolic")
+                .tooltip_text("Wieder einblenden")
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            {
+                let sender = sender.clone();
+                let group = hidden_group.clone();
+                let row = row.clone();
+                reveal.connect_clicked(move |_| {
+                    sender.input(Msg::UnhideEntry {
+                        scope: scope.clone(),
+                        key: key.clone(),
+                    });
+                    group.remove(&row);
+                });
+            }
+            row.add_suffix(&reveal);
+            hidden_group.add(&row);
+        }
+        page.add(&hidden_group);
+        dialog.add(&page);
+
         dialog.present(Some(root));
     }
 
@@ -617,5 +669,25 @@ fn rebuild_section_rows(
         row.add_suffix(&sw);
 
         list.append(&row);
+    }
+}
+
+/// Platzhalter-Icon je Ebene in der Übersicht „Ausgeblendet".
+fn hidden_icon(scope: &str) -> &'static str {
+    match scope {
+        "album" => "media-optical-symbolic",
+        "artist" => "avatar-default-symbolic",
+        "folder" => "folder-symbolic",
+        _ => "audio-x-generic-symbolic",
+    }
+}
+
+/// Untertitel-Kennzeichnung je Ebene in der Übersicht „Ausgeblendet".
+fn hidden_kind(scope: &str) -> &'static str {
+    match scope {
+        "album" => "Album",
+        "artist" => "Interpret",
+        "folder" => "Ordner",
+        _ => "Titel",
     }
 }

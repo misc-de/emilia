@@ -318,6 +318,11 @@ pub enum Msg {
         from: usize,
         to: usize,
     },
+    /// Einen ausgeblendeten Inhalt wieder einblenden (Festlegung zurücksetzen).
+    UnhideEntry {
+        scope: String,
+        key: String,
+    },
     // Favoriten
     /// Aktuelles Detailziel als Favorit setzen/entfernen.
     ToggleFavorite,
@@ -2176,6 +2181,16 @@ impl Component for App {
                     // Reihenfolge auf die vorhandenen Schaltflächen anwenden.
                     self.apply_section_order();
                 }
+            }
+            Msg::UnhideEntry { scope, key } => {
+                // Festlegung löschen → zurück auf Standard (wieder sichtbar).
+                let _ = self.library.set_category(&scope, &key, None);
+                self.reload_albums();
+                self.reload_artists();
+                self.load_concerts(&sender);
+                self.load_audiobooks(&sender);
+                self.load_dir(&sender);
+                self.toast("Wieder eingeblendet");
             }
             Msg::ToggleFavorite => {
                 if let Some(target) = self.context_target.clone() {

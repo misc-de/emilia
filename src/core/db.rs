@@ -486,6 +486,29 @@ impl Library {
         include_folders: bool,
         include_artists: bool,
     ) -> Vec<(String, String, String, bool)> {
+        self.category_entries(
+            |areas| areas.contains(&area),
+            include_folders,
+            include_artists,
+        )
+    }
+
+    /// Alle **ausgeblendeten** Inhalte (leere Bereichsliste) – jeweils das
+    /// Objekt, das die Festlegung trägt (Interpret/Album/Titel/Ordner). Grundlage
+    /// für die Übersicht „Ausgeblendet".
+    pub fn hidden_entries(&self) -> Vec<(String, String, String, bool)> {
+        self.category_entries(|areas| areas.is_empty(), true, true)
+    }
+
+    /// Liefert `(scope, key, Titel, is_dir)` je Festlegung, deren Bereichsliste
+    /// das Prädikat erfüllt. `include_folders`/`include_artists` steuern, ob
+    /// Ordner- bzw. Interpreten-Ebenen mitgenommen werden.
+    fn category_entries(
+        &self,
+        keep: impl Fn(&[crate::core::category::Area]) -> bool,
+        include_folders: bool,
+        include_artists: bool,
+    ) -> Vec<(String, String, String, bool)> {
         use crate::core::category::parse_areas;
         let Ok(mut stmt) = self.conn.prepare("SELECT scope, key, value FROM category") else {
             return Vec::new();
@@ -504,7 +527,7 @@ impl Library {
         let mut out: Vec<(String, String, String, bool)> = Vec::new();
         for row in rows.flatten() {
             let (scope, key, value) = row;
-            if !parse_areas(&value).contains(&area) {
+            if !keep(&parse_areas(&value)) {
                 continue;
             }
             let entry = match scope.as_str() {
