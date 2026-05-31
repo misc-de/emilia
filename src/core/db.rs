@@ -818,13 +818,11 @@ impl Library {
                     .cmp(&a.1 .0)
                     .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
             });
-            for (i, (name, info)) in artists.iter().enumerate() {
-                if i == 0 {
-                    meta.artist = (*name).clone();
-                }
-                if meta.cover_path.is_none() {
-                    meta.cover_path = info.1.clone();
-                }
+            // Anzeige-Interpret = der häufigste; Jahr/MBID: erstes vorhandenes.
+            if let Some((name, _)) = artists.first() {
+                meta.artist = (*name).clone();
+            }
+            for (_, info) in &artists {
                 if meta.year.is_none() {
                     meta.year = info.2;
                 }
@@ -832,6 +830,18 @@ impl Library {
                     meta.mbid = info.3.clone();
                 }
             }
+            // Cover NUR, wenn alle (Haupt-)Interpreten dasselbe Cover liefern.
+            // Bei Sammelalben / Pseudo-Alben („[non-album tracks]",
+            // „Dancemix 2009" …) hätte ein einzelnes Mitglied-Cover sonst ein
+            // irreführendes Bild für die ganze Karte ergeben → dann neutral.
+            let mut covers: Vec<&String> =
+                artists.iter().filter_map(|(_, i)| i.1.as_ref()).collect();
+            covers.sort();
+            covers.dedup();
+            meta.cover_path = match covers.as_slice() {
+                [one] => Some((*one).clone()),
+                _ => None,
+            };
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
         // Eigenschaften: nur Alben zeigen, die im Bereich „Alben" sichtbar sind.
@@ -1437,6 +1447,45 @@ mod tests {
         assert_eq!(ac.len(), 1);
         assert_eq!(ac[0].artist, "Beginner");
         assert_eq!(ac[0].track_count, 3);
+    }
+
+    #[test]
+    fn albums_overview_drops_ambiguous_cover_for_compilations() {
+        let lib = Library::open_in_memory().unwrap();
+        // Sammelalbum: zwei Interpreten mit unterschiedlichem Cover → neutral.
+        for (path, artist, cover) in [
+            ("/c1.mp3", "DJ A", "/covers/a.jpg"),
+            ("/c2.mp3", "DJ B", "/covers/b.jpg"),
+        ] {
+            lib.upsert_track(&track(path, Some(artist), Some("Dancemix 2009")))
+                .unwrap();
+            let mut m = crate::model::AlbumMeta::pending(artist, "Dancemix 2009");
+            m.cover_path = Some(cover.to_string());
+            m.status = "local".to_string();
+            lib.upsert_album_meta(&m).unwrap();
+        }
+        let dm = lib
+            .albums_overview()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.album == "Dancemix 2009")
+            .unwrap();
+        assert_eq!(dm.cover_path, None);
+
+        // Echtes Album eines Interpreten → Cover bleibt erhalten.
+        lib.upsert_track(&track("/d1.mp3", Some("Solo"), Some("Werk")))
+            .unwrap();
+        let mut m = crate::model::AlbumMeta::pending("Solo", "Werk");
+        m.cover_path = Some("/covers/werk.jpg".to_string());
+        m.status = "local".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        let werk = lib
+            .albums_overview()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.album == "Werk")
+            .unwrap();
+        assert_eq!(werk.cover_path.as_deref(), Some("/covers/werk.jpg"));
     }
 
     #[test]
