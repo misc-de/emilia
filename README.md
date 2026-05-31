@@ -185,7 +185,14 @@ src/
   main.rs            App-Start (Adw::Application, App-ID de.cais.Emilia)
   model.rs           Datenmodelle (Track, AlbumMeta, ArtistMeta, …)
   ui/
-    app.rs           Wurzel-Komponente: Navigation, Ansichten, Unterseiten, Player
+    app.rs           Wurzel-Komponente (init/update/view!), Navigation, Player
+    app_views.rs     Laden/Gruppieren, Unterseiten, ctx-/Cover-Helfer
+    app_playback.rs  Wiedergabe, Warteschlange, Resume
+    app_playlist.rs  Playlisten (Liste, Unterseite, Dialoge)
+    app_eq.rs        Equalizer-Editor + Merkmal-Dialoge
+    app_dialogs.rs   Kontextmenü, Teilen, Einstellungen
+    app_concert.rs   Konzerte
+    enrich.rs        Online-Anreicherungs-Worker (Hintergrund)
     artist_row.rs    Interpreten-Karte (mit Foto)
     album_row.rs     Album-Karte (mit Cover)
     track_row.rs     Titel-Zeile
