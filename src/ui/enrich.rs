@@ -17,9 +17,10 @@ use crate::ui::app::Cmd;
 ///   2. Interpreten → Deezer (Fotos)
 ///   3. Titel  → Chromaprint/AcoustID (nur Dateien mit lückenhaften Tags;
 ///      benötigt einen AcoustID-Key, sonst wird die Phase übersprungen)
-/// Nach so vielen erfolglosen Versuchen wird ein Eintrag beim **automatischen**
-/// Sync nicht erneut online abgefragt (manuell auf Knopfdruck schon).
-const MAX_AUTO_ATTEMPTS: i64 = 3;
+/// Nach so vielen erfolglosen Versuchen wird ein Eintrag **nicht** erneut online
+/// abgefragt – weder beim automatischen Sync noch beim manuellen Abruf. So
+/// werden dauerhaft erfolglose Cover/Fotos nicht endlos wiederholt.
+const MAX_ATTEMPTS: i64 = 3;
 
 pub(crate) fn enrich_worker(
     root: PathBuf,
@@ -27,9 +28,6 @@ pub(crate) fn enrich_worker(
     fanart_key: Option<String>,
     cancel: Arc<AtomicBool>,
     scan_first: bool,
-    // `true` = automatischer Lauf (überspringt erschöpfte Einträge),
-    // `false` = manuell ausgelöst (versucht alles erneut).
-    auto: bool,
     out: &relm4::Sender<Cmd>,
 ) {
     let lib = match Library::open() {
@@ -90,10 +88,8 @@ pub(crate) fn enrich_worker(
         for name in all_artists {
             match lib.get_artist_meta(&name).ok().flatten() {
                 Some(m) if m.status == "matched" => artists_matched += 1,
-                // Automatik: nach zu vielen Fehlversuchen nicht erneut anfragen.
-                _ if auto && lib.artist_attempts(&name) >= MAX_AUTO_ATTEMPTS => {
-                    artists_skipped += 1
-                }
+                // Nach zu vielen Fehlversuchen nicht erneut anfragen (auch manuell).
+                _ if lib.artist_attempts(&name) >= MAX_ATTEMPTS => artists_skipped += 1,
                 _ => to_fetch.push(name),
             }
         }
@@ -115,8 +111,8 @@ pub(crate) fn enrich_worker(
             if stopped() {
                 break 'work;
             }
-            // Automatik: nach zu vielen erfolglosen Versuchen überspringen.
-            let exhausted = auto && lib.album_attempts(artist, album) >= MAX_AUTO_ATTEMPTS;
+            // Nach zu vielen erfolglosen Versuchen überspringen (auch manuell).
+            let exhausted = lib.album_attempts(artist, album) >= MAX_ATTEMPTS;
             if !exhausted {
                 if !artist.is_empty() {
                     let _ = online::enrich_album(&client, &lib, artist, album);
@@ -146,8 +142,8 @@ pub(crate) fn enrich_worker(
                     let already = lib.get_track_meta(&track.path).ok().flatten();
                     let matched =
                         already.as_ref().map(|m| m.status.as_str()) == Some("matched");
-                    // Automatik: erschöpfte Titel nicht erneut anfragen.
-                    let exhausted = auto && lib.track_attempts(&track.path) >= MAX_AUTO_ATTEMPTS;
+                    // Erschöpfte Titel nicht erneut anfragen (auch manuell).
+                    let exhausted = lib.track_attempts(&track.path) >= MAX_ATTEMPTS;
                     if !matched && !exhausted {
                         let _ = online::enrich_track_fingerprint(&client, &lib, &key, &path);
                         std::thread::sleep(online::ACOUSTID_DELAY);

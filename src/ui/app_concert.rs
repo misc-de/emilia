@@ -63,6 +63,65 @@ impl App {
         }
     }
 
+    /// Hält die Konzert-Liste mit der Eigenschaft „Konzerte" in Einklang: wird
+    /// der Bereich „Konzerte" für ein Album/einen Ordner/einen Titel gesetzt,
+    /// erscheint er in der Konzerte-Liste; wird er entfernt, verschwindet er.
+    /// So wirkt die Eigenschaften-Auswahl wie bei den übrigen Bereichen.
+    pub(crate) fn sync_concert_marker(&self, scope: &str, key: &str, value: &str) {
+        use crate::core::category::{parse_areas, Area};
+        let is_concert = parse_areas(value).contains(&Area::Concerts);
+
+        // Pfad/Titel/Ordner-Kennung der Ebene bestimmen.
+        let entry: Option<(String, String, bool)> = match scope {
+            "track" => {
+                let title = self
+                    .library
+                    .track_by_path(key)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.title)
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        std::path::Path::new(key)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(key)
+                            .to_string()
+                    });
+                Some((key.to_string(), title, false))
+            }
+            "folder" => {
+                let name = std::path::Path::new(key)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(key)
+                    .to_string();
+                Some((key.to_string(), name, true))
+            }
+            "album" => {
+                // Schlüssel = „Interpret\u{1}Album". Repräsentativer Ordner =
+                // übergeordneter Ordner eines Albumtitels.
+                let mut parts = key.splitn(2, '\u{1}');
+                let artist = parts.next().unwrap_or("");
+                let album = parts.next().unwrap_or("");
+                self.album_files(artist, album)
+                    .first()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                    .map(|d| (d.to_string_lossy().into_owned(), album.to_string(), true))
+            }
+            // Interpret-Ebene hat keinen einzelnen Pfad – hier nicht abgebildet.
+            _ => None,
+        };
+
+        if let Some((path, title, is_dir)) = entry {
+            if is_concert {
+                let _ = self.library.add_concert(&path, &title, is_dir);
+            } else {
+                let _ = self.library.remove_concert(&path);
+            }
+        }
+    }
+
     /// Import-Dialog: Liste der Kandidaten zum Markieren + „Hinzufügen".
     pub(crate) fn open_concert_import_dialog(
         &self,

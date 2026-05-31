@@ -761,20 +761,24 @@ impl Library {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
-        // „A feat. B" gehört zum Album von „A": nach (Haupt-Interpret, Album)
-        // zusammenfassen, damit feat.-Varianten desselben Albums nicht mehrere
-        // Karten erzeugen. Cover/Jahr: der erste vorhandene Wert (die schlichte
-        // „A"-Angabe steht alphabetisch zuerst und trägt meist das echte Cover).
+        // Alben werden **allein über den Albumnamen** zusammengefasst – der
+        // Interpret spielt keine Rolle. Gleichnamige Titel verschiedener
+        // Interpreten (auch „feat."-Varianten) bilden damit genau eine Karte.
+        // Anzeige-Interpret + Cover stammen vom Interpreten mit den meisten
+        // Titeln des Albums (Lücken werden aus den übrigen gefüllt).
         use std::collections::HashMap;
-        let mut order: Vec<(String, String)> = Vec::new();
-        let mut map: HashMap<(String, String), AlbumMeta> = HashMap::new();
+        // Je Album-Schlüssel: Statistik pro Haupt-Interpret (Titelzahl, Cover,
+        // Jahr, MBID) für die Wahl von Anzeige-Interpret/Cover.
+        type ArtistInfo = (i64, Option<String>, Option<i32>, Option<String>);
+        let mut order: Vec<String> = Vec::new();
+        let mut map: HashMap<String, AlbumMeta> = HashMap::new();
+        let mut by_artist: HashMap<String, HashMap<String, ArtistInfo>> = HashMap::new();
         for (artist, album, mbid, cover, year, status, count) in raw {
-            let primary = crate::core::artist::primary_artist(&artist);
-            let key = (crate::core::artist::norm_key(&primary), album.to_lowercase());
+            let key = album.to_lowercase();
             let entry = map.entry(key.clone()).or_insert_with(|| {
                 order.push(key.clone());
                 AlbumMeta {
-                    artist: primary.clone(),
+                    artist: String::new(),
                     album: album.clone(),
                     mbid: None,
                     cover_path: None,
@@ -784,17 +788,49 @@ impl Library {
                 }
             });
             entry.track_count += count;
-            if entry.cover_path.is_none() {
-                entry.cover_path = cover;
-            }
-            if entry.mbid.is_none() {
-                entry.mbid = mbid;
-            }
-            if entry.year.is_none() {
-                entry.year = year;
-            }
             if matches!(status.as_str(), "matched" | "local") {
                 entry.status = status;
+            }
+            let primary = crate::core::artist::primary_artist(&artist);
+            let slot = by_artist
+                .entry(key)
+                .or_default()
+                .entry(primary)
+                .or_insert((0, None, None, None));
+            slot.0 += count;
+            if slot.1.is_none() {
+                slot.1 = cover;
+            }
+            if slot.2.is_none() {
+                slot.2 = year;
+            }
+            if slot.3.is_none() {
+                slot.3 = mbid;
+            }
+        }
+        // Anzeige-Interpret = der mit den meisten Titeln; dessen Cover/Jahr/MBID
+        // bevorzugen, fehlende Felder aus den übrigen Interpreten ergänzen.
+        for (key, meta) in map.iter_mut() {
+            let Some(per) = by_artist.get(key) else { continue };
+            let mut artists: Vec<(&String, &ArtistInfo)> = per.iter().collect();
+            artists.sort_by(|a, b| {
+                b.1 .0
+                    .cmp(&a.1 .0)
+                    .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+            });
+            for (i, (name, info)) in artists.iter().enumerate() {
+                if i == 0 {
+                    meta.artist = (*name).clone();
+                }
+                if meta.cover_path.is_none() {
+                    meta.cover_path = info.1.clone();
+                }
+                if meta.year.is_none() {
+                    meta.year = info.2;
+                }
+                if meta.mbid.is_none() {
+                    meta.mbid = info.3.clone();
+                }
             }
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
@@ -803,12 +839,7 @@ impl Library {
             self.album_areas(&a.artist, &a.album)
                 .contains(&crate::core::category::Area::Albums)
         });
-        out.sort_by(|a, b| {
-            a.album
-                .to_lowercase()
-                .cmp(&b.album.to_lowercase())
-                .then_with(|| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
-        });
+        out.sort_by(|a, b| a.album.to_lowercase().cmp(&b.album.to_lowercase()));
         Ok(out)
     }
 
@@ -1406,6 +1437,30 @@ mod tests {
         assert_eq!(ac.len(), 1);
         assert_eq!(ac[0].artist, "Beginner");
         assert_eq!(ac[0].track_count, 3);
+    }
+
+    #[test]
+    fn albums_overview_groups_by_name_ignoring_artist() {
+        let lib = Library::open_in_memory().unwrap();
+        // Gleicher Albumname, verschiedene Interpreten → genau EINE Karte.
+        for (path, artist) in [
+            ("/a1.mp3", "Artist A"),
+            ("/a2.mp3", "Artist A"),
+            ("/b1.mp3", "Artist B"),
+        ] {
+            lib.upsert_track(&track(path, Some(artist), Some("Live")))
+                .unwrap();
+        }
+        let live: Vec<_> = lib
+            .albums_overview()
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.album == "Live")
+            .collect();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].track_count, 3);
+        // Anzeige-Interpret = der mit den meisten Titeln (A: 2 > B: 1).
+        assert_eq!(live[0].artist, "Artist A");
     }
 
     #[test]

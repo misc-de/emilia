@@ -114,6 +114,17 @@ pub struct App {
     pub(crate) loading: bool,
     pub(crate) queue: Vec<PathBuf>,
     pub(crate) queue_pos: usize,
+    /// Zufalls-Reihenfolge der Queue-Indizes (Fisher-Yates), wird bei aktivem
+    /// Zufall durchlaufen, damit jeder Titel **genau einmal** an die Reihe kommt.
+    pub(crate) shuffle_order: Vec<usize>,
+    /// Position innerhalb von `shuffle_order`.
+    pub(crate) shuffle_idx: usize,
+    /// Zuletzt gespielte Titel (für „vorheriges Lied" per Doppelklick auf Zurück).
+    pub(crate) play_history: Vec<PathBuf>,
+    /// Beim Zurückspringen aus der History nicht erneut in die History schreiben.
+    pub(crate) skip_history_push: bool,
+    /// Zeitpunkt des letzten Zurück-Klicks (Doppelklick-Erkennung, < 1 s).
+    pub(crate) last_prev: Option<std::time::Instant>,
     /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
     /// Resume-Position beim Wechsel auf einen anderen Titel).
     pub(crate) playing_path: Option<PathBuf>,
@@ -181,6 +192,9 @@ pub enum Msg {
     /// Einen Titel aus der Album-Unterseite abspielen (Queue = ganzes Album in
     /// Track-Reihenfolge, Start beim getippten).
     PlayAlbumTrack { artist: String, album: String, path: String },
+    /// Wie `PlayAlbumTrack`, aber interpretenübergreifend (Alben-Übersicht):
+    /// Queue = alle Titel des Albumnamens.
+    PlayAlbumByNameTrack { album: String, path: String },
     /// Ganzes Album in Track-Reihenfolge abspielen (Play-Button der Album-Zeile).
     PlayAlbum { artist: String, album: String },
     CtxPlay,
@@ -797,6 +811,9 @@ impl Component for App {
                                 set_tooltip_text: Some("Zufall"),
                                 set_valign: gtk::Align::Center,
                                 add_css_class: "flat",
+                                // Nur sinnvoll ab zwei Titeln in der Queue.
+                                #[watch]
+                                set_visible: model.queue.len() >= 2,
                                 #[watch]
                                 set_active: model.shuffle,
                                 connect_clicked => Msg::ToggleShuffle,
@@ -1038,6 +1055,11 @@ impl Component for App {
             loading: false,
             queue: Vec::new(),
             queue_pos: 0,
+            shuffle_order: Vec::new(),
+            shuffle_idx: 0,
+            play_history: Vec::new(),
+            skip_history_push: false,
+            last_prev: None,
             playing_path: None,
             close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
             now_playing: None,
@@ -1345,9 +1367,10 @@ impl Component for App {
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowAlbumTracks(index) => {
-                let meta = self.albums.guard().get(index).map(|c| c.meta.clone());
-                if let Some(meta) = meta {
-                    self.open_album_tracks(&sender, &meta.artist, &meta.album);
+                // Alben-Übersicht: nach Albumname öffnen (Interpret egal).
+                let album = self.albums.guard().get(index).map(|c| c.meta.album.clone());
+                if let Some(album) = album {
+                    self.open_album_by_name(&sender, &album);
                 }
             }
             Msg::ShowConcertDetail(index) => {
@@ -1398,6 +1421,23 @@ impl Component for App {
                 // wie auf der Album-Unterseite.
                 let files: Vec<PathBuf> = self
                     .album_tracks_for_artist(&artist, &album)
+                    .into_iter()
+                    .map(|t| PathBuf::from(t.path))
+                    .collect();
+                let target = PathBuf::from(&path);
+                if let Some(pos) = files.iter().position(|p| *p == target) {
+                    self.queue = files;
+                    self.queue_pos = pos;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                    self.nav_view.pop_to_tag("main");
+                }
+            }
+            Msg::PlayAlbumByNameTrack { album, path } => {
+                // Queue = alle Titel des Albumnamens (interpretenübergreifend),
+                // Start beim getippten – passend zur Alben-Übersicht.
+                let files: Vec<PathBuf> = self
+                    .album_tracks_by_name(&album)
                     .into_iter()
                     .map(|t| PathBuf::from(t.path))
                     .collect();
@@ -1696,7 +1736,14 @@ impl Component for App {
             }
             Msg::Next => self.play_next(),
             Msg::Prev => self.play_prev(),
-            Msg::ToggleShuffle => self.shuffle = !self.shuffle,
+            Msg::ToggleShuffle => {
+                self.shuffle = !self.shuffle;
+                // Beim Einschalten eine frische Zufalls-Reihenfolge der ganzen
+                // Queue aufbauen (laufender Titel zuerst).
+                if self.shuffle {
+                    self.rebuild_shuffle_order();
+                }
+            }
             Msg::NavUp => {
                 if self.can_go_up() {
                     if let Some(parent) = self.browse_dir.as_ref().and_then(|d| d.parent()) {
@@ -1723,8 +1770,9 @@ impl Component for App {
                     self.enrich_cancel.store(true, Ordering::Relaxed);
                     self.enrich_status = "Wird abgebrochen …".to_string();
                 } else {
-                    // Manuell ausgelöst: alles erneut versuchen (Zähler ignorieren).
-                    self.run_enrich(&sender, true, false);
+                    // Manuell ausgelöst: einlesen + Online-Abruf. Dauerhaft erfolglose
+                    // Einträge (≥ 3 Versuche) werden trotzdem übersprungen.
+                    self.run_enrich(&sender, true);
                 }
             }
             Msg::HideEnrichBanner => self.enrich_banner_hidden = true,
@@ -1849,9 +1897,12 @@ impl Component for App {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
                     tracing::error!("Eigenschaften konnten nicht gespeichert werden: {e}");
                 }
+                // Bereich „Konzerte" in die Konzerte-Liste übernehmen/entfernen.
+                self.sync_concert_marker(scope, &key, &value);
                 // Sichtbarkeit kann sich überall geändert haben → Ansichten neu laden.
                 self.reload_albums();
                 self.reload_artists();
+                self.load_concerts(&sender);
                 self.load_dir(&sender);
             }
             Msg::SetEq {
@@ -2002,8 +2053,8 @@ impl Component for App {
                     && self.root_dir.is_some()
                     && online_unmetered()
                 {
-                    // Automatischer Lauf: erschöpfte Einträge werden übersprungen.
-                    self.run_enrich(&sender, false, true);
+                    // Automatischer Lauf (ohne erneuten Tag-Scan).
+                    self.run_enrich(&sender, false);
                 }
             }
             Cmd::Candidates(candidates) => {

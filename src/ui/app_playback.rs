@@ -38,37 +38,107 @@ impl App {
         }
     }
 
-    /// Nächster Titel: bei Zufall ein zufälliger, sonst der folgende.
-    /// Am sequentiellen Ende wird gestoppt.
+    /// Baut die Zufalls-Reihenfolge neu auf (Fisher-Yates), mit dem aktuell
+    /// laufenden Titel an erster Stelle. So spielt jeder Titel der Queue genau
+    /// einmal, in zufälliger Folge.
+    pub(crate) fn rebuild_shuffle_order(&mut self) {
+        let len = self.queue.len();
+        let mut order: Vec<usize> = (0..len).collect();
+        for i in (1..len).rev() {
+            let j = gtk::glib::random_int_range(0, (i + 1) as i32) as usize;
+            order.swap(i, j);
+        }
+        // Laufenden Titel nach vorn, damit er nicht sofort übersprungen wird.
+        if let Some(p) = order.iter().position(|&x| x == self.queue_pos) {
+            order.swap(0, p);
+        }
+        self.shuffle_order = order;
+        self.shuffle_idx = 0;
+    }
+
+    /// Nächster Titel: bei Zufall der nächste der Zufalls-Reihenfolge, sonst der
+    /// folgende. Am Ende (alle gespielt) wird gestoppt.
     pub(crate) fn play_next(&mut self) {
         if self.queue.is_empty() {
             return;
         }
         let len = self.queue.len();
         let next = if self.shuffle {
-            gtk::glib::random_int_range(0, len as i32) as usize
+            // Neu mischen, wenn die Queue sich geänderte hat oder der laufende
+            // Titel nicht (mehr) der erwartete der Reihenfolge ist (z. B. nach
+            // manueller Auswahl) – dann ab dem aktuellen Titel weiterwürfeln.
+            if self.shuffle_order.len() != len
+                || self.shuffle_order.get(self.shuffle_idx) != Some(&self.queue_pos)
+            {
+                self.rebuild_shuffle_order();
+            }
+            if self.shuffle_idx + 1 < self.shuffle_order.len() {
+                self.shuffle_idx += 1;
+                Some(self.shuffle_order[self.shuffle_idx])
+            } else {
+                None
+            }
         } else if self.queue_pos + 1 < len {
-            self.queue_pos + 1
+            Some(self.queue_pos + 1)
         } else {
-            self.save_resume();
-            self.player.stop();
-            self.playing = false;
-            self.playing_path = None;
-            self.position_ms = 0;
-            self.track_duration_ms = 0;
-            *self.close_resume.borrow_mut() = None;
-            self.mpris.set_stopped();
-            self.refresh_queue_icons();
-            return;
+            None
         };
-        self.queue_pos = next;
-        self.play_current();
+        match next {
+            Some(n) => {
+                self.queue_pos = n;
+                self.play_current();
+            }
+            None => {
+                self.save_resume();
+                self.player.stop();
+                self.playing = false;
+                self.playing_path = None;
+                self.position_ms = 0;
+                self.track_duration_ms = 0;
+                *self.close_resume.borrow_mut() = None;
+                self.mpris.set_stopped();
+                self.refresh_queue_icons();
+            }
+        }
     }
 
-    /// Vorheriger Titel (sequentiell).
+    /// Zurück-Taste: einmaliges Drücken startet den laufenden Titel von vorn,
+    /// ein zweites Drücken **innerhalb einer Sekunde** springt zum zuvor
+    /// gespielten Titel (History).
     pub(crate) fn play_prev(&mut self) {
-        if !self.queue.is_empty() && self.queue_pos > 0 {
-            self.queue_pos -= 1;
+        let now = std::time::Instant::now();
+        let double = self
+            .last_prev
+            .is_some_and(|t| now.duration_since(t) <= std::time::Duration::from_secs(1));
+        self.last_prev = Some(now);
+
+        if double {
+            if let Some(prev) = self.play_history.pop() {
+                // Vorheriges Lied: bevorzugt an seiner Queue-Position spielen,
+                // sonst direkt den Pfad (ohne erneuten History-Eintrag).
+                self.skip_history_push = true;
+                if let Some(pos) = self.queue.iter().position(|p| *p == prev) {
+                    self.queue_pos = pos;
+                    self.play_current();
+                } else {
+                    self.queue = vec![prev];
+                    self.queue_pos = 0;
+                    self.play_current();
+                }
+                return;
+            }
+            // Keine History → sequentiell ein Lied zurück.
+            if !self.queue.is_empty() && self.queue_pos > 0 {
+                self.skip_history_push = true;
+                self.queue_pos -= 1;
+                self.play_current();
+            }
+            return;
+        }
+
+        // Erstes Drücken: laufenden Titel von vorn.
+        if self.playing_path.is_some() {
+            self.skip_history_push = true;
             self.play_current();
         }
     }
@@ -140,6 +210,18 @@ impl App {
         let Some(path) = self.queue.get(self.queue_pos).cloned() else {
             return;
         };
+        // History pflegen: bisher laufenden Titel merken (für „vorheriges Lied").
+        // Beim Zurückspringen aus der History selbst nicht erneut eintragen.
+        if self.skip_history_push {
+            self.skip_history_push = false;
+        } else if let Some(prev) = self.playing_path.clone() {
+            if prev != path {
+                self.play_history.push(prev);
+                if self.play_history.len() > 200 {
+                    self.play_history.remove(0);
+                }
+            }
+        }
         let path_str = path.to_string_lossy().to_string();
         // Gespeicherte Resume-Position – nur für Lang-Inhalte (s. should_resume).
         let track = self.library.track_by_path(&path_str).ok().flatten();

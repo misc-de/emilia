@@ -21,6 +21,15 @@ use crate::ui::app::{
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::FsEntry;
 
+/// Wie ein in einer Album-Titelliste angetippter Titel abgespielt wird.
+#[derive(Clone)]
+enum AlbumPlay {
+    /// Interpreten-Kontext (Interpret → Album): nur dessen Album-Titel.
+    Artist(String),
+    /// Alben-Übersicht: alle Titel des Albumnamens (Interpret egal).
+    Name(String),
+}
+
 impl App {
     /// Scroller der Dateiliste (Vorfahre der Einträge-`ListBox`).
     pub(crate) fn fs_scroller(&self) -> Option<gtk::ScrolledWindow> {
@@ -86,13 +95,9 @@ impl App {
     /// Startet die Online-Anreicherung im Hintergrund. `scan_first`: zuvor noch die
     /// Tags einlesen (beim manuellen Abruf) – beim automatischen Lauf entfällt das,
     /// weil der lokale Scan bereits durchlief. Die Audiodateien werden dabei nur
-    /// gelesen, niemals verändert.
-    pub(crate) fn run_enrich(
-        &mut self,
-        sender: &ComponentSender<Self>,
-        scan_first: bool,
-        auto: bool,
-    ) {
+    /// gelesen, niemals verändert. Dauerhaft erfolglose Einträge (≥ 3 Versuche)
+    /// werden in beiden Fällen übersprungen.
+    pub(crate) fn run_enrich(&mut self, sender: &ComponentSender<Self>, scan_first: bool) {
         let Some(root) = self.root_dir.clone() else {
             self.toast("Kein Musikordner festgelegt – bitte in den Einstellungen wählen");
             return;
@@ -114,7 +119,7 @@ impl App {
             "Cover & Metadaten werden gesucht …".to_string()
         };
         sender
-            .spawn_command(move |out| enrich_worker(root, key, fkey, cancel, scan_first, auto, &out));
+            .spawn_command(move |out| enrich_worker(root, key, fkey, cancel, scan_first, &out));
     }
 
     /// Lädt die Interpreten-Übersicht aus der DB in die Factory (inkl. Foto).
@@ -301,6 +306,32 @@ impl App {
                     })
             })
             .collect()
+    }
+
+    /// Alle Titel mit diesem Albumnamen – **interpretenübergreifend** (passend
+    /// zur Alben-Übersicht, die rein nach Albumnamen gruppiert). Sortiert nach
+    /// Disc-/Tracknummer, dann Pfad.
+    pub(crate) fn album_tracks_by_name(&self, album: &str) -> Vec<Track> {
+        let target = album.to_lowercase();
+        let mut tracks: Vec<Track> = self
+            .library
+            .all_tracks()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| {
+                t.album
+                    .as_deref()
+                    .is_some_and(|a| a.to_lowercase() == target)
+            })
+            .collect();
+        tracks.sort_by(|a, b| {
+            a.disc_no
+                .unwrap_or(1)
+                .cmp(&b.disc_no.unwrap_or(1))
+                .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        tracks
     }
 
     /// Hüllt einen Inhalt in eine scrollbare Unterseite (mit Kopfleiste +
@@ -535,7 +566,26 @@ impl App {
     pub(crate) fn open_album_tracks(&self, sender: &ComponentSender<Self>, name: &str, album: &str) {
         // Titel des Albums – `all_tracks` liefert bereits nach Tracknummer sortiert.
         let tracks = self.album_tracks_for_artist(name, album);
+        self.render_album_tracks(sender, tracks, name, album, AlbumPlay::Artist(name.to_string()));
+    }
 
+    /// Album aus der Alben-Übersicht: **alle** Titel dieses Albumnamens
+    /// (Interpret egal). Tippen auf einen Titel spielt das ganze Album ab hier.
+    pub(crate) fn open_album_by_name(&self, sender: &ComponentSender<Self>, album: &str) {
+        let tracks = self.album_tracks_by_name(album);
+        self.render_album_tracks(sender, tracks, "", album, AlbumPlay::Name(album.to_string()));
+    }
+
+    /// Gemeinsame Darstellung einer Album-Titelliste. `play` bestimmt, wie ein
+    /// angetippter Titel abgespielt wird (interpretenbezogen oder nach Albumname).
+    fn render_album_tracks(
+        &self,
+        sender: &ComponentSender<Self>,
+        tracks: Vec<Track>,
+        name: &str,
+        album: &str,
+        play: AlbumPlay,
+    ) {
         // Cover/Jahr liegen unter dem (häufigsten) rohen Interpreten-Credit.
         let display_artist = most_common_artist(&tracks);
         let album_meta = self
@@ -599,14 +649,20 @@ impl App {
             // Kurzes Tippen: Titel abspielen (ganzes Album ab hier).
             {
                 let sender = sender.clone();
-                let name = name.to_string();
+                let play = play.clone();
                 let album = album.to_string();
                 let path = path.clone();
                 row.connect_activated(move |_| {
-                    sender.input(Msg::PlayAlbumTrack {
-                        artist: name.clone(),
-                        album: album.clone(),
-                        path: path.clone(),
+                    sender.input(match &play {
+                        AlbumPlay::Artist(a) => Msg::PlayAlbumTrack {
+                            artist: a.clone(),
+                            album: album.clone(),
+                            path: path.clone(),
+                        },
+                        AlbumPlay::Name(al) => Msg::PlayAlbumByNameTrack {
+                            album: al.clone(),
+                            path: path.clone(),
+                        },
                     });
                 });
             }
