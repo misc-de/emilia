@@ -249,12 +249,12 @@ impl App {
     pub(crate) fn open_settings(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let dialog = adw::PreferencesDialog::new();
         let page = adw::PreferencesPage::builder()
-            .title("Einstellungen")
-            .icon_name("emblem-system-symbolic")
+            .title("Bibliothek")
+            .icon_name("folder-symbolic")
             .build();
         let group = adw::PreferencesGroup::builder()
-            .title("Bibliothek")
-            .description("Startordner für die Dateisystem-Ansicht")
+            .title("Startordner")
+            .description("Ordner für die Dateisystem-Ansicht")
             .build();
 
         let current = self.music_dir.as_deref().unwrap_or("Nicht festgelegt");
@@ -298,7 +298,13 @@ impl App {
         row.set_activatable_widget(Some(&button));
         group.add(&row);
         page.add(&group);
+        dialog.add(&page);
 
+        // --- Kategorie: Klang ---
+        let page = adw::PreferencesPage::builder()
+            .title("Klang")
+            .icon_name("preferences-other-symbolic")
+            .build();
         // Globaler Equalizer (Basis für alles ohne eigene Interpret-/Album-/Titel-EQ).
         let eq_group = adw::PreferencesGroup::builder()
             .title("Equalizer")
@@ -320,7 +326,13 @@ impl App {
         }
         eq_group.add(&eq_row);
         page.add(&eq_group);
+        dialog.add(&page);
 
+        // --- Kategorie: Online ---
+        let page = adw::PreferencesPage::builder()
+            .title("Online")
+            .icon_name("network-wireless-symbolic")
+            .build();
         // Online-Erkennung: AcoustID-Key für die Titel-Erkennung per Fingerprint.
         let online_group = adw::PreferencesGroup::builder()
             .title("Online-Erkennung")
@@ -370,9 +382,15 @@ impl App {
         }
         online_group.add(&auto_row);
         page.add(&online_group);
+        dialog.add(&page);
 
-        // Bereiche: ausgeblendete Navigationspunkte wieder einblenden.
-        let sections_group = adw::PreferencesGroup::builder().title("Bereiche").build();
+        // --- Kategorie: Ansicht ---
+        let page = adw::PreferencesPage::builder()
+            .title("Ansicht")
+            .icon_name("view-list-symbolic")
+            .build();
+        // Menüpunkte ein-/ausblenden.
+        let sections_group = adw::PreferencesGroup::builder().title("Menüpunkte").build();
         let concerts_row = adw::SwitchRow::builder()
             .title("Konzerte anzeigen")
             .subtitle("Menüpunkt „Konzerte“ in der Navigation")
