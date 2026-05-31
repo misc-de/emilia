@@ -134,6 +134,9 @@ pub struct App {
     pub(crate) concert_hint_dismissed: bool,
     pub(crate) concerts_hidden: bool,
     pub(crate) concert_nav_buttons: Vec<gtk::ToggleButton>,
+    // Playlisten
+    pub(crate) playlist_items: Vec<(i64, String, i64)>,
+    pub(crate) playlists_list: gtk::ListBox,
     pub(crate) view_stack: adw::ViewStack,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
     pub(crate) nav_view: adw::NavigationView,
@@ -243,6 +246,29 @@ pub enum Msg {
     PlayConcert(usize),
     ConcertRemove(usize),
     SetConcertsVisible(bool),
+    // Playlisten
+    /// „Neue Playlist"-Dialog öffnen.
+    PlaylistNew,
+    /// Playlist mit diesem Namen anlegen.
+    PlaylistCreate(String),
+    /// Playlist anlegen und die aktuellen Kontext-Dateien hinzufügen.
+    PlaylistCreateAddTo(String),
+    /// Titel-Unterseite einer Playlist öffnen.
+    OpenPlaylist(i64),
+    /// Ganze Playlist abspielen.
+    PlayPlaylist(i64),
+    /// Playlist löschen.
+    PlaylistDelete(i64),
+    /// Aktuelle Kontext-Dateien zu dieser Playlist hinzufügen.
+    PlaylistAddTo(i64),
+    /// Einen Titel aus einer Playlist abspielen (Queue = ganze Playlist).
+    PlaylistTrack { id: i64, path: String },
+    /// Einen Titel aus einer Playlist entfernen.
+    PlaylistRemoveTrack { id: i64, path: String },
+    /// Umbenennen-Dialog einer Playlist öffnen.
+    PlaylistRenameDialog(i64),
+    /// Playlist umbenennen.
+    PlaylistRename { id: i64, name: String },
 }
 
 /// Ergebnisse der Hintergrund-Worker (Ordner lesen bzw. Online-Anreicherung).
@@ -560,10 +586,43 @@ impl Component for App {
                                     },
                                 },
                             add_titled_with_icon[Some("playlists"), "Playlisten", "view-list-symbolic"] =
-                                &adw::StatusPage {
-                                    set_icon_name: Some("view-list-symbolic"),
-                                    set_title: "Playlisten",
-                                    set_description: Some("Kommt bald"),
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    gtk::Box {
+                                        set_halign: gtk::Align::Center,
+                                        set_margin_top: 12,
+                                        set_margin_bottom: 6,
+                                        gtk::Button {
+                                            set_label: "Neue Playlist",
+                                            set_css_classes: &["suggested-action", "pill"],
+                                            connect_clicked => Msg::PlaylistNew,
+                                        },
+                                    },
+
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.playlist_items.is_empty(),
+                                        #[local_ref]
+                                        playlists_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+
+                                    adw::StatusPage {
+                                        set_icon_name: Some("view-list-symbolic"),
+                                        set_title: "Keine Playlisten",
+                                        set_description: Some("Erstelle eine Playlist oder füge Titel über die Optionen hinzu."),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.playlist_items.is_empty(),
+                                    },
                                 },
                         },
 
@@ -834,6 +893,7 @@ impl Component for App {
 
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
+        let playlists_list = gtk::ListBox::new();
 
         let mut model = App {
             library,
@@ -871,6 +931,8 @@ impl Component for App {
             toast_overlay: toast_overlay.clone(),
             concert_items: Vec::new(),
             concerts_list: concerts_list.clone(),
+            playlist_items: Vec::new(),
+            playlists_list: playlists_list.clone(),
             concert_hint_dismissed,
             concerts_hidden,
             concert_nav_buttons: Vec::new(),
@@ -883,6 +945,7 @@ impl Component for App {
         model.reload_albums();
         model.reload_artists();
         model.load_concerts(&sender);
+        model.reload_playlists(&sender);
         // Bibliothek beim Start automatisch einlesen und – bei WLAN/LAN und
         // aktiviertem Schalter – fehlende Cover/Metadaten im Hintergrund nachladen.
         model.start_scan(&sender, true);
@@ -1277,7 +1340,80 @@ impl Component for App {
                     self.toast(&format!("{n} Titel zur Queue hinzugefügt"));
                 }
             }
-            Msg::CtxAddPlaylist => self.toast("Playlists kommen bald"),
+            Msg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, &sender),
+            Msg::PlaylistNew => self.open_new_playlist_dialog(root, &sender),
+            Msg::PlaylistCreate(name) => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    let _ = self.library.create_playlist(name);
+                    self.reload_playlists(&sender);
+                    self.toast("Playlist erstellt");
+                }
+            }
+            Msg::PlaylistCreateAddTo(name) => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    if let Ok(id) = self.library.create_playlist(name) {
+                        self.add_context_to_playlist(id, &sender);
+                    }
+                }
+            }
+            Msg::PlaylistAddTo(id) => self.add_context_to_playlist(id, &sender),
+            Msg::OpenPlaylist(id) => {
+                if let Some((_, name, _)) =
+                    self.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
+                {
+                    self.open_playlist(&sender, id, &name);
+                }
+            }
+            Msg::PlayPlaylist(id) => {
+                let paths = self.library.playlist_paths(id).unwrap_or_default();
+                if !paths.is_empty() {
+                    self.queue = paths.into_iter().map(PathBuf::from).collect();
+                    self.queue_pos = 0;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
+            Msg::PlaylistTrack { id, path } => {
+                let queue: Vec<PathBuf> = self
+                    .library
+                    .playlist_paths(id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect();
+                if let Some(pos) = queue.iter().position(|p| p.to_string_lossy() == path) {
+                    self.queue = queue;
+                    self.queue_pos = pos;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
+            Msg::PlaylistDelete(id) => {
+                let _ = self.library.delete_playlist(id);
+                self.reload_playlists(&sender);
+                self.toast("Playlist gelöscht");
+            }
+            Msg::PlaylistRemoveTrack { id, path } => {
+                let _ = self.library.remove_from_playlist(id, &path);
+                self.reload_playlists(&sender);
+                // Unterseite neu aufbauen (alte ersetzen).
+                self.nav_view.pop();
+                if let Some((_, name, _)) =
+                    self.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
+                {
+                    self.open_playlist(&sender, id, &name);
+                }
+            }
+            Msg::PlaylistRenameDialog(id) => self.open_rename_playlist_dialog(root, &sender, id),
+            Msg::PlaylistRename { id, name } => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    let _ = self.library.rename_playlist(id, name);
+                    self.reload_playlists(&sender);
+                }
+            }
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.open_share_dialog(root, &sender),
             Msg::ShareHost => {

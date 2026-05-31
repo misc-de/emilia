@@ -1,6 +1,7 @@
 pub mod album_row;
 pub mod app;
 pub mod app_playback;
+pub mod app_playlist;
 pub mod app_concert;
 pub mod app_eq;
 pub mod app_dialogs;

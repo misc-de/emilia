@@ -33,6 +33,9 @@ Bibliotheksindex in **SQLite**.
   weiter; bei Titelende wird wieder von vorn begonnen.
 - **Sperrbildschirm & Medientasten** – Steuerung über **MPRIS**
   (Play/Pause, Vor/Zurück, Spulen) samt Titel-/Albumanzeige.
+- **Playlisten** – eigene Playlisten anlegen, Titel/Alben/Ordner über die
+  Optionen hinzufügen, abspielen, umbenennen und einzelne Titel wieder
+  entfernen.
 - **Equalizer mit Kaskade** – 10-Band-EQ (`equalizer-10bands`), live während der
   Wiedergabe. Einstellungen wirken in der Reihenfolge
   **Global → Interpret → Album → Titel** (spezifischste Ebene gewinnt),
@@ -49,7 +52,6 @@ Bibliotheksindex in **SQLite**.
 
 ### Geplant (Roadmap)
 
-- Playlisten
 - Streaming-Backend (Subsonic/Navidrome oder Jellyfin)
 - Podcasts
 

@@ -160,6 +160,20 @@ impl Library {
                 source TEXT,
                 PRIMARY KEY (name, idx)
             );
+
+            -- Vom Nutzer angelegte Playlisten und ihre Einträge (geordnet).
+            -- Einträge sind Pfade (wie die Warteschlange); Duplikate erlaubt.
+            CREATE TABLE IF NOT EXISTS playlist (
+                id         INTEGER PRIMARY KEY,
+                name       TEXT NOT NULL,
+                created_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS playlist_item (
+                playlist_id INTEGER NOT NULL,
+                position    INTEGER NOT NULL,
+                path        TEXT NOT NULL,
+                PRIMARY KEY (playlist_id, position)
+            );
             "#,
         )?;
 
@@ -826,6 +840,87 @@ impl Library {
         let rows = stmt.query_map([name], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    // ---- Playlisten ----
+
+    /// Legt eine Playlist an und gibt ihre ID zurück.
+    pub fn create_playlist(&self, name: &str) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO playlist (name, created_at) VALUES (?1, strftime('%s','now'))",
+            [name],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Benennt eine Playlist um.
+    pub fn rename_playlist(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE playlist SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )?;
+        Ok(())
+    }
+
+    /// Löscht eine Playlist samt ihrer Einträge.
+    pub fn delete_playlist(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM playlist_item WHERE playlist_id = ?1", [id])?;
+        self.conn.execute("DELETE FROM playlist WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Alle Playlisten als (id, Name, Titelanzahl), alphabetisch sortiert.
+    pub fn playlists(&self) -> Result<Vec<(i64, String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, COUNT(i.path)
+             FROM playlist p
+             LEFT JOIN playlist_item i ON i.playlist_id = p.id
+             GROUP BY p.id
+             ORDER BY p.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Hängt Pfade ans Ende einer Playlist an (Duplikate erlaubt).
+    pub fn add_to_playlist(&self, id: i64, paths: &[String]) -> Result<()> {
+        let start: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_item WHERE playlist_id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        for (i, path) in paths.iter().enumerate() {
+            self.conn.execute(
+                "INSERT INTO playlist_item (playlist_id, position, path) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, start + i as i64, path],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Pfade einer Playlist in ihrer Reihenfolge.
+    pub fn playlist_paths(&self, id: i64) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM playlist_item WHERE playlist_id = ?1 ORDER BY position")?;
+        let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Entfernt alle Vorkommen eines Pfads aus einer Playlist.
+    pub fn remove_from_playlist(&self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM playlist_item WHERE playlist_id = ?1 AND path = ?2",
+            rusqlite::params![id, path],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -844,6 +939,33 @@ mod tests {
             duration_ms: Some(60_000),
             resume_ms: 0,
         }
+    }
+
+    #[test]
+    fn playlist_crud_and_items() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib.create_playlist("Roadtrip").unwrap();
+        assert_eq!(lib.playlists().unwrap(), vec![(id, "Roadtrip".to_string(), 0)]);
+
+        // Anhängen erhält die Reihenfolge (über zwei Aufrufe hinweg).
+        lib.add_to_playlist(id, &["/a.mp3".into(), "/b.mp3".into()])
+            .unwrap();
+        lib.add_to_playlist(id, &["/c.mp3".into()]).unwrap();
+        assert_eq!(
+            lib.playlist_paths(id).unwrap(),
+            vec!["/a.mp3", "/b.mp3", "/c.mp3"]
+        );
+        assert_eq!(lib.playlists().unwrap()[0].2, 3); // Titelanzahl
+
+        lib.rename_playlist(id, "Tour").unwrap();
+        assert_eq!(lib.playlists().unwrap()[0].1, "Tour");
+
+        lib.remove_from_playlist(id, "/b.mp3").unwrap();
+        assert_eq!(lib.playlist_paths(id).unwrap(), vec!["/a.mp3", "/c.mp3"]);
+
+        lib.delete_playlist(id).unwrap();
+        assert!(lib.playlists().unwrap().is_empty());
+        assert!(lib.playlist_paths(id).unwrap().is_empty());
     }
 
     #[test]
