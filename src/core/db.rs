@@ -589,9 +589,11 @@ impl Library {
             .unwrap_or(0)
     }
 
-    /// Anzahl eindeutiger Alben – **gleiche Gruppierung** wie [`Self::albums_overview`]
-    /// und [`Self::albums_missing_cover`] (nach `COALESCE(artist,''), album`). Dient
-    /// als Gesamtsumme für die Fortschrittsanzeige des Cover-Abrufs.
+    /// Anzahl roher (Interpret, Album)-Gruppen – **gleiche Gruppierung** wie
+    /// [`Self::albums_missing_cover`], als Gesamtsumme für die Fortschrittsanzeige
+    /// des Cover-Abrufs. (Die *Anzeige* in [`Self::albums_overview`] fasst
+    /// feat.-Varianten zusätzlich nach Haupt-Interpret zusammen und kann daher
+    /// weniger Karten zeigen.)
     pub fn album_count(&self) -> Result<i64> {
         Ok(self.conn.query_row(
             "SELECT COUNT(*) FROM (
@@ -670,18 +672,64 @@ impl Library {
              GROUP BY COALESCE(t.artist, ''), t.album
              ORDER BY t.album COLLATE NOCASE, t.artist COLLATE NOCASE",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(AlbumMeta {
-                artist: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                album: r.get(1)?,
-                mbid: r.get(2)?,
-                cover_path: r.get(3)?,
-                year: r.get(4)?,
-                status: r.get(5)?,
-                track_count: r.get(6)?,
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let raw = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<i32>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, i64>(6)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // „A feat. B" gehört zum Album von „A": nach (Haupt-Interpret, Album)
+        // zusammenfassen, damit feat.-Varianten desselben Albums nicht mehrere
+        // Karten erzeugen. Cover/Jahr: der erste vorhandene Wert (die schlichte
+        // „A"-Angabe steht alphabetisch zuerst und trägt meist das echte Cover).
+        use std::collections::HashMap;
+        let mut order: Vec<(String, String)> = Vec::new();
+        let mut map: HashMap<(String, String), AlbumMeta> = HashMap::new();
+        for (artist, album, mbid, cover, year, status, count) in raw {
+            let primary = crate::core::artist::primary_artist(&artist);
+            let key = (crate::core::artist::norm_key(&primary), album.to_lowercase());
+            let entry = map.entry(key.clone()).or_insert_with(|| {
+                order.push(key.clone());
+                AlbumMeta {
+                    artist: primary.clone(),
+                    album: album.clone(),
+                    mbid: None,
+                    cover_path: None,
+                    year: None,
+                    status: "pending".to_string(),
+                    track_count: 0,
+                }
+            });
+            entry.track_count += count;
+            if entry.cover_path.is_none() {
+                entry.cover_path = cover;
+            }
+            if entry.mbid.is_none() {
+                entry.mbid = mbid;
+            }
+            if entry.year.is_none() {
+                entry.year = year;
+            }
+            if matches!(status.as_str(), "matched" | "local") {
+                entry.status = status;
+            }
+        }
+        let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
+        out.sort_by(|a, b| {
+            a.album
+                .to_lowercase()
+                .cmp(&b.album.to_lowercase())
+                .then_with(|| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+        });
+        Ok(out)
     }
 
     fn map_album_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumMeta> {
@@ -738,7 +786,7 @@ impl Library {
         let mut out = Vec::new();
         for raw in &raws {
             for name in crate::core::artist::split_artists(raw) {
-                if seen.insert(name.to_lowercase()) {
+                if seen.insert(crate::core::artist::norm_key(&name)) {
                     out.push(name);
                 }
             }
@@ -1224,6 +1272,28 @@ mod tests {
         lib.delete_playlist(id).unwrap();
         assert!(lib.playlists().unwrap().is_empty());
         assert!(lib.playlist_paths(id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn albums_overview_merges_feat_variants() {
+        let lib = Library::open_in_memory().unwrap();
+        for (path, artist) in [
+            ("/1.mp3", "Beginner"),
+            ("/2.mp3", "Beginner feat. Megaloh"),
+            ("/3.mp3", "Beginner feat. Gzuz & Gentleman"),
+        ] {
+            lib.upsert_track(&track(path, Some(artist), Some("Advanced Chemistry")))
+                .unwrap();
+        }
+        let albums = lib.albums_overview().unwrap();
+        let ac: Vec<_> = albums
+            .iter()
+            .filter(|a| a.album == "Advanced Chemistry")
+            .collect();
+        // feat.-Varianten desselben Haupt-Interpreten → genau EINE Karte.
+        assert_eq!(ac.len(), 1);
+        assert_eq!(ac[0].artist, "Beginner");
+        assert_eq!(ac[0].track_count, 3);
     }
 
     #[test]

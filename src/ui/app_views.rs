@@ -145,7 +145,7 @@ impl App {
         // zerlegten – Interpreten-Angabe vorkommt (case-insensitiv). Sonst zählte
         // die Detailseite Gast-/zusammengesetzte Titel nicht mit und zeigte „0
         // Lieder", obwohl die Liederliste sie führt.
-        let target = name.to_lowercase();
+        let target = crate::core::artist::norm_key(name);
         self.library
             .all_tracks()
             .unwrap_or_default()
@@ -154,21 +154,29 @@ impl App {
                 t.artist.as_deref().is_some_and(|a| {
                     crate::core::artist::split_artists(a)
                         .iter()
-                        .any(|s| s.to_lowercase() == target)
+                        .any(|s| crate::core::artist::norm_key(s) == target)
                 })
             })
             .map(|t| PathBuf::from(t.path))
             .collect()
     }
 
-    /// Alle Dateien eines Albums (Interpret + Album), in Abspielreihenfolge.
+    /// Alle Dateien eines Albums (Haupt-Interpret + Album), in Abspielreihenfolge.
+    /// Zählt feat.-Varianten desselben Haupt-Interpreten mit – passend zur
+    /// zusammengefassten Alben-Übersicht.
     pub(crate) fn album_files(&self, artist: &str, album: &str) -> Vec<PathBuf> {
+        let target = crate::core::artist::norm_key(artist);
         self.library
             .all_tracks()
             .unwrap_or_default()
             .into_iter()
             .filter(|t| {
-                t.album.as_deref() == Some(album) && t.artist.as_deref() == Some(artist)
+                t.album.as_deref() == Some(album)
+                    && t.artist.as_deref().is_some_and(|a| {
+                        crate::core::artist::split_artists(a)
+                            .first()
+                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
+                    })
             })
             .map(|t| PathBuf::from(t.path))
             .collect()
@@ -181,7 +189,7 @@ impl App {
     /// Alben in der Reihenfolge aus `all_tracks` (alphabetisch), Titel je Album
     /// nach Tracknummer.
     pub(crate) fn artist_albums(&self, name: &str) -> Vec<(String, Vec<Track>)> {
-        let target = name.to_lowercase();
+        let target = crate::core::artist::norm_key(name);
         let mut order: Vec<String> = Vec::new();
         let mut groups: std::collections::HashMap<String, Vec<Track>> =
             std::collections::HashMap::new();
@@ -189,7 +197,7 @@ impl App {
             let belongs = t.artist.as_deref().is_some_and(|a| {
                 crate::core::artist::split_artists(a)
                     .iter()
-                    .any(|s| s.to_lowercase() == target)
+                    .any(|s| crate::core::artist::norm_key(s) == target)
             });
             if !belongs {
                 continue;
@@ -219,7 +227,7 @@ impl App {
     ///
     /// Alben in der Reihenfolge aus `all_tracks`; Titel je Album nach Tracknummer.
     pub(crate) fn artist_sections(&self, name: &str) -> (Vec<(String, String, Vec<Track>)>, Vec<Track>) {
-        let target = name.to_lowercase();
+        let target = crate::core::artist::norm_key(name);
         let all = self.library.all_tracks().unwrap_or_default();
 
         // Titel des Interpreten nach Albumname gruppieren (Reihenfolge bewahren).
@@ -230,7 +238,7 @@ impl App {
             let belongs = t.artist.as_deref().is_some_and(|a| {
                 crate::core::artist::split_artists(a)
                     .iter()
-                    .any(|s| s.to_lowercase() == target)
+                    .any(|s| crate::core::artist::norm_key(s) == target)
             });
             if !belongs {
                 continue;
@@ -259,7 +267,7 @@ impl App {
                     t.artist.as_deref().is_some_and(|a| {
                         crate::core::artist::split_artists(a)
                             .first()
-                            .is_some_and(|p| p.to_lowercase() == target)
+                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
                     })
                 })
                 .count();
@@ -280,17 +288,19 @@ impl App {
     /// titel mit dem Albumnamen, in deren (zerlegter) Interpreten-Angabe `name`
     /// vorkommt. Bereits nach Tracknummer sortiert (Reihenfolge aus `all_tracks`).
     pub(crate) fn album_tracks_for_artist(&self, name: &str, album: &str) -> Vec<Track> {
-        let target = name.to_lowercase();
+        let target = crate::core::artist::norm_key(name);
         self.library
             .all_tracks()
             .unwrap_or_default()
             .into_iter()
             .filter(|t| {
+                // Album-Zugehörigkeit über den Haupt-Interpreten (wie die
+                // Alben-Übersicht): „A feat. B" gehört zum Album von „A".
                 t.album.as_deref() == Some(album)
                     && t.artist.as_deref().is_some_and(|a| {
                         crate::core::artist::split_artists(a)
-                            .iter()
-                            .any(|s| s.to_lowercase() == target)
+                            .first()
+                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
                     })
             })
             .collect()

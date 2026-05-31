@@ -50,11 +50,31 @@ pub fn split_artists(raw: &str) -> Vec<String> {
         if name.is_empty() {
             continue;
         }
-        if seen.insert(name.to_lowercase()) {
+        if seen.insert(norm_key(&name)) {
             out.push(name);
         }
     }
     out
+}
+
+/// Vergleichs-Schlüssel für Interpretennamen: getrimmt, ohne abschließende
+/// Punkte, klein geschrieben. So gelten „RZA" und „RZA." (oder „M.I.A" und
+/// „M.I.A.") als **derselbe** Interpret – ein abschließender Abkürzungspunkt
+/// soll nicht zu zwei Einträgen führen.
+pub fn norm_key(name: &str) -> String {
+    name.trim()
+        .trim_end_matches(['.', ' '])
+        .trim()
+        .to_lowercase()
+}
+
+/// Haupt-Interpret einer Angabe (der erstgenannte, vor „feat."). Dient der
+/// Album-Gruppierung: „Beginner feat. X" gehört zum Album von „Beginner".
+pub fn primary_artist(raw: &str) -> String {
+    split_artists(raw)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| raw.trim().to_string())
 }
 
 /// Entfernt Auftritts-Zusätze aus einem Interpretennamen:
@@ -192,5 +212,23 @@ mod tests {
     #[test]
     fn keeps_non_qualifier_brackets() {
         assert_eq!(split_artists("Sigur Rós (Band)"), vec!["Sigur Rós (Band)"]);
+    }
+
+    #[test]
+    fn trailing_dot_is_same_artist() {
+        use super::norm_key;
+        assert_eq!(norm_key("RZA"), norm_key("RZA."));
+        assert_eq!(norm_key("M.I.A"), norm_key("M.I.A."));
+        assert_ne!(norm_key("RZA"), norm_key("GZA"));
+        // Dedup auch innerhalb einer Angabe.
+        assert_eq!(split_artists("RZA & RZA."), vec!["RZA"]);
+    }
+
+    #[test]
+    fn primary_is_first_artist() {
+        use super::primary_artist;
+        assert_eq!(primary_artist("Beginner feat. Megaloh"), "Beginner");
+        assert_eq!(primary_artist("Sido feat. Genetikk & Marsimoto"), "Sido");
+        assert_eq!(primary_artist("Adele"), "Adele");
     }
 }
