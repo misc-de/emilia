@@ -379,4 +379,84 @@ impl App {
         dialog.add(&page);
         dialog.present(Some(root));
     }
+
+    /// Dateidialog zum Hochladen eines eigenen Covers/Fotos für das aktuelle
+    /// Detailziel (Album → Cover, Interpret → Foto). Das gewählte Bild wird in
+    /// den Cache kopiert und als primäres Bild gesetzt.
+    pub(crate) fn open_cover_upload_dialog(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        enum Dest {
+            Album(String, String),
+            Artist(String),
+        }
+        let dest = match self.context_target.as_ref() {
+            Some(CtxTarget::Album(m)) => Some(Dest::Album(m.artist.clone(), m.album.clone())),
+            Some(CtxTarget::Artist(m)) => Some(Dest::Artist(m.name.clone())),
+            // Ordner im Dateibrowser: als Album bzw. Interpret auflösen.
+            _ => match self.ctx_album() {
+                Some((a, al)) => Some(Dest::Album(a, al)),
+                None => self.ctx_artist().map(Dest::Artist),
+            },
+        };
+        let Some(dest) = dest else {
+            self.toast("Hier lässt sich kein eigenes Bild setzen");
+            return;
+        };
+
+        let filter = gtk::FileFilter::new();
+        filter.add_pixbuf_formats();
+        filter.set_name(Some("Bilder"));
+        let chooser = gtk::FileDialog::builder()
+            .title("Eigenes Bild auswählen")
+            .default_filter(&filter)
+            .build();
+
+        let sender = sender.clone();
+        chooser.open(Some(root), gtk::gio::Cancellable::NONE, move |res| {
+            let Ok(file) = res else {
+                return;
+            };
+            let Some(src) = file.path() else {
+                return;
+            };
+            let is_artist = matches!(dest, Dest::Artist(_));
+            let Some(cached) = store_custom_image(&src, is_artist) else {
+                return;
+            };
+            match dest {
+                Dest::Album(artist, album) => sender.input(Msg::SetAlbumCover {
+                    artist,
+                    album,
+                    path: cached,
+                }),
+                Dest::Artist(name) => sender.input(Msg::SetArtistImage { name, path: cached }),
+            }
+        });
+    }
+}
+
+/// Kopiert ein gewähltes Bild in den Cover- bzw. Künstler-Cache und gibt den
+/// neuen Pfad zurück. Der Dateiname ist eindeutig (Zeitstempel), damit das Bild
+/// sofort frisch geladen wird und kein alter Cache-Eintrag greift.
+fn store_custom_image(src: &std::path::Path, is_artist: bool) -> Option<String> {
+    let dir = if is_artist {
+        crate::core::online::artist_cache_dir()
+    } else {
+        crate::core::online::cover_cache_dir()
+    };
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| e.len() <= 5)
+        .unwrap_or("img");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let out = dir.join(format!("custom_{stamp}.{ext}"));
+    std::fs::copy(src, &out).ok()?;
+    Some(out.to_string_lossy().into_owned())
 }

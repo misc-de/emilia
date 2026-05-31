@@ -899,6 +899,29 @@ impl App {
         let (texture, placeholder) = self.ctx_cover(entry);
         let mut paths = self.ctx_gallery_paths(entry);
 
+        // Langes Drücken oder Rechtsklick auf das Bild: eigenes Cover/Foto wählen.
+        let attach_upload = |w: &gtk::Box| {
+            let click = gtk::GestureClick::new();
+            click.set_button(gtk::gdk::BUTTON_SECONDARY);
+            {
+                let sender = sender.clone();
+                click.connect_pressed(move |g, _, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    sender.input(Msg::UploadCover);
+                });
+            }
+            w.add_controller(click);
+            let lp = gtk::GestureLongPress::new();
+            {
+                let sender = sender.clone();
+                lp.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    sender.input(Msg::UploadCover);
+                });
+            }
+            w.add_controller(lp);
+        };
+
         // Aktuelles Primärbild nach vorn, damit das Karussell darauf startet
         // (so wird beim Schließen ohne Blättern nichts ungewollt geändert).
         let primary = match entry {
@@ -927,6 +950,7 @@ impl App {
             gallery.append(&carousel);
             gallery.append(&dots);
             content.append(&gallery);
+            attach_upload(&gallery);
 
             // Beim Schließen der Detailansicht das zuletzt im Karussell gezeigte
             // Bild sofort als primäres Cover/Foto übernehmen (gilt dann überall).
@@ -964,6 +988,7 @@ impl App {
             cover_box.set_hexpand(false);
             cover_box.append(&cover);
             content.append(&cover_box);
+            attach_upload(&cover_box);
         }
     }
 

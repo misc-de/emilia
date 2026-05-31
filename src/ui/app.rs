@@ -221,6 +221,8 @@ pub enum Msg {
     SetAlbumCover { artist: String, album: String, path: String },
     /// Primäres Foto eines Interpreten festlegen (zuletzt im Galerie-Karussell gezeigt).
     SetArtistImage { name: String, path: String },
+    /// Eigenes Cover/Foto für das aktuelle Detailziel hochladen (Dateidialog).
+    UploadCover,
     SetFanartKey(String),
     /// Automatischen Online-Abruf an-/ausschalten.
     SetAutoEnrich(bool),
@@ -1700,6 +1702,7 @@ impl Component for App {
                     self.reload_artists();
                 }
             }
+            Msg::UploadCover => self.open_cover_upload_dialog(root, &sender),
             Msg::SetFanartKey(key) => {
                 let key = key.trim().to_string();
                 let _ = self.library.set_setting("fanart_key", &key);
