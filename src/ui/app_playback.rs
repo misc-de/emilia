@@ -333,11 +333,26 @@ impl App {
         self.player.set_eq_bands(&bands);
     }
 
-    /// Spielt einen Pfad ab (Ordner rekursiv bzw. Einzeldatei) als neue Queue.
+    /// Spielt einen Pfad ab (Ordner rekursiv bzw. Einzeldatei) als **eine**
+    /// Warteschlange. Bei Mehr-CD-Inhalten (z. B. Live-Konzerten) werden die CDs
+    /// zusammen abgespielt: zuerst CD1, dann CD2 … – sortiert nach Unterordner
+    /// (CD-Ordner), dann Disc- und Tracknummer aus den Tags, sonst Dateiname.
     pub(crate) fn play_path(&mut self, path: &str, is_dir: bool) {
         let p = PathBuf::from(path);
         let files = if is_dir {
-            scanner::collect_audio_files(&p)
+            let mut fs = scanner::collect_audio_files(&p);
+            fs.sort_by_cached_key(|f| {
+                let s = f.to_string_lossy().into_owned();
+                let t = self.library.track_by_path(&s).ok().flatten();
+                let parent = f
+                    .parent()
+                    .map(|d| d.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let disc = t.as_ref().and_then(|t| t.disc_no).unwrap_or(1);
+                let track = t.as_ref().and_then(|t| t.track_no).unwrap_or(0);
+                (parent, disc, track, s)
+            });
+            fs
         } else {
             vec![p]
         };
