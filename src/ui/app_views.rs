@@ -1039,7 +1039,7 @@ impl App {
         }
     }
 
-    /// "Merkmale"-Gruppe des Detailziels (Datei: alle Ebenen; Interpret/Album: passend).
+    /// "Eigenschaften"-Gruppe des Detailziels (Datei: alle Ebenen; Interpret/Album: passend).
     pub(crate) fn ctx_merkmale(
         &self,
         target: &CtxTarget,
@@ -1052,14 +1052,14 @@ impl App {
         }
     }
 
-    /// "Merkmale"-Gruppe für einen Interpreten: eine Auswahl auf Interpret-Ebene.
+    /// "Eigenschaften"-Gruppe für einen Interpreten: eine Auswahl auf Interpret-Ebene.
     pub(crate) fn artist_merkmale(
         &self,
         name: &str,
         sender: &ComponentSender<Self>,
     ) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().title("Merkmale").build();
-        let expander = adw::ExpanderRow::builder().title("Merkmal").build();
+        let group = adw::PreferencesGroup::builder().build();
+        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
 
         let (eff, src) = self.library.resolve_category(Some(name), None, "");
         let eff_label = Category::from_str(&eff).unwrap_or(Category::DEFAULT).label();
@@ -1080,15 +1080,15 @@ impl App {
         group
     }
 
-    /// "Merkmale"-Gruppe für ein Album: Album-Ebene plus geerbte Interpret-Ebene.
+    /// "Eigenschaften"-Gruppe für ein Album: Album-Ebene plus geerbte Interpret-Ebene.
     pub(crate) fn album_merkmale(
         &self,
         artist: &str,
         album: &str,
         sender: &ComponentSender<Self>,
     ) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().title("Merkmale").build();
-        let expander = adw::ExpanderRow::builder().title("Merkmal").build();
+        let group = adw::PreferencesGroup::builder().build();
+        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
 
         let (eff, src) = self.library.resolve_category(Some(artist), Some(album), "");
         let eff_label = Category::from_str(&eff).unwrap_or(Category::DEFAULT).label();

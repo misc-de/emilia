@@ -36,11 +36,7 @@ pub(crate) fn enrich_worker(
         Ok(lib) => lib,
         Err(e) => {
             tracing::error!("DB für Online-Abruf nicht erreichbar: {e}");
-            let _ = out.send(Cmd::EnrichDone {
-                albums: 0,
-                artists: 0,
-                tracks: 0,
-            });
+            let _ = out.send(Cmd::EnrichDone);
             return;
         }
     };
@@ -54,9 +50,7 @@ pub(crate) fn enrich_worker(
     }
 
     let client = online::OnlineClient::new();
-    let mut covers = 0usize;
     let mut artists_matched = 0usize;
-    let mut tracks_matched = 0usize;
     let stopped = || cancel.load(Ordering::Relaxed);
 
     // Gesamtsummen für die Fortschrittsanzeige (gegen die ganze Bibliothek,
@@ -78,7 +72,6 @@ pub(crate) fn enrich_worker(
                 m.cover_path = Some(cover_path);
                 m.status = "local".to_string();
                 let _ = lib.upsert_album_meta(&m);
-                covers += 1;
             }
             let _ = out.send(Cmd::EnrichProgress {
                 phase: "Cover".to_string(),
@@ -109,8 +102,7 @@ pub(crate) fn enrich_worker(
         }
         // Zugeordnete + übersprungene Interpreten zählen als „erledigt".
         let artists_base = artists_matched + artists_skipped;
-        artists_matched +=
-            fetch_artists_parallel(&client, to_fetch, &cancel, &lib, artists_base, total_artists, out);
+        fetch_artists_parallel(&client, to_fetch, &cancel, &lib, artists_base, total_artists, out);
         let _ = out.send(Cmd::ReloadViews);
         if stopped() {
             break 'work;
@@ -126,10 +118,8 @@ pub(crate) fn enrich_worker(
             // Automatik: nach zu vielen erfolglosen Versuchen überspringen.
             let exhausted = auto && lib.album_attempts(artist, album) >= MAX_AUTO_ATTEMPTS;
             if !exhausted {
-                if !artist.is_empty()
-                    && online::enrich_album(&client, &lib, artist, album).status == "matched"
-                {
-                    covers += 1;
+                if !artist.is_empty() {
+                    let _ = online::enrich_album(&client, &lib, artist, album);
                 }
                 std::thread::sleep(online::RATE_LIMIT);
             }
@@ -154,16 +144,12 @@ pub(crate) fn enrich_worker(
                     }
                     let path = PathBuf::from(&track.path);
                     let already = lib.get_track_meta(&track.path).ok().flatten();
-                    if already.as_ref().map(|m| m.status.as_str()) == Some("matched") {
-                        tracks_matched += 1;
-                    } else if auto && lib.track_attempts(&track.path) >= MAX_AUTO_ATTEMPTS {
-                        // Automatik: erschöpfte Titel nicht erneut anfragen.
-                    } else {
-                        if online::enrich_track_fingerprint(&client, &lib, &key, &path).status
-                            == "matched"
-                        {
-                            tracks_matched += 1;
-                        }
+                    let matched =
+                        already.as_ref().map(|m| m.status.as_str()) == Some("matched");
+                    // Automatik: erschöpfte Titel nicht erneut anfragen.
+                    let exhausted = auto && lib.track_attempts(&track.path) >= MAX_AUTO_ATTEMPTS;
+                    if !matched && !exhausted {
+                        let _ = online::enrich_track_fingerprint(&client, &lib, &key, &path);
                         std::thread::sleep(online::ACOUSTID_DELAY);
                     }
                     let _ = out.send(Cmd::EnrichProgress {
@@ -211,11 +197,7 @@ pub(crate) fn enrich_worker(
         }
     }
 
-    let _ = out.send(Cmd::EnrichDone {
-        albums: covers,
-        artists: artists_matched,
-        tracks: tracks_matched,
-    });
+    let _ = out.send(Cmd::EnrichDone);
 }
 
 /// Lädt Künstlerfotos **parallel** (mehrere Netz-Threads), schreibt die

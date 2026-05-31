@@ -42,7 +42,7 @@ impl App {
         info_group.add(&expander);
         content.append(&info_group);
 
-        // "Merkmale" – Kategorie je Ebene (Titel/Album/Interpret), vererbt.
+        // "Eigenschaften" – Kategorie je Ebene (Titel/Album/Interpret), vererbt.
         if let Some(merkmale) = self.ctx_merkmale(entry, sender) {
             content.append(&merkmale);
         }

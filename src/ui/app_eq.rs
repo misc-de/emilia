@@ -1,5 +1,5 @@
-//! Equalizer- und Merkmal-Dialoge: der 10-Band-EQ-Editor (Kaskade je Ebene und
-//! Ausgabegerät) sowie die Merkmal-Auswahl (Musik/Konzert/Podcast/Hörbuch).
+//! Equalizer- und Eigenschaft-Dialoge: der 10-Band-EQ-Editor (Kaskade je Ebene und
+//! Ausgabegerät) sowie die Eigenschaft-Auswahl (Musik/Konzert/Podcast/Hörbuch).
 //! Aus app.rs herausgelöst – reine Umordnung, kein Funktionswechsel.
 
 use adw::prelude::*;
@@ -12,7 +12,7 @@ use crate::ui::app::{App, CtxTarget, Msg};
 use crate::ui::fs_row::FsEntry;
 
 impl App {
-    /// Baut die „Merkmale"-Gruppe für einen Titel: je eine Auswahl für die
+    /// Baut die „Eigenschaften"-Gruppe für einen Titel: je eine Auswahl für die
     /// Titel-, Album- und Interpret-Ebene. Höhere Ebenen werden vererbt, jede
     /// kann individuell übersteuert werden. Für Ordner: `None`.
     pub(crate) fn build_merkmale(
@@ -28,10 +28,10 @@ impl App {
         let artist = track.artist.filter(|s| !s.is_empty());
         let album = track.album.filter(|s| !s.is_empty());
 
-        let group = adw::PreferencesGroup::builder().title("Merkmale").build();
-        let expander = adw::ExpanderRow::builder().title("Merkmal").build();
+        let group = adw::PreferencesGroup::builder().build();
+        let expander = adw::ExpanderRow::builder().title("Eigenschaften").build();
 
-        // Effektives Merkmal (geerbt/aufgelöst) als Untertitel.
+        // Effektive Eigenschaft (geerbt/aufgelöst) als Untertitel.
         let (eff, src) =
             self.library
                 .resolve_category(artist.as_deref(), album.as_deref(), &path);
@@ -70,7 +70,7 @@ impl App {
         Some(group)
     }
 
-    /// Eine Auswahl-Zeile („Erben" + die vier Merkmale) für eine Ebene.
+    /// Eine Auswahl-Zeile („Erben" + die vier Eigenschaften) für eine Ebene.
     pub(crate) fn add_category_row(
         &self,
         expander: &adw::ExpanderRow,

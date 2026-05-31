@@ -297,8 +297,8 @@ pub enum Cmd {
     Entries(Vec<FsEntry>),
     /// Fortschritt einer Anreicherungsphase (`phase` = Anzeigetext).
     EnrichProgress { phase: String, done: usize, total: usize },
-    /// Abschluss: Anzahl zugeordneter Alben, Interpreten und Titel.
-    EnrichDone { albums: usize, artists: usize, tracks: usize },
+    /// Online-Anreicherung abgeschlossen.
+    EnrichDone,
     /// Zwischenstand: Alben-/Interpreten-Ansicht neu laden (z. B. nach einer Phase).
     ReloadViews,
     /// Lokaler Bibliotheks-Scan fertig; `then_enrich` = danach ggf. online nachladen.
@@ -1862,17 +1862,10 @@ impl Component for App {
             Cmd::EnrichProgress { phase, done, total } => {
                 self.enrich_status = format!("{phase}: {done}/{total}");
             }
-            Cmd::EnrichDone {
-                albums,
-                artists,
-                tracks,
-            } => {
+            Cmd::EnrichDone => {
                 self.enriching = false;
                 self.reload_albums();
                 self.reload_artists();
-                self.toast(&format!(
-                    "{albums} Cover, {artists} Interpreten-Fotos, {tracks} Titel zugeordnet"
-                ));
             }
             Cmd::ReloadViews => {
                 self.reload_albums();
