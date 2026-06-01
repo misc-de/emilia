@@ -257,9 +257,101 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
     parse_feed(&bytes)
 }
 
+/// Ein Treffer der Podcast-Suche: genug, um ihn anzuzeigen und – bei Auswahl –
+/// über die Feed-Adresse zu abonnieren (dann läuft der übliche Abo-Weg).
+#[derive(Debug, Clone)]
+pub struct PodcastSearchResult {
+    pub title: String,
+    pub author: Option<String>,
+    pub feed_url: String,
+    /// Cover-URL (iTunes-Artwork) – zum Vorab-Cachen und Anzeigen in der Liste.
+    pub image_url: Option<String>,
+}
+
+/// Sucht Podcasts über die **iTunes Search API** (kein API-Key, kein Account
+/// nötig) und liefert Treffer samt RSS-Feed-Adresse. Blockierend – nur aus
+/// Worker-Threads aufrufen. Leerer Suchbegriff ergibt eine leere Liste.
+pub fn search_podcasts(term: &str) -> Result<Vec<PodcastSearchResult>> {
+    let term = term.trim();
+    if term.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!(
+        "https://itunes.apple.com/search?media=podcast&entity=podcast&limit=25&term={}",
+        crate::core::online::percent_encode(term),
+    );
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(20))
+        .build();
+    let mut bytes = Vec::new();
+    agent
+        .get(&url)
+        .call()?
+        .into_reader()
+        .take(4 * 1024 * 1024) // Deckel gegen unerwartet große Antworten.
+        .read_to_end(&mut bytes)?;
+    parse_search(&bytes)
+}
+
+/// Wertet die iTunes-Such-Antwort aus. Treffer **ohne** `feedUrl` werden
+/// verworfen – ohne Feed-Adresse lässt sich nichts abonnieren.
+fn parse_search(body: &[u8]) -> Result<Vec<PodcastSearchResult>> {
+    let resp: ItunesSearch = serde_json::from_slice(body)?;
+    let results = resp
+        .results
+        .into_iter()
+        .filter_map(|r| {
+            let feed_url = r.feed_url?.trim().to_string();
+            if feed_url.is_empty() {
+                return None;
+            }
+            let title = r
+                .collection_name
+                .map(|t| decode_entities(t.trim()))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Podcast".to_string());
+            Some(PodcastSearchResult {
+                title,
+                author: r
+                    .artist_name
+                    .map(|a| decode_entities(a.trim()))
+                    .filter(|s| !s.is_empty()),
+                feed_url,
+                // Kleines Artwork bevorzugen (reicht für den 48-px-Avatar, lädt schneller).
+                image_url: r
+                    .artwork_url_100
+                    .or(r.artwork_url_600)
+                    .filter(|s| !s.trim().is_empty()),
+            })
+        })
+        .collect();
+    Ok(results)
+}
+
+#[derive(serde::Deserialize)]
+struct ItunesSearch {
+    #[serde(default)]
+    results: Vec<ItunesPodcast>,
+}
+
+#[derive(serde::Deserialize)]
+struct ItunesPodcast {
+    #[serde(rename = "collectionName", default)]
+    collection_name: Option<String>,
+    #[serde(rename = "artistName", default)]
+    artist_name: Option<String>,
+    #[serde(rename = "feedUrl", default)]
+    feed_url: Option<String>,
+    #[serde(rename = "artworkUrl100", default)]
+    artwork_url_100: Option<String>,
+    #[serde(rename = "artworkUrl600", default)]
+    artwork_url_600: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_feed;
+    use super::{parse_feed, parse_search};
 
     const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
@@ -306,5 +398,24 @@ mod tests {
         let xml = r#"<rss version="2.0"><channel><title>X</title>
             <item><title>Nur Text</title></item></channel></rss>"#;
         assert!(parse_feed(xml.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn search_parses_results_and_skips_entries_without_feed() {
+        let json = br#"{"resultCount":2,"results":[
+            {"collectionName":"Tech Talk","artistName":"Alice",
+             "feedUrl":"https://example.com/feed.xml",
+             "artworkUrl100":"https://example.com/100.jpg",
+             "artworkUrl600":"https://example.com/600.jpg"},
+            {"collectionName":"Kein Feed","artistName":"Bob"}
+        ]}"#;
+        let r = parse_search(json).unwrap();
+        // Der Eintrag ohne feedUrl wird übersprungen → 1 Treffer.
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].title, "Tech Talk");
+        assert_eq!(r[0].author.as_deref(), Some("Alice"));
+        assert_eq!(r[0].feed_url, "https://example.com/feed.xml");
+        // Kleines Artwork wird bevorzugt.
+        assert_eq!(r[0].image_url.as_deref(), Some("https://example.com/100.jpg"));
     }
 }

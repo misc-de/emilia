@@ -281,6 +281,12 @@ pub struct App {
     /// Container der „Neuste"-Liste: je Zeitabschnitt (Heute/Gestern/…) eine
     /// eigene Gruppe, imperativ in `reload_newest` befüllt.
     pub(crate) newest_list: gtk::Box,
+    /// Treffer der letzten Podcast-Suche (iTunes), für den Abo-Dialog.
+    pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
+    /// Solange der Abo-Such-Dialog offen ist: (Dialog, Trefferliste). Damit lassen
+    /// sich asynchron eintreffende Treffer in die bereits gezeigte Liste einfügen.
+    pub(crate) podcast_search:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
     pub(crate) queue_list: gtk::ListBox,
     /// Inhalt der Statistik-Seite (imperativ befüllt, wie die Listen oben).
@@ -494,8 +500,10 @@ pub enum Msg {
     /// Playlist umbenennen.
     PlaylistRename { id: i64, name: String },
     // Podcasts
-    /// Abo-Dialog (Feed-Adresse) öffnen.
+    /// Abo-Dialog (Suche + Feed-Adresse) öffnen.
     PodcastSubscribe,
+    /// Podcasts zu diesem Suchbegriff suchen (iTunes-Verzeichnis, im Hintergrund).
+    PodcastSearch(String),
     /// Feed unter dieser Adresse abonnieren (im Hintergrund holen).
     PodcastSubscribeUrl(String),
     /// Episoden-Unterseite eines Podcasts öffnen.
@@ -530,6 +538,10 @@ pub enum Cmd {
     Candidates(Vec<crate::core::concert::Candidate>),
     /// Podcast-Feed geholt: `Some(Titel)` bei Erfolg, sonst `None`.
     PodcastFetched(Option<String>),
+    /// Treffer der Podcast-Suche (für den offenen Abo-Dialog).
+    PodcastSearchResults(Vec<crate::core::podcast::PodcastSearchResult>),
+    /// Cover-Thumbnails der Suchtreffer sind gecacht → Trefferliste neu zeichnen.
+    PodcastSearchCoversReady,
     /// Podcast-Liste neu aufbauen (z. B. nachdem Feed-Bilder gecacht wurden).
     ReloadPodcasts,
     /// Ereignis aus dem Sync-Server-Thread bzw. Client-Worker.
@@ -1478,6 +1490,8 @@ impl Component for App {
             podcast_view: PodcastView::Newest,
             newest_items: Vec::new(),
             newest_list: newest_list.clone(),
+            podcast_search_results: Vec::new(),
+            podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
             queue_list: queue_list.clone(),
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
@@ -2158,6 +2172,25 @@ impl Component for App {
                 }
             }
             Msg::PodcastSubscribe => self.open_subscribe_podcast_dialog(root, &sender),
+            Msg::PodcastSearch(term) => {
+                let term = term.trim().to_string();
+                if !term.is_empty() {
+                    self.toast(&gettext("Searching …"));
+                    sender.spawn_command(move |out| {
+                        let results =
+                            crate::core::podcast::search_podcasts(&term).unwrap_or_default();
+                        // Treffer sofort zeigen (noch ohne Cover) …
+                        let _ = out.send(Cmd::PodcastSearchResults(results.clone()));
+                        // … und die Cover-Thumbnails danach im Hintergrund nachladen.
+                        for r in &results {
+                            if let Some(img) = r.image_url.as_deref() {
+                                crate::core::online::cache_podcast_image(img);
+                            }
+                        }
+                        let _ = out.send(Cmd::PodcastSearchCoversReady);
+                    });
+                }
+            }
             Msg::PodcastSubscribeUrl(url) => {
                 let url = url.trim().to_string();
                 if !url.is_empty() {
@@ -2862,6 +2895,11 @@ impl Component for App {
                     None => self.toast(&gettext("Could not load feed")),
                 }
             }
+            Cmd::PodcastSearchResults(results) => {
+                self.podcast_search_results = results;
+                self.rebuild_podcast_search_results(&sender);
+            }
+            Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
             Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
             Cmd::Sync(ev) => self.on_sync_event(ev, &sender),
             Cmd::UpdateChecked(result) => match result {

@@ -84,6 +84,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.1.4" date="2026-06-01">
+      <description>
+        <p>Custom app icon, mini-player polish, podcast grouping, audiobook CD ordering, and in-app self-update.</p>
+        <p xml:lang="de">Eigenes App-Icon, Mini-Player-Politur, Podcast-Gruppierung, CD-Sortierung bei Hörbüchern und Selbst-Aktualisierung.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-05-30">
       <description>
         <p>First release: library, playback, equalizer, resume, MPRIS.</p>

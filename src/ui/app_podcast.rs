@@ -418,36 +418,147 @@ impl App {
         self.push_subpage(&gettext_f("Podcast – {title}", &[("title", title)]), &content);
     }
 
-    /// Dialog: Feed-Adresse (RSS) eingeben und abonnieren.
+    /// Dialog zum Abonnieren: oben eine **Suche** (durchsucht das iTunes-
+    /// Podcast-Verzeichnis und zeigt antippbare Treffer), darunter ein Feld für
+    /// die **Feed-Adresse** (RSS) als manueller Weg. Beides führt am Ende über
+    /// [`Msg::PodcastSubscribeUrl`] zum üblichen Abo-Abruf.
     pub(crate) fn open_subscribe_podcast_dialog(
         &self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let dialog = adw::AlertDialog::new(
-            Some(&gettext("Subscribe to podcast")),
-            Some(&gettext("Enter the feed address (RSS):")),
-        );
-        let entry = gtk::Entry::builder()
-            .placeholder_text("https://…/feed.xml")
-            .activates_default(true)
+        let dialog = adw::Dialog::builder()
+            .title(&gettext("Subscribe to podcast"))
             .build();
-        dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[
-            ("cancel", &gettext("Cancel")),
-            ("add", &gettext("Subscribe")),
-        ]);
-        dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("add"));
+        self.adapt_detail_dialog(&dialog);
+        let content = detail_box();
+
+        // --- Suche (iTunes-Verzeichnis) ---
+        let search_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Search"))
+            .description(&gettext("Find a podcast by name"))
+            .build();
+        let search_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .build();
+        let search_entry = gtk::SearchEntry::builder()
+            .placeholder_text(&gettext("Podcast name …"))
+            .hexpand(true)
+            .build();
+        let search_btn = gtk::Button::builder().label(&gettext("Search")).build();
+        search_btn.add_css_class("suggested-action");
+        search_row.append(&search_entry);
+        search_row.append(&search_btn);
+        search_group.add(&search_row);
+        content.append(&search_group);
+
+        // Enter im Suchfeld oder Klick auf „Suchen" startet die Suche.
         {
-            let sender = sender.clone();
-            dialog.connect_response(None, move |_, resp| {
-                if resp == "add" {
-                    sender.input(Msg::PodcastSubscribeUrl(entry.text().to_string()));
+            let (sender, entry) = (sender.clone(), search_entry.clone());
+            search_entry.connect_activate(move |_| {
+                let term = entry.text().to_string();
+                if !term.trim().is_empty() {
+                    sender.input(Msg::PodcastSearch(term));
                 }
             });
         }
-        dialog.present(Some(root));
+        {
+            let (sender, entry) = (sender.clone(), search_entry.clone());
+            search_btn.connect_clicked(move |_| {
+                let term = entry.text().to_string();
+                if !term.trim().is_empty() {
+                    sender.input(Msg::PodcastSearch(term));
+                }
+            });
+        }
+
+        // Trefferliste – anfangs leer/versteckt, asynchron befüllt von
+        // `rebuild_podcast_search_results`.
+        let results = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .build();
+        results.add_css_class("boxed-list");
+        results.set_visible(false);
+        content.append(&results);
+
+        // --- Manuell: Feed-Adresse (RSS) ---
+        let url_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Or enter feed address"))
+            .build();
+        let url_entry = adw::EntryRow::builder()
+            .title(&gettext("Feed address (RSS)"))
+            .show_apply_button(true)
+            .build();
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            url_entry.connect_apply(move |e| {
+                let url = e.text().to_string();
+                if !url.trim().is_empty() {
+                    sender.input(Msg::PodcastSubscribeUrl(url));
+                    dialog.close();
+                }
+            });
+        }
+        url_group.add(&url_entry);
+        content.append(&url_group);
+
+        // Dialog + Trefferliste hinterlegen, damit eintreffende Treffer in die
+        // offene Liste gezeichnet werden; beim Schließen wieder freigeben.
+        *self.podcast_search.borrow_mut() = Some((dialog.clone(), results.clone()));
+        {
+            let slot = self.podcast_search.clone();
+            dialog.connect_closed(move |_| {
+                *slot.borrow_mut() = None;
+            });
+        }
+
+        present_detail(&dialog, &content, root);
+        search_entry.grab_focus();
+    }
+
+    /// Zeichnet die Trefferliste im offenen Abo-Such-Dialog neu (aus
+    /// `self.podcast_search_results`). Tut nichts, wenn der Dialog zu ist. Jeder
+    /// Treffer ist antippbar: Tippen abonniert über die Feed-Adresse und schließt
+    /// den Dialog. Cover stammen aus dem lokalen Cache (sonst Mikrofon-Platzhalter).
+    pub(crate) fn rebuild_podcast_search_results(&self, sender: &ComponentSender<Self>) {
+        let guard = self.podcast_search.borrow();
+        let Some((dialog, list)) = guard.as_ref() else {
+            return;
+        };
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
+        list.set_visible(true);
+
+        if self.podcast_search_results.is_empty() {
+            let row = adw::ActionRow::builder().title(&gettext("No podcasts found")).build();
+            row.set_sensitive(false);
+            list.append(&row);
+            return;
+        }
+
+        for r in &self.podcast_search_results {
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&r.title))
+                .activatable(true)
+                .build();
+            if let Some(a) = r.author.as_deref().filter(|a| !a.trim().is_empty()) {
+                row.set_subtitle(&gtk::glib::markup_escape_text(a));
+            }
+            let cover = r.image_url.as_deref().and_then(crate::core::online::podcast_image_path);
+            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "microphone-symbolic"));
+            row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
+            {
+                let (sender, dialog, feed) =
+                    (sender.clone(), dialog.clone(), r.feed_url.clone());
+                row.connect_activated(move |_| {
+                    sender.input(Msg::PodcastSubscribeUrl(feed.clone()));
+                    dialog.close();
+                });
+            }
+            list.append(&row);
+        }
     }
 
     /// Streamt eine Podcast-Episode (ersetzt die laufende Wiedergabe).

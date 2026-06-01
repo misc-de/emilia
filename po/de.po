@@ -132,6 +132,34 @@ msgstr "Übersicht"
 msgid "Subscribe to podcast"
 msgstr "Podcast abonnieren"
 
+#: src/ui/app_podcast.rs:434
+msgid "Search"
+msgstr "Suchen"
+
+#: src/ui/app_podcast.rs:435
+msgid "Find a podcast by name"
+msgstr "Podcast nach Namen finden"
+
+#: src/ui/app_podcast.rs:443
+msgid "Podcast name …"
+msgstr "Podcast-Name …"
+
+#: src/ui/app_podcast.rs:486
+msgid "Or enter feed address"
+msgstr "Oder Feed-Adresse eingeben"
+
+#: src/ui/app_podcast.rs:490
+msgid "Feed address (RSS)"
+msgstr "Feed-Adresse (RSS)"
+
+#: src/ui/app_podcast.rs:518
+msgid "No podcasts found"
+msgstr "Keine Podcasts gefunden"
+
+#: src/ui/app.rs:2168
+msgid "Searching …"
+msgstr "Suche läuft …"
+
 #: src/ui/app.rs:907 src/ui/app_podcast.rs:334
 msgid "No episodes"
 msgstr "Keine Episoden"

@@ -782,7 +782,7 @@ fn escape_lucene(s: &str) -> String {
 }
 
 /// Minimales Percent-Encoding für Query-Strings (RFC 3986 unreserved bleibt).
-fn percent_encode(s: &str) -> String {
+pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
