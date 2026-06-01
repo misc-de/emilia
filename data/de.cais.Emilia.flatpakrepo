@@ -1,17 +1,7 @@
 [Flatpak Repo]
 Title=Emilia
-# URL des gehosteten OSTree-Repos (das per `make flatpak-publish` erzeugte repo/
-# muss unter genau dieser Adresse per HTTPS erreichbar sein, mit abschliessendem /).
-Url=https://REPLACE.example.com/emilia/repo/
-Homepage=https://cais.de
+Url=https://misc-de.github.io/emilia/repo/
+Homepage=https://github.com/misc-de/emilia
 Comment=Musik- und Hoerspielplayer fuer Phosh
 Description=Emilia – GTK4/libadwaita Musik- und Hoerspielplayer (mobil/Phosh).
-# Nur bei signiertem Repo (FP_GPG gesetzt): exportierten oeffentlichen Schluessel
-# einzeilig base64-kodiert hier eintragen, sonst die Zeile entfernen:
-#   gpg --export <KEYID> | base64 -w0
-# GPGKey=<base64-des-oeffentlichen-schluessels>
-
-# Nutzer fuegen das Repo dann hinzu und installieren mit:
-#   flatpak remote-add --if-not-exists emilia https://REPLACE.example.com/emilia/de.cais.Emilia.flatpakrepo
-#   flatpak install emilia de.cais.Emilia
-# (Bei unsigniertem Repo stattdessen: flatpak remote-add --no-gpg-verify ... )
+GPGKey=mDMEah0HlxYJKwYBBAHaRw8BAQdAtoPyTPC7/Uvyp+PDlRyVrOPGxLKceOVYBohn19lO4vu0JUVtaWxpYSBGbGF0cGFrIFJlcG8gPGZsYXRwYWtAY2Fpcy5kZT6IkAQTFgoAOBYhBDYLWjCYuq0miETlQEXeVLPBkxHqBQJqHQeXAhsDBQsJCAcCBhUKCQgLAgQWAgMBAh4BAheAAAoJEEXeVLPBkxHqAP4BAITj+1Ia9GZ6ENaxSmOKsVuMJlubVbAaOLF6ZDUPRDczAQCNOJLO1ZKQuvSPJpR+SUTrhPJazl5Ezh49rg3YNA+ZDQ==
