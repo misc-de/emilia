@@ -121,6 +121,17 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
+/// Wendet das Farbschema („system"/„dark"/„light") über den globalen
+/// libadwaita-StyleManager an. „system" folgt der Desktop-Einstellung.
+pub(crate) fn apply_color_scheme(code: &str) {
+    let scheme = match code {
+        "dark" => adw::ColorScheme::ForceDark,
+        "light" => adw::ColorScheme::ForceLight,
+        _ => adw::ColorScheme::Default,
+    };
+    adw::StyleManager::default().set_color_scheme(scheme);
+}
+
 pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     if pos_ms < RESUME_MIN_POS_MS {
         0
@@ -287,6 +298,18 @@ pub struct App {
     /// sich asynchron eintreffende Treffer in die bereits gezeigte Liste einfügen.
     pub(crate) podcast_search:
         std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    /// URL der aktuell geladenen Podcast-Episode (für die Play/Pause-Markierung
+    /// der Beitragszeilen); `None`, wenn gerade Musik bzw. keine Episode läuft.
+    pub(crate) playing_episode_url: Option<String>,
+    /// Play/Pause-Knöpfe der sichtbaren Beitragszeilen (Audio-URL → Knopf), um ihr
+    /// Icon beim Wechsel des Wiedergabestands aufzufrischen. Abgehängte (tote)
+    /// Einträge werden beim Auffrischen verworfen.
+    pub(crate) episode_play_buttons:
+        std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
+    /// „Abspielen"-Zeile eines offenen Beitrag-Detaildialogs (Zeile, Audio-URL) –
+    /// wird ausgeblendet, solange genau diese Episode läuft.
+    pub(crate) ctx_episode_play:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
     /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
     pub(crate) queue_list: gtk::ListBox,
     /// Inhalt der Statistik-Seite (imperativ befüllt, wie die Listen oben).
@@ -421,6 +444,8 @@ pub enum Msg {
     SetAutoEnrich(bool),
     /// Anzeigesprache umstellen ("system"/"de"/"en"); startet die App neu.
     SetLanguage(String),
+    /// Farbschema umstellen ("system"/"dark"/"light"); greift sofort.
+    SetColorScheme(String),
     /// Merkmal einer Ebene setzen (oder bei `None` auf „erben" zurücksetzen).
     /// Bereiche (Eigenschaften) einer Ebene setzen; leerer Wert = ausgeblendet.
     SetAreas {
@@ -512,8 +537,9 @@ pub enum Msg {
     PodcastDelete(i64),
     /// Feed eines Podcasts neu laden.
     PodcastRefresh(i64),
-    /// Eine Episode streamen.
-    PlayEpisode { url: String, title: String },
+    /// Beitrag (Episode) umschalten: starten bzw. – wenn schon die laufende –
+    /// pausieren/fortsetzen. Vom Antippen der Zeile und vom Play/Pause-Knopf.
+    ToggleEpisode { url: String, title: String },
     /// Podcast-Ansicht umschalten (Neuste / Übersicht).
     SetPodcastView(PodcastView),
     /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste (Index).
@@ -1100,7 +1126,16 @@ impl Component for App {
                             #[wrap(Some)]
                             set_child = &gtk::Label {
                                 set_xalign: 0.5,
+                                set_justify: gtk::Justification::Center,
+                                // Lange Titel auf bis zu 2 Zeilen umbrechen statt die
+                                // Leiste zu sprengen; danach mit … kürzen. Die
+                                // Breitenbegrenzung verhindert, dass ein langer Titel
+                                // die Mindestbreite des Fensters aufbläht.
+                                set_wrap: true,
+                                set_wrap_mode: gtk::pango::WrapMode::WordChar,
+                                set_lines: 2,
                                 set_ellipsize: gtk::pango::EllipsizeMode::End,
+                                set_max_width_chars: 28,
                                 add_css_class: "caption",
                                 // Nichts ausgewählt → kein Text (Leiste wirkt inaktiv).
                                 #[watch]
@@ -1269,6 +1304,15 @@ impl Component for App {
 
         let library = Library::open().expect("Failed to open the library database");
         let player = Player::new().expect("Failed to initialize GStreamer");
+        // Farbschema (Standard: System) sofort anwenden.
+        apply_color_scheme(
+            library
+                .get_setting("color_scheme")
+                .ok()
+                .flatten()
+                .as_deref()
+                .unwrap_or("system"),
+        );
         let music_dir = library.get_setting("music_dir").ok().flatten();
         let root_dir = music_dir.as_ref().map(PathBuf::from);
         // Zuletzt offenen Ordner wiederherstellen – nur wenn er noch existiert
@@ -1492,6 +1536,9 @@ impl Component for App {
             newest_list: newest_list.clone(),
             podcast_search_results: Vec::new(),
             podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            playing_episode_url: None,
+            episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+            ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             queue_list: queue_list.clone(),
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
@@ -2220,7 +2267,22 @@ impl Component for App {
                 self.reload_podcasts(&sender);
                 self.toast(&gettext("Podcast removed"));
             }
-            Msg::PlayEpisode { url, title } => self.play_episode(&url, &title),
+            Msg::ToggleEpisode { url, title } => {
+                if self.playing_episode_url.as_deref() == Some(url.as_str()) {
+                    // Bereits geladene Episode → Pause/Weiter umschalten.
+                    if self.playing {
+                        self.player.pause();
+                    } else {
+                        self.player.resume();
+                    }
+                    self.playing = !self.playing;
+                    self.mpris.set_playing(self.playing);
+                    self.refresh_queue_icons();
+                } else {
+                    // Andere/keine Episode → diese starten.
+                    self.play_episode(&url, &title);
+                }
+            }
             Msg::SetPodcastView(view) => self.podcast_view = view,
             Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
             Msg::ShowPodcastDetail(id) => self.open_podcast_detail(root, &sender, id),
@@ -2240,29 +2302,38 @@ impl Component for App {
             Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
             Msg::SyncDialogClosed => self.teardown_sync(),
             Msg::TrackFinished => {
-                // Bis zum Ende gehört → Hör-Sitzung als „durchgehört" abschließen,
-                // bevor das nachfolgende play_current eine neue Sitzung startet.
-                self.finalize_play_session(true);
-                // Titel zu Ende gehört → Resume vergessen, nächstes Mal von vorn.
-                // `take()` verhindert, dass play_current die (End-)Position erneut
-                // als Resume-Punkt speichert.
-                if let Some(path) = self.playing_path.take() {
-                    let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
-                }
-                *self.close_resume.borrow_mut() = None;
-                // War ein Einzellied dazwischengeschoben, jetzt die unterbrochene
-                // Warteschlange an ihrer Stelle fortsetzen.
-                if self.queue.len() == 1 && self.interrupted_queue.is_some() {
-                    if let Some((q, pos)) = self.interrupted_queue.take() {
-                        self.queue = q;
-                        self.queue_pos = pos;
-                        self.play_current();
-                    }
+                if self.playing_episode_url.is_some() && self.queue.is_empty() {
+                    // Eine gestreamte Episode ist zu Ende (keine Warteschlange
+                    // dahinter): Wiedergabestand zurücksetzen, Markierung lösen.
+                    self.playing = false;
+                    self.playing_episode_url = None;
+                    self.mpris.set_playing(false);
+                    self.refresh_queue_icons();
                 } else {
-                    // Eine neue (mehrteilige) Wiedergabe verwirft eine evtl.
-                    // gemerkte Unterbrechung.
-                    self.interrupted_queue = None;
-                    self.play_next();
+                    // Bis zum Ende gehört → Hör-Sitzung als „durchgehört" abschließen,
+                    // bevor das nachfolgende play_current eine neue Sitzung startet.
+                    self.finalize_play_session(true);
+                    // Titel zu Ende gehört → Resume vergessen, nächstes Mal von vorn.
+                    // `take()` verhindert, dass play_current die (End-)Position erneut
+                    // als Resume-Punkt speichert.
+                    if let Some(path) = self.playing_path.take() {
+                        let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
+                    }
+                    *self.close_resume.borrow_mut() = None;
+                    // War ein Einzellied dazwischengeschoben, jetzt die unterbrochene
+                    // Warteschlange an ihrer Stelle fortsetzen.
+                    if self.queue.len() == 1 && self.interrupted_queue.is_some() {
+                        if let Some((q, pos)) = self.interrupted_queue.take() {
+                            self.queue = q;
+                            self.queue_pos = pos;
+                            self.play_current();
+                        }
+                    } else {
+                        // Eine neue (mehrteilige) Wiedergabe verwirft eine evtl.
+                        // gemerkte Unterbrechung.
+                        self.interrupted_queue = None;
+                        self.play_next();
+                    }
                 }
             }
             Msg::SetStatsPeriod(period) => {
@@ -2589,6 +2660,10 @@ impl Component for App {
                     }
                     std::process::exit(0);
                 }
+            }
+            Msg::SetColorScheme(scheme) => {
+                apply_color_scheme(&scheme);
+                let _ = self.library.set_setting("color_scheme", &scheme);
             }
             Msg::SetAreas { scope, key, value } => {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {

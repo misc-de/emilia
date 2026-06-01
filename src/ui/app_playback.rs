@@ -38,6 +38,8 @@ impl App {
         }
         // Play-Zeile eines offenen Detail-Dialogs mit dem Wiedergabestand abgleichen.
         self.refresh_ctx_play();
+        // Play/Pause-Icons der Podcast-Beiträge (und die Detail-„Abspielen"-Zeile).
+        self.refresh_episode_icons();
     }
 
     /// Baut die Zufalls-Reihenfolge neu auf (Fisher-Yates), mit dem aktuell
@@ -279,6 +281,8 @@ impl App {
         match self.player.play_file(&path_str, resume_ms) {
             Ok(()) => {
                 self.playing_path = Some(path.clone());
+                // Es läuft wieder Musik – keine Podcast-Episode mehr aktiv.
+                self.playing_episode_url = None;
                 self.now_playing = Some(Self::track_display_name(&path));
                 self.playing = true;
                 // Aktiven Ausgang (kann sich geändert haben) auffrischen.

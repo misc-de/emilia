@@ -99,6 +99,8 @@ pub struct Episode {
     pub published: Option<String>,
     /// Dauer als Text (z. B. „00:42:13" oder Sekunden), falls im Feed angegeben.
     pub duration: Option<String>,
+    /// Beschreibung/Shownotes (HTML zu Klartext entschärft), falls vorhanden.
+    pub description: Option<String>,
 }
 
 /// Eine Episode samt zugehörigem Podcast – für die podcastübergreifende
@@ -112,6 +114,8 @@ pub struct EpisodeRef {
     pub audio_url: String,
     pub published: Option<String>,
     pub duration: Option<String>,
+    /// Beschreibung/Shownotes (HTML zu Klartext entschärft), falls vorhanden.
+    pub description: Option<String>,
 }
 
 /// Aggregierte Kennzahlen der Hörstatistik über einen Zeitraum. Alles aus der

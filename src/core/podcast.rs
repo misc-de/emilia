@@ -191,6 +191,98 @@ pub(crate) fn decode_entities(s: &str) -> String {
     out
 }
 
+/// Formatiert eine Feed-Dauerangabe einheitlich als `h:mm:ss` (bzw. `m:ss`,
+/// wenn unter einer Stunde). Akzeptiert sowohl `HH:MM:SS`/`MM:SS` als auch reine
+/// Sekunden (z. B. „3600" oder „3600.0"). Gibt `None` zurück, wenn sich nichts
+/// Sinnvolles ermitteln lässt – der Aufrufer zeigt dann den Originaltext.
+pub fn format_duration(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let total: i64 = if s.contains(':') {
+        let mut secs = 0i64;
+        for part in s.split(':') {
+            let n: i64 = part.trim().parse().ok()?;
+            if n < 0 {
+                return None;
+            }
+            secs = secs * 60 + n;
+        }
+        secs
+    } else {
+        // Reine Sekunden, evtl. mit Nachkommastellen („1234.5").
+        s.split('.').next()?.trim().parse().ok()?
+    };
+    if total < 0 {
+        return None;
+    }
+    let (h, m, sec) = (total / 3600, (total % 3600) / 60, total % 60);
+    Some(if h > 0 {
+        format!("{h}:{m:02}:{sec:02}")
+    } else {
+        format!("{m}:{sec:02}")
+    })
+}
+
+/// Wandelt einen HTML-Beschreibungstext (Shownotes) in lesbaren Klartext:
+/// Block-/Umbruch-Tags werden zu Zeilenumbrüchen, übrige Tags entfernt,
+/// HTML-Entities dekodiert und überflüssiger Leerraum zusammengefasst.
+pub(crate) fn html_to_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    let mut tag = String::new();
+    for c in s.chars() {
+        match c {
+            '<' => {
+                in_tag = true;
+                tag.clear();
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                // Tag-Name (ohne führenden „/") bis zum ersten Nicht-Buchstaben.
+                let name: String = tag
+                    .trim()
+                    .trim_start_matches('/')
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric())
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                if matches!(
+                    name.as_str(),
+                    "br" | "p" | "div" | "li" | "tr" | "ul" | "ol" | "blockquote"
+                        | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+                ) && !out.ends_with('\n')
+                {
+                    out.push('\n');
+                }
+            }
+            _ if in_tag => tag.push(c),
+            _ => out.push(c),
+        }
+    }
+    let decoded = decode_entities(&out);
+    // Je Zeile Whitespace zusammenfassen; höchstens eine Leerzeile am Stück.
+    let mut lines: Vec<String> = Vec::new();
+    let mut blank = false;
+    for raw in decoded.lines() {
+        let line = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if line.is_empty() {
+            if !blank && !lines.is_empty() {
+                lines.push(String::new());
+            }
+            blank = true;
+        } else {
+            lines.push(line);
+            blank = false;
+        }
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
 /// Liest einen Podcast-RSS-Feed. Nur Einträge mit Audio-Enclosure werden
 /// übernommen; Fehler, wenn keine Audio-Episode gefunden wird.
 pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
@@ -224,12 +316,22 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
             .map(|t| decode_entities(t.trim()))
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "Episode".to_string());
+        // Shownotes: bevorzugt das volle <content:encoded>, sonst <description>,
+        // sonst die iTunes-Zusammenfassung – jeweils zu Klartext entschärft.
+        let description = item
+            .content()
+            .or_else(|| item.description())
+            .or_else(|| item.itunes_ext().and_then(|e| e.summary()))
+            .map(html_to_text)
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
         episodes.push(Episode {
             guid: item.guid().map(|g| g.value().to_string()),
             title,
             audio_url,
             published: item.pub_date().map(String::from),
             duration: item.itunes_ext().and_then(|e| e.duration().map(String::from)),
+            description,
         });
     }
     if episodes.is_empty() {
@@ -351,7 +453,7 @@ struct ItunesPodcast {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_feed, parse_search};
+    use super::{format_duration, html_to_text, parse_feed, parse_search};
 
     const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
@@ -362,6 +464,7 @@ mod tests {
       <title>Folge 1</title>
       <pubDate>Mon, 01 Jan 2024 10:00:00 +0000</pubDate>
       <guid>ep-1</guid>
+      <description>&lt;p&gt;Hallo &amp; Welt&lt;/p&gt;</description>
       <enclosure url="https://example.com/ep1.mp3" length="123" type="audio/mpeg"/>
       <itunes:duration>00:30:00</itunes:duration>
     </item>
@@ -388,9 +491,33 @@ mod tests {
         assert_eq!(ep1.audio_url, "https://example.com/ep1.mp3");
         assert_eq!(ep1.guid.as_deref(), Some("ep-1"));
         assert_eq!(ep1.duration.as_deref(), Some("00:30:00"));
+        // Shownotes: HTML entschärft zu Klartext.
+        assert_eq!(ep1.description.as_deref(), Some("Hallo & Welt"));
 
         assert_eq!(feed.episodes[1].title, "Folge 2");
         assert!(feed.episodes[1].duration.is_none());
+        assert!(feed.episodes[1].description.is_none());
+    }
+
+    #[test]
+    fn formats_duration_variants() {
+        assert_eq!(format_duration("00:42:13").as_deref(), Some("42:13"));
+        assert_eq!(format_duration("1:02:03").as_deref(), Some("1:02:03"));
+        assert_eq!(format_duration("10:00").as_deref(), Some("10:00"));
+        assert_eq!(format_duration("3600").as_deref(), Some("1:00:00"));
+        assert_eq!(format_duration("3623.5").as_deref(), Some("1:00:23"));
+        assert_eq!(format_duration("90").as_deref(), Some("1:30"));
+        assert!(format_duration("").is_none());
+        assert!(format_duration("keine").is_none());
+    }
+
+    #[test]
+    fn strips_html_to_plain_text() {
+        let html = "<p>Erste Zeile</p><p>Zweite &amp; Zeile</p><br>Dritte<ul><li>A</li><li>B</li></ul>";
+        assert_eq!(
+            html_to_text(html),
+            "Erste Zeile\nZweite & Zeile\nDritte\nA\nB"
+        );
     }
 
     #[test]

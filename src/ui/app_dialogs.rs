@@ -330,16 +330,16 @@ impl App {
             .icon_name("folder-symbolic")
             .build();
         let group = adw::PreferencesGroup::builder()
-            .title(&gettext("Start folder"))
+            .title(&gettext("Music folder"))
             .description(&gettext("Folder for the file system view"))
             .build();
 
         let not_set = gettext("Not set");
         let current = self.music_dir.as_deref().unwrap_or(&not_set);
+        // Erster Eintrag zeigt nur den Pfad (keine „Music folder"-Beschriftung).
         let row = adw::ActionRow::builder()
-            .title(&gettext("Music folder"))
-            .subtitle(gtk::glib::markup_escape_text(current))
-            .subtitle_lines(2)
+            .title(gtk::glib::markup_escape_text(current))
+            .title_lines(2)
             .build();
 
         let button = gtk::Button::builder()
@@ -362,7 +362,7 @@ impl App {
                 chooser.select_folder(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
                     if let Ok(folder) = res {
                         if let Some(path) = folder.path() {
-                            row.set_subtitle(&gtk::glib::markup_escape_text(
+                            row.set_title(&gtk::glib::markup_escape_text(
                                 &path.to_string_lossy(),
                             ));
                             sender.input(Msg::SetMusicDir(path));
@@ -492,27 +492,8 @@ impl App {
         online_group.add(&auto_row);
         page.add(&online_group);
 
-        // --- Geräte-Synchronisierung ---
-        let sync_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Devices"))
-            .description(&gettext(
-                "Transfer favorites, playlists, podcasts and music between two \
-                 devices on the same network.",
-            ))
-            .build();
-        let sync_row = adw::ActionRow::builder()
-            .title(&gettext("Device sync"))
-            .subtitle(&gettext("Create a server or scan another device's code"))
-            .activatable(true)
-            .build();
-        sync_row.add_prefix(&gtk::Image::from_icon_name("network-transmit-receive-symbolic"));
-        sync_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-        {
-            let sender = sender.clone();
-            sync_row.connect_activated(move |_| sender.input(Msg::OpenSyncDialog));
-        }
-        sync_group.add(&sync_row);
-        page.add(&sync_group);
+        // --- Geräte-Synchronisierung: in den Einstellungen ausgeblendet
+        //     (Funktion bleibt über die Teilen-Schaltfläche erreichbar). ---
 
         // --- Software-Aktualisierung (nur in der Flatpak-Version) ---
         if crate::core::update::in_flatpak() {
@@ -546,12 +527,44 @@ impl App {
             .title(&gettext("View"))
             .icon_name("view-list-symbolic")
             .build();
+
+        // Erscheinungsbild: Farbschema automatisch/dunkel/hell (greift sofort).
+        let theme_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Appearance"))
+            .build();
+        let theme_codes = ["system", "dark", "light"];
+        let theme_labels = [gettext("Automatic"), gettext("Dark"), gettext("Light")];
+        let theme_label_refs: Vec<&str> = theme_labels.iter().map(String::as_str).collect();
+        let theme_row = adw::ComboRow::builder()
+            .title(&gettext("Theme"))
+            .model(&gtk::StringList::new(&theme_label_refs))
+            .build();
+        let cur_scheme = self
+            .library
+            .get_setting("color_scheme")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "system".to_string());
+        let cur_theme_idx = theme_codes.iter().position(|c| *c == cur_scheme).unwrap_or(0);
+        theme_row.set_selected(cur_theme_idx as u32);
+        {
+            // Handler erst nach `set_selected` verbinden, damit die Vorauswahl
+            // keinen Wechsel auslöst.
+            let sender = sender.clone();
+            theme_row.connect_selected_notify(move |r| {
+                let code = theme_codes.get(r.selected() as usize).copied().unwrap_or("system");
+                sender.input(Msg::SetColorScheme(code.to_string()));
+            });
+        }
+        theme_group.add(&theme_row);
+        page.add(&theme_group);
+
         // Menüpunkte ein-/ausblenden **und** per Ziehgriff umsortieren. Die
         // Reihenfolge/Sichtbarkeit wird sofort in die Navigation übernommen.
         let sections_group = adw::PreferencesGroup::builder()
             .title(&gettext("Menu items"))
             .description(&gettext(
-                "Drag handle to reorder; the switch hides a menu item. Both take effect immediately in the navigation and the properties selection.",
+                "Drag handle to reorder; the switch hides a menu item.",
             ))
             .build();
         let list = gtk::ListBox::builder()

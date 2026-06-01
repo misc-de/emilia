@@ -220,13 +220,14 @@ impl Library {
                 added_at  INTEGER
             );
             CREATE TABLE IF NOT EXISTS episode (
-                podcast_id INTEGER NOT NULL,
-                position   INTEGER NOT NULL,
-                guid       TEXT,
-                title      TEXT NOT NULL,
-                audio_url  TEXT NOT NULL,
-                published  TEXT,
-                duration   TEXT,
+                podcast_id  INTEGER NOT NULL,
+                position    INTEGER NOT NULL,
+                guid        TEXT,
+                title       TEXT NOT NULL,
+                audio_url   TEXT NOT NULL,
+                published   TEXT,
+                duration    TEXT,
+                description TEXT,
                 PRIMARY KEY (podcast_id, position)
             );
 
@@ -333,6 +334,21 @@ impl Library {
                         OR (COALESCE(f2.added_at,0) = COALESCE(favorite.added_at,0) AND f2.key <= favorite.key)
                  );",
             )?;
+        }
+
+        // Migration: Shownotes/Beschreibung der Episoden nachrüsten.
+        let has_descr = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('episode') WHERE name = 'description'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_descr {
+            self.conn
+                .execute_batch("ALTER TABLE episode ADD COLUMN description TEXT;")?;
         }
 
         // Migration: alte Einzel-Merkmale (music/concert/…) auf die neue
@@ -1797,8 +1813,8 @@ impl Library {
         for (i, ep) in episodes.iter().enumerate() {
             self.conn.execute(
                 "INSERT INTO episode
-                    (podcast_id, position, guid, title, audio_url, published, duration)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    (podcast_id, position, guid, title, audio_url, published, duration, description)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 rusqlite::params![
                     podcast_id,
                     i as i64,
@@ -1806,7 +1822,8 @@ impl Library {
                     ep.title,
                     ep.audio_url,
                     ep.published,
-                    ep.duration
+                    ep.duration,
+                    ep.description
                 ],
             )?;
         }
@@ -1816,7 +1833,7 @@ impl Library {
     /// Episoden eines Podcasts in Feed-Reihenfolge.
     pub fn episodes(&self, podcast_id: i64) -> Result<Vec<Episode>> {
         let mut stmt = self.conn.prepare(
-            "SELECT guid, title, audio_url, published, duration FROM episode
+            "SELECT guid, title, audio_url, published, duration, description FROM episode
              WHERE podcast_id = ?1 ORDER BY position",
         )?;
         let rows = stmt.query_map([podcast_id], |r| {
@@ -1826,6 +1843,7 @@ impl Library {
                 audio_url: r.get(2)?,
                 published: r.get(3)?,
                 duration: r.get(4)?,
+                description: r.get(5)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1836,7 +1854,7 @@ impl Library {
     /// (das gespeicherte Datum ist nur Text).
     pub fn all_episodes(&self) -> Result<Vec<crate::model::EpisodeRef>> {
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, p.title, p.image_url, e.title, e.audio_url, e.published, e.duration
+            "SELECT p.id, p.title, p.image_url, e.title, e.audio_url, e.published, e.duration, e.description
              FROM episode e JOIN podcast p ON p.id = e.podcast_id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -1848,6 +1866,7 @@ impl Library {
                 audio_url: r.get(4)?,
                 published: r.get(5)?,
                 duration: r.get(6)?,
+                description: r.get(7)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1974,6 +1993,7 @@ mod tests {
                 audio_url: "https://a/1.mp3".into(),
                 published: Some("Mon, 01 Jan 2024".into()),
                 duration: Some("10:00".into()),
+                description: Some("Shownotes 1".into()),
             },
             Episode {
                 guid: None,
@@ -1981,6 +2001,7 @@ mod tests {
                 audio_url: "https://a/2.mp3".into(),
                 published: None,
                 duration: None,
+                description: None,
             },
         ];
         lib.set_episodes(id, &eps).unwrap();
@@ -1988,6 +2009,7 @@ mod tests {
         let got = lib.episodes(id).unwrap();
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].title, "E1");
+        assert_eq!(got[0].description.as_deref(), Some("Shownotes 1"));
         assert_eq!(got[1].audio_url, "https://a/2.mp3");
 
         let list = lib.podcasts().unwrap();

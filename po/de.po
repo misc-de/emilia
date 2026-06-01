@@ -156,6 +156,10 @@ msgstr "Feed-Adresse (RSS)"
 msgid "No podcasts found"
 msgstr "Keine Podcasts gefunden"
 
+#: src/ui/app_podcast.rs:301
+msgid "Shownotes"
+msgstr "Shownotes"
+
 #: src/ui/app.rs:2168
 msgid "Searching …"
 msgstr "Suche läuft …"

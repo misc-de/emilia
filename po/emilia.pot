@@ -1,310 +1,310 @@
 
-#: src/ui/album_row.rs:29 src/ui/app.rs:2993 src/ui/app_views.rs:587 src/ui/app_views.rs:1586
+#: src/ui/album_row.rs:29 src/ui/app.rs:3033 src/ui/app_views.rs:587 src/ui/app_views.rs:1586
 msgid "{n} song"
 msgid_plural "{n} songs"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app.rs:92 src/ui/app.rs:2919 src/ui/app_playlist.rs:158 src/ui/app_playlist.rs:266 src/ui/app_queue.rs:64
+#: src/ui/app.rs:92 src/ui/app.rs:2959 src/ui/app_playlist.rs:158 src/ui/app_playlist.rs:266 src/ui/app_queue.rs:64
 msgid "Cancel"
 msgstr ""
 
-#: src/ui/app.rs:624 src/ui/app.rs:1706
+#: src/ui/app.rs:637 src/ui/app.rs:1722
 msgid "Settings"
 msgstr ""
 
-#: src/ui/app.rs:630
+#: src/ui/app.rs:643
 msgid "Rescan folder"
 msgstr ""
 
-#: src/ui/app.rs:640 src/ui/app_dialogs.rs:207 src/ui/app_dialogs.rs:260
+#: src/ui/app.rs:653 src/ui/app_dialogs.rs:207 src/ui/app_dialogs.rs:260
 msgid "Share"
 msgstr ""
 
-#: src/ui/app.rs:669 src/ui/app_views.rs:1460
+#: src/ui/app.rs:682 src/ui/app_views.rs:1460
 msgid "Hide"
 msgstr ""
 
-#: src/ui/app.rs:679
+#: src/ui/app.rs:692
 msgid "Files"
 msgstr ""
 
-#: src/ui/app.rs:696 src/ui/app.rs:1185
+#: src/ui/app.rs:709 src/ui/app.rs:1198
 msgid "Back"
 msgstr ""
 
-#: src/ui/app.rs:726 src/ui/app_stats.rs:153 src/ui/enrich.rs:272
+#: src/ui/app.rs:739 src/ui/app_stats.rs:153 src/ui/enrich.rs:272
 msgid "Artists"
 msgstr ""
 
-#: src/ui/app.rs:738
+#: src/ui/app.rs:751
 msgid "No artists"
 msgstr ""
 
-#: src/ui/app.rs:740 src/ui/app.rs:778
+#: src/ui/app.rs:753 src/ui/app.rs:791
 msgid "Scan a music folder and fetch online metadata"
 msgstr ""
 
-#: src/ui/app.rs:762 src/ui/app_stats.rs:154 src/ui/app_views.rs:506
+#: src/ui/app.rs:775 src/ui/app_stats.rs:154 src/ui/app_views.rs:506
 msgid "Albums"
 msgstr ""
 
-#: src/ui/app.rs:776
+#: src/ui/app.rs:789
 msgid "No albums"
 msgstr ""
 
-#: src/ui/app.rs:800 src/ui/app.rs:823
+#: src/ui/app.rs:813 src/ui/app.rs:836
 msgid "Concerts"
 msgstr ""
 
-#: src/ui/app.rs:824
+#: src/ui/app.rs:837
 msgid "Here you can list your collected concerts. Via Import concerts you get an overview of likely concerts: albums with live, unplugged or concert in the name, plus single files of 30 minutes or more. Mark them as a concert and they'll appear here. You can also add concerts later at any time via the options."
 msgstr ""
 
-#: src/ui/app.rs:834 src/ui/app_concert.rs:49
+#: src/ui/app.rs:847 src/ui/app_concert.rs:49
 msgid "Import concerts"
 msgstr ""
 
-#: src/ui/app.rs:839
+#: src/ui/app.rs:852
 msgid "I'll do it myself"
 msgstr ""
 
-#: src/ui/app.rs:844
+#: src/ui/app.rs:857
 msgid "Hide menu item"
 msgstr ""
 
-#: src/ui/app.rs:856
+#: src/ui/app.rs:869
 msgid "No concerts"
 msgstr ""
 
-#: src/ui/app.rs:857
+#: src/ui/app.rs:870
 msgid "Mark an album or a track as a concert via the options."
 msgstr ""
 
-#: src/ui/app.rs:863
+#: src/ui/app.rs:876
 msgid "Playlists"
 msgstr ""
 
-#: src/ui/app.rs:884
+#: src/ui/app.rs:897
 msgid "No playlists"
 msgstr ""
 
-#: src/ui/app.rs:885
+#: src/ui/app.rs:898
 msgid "Create a playlist or add tracks via the options."
 msgstr ""
 
 #. Neue Playlist anlegen (Name eingeben, Enter bestätigt).
-#: src/ui/app.rs:897 src/ui/app_playlist.rs:151 src/ui/app_playlist.rs:198
+#: src/ui/app.rs:910 src/ui/app_playlist.rs:151 src/ui/app_playlist.rs:198
 msgid "New playlist"
 msgstr ""
 
-#: src/ui/app.rs:903
+#: src/ui/app.rs:916
 msgid "Podcasts"
 msgstr ""
 
-#: src/ui/app.rs:919
+#: src/ui/app.rs:932
 msgid "Newest"
 msgstr ""
 
-#: src/ui/app.rs:926 src/ui/app_stats.rs:137
+#: src/ui/app.rs:939 src/ui/app_stats.rs:137
 msgid "Overview"
 msgstr ""
 
-#: src/ui/app.rs:934 src/ui/app_podcast.rs:431
+#: src/ui/app.rs:947 src/ui/app_podcast.rs:464
 msgid "Subscribe to podcast"
 msgstr ""
 
-#: src/ui/app.rs:959 src/ui/app_podcast.rs:380
+#: src/ui/app.rs:972 src/ui/app_podcast.rs:411
 msgid "No episodes"
 msgstr ""
 
-#: src/ui/app.rs:982
+#: src/ui/app.rs:995
 msgid "No podcasts"
 msgstr ""
 
-#: src/ui/app.rs:983
+#: src/ui/app.rs:996
 msgid "Subscribe to a podcast via its feed address (RSS)."
 msgstr ""
 
-#: src/ui/app.rs:989
+#: src/ui/app.rs:1002
 msgid "Favorites"
 msgstr ""
 
-#: src/ui/app.rs:1010
+#: src/ui/app.rs:1023
 msgid "No favorites"
 msgstr ""
 
-#: src/ui/app.rs:1011
+#: src/ui/app.rs:1024
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
 msgstr ""
 
-#: src/ui/app.rs:1017
+#: src/ui/app.rs:1030
 msgid "Audiobooks"
 msgstr ""
 
-#: src/ui/app.rs:1038
+#: src/ui/app.rs:1051
 msgid "No audiobooks"
 msgstr ""
 
-#: src/ui/app.rs:1039
+#: src/ui/app.rs:1052
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
 msgstr ""
 
-#: src/ui/app.rs:1045
+#: src/ui/app.rs:1058
 msgid "Statistics"
 msgstr ""
 
-#: src/ui/app.rs:1075
+#: src/ui/app.rs:1088
 msgid "Reading music data"
 msgstr ""
 
-#: src/ui/app.rs:1095
+#: src/ui/app.rs:1108
 msgid "Details of the current track"
 msgstr ""
 
-#: src/ui/app.rs:1155
+#: src/ui/app.rs:1168
 msgid "Equalizer for this track"
 msgstr ""
 
-#: src/ui/app.rs:1166
+#: src/ui/app.rs:1179
 msgid "Shuffle"
 msgstr ""
 
-#: src/ui/app.rs:1199
+#: src/ui/app.rs:1212 src/ui/app_podcast.rs:617
 msgid "Play/Pause"
 msgstr ""
 
-#: src/ui/app.rs:1211
+#: src/ui/app.rs:1224
 msgid "Forward"
 msgstr ""
 
-#: src/ui/app.rs:1222 src/ui/app_queue.rs:42
+#: src/ui/app.rs:1235 src/ui/app_queue.rs:42
 msgid "Queue"
 msgstr ""
 
-#: src/ui/app.rs:1868
+#: src/ui/app.rs:1884
 msgid "Removed from queue"
 msgstr ""
 
-#: src/ui/app.rs:1871
+#: src/ui/app.rs:1887
 msgid "Will play next"
 msgstr ""
 
-#: src/ui/app.rs:2095
+#: src/ui/app.rs:2111
 msgid "Added {n} tracks to the queue"
 msgstr ""
 
-#: src/ui/app.rs:2107
+#: src/ui/app.rs:2123
 msgid "Playlist created"
 msgstr ""
 
-#: src/ui/app.rs:2153
+#: src/ui/app.rs:2169
 msgid "Playlist deleted"
 msgstr ""
 
-#: src/ui/app.rs:2178
+#: src/ui/app.rs:2194
 msgid "Searching …"
 msgstr ""
 
-#: src/ui/app.rs:2197
+#: src/ui/app.rs:2213
 msgid "Loading feed …"
 msgstr ""
 
-#: src/ui/app.rs:2205
+#: src/ui/app.rs:2221
 msgid "Updating feed …"
 msgstr ""
 
-#: src/ui/app.rs:2221
+#: src/ui/app.rs:2237
 msgid "Podcast removed"
 msgstr ""
 
-#: src/ui/app.rs:2417
+#: src/ui/app.rs:2457
 msgid "Checking for updates …"
 msgstr ""
 
-#: src/ui/app.rs:2422
+#: src/ui/app.rs:2462
 msgid "Updates are only available in the Flatpak version."
 msgstr ""
 
-#: src/ui/app.rs:2427
+#: src/ui/app.rs:2467
 msgid "Update started – it runs in the background. Please restart Emilia afterwards."
 msgstr ""
 
-#: src/ui/app.rs:2439
+#: src/ui/app.rs:2479
 msgid "Update installed. Please restart Emilia."
 msgstr ""
 
-#: src/ui/app.rs:2441
+#: src/ui/app.rs:2481
 msgid "Update failed. You can update manually: {cmd}"
 msgstr ""
 
-#: src/ui/app.rs:2499
+#: src/ui/app.rs:2539
 msgid "Queue cleared"
 msgstr ""
 
-#: src/ui/app.rs:2623
+#: src/ui/app.rs:2663
 msgid "No music folder set"
 msgstr ""
 
-#: src/ui/app.rs:2627
+#: src/ui/app.rs:2667
 msgid "Searching for concerts …"
 msgstr ""
 
-#: src/ui/app.rs:2638
+#: src/ui/app.rs:2678
 msgid "Hid the Concerts menu item"
 msgstr ""
 
-#: src/ui/app.rs:2663
+#: src/ui/app.rs:2703
 msgid "Added {n} concert"
 msgid_plural "Added {n} concerts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app.rs:2694
+#: src/ui/app.rs:2734
 msgid "Shown again"
 msgstr ""
 
-#: src/ui/app.rs:2703
+#: src/ui/app.rs:2743
 msgid "Added to favorites"
 msgstr ""
 
-#: src/ui/app.rs:2705
+#: src/ui/app.rs:2745
 msgid "Removed from favorites"
 msgstr ""
 
-#: src/ui/app.rs:2886
+#: src/ui/app.rs:2926
 msgid "No new concert candidates found"
 msgstr ""
 
-#: src/ui/app.rs:2894
+#: src/ui/app.rs:2934
 msgid "Subscribed: {t}"
 msgstr ""
 
-#: src/ui/app.rs:2895
+#: src/ui/app.rs:2935
 msgid "Could not load feed"
 msgstr ""
 
-#: src/ui/app.rs:2907
+#: src/ui/app.rs:2947
 msgid "Emilia is up to date (version {v})."
 msgstr ""
 
-#: src/ui/app.rs:2911
+#: src/ui/app.rs:2951
 msgid "Could not check for updates (offline?)."
 msgstr ""
 
-#: src/ui/app.rs:2916
+#: src/ui/app.rs:2956
 msgid "Update available"
 msgstr ""
 
-#: src/ui/app.rs:2917
+#: src/ui/app.rs:2957
 msgid "A newer version of Emilia is available. Install it now?"
 msgstr ""
 
-#: src/ui/app.rs:2920
+#: src/ui/app.rs:2960
 msgid "Update"
 msgstr ""
 
-#: src/ui/app.rs:3178
+#: src/ui/app.rs:3218
 msgid "No music folder – please set one in settings"
 msgstr ""
 
@@ -342,7 +342,7 @@ msgstr ""
 msgid "Remove this track from the playlist?"
 msgstr ""
 
-#: src/ui/app_playlist.rs:118 src/ui/app_podcast.rs:343 src/ui/app_favorites.rs:156 src/ui/app_favorites.rs:165
+#: src/ui/app_playlist.rs:118 src/ui/app_podcast.rs:374 src/ui/app_favorites.rs:156 src/ui/app_favorites.rs:165
 msgid "Remove"
 msgstr ""
 
@@ -382,7 +382,7 @@ msgstr ""
 msgid "Added {n} to the playlist"
 msgstr ""
 
-#: src/ui/app_podcast.rs:75 src/ui/app_podcast.rs:307 src/ui/app_podcast.rs:376
+#: src/ui/app_podcast.rs:75 src/ui/app_podcast.rs:338 src/ui/app_podcast.rs:407
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] ""
@@ -404,67 +404,71 @@ msgstr ""
 msgid "This month"
 msgstr ""
 
-#: src/ui/app_podcast.rs:230
+#: src/ui/app_podcast.rs:233
 msgid "Podcast"
 msgstr ""
 
-#: src/ui/app_podcast.rs:242
+#: src/ui/app_podcast.rs:245
 msgid "Published"
 msgstr ""
 
-#: src/ui/app_podcast.rs:250 src/ui/app_views.rs:1718
+#: src/ui/app_podcast.rs:255 src/ui/app_views.rs:1718
 msgid "Duration"
 msgstr ""
 
-#: src/ui/app_podcast.rs:258 src/ui/app_dialogs.rs:131
+#: src/ui/app_podcast.rs:263 src/ui/app_dialogs.rs:131
 msgid "Play"
 msgstr ""
 
-#: src/ui/app_podcast.rs:271
+#: src/ui/app_podcast.rs:286
 msgid "Open podcast"
 msgstr ""
 
-#: src/ui/app_podcast.rs:317
+#: src/ui/app_podcast.rs:300
+msgid "Shownotes"
+msgstr ""
+
+#: src/ui/app_podcast.rs:348
 msgid "Open episodes"
 msgstr ""
 
-#: src/ui/app_podcast.rs:326
+#: src/ui/app_podcast.rs:357
 msgid "Refresh feed"
 msgstr ""
 
-#: src/ui/app_podcast.rs:335
+#: src/ui/app_podcast.rs:366
 msgid "Remove podcast"
 msgstr ""
 
-#: src/ui/app_podcast.rs:342
+#: src/ui/app_podcast.rs:373
 msgid "Remove this podcast?"
 msgstr ""
 
-#: src/ui/app_podcast.rs:418
+#: src/ui/app_podcast.rs:449
 msgid "Podcast – {title}"
 msgstr ""
 
-#: src/ui/app_podcast.rs:438 src/ui/app_podcast.rs:449
+#: src/ui/app_podcast.rs:471 src/ui/app_podcast.rs:482
 msgid "Search"
 msgstr ""
 
-#: src/ui/app_podcast.rs:439
+#: src/ui/app_podcast.rs:472
 msgid "Find a podcast by name"
 msgstr ""
 
-#: src/ui/app_podcast.rs:446
+#: src/ui/app_podcast.rs:479
 msgid "Podcast name …"
 msgstr ""
 
-#: src/ui/app_podcast.rs:487
+#: src/ui/app_podcast.rs:520
 msgid "Or enter feed address"
 msgstr ""
 
-#: src/ui/app_podcast.rs:490
+#: src/ui/app_podcast.rs:523
 msgid "Feed address (RSS)"
 msgstr ""
 
-#: src/ui/app_podcast.rs:535
+#: src/ui/app_podcast.rs:568
 msgid "No podcasts found"
 msgstr ""
 

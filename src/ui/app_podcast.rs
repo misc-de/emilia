@@ -180,13 +180,13 @@ impl App {
                 cover.as_deref(),
                 "microphone-symbolic",
             ));
-            row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+            row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
             {
                 let sender = sender.clone();
                 let url = ep.audio_url.clone();
                 let title = ep.title.clone();
                 row.connect_activated(move |_| {
-                    sender.input(Msg::PlayEpisode {
+                    sender.input(Msg::ToggleEpisode {
                         url: url.clone(),
                         title: title.clone(),
                     });
@@ -206,6 +206,9 @@ impl App {
                 g.add(&row);
             }
         }
+        // Icons der neu gebauten Zeilen auf den aktuellen Wiedergabestand setzen
+        // (und tote Zeilen der vorherigen Liste aussortieren).
+        self.refresh_episode_icons();
     }
 
     /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste: Podcast,
@@ -245,10 +248,12 @@ impl App {
             );
         }
         if let Some(d) = ep.duration.as_deref().filter(|d| !d.trim().is_empty()) {
+            // Dauer einheitlich als h:mm:ss (bzw. m:ss) anzeigen.
+            let dur = crate::core::podcast::format_duration(d).unwrap_or_else(|| d.trim().to_string());
             info.add(
                 &adw::ActionRow::builder()
                     .title(&gettext("Duration"))
-                    .subtitle(gtk::glib::markup_escape_text(d.trim()))
+                    .subtitle(gtk::glib::markup_escape_text(&dur))
                     .build(),
             );
         }
@@ -260,7 +265,7 @@ impl App {
             let (sender, dialog, url, title) =
                 (sender.clone(), dialog.clone(), ep.audio_url.clone(), ep.title.clone());
             play.connect_activated(move |_| {
-                sender.input(Msg::PlayEpisode {
+                sender.input(Msg::ToggleEpisode {
                     url: url.clone(),
                     title: title.clone(),
                 });
@@ -268,6 +273,16 @@ impl App {
             });
         }
         actions.add(&play);
+        // „Abspielen" ausblenden, solange genau diese Episode läuft; merken, damit
+        // `refresh_episode_icons` die Zeile bei Pause/Ende wieder einblendet.
+        let is_current =
+            self.playing && self.playing_episode_url.as_deref() == Some(ep.audio_url.as_str());
+        play.set_visible(!is_current);
+        *self.ctx_episode_play.borrow_mut() = Some((play.clone(), ep.audio_url.clone()));
+        {
+            let slot = self.ctx_episode_play.clone();
+            dialog.connect_closed(move |_| *slot.borrow_mut() = None);
+        }
         let open = action_row(&gettext("Open podcast"), "go-next-symbolic");
         {
             let (sender, dialog, pid) = (sender.clone(), dialog.clone(), ep.podcast_id);
@@ -278,6 +293,22 @@ impl App {
         }
         actions.add(&open);
         content.append(&actions);
+
+        // Shownotes (falls vorhanden) als eigener Abschnitt, scrollbar im Dialog.
+        if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
+            let notes_group = adw::PreferencesGroup::builder()
+                .title(&gettext("Shownotes"))
+                .build();
+            let label = gtk::Label::builder()
+                .label(notes.trim())
+                .wrap(true)
+                .xalign(0.0)
+                .selectable(true)
+                .build();
+            label.add_css_class("body");
+            notes_group.add(&label);
+            content.append(&notes_group);
+        }
 
         present_detail(&dialog, &content, root);
     }
@@ -400,13 +431,13 @@ impl App {
                 cover.as_deref(),
                 "microphone-symbolic",
             ));
-            row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+            row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
             {
                 let sender = sender.clone();
                 let url = ep.audio_url.clone();
                 let title = ep.title.clone();
                 row.connect_activated(move |_| {
-                    sender.input(Msg::PlayEpisode {
+                    sender.input(Msg::ToggleEpisode {
                         url: url.clone(),
                         title: title.clone(),
                     });
@@ -416,6 +447,8 @@ impl App {
         }
         content.append(&group);
         self.push_subpage(&gettext_f("Podcast – {title}", &[("title", title)]), &content);
+        // Icons auf den aktuellen Wiedergabestand setzen.
+        self.refresh_episode_icons();
     }
 
     /// Dialog zum Abonnieren: oben eine **Suche** (durchsucht das iTunes-
@@ -535,8 +568,16 @@ impl App {
             let row = adw::ActionRow::builder().title(&gettext("No podcasts found")).build();
             row.set_sensitive(false);
             list.append(&row);
+            // Knappe Höhe – nur Such- und Adressfeld plus Hinweiszeile.
+            dialog.set_content_height(300);
             return;
         }
+
+        // Dialog so hoch machen, wie die Treffer es brauchen (gedeckelt, dann
+        // scrollt die Liste). Grob: feste Bereiche (Kopf, Suche, Adresse) +
+        // ~66 px je Trefferzeile.
+        let rows = self.podcast_search_results.len() as i32;
+        dialog.set_content_height((320 + rows * 66).min(760));
 
         for r in &self.podcast_search_results {
             let row = adw::ActionRow::builder()
@@ -561,6 +602,59 @@ impl App {
         }
     }
 
+    /// Play/Pause-Knopf (Suffix) für eine Beitragszeile: tippt = Episode
+    /// umschalten. Wird in `episode_play_buttons` registriert, damit sein Icon
+    /// beim Wechsel des Wiedergabestands aktualisiert werden kann.
+    fn episode_play_button(
+        &self,
+        sender: &ComponentSender<Self>,
+        url: &str,
+        title: &str,
+    ) -> gtk::Button {
+        let btn = gtk::Button::builder()
+            .icon_name("media-playback-start-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text(&gettext("Play/Pause"))
+            .build();
+        btn.add_css_class("flat");
+        {
+            let (sender, url, title) = (sender.clone(), url.to_string(), title.to_string());
+            btn.connect_clicked(move |_| {
+                sender.input(Msg::ToggleEpisode {
+                    url: url.clone(),
+                    title: title.clone(),
+                });
+            });
+        }
+        self.episode_play_buttons
+            .borrow_mut()
+            .push((url.to_string(), btn.clone()));
+        btn
+    }
+
+    /// Aktualisiert die Play/Pause-Icons aller sichtbaren Beitragszeilen und die
+    /// „Abspielen"-Zeile eines offenen Detaildialogs. Abgehängte Zeilen (z. B.
+    /// nach Verlassen einer Unterseite) werden dabei aussortiert.
+    pub(crate) fn refresh_episode_icons(&self) {
+        let active = self.playing_episode_url.clone();
+        let playing = self.playing;
+        let is_active = |url: &str| playing && active.as_deref() == Some(url);
+        {
+            let mut buttons = self.episode_play_buttons.borrow_mut();
+            buttons.retain(|(_, btn)| btn.root().is_some());
+            for (url, btn) in buttons.iter() {
+                btn.set_icon_name(if is_active(url) {
+                    "media-playback-pause-symbolic"
+                } else {
+                    "media-playback-start-symbolic"
+                });
+            }
+        }
+        if let Some((row, url)) = self.ctx_episode_play.borrow().as_ref() {
+            row.set_visible(!is_active(url));
+        }
+    }
+
     /// Streamt eine Podcast-Episode (ersetzt die laufende Wiedergabe).
     pub(crate) fn play_episode(&mut self, url: &str, title: &str) {
         match self.player.play_uri(url) {
@@ -568,6 +662,7 @@ impl App {
                 self.now_playing = Some(title.to_string());
                 self.playing = true;
                 self.playing_path = None;
+                self.playing_episode_url = Some(url.to_string());
                 self.queue.clear();
                 self.queue_pos = 0;
                 self.position_ms = 0;
