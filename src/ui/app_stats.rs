@@ -106,7 +106,8 @@ impl App {
             .orientation(gtk::Orientation::Horizontal)
             .halign(gtk::Align::Center)
             .margin_top(2)
-            .margin_bottom(6)
+            // Etwas Luft unter den Zeitraum-Schaltern vor dem Inhalt.
+            .margin_bottom(10)
             .build();
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         group.add_css_class("linked");

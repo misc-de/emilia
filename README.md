@@ -58,7 +58,10 @@ Bibliotheksindex in **SQLite**.
 
 ---
 
-## Voraussetzungen
+## Voraussetzungen (zum Selbstbauen)
+
+> Für die **Flatpak-Installation** (empfohlen, siehe unten) ist nichts davon
+> nötig – das Bundle bringt alle Bibliotheken mit.
 
 - **Rust-Toolchain** (Edition 2021), am einfachsten über [rustup](https://rustup.rs)
 - **GTK ≥ 4.14** und **libadwaita ≥ 1.5** (inkl. Dev-Header)
@@ -73,7 +76,27 @@ Bibliotheksindex in **SQLite**.
 
 ## Installation
 
-### 1. Abhängigkeiten installieren
+### Flatpak (empfohlen)
+
+Vorgebautes, **GPG-signiertes** Bundle für **x86_64 und aarch64** – ideal fürs
+Phone, ohne Build-Werkzeuge. Aus dem Projekt-Repo (GitHub Pages):
+
+```bash
+flatpak remote-add --if-not-exists emilia https://misc-de.github.io/emilia/de.cais.Emilia.flatpakrepo
+flatpak install emilia de.cais.Emilia
+flatpak run de.cais.Emilia
+```
+
+Später aktualisieren mit `flatpak update de.cais.Emilia`. Der Signaturschlüssel
+steckt bereits in der `.flatpakrepo`-Datei – es muss nichts separat importiert
+werden.
+
+### Aus dem Quellcode bauen
+
+Nur nötig, wenn du selbst baust oder entwickelst – der Flatpak oben bringt alle
+Bibliotheken mit (Voraussetzungen siehe [oben](#voraussetzungen-zum-selbstbauen)).
+
+#### 1. Abhängigkeiten installieren
 
 **Arch / Manjaro**
 
@@ -110,7 +133,7 @@ sudo dnf install cargo rust gcc pkgconf-pkg-config \
 # gstreamer1-plugins-ugly liegt in RPM Fusion
 ```
 
-### 2. Bauen & starten
+#### 2. Bauen & starten
 
 ```bash
 git clone <repo-url> Emilia
@@ -127,7 +150,7 @@ cargo build --release
 > Hinweis: Beim Start aus dem Projektordner (`cargo run`) werden die Icons aus
 > `data/icons` gefunden. Für den dauerhaften Betrieb lieber installieren (unten).
 
-### 3. Installieren (optional)
+#### 3. Installieren (optional)
 
 Damit Emilia im App-Raster erscheint und ihr Icon am Sperrbildschirm zeigt,
 installiert das `Makefile` Binary, `.desktop`-Datei, App-Icon und
@@ -144,9 +167,12 @@ make install PREFIX=$HOME/.local
 Wieder entfernen mit `make uninstall` (gleicher `PREFIX`). `make check` prüft
 `.desktop` und Metainfo mit `desktop-file-validate` bzw. `appstreamcli`.
 
-**Flatpak:** Ein Manifest liegt unter [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml)
-(GNOME-Runtime + rust-stable-SDK). Bauen mit `flatpak-builder` – die genauen
-Befehle stehen im Kopf des Manifests.
+#### Flatpak selbst bauen
+
+Wer lieber selbst ein Bundle baut (statt das vorgebaute oben zu nutzen): Ein
+Manifest liegt unter [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml) (GNOME-Runtime
++ rust-stable-SDK). Bauen mit `flatpak-builder` – die genauen Befehle stehen im
+Kopf des Manifests.
 
 ---
 
