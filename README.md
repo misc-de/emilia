@@ -58,22 +58,6 @@ Bibliotheksindex in **SQLite**.
 
 ---
 
-## Voraussetzungen (zum Selbstbauen)
-
-> Für die **Flatpak-Installation** (empfohlen, siehe unten) ist nichts davon
-> nötig – das Bundle bringt alle Bibliotheken mit.
-
-- **Rust-Toolchain** (Edition 2021), am einfachsten über [rustup](https://rustup.rs)
-- **GTK ≥ 4.14** und **libadwaita ≥ 1.5** (inkl. Dev-Header)
-- **GStreamer 1.x** (Core + Dev-Header) sowie die Plugin-Pakete
-  *base*, *good*, *bad*, *ugly* und *libav* (für `playbin3`, den Equalizer und
-  gängige Codecs)
-- **PipeWire** als Audio-Ausgabe (auf Phosh/aktuellen Distros vorhanden)
-- ein **C-Compiler** + `pkg-config` (SQLite wird gebündelt aus dem Quellcode gebaut)
-- *optional:* **`fpcalc`** (Chromaprint) für die Titel-Erkennung per Fingerprint
-
----
-
 ## Installation
 
 ### Flatpak (empfohlen)
@@ -91,12 +75,62 @@ Später aktualisieren mit `flatpak update de.cais.Emilia`. Der Signaturschlüsse
 steckt bereits in der `.flatpakrepo`-Datei – es muss nichts separat importiert
 werden.
 
-### Aus dem Quellcode bauen
+> Du möchtest lieber selbst kompilieren? Siehe
+> [Aus dem Quellcode bauen](#aus-dem-quellcode-bauen-für-entwickler) ganz unten.
 
-Nur nötig, wenn du selbst baust oder entwickelst – der Flatpak oben bringt alle
-Bibliotheken mit (Voraussetzungen siehe [oben](#voraussetzungen-zum-selbstbauen)).
+---
 
-#### 1. Abhängigkeiten installieren
+## Erste Schritte
+
+1. Emilia starten und oben links auf **Einstellungen** (Zahnrad) gehen.
+2. Den **Musikordner** auswählen – Emilia liest die Bibliothek im Hintergrund ein.
+3. Über **Interpreten** / **Alben** / **Dateisystem** stöbern und abspielen.
+4. Optional: oben auf **„Cover & Metadaten online abrufen"** klicken, um Cover,
+   Interpretenfotos und (mit `fpcalc` + AcoustID-Key) fehlende Titel zu ergänzen.
+5. Equalizer: Titel/Album/Interpret per langem Druck öffnen → **Equalizer**, oder
+   den globalen EQ in den Einstellungen.
+
+### Online-Metadaten (optional)
+
+- **AcoustID-Key** (kostenlos, für die Fingerprint-Titelerkennung) und
+  **fanart.tv-Key** (für zusätzliche Bilder) lassen sich in den **Einstellungen**
+  hinterlegen. Ohne Keys werden diese Phasen einfach übersprungen.
+- Cover (MusicBrainz/Cover Art Archive) und Interpretenfotos (Deezer)
+  funktionieren ohne Schlüssel.
+
+---
+
+## Datenspeicherorte
+
+| Inhalt                     | Pfad                                         |
+|----------------------------|----------------------------------------------|
+| Bibliothek & Einstellungen | `~/.local/share/emilia/library.db`           |
+| Cover-Cache                | `~/.cache/emilia/covers/`                    |
+| Interpretenfotos-Cache     | `~/.cache/emilia/artists/`                   |
+
+Alle Einstellungen (Musikordner, API-Keys, Fensterzustand …) liegen in der
+SQLite-Datenbank.
+
+---
+
+## Aus dem Quellcode bauen (für Entwickler)
+
+> Für die normale Nutzung **nicht nötig** – dafür gibt es das
+> [Flatpak](#flatpak-empfohlen). Dieser Abschnitt richtet sich an Entwickler und
+> alle, die selbst kompilieren möchten.
+
+### Voraussetzungen
+
+- **Rust-Toolchain** (Edition 2021), am einfachsten über [rustup](https://rustup.rs)
+- **GTK ≥ 4.14** und **libadwaita ≥ 1.5** (inkl. Dev-Header)
+- **GStreamer 1.x** (Core + Dev-Header) sowie die Plugin-Pakete
+  *base*, *good*, *bad*, *ugly* und *libav* (für `playbin3`, den Equalizer und
+  gängige Codecs)
+- **PipeWire** als Audio-Ausgabe (auf Phosh/aktuellen Distros vorhanden)
+- ein **C-Compiler** + `pkg-config` (SQLite wird gebündelt aus dem Quellcode gebaut)
+- *optional:* **`fpcalc`** (Chromaprint) für die Titel-Erkennung per Fingerprint
+
+### 1. Abhängigkeiten installieren
 
 **Arch / Manjaro**
 
@@ -133,7 +167,7 @@ sudo dnf install cargo rust gcc pkgconf-pkg-config \
 # gstreamer1-plugins-ugly liegt in RPM Fusion
 ```
 
-#### 2. Bauen & starten
+### 2. Bauen & starten
 
 ```bash
 git clone <repo-url> Emilia
@@ -150,7 +184,7 @@ cargo build --release
 > Hinweis: Beim Start aus dem Projektordner (`cargo run`) werden die Icons aus
 > `data/icons` gefunden. Für den dauerhaften Betrieb lieber installieren (unten).
 
-#### 3. Installieren (optional)
+### 3. Installieren (optional)
 
 Damit Emilia im App-Raster erscheint und ihr Icon am Sperrbildschirm zeigt,
 installiert das `Makefile` Binary, `.desktop`-Datei, App-Icon und
@@ -167,45 +201,12 @@ make install PREFIX=$HOME/.local
 Wieder entfernen mit `make uninstall` (gleicher `PREFIX`). `make check` prüft
 `.desktop` und Metainfo mit `desktop-file-validate` bzw. `appstreamcli`.
 
-#### Flatpak selbst bauen
+### Flatpak selbst bauen
 
 Wer lieber selbst ein Bundle baut (statt das vorgebaute oben zu nutzen): Ein
 Manifest liegt unter [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml) (GNOME-Runtime
 + rust-stable-SDK). Bauen mit `flatpak-builder` – die genauen Befehle stehen im
 Kopf des Manifests.
-
----
-
-## Erste Schritte
-
-1. Emilia starten und oben links auf **Einstellungen** (Zahnrad) gehen.
-2. Den **Musikordner** auswählen – Emilia liest die Bibliothek im Hintergrund ein.
-3. Über **Interpreten** / **Alben** / **Dateisystem** stöbern und abspielen.
-4. Optional: oben auf **„Cover & Metadaten online abrufen"** klicken, um Cover,
-   Interpretenfotos und (mit `fpcalc` + AcoustID-Key) fehlende Titel zu ergänzen.
-5. Equalizer: Titel/Album/Interpret per langem Druck öffnen → **Equalizer**, oder
-   den globalen EQ in den Einstellungen.
-
-### Online-Metadaten (optional)
-
-- **AcoustID-Key** (kostenlos, für die Fingerprint-Titelerkennung) und
-  **fanart.tv-Key** (für zusätzliche Bilder) lassen sich in den **Einstellungen**
-  hinterlegen. Ohne Keys werden diese Phasen einfach übersprungen.
-- Cover (MusicBrainz/Cover Art Archive) und Interpretenfotos (Deezer)
-  funktionieren ohne Schlüssel.
-
----
-
-## Datenspeicherorte
-
-| Inhalt                     | Pfad                                         |
-|----------------------------|----------------------------------------------|
-| Bibliothek & Einstellungen | `~/.local/share/emilia/library.db`           |
-| Cover-Cache                | `~/.cache/emilia/covers/`                    |
-| Interpretenfotos-Cache     | `~/.cache/emilia/artists/`                   |
-
-Alle Einstellungen (Musikordner, API-Keys, Fensterzustand …) liegen in der
-SQLite-Datenbank.
 
 ---
 
