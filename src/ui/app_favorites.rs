@@ -11,7 +11,7 @@ use relm4::{adw, gtk};
 
 use crate::core::category::album_key;
 use crate::i18n::gettext;
-use crate::ui::app::{cover_widget, App, CtxTarget, Msg};
+use crate::ui::app::{cover_widget, duration_label, App, CtxTarget, Msg};
 use crate::ui::fs_row::FsEntry;
 
 impl App {
@@ -174,7 +174,23 @@ impl App {
             // nur Einzelstücke werden direkt abgespielt und tragen das Play-Icon.
             let opens_list = folder_as_album && scope != "track";
             if opens_list {
-                row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                // Ganz rechts: Gesamtlaufzeit + Play-Button (spielt das ganze
+                // Album/Konzert). Ein normaler Klick öffnet weiterhin die Liste.
+                let total_ms = self.entry_total_ms(scope, key);
+                if total_ms > 0 {
+                    row.add_suffix(&duration_label(total_ms));
+                }
+                let play_btn = gtk::Button::builder()
+                    .icon_name("media-playback-start-symbolic")
+                    .tooltip_text(&gettext("Play"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                {
+                    let sender = sender.clone();
+                    play_btn.connect_clicked(move |_| sender.input(play(i)));
+                }
+                row.add_suffix(&play_btn);
             } else {
                 // Läuft genau dieser Titel gerade, ein Pause-Symbol zeigen.
                 let is_active = scope == "track"
@@ -245,6 +261,22 @@ impl App {
 
             list.append(&row);
         }
+    }
+
+    /// Gesamtlaufzeit (ms) eines als Album/Ordner dargestellten Eintrags
+    /// (für die Laufzeitanzeige in Konzert-/Hörbuchlisten). 0 = unbekannt.
+    fn entry_total_ms(&self, scope: &str, key: &str) -> i64 {
+        let tracks = match scope {
+            "album" => {
+                let mut parts = key.splitn(2, '\u{1}');
+                let artist = parts.next().unwrap_or("");
+                let album = parts.next().unwrap_or("");
+                self.album_tracks_for_artist(artist, album)
+            }
+            "folder" => self.folder_tracks_ordered(key),
+            _ => Vec::new(),
+        };
+        tracks.iter().filter_map(|t| t.duration_ms).sum()
     }
 
     // ---- Auflösung (Cover / Abspielen / Detail) ----

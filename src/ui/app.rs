@@ -227,6 +227,13 @@ pub struct App {
     /// Pausierte Warteschlange, während ein einzelnes Lied dazwischengespielt
     /// wird (Liste + Position). Nach dem Einzellied wird sie fortgesetzt.
     pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
+    /// Zurück-Stapel verdrängter Wiedergabe-Kontexte (Queue + Position). Wird
+    /// gefüllt, wenn eine neue Auswahl die laufende Warteschlange ersetzt, und
+    /// erlaubt „voriges Lied **inkl. Playlist** weiterhören" (Zurück-Taste).
+    pub(crate) nav_stack: Vec<(Vec<PathBuf>, usize)>,
+    /// Zuletzt von `play_current` gespielter Kontext (zur Erkennung, ob die
+    /// Warteschlange durch eine neue Auswahl ersetzt wurde).
+    pub(crate) prev_ctx: Option<(Vec<PathBuf>, usize)>,
     /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
     /// Resume-Position beim Wechsel auf einen anderen Titel).
     pub(crate) playing_path: Option<PathBuf>,
@@ -247,6 +254,8 @@ pub struct App {
     pub(crate) position_ms: i64,
     pub(crate) track_duration_ms: i64,
     pub(crate) shuffle: bool,
+    /// Wiederholen: am Ende der Warteschlange bzw. des Einzeltitels von vorn.
+    pub(crate) repeat: bool,
     pub(crate) context_target: Option<CtxTarget>,
     /// Play-Zeile des offenen Detail-Dialogs samt zugehörigem Titel-Pfad. Wird
     /// ausgeblendet, solange genau dieser Titel läuft, und wieder eingeblendet,
@@ -378,9 +387,7 @@ pub enum Msg {
     CtxShare,
     ShareHost,
     ShareScan,
-    // --- Geräte-Synchronisierung ---
-    /// Öffnet den Synchronisierungs-Dialog (Moduswahl).
-    OpenSyncDialog,
+    // --- Geräte-Synchronisierung (erreichbar über „Teilen") ---
     /// Server-Modus starten (QR-Code anzeigen, auf Kopplung warten).
     SyncStartServer,
     /// Client-Modus starten (Webcam-Scan).
@@ -405,6 +412,7 @@ pub enum Msg {
     Next,
     Prev,
     ToggleShuffle,
+    ToggleRepeat,
     NavUp,
     FilesGoStart,
     Refresh,
@@ -996,7 +1004,8 @@ impl Component for App {
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 0,
+                                            // 10px Abstand nach unten zum Content (nicht am Umschalter kleben).
+                                            set_margin_top: 10,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -1249,6 +1258,22 @@ impl Component for App {
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::Next,
                                 },
+                                // Wiederholen (Loop): am Ende der Warteschlange bzw.
+                                // des Einzeltitels von vorn. Aktiv = weiß, aus =
+                                // ausgegraut.
+                                gtk::ToggleButton {
+                                    set_icon_name: "media-playlist-repeat-symbolic",
+                                    set_tooltip_text: Some(&gettext("Repeat")),
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
+                                    #[watch]
+                                    set_active: model.repeat,
+                                    #[watch]
+                                    set_opacity: if model.repeat { 1.0 } else { 0.4 },
+                                    connect_clicked => Msg::ToggleRepeat,
+                                },
                             },
                             // Warteschlange (rechts unten).
                             #[wrap(Some)]
@@ -1394,6 +1419,11 @@ impl Component for App {
             library.get_setting("auto_enrich").ok().flatten().as_deref(),
             Some("0")
         );
+        // Wiederholen-Zustand (Standard: aus).
+        let repeat_on = matches!(
+            library.get_setting("repeat").ok().flatten().as_deref(),
+            Some("1")
+        );
         // Anzeigesprache (Standard: System-Locale). Wirksam wurde sie bereits
         // beim Start in `main` über `i18n::init`; hier nur für die Anzeige im
         // Einstellungs-Umschalter.
@@ -1509,6 +1539,8 @@ impl Component for App {
             skip_history_push: false,
             last_prev: None,
             interrupted_queue: None,
+            nav_stack: Vec::new(),
+            prev_ctx: None,
             playing_path: None,
             close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
             play_session: None,
@@ -1518,6 +1550,7 @@ impl Component for App {
             position_ms: 0,
             track_duration_ms: 0,
             shuffle: false,
+            repeat: repeat_on,
             context_target: None,
             ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             toast_overlay: toast_overlay.clone(),
@@ -1705,15 +1738,21 @@ impl Component for App {
                 btn.set_visible(!model.hidden_sections.contains(name));
                 btn.add_css_class("flat");
                 if is_sidebar {
-                    // Desktop-Seitenleiste: Icon **mit Beschriftung**.
+                    // Desktop-Seitenleiste: Icon **mit Beschriftung**. Etwas
+                    // größeres Icon (gut sichtbar, nie kleiner als der Standard).
                     let inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-                    inner.append(&gtk::Image::from_icon_name(icon));
+                    let img = gtk::Image::from_icon_name(icon);
+                    img.set_pixel_size(22);
+                    inner.append(&img);
                     inner.append(&gtk::Label::new(Some(&gettext(label))));
                     btn.set_child(Some(&inner));
                     btn.set_hexpand(true);
                 } else {
-                    // Mobile Top-Leiste: nur Icon (Platz).
-                    btn.set_icon_name(icon);
+                    // Mobile Top-Leiste: nur Icon, deutlich größer (≈1,6×) als die
+                    // Standardgröße – nie kleiner als jetzt.
+                    let img = gtk::Image::from_icon_name(icon);
+                    img.set_pixel_size(26);
+                    btn.set_child(Some(&img));
                     btn.set_tooltip_text(Some(&gettext(label)));
                 }
                 match &group_leader {
@@ -2296,7 +2335,6 @@ impl Component for App {
                 self.open_sync_dialog(root, &sender);
                 self.start_sync_scan(&sender);
             }
-            Msg::OpenSyncDialog => self.open_sync_dialog(root, &sender),
             Msg::SyncStartServer => self.start_sync_server(&sender),
             Msg::SyncStartScan => self.start_sync_scan(&sender),
             Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
@@ -2459,6 +2497,12 @@ impl Component for App {
                 if self.shuffle {
                     self.rebuild_shuffle_order();
                 }
+            }
+            Msg::ToggleRepeat => {
+                self.repeat = !self.repeat;
+                let _ = self
+                    .library
+                    .set_setting("repeat", if self.repeat { "1" } else { "0" });
             }
             Msg::NavUp => {
                 if self.can_go_up() {

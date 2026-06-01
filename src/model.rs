@@ -10,6 +10,9 @@ pub struct Track {
     pub title: String,
     pub artist: Option<String>,
     pub album: Option<String>,
+    /// Genre aus den Datei-Tags (für die Statistik); `None`, wenn nicht gesetzt
+    /// oder die Datei noch nicht (neu) eingelesen wurde.
+    pub genre: Option<String>,
     pub track_no: Option<u32>,
     /// Disc-/CD-Nummer bei Mehr-CD-Alben (None = einzelne CD).
     pub disc_no: Option<u32>,

@@ -71,7 +71,8 @@ impl Library {
                 disc_no     INTEGER,
                 duration_ms INTEGER,
                 resume_ms   INTEGER NOT NULL DEFAULT 0,
-                last_played INTEGER
+                last_played INTEGER,
+                genre       TEXT
             );
             -- Schnelles Nachschlagen eines Beispieltitels je Album (Ordner-Vererbung).
             CREATE INDEX IF NOT EXISTS idx_track_album ON track(album);
@@ -290,6 +291,22 @@ impl Library {
         if !has_disc {
             self.conn
                 .execute_batch("ALTER TABLE track ADD COLUMN disc_no INTEGER;")?;
+        }
+
+        // Migration: Genre-Spalte nachrüsten (für die Genre-Statistik). Wird erst
+        // durch ein erneutes Einlesen der Bibliothek befüllt.
+        let has_genre = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('track') WHERE name = 'genre'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_genre {
+            self.conn
+                .execute_batch("ALTER TABLE track ADD COLUMN genre TEXT;")?;
         }
 
         // Migration: attempts-Zähler in den Meta-Tabellen nachrüsten (begrenzt das
@@ -851,15 +868,16 @@ impl Library {
     pub fn upsert_track(&self, t: &Track) -> Result<()> {
         self.conn.execute(
             r#"
-            INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms, genre)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(path) DO UPDATE SET
                 title       = excluded.title,
                 artist      = excluded.artist,
                 album       = excluded.album,
                 track_no    = excluded.track_no,
                 disc_no     = excluded.disc_no,
-                duration_ms = excluded.duration_ms
+                duration_ms = excluded.duration_ms,
+                genre       = excluded.genre
             "#,
             rusqlite::params![
                 t.path,
@@ -869,6 +887,7 @@ impl Library {
                 t.track_no,
                 t.disc_no,
                 t.duration_ms,
+                t.genre,
             ],
         )?;
         Ok(())
@@ -899,6 +918,7 @@ impl Library {
                         title: r.get(2)?,
                         artist: r.get(3)?,
                         album: r.get(4)?,
+                        genre: None,
                         track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                         duration_ms: r.get(6)?,
                         resume_ms: r.get(7)?,
@@ -924,6 +944,7 @@ impl Library {
                 title: r.get(2)?,
                 artist: r.get(3)?,
                 album: r.get(4)?,
+                genre: None,
                 track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                 duration_ms: r.get(6)?,
                 resume_ms: r.get(7)?,
@@ -1301,6 +1322,7 @@ impl Library {
                 title: r.get(2)?,
                 artist: r.get(3)?,
                 album: r.get(4)?,
+                genre: None,
                 track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                 duration_ms: r.get(6)?,
                 resume_ms: r.get(7)?,
@@ -1554,6 +1576,34 @@ impl Library {
             e.played_ms += ms;
         }
         Ok(Self::rank(map.into_values().collect(), limit))
+    }
+
+    /// Top-Genres nach Wiedergaben (aus den in der Bibliothek gespeicherten
+    /// Track-Genres). Nur Titel mit gesetztem Genre zählen; Titel ohne Genre
+    /// (oder vor der Genre-Migration eingelesene) bleiben unberücksichtigt.
+    pub fn stats_top_genres(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT t.genre AS genre,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             JOIN track t ON t.path = e.path
+             WHERE e.started_at >= ?1 AND t.genre IS NOT NULL AND t.genre <> ''
+             GROUP BY t.genre",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let entries = stmt
+            .query_map([since], |r| {
+                Ok(StatEntry {
+                    name: r.get::<_, String>(0)?,
+                    detail: String::new(),
+                    plays: r.get::<_, i64>(1)?,
+                    played_ms: r.get::<_, i64>(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        Ok(Self::rank(entries, limit))
     }
 
     /// Nur tatsächliche Wiedergaben behalten, nach Wiedergaben (dann Zeit)
@@ -1884,6 +1934,7 @@ mod tests {
             title: "T".to_string(),
             artist: artist.map(String::from),
             album: album.map(String::from),
+            genre: None,
             track_no: None,
             disc_no: None,
             duration_ms: Some(60_000),

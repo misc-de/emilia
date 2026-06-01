@@ -297,7 +297,48 @@ impl App {
                 });
             });
         }
-        content.append(&reset);
+        // EQ für diese Ebene **ausschalten**: flache Nullbänder fest speichern.
+        // Anders als „Zurücksetzen" (löschen → erbt Album/Interpret/Global)
+        // überschreibt das eine vererbte Einstellung mit „kein EQ".
+        let off = gtk::Button::builder()
+            .label(gettext("Turn off"))
+            .css_classes(["pill"])
+            .halign(gtk::Align::Center)
+            .build();
+        {
+            let bands = bands.clone();
+            let cur_out = cur_out.clone();
+            let loading = loading.clone();
+            let scales = scales.clone();
+            let outputs = outputs.clone();
+            let key = key.clone();
+            let sender = sender.clone();
+            off.connect_clicked(move |_| {
+                let o = cur_out.get();
+                bands.borrow_mut()[o] = [0.0; 10];
+                loading.set(true);
+                for sc in scales.iter() {
+                    sc.set_value(0.0);
+                }
+                loading.set(false);
+                let (_, oid) = &outputs[o];
+                sender.input(Msg::SetEq {
+                    output: oid.clone(),
+                    scope,
+                    key: (*key).clone(),
+                    bands: [0.0; 10],
+                });
+            });
+        }
+
+        let buttons = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(8)
+            .halign(gtk::Align::Center)
+            .build();
+        buttons.append(&reset);
+        buttons.append(&off);
+        content.append(&buttons);
 
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)

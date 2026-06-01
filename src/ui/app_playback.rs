@@ -92,6 +92,17 @@ impl App {
                 self.queue_pos = n;
                 self.play_current();
             }
+            None if self.repeat && !self.queue.is_empty() => {
+                // Wiederholen: am Ende von vorn beginnen (Einzeltitel ebenso, da
+                // die Queue dann nur einen Eintrag hat). Bei Zufall neu mischen.
+                if self.shuffle {
+                    self.rebuild_shuffle_order();
+                    self.queue_pos = self.shuffle_order.first().copied().unwrap_or(0);
+                } else {
+                    self.queue_pos = 0;
+                }
+                self.play_current();
+            }
             None => {
                 // Ende der Wiedergabe: anhalten und an den Anfang der Queue
                 // zurückspulen, damit die Play-Taste wieder auf „Play" steht und
@@ -149,7 +160,23 @@ impl App {
             return;
         }
 
-        // Erstes Drücken: laufenden Titel von vorn.
+        // Erstes Drücken: Wurde gerade erst ein neuer Kontext gestartet (Titel
+        // läuft erst < 5 s) und liegt ein verdrängter Kontext auf dem Stapel, so
+        // diesen **samt Playlist** wiederherstellen und das Lied weiterhören
+        // (Resume aus der DB). „Zurück" direkt nach einem versehentlich
+        // gestarteten Lied bringt damit zum vorherigen zurück.
+        if !self.nav_stack.is_empty() && self.player.position_ms().unwrap_or(0) < 5000 {
+            if let Some((q, pos)) = self.nav_stack.pop() {
+                self.skip_history_push = true;
+                self.queue = q;
+                self.queue_pos = pos.min(self.queue.len().saturating_sub(1));
+                self.play_current();
+                self.refresh_queue_icons();
+                return;
+            }
+        }
+
+        // Sonst: laufenden Titel von vorn.
         if self.playing_path.is_some() {
             self.skip_history_push = true;
             self.play_current();
@@ -259,6 +286,20 @@ impl App {
         let Some(path) = self.queue.get(self.queue_pos).cloned() else {
             return;
         };
+        // Kontext-Wechsel erkennen: ersetzt eine neue Auswahl die laufende
+        // Warteschlange, den alten Kontext (Queue + Position) auf den Zurück-
+        // Stapel legen – so lässt sich „voriges Lied **inkl. Playlist**
+        // weiterhören". Beim Zurückspringen selbst nicht erneut stapeln.
+        if !self.skip_history_push {
+            if let Some((pq, pp)) = self.prev_ctx.clone() {
+                if !pq.is_empty() && pq != self.queue {
+                    self.nav_stack.push((pq, pp));
+                    if self.nav_stack.len() > 50 {
+                        self.nav_stack.remove(0);
+                    }
+                }
+            }
+        }
         // History pflegen: bisher laufenden Titel merken (für „vorheriges Lied").
         // Beim Zurückspringen aus der History selbst nicht erneut eintragen.
         if self.skip_history_push {
@@ -319,6 +360,8 @@ impl App {
                 self.refresh_queue_icons();
                 // Warteschlange + Position für den nächsten Start sichern.
                 self.save_queue();
+                // Aktuellen Kontext merken (Erkennung künftiger Queue-Wechsel).
+                self.prev_ctx = Some((self.queue.clone(), self.queue_pos));
             }
             Err(e) => tracing::error!("Playback failed: {e}"),
         }

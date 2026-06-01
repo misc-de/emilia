@@ -1032,6 +1032,33 @@ msgstr "Aktualisierung installiert. Bitte Emilia neu starten."
 msgid "Update failed. You can update manually: {cmd}"
 msgstr "Aktualisierung fehlgeschlagen. Manuell aktualisieren: {cmd}"
 
+msgid "Appearance"
+msgstr "Erscheinungsbild"
+
+msgid "Theme"
+msgstr "Farbschema"
+
+msgid "Automatic"
+msgstr "Automatisch"
+
+msgid "Dark"
+msgstr "Dunkel"
+
+msgid "Light"
+msgstr "Hell"
+
+msgid "Repeat"
+msgstr "Wiederholen"
+
+msgid "Turn off"
+msgstr "Ausschalten"
+
+msgid "Top genres"
+msgstr "Top-Genres"
+
+msgid "Drag handle to reorder; the switch hides a menu item."
+msgstr "Zum Umsortieren am Griff ziehen; der Schalter blendet einen Menüpunkt aus."
+
 #~ msgid "Cancel fetch"
 #~ msgstr "Abruf abbrechen"
 

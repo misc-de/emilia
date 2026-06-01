@@ -503,8 +503,7 @@ impl App {
         if !album_groups.is_empty() {
             let n = album_groups.len();
             let group = adw::PreferencesGroup::builder()
-                .title(&gettext("Albums"))
-                .description(ngettext_n("{n} album", "{n} albums", n as u32))
+                .title(&format!("{} ({n})", gettext("Albums")))
                 .build();
             for (album, display_artist, tracks) in &album_groups {
                 let album_meta = self
@@ -583,8 +582,7 @@ impl App {
         if !singles.is_empty() {
             let n = singles.len();
             let group = adw::PreferencesGroup::builder()
-                .title(&gettext("Singles"))
-                .description(ngettext_n("{n} song", "{n} songs", n as u32))
+                .title(&format!("{} ({n})", gettext("Singles")))
                 .build();
             for t in &singles {
                 // Cover-Reihenfolge (nie ein fremdes Ordnerbild):
@@ -853,8 +851,12 @@ impl App {
             // Mehrere CDs → je „CD 1" / „CD 2" … eine Gruppe (die Songzahl bzw.
             // der Titel steht bereits oben über den Abschnitten).
             for disc in &discs {
-                let group = adw::PreferencesGroup::builder().title(format!("CD {disc}")).build();
-                for t in tracks.iter().filter(|t| track_disc(t) == *disc) {
+                let disc_tracks: Vec<&Track> =
+                    tracks.iter().filter(|t| track_disc(t) == *disc).collect();
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("CD {disc} ({})", disc_tracks.len()))
+                    .build();
+                for t in disc_tracks {
                     group.add(&make_row(t));
                 }
                 content.append(&group);
@@ -866,7 +868,7 @@ impl App {
                 adw::PreferencesGroup::new()
             } else {
                 adw::PreferencesGroup::builder()
-                    .title(gtk::glib::markup_escape_text(album).as_str())
+                    .title(format!("{} ({})", gtk::glib::markup_escape_text(album), tracks.len()).as_str())
                     .build()
             };
             for t in &tracks {

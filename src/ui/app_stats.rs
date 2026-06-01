@@ -91,6 +91,10 @@ impl App {
         if !tracks.is_empty() {
             content.append(&top_group(&gettext("Top tracks"), &tracks, false));
         }
+        let genres = self.library.stats_top_genres(since, TOP_N).unwrap_or_default();
+        if !genres.is_empty() {
+            content.append(&top_group(&gettext("Top genres"), &genres, true));
+        }
 
         content.append(&weekday_group(
             &self.library.stats_by_weekday(since).unwrap_or([0; 7]),
@@ -244,44 +248,54 @@ fn hbar_row(label: &str, value: i64, max: i64) -> gtk::Box {
     row
 }
 
-/// Gehörte Zeit je Stunde des Tages als kompaktes 24-Balken-Diagramm.
+/// Gehörte Zeit je Stunde des Tages als 24-Balken-Diagramm. Direkt mit Cairo
+/// gezeichnet (eine `DrawingArea`) – robust auch auf schmalen Displays, statt
+/// der früheren 24 vertikalen ProgressBars, die zu Null-Breite kollabierten.
 fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder()
         .title(&gettext("By time of day"))
         .build();
-    let max = by_hour.iter().copied().max().unwrap_or(0).max(1);
-    let row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(2)
-        .homogeneous(true)
-        .height_request(110)
+    let data = *by_hour;
+    let area = gtk::DrawingArea::builder()
+        .height_request(120)
+        .hexpand(true)
         .margin_top(8)
         .margin_bottom(8)
         .margin_start(6)
         .margin_end(6)
         .build();
-    for h in 0..24usize {
-        let col = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let bar = gtk::ProgressBar::new();
-        bar.set_orientation(gtk::Orientation::Vertical);
-        bar.set_inverted(true); // von unten füllen
-        bar.set_fraction((by_hour[h] as f64 / max as f64).clamp(0.0, 1.0));
-        bar.set_vexpand(true);
-        bar.set_valign(gtk::Align::Fill);
-        // Balken füllen ihre (gleich breiten) Spalte; die Mindestbreite wird per
-        // CSS aufgehoben, damit alle 24 Stunden auch auf schmalen Displays passen.
-        bar.set_halign(gtk::Align::Fill);
-        bar.add_css_class("emilia-hourbar");
-        col.append(&bar);
-        // Beschriftung nur alle 6 Stunden (0, 6, 12, 18).
-        let txt = if h % 6 == 0 { format!("{h}") } else { String::new() };
-        let lbl = gtk::Label::new(Some(&txt));
-        lbl.add_css_class("dim-label");
-        lbl.add_css_class("caption");
-        col.append(&lbl);
-        row.append(&col);
-    }
-    g.add(&row);
+    area.set_draw_func(move |widget, cr, width, height| {
+        let max = data.iter().copied().max().unwrap_or(0).max(1) as f64;
+        let w = width as f64;
+        let h = height as f64;
+        let label_h = 16.0; // Platz für die Stundenbeschriftung unten
+        let chart_h = (h - label_h).max(1.0);
+        let n = 24.0;
+        let gap = 2.0;
+        let bar_w = ((w - gap * (n - 1.0)) / n).max(1.0);
+        // Vordergrundfarbe des Themes (passt sich hell/dunkel an).
+        let c = widget.color();
+        let (r, gc, b) = (c.red() as f64, c.green() as f64, c.blue() as f64);
+        cr.set_source_rgba(r, gc, b, 0.85);
+        for (i, &v) in data.iter().enumerate() {
+            let frac = (v as f64 / max).clamp(0.0, 1.0);
+            let bh = if v > 0 { (chart_h * frac).max(2.0) } else { 0.0 };
+            if bh > 0.0 {
+                let x = i as f64 * (bar_w + gap);
+                cr.rectangle(x, chart_h - bh, bar_w, bh);
+            }
+        }
+        let _ = cr.fill();
+        // Stundenbeschriftung alle 6 Stunden (0, 6, 12, 18).
+        cr.set_source_rgba(r, gc, b, 0.5);
+        cr.set_font_size(10.0);
+        for i in (0..24usize).step_by(6) {
+            let x = i as f64 * (bar_w + gap);
+            cr.move_to(x, h - 3.0);
+            let _ = cr.show_text(&i.to_string());
+        }
+    });
+    g.add(&area);
     g
 }
 
