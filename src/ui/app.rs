@@ -290,6 +290,8 @@ pub struct App {
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// Zustand der Geräte-Synchronisierung (Server/Client + Dialog-Widgets).
     pub(crate) sync: crate::ui::app_sync::SyncState,
+    /// Ob aktuell ein Gerät gekoppelt ist – steuert das grüne Sync-Icon oben.
+    pub(crate) sync_connected: bool,
 }
 
 #[derive(Debug)]
@@ -598,6 +600,20 @@ impl Component for App {
                             set_icon_name: "view-refresh-symbolic",
                             set_tooltip_text: Some(&gettext("Rescan folder")),
                             connect_clicked => Msg::Refresh,
+                        },
+                        // Geräte-Synchronisierung: öffnet ein kleines Menü mit den
+                        // Teilen-Optionen. Bei bestehender Kopplung wird das Icon grün
+                        // dargestellt (CSS-Klasse, siehe unten).
+                        #[name = "sync_btn"]
+                        pack_start = &gtk::MenuButton {
+                            set_icon_name: "emilia-share-symbolic",
+                            set_tooltip_text: Some(&gettext("Share")),
+                            #[watch]
+                            set_css_classes: if model.sync_connected {
+                                &["sync-connected"]
+                            } else {
+                                &[]
+                            },
                         },
                     },
 
@@ -1179,7 +1195,8 @@ impl Component for App {
             let css = gtk::CssProvider::new();
             css.load_from_string(
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
-                 row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }",
+                 row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
+                 button.sync-connected { color: @success_color; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -1424,6 +1441,7 @@ impl Component for App {
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             sync: crate::ui::app_sync::SyncState::default(),
+            sync_connected: false,
         };
 
         // Warteschlange vom letzten Mal wiederherstellen (nur noch vorhandene
@@ -1496,6 +1514,41 @@ impl Component for App {
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
+
+        // Teilen-Menü des Sync-Knopfs oben in der Kopfzeile: zwei Einträge, die den
+        // Sync-Dialog im jeweiligen Modus öffnen (Verbindung anbieten / QR-Code
+        // einlesen). Bei Klick das Popover schließen, damit der Dialog frei liegt.
+        {
+            let menu = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(2)
+                .build();
+            let popover = gtk::Popover::builder().css_classes(["menu"]).build();
+            let entries: [(String, &str, fn() -> Msg); 2] = [
+                (
+                    gettext("Offer connection"),
+                    "network-transmit-receive-symbolic",
+                    || Msg::ShareHost,
+                ),
+                (gettext("Scan QR code"), "camera-photo-symbolic", || Msg::ShareScan),
+            ];
+            for (label, icon, make) in entries {
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+                row.set_halign(gtk::Align::Start);
+                row.append(&gtk::Image::from_icon_name(icon));
+                row.append(&gtk::Label::new(Some(&label)));
+                let btn = gtk::Button::builder().child(&row).css_classes(["flat"]).build();
+                let sender = sender.clone();
+                let popover = popover.clone();
+                btn.connect_clicked(move |_| {
+                    popover.popdown();
+                    sender.input(make());
+                });
+                menu.append(&btn);
+            }
+            popover.set_child(Some(&menu));
+            widgets.sync_btn.set_popover(Some(&popover));
+        }
 
         // Seekleiste: Ziehen/Klicken springt im laufenden Titel an die Position.
         // `change-value` feuert nur bei Nutzer-Interaktion (nicht beim

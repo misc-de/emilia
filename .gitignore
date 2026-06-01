@@ -1,6 +1,13 @@
 # Rust-Build-Artefakte
 /target
 
+# Flatpak: lokale Build-Verzeichnisse und das gehostete OSTree-Repo
+/.flatpak-builder
+/.flatpak-build
+/repo
+/repo-*
+/*.flatpak
+
 # Kompilierte Übersetzungskataloge (werden aus po/<lang>.po via msgfmt gebaut)
 po/*/LC_MESSAGES/*.mo
 

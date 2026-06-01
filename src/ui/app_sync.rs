@@ -333,6 +333,8 @@ impl App {
                 }
             }
             SyncEvent::PeerPaired { peer_name } => {
+                // Gekoppelt → Sync-Icon oben grün einfärben.
+                self.sync_connected = true;
                 if let Some(nav) = &self.sync.nav {
                     nav.push_by_tag("paired");
                 }
@@ -387,11 +389,13 @@ impl App {
                 self.toast(&gettext("Sync complete"));
             }
             SyncEvent::PeerDisconnected => {
+                self.sync_connected = false;
                 if let Some(st) = &self.sync.status {
                     st.set_text(&gettext("Disconnected."));
                 }
             }
             SyncEvent::ServerStopped => {
+                self.sync_connected = false;
                 self.sync.stop = None;
             }
             SyncEvent::Error(msg) => self.toast(&msg),
@@ -400,6 +404,7 @@ impl App {
 
     /// Räumt den Sync-Zustand auf (Server stoppen, Kamera aus, Dialog schließen).
     pub(crate) fn teardown_sync(&mut self) {
+        self.sync_connected = false;
         if let Some(stop) = self.sync.stop.take() {
             stop.store(true, Ordering::Relaxed);
         }
