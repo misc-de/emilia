@@ -107,7 +107,15 @@ impl App {
     /// chronologisch nach Veröffentlichungsdatum. Tippen streamt; **langes
     /// Drücken** öffnet die Beitrag-Detailansicht.
     pub(crate) fn reload_newest(&mut self, sender: &ComponentSender<Self>) {
-        let mut eps = self.library.all_episodes().unwrap_or_default();
+        // Nur Episoden aus höchstens ~einem Monat anzeigen.
+        let cutoff = crate::core::podcast::recent_cutoff_key();
+        let mut eps: Vec<_> = self
+            .library
+            .all_episodes()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| crate::core::podcast::pubdate_key(e.published.as_deref()) >= cutoff)
+            .collect();
         eps.sort_by(|a, b| {
             crate::core::podcast::pubdate_key(b.published.as_deref())
                 .cmp(&crate::core::podcast::pubdate_key(a.published.as_deref()))

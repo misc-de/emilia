@@ -73,6 +73,16 @@ pub fn read_genre_composer(path: &Path) -> (Option<String>, Option<String>) {
     (genre, composer)
 }
 
+/// Liest den (unsynchronisierten) Liedtext aus den Tags, falls vorhanden.
+/// Die Audiodatei wird dabei nur gelesen.
+pub fn read_lyrics(path: &Path) -> Option<String> {
+    let tagged = lofty::read_from_path(path).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    tag.get_string(&lofty::tag::ItemKey::Lyrics)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Spieldauer einer Audiodatei in Sekunden (0, wenn nicht lesbar).
 pub fn duration_secs(path: &Path) -> u64 {
     lofty::read_from_path(path)

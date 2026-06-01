@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use adw::prelude::*;
@@ -56,15 +56,16 @@ pub(crate) enum FsKind {
 /// und vom Nutzer verschiebbar.
 // Die Labels sind englische gettext-`msgid`; am Anzeigeort mit `gettext()`
 // übersetzen (siehe Nutzung in `build_nav` / `win_title`).
-pub(crate) const SECTIONS: [(&str, &str, &str); 8] = [
-    ("files", "Files", "folder-symbolic"),
-    ("artists", "Artists", "avatar-default-symbolic"),
-    ("albums", "Albums", "media-optical-symbolic"),
+pub(crate) const SECTIONS: [(&str, &str, &str); 9] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("concerts", "Concerts", "emilia-concert-symbolic"),
     ("podcasts", "Podcasts", "microphone-symbolic"),
+    ("files", "Files", "folder-symbolic"),
+    ("artists", "Artists", "avatar-default-symbolic"),
+    ("albums", "Albums", "media-optical-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
+    ("stats", "Statistics", "emilia-stats-symbolic"),
 ];
 
 /// Liefert (Tooltip/Label als msgid, Icon) eines Bereichs anhand seines
@@ -112,6 +113,14 @@ const RESUME_END_GUARD_MS: i64 = 10_000;
 
 /// Resume-Position mit Wächtern: nahe Anfang oder Ende wird auf 0 gesetzt,
 /// damit ein quasi fertiger Titel beim nächsten Mal von vorn beginnt.
+/// Aktuelle Zeit in Unix-Sekunden (für die Hörstatistik-Zeitstempel).
+pub(crate) fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     if pos_ms < RESUME_MIN_POS_MS {
         0
@@ -129,6 +138,31 @@ pub(crate) enum PodcastView {
     Newest,
     /// Übersicht der abonnierten Podcasts.
     Overview,
+}
+
+/// Zeitraum der Hörstatistik. Bewusst gleitende Fenster (statt Kalenderjahr) –
+/// kalenderfrei und ohne zusätzliche Datums-Abhängigkeit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatsPeriod {
+    /// Letzte 4 Wochen.
+    Weeks4,
+    /// Letzte 12 Monate.
+    Year,
+    /// Seit Beginn.
+    All,
+}
+
+/// Laufende Hör-Sitzung eines Titels. Beim Wechsel/Ende wird sie als **ein**
+/// `play_event` in die Statistik geschrieben (siehe `finalize_play_session`).
+/// Rein lokal – verlässt das Gerät nie.
+pub(crate) struct PlaySession {
+    pub(crate) path: PathBuf,
+    /// Startzeitpunkt (Unix-Sekunden).
+    pub(crate) started_at: i64,
+    /// Tatsächlich gehörte Zeit (vom 1-s-Tick, nur während „Playing" gezählt).
+    pub(crate) played_ms: i64,
+    /// Schnappschuss der Titellänge (0 = noch unbekannt → bei Tick nachgezogen).
+    pub(crate) duration_ms: i64,
 }
 
 pub struct App {
@@ -189,6 +223,12 @@ pub struct App {
     /// 1-s-Tick aktualisiert. Wird beim Schließen einmalig in die DB geschrieben,
     /// damit beim harten Beenden höchstens ~1 s Hörposition verloren geht.
     pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
+    /// Laufende Hör-Sitzung für die Statistik (siehe [`PlaySession`]).
+    pub(crate) play_session: Option<PlaySession>,
+    /// Schnappschuss der Sitzung fürs Schließen (Pfad, Start, gehört, Dauer) –
+    /// analog `close_resume`, damit beim harten Beenden das letzte Ereignis
+    /// nicht verloren geht.
+    pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
     pub(crate) now_playing: Option<String>,
     pub(crate) playing: bool,
     /// Aktuelle Position und Gesamtdauer des laufenden Titels (ms) – für die
@@ -197,6 +237,10 @@ pub struct App {
     pub(crate) track_duration_ms: i64,
     pub(crate) shuffle: bool,
     pub(crate) context_target: Option<CtxTarget>,
+    /// Play-Zeile des offenen Detail-Dialogs samt zugehörigem Titel-Pfad. Wird
+    /// ausgeblendet, solange genau dieser Titel läuft, und wieder eingeblendet,
+    /// sobald er endet (siehe `refresh_ctx_play`).
+    pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
     pub(crate) toast_overlay: adw::ToastOverlay,
     // Konzerte
     // Konzerte/Hörbücher: (scope, key, Titel, is_dir) – wie Favoriten.
@@ -234,6 +278,10 @@ pub struct App {
     pub(crate) newest_list: gtk::ListBox,
     /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
     pub(crate) queue_list: gtk::ListBox,
+    /// Inhalt der Statistik-Seite (imperativ befüllt, wie die Listen oben).
+    pub(crate) stats_box: gtk::Box,
+    /// Aktuell gewählter Zeitraum der Hörstatistik.
+    pub(crate) stats_period: StatsPeriod,
     pub(crate) view_stack: adw::ViewStack,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
     pub(crate) nav_view: adw::NavigationView,
@@ -272,6 +320,12 @@ pub enum Msg {
     /// Wie `PlayAlbumTrack`, aber interpretenübergreifend (Alben-Übersicht):
     /// Queue = alle Titel des Albumnamens.
     PlayAlbumByNameTrack { album: String, path: String },
+    /// Tippen auf einen Album-/Ordner-Eintrag in Konzerten/Hörbüchern: dessen
+    /// Titel als Unterseite auflisten (statt direkt abzuspielen).
+    OpenEntryTracks { scope: String, key: String },
+    /// Einen Titel eines Ordner-Hörbuchs/-Konzerts abspielen (Queue = Ordner in
+    /// Reihenfolge, Start beim getippten).
+    PlayFolderTrack { folder: String, path: String },
     /// Ganzes Album in Track-Reihenfolge abspielen (Play-Button der Album-Zeile).
     PlayAlbum { artist: String, album: String },
     CtxPlay,
@@ -300,6 +354,10 @@ pub enum Msg {
     /// Der Sync-Dialog wurde geschlossen – Server/Kamera aufräumen.
     SyncDialogClosed,
     TrackFinished,
+    /// Zeitraum der Hörstatistik umschalten.
+    SetStatsPeriod(StatsPeriod),
+    /// Statistik-Seite neu aufbauen (z. B. beim Öffnen des Bereichs).
+    RefreshStats,
     /// Periodischer Tick: Resume-Position des laufenden Titels sichern.
     PersistResume,
     /// Befehl vom Sperrbildschirm / von Medientasten (MPRIS).
@@ -314,8 +372,6 @@ pub enum Msg {
     NavUp,
     FilesGoStart,
     Refresh,
-    /// Header-Knopf: Abruf starten – oder, falls schon läuft, abbrechen.
-    ToggleEnrich,
     /// Fortschritts-Leiste ausblenden (der Abruf läuft im Hintergrund weiter).
     HideEnrichBanner,
     TogglePlay,
@@ -543,22 +599,6 @@ impl Component for App {
                             set_tooltip_text: Some(&gettext("Rescan folder")),
                             connect_clicked => Msg::Refresh,
                         },
-                        pack_start = &gtk::Button {
-                            // Während eines laufenden Abrufs zum Abbrechen-Knopf.
-                            #[watch]
-                            set_icon_name: if model.enriching {
-                                "process-stop-symbolic"
-                            } else {
-                                "folder-download-symbolic"
-                            },
-                            #[watch]
-                            set_tooltip_text: Some(&if model.enriching {
-                                gettext("Cancel fetch")
-                            } else {
-                                gettext("Fetch cover & metadata online")
-                            }),
-                            connect_clicked => Msg::ToggleEnrich,
-                        },
                     },
 
                     // Top-Navigation (icon-only) – nur im schmalen (mobilen) Modus
@@ -567,8 +607,8 @@ impl Component for App {
                         set_halign: gtk::Align::Center,
                         set_spacing: 6,
                         set_visible: false,
-                        set_margin_top: 4,
-                        set_margin_bottom: 6,
+                        set_margin_top: 2,
+                        set_margin_bottom: 2,
                     },
 
                     // Globaler Fortschritt der Online-Anreicherung – die graue Leiste
@@ -784,7 +824,7 @@ impl Component for App {
                                         #[local_ref]
                                         playlists_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 12,
+                                            set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -821,7 +861,7 @@ impl Component for App {
                                     gtk::Box {
                                         set_orientation: gtk::Orientation::Horizontal,
                                         set_spacing: 6,
-                                        set_margin_top: 8,
+                                        set_margin_top: 2,
                                         set_margin_start: 12,
                                         set_margin_end: 12,
 
@@ -855,7 +895,7 @@ impl Component for App {
                                         #[local_ref]
                                         newest_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 12,
+                                            set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -878,7 +918,7 @@ impl Component for App {
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 12,
+                                            set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -905,7 +945,7 @@ impl Component for App {
                                         #[local_ref]
                                         favorites_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 12,
+                                            set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -933,7 +973,7 @@ impl Component for App {
                                         #[local_ref]
                                         audiobooks_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            set_margin_top: 12,
+                                            set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
@@ -948,6 +988,16 @@ impl Component for App {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.audiobook_items.is_empty(),
+                                    },
+                                },
+                            add_titled_with_icon[Some("stats"), &gettext("Statistics"), "emilia-stats-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    // Inhalt wird imperativ in `refresh_stats` befüllt.
+                                    #[local_ref]
+                                    stats_box -> gtk::Box {
+                                        set_orientation: gtk::Orientation::Vertical,
+                                        set_vexpand: true,
                                     },
                                 },
                         },
@@ -1302,6 +1352,7 @@ impl Component for App {
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
+        let stats_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
         let mut model = App {
             library,
@@ -1337,12 +1388,15 @@ impl Component for App {
             interrupted_queue: None,
             playing_path: None,
             close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            play_session: None,
+            close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
             now_playing: None,
             playing: false,
             position_ms: 0,
             track_duration_ms: 0,
             shuffle: false,
             context_target: None,
+            ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             toast_overlay: toast_overlay.clone(),
             concert_items: Vec::new(),
             concerts_list: concerts_list.clone(),
@@ -1358,6 +1412,8 @@ impl Component for App {
             newest_items: Vec::new(),
             newest_list: newest_list.clone(),
             queue_list: queue_list.clone(),
+            stats_box: stats_box.clone(),
+            stats_period: StatsPeriod::All,
             concert_hint_dismissed,
             hidden_sections,
             section_order,
@@ -1417,6 +1473,7 @@ impl Component for App {
         model.load_audiobooks(&sender);
         model.reload_playlists(&sender);
         model.reload_podcasts(&sender);
+        model.refresh_stats(&sender);
         // Podcast-Feed-Bilder einmalig im Hintergrund cachen, dann die Liste neu
         // aufbauen, damit die Cover erscheinen (kein UI-Block beim Start).
         sender.spawn_oneshot_command(|| {
@@ -1600,9 +1657,18 @@ impl Component for App {
             widgets.view_stack.set_visible_child_name(section);
         }
         sync_active(&widgets.view_stack, &nav_buttons);
-        widgets
-            .view_stack
-            .connect_visible_child_notify(move |stack| sync_active(stack, &nav_buttons));
+        {
+            let sender = sender.clone();
+            widgets
+                .view_stack
+                .connect_visible_child_notify(move |stack| {
+                    sync_active(stack, &nav_buttons);
+                    // Statistik beim Öffnen des Bereichs frisch berechnen.
+                    if stack.visible_child_name().as_deref() == Some("stats") {
+                        sender.input(Msg::RefreshStats);
+                    }
+                });
+        }
 
         // Wisch-Geste auf der ganzen Dateisystem-Seite: nach rechts = zurück.
         let swipe = gtk::GestureSwipe::new();
@@ -1626,11 +1692,21 @@ impl Component for App {
         }
         let stack_for_close = widgets.view_stack.clone();
         let close_resume = model.close_resume.clone();
+        let close_session = model.close_session.clone();
         root.connect_close_request(move |win| {
             // Letzte Hörposition sichern (deckt den Spalt zum 5-s-Speichern).
             if let Some((path, pos, dur)) = close_resume.borrow().clone() {
                 if let Ok(lib) = Library::open() {
                     let _ = lib.set_resume_path(&path, guarded_resume(pos, dur));
+                }
+            }
+            // Laufende Hör-Sitzung als letztes Ereignis sichern (sonst ginge der
+            // gerade laufende Titel bei hartem Beenden verloren).
+            if let Some((path, started_at, played_ms, dur)) = close_session.borrow().clone() {
+                if played_ms > 0 {
+                    if let Ok(lib) = Library::open() {
+                        let _ = lib.log_play(&path, started_at, played_ms, dur, false, None);
+                    }
                 }
             }
             let section = stack_for_close.visible_child_name();
@@ -1773,6 +1849,32 @@ impl Component for App {
             }
             Msg::OpenAlbumTracks { artist, album } => {
                 self.open_album_tracks(&sender, &artist, &album);
+            }
+            Msg::OpenEntryTracks { scope, key } => match scope.as_str() {
+                "album" => {
+                    // key = „Interpret\u{1}Album"
+                    let mut parts = key.splitn(2, '\u{1}');
+                    let artist = parts.next().unwrap_or("").to_string();
+                    let album = parts.next().unwrap_or("").to_string();
+                    self.open_album_tracks(&sender, &artist, &album);
+                }
+                "folder" => self.open_folder_tracks(&sender, &key),
+                _ => {}
+            },
+            Msg::PlayFolderTrack { folder, path } => {
+                let files: Vec<PathBuf> = self
+                    .folder_tracks_ordered(&folder)
+                    .into_iter()
+                    .map(|t| PathBuf::from(t.path))
+                    .collect();
+                let target = PathBuf::from(&path);
+                if let Some(pos) = files.iter().position(|p| *p == target) {
+                    self.queue = files;
+                    self.queue_pos = pos;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                    self.nav_view.pop_to_tag("main");
+                }
             }
             Msg::PlayArtistTrack { name, path } => {
                 // Queue = alle Titel des Interpreten (album-übergreifend),
@@ -2024,6 +2126,9 @@ impl Component for App {
             Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
             Msg::SyncDialogClosed => self.teardown_sync(),
             Msg::TrackFinished => {
+                // Bis zum Ende gehört → Hör-Sitzung als „durchgehört" abschließen,
+                // bevor das nachfolgende play_current eine neue Sitzung startet.
+                self.finalize_play_session(true);
                 // Titel zu Ende gehört → Resume vergessen, nächstes Mal von vorn.
                 // `take()` verhindert, dass play_current die (End-)Position erneut
                 // als Resume-Punkt speichert.
@@ -2046,6 +2151,11 @@ impl Component for App {
                     self.play_next();
                 }
             }
+            Msg::SetStatsPeriod(period) => {
+                self.stats_period = period;
+                self.refresh_stats(&sender);
+            }
+            Msg::RefreshStats => self.refresh_stats(&sender),
             Msg::PersistResume => {
                 if self.playing {
                     self.save_resume();
@@ -2066,6 +2176,22 @@ impl Component for App {
                     if let Some(entry) = self.close_resume.borrow_mut().as_mut() {
                         entry.1 = self.position_ms;
                         entry.2 = self.track_duration_ms;
+                    }
+                    // Gehörte Zeit der Statistik-Sitzung weiterzählen (Wanduhr, nur
+                    // während „Playing"; ~1 s je Tick). Die Dauer ggf. nachziehen,
+                    // falls sie beim Start noch nicht feststand.
+                    let dur = self.track_duration_ms;
+                    if let Some(s) = self.play_session.as_mut() {
+                        s.played_ms += 1000;
+                        if s.duration_ms == 0 {
+                            s.duration_ms = dur;
+                        }
+                    }
+                    if let Some(cs) = self.close_session.borrow_mut().as_mut() {
+                        if let Some(s) = self.play_session.as_ref() {
+                            cs.2 = s.played_ms;
+                            cs.3 = s.duration_ms;
+                        }
                     }
                 }
             }
@@ -2113,6 +2239,7 @@ impl Component for App {
                     M::Prev => self.play_prev(),
                     M::Stop => {
                         self.save_resume();
+                        self.finalize_play_session(false);
                         self.player.stop();
                         self.playing = false;
                         self.playing_path = None;
@@ -2168,16 +2295,6 @@ impl Component for App {
                 self.load_dir(&sender);
                 // „Neu einlesen" aktualisiert auch die Bibliothek (Interpreten/Alben).
                 self.start_scan(&sender, false);
-            }
-            Msg::ToggleEnrich => {
-                if self.enriching {
-                    self.enrich_cancel.store(true, Ordering::Relaxed);
-                    self.enrich_status = gettext("Cancelling …");
-                } else {
-                    // Manuell ausgelöst: einlesen + Online-Abruf. Dauerhaft erfolglose
-                    // Einträge (≥ 3 Versuche) werden trotzdem übersprungen.
-                    self.run_enrich(&sender, true);
-                }
             }
             Msg::HideEnrichBanner => self.enrich_banner_hidden = true,
             Msg::OpenSettings => self.open_settings(root, &sender),

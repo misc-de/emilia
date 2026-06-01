@@ -169,18 +169,26 @@ impl App {
                 });
                 row.add_suffix(&btn);
             }
-            // Läuft genau dieser Titel gerade, ein Pause-Symbol zeigen.
-            let is_active = scope == "track"
-                && self
-                    .playing_path
-                    .as_ref()
-                    .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
-            let play_icon = if is_active && self.playing {
-                "media-playback-pause-symbolic"
+            // In Konzerten/Hörbüchern öffnet ein Album/Ordner seine Titelliste
+            // (kein direktes Abspielen → kein Play-Icon, sondern ein Chevron);
+            // nur Einzelstücke werden direkt abgespielt und tragen das Play-Icon.
+            let opens_list = folder_as_album && scope != "track";
+            if opens_list {
+                row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
             } else {
-                "media-playback-start-symbolic"
-            };
-            row.add_suffix(&gtk::Image::from_icon_name(play_icon));
+                // Läuft genau dieser Titel gerade, ein Pause-Symbol zeigen.
+                let is_active = scope == "track"
+                    && self
+                        .playing_path
+                        .as_ref()
+                        .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
+                let play_icon = if is_active && self.playing {
+                    "media-playback-pause-symbolic"
+                } else {
+                    "media-playback-start-symbolic"
+                };
+                row.add_suffix(&gtk::Image::from_icon_name(play_icon));
+            }
 
             // Ziehgriff zum Umsortieren (falls erlaubt) – ganz rechts. Die
             // DragSource sitzt auf der ganzen Zeile; der Griff ist nur die
@@ -213,7 +221,17 @@ impl App {
 
             {
                 let sender = sender.clone();
-                row.connect_activated(move |_| sender.input(play(i)));
+                if opens_list {
+                    let (scope, key) = (scope.clone(), key.clone());
+                    row.connect_activated(move |_| {
+                        sender.input(Msg::OpenEntryTracks {
+                            scope: scope.clone(),
+                            key: key.clone(),
+                        });
+                    });
+                } else {
+                    row.connect_activated(move |_| sender.input(play(i)));
+                }
             }
             let long_press = gtk::GestureLongPress::new();
             {

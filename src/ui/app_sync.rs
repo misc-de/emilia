@@ -112,10 +112,15 @@ impl App {
             .build();
         let progress = gtk::ProgressBar::builder().show_text(true).visible(false).build();
 
+        // Die Modus-Seite zuerst hinzufügen → sie ist die (Wurzel-)Startseite.
+        // Server/Scan werden bei Bedarf per `push_by_tag` darüber geöffnet; käme
+        // „server" zuerst, wäre es bereits die Wurzel und `push_by_tag("server")`
+        // (aus `start_sync_server`) würde nichts tun (man bliebe auf der Modus-
+        // Seite).
+        nav.add(&self.sync_page_mode(sender));
         nav.add(&self.sync_page_server(&qr, &server_status));
         nav.add(&self.sync_page_scan(&cam));
         nav.add(&self.sync_page_paired(&status, &progress));
-        nav.push(&self.sync_page_mode(sender));
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());

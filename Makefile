@@ -41,6 +41,7 @@ install: build mo install-mo
 	install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg $(ICON_ACT)/list-high-priority-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg $(ICON_ACT)/emilia-favorite-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg $(ICON_ACT)/emilia-audiobook-symbolic.svg
+	install -Dm644 data/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg $(ICON_ACT)/emilia-stats-symbolic.svg
 	@echo "Installiert nach $(PREFIX). Ggf. Icon-Cache/Desktop-DB aktualisieren:"
 	@echo "  gtk4-update-icon-cache $(PREFIX)/share/icons/hicolor"
 	@echo "  update-desktop-database $(PREFIX)/share/applications"

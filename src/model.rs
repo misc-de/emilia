@@ -114,6 +114,34 @@ pub struct EpisodeRef {
     pub duration: Option<String>,
 }
 
+/// Aggregierte Kennzahlen der Hörstatistik über einen Zeitraum. Alles aus der
+/// rohen `play_event`-Tabelle berechnet (siehe [`crate::core::db`]).
+#[derive(Debug, Clone, Default)]
+pub struct StatTotals {
+    /// Tatsächlich gehörte Zeit (Summe aller Ereignisse, auch Teil-Wiedergaben).
+    pub total_played_ms: i64,
+    /// Als Wiedergabe zählende Ereignisse (über dem Schwellwert, Last.fm-Regel).
+    pub plays: i64,
+    /// Abgebrochene/übersprungene Ereignisse (unter dem Schwellwert).
+    pub skips: i64,
+    pub distinct_tracks: i64,
+    pub distinct_artists: i64,
+    pub distinct_albums: i64,
+}
+
+/// Ein Eintrag einer Rangliste (Top-Titel/-Alben/-Interpreten).
+#[derive(Debug, Clone)]
+pub struct StatEntry {
+    /// Anzeigename: Titel, Albumname oder Interpretenname.
+    pub name: String,
+    /// Zusatz: Interpret (bei Titel/Album), bei Interpreten leer.
+    pub detail: String,
+    /// Als Wiedergabe zählende Ereignisse.
+    pub plays: i64,
+    /// Tatsächlich gehörte Zeit (ms).
+    pub played_ms: i64,
+}
+
 impl TrackMeta {
     pub fn pending(path: impl Into<String>) -> Self {
         Self {

@@ -39,6 +39,39 @@ pub fn pubdate_key(s: Option<&str>) -> i64 {
     ((((year * 100 + month) * 100 + day) * 100 + h) * 100 + m) * 100 + sec
 }
 
+/// Sortier-/Vergleichsschlüssel `YYYYMMDD000000` für ein Datum (Tag genau).
+fn date_key(year: i64, month: i64, day: i64) -> i64 {
+    ((year * 100 + month) * 100 + day) * 1_000_000
+}
+
+/// Bürgerliches Datum (Jahr, Monat, Tag) aus Tagen seit der Unix-Epoche
+/// (Algorithmus nach Howard Hinnant).
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Vergleichsschlüssel für „vor ~einem Monat" (heute − 31 Tage), passend zu
+/// [`pubdate_key`]. Episoden mit `pubdate_key >= recent_cutoff_key()` gelten als
+/// neu (höchstens einen Monat zurück).
+pub fn recent_cutoff_key() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (y, m, d) = civil_from_days(secs / 86_400 - 31);
+    date_key(y, m, d)
+}
+
 /// Kurzform eines RFC-2822-Datums für die Anzeige: „29 May 2026" (ohne Wochentag,
 /// Uhrzeit und Zeitzone). Unparsbares wird unverändert zurückgegeben.
 pub fn pubdate_short(s: &str) -> String {

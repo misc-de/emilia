@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::model::{AlbumMeta, ArtistMeta, Episode, Track, TrackMeta};
+use crate::model::{AlbumMeta, ArtistMeta, Episode, StatEntry, StatTotals, Track, TrackMeta};
 
 /// Speicherort der Datenbank: `$XDG_DATA_HOME/emilia/library.db`.
 pub fn db_path() -> PathBuf {
@@ -229,6 +229,22 @@ impl Library {
                 duration   TEXT,
                 PRIMARY KEY (podcast_id, position)
             );
+
+            -- Hörstatistik: ein Ereignis je gehörtem Titel (roh; nichts wird
+            -- vorberechnet). Bleibt rein lokal – verlässt das Gerät nie. Interpret/
+            -- Album/Genre werden zur Auswertung über `path` an `track` gejoint,
+            -- nicht hier dupliziert (gleiches Prinzip wie bei den Online-Metadaten).
+            CREATE TABLE IF NOT EXISTS play_event (
+                id          INTEGER PRIMARY KEY,
+                path        TEXT NOT NULL,
+                started_at  INTEGER NOT NULL,           -- Unix-Sekunden (Start)
+                played_ms   INTEGER NOT NULL,           -- tatsächlich gehört (nur „Playing")
+                duration_ms INTEGER,                    -- Schnappschuss (Datei kann verschwinden)
+                completed   INTEGER NOT NULL DEFAULT 0, -- 1 = bis EOS durchgehört, 0 = Skip/Wechsel
+                source      TEXT                        -- 'queue'|'album'|'artist'|… | NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_play_event_path ON play_event(path);
+            CREATE INDEX IF NOT EXISTS idx_play_event_time ON play_event(started_at);
             "#,
         )?;
 
@@ -1322,6 +1338,256 @@ impl Library {
         })
     }
 
+    // ---- Hörstatistik (play_event) ----
+
+    /// SQL-Prädikat (über Spalten von `play_event`), ab dem ein Ereignis als
+    /// „Wiedergabe" zählt: Last.fm-Regel – mindestens 30 s **oder** die halbe
+    /// Titellänge gehört. Darunter gilt es als Skip/Abbruch.
+    /// `play_event` ist in allen Auswertungs-Queries als `e` aliasiert (Spalten
+    /// wie `duration_ms` gibt es auch in `track` → sonst mehrdeutig).
+    const COUNTS_AS_PLAY: &'static str =
+        "(e.played_ms >= 30000 OR (e.duration_ms > 0 AND e.played_ms * 2 >= e.duration_ms))";
+
+    /// Schreibt ein Hörereignis und führt nebenbei `track.last_played` nach
+    /// (die Spalte existiert seit jeher, war aber ungenutzt).
+    pub fn log_play(
+        &self,
+        path: &str,
+        started_at: i64,
+        played_ms: i64,
+        duration_ms: i64,
+        completed: bool,
+        source: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO play_event (path, started_at, played_ms, duration_ms, completed, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                path,
+                started_at,
+                played_ms.max(0),
+                (duration_ms > 0).then_some(duration_ms),
+                completed as i64,
+                source,
+            ],
+        )?;
+        // Nur vorwärts setzen (ein Resume aus der Vergangenheit darf nicht zurückdrehen).
+        self.conn.execute(
+            "UPDATE track SET last_played = ?2
+             WHERE path = ?1 AND (last_played IS NULL OR last_played < ?2)",
+            rusqlite::params![path, started_at],
+        )?;
+        Ok(())
+    }
+
+    /// Gesamtkennzahlen ab `since` (Unix-Sekunden; 0 = seit Beginn). Die
+    /// `distinct_*`-Zahlen zählen nur, was tatsächlich als Wiedergabe gilt, und
+    /// werden – wie die Ranglisten – über feat.-/Albumnamen gefaltet.
+    pub fn stats_totals(&self, since: i64) -> Result<StatTotals> {
+        let (total_played_ms, plays, skips): (i64, i64, i64) = self.conn.query_row(
+            &format!(
+                "SELECT COALESCE(SUM(e.played_ms), 0),
+                        COALESCE(SUM(CASE WHEN {p} THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN {p} THEN 0 ELSE 1 END), 0)
+                 FROM play_event e WHERE e.started_at >= ?1",
+                p = Self::COUNTS_AS_PLAY
+            ),
+            [since],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let distinct_tracks: i64 = self.conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM (
+                     SELECT e.path FROM play_event e
+                     WHERE e.started_at >= ?1 AND {p} GROUP BY e.path
+                 )",
+                p = Self::COUNTS_AS_PLAY
+            ),
+            [since],
+            |r| r.get(0),
+        )?;
+        Ok(StatTotals {
+            total_played_ms,
+            plays,
+            skips,
+            distinct_tracks,
+            distinct_artists: self.stats_top_artists(since, usize::MAX)?.len() as i64,
+            distinct_albums: self.stats_top_albums(since, usize::MAX)?.len() as i64,
+        })
+    }
+
+    /// Top-Titel ab `since`, nach Wiedergaben (dann gehörter Zeit) sortiert.
+    pub fn stats_top_tracks(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT t.title, e.path, COALESCE(t.artist, '') AS artist,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             LEFT JOIN track t ON t.path = e.path
+             WHERE e.started_at >= ?1
+             GROUP BY e.path
+             HAVING plays > 0
+             ORDER BY plays DESC, ms DESC
+             LIMIT ?2",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![since, limit as i64], |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?;
+        Ok(rows
+            .filter_map(|r| r.ok())
+            .map(|(title, path, artist, plays, played_ms)| StatEntry {
+                name: title
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| file_stem_of(&path)),
+                detail: artist,
+                plays,
+                played_ms,
+            })
+            .collect())
+    }
+
+    /// Top-Alben ab `since`. Wie [`Self::albums_overview`] über den Albumnamen
+    /// gefaltet; Anzeige-Interpret = Haupt-Interpret mit den meisten Wiedergaben.
+    pub fn stats_top_albums(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT COALESCE(t.artist, '') AS artist, t.album,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             JOIN track t ON t.path = e.path
+             WHERE e.started_at >= ?1 AND t.album IS NOT NULL AND t.album <> ''
+             GROUP BY COALESCE(t.artist, ''), t.album",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let raw = stmt
+            .query_map([since], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+
+        use std::collections::HashMap;
+        let mut map: HashMap<String, StatEntry> = HashMap::new();
+        let mut votes: HashMap<String, HashMap<String, i64>> = HashMap::new();
+        for (artist, album, plays, ms) in raw {
+            let key = album.to_lowercase();
+            let e = map.entry(key.clone()).or_insert_with(|| StatEntry {
+                name: album.clone(),
+                detail: String::new(),
+                plays: 0,
+                played_ms: 0,
+            });
+            e.plays += plays;
+            e.played_ms += ms;
+            let primary = crate::core::artist::primary_artist(&artist);
+            *votes.entry(key).or_default().entry(primary).or_insert(0) += plays;
+        }
+        for (key, e) in map.iter_mut() {
+            if let Some((name, _)) = votes.get(key).and_then(|v| v.iter().max_by_key(|(_, c)| **c)) {
+                e.detail = name.clone();
+            }
+        }
+        Ok(Self::rank(map.into_values().collect(), limit))
+    }
+
+    /// Top-Interpreten ab `since`. Über den Haupt-Interpreten (feat.-Auflösung)
+    /// gefaltet, damit „A" und „A feat. B" zusammenfallen.
+    pub fn stats_top_artists(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT COALESCE(t.artist, '') AS artist,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             JOIN track t ON t.path = e.path
+             WHERE e.started_at >= ?1 AND t.artist IS NOT NULL AND t.artist <> ''
+             GROUP BY COALESCE(t.artist, '')",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let raw = stmt
+            .query_map([since], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+
+        use std::collections::HashMap;
+        let mut map: HashMap<String, StatEntry> = HashMap::new();
+        for (artist, plays, ms) in raw {
+            let primary = crate::core::artist::primary_artist(&artist);
+            let e = map
+                .entry(crate::core::artist::norm_key(&primary))
+                .or_insert_with(|| StatEntry {
+                    name: primary.clone(),
+                    detail: String::new(),
+                    plays: 0,
+                    played_ms: 0,
+                });
+            e.plays += plays;
+            e.played_ms += ms;
+        }
+        Ok(Self::rank(map.into_values().collect(), limit))
+    }
+
+    /// Nur tatsächliche Wiedergaben behalten, nach Wiedergaben (dann Zeit)
+    /// sortieren und auf `limit` kürzen.
+    fn rank(mut entries: Vec<StatEntry>, limit: usize) -> Vec<StatEntry> {
+        entries.retain(|e| e.plays > 0);
+        entries.sort_by(|a, b| {
+            b.plays
+                .cmp(&a.plays)
+                .then(b.played_ms.cmp(&a.played_ms))
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        entries.truncate(limit);
+        entries
+    }
+
+    /// Gehörte Zeit (ms) je Stunde des Tages (Index 0..23, lokale Zeit).
+    pub fn stats_by_hour(&self, since: i64) -> Result<[i64; 24]> {
+        let mut out = [0i64; 24];
+        let mut stmt = self.conn.prepare(
+            "SELECT CAST(strftime('%H', started_at, 'unixepoch', 'localtime') AS INTEGER),
+                    SUM(played_ms)
+             FROM play_event WHERE started_at >= ?1 GROUP BY 1",
+        )?;
+        let rows = stmt.query_map([since], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+        for (h, ms) in rows.flatten() {
+            if (0..24).contains(&h) {
+                out[h as usize] = ms;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Gehörte Zeit (ms) je Wochentag (Index 0 = Sonntag … 6 = Samstag, lokal).
+    pub fn stats_by_weekday(&self, since: i64) -> Result<[i64; 7]> {
+        let mut out = [0i64; 7];
+        let mut stmt = self.conn.prepare(
+            "SELECT CAST(strftime('%w', started_at, 'unixepoch', 'localtime') AS INTEGER),
+                    SUM(played_ms)
+             FROM play_event WHERE started_at >= ?1 GROUP BY 1",
+        )?;
+        let rows = stmt.query_map([since], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+        for (d, ms) in rows.flatten() {
+            if (0..7).contains(&d) {
+                out[d as usize] = ms;
+            }
+        }
+        Ok(out)
+    }
+
     // ---- Mehrere Bilder je Album / Interpret (Galerie) ----
 
     /// Ersetzt die gespeicherten Album-Bilder (Reihenfolge = idx).
@@ -1604,6 +1870,64 @@ mod tests {
             duration_ms: Some(60_000),
             resume_ms: 0,
         }
+    }
+
+    #[test]
+    fn play_events_aggregate_into_stats() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/m/a1.mp3", Some("Alice"), Some("Album X")))
+            .unwrap();
+        lib.upsert_track(&track("/m/a2.mp3", Some("Alice feat. Bob"), Some("Album X")))
+            .unwrap();
+        lib.upsert_track(&track("/m/c1.mp3", Some("Carol"), Some("Album Y")))
+            .unwrap();
+
+        // Dauer der Test-Tracks ist 60 s → Schwellwert effektiv 30 s.
+        let t0: i64 = 1_700_000_000;
+        lib.log_play("/m/a1.mp3", t0, 45_000, 60_000, true, Some("queue")).unwrap();
+        lib.log_play("/m/a1.mp3", t0 + 100, 50_000, 60_000, true, None).unwrap();
+        lib.log_play("/m/a2.mp3", t0 + 200, 40_000, 60_000, false, None).unwrap();
+        lib.log_play("/m/c1.mp3", t0 + 300, 5_000, 60_000, false, None).unwrap(); // Skip
+
+        let tot = lib.stats_totals(0).unwrap();
+        assert_eq!(tot.plays, 3);
+        assert_eq!(tot.skips, 1);
+        assert_eq!(tot.total_played_ms, 45_000 + 50_000 + 40_000 + 5_000);
+        assert_eq!(tot.distinct_tracks, 2); // a1, a2 (c1 nur Skip)
+        assert_eq!(tot.distinct_artists, 1); // Alice (a2 fällt via primary auf Alice)
+        assert_eq!(tot.distinct_albums, 1); // Album X (Album Y nur Skip)
+
+        let tracks = lib.stats_top_tracks(0, 10).unwrap();
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].plays, 2); // a1 zweimal
+        assert_eq!(tracks[0].detail, "Alice");
+
+        let artists = lib.stats_top_artists(0, 10).unwrap();
+        assert_eq!(artists.len(), 1);
+        assert_eq!(artists[0].name, "Alice");
+        assert_eq!(artists[0].plays, 3); // a1×2 + a2×1, gefaltet
+
+        let albums = lib.stats_top_albums(0, 10).unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].name, "Album X");
+        assert_eq!(albums[0].plays, 3);
+        assert_eq!(albums[0].detail, "Alice");
+
+        // last_played wird mitgeführt (vorwärts: das spätere Ereignis gewinnt).
+        let lp: Option<i64> = lib
+            .conn
+            .query_row("SELECT last_played FROM track WHERE path = ?1", ["/m/a1.mp3"], |r| r.get(0))
+            .unwrap();
+        assert_eq!(lp, Some(t0 + 100));
+
+        // Verteilungen bewahren die Gesamtzeit (zeitzonenunabhängig geprüft).
+        assert_eq!(lib.stats_by_hour(0).unwrap().iter().sum::<i64>(), tot.total_played_ms);
+        assert_eq!(lib.stats_by_weekday(0).unwrap().iter().sum::<i64>(), tot.total_played_ms);
+
+        // since-Filter: ab t0+250 bleibt nur der Skip (c1).
+        let recent = lib.stats_totals(t0 + 250).unwrap();
+        assert_eq!(recent.plays, 0);
+        assert_eq!(recent.skips, 1);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use relm4::gtk;
 
 use crate::core::scanner;
 use crate::model::Track;
-use crate::ui::app::{guarded_resume, App};
+use crate::ui::app::{guarded_resume, App, PlaySession};
 use crate::ui::fs_row::FsInput;
 
 impl App {
@@ -36,6 +36,8 @@ impl App {
             self.entries.send(i, FsInput::SetQueued(q));
             self.entries.send(i, FsInput::SetActive { active: a, playing });
         }
+        // Play-Zeile eines offenen Detail-Dialogs mit dem Wiedergabestand abgleichen.
+        self.refresh_ctx_play();
     }
 
     /// Baut die Zufalls-Reihenfolge neu auf (Fisher-Yates), mit dem aktuell
@@ -93,6 +95,8 @@ impl App {
                 // zurückspulen, damit die Play-Taste wieder auf „Play" steht und
                 // ein erneuter Druck von vorn beginnt (siehe TogglePlay).
                 self.save_resume();
+                // Laufende Sitzung abschließen (No-op, falls bereits per EOS getan).
+                self.finalize_play_session(false);
                 self.player.stop();
                 self.playing = false;
                 self.playing_path = None;
@@ -222,9 +226,34 @@ impl App {
             .set_resume_path(&path_str, guarded_resume(pos, dur));
     }
 
+    /// Schließt die laufende Hör-Sitzung ab und schreibt sie als ein
+    /// `play_event` in die Statistik. `completed` = bis zum Ende (EOS) gehört.
+    /// Ohne Sitzung passiert nichts (idempotent).
+    pub(crate) fn finalize_play_session(&mut self, completed: bool) {
+        if let Some(s) = self.play_session.take() {
+            let dur = if s.duration_ms > 0 {
+                s.duration_ms
+            } else {
+                self.track_duration_ms
+            };
+            let _ = self.library.log_play(
+                &s.path.to_string_lossy(),
+                s.started_at,
+                s.played_ms,
+                dur,
+                completed,
+                None, // Quelle (queue/album/…) bleibt v1 ungenutzt, Spalte reserviert.
+            );
+        }
+        *self.close_session.borrow_mut() = None;
+    }
+
     pub(crate) fn play_current(&mut self) {
         // Position des bisher laufenden Titels sichern, bevor ein neuer geladen wird.
         self.save_resume();
+        // Bisherige Hör-Sitzung als Wechsel/Skip abschließen (kam der Aufruf von
+        // einem EOS, ist sie bereits abgeschlossen → No-op).
+        self.finalize_play_session(false);
         let Some(path) = self.queue.get(self.queue_pos).cloned() else {
             return;
         };
@@ -272,6 +301,16 @@ impl App {
                 let resumable = matches!(&track, Some(t) if self.should_resume(t));
                 *self.close_resume.borrow_mut() = resumable
                     .then(|| (path_str.clone(), start, self.track_duration_ms));
+                // Neue Hör-Sitzung für die Statistik starten.
+                let now = crate::ui::app::unix_now();
+                self.play_session = Some(PlaySession {
+                    path: path.clone(),
+                    started_at: now,
+                    played_ms: 0,
+                    duration_ms: self.track_duration_ms,
+                });
+                *self.close_session.borrow_mut() =
+                    Some((path_str.clone(), now, 0, self.track_duration_ms));
                 // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
                 self.refresh_queue_icons();
                 // Warteschlange + Position für den nächsten Start sichern.

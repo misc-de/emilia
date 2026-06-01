@@ -29,9 +29,33 @@ impl App {
         // Cover/Foto bzw. – bei mehreren Bildern – ein Karussell mit Punkten.
         self.append_cover_or_gallery(&content, entry, sender, &dialog);
 
-        // "Mehr Infos" – aufklappbar mit Detailzeilen
+        // Liedtext (falls in den Datei-Tags vorhanden) – aufklappbar, oberhalb
+        // der Infos (wie die Eigenschaften ein Pulldown).
+        if let CtxTarget::Fs(e) = entry {
+            if !e.is_dir() {
+                if let Some(lyrics) = crate::core::scanner::read_lyrics(e.path()) {
+                    let group = adw::PreferencesGroup::new();
+                    let exp = adw::ExpanderRow::builder().title(&gettext("Lyrics")).build();
+                    let label = gtk::Label::builder()
+                        .label(&lyrics)
+                        .wrap(true)
+                        .xalign(0.0)
+                        .selectable(true)
+                        .margin_top(8)
+                        .margin_bottom(8)
+                        .margin_start(12)
+                        .margin_end(12)
+                        .build();
+                    exp.add_row(&label);
+                    group.add(&exp);
+                    content.append(&group);
+                }
+            }
+        }
+
+        // „Infos" – aufklappbar mit Detailzeilen
         let info_group = adw::PreferencesGroup::new();
-        let expander = adw::ExpanderRow::builder().title(&gettext("More info")).build();
+        let expander = adw::ExpanderRow::builder().title(&gettext("Info")).build();
         for (label, value) in self.ctx_info_lines(entry) {
             let row = adw::ActionRow::builder()
                 .title(&label)
@@ -75,14 +99,16 @@ impl App {
         );
 
         // Play-Aktion: bei Album/Interpret eigener Text und eigene Reihenfolge.
-        // Beim gerade laufenden Titel keine „Abspielen"-Aktion anbieten.
-        let is_current = if let CtxTarget::Fs(e) = entry {
-            !e.is_dir()
-                && self.now_playing.is_some()
-                && self.queue.get(self.queue_pos).map(|p| p.as_path()) == Some(e.path().as_path())
-        } else {
-            false
+        // Pfad des Ziel-Titels (nur Dateien) – Grundlage für die dynamische
+        // Sichtbarkeit der „Abspielen"-Aktion.
+        let current_path: Option<std::path::PathBuf> = match entry {
+            CtxTarget::Fs(e) if !e.is_dir() => Some(e.path().clone()),
+            _ => None,
         };
+        // Solange genau dieser Titel **läuft**, keine „Abspielen"-Aktion zeigen;
+        // endet er, wird sie wieder eingeblendet (siehe `refresh_ctx_play`).
+        let is_current =
+            current_path.is_some() && self.playing_path.as_deref() == current_path.as_deref();
 
         // Interpret mit nur **einem** Lied: „Interpret abspielen" + Reihenfolge
         // ist unsinnig (und die Reihenfolge erfasst Einzellieder ohne Album gar
@@ -138,9 +164,10 @@ impl App {
                 });
             }
         }
-        if !is_current {
-            action_group.add(&play_row);
-        }
+        action_group.add(&play_row);
+        play_row.set_visible(!is_current);
+        // Diese Play-Zeile merken, damit sie nach Titelende wieder erscheint.
+        *self.ctx_play.borrow_mut() = current_path.map(|p| (play_row.clone(), p));
 
         // Favorit-Stern (Markieren/Entfernen).
         let is_fav = self.target_is_favorite(entry);
@@ -208,7 +235,21 @@ impl App {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         toolbar.set_content(Some(&scroller));
         dialog.set_child(Some(&toolbar));
+        // Gemerkte Play-Zeile wieder vergessen, sobald der Dialog schließt.
+        {
+            let ctx_play = self.ctx_play.clone();
+            dialog.connect_closed(move |_| *ctx_play.borrow_mut() = None);
+        }
         dialog.present(Some(root));
+    }
+
+    /// Blendet die gemerkte Play-Zeile des Detail-Dialogs passend ein/aus:
+    /// versteckt, solange genau dieser Titel läuft; sichtbar, sobald er endet
+    /// oder gewechselt wird.
+    pub(crate) fn refresh_ctx_play(&self) {
+        if let Some((row, path)) = self.ctx_play.borrow().as_ref() {
+            row.set_visible(self.playing_path.as_deref() != Some(path.as_path()));
+        }
     }
 
     /// „Teilen"-Dialog: Verbindung anbieten (Dienst starten) oder QR-Code einlesen.

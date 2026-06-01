@@ -29,6 +29,8 @@ enum AlbumPlay {
     Artist(String),
     /// Alben-Übersicht: alle Titel des Albumnamens (Interpret egal).
     Name(String),
+    /// Ordner-Inhalt (Hörbuch/Konzert): genau die Dateien dieses Ordners.
+    Folder(String),
 }
 
 /// Album-Name ohne CD-/Disc-Suffix, damit Mehr-CD-Alben zusammenfallen:
@@ -635,6 +637,42 @@ impl App {
         self.render_album_tracks(sender, tracks, "", album, AlbumPlay::Name(album.to_string()));
     }
 
+    /// Titel eines Ordners in Abspielreihenfolge (CD/Disc, Tracknummer, Pfad).
+    /// Grundlage für die Titelliste eines als Album dargestellten Ordners.
+    pub(crate) fn folder_tracks_ordered(&self, folder: &str) -> Vec<Track> {
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        let mut tracks: Vec<Track> = self
+            .library
+            .all_tracks()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.path.starts_with(&prefix))
+            .collect();
+        tracks.sort_by(|a, b| {
+            a.disc_no
+                .unwrap_or(1)
+                .cmp(&b.disc_no.unwrap_or(1))
+                .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        tracks
+    }
+
+    /// Tippen auf ein als Album dargestelltes **Ordner**-Hörbuch/-Konzert: listet
+    /// dessen Titel auf. Tippen auf einen Titel spielt den Ordner ab dort.
+    pub(crate) fn open_folder_tracks(&self, sender: &ComponentSender<Self>, folder: &str) {
+        let tracks = self.folder_tracks_ordered(folder);
+        let refs: Vec<&Track> = tracks.iter().collect();
+        let album = most_common_album_base(&refs).unwrap_or_else(|| {
+            std::path::Path::new(folder)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        });
+        let name = most_common_artist(&tracks);
+        self.render_album_tracks(sender, tracks, &name, &album, AlbumPlay::Folder(folder.to_string()));
+    }
+
     /// Gemeinsame Darstellung einer Album-Titelliste. `play` bestimmt, wie ein
     /// angetippter Titel abgespielt wird (interpretenbezogen oder nach Albumname).
     fn render_album_tracks(
@@ -720,6 +758,10 @@ impl App {
                         },
                         AlbumPlay::Name(al) => Msg::PlayAlbumByNameTrack {
                             album: al.clone(),
+                            path: path.clone(),
+                        },
+                        AlbumPlay::Folder(f) => Msg::PlayFolderTrack {
+                            folder: f.clone(),
                             path: path.clone(),
                         },
                     });

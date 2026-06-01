@@ -38,8 +38,14 @@ impl App {
             .child(&content)
             .build();
         let toolbar = adw::ToolbarView::new();
+        let dialog = adw::Dialog::builder()
+            .title(&gettext("Queue"))
+            .content_width(400)
+            .content_height(620)
+            .build();
 
-        // Kopfzeile mit Mülleimer links oben zum Leeren (mit Rückfrage).
+        // Kopfzeile mit Mülleimer links oben zum Leeren (mit Rückfrage). Nach dem
+        // Leeren schließt sich der Dialog automatisch.
         let header = adw::HeaderBar::new();
         let clear = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
@@ -49,6 +55,7 @@ impl App {
         {
             let sender = sender.clone();
             let root = root.clone();
+            let dialog = dialog.clone();
             clear.connect_clicked(move |_| {
                 let confirm = adw::AlertDialog::new(
                     Some(&gettext("Clear queue?")),
@@ -60,9 +67,11 @@ impl App {
                 confirm.set_default_response(Some("cancel"));
                 confirm.set_close_response("cancel");
                 let sender = sender.clone();
+                let dialog = dialog.clone();
                 confirm.connect_response(None, move |_, resp| {
                     if resp == "clear" {
                         sender.input(Msg::QueueClear);
+                        dialog.close();
                     }
                 });
                 confirm.present(Some(&root));
@@ -71,12 +80,6 @@ impl App {
         header.pack_start(&clear);
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&scroller));
-
-        let dialog = adw::Dialog::builder()
-            .title(&gettext("Queue"))
-            .content_width(400)
-            .content_height(620)
-            .build();
         dialog.set_child(Some(&toolbar));
         dialog.present(Some(root));
     }
