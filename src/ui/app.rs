@@ -1869,6 +1869,8 @@ impl Component for App {
             Msg::ShowArtistDetail(index) => {
                 let meta = self.artists.guard().get(index).map(|c| c.meta.clone());
                 if let Some(meta) = meta {
+                    // Foto des geöffneten Interpreten vorrangig nachladen.
+                    self.fetch_focus_artist(&sender, &meta.name);
                     self.context_target = Some(CtxTarget::Artist(meta));
                     self.open_context_menu(root, &sender);
                 }
@@ -1876,11 +1878,14 @@ impl Component for App {
             Msg::ShowAlbumDetail(index) => {
                 let meta = self.albums.guard().get(index).map(|c| c.meta.clone());
                 if let Some(meta) = meta {
+                    // Cover des geöffneten Albums vorrangig nachladen.
+                    self.fetch_focus_album(&sender, &meta.artist, &meta.album);
                     self.context_target = Some(CtxTarget::Album(meta));
                     self.open_context_menu(root, &sender);
                 }
             }
             Msg::ShowAlbumDetailFor { artist, album } => {
+                self.fetch_focus_album(&sender, &artist, &album);
                 // Album-Metadaten laden (für Cover/Jahr), sonst leeren Eintrag.
                 let meta = self
                     .library
@@ -1912,10 +1917,13 @@ impl Component for App {
             Msg::OpenArtistTracks(index) => {
                 let meta = self.artists.guard().get(index).map(|c| c.meta.clone());
                 if let Some(meta) = meta {
+                    // Foto des geöffneten Interpreten vorrangig nachladen.
+                    self.fetch_focus_artist(&sender, &meta.name);
                     self.open_artist_tracks(&sender, &meta);
                 }
             }
             Msg::OpenAlbumTracks { artist, album } => {
+                self.fetch_focus_album(&sender, &artist, &album);
                 self.open_album_tracks(&sender, &artist, &album);
             }
             Msg::OpenEntryTracks { scope, key } => match scope.as_str() {
@@ -2772,15 +2780,15 @@ impl Component for App {
                 // Bibliothek ist eingelesen → Ansichten aktualisieren.
                 self.reload_albums();
                 self.reload_artists();
-                // Danach automatisch online nachladen – aber nur, wenn gewünscht,
-                // nicht schon ein Abruf läuft und die Verbindung nicht getaktet ist
-                // (also WLAN/LAN, keine mobilen Daten). Der lokale Scan lief schon,
-                // daher hier ohne erneutes Einlesen.
+                // Danach automatisch online nachladen – ohne Zutun des Nutzers,
+                // sofern gewünscht, nicht schon ein Abruf läuft und überhaupt eine
+                // Verbindung besteht (auf jeder Verbindung, auch getaktet). Der
+                // lokale Scan lief schon, daher hier ohne erneutes Einlesen.
                 if then_enrich
                     && self.auto_enrich
                     && !self.enriching
                     && self.root_dir.is_some()
-                    && online_unmetered()
+                    && online_available()
                 {
                     // Automatischer Lauf (ohne erneuten Tag-Scan).
                     self.run_enrich(&sender, false);
@@ -2830,13 +2838,14 @@ pub(crate) fn fmt_duration(ms: i64) -> String {
     }
 }
 
-/// Ob ein automatischer Online-Abruf erlaubt ist: Verbindung vorhanden **und**
-/// nicht getaktet (also WLAN/LAN, keine mobilen Daten). Grundlage über
-/// `gio::NetworkMonitor` (nutzt NetworkManager) – ohne zusätzliche Abhängigkeit.
-fn online_unmetered() -> bool {
+/// Ob ein Online-Abruf sinnvoll ist: schlicht, ob überhaupt eine Verbindung
+/// besteht. Bewusst **ohne** Taktungs-Prüfung – der Sync läuft auf jeder
+/// Verbindung (Wunsch des Nutzers). Die Offline-Prüfung bleibt, damit im
+/// Funkloch nicht reihenweise „Fehlversuche" verbucht werden (die einen Eintrag
+/// dauerhaft sperren würden). Grundlage: `gio::NetworkMonitor` (NetworkManager).
+pub(crate) fn online_available() -> bool {
     use gtk::gio::prelude::NetworkMonitorExt;
-    let nm = gtk::gio::NetworkMonitor::default();
-    nm.is_network_available() && !nm.is_network_metered()
+    gtk::gio::NetworkMonitor::default().is_network_available()
 }
 
 /// Häufigste Interpreten-Angabe (rohe Tag-Zeichenkette) einer Titelmenge – dient
@@ -2968,6 +2977,66 @@ impl App {
         if self.is_mobile() {
             dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
         }
+    }
+
+    /// Lädt das **Foto des gerade geöffneten Interpreten** sofort im Hintergrund
+    /// nach – damit zuerst erscheint, was der Nutzer ansieht (Vorrang vor dem
+    /// laufenden Massen-Sync). Tut nichts ohne Netz, bei bereits zugeordnetem Foto
+    /// oder nach zu vielen erfolglosen Versuchen. Nach Erfolg werden die Ansichten
+    /// neu geladen (`Cmd::ReloadViews`).
+    pub(crate) fn fetch_focus_artist(&self, sender: &ComponentSender<Self>, name: &str) {
+        let name = name.trim().to_string();
+        if name.is_empty() || !online_available() {
+            return;
+        }
+        let matched = self
+            .library
+            .get_artist_meta(&name)
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.status == "matched");
+        if matched || self.library.artist_attempts(&name) >= crate::ui::enrich::MAX_ATTEMPTS {
+            return;
+        }
+        sender.spawn_oneshot_command(move || {
+            if let Ok(lib) = Library::open() {
+                let client = crate::core::online::OnlineClient::new();
+                let (image, errored) = match client.fetch_artist_image(&name) {
+                    Ok(img) => (img, false),
+                    Err(_) => (None, true),
+                };
+                let meta = crate::core::online::store_artist_image(&name, image, errored);
+                let _ = lib.upsert_artist_meta(&meta);
+            }
+            Cmd::ReloadViews
+        });
+    }
+
+    /// Wie [`Self::fetch_focus_artist`], nur für das **Cover des gerade geöffneten
+    /// Albums**. Übersprungen, wenn bereits ein Cover vorliegt, kein Netz besteht
+    /// oder zu viele Versuche erfolglos blieben.
+    pub(crate) fn fetch_focus_album(&self, sender: &ComponentSender<Self>, artist: &str, album: &str) {
+        let artist = artist.trim().to_string();
+        let album = album.trim().to_string();
+        if artist.is_empty() || album.is_empty() || !online_available() {
+            return;
+        }
+        let has_cover = self
+            .library
+            .get_album_meta(&artist, &album)
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.cover_path.as_deref().is_some_and(|p| !p.trim().is_empty()));
+        if has_cover || self.library.album_attempts(&artist, &album) >= crate::ui::enrich::MAX_ATTEMPTS {
+            return;
+        }
+        sender.spawn_oneshot_command(move || {
+            if let Ok(lib) = Library::open() {
+                let client = crate::core::online::OnlineClient::new();
+                let _ = crate::core::online::enrich_album(&client, &lib, &artist, &album);
+            }
+            Cmd::ReloadViews
+        });
     }
 
     /// Nur nach oben, solange wir innerhalb des Startordners bleiben.

@@ -28,6 +28,13 @@ const USER_AGENT: &str = "Emilia/0.1.0 ( https://cais.de )";
 
 /// MusicBrainz-Richtlinie: höchstens eine Anfrage pro Sekunde.
 pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
+/// Bei Server-seitigem Rate-Limit (HTTP 429/503) so oft mit Pause wiederholen,
+/// bevor ein echter Fehler gemeldet wird.
+const RL_MAX_RETRIES: usize = 4;
+/// Erste Backoff-Pause bei Rate-Limit (verdoppelt sich je Versuch, gedeckelt).
+const RL_BASE_BACKOFF: Duration = Duration::from_millis(1500);
+/// Obergrenze der Backoff-Pause.
+const RL_MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// AcoustID erlaubt einige Anfragen/Sekunde – konservativ gedrosselt.
 pub const ACOUSTID_DELAY: Duration = Duration::from_millis(350);
 /// Anzahl paralleler Abrufe für Künstlerfotos (Deezer verträgt das gut).
@@ -98,6 +105,41 @@ impl OnlineClient {
         Self { agent }
     }
 
+    /// GET mit höflichem Umgang mit Rate-Limits: Bei `429`/`503` wird – soweit per
+    /// `Retry-After` angegeben, sonst per Backoff – **pausiert und erneut versucht**,
+    /// statt sofort zu scheitern. So bricht ein vorübergehendes Limit den Lauf nicht
+    /// ab und verbraucht auch keinen „Fehlversuch". `404` ergibt `Ok(None)` (kein
+    /// Inhalt). Andere Fehler – und anhaltendes Limit nach allen Versuchen – werden
+    /// durchgereicht. Setzt stets unseren User-Agent (von allen Diensten geduldet).
+    fn call_get(&self, url: &str) -> Result<Option<ureq::Response>> {
+        let mut backoff = RL_BASE_BACKOFF;
+        let mut attempt = 0usize;
+        loop {
+            match self.agent.get(url).set("User-Agent", USER_AGENT).call() {
+                Ok(resp) => return Ok(Some(resp)),
+                // Kein Inhalt hinterlegt (404) – kein Fehler.
+                Err(ureq::Error::Status(404, _)) => return Ok(None),
+                // Rate-Limit: pausieren und – bis zum Limit – erneut versuchen.
+                Err(ureq::Error::Status(code, resp)) if code == 429 || code == 503 => {
+                    attempt += 1;
+                    if attempt > RL_MAX_RETRIES {
+                        return Err(ureq::Error::Status(code, resp).into());
+                    }
+                    let wait = resp
+                        .header("Retry-After")
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .map(Duration::from_secs)
+                        .unwrap_or(backoff)
+                        .min(RL_MAX_BACKOFF);
+                    tracing::debug!("Rate-limited ({code}) on {url}; pausing {wait:?}");
+                    std::thread::sleep(wait);
+                    backoff = (backoff * 2).min(RL_MAX_BACKOFF);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
     /// Sucht das passendste MusicBrainz-Release zu (Interpret, Album).
     /// Liefert `Ok(None)`, wenn nichts hinreichend Passendes gefunden wurde.
     pub fn match_release(&self, artist: &str, album: &str) -> Result<Option<ReleaseMatch>> {
@@ -111,12 +153,10 @@ impl OnlineClient {
             percent_encode(&query)
         );
 
-        let search: MbSearch = self
-            .agent
-            .get(&url)
-            .set("User-Agent", USER_AGENT)
-            .call()?
-            .into_json()?;
+        let search: MbSearch = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(None),
+        };
 
         // MusicBrainz sortiert nach Score; wir nehmen den besten Treffer,
         // verlangen aber eine Mindestgüte, um Fehlzuordnungen zu vermeiden.
@@ -154,8 +194,8 @@ impl OnlineClient {
     }
 
     pub(crate) fn get_image(&self, url: &str) -> Result<Option<Vec<u8>>> {
-        match self.agent.get(url).set("User-Agent", USER_AGENT).call() {
-            Ok(resp) => {
+        match self.call_get(url)? {
+            Some(resp) => {
                 let mut buf = Vec::new();
                 // Deckel gegen versehentlich riesige Antworten (10 MB).
                 resp.into_reader()
@@ -164,8 +204,7 @@ impl OnlineClient {
                 Ok(Some(buf))
             }
             // Kein Cover hinterlegt (404) – kein Fehler.
-            Err(ureq::Error::Status(404, _)) => Ok(None),
-            Err(e) => Err(e.into()),
+            None => Ok(None),
         }
     }
 
@@ -177,7 +216,10 @@ impl OnlineClient {
             "https://api.deezer.com/search/artist?q={}&limit=1",
             percent_encode(name)
         );
-        let search: DzSearch = self.agent.get(&url).call()?.into_json()?;
+        let search: DzSearch = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(None),
+        };
         let Some(artist) = search.data.into_iter().next() else {
             return Ok(None);
         };
@@ -201,10 +243,9 @@ impl OnlineClient {
     /// Booklet, …). Liefert je (Bytes, Art). Leere Liste, wenn nichts da ist.
     pub fn fetch_album_gallery(&self, mbid: &str) -> Result<Vec<(Vec<u8>, String)>> {
         let url = format!("https://coverartarchive.org/release/{mbid}");
-        let list: CaaList = match self.agent.get(&url).set("User-Agent", USER_AGENT).call() {
-            Ok(resp) => resp.into_json()?,
-            Err(ureq::Error::Status(404, _)) => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
+        let list: CaaList = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(Vec::new()),
         };
         let mut out = Vec::new();
         for img in list.images.into_iter().take(MAX_GALLERY) {
@@ -227,12 +268,10 @@ impl OnlineClient {
             "https://musicbrainz.org/ws/2/artist?query={}&fmt=json&limit=1",
             percent_encode(&query)
         );
-        let search: MbArtistSearch = self
-            .agent
-            .get(&url)
-            .set("User-Agent", USER_AGENT)
-            .call()?
-            .into_json()?;
+        let search: MbArtistSearch = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(None),
+        };
         Ok(search.artists.into_iter().find(|a| a.score >= 90).map(|a| a.id))
     }
 
@@ -244,10 +283,9 @@ impl OnlineClient {
         mbid: &str,
     ) -> Result<Vec<(Vec<u8>, String)>> {
         let url = format!("https://webservice.fanart.tv/v3/music/{mbid}?api_key={api_key}");
-        let fa: FanartArtist = match self.agent.get(&url).set("User-Agent", USER_AGENT).call() {
-            Ok(resp) => resp.into_json()?,
-            Err(ureq::Error::Status(404, _)) => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
+        let fa: FanartArtist = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(Vec::new()),
         };
         let mut out = Vec::new();
         for t in fa.artistthumb.into_iter().chain(fa.artistbackground.into_iter()) {
@@ -277,7 +315,10 @@ impl OnlineClient {
             fp.duration as u64,
             percent_encode(&fp.fingerprint),
         );
-        let resp: AcoustIdResp = self.agent.get(&url).call()?.into_json()?;
+        let resp: AcoustIdResp = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(None),
+        };
 
         // Bestes Result (höchster Score) mit mindestens einem Recording.
         let best = resp
