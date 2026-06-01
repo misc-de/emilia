@@ -125,7 +125,42 @@ impl App {
         while let Some(child) = self.newest_list.first_child() {
             self.newest_list.remove(&child);
         }
+
+        // Einsortieren nach Aktualität: Heute / Gestern / Diese Woche / Diesen
+        // Monat. Die Liste ist absteigend sortiert, daher sind die Abschnitte
+        // zusammenhängend; je Abschnitt eine eigene Gruppe (mit Überschrift), und
+        // ein Eintrag steht nur im obersten passenden Abschnitt (keine Dopplung).
+        let (today, yesterday, week_start) = crate::core::podcast::recent_day_buckets();
+        let bucket_of = |k: i64| -> usize {
+            if k >= today {
+                0
+            } else if k >= yesterday {
+                1
+            } else if k >= week_start {
+                2
+            } else {
+                3
+            }
+        };
+        let bucket_title = |b: usize| match b {
+            0 => gettext("Today"),
+            1 => gettext("Yesterday"),
+            2 => gettext("This week"),
+            _ => gettext("This month"),
+        };
+
+        let mut cur_bucket: Option<usize> = None;
+        let mut group: Option<adw::PreferencesGroup> = None;
         for (i, ep) in self.newest_items.iter().enumerate() {
+            let b = bucket_of(crate::core::podcast::pubdate_key(ep.published.as_deref()));
+            // Neuer Abschnitt → neue Gruppe mit Überschrift (nur wenn etwas da ist).
+            if cur_bucket != Some(b) {
+                cur_bucket = Some(b);
+                let g = adw::PreferencesGroup::builder().title(&bucket_title(b)).build();
+                self.newest_list.append(&g);
+                group = Some(g);
+            }
+
             let mut subtitle = ep.podcast_title.clone();
             if let Some(p) = ep.published.as_deref().filter(|p| !p.trim().is_empty()) {
                 subtitle.push_str(" · ");
@@ -167,7 +202,9 @@ impl App {
                 });
             }
             row.add_controller(lp);
-            self.newest_list.append(&row);
+            if let Some(g) = &group {
+                g.add(&row);
+            }
         }
     }
 
@@ -318,6 +355,13 @@ impl App {
     /// Episoden-Unterseite eines Podcasts (Tippen = Episode streamen).
     pub(crate) fn open_podcast(&self, sender: &ComponentSender<Self>, id: i64, title: &str) {
         let episodes = self.library.episodes(id).unwrap_or_default();
+        // Cover des Podcasts einmal ermitteln und in allen Episodenzeilen zeigen.
+        let cover = self
+            .podcast_items
+            .iter()
+            .find(|(pid, _, _, _)| *pid == id)
+            .and_then(|(_, _, img, _)| img.as_deref())
+            .and_then(crate::core::online::podcast_image_path);
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -351,7 +395,11 @@ impl App {
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .activatable(true)
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("microphone-symbolic"));
+            row.add_css_class("emilia-flush");
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "microphone-symbolic",
+            ));
             row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
             {
                 let sender = sender.clone();

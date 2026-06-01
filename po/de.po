@@ -942,6 +942,20 @@ msgstr "Interpreten-Bilder"
 msgid "Album art"
 msgstr "Album-Bilder"
 
+# --- Podcast-Zeitabschnitte („Neuste"-Liste) ---
+
+msgid "Today"
+msgstr "Heute"
+
+msgid "Yesterday"
+msgstr "Gestern"
+
+msgid "This week"
+msgstr "Diese Woche"
+
+msgid "This month"
+msgstr "Diesen Monat"
+
 # --- Selbst-Aktualisierung (Flatpak) ---
 
 msgid "Check for updates"

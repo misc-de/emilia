@@ -252,7 +252,7 @@ fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
     let max = by_hour.iter().copied().max().unwrap_or(0).max(1);
     let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
-        .spacing(3)
+        .spacing(2)
         .homogeneous(true)
         .height_request(110)
         .margin_top(8)
@@ -268,7 +268,10 @@ fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
         bar.set_fraction((by_hour[h] as f64 / max as f64).clamp(0.0, 1.0));
         bar.set_vexpand(true);
         bar.set_valign(gtk::Align::Fill);
-        bar.set_halign(gtk::Align::Center);
+        // Balken füllen ihre (gleich breiten) Spalte; die Mindestbreite wird per
+        // CSS aufgehoben, damit alle 24 Stunden auch auf schmalen Displays passen.
+        bar.set_halign(gtk::Align::Fill);
+        bar.add_css_class("emilia-hourbar");
         col.append(&bar);
         // Beschriftung nur alle 6 Stunden (0, 6, 12, 18).
         let txt = if h % 6 == 0 { format!("{h}") } else { String::new() };

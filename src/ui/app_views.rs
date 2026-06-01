@@ -72,6 +72,45 @@ fn album_base(name: &str) -> String {
     }
 }
 
+/// Disc-Nummer aus einem Ordner-Segment wie „CD2", „CD 2", „Disc 03", „Teil 2".
+/// Nur wenn das Segment mit einem Disc-Schlüsselwort **beginnt** und darauf
+/// (ggf. nach Trennzeichen) Ziffern folgen – so lösen „Greatest Hits" o. Ä.
+/// nichts aus. Sonst `None`.
+fn disc_from_segment(seg: &str) -> Option<u32> {
+    let s = seg.trim().to_ascii_lowercase();
+    const MARKERS: [&str; 6] = ["cd", "disc", "disk", "teil", "part", "folge"];
+    for kw in MARKERS {
+        if let Some(rest) = s.strip_prefix(kw) {
+            let digits: String = rest
+                .trim_start_matches(|c: char| matches!(c, ' ' | '_' | '.' | '#' | '-'))
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if let Ok(n) = digits.parse::<u32>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Effektive Disc-Nummer eines Titels: bevorzugt das `disc_no`-Tag, sonst aus
+/// einem CD-/Disc-**Unterordner** des Pfads abgeleitet (Hörbücher ohne Disc-Tag),
+/// sonst 1. Es zählen nur Verzeichnis-Segmente, nicht der Dateiname.
+pub(crate) fn track_disc(t: &Track) -> u32 {
+    if let Some(d) = t.disc_no {
+        return d;
+    }
+    std::path::Path::new(&t.path)
+        .parent()
+        .into_iter()
+        .flat_map(|d| d.components())
+        .filter_map(|c| c.as_os_str().to_str())
+        .filter_map(disc_from_segment)
+        .last()
+        .unwrap_or(1)
+}
+
 /// Häufigster Album-Basistitel einer Titelmenge (für den Anzeigetitel eines
 /// als Album zusammengefassten Unterordners).
 fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
@@ -386,9 +425,10 @@ impl App {
             })
             .collect();
         tracks.sort_by(|a, b| {
-            a.disc_no
-                .unwrap_or(1)
-                .cmp(&b.disc_no.unwrap_or(1))
+            // Disc aus Tag oder CD-Unterordner (Hörbücher ohne Disc-Tag), dann
+            // Tracknummer, dann Pfad.
+            track_disc(a)
+                .cmp(&track_disc(b))
                 .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
                 .then_with(|| a.path.cmp(&b.path))
         });
@@ -649,9 +689,10 @@ impl App {
             .filter(|t| t.path.starts_with(&prefix))
             .collect();
         tracks.sort_by(|a, b| {
-            a.disc_no
-                .unwrap_or(1)
-                .cmp(&b.disc_no.unwrap_or(1))
+            // Disc aus Tag oder CD-Unterordner (Hörbücher ohne Disc-Tag), dann
+            // Tracknummer, dann Pfad.
+            track_disc(a)
+                .cmp(&track_disc(b))
                 .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
                 .then_with(|| a.path.cmp(&b.path))
         });
@@ -697,18 +738,46 @@ impl App {
             .as_deref()
             .and_then(crate::ui::widgets::thumb_cached);
 
+        // Hörbuch? Dann steht oben der Titel statt der Anzahl der Lieder.
+        let is_audiobook = {
+            use crate::core::category::Area;
+            let areas = match &play {
+                AlbumPlay::Folder(f) => self.library.folder_areas(f),
+                _ => self.library.album_areas(&display_artist, album),
+            };
+            areas.contains(&Area::Audiobooks)
+        };
+
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
+            .spacing(12)
             .margin_top(12)
             .margin_bottom(12)
             .margin_start(12)
             .margin_end(12)
             .build();
 
+        // Zeile **über** der Überschrift: bei Hörbüchern der Titel, sonst die
+        // Anzahl der Lieder (+ Jahr).
+        let header_text = if is_audiobook {
+            album.to_string()
+        } else {
+            album_subtitle(year, tracks.len())
+        };
+        if !header_text.trim().is_empty() {
+            let lbl = gtk::Label::builder()
+                .label(gtk::glib::markup_escape_text(&header_text).as_str())
+                .xalign(0.0)
+                .wrap(true)
+                .margin_start(4)
+                .build();
+            lbl.add_css_class(if is_audiobook { "title-4" } else { "dim-label" });
+            content.append(&lbl);
+        }
+
         // Vorhandene Discs ermitteln (None gilt als CD 1). Mehr als eine → die
         // Titel werden nach „CD 1" / „CD 2" … getrennt dargestellt.
-        let mut discs: Vec<u32> = tracks.iter().map(|t| t.disc_no.unwrap_or(1)).collect();
+        let mut discs: Vec<u32> = tracks.iter().map(track_disc).collect();
         discs.sort_unstable();
         discs.dedup();
         let multi_disc = discs.len() > 1;
@@ -781,26 +850,25 @@ impl App {
         };
 
         if multi_disc {
-            for (i, disc) in discs.iter().enumerate() {
-                let group = adw::PreferencesGroup::builder()
-                    .title(format!("CD {disc}"))
-                    .build();
-                // Album-Jahr/Titelzahl als Untertitel der ersten Disc-Gruppe.
-                if i == 0 {
-                    group.set_description(Some(
-                        album_subtitle(year, tracks.len()).as_str(),
-                    ));
-                }
-                for t in tracks.iter().filter(|t| t.disc_no.unwrap_or(1) == *disc) {
+            // Mehrere CDs → je „CD 1" / „CD 2" … eine Gruppe (die Songzahl bzw.
+            // der Titel steht bereits oben über den Abschnitten).
+            for disc in &discs {
+                let group = adw::PreferencesGroup::builder().title(format!("CD {disc}")).build();
+                for t in tracks.iter().filter(|t| track_disc(t) == *disc) {
                     group.add(&make_row(t));
                 }
                 content.append(&group);
             }
         } else {
-            let group = adw::PreferencesGroup::builder()
-                .title(gtk::glib::markup_escape_text(album))
-                .description(album_subtitle(year, tracks.len()))
-                .build();
+            // Einzel-CD: bei Hörbüchern ohne wiederholte Titel-Überschrift (steht
+            // schon oben), sonst der Albumname als Gruppentitel.
+            let group = if is_audiobook {
+                adw::PreferencesGroup::new()
+            } else {
+                adw::PreferencesGroup::builder()
+                    .title(gtk::glib::markup_escape_text(album).as_str())
+                    .build()
+            };
             for t in &tracks {
                 group.add(&make_row(t));
             }

@@ -72,6 +72,28 @@ pub fn recent_cutoff_key() -> i64 {
     date_key(y, m, d)
 }
 
+/// Schwellen-Schlüssel (passend zu [`pubdate_key`]) für die Gruppierung der
+/// neuesten Episoden – jeweils Mitternacht: `(heute, gestern, vor 7 Tagen)`.
+/// „Diese Woche" meint bewusst die **letzten 7 Tage (rollierend)**, nicht die
+/// Kalenderwoche; älter als das = „Diesen Monat".
+pub fn recent_day_buckets() -> (i64, i64, i64) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let today_days = secs / 86_400;
+    let key_of = |days: i64| {
+        let (y, m, d) = civil_from_days(days);
+        date_key(y, m, d)
+    };
+    let today = key_of(today_days);
+    let yesterday = key_of(today_days - 1);
+    // Rollierend: alles ab heute − 6 Tagen zählt zu „diese Woche" (= letzte 7 Tage).
+    let week_start = key_of(today_days - 6);
+    (today, yesterday, week_start)
+}
+
 /// Kurzform eines RFC-2822-Datums für die Anzeige: „29 May 2026" (ohne Wochentag,
 /// Uhrzeit und Zeitzone). Unparsbares wird unverändert zurückgegeben.
 pub fn pubdate_short(s: &str) -> String {
@@ -97,13 +119,86 @@ pub struct PodcastFeed {
     pub episodes: Vec<Episode>,
 }
 
+/// Dekodiert verbliebene HTML-/XML-Entities in Feed-Texten (v. a. Titel):
+/// numerische Referenzen (`&#128512;`, `&#x1F600;` → Emoji/Smiley) und gängige
+/// benannte Entities. Viele Feeds sind doppelt kodiert oder nutzen HTML-Entities,
+/// die der XML-Parser stehen lässt – das holt diese Zeichen wieder hervor.
+pub(crate) fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let named = |name: &str| -> Option<char> {
+        Some(match name {
+            "amp" => '&',
+            "lt" => '<',
+            "gt" => '>',
+            "quot" => '"',
+            "apos" => '\'',
+            "nbsp" => '\u{00A0}',
+            "rsquo" => '\u{2019}',
+            "lsquo" => '\u{2018}',
+            "rdquo" => '\u{201D}',
+            "ldquo" => '\u{201C}',
+            "hellip" => '\u{2026}',
+            "mdash" => '\u{2014}',
+            "ndash" => '\u{2013}',
+            "auml" => 'ä',
+            "ouml" => 'ö',
+            "uuml" => 'ü',
+            "Auml" => 'Ä',
+            "Ouml" => 'Ö',
+            "Uuml" => 'Ü',
+            "szlig" => 'ß',
+            "eacute" => 'é',
+            "copy" => '©',
+            "reg" => '®',
+            "trade" => '™',
+            "deg" => '°',
+            "euro" => '€',
+            "middot" => '·',
+            "bull" => '•',
+            _ => return None,
+        })
+    };
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after = &rest[amp + 1..];
+        // Entity-Namen bis zum ';' (kurz halten, sonst kein echtes Entity).
+        if let Some(semi) = after.find(';').filter(|&p| p > 0 && p <= 12) {
+            let ent = &after[..semi];
+            let decoded = if let Some(hex) =
+                ent.strip_prefix("#x").or_else(|| ent.strip_prefix("#X"))
+            {
+                u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+            } else if let Some(dec) = ent.strip_prefix('#') {
+                dec.parse::<u32>().ok().and_then(char::from_u32)
+            } else {
+                named(ent)
+            };
+            if let Some(c) = decoded {
+                out.push(c);
+                rest = &after[semi + 1..];
+                continue;
+            }
+        }
+        // Kein gültiges Entity → das „&" unverändert übernehmen.
+        out.push('&');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Liest einen Podcast-RSS-Feed. Nur Einträge mit Audio-Enclosure werden
 /// übernommen; Fehler, wenn keine Audio-Episode gefunden wird.
 pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
     let channel = rss::Channel::read_from(xml)?;
 
     let title = {
-        let t = channel.title().trim();
+        let t = decode_entities(channel.title().trim());
+        let t = t.trim();
         if t.is_empty() {
             "Podcast".to_string()
         } else {
@@ -126,10 +221,9 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
         }
         let title = item
             .title()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Episode")
-            .to_string();
+            .map(|t| decode_entities(t.trim()))
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "Episode".to_string());
         episodes.push(Episode {
             guid: item.guid().map(|g| g.value().to_string()),
             title,

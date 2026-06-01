@@ -278,7 +278,9 @@ pub struct App {
     pub(crate) podcast_view: PodcastView,
     /// Neueste Episoden über alle Abos (für die „Neuste"-Ansicht).
     pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
-    pub(crate) newest_list: gtk::ListBox,
+    /// Container der „Neuste"-Liste: je Zeitabschnitt (Heute/Gestern/…) eine
+    /// eigene Gruppe, imperativ in `reload_newest` befüllt.
+    pub(crate) newest_list: gtk::Box,
     /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
     pub(crate) queue_list: gtk::ListBox,
     /// Inhalt der Statistik-Seite (imperativ befüllt, wie die Listen oben).
@@ -593,7 +595,11 @@ impl Component for App {
                 },
 
                 #[wrap(Some)]
+                #[name = "content_view"]
                 set_content = &adw::ToolbarView {
+                    // Desktop: etwas Luft zwischen Seitenleiste und Inhalt. Im
+                    // schmalen (mobilen) Modus per Breakpoint wieder auf 0 (siehe `init`).
+                    set_margin_start: 20,
                     add_top_bar = &adw::HeaderBar {
                         #[wrap(Some)]
                         #[name = "win_title"]
@@ -891,8 +897,9 @@ impl Component for App {
                                         set_orientation: gtk::Orientation::Horizontal,
                                         set_spacing: 6,
                                         set_margin_top: 2,
-                                        // Etwas Luft unter den Schaltern vor der Liste.
-                                        set_margin_bottom: 10,
+                                        // Etwas (knappe) Luft unter den Schaltern; die erste
+                                        // Abschnitts-Überschrift sitzt so ~10px höher.
+                                        set_margin_bottom: 4,
                                         set_margin_start: 12,
                                         set_margin_end: 12,
 
@@ -924,13 +931,15 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.podcast_view == PodcastView::Newest && !model.newest_items.is_empty(),
                                         #[local_ref]
-                                        newest_list -> gtk::ListBox {
+                                        newest_list -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
                                             set_valign: gtk::Align::Start,
+                                            // Erste Überschrift dichter an die Umschalter (≈10px höher).
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
                                         },
                                     },
                                     adw::StatusPage {
@@ -1033,13 +1042,16 @@ impl Component for App {
                                 },
                         },
 
-                        // Zentrierter Spinner während des Einlesens
+                        // Zentrierter Spinner während des Einlesens – auf einer
+                        // halbtransparenten Fläche, damit die Schrift über dem
+                        // Inhalt lesbar bleibt (CSS-Klasse, siehe `init`).
                         add_overlay = &gtk::Box {
                             set_orientation: gtk::Orientation::Vertical,
                             set_halign: gtk::Align::Center,
                             set_valign: gtk::Align::Center,
                             set_spacing: 12,
                             set_can_target: false,
+                            add_css_class: "emilia-loading",
                             #[watch]
                             set_visible: model.loading,
 
@@ -1054,9 +1066,10 @@ impl Component for App {
                         },
                     },
 
-                    // Mini-Player unten mit Transport-Steuerung. Solange nichts
-                    // geladen ist, komplett ausblenden – so bekommt der Inhalt
-                    // den Platz der unteren Leiste.
+                    // Mini-Player unten mit Transport-Steuerung. Die Leiste bleibt
+                    // immer sichtbar; ohne ausgewählten Titel werden nur die
+                    // Songzeile (Titel + Seekleiste) ausgeblendet und die
+                    // Transport-Tasten ausgegraut.
                     add_bottom_bar = &gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
                         set_spacing: 2,
@@ -1064,15 +1077,13 @@ impl Component for App {
                         set_margin_bottom: 6,
                         set_margin_start: 10,
                         set_margin_end: 10,
-                        #[watch]
-                        set_visible: model.now_playing.is_some(),
 
                         gtk::Button {
                             add_css_class: "flat",
                             set_tooltip_text: Some(&gettext("Details of the current track")),
-                            // Nur anklickbar, wenn etwas läuft.
+                            // Ohne ausgewählten Titel ganz ausblenden (gibt Platz frei).
                             #[watch]
-                            set_sensitive: model.now_playing.is_some(),
+                            set_visible: model.now_playing.is_some(),
                             connect_clicked => Msg::OpenNowPlaying,
                             #[wrap(Some)]
                             set_child = &gtk::Label {
@@ -1119,21 +1130,25 @@ impl Component for App {
                         },
 
                         gtk::CenterBox {
-                            // EQ ganz links, Transport-Tasten + Zufall mittig.
+                            // Links EQ + Zufall, mittig die Transport-Tasten. Die
+                            // mittige Gruppe ist symmetrisch (Zurück | Play | Vor),
+                            // damit Play/Zurück/Vor unabhängig von EQ/Zufall/
+                            // Warteschlange in der **absoluten Mitte** bleiben.
                             #[wrap(Some)]
-                            set_start_widget = &gtk::Button {
-                                set_label: "EQ",
-                                set_tooltip_text: Some(&gettext("Equalizer for this track")),
-                                set_valign: gtk::Align::Center,
-                                add_css_class: "flat",
-                                #[watch]
-                                set_sensitive: model.now_playing.is_some(),
-                                connect_clicked => Msg::OpenCurrentEq,
-                            },
-                            #[wrap(Some)]
-                            set_center_widget = &gtk::Box {
+                            set_start_widget = &gtk::Box {
                                 set_spacing: 6,
-                                // Zufall mittig bei den Transport-Tasten (nur ab 2 Titeln).
+                                set_valign: gtk::Align::Center,
+                                gtk::Button {
+                                    set_label: "EQ",
+                                    set_tooltip_text: Some(&gettext("Equalizer for this track")),
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
+                                    connect_clicked => Msg::OpenCurrentEq,
+                                },
+                                // Zufall (nur ab 2 Titeln); links bei EQ, damit die
+                                // Transport-Mitte nicht verschoben wird.
                                 gtk::ToggleButton {
                                     set_icon_name: "media-playlist-shuffle-symbolic",
                                     set_tooltip_text: Some(&gettext("Shuffle")),
@@ -1142,12 +1157,17 @@ impl Component for App {
                                     #[watch]
                                     set_visible: model.queue.len() >= 2,
                                     #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
+                                    #[watch]
                                     set_active: model.shuffle,
-                                    // Aktiv = weiß (volle Deckkraft), sonst ausgegraut.
                                     #[watch]
                                     set_opacity: if model.shuffle { 1.0 } else { 0.4 },
                                     connect_clicked => Msg::ToggleShuffle,
                                 },
+                            },
+                            #[wrap(Some)]
+                            set_center_widget = &gtk::Box {
+                                set_spacing: 6,
                                 gtk::Button {
                                     set_icon_name: "media-skip-backward-symbolic",
                                     set_tooltip_text: Some(&gettext("Back")),
@@ -1166,7 +1186,7 @@ impl Component for App {
                                     },
                                     set_tooltip_text: Some(&gettext("Play/Pause")),
                                     add_css_class: "circular",
-                                    // Dreifach so groß wie die übrigen Transport-Tasten
+                                    // Größer als die übrigen Transport-Tasten
                                     // (Größe via CSS-Klasse, siehe `init`).
                                     add_css_class: "emilia-bigplay",
                                     set_valign: gtk::Align::Center,
@@ -1213,6 +1233,9 @@ impl Component for App {
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::IconTheme::for_display(&display)
                 .add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons"));
+            // App-Icon (logo.png unter dem App-Id-Namen) für Fenster/Taskleiste –
+            // greift auch ohne installierte .desktop-Datei (z. B. `cargo run`).
+            gtk::Window::set_default_icon_name("de.cais.Emilia");
 
             // Cover/Fotos in Alben-/Interpreten-Liste ganz links (kein Einzug).
             let css = gtk::CssProvider::new();
@@ -1220,8 +1243,10 @@ impl Component for App {
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
                  row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
                  button.sync-connected { color: @success_color; }\
-                 button.emilia-bigplay { min-width: 66px; min-height: 66px; padding: 0px; }\
-                 button.emilia-bigplay image { -gtk-icon-size: 48px; }",
+                 button.emilia-bigplay { min-width: 46px; min-height: 46px; padding: 0px; }\
+                 button.emilia-bigplay image { -gtk-icon-size: 34px; }\
+                 box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
+                 progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -1390,7 +1415,7 @@ impl Component for App {
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
         let podcasts_list = gtk::ListBox::new();
-        let newest_list = gtk::ListBox::new();
+        let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
@@ -1595,6 +1620,9 @@ impl Component for App {
         breakpoint.add_setter(&widgets.top_nav, "visible", Some(&yes));
         // Einstellungen oben nur im schmalen Modus zeigen (Desktop: Seitenleiste).
         breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
+        // Der Desktop-Abstand zwischen Seitenleiste und Inhalt entfällt im schmalen
+        // Modus (sonst säße der eingeklappte Inhalt eingerückt).
+        breakpoint.add_setter(&widgets.content_view, "margin-start", Some(&0i32.to_value()));
         root.add_breakpoint(breakpoint);
 
         // Icon-only Navigation (Seitenleiste + oben) in der **gespeicherten
@@ -2647,7 +2675,26 @@ impl Component for App {
             }
             Msg::PlayFavorite(index) => {
                 if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
-                    if scope == "track" {
+                    // Läuft genau dieser Titel bereits, nur Play/Pause umschalten
+                    // (Klick auf das eingeblendete Pause-Zeichen pausiert), statt
+                    // ihn neu zu starten.
+                    let is_current = scope == "track"
+                        && self
+                            .playing_path
+                            .as_ref()
+                            .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
+                    if is_current {
+                        if self.playing {
+                            self.save_resume();
+                            self.player.pause();
+                            self.playing = false;
+                        } else {
+                            self.player.resume();
+                            self.playing = true;
+                        }
+                        self.mpris.set_playing(self.playing);
+                        self.refresh_queue_icons();
+                    } else if scope == "track" {
                         // Ganze Favoriten-Titelliste als Queue (vorherige leeren),
                         // ab dem angeklickten Titel.
                         let tracks: Vec<PathBuf> = self
@@ -2665,7 +2712,7 @@ impl Component for App {
                     } else {
                         self.play_entry(&scope, &key, is_dir);
                     }
-                    // Aktiv-Markierung (Pause-Icon) in der Favoritenliste aktualisieren.
+                    // Aktiv-Markierung (Play-/Pause-Icon) in der Favoritenliste aktualisieren.
                     self.load_favorites(&sender);
                 }
             }

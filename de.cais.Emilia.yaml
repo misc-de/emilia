@@ -63,8 +63,8 @@ modules:
         /app/share/applications/de.cais.Emilia.desktop
       - install -Dm644 data/de.cais.Emilia.metainfo.xml
         /app/share/metainfo/de.cais.Emilia.metainfo.xml
-      - install -Dm644 data/icons/hicolor/scalable/apps/de.cais.Emilia.svg
-        /app/share/icons/hicolor/scalable/apps/de.cais.Emilia.svg
+      - install -Dm644 data/icons/hicolor/256x256/apps/de.cais.Emilia.png
+        /app/share/icons/hicolor/256x256/apps/de.cais.Emilia.png
       - install -Dm644 data/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg

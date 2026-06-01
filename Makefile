@@ -12,7 +12,7 @@ APPID    = de.cais.Emilia
 BIN_DIR   = $(DESTDIR)$(PREFIX)/bin
 APP_DIR   = $(DESTDIR)$(PREFIX)/share/applications
 META_DIR  = $(DESTDIR)$(PREFIX)/share/metainfo
-ICON_APP  = $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
+ICON_APP  = $(DESTDIR)$(PREFIX)/share/icons/hicolor/256x256/apps
 ICON_ACT  = $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/actions
 LOCALE_DIR = $(DESTDIR)$(PREFIX)/share/locale
 
@@ -36,16 +36,20 @@ install: build mo install-mo
 	install -Dm755 target/release/emilia $(BIN_DIR)/emilia
 	install -Dm644 data/$(APPID).desktop $(APP_DIR)/$(APPID).desktop
 	install -Dm644 data/$(APPID).metainfo.xml $(META_DIR)/$(APPID).metainfo.xml
-	install -Dm644 data/icons/hicolor/scalable/apps/$(APPID).svg $(ICON_APP)/$(APPID).svg
+	install -Dm644 data/icons/hicolor/256x256/apps/$(APPID).png $(ICON_APP)/$(APPID).png
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg $(ICON_ACT)/emilia-concert-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg $(ICON_ACT)/list-high-priority-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg $(ICON_ACT)/emilia-favorite-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg $(ICON_ACT)/emilia-audiobook-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg $(ICON_ACT)/emilia-stats-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-share-symbolic.svg $(ICON_ACT)/emilia-share-symbolic.svg
-	@echo "Installiert nach $(PREFIX). Ggf. Icon-Cache/Desktop-DB aktualisieren:"
-	@echo "  gtk4-update-icon-cache $(PREFIX)/share/icons/hicolor"
-	@echo "  update-desktop-database $(PREFIX)/share/applications"
+	@# Icon-Cache & Desktop-DB auffrischen, damit das neue App-Icon sofort
+	@# erscheint (nur bei direkter Installation, nicht in eine DESTDIR-Stage).
+	@if [ -z "$(DESTDIR)" ]; then \
+	  gtk4-update-icon-cache -f -t "$(PREFIX)/share/icons/hicolor" 2>/dev/null || true; \
+	  update-desktop-database "$(PREFIX)/share/applications" 2>/dev/null || true; \
+	fi
+	@echo "Installiert nach $(PREFIX)."
 
 # Kataloge nach <prefix>/share/locale/<lang>/LC_MESSAGES/emilia.mo legen.
 install-mo: mo
@@ -58,7 +62,7 @@ uninstall:
 	rm -f $(BIN_DIR)/emilia
 	rm -f $(APP_DIR)/$(APPID).desktop
 	rm -f $(META_DIR)/$(APPID).metainfo.xml
-	rm -f $(ICON_APP)/$(APPID).svg
+	rm -f $(ICON_APP)/$(APPID).png
 	rm -f $(ICON_ACT)/emilia-concert-symbolic.svg
 	rm -f $(ICON_ACT)/emilia-share-symbolic.svg
 	@for lang in $(LINGUAS); do \

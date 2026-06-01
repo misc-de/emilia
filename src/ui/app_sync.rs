@@ -91,10 +91,16 @@ impl App {
         let nav = adw::NavigationView::new();
 
         // Gemeinsame Widgets, die später aktualisiert werden.
+        // `can_shrink(true)` + `Contain`: der QR-Code skaliert quadratisch auf die
+        // verfügbare Breite herunter (passt so auch auf schmale Telefon-Displays),
+        // statt in seiner vollen Pixelgröße über den Rand zu laufen.
         let qr = gtk::Picture::builder()
-            .width_request(260)
-            .height_request(260)
-            .can_shrink(false)
+            .width_request(220)
+            .height_request(220)
+            .can_shrink(true)
+            .content_fit(gtk::ContentFit::Contain)
+            .hexpand(false)
+            .halign(gtk::Align::Center)
             .build();
         let cam = gtk::Picture::builder()
             .width_request(320)
