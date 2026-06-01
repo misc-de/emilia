@@ -185,6 +185,7 @@ impl App {
         let dialog = adw::Dialog::builder()
             .title(gtk::glib::markup_escape_text(&ep.title))
             .build();
+        self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
         let info = adw::PreferencesGroup::new();
@@ -260,6 +261,7 @@ impl App {
         let dialog = adw::Dialog::builder()
             .title(gtk::glib::markup_escape_text(&title))
             .build();
+        self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
         let info = adw::PreferencesGroup::new();

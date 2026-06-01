@@ -16,6 +16,8 @@ impl App {
         };
 
         let dialog = adw::Dialog::builder().title(entry.heading()).build();
+        // Auf dem Phone über die volle Breite (Bottom-Sheet) statt schwebend.
+        self.adapt_detail_dialog(&dialog);
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)

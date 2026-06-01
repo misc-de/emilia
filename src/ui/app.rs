@@ -58,12 +58,12 @@ pub(crate) enum FsKind {
 // übersetzen (siehe Nutzung in `build_nav` / `win_title`).
 pub(crate) const SECTIONS: [(&str, &str, &str); 9] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
-    ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
-    ("concerts", "Concerts", "emilia-concert-symbolic"),
-    ("podcasts", "Podcasts", "microphone-symbolic"),
     ("files", "Files", "folder-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
+    ("concerts", "Concerts", "emilia-concert-symbolic"),
+    ("podcasts", "Podcasts", "microphone-symbolic"),
+    ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
     ("stats", "Statistics", "emilia-stats-symbolic"),
 ];
@@ -259,6 +259,9 @@ pub struct App {
     /// Navigations-Container (Seitenleiste, obere Leiste) zum Umsortieren.
     pub(crate) sidebar_nav: gtk::Box,
     pub(crate) top_nav: gtk::Box,
+    /// Haupt-Splitview – eingeklappt (`is_collapsed`) bedeutet schmaler/mobiler
+    /// Modus; danach richten sich z. B. die Detail-Dialoge (volle Breite).
+    pub(crate) split: adw::OverlaySplitView,
     // Favoriten: (scope, key, Titel, is_dir)
     pub(crate) favorite_items: Vec<(String, String, String, bool)>,
     pub(crate) favorites_list: gtk::ListBox,
@@ -1039,7 +1042,9 @@ impl Component for App {
                         },
                     },
 
-                    // Mini-Player unten mit Transport-Steuerung
+                    // Mini-Player unten mit Transport-Steuerung. Solange nichts
+                    // geladen ist, komplett ausblenden – so bekommt der Inhalt
+                    // den Platz der unteren Leiste.
                     add_bottom_bar = &gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
                         set_spacing: 2,
@@ -1047,6 +1052,8 @@ impl Component for App {
                         set_margin_bottom: 6,
                         set_margin_start: 10,
                         set_margin_end: 10,
+                        #[watch]
+                        set_visible: model.now_playing.is_some(),
 
                         gtk::Button {
                             add_css_class: "flat",
@@ -1147,6 +1154,10 @@ impl Component for App {
                                     },
                                     set_tooltip_text: Some(&gettext("Play/Pause")),
                                     add_css_class: "circular",
+                                    // Dreifach so groß wie die übrigen Transport-Tasten
+                                    // (Größe via CSS-Klasse, siehe `init`).
+                                    add_css_class: "emilia-bigplay",
+                                    set_valign: gtk::Align::Center,
                                     #[watch]
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::TogglePlay,
@@ -1196,7 +1207,9 @@ impl Component for App {
             css.load_from_string(
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
                  row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
-                 button.sync-connected { color: @success_color; }",
+                 button.sync-connected { color: @success_color; }\
+                 button.emilia-bigplay { min-width: 66px; min-height: 66px; padding: 0px; }\
+                 button.emilia-bigplay image { -gtk-icon-size: 48px; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -1437,6 +1450,7 @@ impl Component for App {
             nav_buttons: Vec::new(),
             sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
             top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            split: adw::OverlaySplitView::new(),
             view_stack: adw::ViewStack::new(),
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -1514,6 +1528,7 @@ impl Component for App {
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
+        model.split = widgets.split.clone();
 
         // Teilen-Menü des Sync-Knopfs oben in der Kopfzeile: zwei Einträge, die den
         // Sync-Dialog im jeweiligen Modus öffnen (Verbindung anbieten / QR-Code
@@ -2941,6 +2956,20 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
 }
 
 impl App {
+    /// Schmaler (mobiler) Modus? Identisch zur eingeklappten Seitenleiste, die
+    /// der Breakpoint bei geringer Fensterbreite setzt.
+    pub(crate) fn is_mobile(&self) -> bool {
+        self.split.is_collapsed()
+    }
+
+    /// Detail-Dialoge auf dem Phone über die **volle Breite** zeigen
+    /// (Bottom-Sheet); auf dem Desktop schwebend wie gehabt (Auto).
+    pub(crate) fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
+        if self.is_mobile() {
+            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
+        }
+    }
+
     /// Nur nach oben, solange wir innerhalb des Startordners bleiben.
     pub(crate) fn can_go_up(&self) -> bool {
         match (&self.browse_dir, &self.root_dir) {
