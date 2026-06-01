@@ -37,6 +37,10 @@ finish-args:
   - --filesystem=home
   # Sperrbildschirm/Medientasten: eigener MPRIS-Name (pro Prozess-Suffix)
   - --own-name=org.mpris.MediaPlayer2.Emilia.*
+  # Selbst-Aktualisierung aus den App-Einstellungen über das Flatpak-Portal
+  # (Update-Monitor). Bei vielen Setups ist der Portal-Name ohnehin erreichbar;
+  # explizit erlauben schadet nicht.
+  - --talk-name=org.freedesktop.portal.Flatpak
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin

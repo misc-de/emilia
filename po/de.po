@@ -461,16 +461,16 @@ msgid "fanart.tv API key (optional, for multiple artist photos)"
 msgstr "fanart.tv API-Key (optional, für mehrere Interpreten-Fotos)"
 
 #: src/ui/app_dialogs.rs:478
-msgid "Fetch automatically (Wi-Fi only)"
-msgstr "Automatisch abrufen (nur WLAN)"
+msgid "Fetch automatically"
+msgstr "Automatisch abrufen"
 
 #: src/ui/app_dialogs.rs:480
 msgid ""
-"Load missing cover art, photos and tracks in the background "
-"at                  startup – only on an unmetered connection"
+"Load missing cover art, photos and tracks in the background at startup – on "
+"any connection"
 msgstr ""
-"Beim Start fehlende Cover, Fotos & Titel im Hintergrund laden – nur bei "
-"nicht-getakteter Verbindung"
+"Beim Start fehlende Cover, Fotos & Titel im Hintergrund laden – auf jeder "
+"Verbindung"
 
 #: src/ui/app_dialogs.rs:496
 msgid "Devices"
@@ -941,6 +941,50 @@ msgstr "Interpreten-Bilder"
 #: src/ui/enrich.rs:327
 msgid "Album art"
 msgstr "Album-Bilder"
+
+# --- Selbst-Aktualisierung (Flatpak) ---
+
+msgid "Check for updates"
+msgstr "Auf Updates prüfen"
+
+msgid "App update"
+msgstr "App-Aktualisierung"
+
+msgid "Emilia is installed as a Flatpak – check for a newer version and update directly."
+msgstr "Emilia ist als Flatpak installiert – auf eine neuere Version prüfen und direkt aktualisieren."
+
+msgid "Installed version: {v}"
+msgstr "Installierte Version: {v}"
+
+msgid "Checking for updates …"
+msgstr "Suche nach Updates …"
+
+msgid "Updates are only available in the Flatpak version."
+msgstr "Updates sind nur in der Flatpak-Version verfügbar."
+
+msgid "Emilia is up to date (version {v})."
+msgstr "Emilia ist aktuell (Version {v})."
+
+msgid "Could not check for updates (offline?)."
+msgstr "Aktualisierung konnte nicht geprüft werden (offline?)."
+
+msgid "Update available"
+msgstr "Update verfügbar"
+
+msgid "A newer version of Emilia is available. Install it now?"
+msgstr "Eine neuere Version von Emilia ist verfügbar. Jetzt installieren?"
+
+msgid "Update"
+msgstr "Aktualisieren"
+
+msgid "Update started – it runs in the background. Please restart Emilia afterwards."
+msgstr "Aktualisierung gestartet – sie läuft im Hintergrund. Bitte Emilia danach neu starten."
+
+msgid "Update installed. Please restart Emilia."
+msgstr "Aktualisierung installiert. Bitte Emilia neu starten."
+
+msgid "Update failed. You can update manually: {cmd}"
+msgstr "Aktualisierung fehlgeschlagen. Manuell aktualisieren: {cmd}"
 
 #~ msgid "Cancel fetch"
 #~ msgstr "Abruf abbrechen"

@@ -383,6 +383,12 @@ pub enum Msg {
     /// Detailansicht des gerade laufenden Titels öffnen (Klick auf die Leiste).
     OpenNowPlaying,
     OpenSettings,
+    /// Auf eine neuere Flatpak-Version prüfen (nur als Flatpak; im Hintergrund).
+    CheckForUpdates,
+    /// Gefundene Aktualisierung über das Flatpak-Portal einspielen.
+    InstallFlatpakUpdate,
+    /// Ergebnis der Flatpak-Aktualisierung (`Ok` = fertig, Neustart nötig).
+    FlatpakUpdateFinished(Result<(), String>),
     OpenGlobalEq,
     /// Equalizer für den gerade laufenden Titel öffnen.
     OpenCurrentEq,
@@ -526,6 +532,8 @@ pub enum Cmd {
     ReloadPodcasts,
     /// Ereignis aus dem Sync-Server-Thread bzw. Client-Worker.
     Sync(crate::core::sync::SyncEvent),
+    /// Ergebnis der Update-Prüfung (im Hintergrund ermittelt).
+    UpdateChecked(crate::core::update::CheckResult),
 }
 
 #[relm4::component(pub)]
@@ -2343,6 +2351,36 @@ impl Component for App {
             }
             Msg::HideEnrichBanner => self.enrich_banner_hidden = true,
             Msg::OpenSettings => self.open_settings(root, &sender),
+            Msg::CheckForUpdates => {
+                if crate::core::update::in_flatpak() {
+                    self.toast(&gettext("Checking for updates …"));
+                    sender.spawn_oneshot_command(|| {
+                        Cmd::UpdateChecked(crate::core::update::check())
+                    });
+                } else {
+                    self.toast(&gettext("Updates are only available in the Flatpak version."));
+                }
+            }
+            Msg::InstallFlatpakUpdate => {
+                self.toast(&gettext(
+                    "Update started – it runs in the background. Please restart Emilia afterwards.",
+                ));
+                let sender2 = sender.clone();
+                // Über das Flatpak-Portal anstoßen (Hauptthread; Fortschritt via Signal).
+                if let Err(e) =
+                    crate::core::update::install(move |res| sender2.input(Msg::FlatpakUpdateFinished(res)))
+                {
+                    tracing::warn!("Flatpak update failed to start: {e}");
+                    sender.input(Msg::FlatpakUpdateFinished(Err(e.to_string())));
+                }
+            }
+            Msg::FlatpakUpdateFinished(res) => match res {
+                Ok(()) => self.toast(&gettext("Update installed. Please restart Emilia.")),
+                Err(_) => self.toast(&gettext_f(
+                    "Update failed. You can update manually: {cmd}",
+                    &[("cmd", &crate::core::update::manual_command())],
+                )),
+            },
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
             Msg::OpenCurrentEq => {
                 if let Some(path) = self.queue.get(self.queue_pos).cloned() {
@@ -2779,6 +2817,34 @@ impl Component for App {
             }
             Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
             Cmd::Sync(ev) => self.on_sync_event(ev, &sender),
+            Cmd::UpdateChecked(result) => match result {
+                crate::core::update::CheckResult::UpToDate => self.toast(&gettext_f(
+                    "Emilia is up to date (version {v}).",
+                    &[("v", env!("CARGO_PKG_VERSION"))],
+                )),
+                crate::core::update::CheckResult::Unknown => {
+                    self.toast(&gettext("Could not check for updates (offline?)."))
+                }
+                crate::core::update::CheckResult::Available => {
+                    // Rückfrage vor dem Einspielen – installiert über das Portal.
+                    let confirm = adw::AlertDialog::new(
+                        Some(&gettext("Update available")),
+                        Some(&gettext("A newer version of Emilia is available. Install it now?")),
+                    );
+                    confirm.add_response("cancel", &gettext("Cancel"));
+                    confirm.add_response("update", &gettext("Update"));
+                    confirm.set_response_appearance("update", adw::ResponseAppearance::Suggested);
+                    confirm.set_default_response(Some("update"));
+                    confirm.set_close_response("cancel");
+                    let sender = sender.clone();
+                    confirm.connect_response(None, move |_, resp| {
+                        if resp == "update" {
+                            sender.input(Msg::InstallFlatpakUpdate);
+                        }
+                    });
+                    confirm.present(Some(root));
+                }
+            },
         }
     }
 }

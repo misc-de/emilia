@@ -5,7 +5,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::i18n::gettext;
+use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
 impl App {
@@ -477,10 +477,9 @@ impl App {
         online_group.add(&fanart_row);
 
         let auto_row = adw::SwitchRow::builder()
-            .title(&gettext("Fetch automatically (Wi-Fi only)"))
+            .title(&gettext("Fetch automatically"))
             .subtitle(&gettext(
-                "Load missing cover art, photos and tracks in the background at \
-                 startup – only on an unmetered connection",
+                "Load missing cover art, photos and tracks in the background at startup – on any connection",
             ))
             .active(self.auto_enrich)
             .build();
@@ -514,6 +513,32 @@ impl App {
         }
         sync_group.add(&sync_row);
         page.add(&sync_group);
+
+        // --- Software-Aktualisierung (nur in der Flatpak-Version) ---
+        if crate::core::update::in_flatpak() {
+            let update_group = adw::PreferencesGroup::builder()
+                .title(&gettext("App update"))
+                .description(&gettext(
+                    "Emilia is installed as a Flatpak – check for a newer version and update directly.",
+                ))
+                .build();
+            let update_row = adw::ActionRow::builder()
+                .title(&gettext("Check for updates"))
+                .subtitle(&gettext_f(
+                    "Installed version: {v}",
+                    &[("v", env!("CARGO_PKG_VERSION"))],
+                ))
+                .activatable(true)
+                .build();
+            update_row.add_prefix(&gtk::Image::from_icon_name("software-update-available-symbolic"));
+            update_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+            {
+                let sender = sender.clone();
+                update_row.connect_activated(move |_| sender.input(Msg::CheckForUpdates));
+            }
+            update_group.add(&update_row);
+            page.add(&update_group);
+        }
         dialog.add(&page);
 
         // --- Kategorie: Ansicht ---

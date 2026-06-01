@@ -11,3 +11,4 @@ pub mod podcast;
 pub mod player;
 pub mod sync;
 pub mod scanner;
+pub mod update;
