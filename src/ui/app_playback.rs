@@ -255,6 +255,22 @@ impl App {
             .set_resume_path(&path_str, guarded_resume(pos, dur));
     }
 
+    /// Sichert die Wiedergabeposition der laufenden Podcast-Episode (Resume,
+    /// anhand der Audio-URL). Nah am Anfang/Ende wird auf 0 gesetzt (gilt als
+    /// neu bzw. fertig). No-op, wenn gerade keine Episode läuft.
+    pub(crate) fn save_episode_progress(&self) {
+        let Some(url) = self.playing_episode_url.clone() else {
+            return;
+        };
+        let Some(pos) = self.player.position_ms() else {
+            return;
+        };
+        let dur = self.player.duration_ms().unwrap_or(self.track_duration_ms);
+        let _ = self
+            .library
+            .set_episode_progress(&url, guarded_resume(pos, dur));
+    }
+
     /// Schließt die laufende Hör-Sitzung ab und schreibt sie als ein
     /// `play_event` in die Statistik. `completed` = bis zum Ende (EOS) gehört.
     /// Ohne Sitzung passiert nichts (idempotent).
@@ -280,6 +296,8 @@ impl App {
     pub(crate) fn play_current(&mut self) {
         // Position des bisher laufenden Titels sichern, bevor ein neuer geladen wird.
         self.save_resume();
+        // Lief zuvor eine Podcast-Episode, deren Resume-Position sichern.
+        self.save_episode_progress();
         // Bisherige Hör-Sitzung als Wechsel/Skip abschließen (kam der Aufruf von
         // einem EOS, ist sie bereits abgeschlossen → No-op).
         self.finalize_play_session(false);
@@ -362,6 +380,8 @@ impl App {
                 self.save_queue();
                 // Aktuellen Kontext merken (Erkennung künftiger Queue-Wechsel).
                 self.prev_ctx = Some((self.queue.clone(), self.queue_pos));
+                // Titel haben keine Kapitel → Marken/Hover-Liste säubern.
+                self.set_chapters(Vec::new());
             }
             Err(e) => tracing::error!("Playback failed: {e}"),
         }

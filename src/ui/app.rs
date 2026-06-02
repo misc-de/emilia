@@ -326,6 +326,14 @@ pub struct App {
     /// Aktuell gewählter Zeitraum der Hörstatistik.
     pub(crate) stats_period: StatsPeriod,
     pub(crate) view_stack: adw::ViewStack,
+    /// Seekleiste des Mini-Players (für Kapitelmarken via `add_mark`).
+    pub(crate) seek_scale: gtk::Scale,
+    /// Label unter dem Titel, das beim Überfahren der Seekleiste die Bezeichnung
+    /// des Kapitels an der Mausposition zeigt (imperativ gesteuert).
+    pub(crate) chapter_label: gtk::Label,
+    /// Kapitel (Zeit + Bezeichnung) der laufenden Episode – mit dem Hover-
+    /// Controller der Seekleiste geteilt.
+    pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
     pub(crate) nav_view: adw::NavigationView,
     /// Gemerkte Scrollposition der zuletzt verlassenen Übersichtsseite
@@ -552,6 +560,11 @@ pub enum Msg {
     SetPodcastView(PodcastView),
     /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste (Index).
     ShowEpisodeDetail(usize),
+    /// Detailansicht einer Episode aus der Episodenliste eines Podcasts.
+    ShowPodcastEpisodeDetail { podcast_id: i64, index: usize },
+    /// Klick auf eine Zeitsprungmarke in den Shownotes: an die Stelle springen
+    /// (Episode bei Bedarf dort starten).
+    EpisodeSeekTo { url: String, title: String, ms: i64 },
     /// Detailansicht/Verwaltung eines Abos (Podcast-Id) – Aktualisieren/Entfernen.
     ShowPodcastDetail(i64),
 }
@@ -1152,6 +1165,18 @@ impl Component for App {
                             },
                         },
 
+                        // Kapitelbezeichnung beim Überfahren der Seekleiste
+                        // (imperativ über den Hover-Controller gesteuert).
+                        #[name = "chapter_label"]
+                        gtk::Label {
+                            set_xalign: 0.5,
+                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+                            set_max_width_chars: 36,
+                            set_visible: false,
+                            add_css_class: "caption",
+                            add_css_class: "dim-label",
+                        },
+
                         // Seekleiste: Position / Regler / Gesamtdauer.
                         gtk::Box {
                             set_spacing: 6,
@@ -1583,6 +1608,9 @@ impl Component for App {
             top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
             split: adw::OverlaySplitView::new(),
             view_stack: adw::ViewStack::new(),
+            seek_scale: gtk::Scale::default(),
+            chapter_label: gtk::Label::default(),
+            chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             sync: crate::ui::app_sync::SyncState::default(),
@@ -1660,6 +1688,45 @@ impl Component for App {
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
         model.split = widgets.split.clone();
+        model.seek_scale = widgets.seek_scale.clone();
+        model.chapter_label = widgets.chapter_label.clone();
+
+        // Hover über die Seekleiste → Kapitelbezeichnung an der Mausposition
+        // unter dem Titel anzeigen. Liest die geteilte Kapitelliste und
+        // aktualisiert nur das Label (kein voller View-Neuaufbau pro Bewegung).
+        {
+            let chapters = model.chapters.clone();
+            let label = widgets.chapter_label.clone();
+            let scale = widgets.seek_scale.clone();
+            let motion = gtk::EventControllerMotion::new();
+            motion.connect_motion(move |_, x, _| {
+                let chaps = chapters.borrow();
+                let adj = scale.adjustment();
+                let w = scale.width() as f64;
+                let span = adj.upper() - adj.lower();
+                if chaps.is_empty() || w <= 0.0 || span <= 0.0 {
+                    label.set_visible(false);
+                    return;
+                }
+                let val = adj.lower() + (x / w).clamp(0.0, 1.0) * span;
+                let name = chaps
+                    .iter()
+                    .rev()
+                    .find(|(ms, _)| (*ms as f64) <= val)
+                    .map(|(_, n)| n.clone())
+                    .filter(|n| !n.is_empty());
+                match name {
+                    Some(n) => {
+                        label.set_text(&n);
+                        label.set_visible(true);
+                    }
+                    None => label.set_visible(false),
+                }
+            });
+            let leave_label = widgets.chapter_label.clone();
+            motion.connect_leave(move |_| leave_label.set_visible(false));
+            widgets.seek_scale.add_controller(motion);
+        }
 
         // Seekleiste: Ziehen/Klicken springt im laufenden Titel an die Position.
         // `change-value` feuert nur bei Nutzer-Interaktion (nicht beim
@@ -2322,8 +2389,23 @@ impl Component for App {
                     self.play_episode(&url, &title);
                 }
             }
+            Msg::EpisodeSeekTo { url, title, ms } => {
+                if self.playing_episode_url.as_deref() == Some(url.as_str()) {
+                    // Läuft schon → direkt an die Stelle springen.
+                    if self.player.seek_ms(ms).is_ok() {
+                        self.position_ms = ms;
+                        self.save_episode_progress();
+                    }
+                } else {
+                    // Sonst die Episode an der Sprungmarke starten.
+                    self.play_episode_at(&url, &title, ms);
+                }
+            }
             Msg::SetPodcastView(view) => self.podcast_view = view,
             Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
+            Msg::ShowPodcastEpisodeDetail { podcast_id, index } => {
+                self.open_podcast_episode_detail(root, &sender, podcast_id, index)
+            }
             Msg::ShowPodcastDetail(id) => self.open_podcast_detail(root, &sender, id),
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.open_share_dialog(root, &sender),
@@ -2399,6 +2481,10 @@ impl Component for App {
                     if let Some(entry) = self.close_resume.borrow_mut().as_mut() {
                         entry.1 = self.position_ms;
                         entry.2 = self.track_duration_ms;
+                    }
+                    // Resume-Position einer laufenden Podcast-Episode fortschreiben.
+                    if self.playing_episode_url.is_some() {
+                        self.save_episode_progress();
                     }
                     // Gehörte Zeit der Statistik-Sitzung weiterzählen (Wanduhr, nur
                     // während „Playing"; ~1 s je Tick). Die Dauer ggf. nachziehen,

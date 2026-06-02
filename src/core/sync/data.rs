@@ -77,13 +77,33 @@ pub fn export_library(lib: &Library) -> Result<LibraryExport> {
         playlists.push(PlaylistRec { name, paths });
     }
 
+    let progress: std::collections::HashMap<String, i64> = lib
+        .all_episode_progress()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let mut podcasts = Vec::new();
     for (id, title, image_url, _count) in lib.podcasts()? {
         if let Some(feed_url) = lib.podcast_feed_url(id)? {
+            let episodes = lib
+                .episodes(id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|e| EpisodeRec {
+                    position_ms: progress.get(&e.audio_url).copied().unwrap_or(0),
+                    guid: e.guid,
+                    title: e.title,
+                    audio_url: e.audio_url,
+                    published: e.published,
+                    duration: e.duration,
+                    description: e.description,
+                })
+                .collect();
             podcasts.push(PodcastRec {
                 title,
                 feed_url,
                 image_url,
+                episodes,
             });
         }
     }
@@ -177,11 +197,37 @@ pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats>
     }
 
     for pc in &exp.podcasts {
-        if lib
-            .subscribe_podcast(&pc.title, &pc.feed_url, pc.image_url.as_deref())
-            .is_ok()
-        {
+        if let Ok(id) = lib.subscribe_podcast(&pc.title, &pc.feed_url, pc.image_url.as_deref()) {
             stats.podcasts += 1;
+            // Episoden inkl. Shownotes übernehmen – aber nur, wenn lokal noch
+            // keine vorliegen, damit vorhandene/aktuellere Episoden (vom eigenen
+            // Feed-Abruf) nicht überschrieben werden.
+            if !pc.episodes.is_empty()
+                && lib.episodes(id).map(|e| e.is_empty()).unwrap_or(false)
+            {
+                let eps: Vec<crate::model::Episode> = pc
+                    .episodes
+                    .iter()
+                    .map(|e| crate::model::Episode {
+                        guid: e.guid.clone(),
+                        title: e.title.clone(),
+                        audio_url: e.audio_url.clone(),
+                        published: e.published.clone(),
+                        duration: e.duration.clone(),
+                        description: e.description.clone(),
+                    })
+                    .collect();
+                let _ = lib.set_episodes(id, &eps);
+            }
+            // Episodenpositionen mergen: die weiteste Position gewinnt, damit man
+            // auf jedem Gerät dort weiterhört, wo man am weitesten war.
+            for ep in &pc.episodes {
+                if ep.position_ms > 0
+                    && ep.position_ms > lib.episode_progress(&ep.audio_url).unwrap_or(0)
+                {
+                    let _ = lib.set_episode_progress(&ep.audio_url, ep.position_ms);
+                }
+            }
         }
     }
 
@@ -249,6 +295,60 @@ mod tests {
         assert_eq!(
             dst.get_eq("", "track", "/data/Audio/song.mp3").unwrap(),
             Some([1.0; 10])
+        );
+    }
+
+    #[test]
+    fn podcast_episodes_and_shownotes_roundtrip() {
+        let src = Library::open_in_memory().unwrap();
+        let pid = src
+            .subscribe_podcast(
+                "Mein Podcast",
+                "https://example.com/feed.xml",
+                Some("https://example.com/cover.jpg"),
+            )
+            .unwrap();
+        src.set_episodes(
+            pid,
+            &[crate::model::Episode {
+                guid: Some("ep-1".into()),
+                title: "Folge 1".into(),
+                audio_url: "https://example.com/1.mp3".into(),
+                published: Some("Mon, 01 Jan 2024".into()),
+                duration: Some("00:30:00".into()),
+                description: Some("Die Shownotes der Folge.".into()),
+            }],
+        )
+        .unwrap();
+        // Gemerkte Wiedergabeposition der Episode.
+        src.set_episode_progress("https://example.com/1.mp3", 90_000)
+            .unwrap();
+
+        // Export enthält die Episode inkl. Shownotes und Position.
+        let exp = export_library(&src).unwrap();
+        assert_eq!(exp.podcasts.len(), 1);
+        assert_eq!(exp.podcasts[0].episodes.len(), 1);
+        assert_eq!(
+            exp.podcasts[0].episodes[0].description.as_deref(),
+            Some("Die Shownotes der Folge.")
+        );
+        assert_eq!(exp.podcasts[0].episodes[0].position_ms, 90_000);
+
+        // Import in ein leeres Zielgerät: Episoden inkl. Shownotes + Position.
+        let dst = Library::open_in_memory().unwrap();
+        let stats = import_library(&dst, &exp).unwrap();
+        assert_eq!(stats.podcasts, 1);
+        let did = dst.podcasts().unwrap()[0].0;
+        let eps = dst.episodes(did).unwrap();
+        assert_eq!(eps.len(), 1);
+        assert_eq!(eps[0].title, "Folge 1");
+        assert_eq!(
+            eps[0].description.as_deref(),
+            Some("Die Shownotes der Folge.")
+        );
+        assert_eq!(
+            dst.episode_progress("https://example.com/1.mp3").unwrap(),
+            90_000
         );
     }
 }

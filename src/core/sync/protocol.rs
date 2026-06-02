@@ -73,6 +73,30 @@ pub struct PodcastRec {
     pub feed_url: String,
     #[serde(default)]
     pub image_url: Option<String>,
+    /// Episoden inkl. Shownotes – damit sie auf dem Zielgerät sofort und
+    /// dauerhaft vorliegen, unabhängig vom Feed. Leer bei älteren Exporten.
+    #[serde(default)]
+    pub episodes: Vec<EpisodeRec>,
+}
+
+/// Eine Podcast-Episode im Sync-Format (Spiegel von [`crate::model::Episode`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeRec {
+    #[serde(default)]
+    pub guid: Option<String>,
+    pub title: String,
+    pub audio_url: String,
+    #[serde(default)]
+    pub published: Option<String>,
+    #[serde(default)]
+    pub duration: Option<String>,
+    /// Shownotes (HTML zu Klartext entschärft), falls vorhanden.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Gemerkte Wiedergabeposition in ms (0 = von vorn). Wird beim Sync
+    /// mitübertragen, sofern vorhanden.
+    #[serde(default)]
+    pub position_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

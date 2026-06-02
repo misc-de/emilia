@@ -219,9 +219,59 @@ impl App {
         sender: &ComponentSender<Self>,
         index: usize,
     ) {
-        let Some(ep) = self.newest_items.get(index).cloned() else {
+        if let Some(ep) = self.newest_items.get(index).cloned() {
+            self.show_episode_detail(root, sender, ep);
+        }
+    }
+
+    /// Episoden-Detail (inkl. Shownotes) einer Episode aus der Episodenliste
+    /// eines geöffneten Podcasts (Index = Reihenfolge in `episodes(id)`).
+    pub(crate) fn open_podcast_episode_detail(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        podcast_id: i64,
+        index: usize,
+    ) {
+        let Some(ep) = self
+            .library
+            .episodes(podcast_id)
+            .unwrap_or_default()
+            .into_iter()
+            .nth(index)
+        else {
             return;
         };
+        let (podcast_title, podcast_image) = self
+            .podcast_items
+            .iter()
+            .find(|(pid, _, _, _)| *pid == podcast_id)
+            .map(|(_, t, img, _)| (t.clone(), img.clone()))
+            .unwrap_or_default();
+        self.show_episode_detail(
+            root,
+            sender,
+            crate::model::EpisodeRef {
+                podcast_id,
+                podcast_title,
+                podcast_image,
+                title: ep.title,
+                audio_url: ep.audio_url,
+                published: ep.published,
+                duration: ep.duration,
+                description: ep.description,
+            },
+        );
+    }
+
+    /// Baut den Episoden-Detail-Dialog (geteilt von „Neuste" und der
+    /// Episodenliste eines Podcasts): Podcast, Datum, Dauer, Aktionen + Shownotes.
+    fn show_episode_detail(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        ep: crate::model::EpisodeRef,
+    ) {
         let dialog = adw::Dialog::builder()
             .title(gtk::glib::markup_escape_text(&ep.title))
             .build();
@@ -259,6 +309,45 @@ impl App {
         }
         content.append(&info);
 
+        // Shownotes (falls vorhanden) direkt unter „Dauer", vor den Aktionen.
+        // Zeitstempel (z. B. „12:34") werden zu anklickbaren Sprungmarken.
+        if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
+            let notes_group = adw::PreferencesGroup::builder()
+                .title(&gettext("Shownotes"))
+                .build();
+            let label = gtk::Label::builder()
+                .label(&crate::core::podcast::linkify_timestamps(notes.trim()))
+                .use_markup(true)
+                .wrap(true)
+                .xalign(0.0)
+                .selectable(true)
+                .build();
+            label.add_css_class("body");
+            // Klick auf einen Zeitstempel → an die Stelle springen (Episode bei
+            // Bedarf dort starten).
+            {
+                let sender = sender.clone();
+                let url = ep.audio_url.clone();
+                let title = ep.title.clone();
+                label.connect_activate_link(move |_, uri| {
+                    if let Some(ms) = uri
+                        .strip_prefix("emilia-seek:")
+                        .and_then(|s| s.parse::<i64>().ok())
+                    {
+                        sender.input(Msg::EpisodeSeekTo {
+                            url: url.clone(),
+                            title: title.clone(),
+                            ms,
+                        });
+                        return gtk::glib::Propagation::Stop;
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
+            }
+            notes_group.add(&label);
+            content.append(&notes_group);
+        }
+
         let actions = adw::PreferencesGroup::new();
         let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
         {
@@ -293,22 +382,6 @@ impl App {
         }
         actions.add(&open);
         content.append(&actions);
-
-        // Shownotes (falls vorhanden) als eigener Abschnitt, scrollbar im Dialog.
-        if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
-            let notes_group = adw::PreferencesGroup::builder()
-                .title(&gettext("Shownotes"))
-                .build();
-            let label = gtk::Label::builder()
-                .label(notes.trim())
-                .wrap(true)
-                .xalign(0.0)
-                .selectable(true)
-                .build();
-            label.add_css_class("body");
-            notes_group.add(&label);
-            content.append(&notes_group);
-        }
 
         present_detail(&dialog, &content, root);
     }
@@ -410,7 +483,7 @@ impl App {
         if episodes.is_empty() {
             group.add(&adw::ActionRow::builder().title(&gettext("No episodes")).build());
         }
-        for ep in &episodes {
+        for (i, ep) in episodes.iter().enumerate() {
             let mut subtitle = String::new();
             if let Some(p) = &ep.published {
                 subtitle.push_str(p.trim());
@@ -443,6 +516,19 @@ impl App {
                     });
                 });
             }
+            // Langes Drücken → Episoden-Detail (inkl. Shownotes).
+            let lp = gtk::GestureLongPress::new();
+            {
+                let sender = sender.clone();
+                lp.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    sender.input(Msg::ShowPodcastEpisodeDetail {
+                        podcast_id: id,
+                        index: i,
+                    });
+                });
+            }
+            row.add_controller(lp);
             group.add(&row);
         }
         content.append(&group);
@@ -655,9 +741,39 @@ impl App {
         }
     }
 
-    /// Streamt eine Podcast-Episode (ersetzt die laufende Wiedergabe).
+    /// Streamt eine Podcast-Episode (ersetzt die laufende Wiedergabe). Startet
+    /// an der gemerkten Position (Resume) und sichert vorher die Position einer
+    /// bisher laufenden Episode.
     pub(crate) fn play_episode(&mut self, url: &str, title: &str) {
-        match self.player.play_uri(url) {
+        let resume = self.library.episode_progress(url).unwrap_or(0);
+        self.play_episode_from(url, title, resume);
+    }
+
+    /// Wie `play_episode`, startet aber an einer bestimmten Position (für die
+    /// anklickbaren Sprungmarken in den Shownotes).
+    pub(crate) fn play_episode_at(&mut self, url: &str, title: &str, ms: i64) {
+        self.play_episode_from(url, title, ms.max(0));
+    }
+
+    /// Setzt die Kapitel der laufenden Wiedergabe: Seekbar-Marken **und** die
+    /// geteilte Kapitelliste für die Hover-Anzeige. Leere Liste = löschen (z. B.
+    /// bei Titeln ohne Kapitel). Die Marken positionieren sich automatisch neu,
+    /// sobald die Dauer feststeht (der Tick aktualisiert den Wertebereich).
+    pub(crate) fn set_chapters(&self, chapters: Vec<(i64, String)>) {
+        self.seek_scale.clear_marks();
+        for (ms, _) in &chapters {
+            if *ms > 0 {
+                self.seek_scale
+                    .add_mark(*ms as f64, gtk::PositionType::Top, None);
+            }
+        }
+        self.chapter_label.set_visible(false);
+        *self.chapters.borrow_mut() = chapters;
+    }
+
+    fn play_episode_from(&mut self, url: &str, title: &str, resume: i64) {
+        self.save_episode_progress();
+        match self.player.play_uri(url, resume) {
             Ok(()) => {
                 self.now_playing = Some(title.to_string());
                 self.playing = true;
@@ -665,12 +781,22 @@ impl App {
                 self.playing_episode_url = Some(url.to_string());
                 self.queue.clear();
                 self.queue_pos = 0;
-                self.position_ms = 0;
+                self.position_ms = resume.max(0);
                 self.track_duration_ms = 0;
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, title, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
+                // Kapitel (Zeit + Bezeichnung) aus den Shownotes: Seekbar-Marken
+                // setzen und für die Hover-Anzeige merken.
+                let chapters = self
+                    .library
+                    .episode_description_by_url(url)
+                    .ok()
+                    .flatten()
+                    .map(|d| crate::core::podcast::parse_chapters(&d))
+                    .unwrap_or_default();
+                self.set_chapters(chapters);
             }
             Err(e) => tracing::error!("Failed to play episode: {e}"),
         }

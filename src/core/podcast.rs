@@ -451,9 +451,146 @@ struct ItunesPodcast {
     artwork_url_600: Option<String>,
 }
 
+/// Minimales Pango-Markup-Escaping (nur die für Element-Text nötigen Zeichen).
+fn escape_markup(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '"' => o.push_str("&quot;"),
+            '\'' => o.push_str("&#39;"),
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
+/// Versucht, an Byte-Position `i` einen Zeitstempel `M:SS`/`MM:SS` bzw.
+/// `H:MM:SS`/`HH:MM:SS` zu erkennen. Gibt `(Länge in Bytes, Millisekunden)`
+/// zurück. Grenzen werden geprüft, damit nicht in längere Zahlen
+/// hineingematcht wird (z. B. „12:345" oder „2024:01").
+fn match_timestamp_at(text: &str, i: usize) -> Option<(usize, i64)> {
+    let b = text.as_bytes();
+    if i > 0 {
+        let p = b[i - 1];
+        if p.is_ascii_digit() || p == b':' {
+            return None;
+        }
+    }
+    // 1. Gruppe: 1–2 Ziffern, dann ':'
+    let mut j = i;
+    while j < b.len() && b[j].is_ascii_digit() {
+        j += 1;
+    }
+    if j == i || j - i > 2 || j >= b.len() || b[j] != b':' {
+        return None;
+    }
+    let g1: i64 = text[i..j].parse().ok()?;
+    // 2. Gruppe: genau 2 Ziffern
+    let s2 = j + 1;
+    let mut k = s2;
+    while k < b.len() && b[k].is_ascii_digit() {
+        k += 1;
+    }
+    if k - s2 != 2 {
+        return None;
+    }
+    let g2: i64 = text[s2..k].parse().ok()?;
+    // Optional 3. Gruppe (→ Stunden:Minuten:Sekunden)
+    if k < b.len() && b[k] == b':' {
+        let s3 = k + 1;
+        let mut l = s3;
+        while l < b.len() && b[l].is_ascii_digit() {
+            l += 1;
+        }
+        if l - s3 == 2 {
+            let g3: i64 = text[s3..l].parse().ok()?;
+            return finish_timestamp(text, i, l, g1 * 3600 + g2 * 60 + g3);
+        }
+    }
+    finish_timestamp(text, i, k, g1 * 60 + g2)
+}
+
+fn finish_timestamp(text: &str, start: usize, end: usize, total_secs: i64) -> Option<(usize, i64)> {
+    let b = text.as_bytes();
+    if end < b.len() {
+        let n = b[end];
+        if n.is_ascii_digit() || n == b':' {
+            return None;
+        }
+    }
+    Some((end - start, total_secs * 1000))
+}
+
+/// Kapitel (Zeitstempel + Bezeichnung) aus den Shownotes. Pro Zeile wird der
+/// erste Zeitstempel genommen; die Bezeichnung ist der restliche Zeilentext
+/// (bevorzugt **hinter** dem Zeitstempel), von Trennzeichen befreit. Aufsteigend
+/// nach Zeit, je Zeit nur das erste Kapitel. Für Seekbar-Marken + Hover-Anzeige.
+pub fn parse_chapters(text: &str) -> Vec<(i64, String)> {
+    fn strip(s: &str) -> &str {
+        s.trim().trim_matches(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '-' | '–' | '—' | ':' | '·' | '•' | '|' | '(' | ')' | '[' | ']' | '.' | ','
+                )
+        })
+    }
+    let mut out: Vec<(i64, String)> = Vec::new();
+    for line in text.lines() {
+        let b = line.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i].is_ascii_digit() {
+                if let Some((len, ms)) = match_timestamp_at(line, i) {
+                    let after = strip(&line[i + len..]);
+                    let before = strip(&line[..i]);
+                    let label = if !after.is_empty() { after } else { before };
+                    out.push((ms, label.to_string()));
+                    break;
+                }
+            }
+            i += 1;
+        }
+    }
+    out.sort_by_key(|(ms, _)| *ms);
+    out.dedup_by_key(|(ms, _)| *ms);
+    out
+}
+
+/// Wandelt Zeitstempel in Shownotes (z. B. „12:34", „1:02:03") in anklickbare
+/// Pango-Links `emilia-seek:<ms>` um; der restliche Text wird Markup-escaped.
+/// Rückgabe ist Pango-Markup (für `gtk::Label` mit `use_markup`).
+pub fn linkify_timestamps(text: &str) -> String {
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut run = 0; // Anfang des aktuellen Klartext-Abschnitts
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_digit() {
+            if let Some((len, ms)) = match_timestamp_at(text, i) {
+                out.push_str(&escape_markup(&text[run..i]));
+                out.push_str("<a href=\"emilia-seek:");
+                out.push_str(&ms.to_string());
+                out.push_str("\">");
+                out.push_str(&escape_markup(&text[i..i + len]));
+                out.push_str("</a>");
+                i += len;
+                run = i;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&escape_markup(&text[run..]));
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_duration, html_to_text, parse_feed, parse_search};
+    use super::{format_duration, html_to_text, linkify_timestamps, parse_feed, parse_search};
 
     const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
@@ -518,6 +655,33 @@ mod tests {
             html_to_text(html),
             "Erste Zeile\nZweite & Zeile\nDritte\nA\nB"
         );
+    }
+
+    #[test]
+    fn linkifies_timestamps_and_escapes_rest() {
+        let md = linkify_timestamps("Intro 0:30, Thema 12:34 & 1:02:03 Ende");
+        assert!(md.contains("<a href=\"emilia-seek:30000\">0:30</a>"), "{md}");
+        assert!(md.contains("<a href=\"emilia-seek:754000\">12:34</a>"), "{md}");
+        assert!(md.contains("<a href=\"emilia-seek:3723000\">1:02:03</a>"), "{md}");
+        assert!(md.contains("&amp;"), "{md}");
+        // Keine falschen Treffer in längeren Zahlen.
+        let none = linkify_timestamps("Jahr 2024:01 und 12:345 sind keine Marke");
+        assert!(!none.contains("emilia-seek"), "{none}");
+    }
+
+    #[test]
+    fn parse_chapters_extracts_time_and_label() {
+        let notes = "00:00 Intro\n07:13 - Markt-Update\nThema XY 1:02:03\n00:00 Dublette\nohne Zeit";
+        let ch = super::parse_chapters(notes);
+        assert_eq!(
+            ch,
+            vec![
+                (0, "Intro".to_string()),
+                (433_000, "Markt-Update".to_string()),
+                (3_723_000, "Thema XY".to_string()),
+            ]
+        );
+        assert!(super::parse_chapters("kein Zeitcode 2024:01 12:345").is_empty());
     }
 
     #[test]

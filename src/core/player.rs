@@ -75,11 +75,22 @@ impl Player {
 
     /// Spielt eine beliebige URI (z. B. eine http-Podcast-Episode). Anders als
     /// `play_file` wird die URI unverändert übernommen (kein Datei-Pfad).
-    pub fn play_uri(&self, uri: &str) -> Result<()> {
+    /// `resume_ms > 0` springt nach dem Preroll an die gemerkte Position (sofern
+    /// die Quelle seekbar ist – Podcast-Hoster unterstützen i. d. R. Ranges).
+    pub fn play_uri(&self, uri: &str, resume_ms: i64) -> Result<()> {
         self.playbin
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri);
+        if resume_ms > 0 {
+            // Wie play_file: kurz nach PAUSED, auf den Preroll warten (bei
+            // Streams etwas länger), dann an die Resume-Position springen.
+            self.playbin
+                .set_state(gst::State::Paused)
+                .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
+            let _ = self.playbin.state(gst::ClockTime::from_seconds(10));
+            let _ = self.seek_ms(resume_ms);
+        }
         self.playbin
             .set_state(gst::State::Playing)
             .map_err(|e| anyhow!("Failed to start playback: {e}"))?;

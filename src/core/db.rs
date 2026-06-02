@@ -232,6 +232,15 @@ impl Library {
                 PRIMARY KEY (podcast_id, position)
             );
 
+            -- Wiedergabeposition (Resume) je Episode, anhand der Audio-URL –
+            -- bewusst getrennt von `episode`, damit ein Feed-Refresh (der die
+            -- Episodenzeilen ersetzt) die Hörposition nicht löscht.
+            CREATE TABLE IF NOT EXISTS episode_progress (
+                url         TEXT PRIMARY KEY,
+                position_ms INTEGER NOT NULL DEFAULT 0,
+                updated_at  INTEGER NOT NULL DEFAULT 0
+            );
+
             -- Hörstatistik: ein Ereignis je gehörtem Titel (roh; nichts wird
             -- vorberechnet). Bleibt rein lokal – verlässt das Gerät nie. Interpret/
             -- Album/Genre werden zur Auswertung über `path` an `track` gejoint,
@@ -1878,6 +1887,61 @@ impl Library {
             )?;
         }
         Ok(())
+    }
+
+    /// Speichert/aktualisiert die Wiedergabeposition einer Episode (per URL).
+    /// `position_ms <= 0` löscht den Eintrag (gilt als „von vorn / fertig").
+    pub fn set_episode_progress(&self, url: &str, position_ms: i64) -> Result<()> {
+        if position_ms <= 0 {
+            self.conn
+                .execute("DELETE FROM episode_progress WHERE url = ?1", [url])?;
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO episode_progress (url, position_ms, updated_at)
+             VALUES (?1, ?2, strftime('%s','now'))
+             ON CONFLICT(url) DO UPDATE SET
+                position_ms = excluded.position_ms, updated_at = excluded.updated_at",
+            rusqlite::params![url, position_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Gemerkte Wiedergabeposition einer Episode (0 = keine/von vorn).
+    pub fn episode_progress(&self, url: &str) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT position_ms FROM episode_progress WHERE url = ?1",
+                [url],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+
+    /// Alle gemerkten Episodenpositionen (für den Geräte-Sync).
+    pub fn all_episode_progress(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT url, position_ms FROM episode_progress")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Shownotes/Beschreibung einer Episode anhand ihrer Audio-URL (für die
+    /// Kapitelmarken auf dem Seekbar). `None`, wenn unbekannt oder leer.
+    pub fn episode_description_by_url(&self, url: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT description FROM episode WHERE audio_url = ?1 LIMIT 1",
+                [url],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten()
+            .filter(|s| !s.trim().is_empty()))
     }
 
     /// Episoden eines Podcasts in Feed-Reihenfolge.
