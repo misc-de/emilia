@@ -223,10 +223,23 @@ impl App {
     pub(crate) fn reload_albums(&mut self) {
         let albums = self.library.albums_overview().unwrap_or_default();
         self.album_count = albums.len();
-        let mut guard = self.albums.guard();
-        guard.clear();
-        for a in albums {
-            guard.push_back(a);
+        if self.gallery_view {
+            let items: Vec<(Option<String>, &'static str, String)> = albums
+                .iter()
+                .map(|a| (a.cover_path.clone(), "media-optical-symbolic", a.album.clone()))
+                .collect();
+            self.fill_gallery(
+                &self.albums_gallery,
+                &items,
+                Msg::ShowAlbumTracks,
+                Msg::ShowAlbumDetail,
+            );
+        } else {
+            let mut guard = self.albums.guard();
+            guard.clear();
+            for a in albums {
+                guard.push_back(a);
+            }
         }
     }
 
@@ -290,10 +303,23 @@ impl App {
                 a.image_path = self.artist_album_cover(&a.name);
             }
         }
-        let mut guard = self.artists.guard();
-        guard.clear();
-        for a in artists {
-            guard.push_back(a);
+        if self.gallery_view {
+            let items: Vec<(Option<String>, &'static str, String)> = artists
+                .iter()
+                .map(|a| (a.image_path.clone(), "avatar-default-symbolic", a.name.clone()))
+                .collect();
+            self.fill_gallery(
+                &self.artists_gallery,
+                &items,
+                Msg::OpenArtistTracks,
+                Msg::ShowArtistDetail,
+            );
+        } else {
+            let mut guard = self.artists.guard();
+            guard.clear();
+            for a in artists {
+                guard.push_back(a);
+            }
         }
     }
 

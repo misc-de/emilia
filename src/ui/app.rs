@@ -181,10 +181,17 @@ pub struct App {
     pub(crate) player: Player,
     /// Sperrbildschirm-/Medientasten-Steuerung (MPRIS, optional).
     pub(crate) mpris: crate::core::mpris::Mpris,
+    /// Eigener Eingabe-Sender, um aus Methoden ohne `ComponentSender` (z. B.
+    /// [`Self::play_current`]) Nachrichten an die Komponente zu schicken.
+    pub(crate) input: relm4::Sender<Msg>,
     pub(crate) entries: FactoryVecDeque<FsRow>,
     pub(crate) albums: FactoryVecDeque<AlbumCard>,
+    /// Galerie-Variante der Alben (Cover-Gitter), parallel zur Listen-Factory.
+    pub(crate) albums_gallery: gtk::FlowBox,
     pub(crate) album_count: usize,
     pub(crate) artists: FactoryVecDeque<ArtistCard>,
+    /// Galerie-Variante der Interpreten (Foto-Gitter).
+    pub(crate) artists_gallery: gtk::FlowBox,
     pub(crate) artist_count: usize,
     pub(crate) enriching: bool,
     pub(crate) enrich_status: String,
@@ -200,6 +207,10 @@ pub struct App {
     /// Anzeigesprache: "system" (System-Locale), "de" oder "en". In den
     /// Einstellungen umschaltbar; greift nach einem Neustart der App.
     pub(crate) ui_language: String,
+    /// Listen als **Galerie** (Cover-Gitter) statt als Liste darstellen.
+    pub(crate) gallery_view: bool,
+    /// Anzahl der Kacheln pro Reihe in der Galerie-Ansicht (2–8).
+    pub(crate) gallery_columns: u32,
     /// Aktuell aktiver Audio-Ausgang (PipeWire-Sink), für die EQ-Auflösung.
     pub(crate) active_output: String,
     pub(crate) music_dir: Option<String>,
@@ -465,6 +476,10 @@ pub enum Msg {
     SetLanguage(String),
     /// Farbschema umstellen ("system"/"dark"/"light"); greift sofort.
     SetColorScheme(String),
+    /// Galerie-Ansicht (Cover-Gitter) an/aus; baut die Listen neu auf.
+    SetGalleryView(bool),
+    /// Kacheln pro Reihe in der Galerie-Ansicht (2–8); baut die Listen neu auf.
+    SetGalleryColumns(u32),
     /// Merkmal einer Ebene setzen (oder bei `None` auf „erben" zurücksetzen).
     /// Bereiche (Eigenschaften) einer Ebene setzen; leerer Wert = ausgeblendet.
     SetAreas {
@@ -798,7 +813,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.artist_count > 0,
+                                        set_visible: model.artist_count > 0 && !model.gallery_view,
                                         #[local_ref]
                                         artists_box -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -807,6 +822,19 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.artist_count > 0 && model.gallery_view,
+                                        #[local_ref]
+                                        artists_gallery -> gtk::FlowBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                         },
                                     },
                                 },
@@ -836,7 +864,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.album_count > 0,
+                                        set_visible: model.album_count > 0 && !model.gallery_view,
                                         #[local_ref]
                                         albums_box -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -845,6 +873,20 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    // Galerie-Variante (Cover-Gitter)
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.album_count > 0 && model.gallery_view,
+                                        #[local_ref]
+                                        albums_gallery -> gtk::FlowBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                         },
                                     },
                                 },
@@ -1347,7 +1389,10 @@ impl Component for App {
                  button.emilia-bigplay { min-width: 46px; min-height: 46px; padding: 0px; }\
                  button.emilia-bigplay image { -gtk-icon-size: 34px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
-                 progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }",
+                 progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
+                 label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
+                 flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\
+                 flowbox.emilia-gallery > flowboxchild:selected { background: none; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -1461,6 +1506,18 @@ impl Component for App {
             .ok()
             .flatten()
             .unwrap_or_else(|| "system".to_string());
+        // Galerie-Ansicht (Standard: aus) und Kacheln/Reihe (Standard: 3, 2–8).
+        let gallery_view = matches!(
+            library.get_setting("gallery_view").ok().flatten().as_deref(),
+            Some("1")
+        );
+        let gallery_columns = library
+            .get_setting("gallery_columns")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(3)
+            .clamp(2, 8);
         // Zuletzt offener Navigationspunkt (nur gültige Sektionsnamen zulassen).
         let saved_section = library
             .get_setting("active_section")
@@ -1540,8 +1597,11 @@ impl Component for App {
             library,
             player,
             mpris,
+            input: sender.input_sender().clone(),
             entries,
             albums,
+            albums_gallery: gtk::FlowBox::new(),
+            artists_gallery: gtk::FlowBox::new(),
             album_count: 0,
             artists,
             artist_count: 0,
@@ -1553,6 +1613,8 @@ impl Component for App {
             acoustid_key,
             fanart_key,
             ui_language,
+            gallery_view,
+            gallery_columns,
             active_output,
             music_dir,
             root_dir,
@@ -1689,6 +1751,8 @@ impl Component for App {
         let entries_box = model.entries.widget();
         let albums_box = model.albums.widget();
         let artists_box = model.artists.widget();
+        let albums_gallery = model.albums_gallery.clone();
+        let artists_gallery = model.artists_gallery.clone();
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
@@ -2821,6 +2885,22 @@ impl Component for App {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
             }
+            Msg::SetGalleryView(on) => {
+                self.gallery_view = on;
+                let _ = self
+                    .library
+                    .set_setting("gallery_view", if on { "1" } else { "0" });
+                self.rebuild_all_lists(&sender);
+            }
+            Msg::SetGalleryColumns(n) => {
+                self.gallery_columns = n.clamp(2, 8);
+                let _ = self
+                    .library
+                    .set_setting("gallery_columns", &self.gallery_columns.to_string());
+                if self.gallery_view {
+                    self.rebuild_all_lists(&sender);
+                }
+            }
             Msg::SetAreas { scope, key, value } => {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
                     tracing::error!("Failed to save properties: {e}");
@@ -3262,6 +3342,37 @@ pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget
     crate::ui::widgets::rounded_image(texture.as_ref(), placeholder, 48)
 }
 
+/// Eine **Galerie-Kachel**: quadratisches Cover (oder Platzhalter-Icon) mit dem
+/// Titel als halbtransparentem Band unten (Overlay). Klick-/Long-Press-Handler
+/// werden vom Aufrufer (FlowBox) ergänzt.
+pub(crate) fn gallery_cell(cover_path: Option<&str>, icon: &str, title: &str) -> gtk::Overlay {
+    let overlay = gtk::Overlay::new();
+    let frame = gtk::AspectFrame::new(0.5, 0.5, 1.0, false);
+    frame.set_overflow(gtk::Overflow::Hidden);
+    frame.add_css_class("card");
+    match cover_path.and_then(crate::ui::widgets::thumb_cached) {
+        Some(tex) => {
+            let pic = gtk::Picture::for_paintable(&tex);
+            pic.set_content_fit(gtk::ContentFit::Cover);
+            frame.set_child(Some(&pic));
+        }
+        None => {
+            let img = gtk::Image::from_icon_name(icon);
+            img.set_pixel_size(64);
+            frame.set_child(Some(&img));
+        }
+    }
+    overlay.set_child(Some(&frame));
+    let label = gtk::Label::new(Some(title));
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.set_xalign(0.0);
+    label.set_valign(gtk::Align::End);
+    label.set_halign(gtk::Align::Fill);
+    label.add_css_class("emilia-gallery-title");
+    overlay.add_overlay(&label);
+    overlay
+}
+
 /// Liest Unterordner und Audiodateien eines Ordners (Ordner zuerst, sortiert).
 /// Läuft im Hintergrund-Thread – darf daher blockieren.
 pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
@@ -3316,6 +3427,69 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
 }
 
 impl App {
+    /// Baut **alle** Listen neu auf (nach Umschalten Galerie/Liste oder der
+    /// Spaltenzahl). Jede Reload-Funktion füllt – je nach `gallery_view` – die
+    /// Listen- oder die Galerie-Variante.
+    pub(crate) fn rebuild_all_lists(&mut self, sender: &ComponentSender<Self>) {
+        self.reload_albums();
+        self.reload_artists();
+        self.load_dir(sender);
+        self.load_favorites(sender);
+        self.load_audiobooks(sender);
+        self.load_concerts(sender);
+        self.reload_podcasts(sender);
+    }
+
+    /// Füllt eine FlowBox als **Galerie**: Kacheln aus `(cover, icon, title)`,
+    /// Spaltenzahl = `gallery_columns`. Einzelklick aktiviert (`activate(index)`),
+    /// langes Drücken öffnet das Detail (`detail(index)`). Nachrichten gehen über
+    /// den eigenen Input-Sender. Beim erneuten Aufruf werden alle Kacheln (samt
+    /// ihrer Controller) entfernt – keine Mehrfach-Handler.
+    pub(crate) fn fill_gallery(
+        &self,
+        fb: &gtk::FlowBox,
+        items: &[(Option<String>, &'static str, String)],
+        activate: fn(usize) -> Msg,
+        detail: fn(usize) -> Msg,
+    ) {
+        while let Some(c) = fb.first_child() {
+            fb.remove(&c);
+        }
+        fb.set_min_children_per_line(self.gallery_columns);
+        fb.set_max_children_per_line(self.gallery_columns);
+        fb.set_homogeneous(true);
+        fb.set_row_spacing(8);
+        fb.set_column_spacing(8);
+        fb.set_selection_mode(gtk::SelectionMode::None);
+        if !fb.has_css_class("emilia-gallery") {
+            fb.add_css_class("emilia-gallery");
+        }
+        for (i, (cover, icon, title)) in items.iter().enumerate() {
+            let cell = gallery_cell(cover.as_deref(), icon, title);
+            let click = gtk::GestureClick::new();
+            {
+                let input = self.input.clone();
+                click.connect_released(move |g, n, _, _| {
+                    if n == 1 {
+                        g.set_state(gtk::EventSequenceState::Claimed);
+                        let _ = input.send(activate(i));
+                    }
+                });
+            }
+            cell.add_controller(click);
+            let lp = gtk::GestureLongPress::new();
+            {
+                let input = self.input.clone();
+                lp.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    let _ = input.send(detail(i));
+                });
+            }
+            cell.add_controller(lp);
+            fb.append(&cell);
+        }
+    }
+
     /// Schmaler (mobiler) Modus? Identisch zur eingeklappten Seitenleiste, die
     /// der Breakpoint bei geringer Fensterbreite setzt.
     pub(crate) fn is_mobile(&self) -> bool {

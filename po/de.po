@@ -1053,6 +1053,18 @@ msgstr "Wiederholen"
 msgid "Turn off"
 msgstr "Ausschalten"
 
+msgid "List display"
+msgstr "Listendarstellung"
+
+msgid "Gallery view"
+msgstr "Galerie-Ansicht"
+
+msgid "Show lists as a grid of cover thumbnails"
+msgstr "Listen als Gitter aus Cover-Miniaturen anzeigen"
+
+msgid "Tiles per row"
+msgstr "Kacheln pro Reihe"
+
 msgid "Top genres"
 msgstr "Top-Genres"
 

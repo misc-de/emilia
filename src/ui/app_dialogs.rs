@@ -559,6 +559,42 @@ impl App {
         theme_group.add(&theme_row);
         page.add(&theme_group);
 
+        // Galerie-Ansicht (Cover-Gitter) statt Liste + Kacheln pro Reihe.
+        let gallery_group = adw::PreferencesGroup::builder()
+            .title(&gettext("List display"))
+            .build();
+        let gallery_row = adw::SwitchRow::builder()
+            .title(&gettext("Gallery view"))
+            .subtitle(&gettext("Show lists as a grid of cover thumbnails"))
+            .active(self.gallery_view)
+            .build();
+        {
+            let sender = sender.clone();
+            gallery_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetGalleryView(r.is_active()));
+            });
+        }
+        gallery_group.add(&gallery_row);
+        let cols_row = adw::SpinRow::builder()
+            .title(&gettext("Tiles per row"))
+            .adjustment(&gtk::Adjustment::new(
+                self.gallery_columns as f64,
+                2.0,
+                8.0,
+                1.0,
+                1.0,
+                0.0,
+            ))
+            .build();
+        {
+            let sender = sender.clone();
+            cols_row.connect_value_notify(move |r| {
+                sender.input(Msg::SetGalleryColumns(r.value() as u32));
+            });
+        }
+        gallery_group.add(&cols_row);
+        page.add(&gallery_group);
+
         // Menüpunkte ein-/ausblenden **und** per Ziehgriff umsortieren. Die
         // Reihenfolge/Sichtbarkeit wird sofort in die Navigation übernommen.
         let sections_group = adw::PreferencesGroup::builder()
