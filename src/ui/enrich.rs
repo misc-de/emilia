@@ -15,12 +15,14 @@ use crate::ui::app::Cmd;
 /// DB-Verbindung, liest die Tags unter `root` ein (read-only auf den Dateien!)
 /// und reichert **priorisiert von oben nach unten** an – zuerst Interpreten,
 /// dann Cover:
-///   1. Cover aus lokalen Dateien (eingebettet/Ordnerbild) – offline, sofort
-///   2. **Interpreten-Fotos** → Deezer (höchste Priorität)
+///   1. **Interpreten-Fotos** → Deezer (höchste Priorität)
+///   2. Cover aus lokalen Dateien (eingebettet/Ordnerbild) – offline, sofort
 ///   3. **Album-Cover** → MusicBrainz + Cover Art Archive
-///   4. Interpreten-Galerien → fanart.tv (nur mit Key)
-///   5. Album-Galerien → Cover Art Archive
-///   6. Titel-Erkennung → Chromaprint/AcoustID (zuletzt; benötigt AcoustID-Key)
+/// Galerien (fanart.tv / Cover Art Archive) und die Fingerprint-Titelerkennung
+/// (AcoustID) laufen **nicht** hier, sondern bedarfsgesteuert beim Öffnen der
+/// Detailansicht bzw. beim Abspielen – siehe [`crate::ui::app::App::fetch_focus_artist`],
+/// [`fetch_focus_album`](crate::ui::app::App::fetch_focus_album) und
+/// [`fetch_focus_track`](crate::ui::app::App::fetch_focus_track).
 /// Zwischen den Netz-Anfragen wird pausiert (Rate-Limit); ein vorübergehendes
 /// Server-Limit (HTTP 429/503) wird in [`online`] abgefangen (Backoff + Retry)
 /// und zählt **nicht** als Fehlversuch. Erst nach so vielen *echten* erfolglosen
@@ -29,19 +31,25 @@ use crate::ui::app::Cmd;
 /// wiederholt wird.
 pub(crate) const MAX_ATTEMPTS: i64 = 3;
 
+///
+/// `light`: **leichter Hintergrund-Nachzug** (periodischer Timer). Lädt nur die
+/// gut „skip-fähigen" Phasen – **Interpreten-Fotos (1)** und **Online-Cover (3)** –
+/// und überspringt das lokale Cover-Scannen (Phase 2, bereits beim Scan erledigt)
+/// sowie die Galerien/Fingerprint (Phasen 4–6, die bei jedem Lauf erneut laden
+/// würden). Läuft leise: `ReloadViews` wird nur gesendet, wenn sich tatsächlich
+/// etwas geändert hat – sonst würde die UI im Minutentakt grundlos neu aufbauen.
 pub(crate) fn enrich_worker(
     root: PathBuf,
-    acoustid_key: Option<String>,
-    fanart_key: Option<String>,
     cancel: Arc<AtomicBool>,
     scan_first: bool,
+    light: bool,
     out: &relm4::Sender<Cmd>,
 ) {
     let lib = match Library::open() {
         Ok(lib) => lib,
         Err(e) => {
             tracing::error!("Database unavailable for online fetch: {e}");
-            let _ = out.send(Cmd::EnrichDone);
+            let _ = out.send(Cmd::EnrichDone { changed: false });
             return;
         }
     };
@@ -56,6 +64,9 @@ pub(crate) fn enrich_worker(
 
     let client = online::OnlineClient::new();
     let mut artists_matched = 0usize;
+    // Hat dieser Lauf irgendetwas Neues gespeichert? Steuert beim leichten Lauf,
+    // ob die Ansichten am Ende überhaupt neu geladen werden.
+    let mut any_change = false;
     let stopped = || cancel.load(Ordering::Relaxed);
 
     // Gesamtsummen für die Fortschrittsanzeige (gegen die ganze Bibliothek,
@@ -83,39 +94,53 @@ pub(crate) fn enrich_worker(
         }
         // Zugeordnete + übersprungene Interpreten zählen als „erledigt".
         let artists_base = artists_matched + artists_skipped;
-        fetch_artists_parallel(&client, to_fetch, &cancel, &lib, artists_base, total_artists, out);
-        let _ = out.send(Cmd::ReloadViews);
+        let new_artists =
+            fetch_artists_parallel(&client, to_fetch, &cancel, &lib, artists_base, total_artists, out);
+        if new_artists > 0 {
+            any_change = true;
+        }
+        // Beim leichten Lauf nur neu laden, wenn neue Fotos kamen (sonst grundloser
+        // UI-Neuaufbau im Minutentakt).
+        if !light || new_artists > 0 {
+            let _ = out.send(Cmd::ReloadViews);
+        }
         if stopped() {
             break 'work;
         }
 
         // Phase 2: Cover aus den lokalen Dateien (eingebettet/Ordnerbild) – offline
         // und schnell, daher direkt nach den Interpreten und vor dem Online-Cover.
-        let missing = lib.albums_missing_cover().unwrap_or_default();
-        // Bereits mit Cover versehene Alben gelten als „erledigt" → der Zähler
-        // startet dort und läuft bis zur Gesamtzahl (z. B. 4717/4726 … 4726/4726).
-        let base = total_albums.saturating_sub(missing.len());
-        for (i, (artist, album, path)) in missing.iter().enumerate() {
-            if stopped() {
-                break 'work;
+        // Beim leichten Nachzug ausgelassen: das lief bereits beim Scan; ein erneutes
+        // Datei-Scannen aller cover-losen Alben im Minutentakt wäre reine Plattenlast.
+        if !light {
+            let missing = lib.albums_missing_cover().unwrap_or_default();
+            // Bereits mit Cover versehene Alben gelten als „erledigt" → der Zähler
+            // startet dort und läuft bis zur Gesamtzahl (z. B. 4717/4726 … 4726/4726).
+            let base = total_albums.saturating_sub(missing.len());
+            for (i, (artist, album, path)) in missing.iter().enumerate() {
+                if stopped() {
+                    break 'work;
+                }
+                if let Some(cover_path) = online::local_album_cover(artist, album, path) {
+                    let mut m = crate::model::AlbumMeta::pending(artist, album);
+                    m.cover_path = Some(cover_path);
+                    m.status = "local".to_string();
+                    let _ = lib.upsert_album_meta(&m);
+                    any_change = true;
+                }
+                let _ = out.send(Cmd::EnrichProgress {
+                    phase: gettext("Cover"),
+                    done: base + i + 1,
+                    total: total_albums,
+                });
             }
-            if let Some(cover_path) = online::local_album_cover(artist, album, path) {
-                let mut m = crate::model::AlbumMeta::pending(artist, album);
-                m.cover_path = Some(cover_path);
-                m.status = "local".to_string();
-                let _ = lib.upsert_album_meta(&m);
-            }
-            let _ = out.send(Cmd::EnrichProgress {
-                phase: gettext("Cover"),
-                done: base + i + 1,
-                total: total_albums,
-            });
+            let _ = out.send(Cmd::ReloadViews);
         }
-        let _ = out.send(Cmd::ReloadViews);
 
         // Phase 3: Online-Cover nur noch für Alben ganz ohne Bild (Lückenfüller).
         let still_missing = lib.albums_missing_cover().unwrap_or_default();
         let base = total_albums.saturating_sub(still_missing.len());
+        let mut new_covers = 0usize;
         for (i, (artist, album, _)) in still_missing.iter().enumerate() {
             if stopped() {
                 break 'work;
@@ -123,88 +148,37 @@ pub(crate) fn enrich_worker(
             // Nach zu vielen erfolglosen Versuchen überspringen (auch manuell).
             let exhausted = lib.album_attempts(artist, album) >= MAX_ATTEMPTS;
             if !exhausted {
-                if !artist.is_empty() {
-                    let _ = online::enrich_album(&client, &lib, artist, album);
+                if !artist.is_empty()
+                    && online::enrich_album(&client, &lib, artist, album).cover_path.is_some()
+                {
+                    new_covers += 1;
+                    any_change = true;
                 }
                 std::thread::sleep(online::RATE_LIMIT);
             }
-            let _ = out.send(Cmd::EnrichProgress {
-                phase: gettext("Cover"),
-                done: base + i + 1,
-                total: total_albums,
-            });
-        }
-        let _ = out.send(Cmd::ReloadViews);
-
-        // Phase 4: Interpreten-Galerien (mehrere Fotos via fanart.tv – nur mit Key).
-        // „Interpret vor Cover" auch bei den Galerien: zuerst die Künstlerbilder.
-        if let Some(fkey) = fanart_key.filter(|k| !k.is_empty()) {
-            let names = lib.distinct_artists().unwrap_or_default();
-            let fa_total = names.len();
-            for (i, name) in names.iter().enumerate() {
-                if stopped() {
-                    break 'work;
-                }
-                online::enrich_artist_gallery(&client, &lib, name, &fkey);
-                std::thread::sleep(online::RATE_LIMIT);
+            // Beim leichten Lauf ist die Leiste ausgeblendet → Fortschritt sparen.
+            if !light {
                 let _ = out.send(Cmd::EnrichProgress {
-                    phase: gettext("Artist photos"),
-                    done: i + 1,
-                    total: fa_total,
+                    phase: gettext("Cover"),
+                    done: base + i + 1,
+                    total: total_albums,
                 });
             }
+        }
+        if !light || new_covers > 0 {
             let _ = out.send(Cmd::ReloadViews);
         }
 
-        // Phase 5: Album-Galerien (mehrere Cover je Album, Cover Art Archive) –
-        // parallel; der reine Bildabruf unterliegt keinem MusicBrainz-1/s-Limit.
-        let gallery_albums: Vec<(String, String, String)> = lib
-            .albums_overview()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|m| m.mbid.map(|id| (m.artist, m.album, id)))
-            .collect();
-        if stopped() {
-            break 'work;
-        }
-        fetch_album_galleries_parallel(&client, gallery_albums, &cancel, &lib, out);
-        let _ = out.send(Cmd::ReloadViews);
-
-        // Phase 6: Titel-Erkennung per Fingerprint (zuletzt – langsam, am wenigsten
-        // sichtbar; benötigt AcoustID-Key + fpcalc, sonst übersprungen).
-        if let Some(key) = acoustid_key.filter(|k| !k.is_empty()) {
-            if online::fingerprint_available() {
-                let candidates = lib.tracks_needing_id().unwrap_or_default();
-                // Gesamtsumme = alle Titel; bereits vollständige zählen als erledigt.
-                let total_tracks = lib.track_count().unwrap_or(0).max(0) as usize;
-                let base = total_tracks.saturating_sub(candidates.len());
-                for (i, track) in candidates.iter().enumerate() {
-                    if stopped() {
-                        break 'work;
-                    }
-                    let path = PathBuf::from(&track.path);
-                    let already = lib.get_track_meta(&track.path).ok().flatten();
-                    let matched =
-                        already.as_ref().map(|m| m.status.as_str()) == Some("matched");
-                    // Erschöpfte Titel nicht erneut anfragen (auch manuell).
-                    let exhausted = lib.track_attempts(&track.path) >= MAX_ATTEMPTS;
-                    if !matched && !exhausted {
-                        let _ = online::enrich_track_fingerprint(&client, &lib, &key, &path);
-                        std::thread::sleep(online::ACOUSTID_DELAY);
-                    }
-                    let _ = out.send(Cmd::EnrichProgress {
-                        phase: gettext("Tracks"),
-                        done: base + i + 1,
-                        total: total_tracks,
-                    });
-                }
-            } else {
-                tracing::info!("Fingerprint phase skipped (fpcalc missing)");
-            }
-        }
+        // Galerien (mehrere Fotos/Cover je Interpret bzw. Album) und die
+        // Fingerprint-Titelerkennung laufen **nicht** mehr im Sweep, sondern
+        // bedarfsgesteuert: Galerien beim Öffnen der Detailansicht, der Fingerprint
+        // beim Abspielen eines Titels ohne Metadaten. Beides würde hier sonst bei
+        // jedem Lauf erneut abgefragt (Galerien haben keine „schon vorhanden"-Prüfung).
     }
 
-    let _ = out.send(Cmd::EnrichDone);
+    // Voller Lauf: immer neu laden (wie bisher – u. a. zeigt das die Ergebnisse der
+    // Fingerprint-Phase). Leichter Lauf: nur, wenn wirklich etwas dazukam.
+    let _ = out.send(Cmd::EnrichDone { changed: !light || any_change });
 }
 
 /// Lädt Künstlerfotos **parallel** (mehrere Netz-Threads), schreibt die
@@ -282,68 +256,4 @@ fn fetch_artists_parallel(
         let _ = h.join();
     }
     matched
-}
-
-/// Lädt **mehrere** Album-Galerien parallel aus dem Cover Art Archive. Anders als
-/// die MusicBrainz-Suche unterliegt der reine Bildabruf (die MBID ist bekannt)
-/// keinem 1/s-Limit; nur die DB-Schreibzugriffe werden serialisiert (Koordinator).
-fn fetch_album_galleries_parallel(
-    client: &online::OnlineClient,
-    albums: Vec<(String, String, String)>,
-    cancel: &Arc<AtomicBool>,
-    lib: &Library,
-    out: &relm4::Sender<Cmd>,
-) {
-    use std::collections::VecDeque;
-    use std::sync::mpsc;
-    use std::sync::Mutex;
-
-    let total = albums.len();
-    if total == 0 {
-        return;
-    }
-
-    let jobs = Arc::new(Mutex::new(VecDeque::from(albums)));
-    let (tx, rx) = mpsc::channel::<(String, String, Vec<(Vec<u8>, String)>)>();
-    let n_threads = total.min(online::GALLERY_FETCH_THREADS);
-
-    let mut handles = Vec::with_capacity(n_threads);
-    for _ in 0..n_threads {
-        let client = client.clone();
-        let jobs = jobs.clone();
-        let cancel = cancel.clone();
-        let tx = tx.clone();
-        handles.push(std::thread::spawn(move || loop {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            let Some((artist, album, mbid)) = jobs.lock().unwrap().pop_front() else {
-                break;
-            };
-            let imgs = client.fetch_album_gallery(&mbid).unwrap_or_default();
-            if tx.send((artist, album, imgs)).is_err() {
-                break;
-            }
-        }));
-    }
-    drop(tx); // nur die Thread-Klone halten den Sender → rx endet, wenn alle fertig
-
-    // Koordinator: Ergebnisse serialisiert in den Cache + die DB schreiben.
-    let mut done = 0usize;
-    while let Ok((artist, album, imgs)) = rx.recv() {
-        online::store_album_gallery(lib, &artist, &album, &imgs);
-        done += 1;
-        let _ = out.send(Cmd::EnrichProgress {
-            phase: gettext("Album art"),
-            done,
-            total,
-        });
-        if done % 16 == 0 {
-            let _ = out.send(Cmd::ReloadViews);
-        }
-    }
-
-    for h in handles {
-        let _ = h.join();
-    }
 }

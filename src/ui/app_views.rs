@@ -268,29 +268,34 @@ impl App {
     /// weil der lokale Scan bereits durchlief. Die Audiodateien werden dabei nur
     /// gelesen, niemals verändert. Dauerhaft erfolglose Einträge (≥ 3 Versuche)
     /// werden in beiden Fällen übersprungen.
-    pub(crate) fn run_enrich(&mut self, sender: &ComponentSender<Self>, scan_first: bool) {
+    /// `light`: leiser Hintergrund-Nachzug (periodisch) – nur Interpreten-Fotos &
+    /// Online-Cover, ohne Fortschrittsleiste. Siehe [`enrich_worker`].
+    pub(crate) fn run_enrich(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        scan_first: bool,
+        light: bool,
+    ) {
         let Some(root) = self.root_dir.clone() else {
-            self.toast(&gettext("No music folder set – please choose one in the settings"));
+            if !light {
+                self.toast(&gettext("No music folder set – please choose one in the settings"));
+            }
             return;
         };
         if self.enriching {
             return;
         }
-        // Fehlender AcoustID-Key/fpcalc: Titel-Erkennung wird still übersprungen.
-        let key = self.acoustid_key.clone();
-        let fkey = self.fanart_key.clone();
         self.enrich_cancel.store(false, Ordering::Relaxed);
         let cancel = self.enrich_cancel.clone();
         self.enriching = true;
-        // Neuer Lauf → Fortschritts-Leiste wieder einblenden.
-        self.enrich_banner_hidden = false;
+        // Voller Lauf → Fortschritts-Leiste einblenden; leiser Nachzug bleibt verborgen.
+        self.enrich_banner_hidden = light;
         self.enrich_status = if scan_first {
             gettext("Reading library …")
         } else {
             gettext("Searching for cover & metadata …")
         };
-        sender
-            .spawn_command(move |out| enrich_worker(root, key, fkey, cancel, scan_first, &out));
+        sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
     }
 
     /// Lädt die Interpreten-Übersicht aus der DB in die Factory (inkl. Foto).

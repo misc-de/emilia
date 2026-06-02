@@ -110,6 +110,10 @@ pub(crate) fn confirm_destructive(
 const RESUME_MIN_POS_MS: i64 = 5_000;
 /// So nah vor dem Ende gilt der Titel als fertig → Resume auf 0 zurücksetzen.
 const RESUME_END_GUARD_MS: i64 = 10_000;
+/// Takt des leisen Hintergrund-Nachzugs fehlender Interpreten-Fotos & Cover.
+/// Bewusst niedrig (~1 min), damit neue Nutzer rasch eine aufgewertete Übersicht
+/// bekommen; der Worker drosselt die eigentlichen Netz-Anfragen selbst.
+const AUTO_ENRICH_INTERVAL_SECS: u32 = 60;
 
 /// Resume-Position mit Wächtern: nahe Anfang oder Ende wird auf 0 gesetzt,
 /// damit ein quasi fertiger Titel beim nächsten Mal von vorn beginnt.
@@ -278,6 +282,11 @@ pub struct App {
     pub(crate) concert_items: Vec<(String, String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
     pub(crate) concert_hint_dismissed: bool,
+    /// Galerien (Interpret bzw. Album), für die in **dieser Sitzung** schon ein
+    /// bedarfsgesteuerter Abruf lief – Schlüssel `"a\x01<name>"` bzw.
+    /// `"b\x01<artist>\x01<album>"`. Verhindert, dass für Einträge ohne Galerie
+    /// (die keine Versuchsgrenze haben) bei jedem Öffnen erneut angefragt wird.
+    pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
     /// Ausgeblendete Navigations-Menüpunkte (Stack-Namen). Betrifft sowohl die
     /// Navigation als auch die Auswahl in den Eigenschaften.
     pub(crate) hidden_sections: std::collections::HashSet<String>,
@@ -429,6 +438,9 @@ pub enum Msg {
     Mpris(crate::core::mpris::MprisCommand),
     /// 1-s-Tick: Position/Dauer der Seekleiste aktualisieren.
     Tick,
+    /// Periodischer, leiser Hintergrund-Nachzug: fehlende Interpreten-Fotos (zuerst)
+    /// und Online-Cover nachladen, ohne dass der Nutzer es anstoßen muss.
+    AutoEnrichTick,
     /// Sprung an eine Position (ms) durch Ziehen/Klicken der Seekleiste.
     Seek(i64),
     Next,
@@ -593,8 +605,9 @@ pub enum Cmd {
     Entries(Vec<FsEntry>),
     /// Fortschritt einer Anreicherungsphase (`phase` = Anzeigetext).
     EnrichProgress { phase: String, done: usize, total: usize },
-    /// Online-Anreicherung abgeschlossen.
-    EnrichDone,
+    /// Online-Anreicherung abgeschlossen; `changed` = es kam etwas Neues hinzu
+    /// (steuert beim leisen Nachzug, ob die Ansichten neu geladen werden).
+    EnrichDone { changed: bool },
     /// Zwischenstand: Alben-/Interpreten-Ansicht neu laden (z. B. nach einer Phase).
     ReloadViews,
     /// Lokaler Bibliotheks-Scan fertig; `then_enrich` = danach ggf. online nachladen.
@@ -1576,6 +1589,20 @@ impl Component for App {
             });
         }
 
+        // Leiser Hintergrund-Nachzug: füllt nach und nach fehlende Interpreten-Fotos
+        // (zuerst) und Online-Cover, ohne Zutun des Nutzers – damit auch ohne neuen
+        // Scan (zurückkehrende Nutzer, Funkloch beim ersten Lauf, fehlgeschlagene
+        // Einzelabrufe) die Übersicht aufgewertet wird. Der Worker ist rate-limitiert
+        // und überspringt bereits Geladenes/dauerhaft Erfolgloses; ist nichts offen,
+        // verpufft der Tick nahezu kostenlos (kein Netz, keine UI-Aktualisierung).
+        {
+            let sender = sender.clone();
+            gtk::glib::timeout_add_seconds_local(AUTO_ENRICH_INTERVAL_SECS, move || {
+                sender.input(Msg::AutoEnrichTick);
+                gtk::glib::ControlFlow::Continue
+            });
+        }
+
         // MPRIS-Dienst starten: Befehle vom Sperrbildschirm/von Medientasten
         // werden als Msg::Mpris in die Komponente eingespeist.
         let mpris = crate::core::mpris::Mpris::start({
@@ -1667,6 +1694,7 @@ impl Component for App {
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
             concert_hint_dismissed,
+            gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
             hidden_sections,
             section_order,
             nav_buttons: Vec::new(),
@@ -2594,6 +2622,20 @@ impl Component for App {
                     }
                 }
             }
+            Msg::AutoEnrichTick => {
+                // Leiser Nachzug fehlender Interpreten-Fotos & Online-Cover im
+                // Hintergrund (rate-limitiert im Worker). Nur, wenn gewünscht, ein
+                // Ordner gesetzt ist, gerade kein Lauf aktiv ist und Netz besteht.
+                // Läuft schon ein (voller) Abruf, greift die `enriching`-Sperre und
+                // dieser Tick verpufft – kein Aufstauen.
+                if self.auto_enrich
+                    && !self.enriching
+                    && self.root_dir.is_some()
+                    && online_available()
+                {
+                    self.run_enrich(&sender, false, true);
+                }
+            }
             Msg::Seek(ms) => {
                 let ms = ms.max(0);
                 self.position_ms = ms;
@@ -3165,10 +3207,15 @@ impl Component for App {
             Cmd::EnrichProgress { phase, done, total } => {
                 self.enrich_status = format!("{phase}: {done}/{total}");
             }
-            Cmd::EnrichDone => {
+            Cmd::EnrichDone { changed } => {
                 self.enriching = false;
-                self.reload_albums();
-                self.reload_artists();
+                // Nur neu aufbauen, wenn der Lauf etwas geändert hat – der leise
+                // Minuten-Nachzug läuft sonst ins Leere und würde die Listen grundlos
+                // neu rendern.
+                if changed {
+                    self.reload_albums();
+                    self.reload_artists();
+                }
             }
             Cmd::ReloadViews => {
                 self.reload_albums();
@@ -3188,8 +3235,8 @@ impl Component for App {
                     && self.root_dir.is_some()
                     && online_available()
                 {
-                    // Automatischer Lauf (ohne erneuten Tag-Scan).
-                    self.run_enrich(&sender, false);
+                    // Automatischer Lauf (ohne erneuten Tag-Scan), voller Umfang.
+                    self.run_enrich(&sender, false, false);
                 }
             }
             Cmd::Candidates(candidates) => {
@@ -3506,40 +3553,66 @@ impl App {
 
     /// Lädt das **Foto des gerade geöffneten Interpreten** sofort im Hintergrund
     /// nach – damit zuerst erscheint, was der Nutzer ansieht (Vorrang vor dem
-    /// laufenden Massen-Sync). Tut nichts ohne Netz, bei bereits zugeordnetem Foto
-    /// oder nach zu vielen erfolglosen Versuchen. Nach Erfolg werden die Ansichten
-    /// neu geladen (`Cmd::ReloadViews`).
+    /// laufenden Massen-Sync). Holt zusätzlich – falls ein fanart.tv-Key vorliegt –
+    /// die **Bildergalerie** des Interpreten (mehrere Fotos), die es nur in der
+    /// Detailansicht gibt und die deshalb erst hier (bedarfsgesteuert) geladen wird.
+    /// Tut nichts ohne Netz; das Einzelfoto entfällt bei bereits zugeordnetem Foto
+    /// oder nach zu vielen Versuchen, die Galerie, wenn sie schon vorliegt oder in
+    /// dieser Sitzung bereits versucht wurde. Nach Erfolg: `Cmd::ReloadViews`.
     pub(crate) fn fetch_focus_artist(&self, sender: &ComponentSender<Self>, name: &str) {
         let name = name.trim().to_string();
         if name.is_empty() || !online_available() {
             return;
         }
+        // (a) Einzelfoto (Deezer): überspringen, wenn schon zugeordnet oder erschöpft.
         let matched = self
             .library
             .get_artist_meta(&name)
             .ok()
             .flatten()
             .is_some_and(|m| m.status == "matched");
-        if matched || self.library.artist_attempts(&name) >= crate::ui::enrich::MAX_ATTEMPTS {
+        let need_image =
+            !matched && self.library.artist_attempts(&name) < crate::ui::enrich::MAX_ATTEMPTS;
+        // (b) Galerie (fanart.tv): nur mit Key, wenn noch keine vorliegt und in dieser
+        // Sitzung noch nicht versucht (Galerien haben keine Versuchsgrenze).
+        let fkey = self.fanart_key.clone().filter(|k| !k.is_empty());
+        let need_gallery = fkey.is_some()
+            && self
+                .library
+                .artist_images(&name)
+                .map(|imgs| imgs.is_empty())
+                .unwrap_or(false)
+            && self.gallery_tried.borrow_mut().insert(format!("a\u{1}{name}"));
+        if !need_image && !need_gallery {
             return;
         }
+        let fkey = fkey.filter(|_| need_gallery);
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = Library::open() {
                 let client = crate::core::online::OnlineClient::new();
-                let (image, errored) = match client.fetch_artist_image(&name) {
-                    Ok(img) => (img, false),
-                    Err(_) => (None, true),
-                };
-                let meta = crate::core::online::store_artist_image(&name, image, errored);
-                let _ = lib.upsert_artist_meta(&meta);
+                if need_image {
+                    let (image, errored) = match client.fetch_artist_image(&name) {
+                        Ok(img) => (img, false),
+                        Err(_) => (None, true),
+                    };
+                    let meta = crate::core::online::store_artist_image(&name, image, errored);
+                    let _ = lib.upsert_artist_meta(&meta);
+                }
+                if let Some(key) = fkey {
+                    let _ = crate::core::online::enrich_artist_gallery(&client, &lib, &name, &key);
+                }
             }
             Cmd::ReloadViews
         });
     }
 
-    /// Wie [`Self::fetch_focus_artist`], nur für das **Cover des gerade geöffneten
-    /// Albums**. Übersprungen, wenn bereits ein Cover vorliegt, kein Netz besteht
-    /// oder zu viele Versuche erfolglos blieben.
+    /// Wie [`Self::fetch_focus_artist`], nur für das **gerade geöffnete Album**: lädt
+    /// das Einzelcover (MusicBrainz + Cover Art Archive) und – falls noch keine da ist –
+    /// die **Cover-Galerie** des Albums. Das Einzelcover entfällt, wenn schon eines
+    /// vorliegt oder zu viele Versuche scheiterten; die Galerie, wenn sie schon
+    /// vorliegt oder in dieser Sitzung versucht wurde. Sie braucht die beim
+    /// Cover-Abruf gesetzte MBID – beim allerersten Öffnen entsteht diese gerade erst,
+    /// die Galerie greift dann ggf. erst beim nächsten Öffnen.
     pub(crate) fn fetch_focus_album(&self, sender: &ComponentSender<Self>, artist: &str, album: &str) {
         let artist = artist.trim().to_string();
         let album = album.trim().to_string();
@@ -3552,13 +3625,31 @@ impl App {
             .ok()
             .flatten()
             .is_some_and(|m| m.cover_path.as_deref().is_some_and(|p| !p.trim().is_empty()));
-        if has_cover || self.library.album_attempts(&artist, &album) >= crate::ui::enrich::MAX_ATTEMPTS {
+        let need_cover = !has_cover
+            && self.library.album_attempts(&artist, &album) < crate::ui::enrich::MAX_ATTEMPTS;
+        let need_gallery = self
+            .library
+            .album_images(&artist, &album)
+            .map(|imgs| imgs.is_empty())
+            .unwrap_or(false)
+            && self
+                .gallery_tried
+                .borrow_mut()
+                .insert(format!("b\u{1}{artist}\u{1}{album}"));
+        if !need_cover && !need_gallery {
             return;
         }
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = Library::open() {
                 let client = crate::core::online::OnlineClient::new();
-                let _ = crate::core::online::enrich_album(&client, &lib, &artist, &album);
+                // Erst das Cover (setzt die MBID), dann die Galerie, die sie nutzt.
+                if need_cover {
+                    let _ = crate::core::online::enrich_album(&client, &lib, &artist, &album);
+                }
+                if need_gallery {
+                    let _ =
+                        crate::core::online::enrich_album_gallery(&client, &lib, &artist, &album);
+                }
             }
             Cmd::ReloadViews
         });

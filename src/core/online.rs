@@ -637,6 +637,23 @@ pub fn enrich_artist_gallery(
     stored.len()
 }
 
+/// Holt & speichert die Cover-Galerie eines Albums (Cover Art Archive) in die DB.
+/// Setzt die bereits gefundene MBID aus den Album-Metadaten voraus (sie entsteht
+/// beim Einzelcover-Abruf [`enrich_album`]); ohne MBID passiert nichts. Für den
+/// bedarfsgesteuerten Abruf beim Öffnen der Album-Detailansicht.
+pub fn enrich_album_gallery(client: &OnlineClient, lib: &Library, artist: &str, album: &str) -> usize {
+    let Some(mbid) = lib
+        .get_album_meta(artist, album)
+        .ok()
+        .flatten()
+        .and_then(|m| m.mbid)
+    else {
+        return 0;
+    };
+    let imgs = client.fetch_album_gallery(&mbid).unwrap_or_default();
+    store_album_gallery(lib, artist, album, &imgs)
+}
+
 /// Erkennt einen Titel per Fingerprint (Chromaprint → AcoustID) und legt die
 /// **vorgeschlagenen** Metadaten in der DB ab. Die Datei wird nur gelesen.
 ///
