@@ -659,10 +659,6 @@ impl Component for App {
                 #[wrap(Some)]
                 #[name = "content_view"]
                 set_content = &adw::ToolbarView {
-                    // Desktop: etwas Luft **oben** über dem Inhalt (nicht links –
-                    // der Inhalt schließt bündig an die Seitenleiste an). Im
-                    // schmalen (mobilen) Modus per Breakpoint wieder auf 0 (siehe `init`).
-                    set_margin_top: 20,
                     add_top_bar = &adw::HeaderBar {
                         #[wrap(Some)]
                         #[name = "win_title"]
@@ -721,9 +717,13 @@ impl Component for App {
                         connect_button_clicked => Msg::HideEnrichBanner,
                     },
 
-                    // Inhalt mit Lade-Overlay
+                    // Inhalt mit Lade-Overlay. Desktop: etwas Luft **zwischen
+                    // Titelleiste und Inhalt** (oben); im schmalen (mobilen) Modus
+                    // per Breakpoint wieder auf 0 (siehe `init`).
                     #[wrap(Some)]
+                    #[name = "content_overlay"]
                     set_content = &gtk::Overlay {
+                        set_margin_top: 10,
                         #[wrap(Some)]
                         #[name = "view_stack"]
                         set_child = &adw::ViewStack {
@@ -1806,8 +1806,8 @@ impl Component for App {
         breakpoint.add_setter(&widgets.top_nav, "visible", Some(&yes));
         // Einstellungen oben nur im schmalen Modus zeigen (Desktop: Seitenleiste).
         breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
-        // Der Desktop-Abstand über dem Inhalt entfällt im schmalen Modus.
-        breakpoint.add_setter(&widgets.content_view, "margin-top", Some(&0i32.to_value()));
+        // Der Desktop-Abstand zwischen Titelleiste und Inhalt entfällt im schmalen Modus.
+        breakpoint.add_setter(&widgets.content_overlay, "margin-top", Some(&0i32.to_value()));
         root.add_breakpoint(breakpoint);
 
         // Icon-only Navigation (Seitenleiste + oben) in der **gespeicherten

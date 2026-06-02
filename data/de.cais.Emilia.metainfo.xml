@@ -84,6 +84,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.1.5" date="2026-06-02">
+      <description>
+        <p>Podcast show notes everywhere with clickable chapter timestamps and seek-bar chapter marks, per-episode resume, and device sync of episodes, show notes and playback position. Robust audiobook ordering by file structure, and various list and layout polish.</p>
+        <p xml:lang="de">Podcast-Shownotes überall mit anklickbaren Kapitel-Zeitmarken und Kapitelmarken auf der Seekleiste, Resume je Episode und Geräte-Sync von Episoden, Shownotes und Hörposition. Robuste Hörbuch-Sortierung nach Dateistruktur sowie diverse Listen- und Layout-Politur.</p>
+      </description>
+    </release>
     <release version="0.1.4" date="2026-06-01">
       <description>
         <p>Custom app icon, mini-player polish, podcast grouping, audiobook CD ordering, and in-app self-update.</p>

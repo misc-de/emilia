@@ -786,7 +786,6 @@ impl App {
             .get_album_meta(&display_artist, album)
             .ok()
             .flatten();
-        let year = album_meta.as_ref().and_then(|m| m.year);
         let cover_path = album_meta.as_ref().and_then(|m| m.cover_path.clone());
         // Album-Cover einmal dekodieren und in allen Titelzeilen wiederverwenden.
         let cover = cover_path
@@ -812,13 +811,13 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Zeile **über** der Überschrift: bei Hörbüchern der Titel, sonst nur das
-        // Jahr. Die Songanzahl steht bereits in der Abschnittsüberschrift
-        // („Album (N)" bzw. „CD n (x)") und wäre hier eine Dopplung.
+        // Zeile **über** der Überschrift: nur bei Hörbüchern der Titel. Bei
+        // normalen Alben kein Kopf – die Songanzahl steht in der Überschrift
+        // („Album (N)"), und das Jahr wird in der Liederansicht ausgeblendet.
         let header_text = if is_audiobook {
             album.to_string()
         } else {
-            year.map(|y| y.to_string()).unwrap_or_default()
+            String::new()
         };
         if !header_text.trim().is_empty() {
             let lbl = gtk::Label::builder()
