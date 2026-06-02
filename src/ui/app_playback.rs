@@ -443,16 +443,12 @@ impl App {
         let p = PathBuf::from(path);
         let files = if is_dir {
             let mut fs = scanner::collect_audio_files(&p);
+            // Wie die Anzeige (`folder_tracks_ordered`): **natürliche** Pfad-
+            // Sortierung, damit Wiedergabe- und Anzeigereihenfolge übereinstimmen
+            // (CD-Ordner + Dateinamen geben die Reihenfolge vor, robust gegen
+            // falsche/fehlende Disc-/Track-Tags).
             fs.sort_by_cached_key(|f| {
-                let s = f.to_string_lossy().into_owned();
-                let t = self.library.track_by_path(&s).ok().flatten();
-                let parent = f
-                    .parent()
-                    .map(|d| d.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let disc = t.as_ref().and_then(|t| t.disc_no).unwrap_or(1);
-                let track = t.as_ref().and_then(|t| t.track_no).unwrap_or(0);
-                (parent, disc, track, s)
+                crate::ui::app_views::natural_key(&f.to_string_lossy())
             });
             fs
         } else {

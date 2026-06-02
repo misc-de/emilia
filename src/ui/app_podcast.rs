@@ -70,9 +70,10 @@ impl App {
             self.podcasts_list.remove(&child);
         }
         for (id, title, image, count) in self.podcast_items.clone() {
+            // Episodenanzahl wie bei Alben/Liedern in Klammern an die Überschrift;
+            // keine separate „N Episoden"-Zeile.
             let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&title))
-                .subtitle(ngettext_n("{n} episode", "{n} episodes", count as u32))
+                .title(format!("{} ({count})", gtk::glib::markup_escape_text(&title)).as_str())
                 .activatable(true)
                 .build();
             row.add_css_class("emilia-flush");
@@ -475,9 +476,10 @@ impl App {
             .margin_start(12)
             .margin_end(12)
             .build();
+        // Anzahl direkt in die Überschrift (in Klammern); die separate
+        // „N Episoden"-Zeile wäre dann eine Dopplung und entfällt.
         let group = adw::PreferencesGroup::builder()
-            .title(gtk::glib::markup_escape_text(title))
-            .description(ngettext_n("{n} episode", "{n} episodes", episodes.len() as u32))
+            .title(format!("{} ({})", gtk::glib::markup_escape_text(title), episodes.len()).as_str())
             .build();
 
         if episodes.is_empty() {
@@ -771,6 +773,31 @@ impl App {
         *self.chapters.borrow_mut() = chapters;
     }
 
+    /// Aktualisiert das Kapitel-Label auf das Kapitel an der aktuellen
+    /// Wiedergabeposition. No-op während eines Hovers (dann hat die Mausposition
+    /// Vorrang) und ohne Kapitel (Label bleibt versteckt).
+    pub(crate) fn update_current_chapter(&self) {
+        if self.hovering_seek.get() {
+            return;
+        }
+        let name = {
+            let chaps = self.chapters.borrow();
+            chaps
+                .iter()
+                .rev()
+                .find(|(ms, _)| *ms <= self.position_ms)
+                .map(|(_, n)| n.clone())
+                .filter(|n| !n.is_empty())
+        };
+        match name {
+            Some(n) => {
+                self.chapter_label.set_text(&n);
+                self.chapter_label.set_visible(true);
+            }
+            None => self.chapter_label.set_visible(false),
+        }
+    }
+
     fn play_episode_from(&mut self, url: &str, title: &str, resume: i64) {
         self.save_episode_progress();
         match self.player.play_uri(url, resume) {
@@ -797,6 +824,8 @@ impl App {
                     .map(|d| crate::core::podcast::parse_chapters(&d))
                     .unwrap_or_default();
                 self.set_chapters(chapters);
+                // Aktuelles Kapitel (an der Resume-/Startposition) sofort zeigen.
+                self.update_current_chapter();
             }
             Err(e) => tracing::error!("Failed to play episode: {e}"),
         }

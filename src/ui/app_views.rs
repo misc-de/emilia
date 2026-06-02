@@ -78,37 +78,101 @@ fn album_base(name: &str) -> String {
 /// nichts aus. Sonst `None`.
 fn disc_from_segment(seg: &str) -> Option<u32> {
     let s = seg.trim().to_ascii_lowercase();
+    let bytes = s.as_bytes();
     const MARKERS: [&str; 6] = ["cd", "disc", "disk", "teil", "part", "folge"];
     for kw in MARKERS {
-        if let Some(rest) = s.strip_prefix(kw) {
-            let digits: String = rest
-                .trim_start_matches(|c: char| matches!(c, ' ' | '_' | '.' | '#' | '-'))
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect();
-            if let Ok(n) = digits.parse::<u32>() {
-                return Some(n);
+        // Marker **irgendwo** im Segment suchen (z. B. „Wie Google tickt CD1"),
+        // aber nur an einer Wortgrenze (kein Treffer mitten in einem Wort wie
+        // „abcd"), gefolgt von Ziffern.
+        let mut from = 0;
+        while let Some(rel) = s[from..].find(kw) {
+            let pos = from + rel;
+            let boundary = pos == 0 || !bytes[pos - 1].is_ascii_alphabetic();
+            if boundary {
+                let digits: String = s[pos + kw.len()..]
+                    .trim_start_matches(|c: char| matches!(c, ' ' | '_' | '.' | '#' | '-'))
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
+                if let Ok(n) = digits.parse::<u32>() {
+                    return Some(n);
+                }
             }
+            from = pos + kw.len();
         }
     }
     None
 }
 
-/// Effektive Disc-Nummer eines Titels: bevorzugt das `disc_no`-Tag, sonst aus
-/// einem CD-/Disc-**Unterordner** des Pfads abgeleitet (Hörbücher ohne Disc-Tag),
-/// sonst 1. Es zählen nur Verzeichnis-Segmente, nicht der Dateiname.
+/// Effektive Disc-Nummer eines Titels. **Dateistruktur hat Vorrang:** ein
+/// CD-/Disc-/Teil-**Unterordner** des Pfads ist verlässlicher als ein Disc-Tag
+/// (manche Hörbuch-Ripper setzen `disc` fälschlich = Tracknummer). Nur echte
+/// „CD/Disc/Teil…"-Ordner zählen (s. `disc_from_segment`), nicht der Dateiname;
+/// sonst das `disc_no`-Tag, sonst 1.
 pub(crate) fn track_disc(t: &Track) -> u32 {
-    if let Some(d) = t.disc_no {
-        return d;
-    }
-    std::path::Path::new(&t.path)
+    if let Some(d) = std::path::Path::new(&t.path)
         .parent()
         .into_iter()
         .flat_map(|d| d.components())
         .filter_map(|c| c.as_os_str().to_str())
         .filter_map(disc_from_segment)
         .last()
-        .unwrap_or(1)
+    {
+        return d;
+    }
+    t.disc_no.unwrap_or(1)
+}
+
+/// „Natürlicher" Sortierschlüssel eines Strings: Ziffernfolgen werden als Zahlen
+/// verglichen (jeder Ziffernblock links auf feste Breite mit Nullen aufgefüllt).
+/// So steht „CD2" vor „CD10" und „3.2" vor „3.10", und „01 01" vor „02 01".
+/// Für die **Dateistruktur-Sortierung** der Hörbücher/Ordnerinhalte – robust
+/// gegen fehlende Zero-Paddings **und** unbrauchbare Track-Tags.
+pub(crate) fn natural_key(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 16);
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_ascii_digit() {
+            let mut num = String::new();
+            num.push(c);
+            while let Some(&d) = chars.peek() {
+                if d.is_ascii_digit() {
+                    num.push(d);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            let trimmed = num.trim_start_matches('0');
+            let trimmed = if trimmed.is_empty() { "0" } else { trimmed };
+            for _ in 0..16usize.saturating_sub(trimmed.len()) {
+                out.push('0');
+            }
+            out.push_str(trimmed);
+        } else {
+            out.extend(c.to_lowercase());
+        }
+    }
+    out
+}
+
+/// Sortiert Titel nach **Dateistruktur**: Unterordner (CD-Ordner) zuerst, dann
+/// Disc, dann Tracknummer, dann Pfad – konsistent mit der Wiedergabe
+/// (`play_path`) und robust gegen falsche/fehlende Disc-Tags (Hörbücher).
+fn sort_by_structure(tracks: &mut [Track]) {
+    let parent = |t: &Track| {
+        std::path::Path::new(&t.path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    tracks.sort_by(|a, b| {
+        parent(a)
+            .cmp(&parent(b))
+            .then(track_disc(a).cmp(&track_disc(b)))
+            .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
+            .then_with(|| a.path.cmp(&b.path))
+    });
 }
 
 /// Häufigster Album-Basistitel einer Titelmenge (für den Anzeigetitel eines
@@ -388,10 +452,11 @@ impl App {
 
     /// Titel, die zu „diesem Album dieses Interpreten" gehören: alle Bibliotheks-
     /// titel mit dem Albumnamen, in deren (zerlegter) Interpreten-Angabe `name`
-    /// vorkommt. Bereits nach Tracknummer sortiert (Reihenfolge aus `all_tracks`).
+    /// vorkommt. Nach Dateistruktur sortiert (CD-Ordner → Disc → Tracknummer).
     pub(crate) fn album_tracks_for_artist(&self, name: &str, album: &str) -> Vec<Track> {
         let target = crate::core::artist::norm_key(name);
-        self.library
+        let mut tracks: Vec<Track> = self
+            .library
             .all_tracks()
             .unwrap_or_default()
             .into_iter()
@@ -405,7 +470,9 @@ impl App {
                             .is_some_and(|p| crate::core::artist::norm_key(p) == target)
                     })
             })
-            .collect()
+            .collect();
+        sort_by_structure(&mut tracks);
+        tracks
     }
 
     /// Alle Titel mit diesem Albumnamen – **interpretenübergreifend** (passend
@@ -424,14 +491,7 @@ impl App {
                     .is_some_and(|a| a.to_lowercase() == target)
             })
             .collect();
-        tracks.sort_by(|a, b| {
-            // Disc aus Tag oder CD-Unterordner (Hörbücher ohne Disc-Tag), dann
-            // Tracknummer, dann Pfad.
-            track_disc(a)
-                .cmp(&track_disc(b))
-                .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
-                .then_with(|| a.path.cmp(&b.path))
-        });
+        sort_by_structure(&mut tracks);
         tracks
     }
 
@@ -686,14 +746,11 @@ impl App {
             .into_iter()
             .filter(|t| t.path.starts_with(&prefix))
             .collect();
-        tracks.sort_by(|a, b| {
-            // Disc aus Tag oder CD-Unterordner (Hörbücher ohne Disc-Tag), dann
-            // Tracknummer, dann Pfad.
-            track_disc(a)
-                .cmp(&track_disc(b))
-                .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
-                .then_with(|| a.path.cmp(&b.path))
-        });
+        // **Dateistruktur als Wahrheit:** Ordnerinhalte (Hörbücher/Konzerte) nach
+        // **natürlichem Pfad** sortieren – die Dateinamen/CD-Ordner geben die
+        // richtige Reihenfolge vor, auch wenn Disc-/Track-Tags fehlen oder falsch
+        // sind. (Album-Einträge nutzen weiterhin die Tracknummer.)
+        tracks.sort_by_cached_key(|t| natural_key(&t.path));
         tracks
     }
 
@@ -755,12 +812,13 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Zeile **über** der Überschrift: bei Hörbüchern der Titel, sonst die
-        // Anzahl der Lieder (+ Jahr).
+        // Zeile **über** der Überschrift: bei Hörbüchern der Titel, sonst nur das
+        // Jahr. Die Songanzahl steht bereits in der Abschnittsüberschrift
+        // („Album (N)" bzw. „CD n (x)") und wäre hier eine Dopplung.
         let header_text = if is_audiobook {
             album.to_string()
         } else {
-            album_subtitle(year, tracks.len())
+            year.map(|y| y.to_string()).unwrap_or_default()
         };
         if !header_text.trim().is_empty() {
             let lbl = gtk::Label::builder()
@@ -1755,5 +1813,72 @@ impl App {
             }
         }
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disc_from_segment_finds_marker_anywhere_with_boundary() {
+        assert_eq!(disc_from_segment("CD1"), Some(1));
+        assert_eq!(disc_from_segment("cd2"), Some(2));
+        assert_eq!(disc_from_segment("Disc 3"), Some(3));
+        // Marker in der Mitte (häufig bei Hörbüchern):
+        assert_eq!(disc_from_segment("Wie Google tickt CD1"), Some(1));
+        assert_eq!(disc_from_segment("Teil 4 – Finale"), Some(4));
+        // Kein Treffer mitten in einem Wort bzw. ohne Ziffer:
+        assert_eq!(disc_from_segment("Discography"), None);
+        assert_eq!(disc_from_segment("Soundtrack"), None);
+        assert_eq!(disc_from_segment("Lockdown"), None);
+        assert_eq!(disc_from_segment("Digitale Erschoepfung"), None);
+    }
+
+    fn track(path: &str, disc: Option<u32>, no: Option<u32>) -> Track {
+        Track {
+            id: 0,
+            path: path.to_string(),
+            title: String::new(),
+            artist: None,
+            album: None,
+            genre: None,
+            track_no: no,
+            disc_no: disc,
+            duration_ms: None,
+            resume_ms: 0,
+        }
+    }
+
+    #[test]
+    fn natural_key_orders_numbers_numerically() {
+        let lt = |a: &str, b: &str| natural_key(a) < natural_key(b);
+        assert!(lt("OKR 3.2", "OKR 3.10")); // nicht zero-gepaddet → numerisch
+        assert!(lt("CD2", "CD10"));
+        assert!(lt("01 01", "01 02"));
+        assert!(lt("01 09", "02 01")); // „Disc" im Dateinamen
+        assert!(lt("Buch CD1/01", "Buch CD2/01"));
+    }
+
+    #[test]
+    fn sort_by_structure_keeps_cd_folders_in_order() {
+        // Mehr-CD-Hörbuch ohne Disc-Tags, CD-Marker im Ordnernamen.
+        let mut ts = vec![
+            track("/Buch/Buch CD2/01.mp3", None, Some(1)),
+            track("/Buch/Buch CD1/02.mp3", None, Some(2)),
+            track("/Buch/Buch CD1/01.mp3", None, Some(1)),
+            track("/Buch/Buch CD2/02.mp3", None, Some(2)),
+        ];
+        sort_by_structure(&mut ts);
+        let order: Vec<&str> = ts.iter().map(|t| t.path.as_str()).collect();
+        assert_eq!(
+            order,
+            vec![
+                "/Buch/Buch CD1/01.mp3",
+                "/Buch/Buch CD1/02.mp3",
+                "/Buch/Buch CD2/01.mp3",
+                "/Buch/Buch CD2/02.mp3",
+            ]
+        );
     }
 }

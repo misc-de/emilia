@@ -334,6 +334,9 @@ pub struct App {
     /// Kapitel (Zeit + Bezeichnung) der laufenden Episode – mit dem Hover-
     /// Controller der Seekleiste geteilt.
     pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
+    /// Wird gerade über die Seekleiste gefahren? Dann zeigt das Label temporär
+    /// das überfahrene Kapitel; sonst läuft es mit der Wiedergabeposition mit.
+    pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
     /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
     pub(crate) nav_view: adw::NavigationView,
     /// Gemerkte Scrollposition der zuletzt verlassenen Übersichtsseite
@@ -656,9 +659,10 @@ impl Component for App {
                 #[wrap(Some)]
                 #[name = "content_view"]
                 set_content = &adw::ToolbarView {
-                    // Desktop: etwas Luft zwischen Seitenleiste und Inhalt. Im
+                    // Desktop: etwas Luft **oben** über dem Inhalt (nicht links –
+                    // der Inhalt schließt bündig an die Seitenleiste an). Im
                     // schmalen (mobilen) Modus per Breakpoint wieder auf 0 (siehe `init`).
-                    set_margin_start: 20,
+                    set_margin_top: 20,
                     add_top_bar = &adw::HeaderBar {
                         #[wrap(Some)]
                         #[name = "win_title"]
@@ -1611,6 +1615,7 @@ impl Component for App {
             seek_scale: gtk::Scale::default(),
             chapter_label: gtk::Label::default(),
             chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+            hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
             nav_view: adw::NavigationView::new(),
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             sync: crate::ui::app_sync::SyncState::default(),
@@ -1691,40 +1696,60 @@ impl Component for App {
         model.seek_scale = widgets.seek_scale.clone();
         model.chapter_label = widgets.chapter_label.clone();
 
-        // Hover über die Seekleiste → Kapitelbezeichnung an der Mausposition
-        // unter dem Titel anzeigen. Liest die geteilte Kapitelliste und
-        // aktualisiert nur das Label (kein voller View-Neuaufbau pro Bewegung).
+        // Hover über die Seekleiste → temporär das überfahrene Kapitel unter dem
+        // Titel anzeigen; beim Verlassen zurück auf das aktuelle Kapitel (an der
+        // Wiedergabeposition). Aktualisiert nur das Label (kein View-Neuaufbau).
+        // Eine kleine Helferfunktion setzt das Label aus einem Zeitwert.
+        fn show_chapter_at(
+            label: &gtk::Label,
+            chapters: &std::cell::RefCell<Vec<(i64, String)>>,
+            val_ms: i64,
+        ) {
+            let chaps = chapters.borrow();
+            let name = chaps
+                .iter()
+                .rev()
+                .find(|(ms, _)| *ms <= val_ms)
+                .map(|(_, n)| n.clone())
+                .filter(|n| !n.is_empty());
+            match name {
+                Some(n) => {
+                    label.set_text(&n);
+                    label.set_visible(true);
+                }
+                None => label.set_visible(false),
+            }
+        }
         {
             let chapters = model.chapters.clone();
-            let label = widgets.chapter_label.clone();
+            let hovering = model.hovering_seek.clone();
             let scale = widgets.seek_scale.clone();
+            let label = widgets.chapter_label.clone();
             let motion = gtk::EventControllerMotion::new();
-            motion.connect_motion(move |_, x, _| {
-                let chaps = chapters.borrow();
-                let adj = scale.adjustment();
-                let w = scale.width() as f64;
-                let span = adj.upper() - adj.lower();
-                if chaps.is_empty() || w <= 0.0 || span <= 0.0 {
-                    label.set_visible(false);
-                    return;
-                }
-                let val = adj.lower() + (x / w).clamp(0.0, 1.0) * span;
-                let name = chaps
-                    .iter()
-                    .rev()
-                    .find(|(ms, _)| (*ms as f64) <= val)
-                    .map(|(_, n)| n.clone())
-                    .filter(|n| !n.is_empty());
-                match name {
-                    Some(n) => {
-                        label.set_text(&n);
-                        label.set_visible(true);
+            {
+                let (chapters, scale, label, hovering) =
+                    (chapters.clone(), scale.clone(), label.clone(), hovering.clone());
+                motion.connect_motion(move |_, x, _| {
+                    if chapters.borrow().is_empty() {
+                        return;
                     }
-                    None => label.set_visible(false),
-                }
+                    let adj = scale.adjustment();
+                    let w = scale.width() as f64;
+                    let span = adj.upper() - adj.lower();
+                    if w <= 0.0 || span <= 0.0 {
+                        return;
+                    }
+                    hovering.set(true);
+                    let val = adj.lower() + (x / w).clamp(0.0, 1.0) * span;
+                    show_chapter_at(&label, &chapters, val as i64);
+                });
+            }
+            motion.connect_leave(move |_| {
+                hovering.set(false);
+                // Zurück auf das Kapitel an der aktuellen Wiedergabeposition.
+                let pos = scale.adjustment().value() as i64;
+                show_chapter_at(&label, &chapters, pos);
             });
-            let leave_label = widgets.chapter_label.clone();
-            motion.connect_leave(move |_| leave_label.set_visible(false));
             widgets.seek_scale.add_controller(motion);
         }
 
@@ -1781,9 +1806,8 @@ impl Component for App {
         breakpoint.add_setter(&widgets.top_nav, "visible", Some(&yes));
         // Einstellungen oben nur im schmalen Modus zeigen (Desktop: Seitenleiste).
         breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
-        // Der Desktop-Abstand zwischen Seitenleiste und Inhalt entfällt im schmalen
-        // Modus (sonst säße der eingeklappte Inhalt eingerückt).
-        breakpoint.add_setter(&widgets.content_view, "margin-start", Some(&0i32.to_value()));
+        // Der Desktop-Abstand über dem Inhalt entfällt im schmalen Modus.
+        breakpoint.add_setter(&widgets.content_view, "margin-top", Some(&0i32.to_value()));
         root.add_breakpoint(breakpoint);
 
         // Icon-only Navigation (Seitenleiste + oben) in der **gespeicherten
@@ -2486,6 +2510,8 @@ impl Component for App {
                     if self.playing_episode_url.is_some() {
                         self.save_episode_progress();
                     }
+                    // Aktuelles Kapitel unter dem Titel mitführen (außer beim Hover).
+                    self.update_current_chapter();
                     // Gehörte Zeit der Statistik-Sitzung weiterzählen (Wanduhr, nur
                     // während „Playing"; ~1 s je Tick). Die Dauer ggf. nachziehen,
                     // falls sie beim Start noch nicht feststand.
