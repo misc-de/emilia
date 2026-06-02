@@ -20,6 +20,30 @@ pub struct Track {
     pub resume_ms: i64,
 }
 
+/// Eine zusätzliche Musikquelle neben dem primären `music_dir`-Ordner.
+/// Erscheint als eigener Tab in der Dateiansicht. Siehe [`crate::core::db`].
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub id: i64,
+    /// `local` (zweiter Ordner) | `webdav` (Nextcloud-Share).
+    pub kind: String,
+    /// Anzeigename (Tab-Beschriftung).
+    pub name: String,
+    /// Sortierreihenfolge der Tabs (nur in der DB genutzt: `ORDER BY position`).
+    #[allow(dead_code)]
+    pub position: i64,
+    /// Lokal: Wurzelpfad im Dateisystem.
+    pub path: Option<String>,
+    /// WebDAV: Basis-URL, z. B. `https://cloud.example.com`.
+    pub base_url: Option<String>,
+    /// WebDAV: Benutzername.
+    pub username: Option<String>,
+    /// WebDAV: App-Passwort/Token.
+    pub password: Option<String>,
+    /// WebDAV: Unterpfad zur Musik, z. B. `/Music`.
+    pub music_path: Option<String>,
+}
+
 /// Online angereicherte Albumdaten (MusicBrainz + Cover Art Archive).
 ///
 /// Wird ausschließlich in der Datenbank bzw. im XDG-Cache gehalten – die
@@ -119,6 +143,36 @@ pub struct EpisodeRef {
     pub duration: Option<String>,
     /// Beschreibung/Shownotes (HTML zu Klartext entschärft), falls vorhanden.
     pub description: Option<String>,
+}
+
+/// Ein gespeicherter Streaming-Sender (Internet-Radio). Wiedergabe direkt über
+/// die Stream-URL – nichts wird heruntergeladen.
+#[derive(Debug, Clone)]
+pub struct StreamItem {
+    pub id: i64,
+    pub name: String,
+    pub url: String,
+    /// Sender-Logo (URL); lokal gecacht wie Podcast-Cover.
+    pub favicon: Option<String>,
+    /// Genre/Schlagworte (kommasepariert, aus der Radio-Browser-API).
+    pub tags: Option<String>,
+    pub country: Option<String>,
+}
+
+/// Ein mitgeschnittener Song aus einem Sender (Timeshift-Aufnahme). Liegt als
+/// getaggte Audiodatei unter `path`.
+#[derive(Debug, Clone)]
+pub struct RecordingItem {
+    pub id: i64,
+    pub path: String,
+    pub artist: Option<String>,
+    pub title: String,
+    /// Sender, aus dem mitgeschnitten wurde.
+    pub station: Option<String>,
+    /// Aufnahmezeitpunkt (Unix-Sekunden).
+    pub recorded_at: i64,
+    /// Anfang fehlte (zu spät begonnen) – nur als Hinweis markiert.
+    pub incomplete: bool,
 }
 
 /// Aggregierte Kennzahlen der Hörstatistik über einen Zeitraum. Alles aus der

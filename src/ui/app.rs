@@ -11,11 +11,11 @@ use crate::core::db::Library;
 use crate::core::player::Player;
 use crate::core::scanner;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
-use crate::model::{AlbumMeta, ArtistMeta, Track};
+use crate::model::{AlbumMeta, ArtistMeta, Source, Track};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
 use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
-use crate::ui::fs_row::{FsEntry, FsOutput, FsRow, RowOpts};
+use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow, RowOpts};
 
 /// Ziel der Detailansicht (langes Drücken): eine Datei/ein Ordner im
 /// Dateibrowser, ein Interpret, ein Album oder ein Konzert (= Pfad → `Fs`).
@@ -43,6 +43,26 @@ impl CtxTarget {
     }
 }
 
+/// Aktuell in der Dateiansicht gewählte Quelle: das primäre `music_dir`
+/// (impliziter erster Tab „Musik") oder eine zusätzliche Quelle per ID.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ActiveSource {
+    /// Das primäre Musikverzeichnis (`music_dir`).
+    Primary,
+    /// Eine zusätzliche Quelle (lokaler Zweitordner oder WebDAV) per `source.id`.
+    Source(i64),
+}
+
+/// Ein Titel der entfernten (Cloud-)Wiedergabe-Reihe. Eigenständig gehalten,
+/// getrennt von der lokalen `PathBuf`-Warteschlange.
+#[derive(Debug, Clone)]
+pub(crate) struct RemoteTrack {
+    /// Pfad relativ zur Musikwurzel der Quelle (führender Slash).
+    pub(crate) rel_path: String,
+    /// Anzeigename (für „Now Playing").
+    pub(crate) title: String,
+}
+
 /// Musikalische Bedeutung eines Dateisystem-Ordners (für Wiedergabe & EQ).
 pub(crate) enum FsKind {
     /// Ordner eines Interpreten (Name = bekannter Interpret).
@@ -56,13 +76,14 @@ pub(crate) enum FsKind {
 /// und vom Nutzer verschiebbar.
 // Die Labels sind englische gettext-`msgid`; am Anzeigeort mit `gettext()`
 // übersetzen (siehe Nutzung in `build_nav` / `win_title`).
-pub(crate) const SECTIONS: [(&str, &str, &str); 9] = [
+pub(crate) const SECTIONS: [(&str, &str, &str); 10] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
     ("files", "Files", "folder-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
     ("concerts", "Concerts", "emilia-concert-symbolic"),
     ("podcasts", "Podcasts", "microphone-symbolic"),
+    ("streaming", "Streaming", "audio-x-generic-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
     ("stats", "Statistics", "emilia-stats-symbolic"),
@@ -155,6 +176,15 @@ pub(crate) enum PodcastView {
     Overview,
 }
 
+/// Welche Ansicht die Streaming-Seite zeigt (Tab-Umschalter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StreamView {
+    /// Gespeicherte Sender/Kanäle.
+    Channels,
+    /// Timeshift-Mitschnitte.
+    Recordings,
+}
+
 /// Zeitraum der Hörstatistik. Bewusst gleitende Fenster (statt Kalenderjahr) –
 /// kalenderfrei und ohne zusätzliche Datums-Abhängigkeit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,18 +222,22 @@ pub struct App {
     pub(crate) albums: FactoryVecDeque<AlbumCard>,
     /// Galerie-Variante der Alben (Cover-Gitter), parallel zur Listen-Factory.
     pub(crate) albums_gallery: gtk::FlowBox,
+    /// Album-Übersicht (gleiche Reihenfolge wie Factory/Galerie). Dient als
+    /// Index-Auflösung für Klicks in der Galerie, wo die Factory leer bleibt.
+    pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) album_count: usize,
     pub(crate) artists: FactoryVecDeque<ArtistCard>,
     /// Galerie-Variante der Interpreten (Foto-Gitter).
     pub(crate) artists_gallery: gtk::FlowBox,
+    /// Interpreten-Übersicht (gleiche Reihenfolge) – Index-Auflösung für Galerie.
+    pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
     pub(crate) artist_count: usize,
+    /// Läuft gerade ein Anreicherungs-Lauf? (verhindert parallele Läufe; ohne
+    /// sichtbare Fortschrittsanzeige – der Abruf läuft still im Hintergrund).
     pub(crate) enriching: bool,
-    pub(crate) enrich_status: String,
     /// Cover & Metadaten beim Start automatisch online nachladen (nur bei
     /// nicht-getakteter Verbindung; in den Einstellungen abschaltbar).
     pub(crate) auto_enrich: bool,
-    /// Fortschritts-Leiste vom Nutzer ausgeblendet? (Abruf läuft im Hintergrund weiter.)
-    pub(crate) enrich_banner_hidden: bool,
     /// Abbruch-Flag für den Anreicherungs-Worker.
     pub(crate) enrich_cancel: Arc<AtomicBool>,
     pub(crate) acoustid_key: Option<String>,
@@ -281,12 +315,17 @@ pub struct App {
     // Konzerte/Hörbücher: (scope, key, Titel, is_dir) – wie Favoriten.
     pub(crate) concert_items: Vec<(String, String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
+    /// Galerie-Variante der Konzerte (Cover-Gitter).
+    pub(crate) concerts_gallery: gtk::FlowBox,
     pub(crate) concert_hint_dismissed: bool,
     /// Galerien (Interpret bzw. Album), für die in **dieser Sitzung** schon ein
     /// bedarfsgesteuerter Abruf lief – Schlüssel `"a\x01<name>"` bzw.
     /// `"b\x01<artist>\x01<album>"`. Verhindert, dass für Einträge ohne Galerie
     /// (die keine Versuchsgrenze haben) bei jedem Öffnen erneut angefragt wird.
     pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Galerie-FlowBoxen, deren Resize-Hook (quadratische Kacheln) bereits
+    /// einmalig verbunden wurde – verhindert, dass sich Handler aufsummieren.
+    pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
     /// Ausgeblendete Navigations-Menüpunkte (Stack-Namen). Betrifft sowohl die
     /// Navigation als auch die Auswahl in den Eigenschaften.
     pub(crate) hidden_sections: std::collections::HashSet<String>,
@@ -308,14 +347,20 @@ pub struct App {
     // Hörbücher: (Pfad, Titel, is_dir)
     pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
     pub(crate) audiobooks_list: gtk::ListBox,
+    /// Galerie-Variante der Hörbücher (Cover-Gitter).
+    pub(crate) audiobooks_gallery: gtk::FlowBox,
     // Playlisten
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
     pub(crate) playlists_list: gtk::ListBox,
     // Podcasts: (id, Titel, Bild-URL, Episodenzahl)
     pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
     pub(crate) podcasts_list: gtk::ListBox,
+    /// Galerie-Variante der Podcast-Übersicht (Cover-Gitter).
+    pub(crate) podcasts_gallery: gtk::FlowBox,
     /// Welche Podcast-Ansicht sichtbar ist: neueste Episoden oder Abo-Übersicht.
     pub(crate) podcast_view: PodcastView,
+    /// Welche Streaming-Ansicht sichtbar ist: Kanäle oder Aufnahmen.
+    pub(crate) stream_view: StreamView,
     /// Neueste Episoden über alle Abos (für die „Neuste"-Ansicht).
     pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
     /// Container der „Neuste"-Liste: je Zeitabschnitt (Heute/Gestern/…) eine
@@ -330,6 +375,40 @@ pub struct App {
     /// URL der aktuell geladenen Podcast-Episode (für die Play/Pause-Markierung
     /// der Beitragszeilen); `None`, wenn gerade Musik bzw. keine Episode läuft.
     pub(crate) playing_episode_url: Option<String>,
+    // Streaming (Internet-Radio): gespeicherte Sender.
+    pub(crate) stream_items: Vec<crate::model::StreamItem>,
+    pub(crate) streams_list: gtk::ListBox,
+    /// Treffer der letzten Sendersuche (Radio-Browser), für den Hinzufügen-Dialog.
+    pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
+    /// Solange der Hinzufügen-Dialog offen ist: (Dialog, Trefferliste) – damit
+    /// asynchron eintreffende Treffer in die bereits gezeigte Liste passen.
+    pub(crate) stream_search:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    /// ID des gerade laufenden Senders (für die Detailseiten-Anzeige); `None`,
+    /// wenn gerade Musik/Episode bzw. nichts läuft.
+    pub(crate) playing_stream: Option<i64>,
+    /// Aktuell laufender Titel des Senders (aus den ICY-Metadaten), für die
+    /// „Now Playing"-Anzeige; `None`, solange (noch) kein Titel gemeldet wurde.
+    pub(crate) stream_title: Option<String>,
+    /// Timeshift-Mitschnitt des laufenden Senders (Ringpuffer); `None`, wenn kein
+    /// Sender läuft bzw. der Puffer auf 0 Minuten steht.
+    pub(crate) recorder: Option<crate::core::recorder::Recorder>,
+    /// Aktive „Aufnahme" (Zustandsmaschine, die an den Songgrenzen speichert).
+    pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
+    /// Größe des Timeshift-Puffers in Minuten (0 = aus, max. 60).
+    pub(crate) recording_buffer_minutes: u32,
+    // Aufnahmen (gespeicherte Timeshift-Mitschnitte).
+    pub(crate) recording_items: Vec<crate::model::RecordingItem>,
+    pub(crate) recordings_list: gtk::ListBox,
+    /// Play/Pause-Knöpfe der Senderzeilen (Sender-Id → Knopf), zum Auffrischen des
+    /// Icons beim Wechsel des Wiedergabestands. Abgehängte Knöpfe werden verworfen.
+    pub(crate) stream_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(i64, gtk::Button)>>>,
+    /// „Verbunden"-Liste der Nextcloud-Seite im offenen Einstellungsdialog, damit
+    /// sie nach einem erfolgreichen Connect sofort aktualisiert werden kann.
+    pub(crate) settings_nc_list: std::rc::Rc<std::cell::RefCell<Option<gtk::ListBox>>>,
+    /// Quellen-Ids, die gerade **nicht erreichbar** sind (Nextcloud offline) –
+    /// steuert den roten „Getrennt"-Hinweis auf deren Covern/Fotos/Liedern.
+    pub(crate) offline_sources: std::collections::HashSet<i64>,
     /// Play/Pause-Knöpfe der sichtbaren Beitragszeilen (Audio-URL → Knopf), um ihr
     /// Icon beim Wechsel des Wiedergabestands aufzufrischen. Abgehängte (tote)
     /// Einträge werden beim Auffrischen verworfen.
@@ -366,6 +445,26 @@ pub struct App {
     pub(crate) sync: crate::ui::app_sync::SyncState,
     /// Ob aktuell ein Gerät gekoppelt ist – steuert das grüne Sync-Icon oben.
     pub(crate) sync_connected: bool,
+    /// Widget-Zustand des Nextcloud-Einrichtungsdialogs.
+    pub(crate) cloud: crate::ui::app_cloud::CloudState,
+    // Zusätzliche Musikquellen (lokaler Zweitordner / Nextcloud) als Tabs.
+    /// Geladen aus der `source`-Tabelle (ohne das primäre `music_dir`).
+    pub(crate) sources: Vec<Source>,
+    /// In der Dateiansicht aktive Quelle (Primär = `music_dir`).
+    pub(crate) active_source: ActiveSource,
+    /// Tab-Leiste über der Dateiliste (linked ToggleButtons), nur sichtbar,
+    /// wenn mindestens eine Zusatzquelle existiert.
+    pub(crate) source_tabs: gtk::Box,
+    /// Tab-Schaltflächen je Quelle (inkl. Primär) – zum Spiegeln des Aktivzustands.
+    pub(crate) source_tab_buttons: Vec<(ActiveSource, gtk::ToggleButton)>,
+    /// Aktueller Unterpfad in der entfernten Quelle (relativ zur Musikwurzel,
+    /// führender Slash; `""` = Wurzel). Nur gesetzt, wenn eine WebDAV-Quelle aktiv ist.
+    pub(crate) remote_browse: Option<String>,
+    /// Entfernte (Cloud-)Wiedergabe-Reihe des zuletzt geöffneten Ordners.
+    pub(crate) remote_queue: Vec<RemoteTrack>,
+    pub(crate) remote_pos: usize,
+    /// Läuft gerade eine entfernte Datei (statt lokaler Queue/Episode/Sender)?
+    pub(crate) playing_remote: bool,
 }
 
 #[derive(Debug)]
@@ -441,6 +540,9 @@ pub enum Msg {
     /// Periodischer, leiser Hintergrund-Nachzug: fehlende Interpreten-Fotos (zuerst)
     /// und Online-Cover nachladen, ohne dass der Nutzer es anstoßen muss.
     AutoEnrichTick,
+    /// Bedarfsgesteuerte Fingerprint-Titelerkennung für den **gerade gestarteten**
+    /// Titel ohne brauchbare Metadaten (AcoustID), ausgelöst beim Abspielen.
+    FingerprintCurrent(PathBuf),
     /// Sprung an eine Position (ms) durch Ziehen/Klicken der Seekleiste.
     Seek(i64),
     Next,
@@ -450,8 +552,6 @@ pub enum Msg {
     NavUp,
     FilesGoStart,
     Refresh,
-    /// Fortschritts-Leiste ausblenden (der Abruf läuft im Hintergrund weiter).
-    HideEnrichBanner,
     TogglePlay,
     /// Detailansicht des gerade laufenden Titels öffnen (Klick auf die Leiste).
     OpenNowPlaying,
@@ -474,6 +574,27 @@ pub enum Msg {
     /// Einen Warteschlangen-Eintrag verschieben (Queue-Indizes).
     QueueMove { from: usize, to: usize },
     SetMusicDir(PathBuf),
+    /// In der Dateiansicht auf eine andere Quelle (Tab) umschalten.
+    SelectSource(ActiveSource),
+    /// Die Quellenliste hat sich geändert (im Einstellungsdialog hinzugefügt/
+    /// entfernt) – Quellen neu laden und die Tab-Leiste aktualisieren.
+    SourcesChanged,
+    /// Erreichbarkeit der Nextcloud-Quellen prüfen (periodisch + beim Start).
+    CheckSources,
+    /// Den Nextcloud-Einrichtungsdialog (QR-Scan oder manuell) öffnen.
+    AddCloudSource,
+    /// Manuelle Eingabe auf-/zugeklappt: Kamera entsprechend aus-/einblenden.
+    CloudManualToggle(bool),
+    /// Der Nextcloud-Dialog wurde geschlossen (Kamera stoppen).
+    CloudClosed,
+    /// Ein QR-Code wurde im Nextcloud-Dialog dekodiert.
+    CloudQrDecoded(String),
+    /// Verbindungstest der eingegebenen Nextcloud-Daten.
+    CloudTest,
+    /// Die eingegebene Nextcloud-Quelle speichern.
+    CloudSave,
+    /// Eine entfernte Datei offline herunterladen (rel-Pfad in der aktiven Quelle).
+    CtxDownloadRemote(String),
     SetAcoustidKey(String),
     /// Primäres Cover eines Albums festlegen (zuletzt im Galerie-Karussell gezeigt).
     SetAlbumCover { artist: String, album: String, path: String },
@@ -518,6 +639,8 @@ pub enum Msg {
     ConcertHideSection,
     ConcertAdd(Vec<(String, String, bool)>),
     PlayConcert(usize),
+    /// Galerie-Konzert (Index) öffnen: Album/Ordner → Titelliste, Track → Abspielen.
+    OpenConcertEntry(usize),
     /// Einen Navigations-Menüpunkt ein-/ausblenden (Stack-Name).
     SetSectionVisible {
         section: &'static str,
@@ -545,6 +668,8 @@ pub enum Msg {
     // Hörbücher
     /// Hörbuch (Index in `audiobook_items`) abspielen.
     PlayAudiobook(usize),
+    /// Galerie-Hörbuch (Index) öffnen: Album/Ordner → Titelliste, Track → Abspielen.
+    OpenAudiobookEntry(usize),
     /// Detailansicht eines Hörbuchs öffnen.
     ShowAudiobookDetail(usize),
     // Playlisten
@@ -579,6 +704,10 @@ pub enum Msg {
     PodcastSubscribeUrl(String),
     /// Episoden-Unterseite eines Podcasts öffnen.
     OpenPodcast(i64),
+    /// Galerie-Podcast (Index in `podcast_items`) öffnen → `OpenPodcast`.
+    OpenPodcastAt(usize),
+    /// Abo-Detail eines Galerie-Podcasts (Index in `podcast_items`) → `ShowPodcastDetail`.
+    ShowPodcastDetailAt(usize),
     /// Podcast entfernen.
     PodcastDelete(i64),
     /// Feed eines Podcasts neu laden.
@@ -588,6 +717,8 @@ pub enum Msg {
     ToggleEpisode { url: String, title: String },
     /// Podcast-Ansicht umschalten (Neuste / Übersicht).
     SetPodcastView(PodcastView),
+    /// Streaming-Ansicht umschalten (Kanäle/Aufnahmen).
+    SetStreamView(StreamView),
     /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste (Index).
     ShowEpisodeDetail(usize),
     /// Detailansicht einer Episode aus der Episodenliste eines Podcasts.
@@ -597,14 +728,66 @@ pub enum Msg {
     EpisodeSeekTo { url: String, title: String, ms: i64 },
     /// Detailansicht/Verwaltung eines Abos (Podcast-Id) – Aktualisieren/Entfernen.
     ShowPodcastDetail(i64),
+    // Streaming (Internet-Radio)
+    /// Hinzufügen-Dialog (Suche + Stream-Adresse) öffnen.
+    StreamAdd,
+    /// Sender zu diesem Suchbegriff suchen (Radio-Browser, im Hintergrund).
+    StreamSearch(String),
+    /// Einen Suchtreffer (Index in `stream_search_results`) als Sender speichern.
+    StreamAddResult(usize),
+    /// Eine Stream-Adresse manuell als Sender speichern.
+    StreamAddUrl(String),
+    /// Sender antippen: startet ihn, bei laufendem Sender Pause/Weiter umschalten.
+    ToggleStream(i64),
+    /// Aufnahme-Knopf einer Senderzeile: startet/stoppt die Daueraufnahme.
+    StreamRecordToggle(i64),
+    /// Aufnahme-Knopf in der Player-Leiste: nimmt den laufenden Sender auf/stoppt.
+    TransportRecordToggle,
+    /// Titel-Tag aus der Wiedergabe (bei Sendern: der laufende ICY-Titel).
+    StreamTitle(String),
+    /// Detailseite eines Senders öffnen.
+    OpenStream(i64),
+    /// Einen Sender entfernen.
+    StreamDelete(i64),
+    // Aufnahme (Timeshift)
+    /// Laufende Aufnahme stoppen.
+    RecordStop,
+    /// Wiederholungs-Unterseite eines Senders öffnen.
+    OpenStreamReplay(i64),
+    /// Einen gepufferten Song probehören (absoluter Byte-Bereich).
+    ReplayPlay { start: u64, end: u64 },
+    /// Einen gepufferten Song nachträglich speichern.
+    ReplaySave {
+        start: u64,
+        end: u64,
+        title: String,
+    },
+    /// Einen gespeicherten Mitschnitt abspielen (Pfad).
+    PlayRecording(String),
+    /// Einen Mitschnitt löschen (Id).
+    RecordingDelete(i64),
+    /// Größe des Timeshift-Puffers in Minuten setzen (0–60).
+    SetRecordingBufferMinutes(u32),
 }
 
 /// Ergebnisse der Hintergrund-Worker (Ordner lesen bzw. Online-Anreicherung).
 #[derive(Debug)]
 pub enum Cmd {
     Entries(Vec<FsEntry>),
-    /// Fortschritt einer Anreicherungsphase (`phase` = Anzeigetext).
-    EnrichProgress { phase: String, done: usize, total: usize },
+    /// Ergebnis eines WebDAV-Verzeichnislistings (Hintergrund-PROPFIND). Trägt die
+    /// Quelle und den rel-Pfad mit, damit ein zwischenzeitlicher Quellen-/Ordner-
+    /// wechsel das veraltete Ergebnis verwerfen kann.
+    RemoteEntries(
+        Result<Vec<crate::core::webdav::DavEntry>, String>,
+        ActiveSource,
+        String,
+    ),
+    /// Nachgeladene Tags entfernter Dateien: (rel-Pfad, Titel, Interpret, Dauer).
+    RemoteTags(Vec<(String, Option<String>, Option<String>, Option<i64>)>),
+    /// Eine entfernte Datei wurde heruntergeladen: (rel-Pfad, lokale Kopie) oder Fehler.
+    RemoteDownloaded(Result<(String, PathBuf), String>),
+    /// Ergebnis des Nextcloud-Verbindungstests.
+    WebdavTested(Result<(), String>),
     /// Online-Anreicherung abgeschlossen; `changed` = es kam etwas Neues hinzu
     /// (steuert beim leisen Nachzug, ob die Ansichten neu geladen werden).
     EnrichDone { changed: bool },
@@ -622,6 +805,16 @@ pub enum Cmd {
     PodcastSearchCoversReady,
     /// Podcast-Liste neu aufbauen (z. B. nachdem Feed-Bilder gecacht wurden).
     ReloadPodcasts,
+    /// Treffer der Sendersuche (für den offenen Hinzufügen-Dialog).
+    StreamSearchResults(Vec<crate::core::streaming::StationResult>),
+    /// Logos der Suchtreffer sind gecacht → Trefferliste neu zeichnen.
+    StreamSearchCoversReady,
+    /// Senderliste neu aufbauen (z. B. nachdem Logos gecacht wurden).
+    ReloadStreams,
+    /// Eine Nextcloud-Quelle wurde indiziert → Alben/Interpreten neu laden.
+    RemoteIndexed,
+    /// Erreichbarkeit der Quellen (Quellen-Id → erreichbar?).
+    SourceStatus(Vec<(i64, bool)>),
     /// Ereignis aus dem Sync-Server-Thread bzw. Client-Worker.
     Sync(crate::core::sync::SyncEvent),
     /// Ergebnis der Update-Prüfung (im Hintergrund ermittelt).
@@ -733,18 +926,6 @@ impl Component for App {
                         set_margin_bottom: 2,
                     },
 
-                    // Globaler Fortschritt der Online-Anreicherung – die graue Leiste
-                    // auf allen Seiten. Der Nutzer kann sie ausblenden (der Abruf
-                    // läuft im Hintergrund weiter; Abbrechen über den Header-Knopf).
-                    add_top_bar = &adw::Banner {
-                        #[watch]
-                        set_revealed: model.enriching && !model.enrich_banner_hidden,
-                        #[watch]
-                        set_title: &model.enrich_status,
-                        set_button_label: Some(&gettext("Hide")),
-                        connect_button_clicked => Msg::HideEnrichBanner,
-                    },
-
                     // Inhalt mit Lade-Overlay. Desktop: etwas Luft **zwischen
                     // Titelleiste und Inhalt** (oben); im schmalen (mobilen) Modus
                     // per Breakpoint wieder auf 0 (siehe `init`).
@@ -763,6 +944,22 @@ impl Component for App {
                                     gtk::Box {
                                         set_orientation: gtk::Orientation::Vertical,
                                         set_vexpand: true,
+
+                                        // Quellen-Tabs (linked) – nur sichtbar, wenn neben dem
+                                        // primären Musikordner mindestens eine Zusatzquelle
+                                        // (SD-Karte/Nextcloud) eingerichtet ist. Befüllt in
+                                        // `rebuild_source_tabs`.
+                                        #[name = "source_tabs"]
+                                        gtk::Box {
+                                            set_orientation: gtk::Orientation::Horizontal,
+                                            add_css_class: "linked",
+                                            set_halign: gtk::Align::Center,
+                                            set_margin_top: 6,
+                                            // Etwas Luft unter dem Quellen-Tab-Menü.
+                                            set_margin_bottom: 10,
+                                            #[watch]
+                                            set_visible: !model.sources.is_empty(),
+                                        },
 
                                         // Pfad-/Zurück-Leiste – nur in Unterordnern
                                         gtk::Box {
@@ -806,12 +1003,6 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    adw::Banner {
-                                        set_visible: false,
-                                        #[watch]
-                                        set_title: &model.enrich_status,
-                                    },
-
                                     adw::StatusPage {
                                         set_icon_name: Some("avatar-default-symbolic"),
                                         set_title: &gettext("No artists"),
@@ -854,13 +1045,6 @@ impl Component for App {
                             add_titled_with_icon[Some("albums"), &gettext("Albums"), "media-optical-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-
-                                    // Fortschritt der Online-Anreicherung
-                                    adw::Banner {
-                                        set_visible: false,
-                                        #[watch]
-                                        set_title: &model.enrich_status,
-                                    },
 
                                     // Leerzustand, solange keine Alben bekannt sind
                                     adw::StatusPage {
@@ -911,7 +1095,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concert_items.is_empty(),
+                                        set_visible: !model.concert_items.is_empty() && !model.gallery_view,
                                         #[local_ref]
                                         concerts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -920,6 +1104,20 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    // Galerie-Variante der Konzerte
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.concert_items.is_empty() && model.gallery_view,
+                                        #[local_ref]
+                                        concerts_gallery -> gtk::FlowBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                         },
                                     },
 
@@ -1072,7 +1270,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty(),
+                                        set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && !model.gallery_view,
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1084,6 +1282,20 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
+                                    // Galerie-Variante der Abo-Übersicht
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && model.gallery_view,
+                                        #[local_ref]
+                                        podcasts_gallery -> gtk::FlowBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 10,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                        },
+                                    },
                                     adw::StatusPage {
                                         set_icon_name: Some("microphone-symbolic"),
                                         set_title: &gettext("No podcasts"),
@@ -1091,6 +1303,88 @@ impl Component for App {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.podcast_view == PodcastView::Overview && model.podcast_items.is_empty(),
+                                    },
+                                },
+                            add_titled_with_icon[Some("streaming"), &gettext("Streaming"), "audio-x-generic-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    // Tab-Umschalter: Kanäle / Aufnahmen + „+" für einen neuen Kanal.
+                                    gtk::Box {
+                                        set_spacing: 6,
+                                        set_margin_top: 6,
+                                        set_margin_bottom: 6,
+                                        set_margin_start: 12,
+                                        set_margin_end: 12,
+                                        add_css_class: "linked",
+                                        gtk::ToggleButton {
+                                            set_label: &gettext("Stations"),
+                                            set_hexpand: true,
+                                            #[watch]
+                                            set_active: model.stream_view == StreamView::Channels,
+                                            connect_clicked => Msg::SetStreamView(StreamView::Channels),
+                                        },
+                                        gtk::ToggleButton {
+                                            set_label: &gettext("Recordings"),
+                                            set_hexpand: true,
+                                            #[watch]
+                                            set_active: model.stream_view == StreamView::Recordings,
+                                            connect_clicked => Msg::SetStreamView(StreamView::Recordings),
+                                        },
+                                        gtk::Button {
+                                            set_icon_name: "list-add-symbolic",
+                                            set_tooltip_text: Some(&gettext("Add station")),
+                                            add_css_class: "flat",
+                                            connect_clicked => Msg::StreamAdd,
+                                        },
+                                    },
+
+                                    // Kanäle.
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.stream_view == StreamView::Channels && !model.stream_items.is_empty(),
+                                        #[local_ref]
+                                        streams_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 4,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    adw::StatusPage {
+                                        set_icon_name: Some("audio-x-generic-symbolic"),
+                                        set_title: &gettext("No stations"),
+                                        set_description: Some(&gettext("Add a stream address or search for a station worldwide.")),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.stream_view == StreamView::Channels && model.stream_items.is_empty(),
+                                    },
+
+                                    // Aufnahmen.
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.stream_view == StreamView::Recordings && !model.recording_items.is_empty(),
+                                        #[local_ref]
+                                        recordings_list -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 4,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    adw::StatusPage {
+                                        set_icon_name: Some("media-record-symbolic"),
+                                        set_title: &gettext("No recordings"),
+                                        set_description: Some(&gettext("Record the current song while a station plays.")),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.stream_view == StreamView::Recordings && model.recording_items.is_empty(),
                                     },
                                 },
                             add_titled_with_icon[Some("favorites"), &gettext("Favorites"), "emilia-favorite-symbolic"] =
@@ -1128,7 +1422,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.audiobook_items.is_empty(),
+                                        set_visible: !model.audiobook_items.is_empty() && !model.gallery_view,
                                         #[local_ref]
                                         audiobooks_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1137,6 +1431,20 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    // Galerie-Variante der Hörbücher
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.audiobook_items.is_empty() && model.gallery_view,
+                                        #[local_ref]
+                                        audiobooks_gallery -> gtk::FlowBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                         },
                                     },
 
@@ -1200,6 +1508,8 @@ impl Component for App {
                         gtk::Button {
                             add_css_class: "flat",
                             set_tooltip_text: Some(&gettext("Details of the current track")),
+                            // Lied/Interpret etwas tiefer setzen (kompaktere Leiste).
+                            set_margin_top: 5,
                             // Ohne ausgewählten Titel ganz ausblenden (gibt Platz frei).
                             #[watch]
                             set_visible: model.now_playing.is_some(),
@@ -1334,6 +1644,25 @@ impl Component for App {
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
+                                // Aufnahme-Knopf direkt neben Play/Pause, etwas tiefer
+                                // (~10px). Roter Punkt; blinkt während der Aufnahme.
+                                // Nur sichtbar, wenn ein Sender läuft und der Puffer an ist.
+                                gtk::Button {
+                                    set_icon_name: "media-record-symbolic",
+                                    set_tooltip_text: Some(&gettext("Record")),
+                                    set_valign: gtk::Align::Start,
+                                    set_margin_top: 10,
+                                    #[watch]
+                                    set_visible: model.playing_stream.is_some()
+                                        && model.recording_buffer_minutes > 0,
+                                    #[watch]
+                                    set_css_classes: if model.record_state.is_some() {
+                                        &["flat", "circular", "emilia-record-dot", "emilia-recording"]
+                                    } else {
+                                        &["flat", "circular", "emilia-record-dot"]
+                                    },
+                                    connect_clicked => Msg::TransportRecordToggle,
+                                },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
                                     set_tooltip_text: Some(&gettext("Forward")),
@@ -1342,9 +1671,15 @@ impl Component for App {
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::Next,
                                 },
+                            },
+                            // Rechts unten: Wiederholen (mittig zwischen „Vor" und der
+                            // Warteschlange) und die Warteschlange.
+                            #[wrap(Some)]
+                            set_end_widget = &gtk::Box {
+                                set_spacing: 18,
+                                set_valign: gtk::Align::Center,
                                 // Wiederholen (Loop): am Ende der Warteschlange bzw.
-                                // des Einzeltitels von vorn. Aktiv = weiß, aus =
-                                // ausgegraut.
+                                // des Einzeltitels von vorn. Aktiv = weiß, aus = grau.
                                 gtk::ToggleButton {
                                     set_icon_name: "media-playlist-repeat-symbolic",
                                     set_tooltip_text: Some(&gettext("Repeat")),
@@ -1358,17 +1693,15 @@ impl Component for App {
                                     set_opacity: if model.repeat { 1.0 } else { 0.4 },
                                     connect_clicked => Msg::ToggleRepeat,
                                 },
-                            },
-                            // Warteschlange (rechts unten).
-                            #[wrap(Some)]
-                            set_end_widget = &gtk::Button {
-                                set_icon_name: "list-high-priority-symbolic",
-                                set_tooltip_text: Some(&gettext("Queue")),
-                                set_valign: gtk::Align::Center,
-                                add_css_class: "flat",
-                                #[watch]
-                                set_sensitive: model.now_playing.is_some(),
-                                connect_clicked => Msg::ShowQueue,
+                                gtk::Button {
+                                    set_icon_name: "list-high-priority-symbolic",
+                                    set_tooltip_text: Some(&gettext("Queue")),
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_sensitive: model.now_playing.is_some(),
+                                    connect_clicked => Msg::ShowQueue,
+                                },
                             },
                         },
                     },
@@ -1401,6 +1734,11 @@ impl Component for App {
                  button.sync-connected { color: @success_color; }\
                  button.emilia-bigplay { min-width: 46px; min-height: 46px; padding: 0px; }\
                  button.emilia-bigplay image { -gtk-icon-size: 34px; }\
+                 button.emilia-record-dot image { color: @error_color; }\
+                 @keyframes emilia-blink { 0% { opacity: 1; } 50% { opacity: 0.25; } 100% { opacity: 1; } }\
+                 button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
+                 button.emilia-nav-btn:checked image { color: @accent_color; }\
+                 image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
                  progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
                  label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
@@ -1436,6 +1774,9 @@ impl Component for App {
             .map(PathBuf::from)
             .filter(|p| root_dir.as_ref().is_some_and(|r| p.starts_with(r)) && p.is_dir())
             .or_else(|| root_dir.clone());
+
+        // Zusätzliche Musikquellen (lokaler Zweitordner / Nextcloud) für die Tabs.
+        let sources = library.list_sources().unwrap_or_default();
 
         // Zuletzt gespeicherte Fenstergröße / Maximierung.
         let saved_w = library
@@ -1531,6 +1872,14 @@ impl Component for App {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(3)
             .clamp(2, 8);
+        // Timeshift-Puffer für Sender in Minuten (Standard 5, 0 = aus, max. 60).
+        let recording_buffer_minutes = library
+            .get_setting("recording_buffer_minutes")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(5)
+            .min(60);
         // Zuletzt offener Navigationspunkt (nur gültige Sektionsnamen zulassen).
         let saved_section = library
             .get_setting("active_section")
@@ -1564,10 +1913,17 @@ impl Component for App {
         let fanart_key = library.get_setting("fanart_key").ok().flatten();
         let active_output = crate::core::output::default_output().unwrap_or_default();
 
-        // Beim Titelende automatisch den nächsten Eintrag der Warteschlange spielen.
+        // Beim Titelende automatisch den nächsten Eintrag der Warteschlange spielen;
+        // Titel-Tags (bei Sendern: der laufende ICY-Titel) als `StreamTitle` melden.
         {
             let sender = sender.clone();
-            player.connect_eos(move || sender.input(Msg::TrackFinished));
+            player.connect_bus_events(
+                {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::TrackFinished)
+                },
+                move |title| sender.input(Msg::StreamTitle(title)),
+            );
         }
 
         // Während der Wiedergabe regelmäßig die Resume-Position sichern, damit
@@ -1603,6 +1959,17 @@ impl Component for App {
             });
         }
 
+        // Erreichbarkeit der Nextcloud-Quellen einmal beim Start und danach
+        // regelmäßig prüfen (steuert den roten „Getrennt"-Hinweis).
+        {
+            let sender = sender.clone();
+            sender.input(Msg::CheckSources);
+            gtk::glib::timeout_add_seconds_local(45, move || {
+                sender.input(Msg::CheckSources);
+                gtk::glib::ControlFlow::Continue
+            });
+        }
+
         // MPRIS-Dienst starten: Befehle vom Sperrbildschirm/von Medientasten
         // werden als Msg::Mpris in die Komponente eingespeist.
         let mpris = crate::core::mpris::Mpris::start({
@@ -1614,6 +1981,8 @@ impl Component for App {
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
         let podcasts_list = gtk::ListBox::new();
+        let streams_list = gtk::ListBox::new();
+        let recordings_list = gtk::ListBox::new();
         let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
@@ -1628,14 +1997,14 @@ impl Component for App {
             entries,
             albums,
             albums_gallery: gtk::FlowBox::new(),
+            albums_overview: Vec::new(),
             artists_gallery: gtk::FlowBox::new(),
+            artists_overview: Vec::new(),
             album_count: 0,
             artists,
             artist_count: 0,
             enriching: false,
-            enrich_status: String::new(),
             auto_enrich,
-            enrich_banner_hidden: false,
             enrich_cancel: Arc::new(AtomicBool::new(false)),
             acoustid_key,
             fanart_key,
@@ -1674,20 +2043,38 @@ impl Component for App {
             toast_overlay: toast_overlay.clone(),
             concert_items: Vec::new(),
             concerts_list: concerts_list.clone(),
+            concerts_gallery: gtk::FlowBox::new(),
             favorite_items: Vec::new(),
             favorites_list: favorites_list.clone(),
             audiobook_items: Vec::new(),
             audiobooks_list: audiobooks_list.clone(),
+            audiobooks_gallery: gtk::FlowBox::new(),
             playlist_items: Vec::new(),
             playlists_list: playlists_list.clone(),
             podcast_items: Vec::new(),
             podcasts_list: podcasts_list.clone(),
+            podcasts_gallery: gtk::FlowBox::new(),
             podcast_view: PodcastView::Newest,
+            stream_view: StreamView::Channels,
             newest_items: Vec::new(),
             newest_list: newest_list.clone(),
             podcast_search_results: Vec::new(),
             podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
             playing_episode_url: None,
+            stream_items: Vec::new(),
+            streams_list: streams_list.clone(),
+            stream_search_results: Vec::new(),
+            stream_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            playing_stream: None,
+            stream_title: None,
+            recorder: None,
+            record_state: None,
+            recording_buffer_minutes,
+            recording_items: Vec::new(),
+            recordings_list: recordings_list.clone(),
+            stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+            settings_nc_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            offline_sources: std::collections::HashSet::new(),
             episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             queue_list: queue_list.clone(),
@@ -1695,6 +2082,7 @@ impl Component for App {
             stats_period: StatsPeriod::All,
             concert_hint_dismissed,
             gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
+            gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
             hidden_sections,
             section_order,
             nav_buttons: Vec::new(),
@@ -1710,6 +2098,15 @@ impl Component for App {
             overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             sync: crate::ui::app_sync::SyncState::default(),
             sync_connected: false,
+            cloud: crate::ui::app_cloud::CloudState::default(),
+            sources,
+            active_source: ActiveSource::Primary,
+            source_tabs: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            source_tab_buttons: Vec::new(),
+            remote_browse: None,
+            remote_queue: Vec::new(),
+            remote_pos: 0,
+            playing_remote: false,
         };
 
         // Warteschlange vom letzten Mal wiederherstellen (nur noch vorhandene
@@ -1746,7 +2143,7 @@ impl Component for App {
         }
         if !q.is_empty() {
             q_pos = q_pos.min(q.len() - 1);
-            model.now_playing = Some(Self::track_display_name(&q[q_pos]));
+            model.now_playing = Some(model.display_name(&q[q_pos]));
             model.queue = q;
             model.queue_pos = q_pos;
         }
@@ -1759,6 +2156,8 @@ impl Component for App {
         model.load_audiobooks(&sender);
         model.reload_playlists(&sender);
         model.reload_podcasts(&sender);
+        model.reload_streams(&sender);
+        model.reload_recordings(&sender);
         model.refresh_stats(&sender);
         // Podcast-Feed-Bilder einmalig im Hintergrund cachen, dann die Liste neu
         // aufbauen, damit die Cover erscheinen (kein UI-Block beim Start).
@@ -1772,6 +2171,17 @@ impl Component for App {
             }
             Cmd::ReloadPodcasts
         });
+        // Genauso die Sender-Logos einmalig im Hintergrund cachen.
+        sender.spawn_oneshot_command(|| {
+            if let Ok(lib) = Library::open() {
+                for st in lib.streams().unwrap_or_default() {
+                    if let Some(url) = st.favicon {
+                        crate::core::online::cache_station_image(&url);
+                    }
+                }
+            }
+            Cmd::ReloadStreams
+        });
         // Bibliothek beim Start automatisch einlesen und – bei WLAN/LAN und
         // aktiviertem Schalter – fehlende Cover/Metadaten im Hintergrund nachladen.
         model.start_scan(&sender, true);
@@ -1781,12 +2191,17 @@ impl Component for App {
         let artists_box = model.artists.widget();
         let albums_gallery = model.albums_gallery.clone();
         let artists_gallery = model.artists_gallery.clone();
+        let concerts_gallery = model.concerts_gallery.clone();
+        let audiobooks_gallery = model.audiobooks_gallery.clone();
+        let podcasts_gallery = model.podcasts_gallery.clone();
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
         model.split = widgets.split.clone();
         model.seek_scale = widgets.seek_scale.clone();
         model.chapter_label = widgets.chapter_label.clone();
+        model.source_tabs = widgets.source_tabs.clone();
+        model.rebuild_source_tabs();
 
         // Hover über die Seekleiste → temporär das überfahrene Kapitel unter dem
         // Titel anzeigen; beim Verlassen zurück auf das aktuelle Kapitel (an der
@@ -1920,6 +2335,8 @@ impl Component for App {
                 let btn = gtk::ToggleButton::builder().build();
                 btn.set_visible(!model.hidden_sections.contains(name));
                 btn.add_css_class("flat");
+                // Aktiven Menüpunkt am Icon blau hervorheben (CSS `:checked`).
+                btn.add_css_class("emilia-nav-btn");
                 if is_sidebar {
                     // Desktop-Seitenleiste: Icon **mit Beschriftung**. Etwas
                     // größeres Icon (gut sichtbar, nie kleiner als der Standard).
@@ -2082,12 +2499,31 @@ impl Component for App {
         match msg {
             Msg::Activate(index) => {
                 let entry = self.entries.guard().get(index).map(|r| r.entry.clone());
-                if let Some(entry) = entry {
+                let Some(entry) = entry else {
+                    return;
+                };
+                // Entfernte Einträge (Nextcloud) laufen über einen eigenen Pfad.
+                if let crate::ui::fs_row::FsEntry::RemoteDir { rel_path, .. } = &entry {
+                    self.remote_browse = Some(rel_path.clone());
+                    self.load_dir(&sender);
+                    return;
+                }
+                if let crate::ui::fs_row::FsEntry::RemoteFile { rel_path, .. } = &entry {
+                    let rel = rel_path.clone();
+                    self.activate_remote(&rel);
+                    return;
+                }
+                {
                     if entry.is_dir() {
-                        self.browse_dir = Some(entry.path().clone());
+                        let Some(p) = entry.path().cloned() else {
+                            return;
+                        };
+                        self.browse_dir = Some(p);
                         self.load_dir(&sender);
                     } else {
-                        let path = entry.path().clone();
+                        let Some(path) = entry.path().cloned() else {
+                            return;
+                        };
                         // Aktives Lied erneut antippen → Wiedergabe umschalten
                         // (Pause/Weiter), statt neu zu starten.
                         let is_active = self.now_playing.is_some()
@@ -2122,12 +2558,14 @@ impl Component for App {
                 }
             }
             Msg::ToggleQueue(index) => {
+                // Entfernte Dateien wandern (noch) nicht in die lokale Queue –
+                // `path()` ist dort `None`, der Doppelklick bleibt wirkungslos.
                 let path = self
                     .entries
                     .guard()
                     .get(index)
                     .filter(|r| !r.entry.is_dir())
-                    .map(|r| r.entry.path().clone());
+                    .and_then(|r| r.entry.path().cloned());
                 if let Some(path) = path {
                     if let Some(pos) = self.queue.iter().position(|p| *p == path) {
                         self.queue.remove(pos);
@@ -2155,7 +2593,12 @@ impl Component for App {
                 }
             }
             Msg::ShowArtistDetail(index) => {
-                let meta = self.artists.guard().get(index).map(|c| c.meta.clone());
+                let meta = self
+                    .artists
+                    .guard()
+                    .get(index)
+                    .map(|c| c.meta.clone())
+                    .or_else(|| self.artists_overview.get(index).cloned());
                 if let Some(meta) = meta {
                     // Foto des geöffneten Interpreten vorrangig nachladen.
                     self.fetch_focus_artist(&sender, &meta.name);
@@ -2164,7 +2607,12 @@ impl Component for App {
                 }
             }
             Msg::ShowAlbumDetail(index) => {
-                let meta = self.albums.guard().get(index).map(|c| c.meta.clone());
+                let meta = self
+                    .albums
+                    .guard()
+                    .get(index)
+                    .map(|c| c.meta.clone())
+                    .or_else(|| self.albums_overview.get(index).cloned());
                 if let Some(meta) = meta {
                     // Cover des geöffneten Albums vorrangig nachladen.
                     self.fetch_focus_album(&sender, &meta.artist, &meta.album);
@@ -2191,7 +2639,12 @@ impl Component for App {
             }
             Msg::ShowAlbumTracks(index) => {
                 // Alben-Übersicht: nach Albumname öffnen (Interpret egal).
-                let album = self.albums.guard().get(index).map(|c| c.meta.album.clone());
+                let album = self
+                    .albums
+                    .guard()
+                    .get(index)
+                    .map(|c| c.meta.album.clone())
+                    .or_else(|| self.albums_overview.get(index).map(|m| m.album.clone()));
                 if let Some(album) = album {
                     self.open_album_by_name(&sender, &album);
                 }
@@ -2203,7 +2656,12 @@ impl Component for App {
                 }
             }
             Msg::OpenArtistTracks(index) => {
-                let meta = self.artists.guard().get(index).map(|c| c.meta.clone());
+                let meta = self
+                    .artists
+                    .guard()
+                    .get(index)
+                    .map(|c| c.meta.clone())
+                    .or_else(|| self.artists_overview.get(index).cloned());
                 if let Some(meta) = meta {
                     // Foto des geöffneten Interpreten vorrangig nachladen.
                     self.fetch_focus_artist(&sender, &meta.name);
@@ -2484,10 +2942,225 @@ impl Component for App {
                     self.open_podcast(&sender, id, &title);
                 }
             }
+            Msg::OpenPodcastAt(index) => {
+                if let Some(id) = self.podcast_items.get(index).map(|p| p.0) {
+                    sender.input(Msg::OpenPodcast(id));
+                }
+            }
+            Msg::ShowPodcastDetailAt(index) => {
+                if let Some(id) = self.podcast_items.get(index).map(|p| p.0) {
+                    sender.input(Msg::ShowPodcastDetail(id));
+                }
+            }
             Msg::PodcastDelete(id) => {
                 let _ = self.library.delete_podcast(id);
                 self.reload_podcasts(&sender);
                 self.toast(&gettext("Podcast removed"));
+            }
+            // --- Streaming (Internet-Radio) ---
+            Msg::StreamAdd => self.open_add_stream_dialog(root, &sender),
+            Msg::StreamSearch(term) => {
+                let term = term.trim().to_string();
+                if !term.is_empty() {
+                    self.toast(&gettext("Searching …"));
+                    sender.spawn_command(move |out| {
+                        let results =
+                            crate::core::streaming::search_stations(&term).unwrap_or_default();
+                        // Treffer sofort zeigen (noch ohne Logos) …
+                        let _ = out.send(Cmd::StreamSearchResults(results.clone()));
+                        // … und die Logos danach im Hintergrund nachladen.
+                        for r in &results {
+                            if let Some(img) = r.favicon.as_deref() {
+                                crate::core::online::cache_station_image(img);
+                            }
+                        }
+                        let _ = out.send(Cmd::StreamSearchCoversReady);
+                    });
+                }
+            }
+            Msg::StreamAddResult(index) => self.add_stream_result(&sender, index),
+            Msg::StreamAddUrl(url) => {
+                let url = url.trim().to_string();
+                if !url.is_empty() {
+                    let name = crate::core::streaming::name_from_url(&url);
+                    match self
+                        .library
+                        .add_stream(&name, &url, None, None, None, None, None)
+                    {
+                        Ok(_) => {
+                            self.reload_streams(&sender);
+                            self.toast(&gettext("Station added"));
+                        }
+                        Err(_) => self.toast(&gettext("Could not add station")),
+                    }
+                }
+            }
+            Msg::ToggleStream(id) => {
+                if self.playing_stream == Some(id) {
+                    // Läuft schon → Pause/Weiter umschalten (Puffer läuft weiter).
+                    if self.playing {
+                        self.player.pause();
+                        self.playing = false;
+                    } else {
+                        self.player.resume();
+                        self.playing = true;
+                    }
+                    self.mpris.set_playing(self.playing);
+                } else {
+                    self.play_stream(id);
+                }
+                self.refresh_stream_icons();
+            }
+            Msg::StreamRecordToggle(id) => {
+                if self.record_state.as_ref().map(|r| r.stream_id) == Some(id) {
+                    // Läuft → stoppen.
+                    sender.input(Msg::RecordStop);
+                } else if self.recording_buffer_minutes == 0 {
+                    self.toast(&gettext("Enable the recording buffer in the settings first"));
+                } else {
+                    // Sender (mit Puffer) sicherstellen, dann Daueraufnahme starten.
+                    if self.playing_stream != Some(id) {
+                        self.play_stream(id);
+                    }
+                    self.record_arm(id);
+                    self.refresh_stream_icons();
+                }
+            }
+            Msg::TransportRecordToggle => {
+                if let Some(id) = self.playing_stream {
+                    sender.input(Msg::StreamRecordToggle(id));
+                }
+            }
+            Msg::StreamTitle(title) => {
+                // Nur relevant, solange ein Sender läuft (Datei-/Episoden-Tags
+                // werden ignoriert). Zeigt „Sender — Titel" im Mini-Player und
+                // meldet den Titel an Sperrbildschirm/Medientasten.
+                let title = title.trim().to_string();
+                if let Some(id) = self.playing_stream {
+                    if !title.is_empty() && self.stream_title.as_deref() != Some(title.as_str()) {
+                        self.stream_title = Some(title.clone());
+                        let station = self
+                            .stream_items
+                            .iter()
+                            .find(|s| s.id == id)
+                            .map(|s| s.name.clone());
+                        self.now_playing = Some(match &station {
+                            Some(name) => format!("{name} — {title}"),
+                            None => title.clone(),
+                        });
+                        self.mpris
+                            .set_metadata(0, &title, station.as_deref(), None, None, None);
+                    }
+                }
+            }
+            Msg::OpenStream(id) => self.open_stream(root, &sender, id),
+            Msg::StreamDelete(id) => {
+                if self.playing_stream == Some(id) {
+                    self.player.stop();
+                    self.playing = false;
+                    self.playing_stream = None;
+                    self.now_playing = None;
+                    self.mpris.set_playing(false);
+                    self.stop_recorder();
+                }
+                let _ = self.library.delete_stream(id);
+                self.reload_streams(&sender);
+                self.toast(&gettext("Station removed"));
+            }
+            // --- Aufnahme (Timeshift) ---
+            Msg::RecordStop => {
+                if self.record_state.take().is_some() {
+                    self.toast(&gettext("Recording stopped"));
+                    self.reload_recordings(&sender);
+                }
+            }
+            Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
+            Msg::ReplayPlay { start, end } => {
+                let temp = self.recorder.as_ref().and_then(|r| r.extract_temp(start, end).ok());
+                match temp {
+                    Some(path) => {
+                        let p = path.to_string_lossy().to_string();
+                        self.player.stop();
+                        match self.player.play_file(&p, 0) {
+                            Ok(()) => {
+                                self.now_playing = Some(gettext("Replay"));
+                                self.playing = true;
+                                self.playing_path = Some(path);
+                                self.playing_episode_url = None;
+                                self.playing_stream = None;
+                                self.mpris.set_playing(true);
+                            }
+                            Err(e) => tracing::error!("Replay failed: {e}"),
+                        }
+                    }
+                    None => self.toast(&gettext("Could not extract from buffer")),
+                }
+            }
+            Msg::ReplaySave { start, end, title } => {
+                let (artist, t) = crate::core::recorder::split_artist_title(&title);
+                let station = self
+                    .playing_stream
+                    .and_then(|id| self.stream_items.iter().find(|s| s.id == id))
+                    .map(|s| s.name.clone());
+                let dest = crate::ui::app_streaming::recordings_dir();
+                let saved = self
+                    .recorder
+                    .as_ref()
+                    .and_then(|r| r.save_song(start, end, artist.as_deref(), &t, &dest).ok());
+                match saved {
+                    Some(path) => {
+                        let _ = self.library.add_recording(
+                            &path.to_string_lossy(),
+                            artist.as_deref(),
+                            &t,
+                            station.as_deref(),
+                            false,
+                        );
+                        self.reload_recordings(&sender);
+                        // Cover + Album online nachschlagen und einbetten (Hintergrund).
+                        let (a, ti) = (artist.clone(), t.clone());
+                        sender.spawn_command(move |_out| {
+                            let aref = a.as_deref().unwrap_or("");
+                            if let Some((bytes, album)) =
+                                crate::core::online::recording_cover(aref, &ti)
+                            {
+                                crate::core::recorder::embed_cover(
+                                    &path,
+                                    a.as_deref(),
+                                    &ti,
+                                    album.as_deref(),
+                                    &bytes,
+                                );
+                            }
+                        });
+                    }
+                    None => {}
+                }
+            }
+            Msg::PlayRecording(path) => {
+                let p = PathBuf::from(&path);
+                if p.exists() {
+                    self.stop_recorder();
+                    self.queue = vec![p];
+                    self.queue_pos = 0;
+                    self.play_current();
+                } else {
+                    self.toast(&gettext("File not found"));
+                }
+            }
+            Msg::RecordingDelete(id) => {
+                if let Ok(Some(path)) = self.library.delete_recording(id) {
+                    let _ = std::fs::remove_file(&path);
+                }
+                self.reload_recordings(&sender);
+                self.toast(&gettext("Recording deleted"));
+            }
+            Msg::SetRecordingBufferMinutes(n) => {
+                self.recording_buffer_minutes = n.min(60);
+                let _ = self.library.set_setting(
+                    "recording_buffer_minutes",
+                    &self.recording_buffer_minutes.to_string(),
+                );
             }
             Msg::ToggleEpisode { url, title } => {
                 if self.playing_episode_url.as_deref() == Some(url.as_str()) {
@@ -2518,6 +3191,7 @@ impl Component for App {
                 }
             }
             Msg::SetPodcastView(view) => self.podcast_view = view,
+            Msg::SetStreamView(view) => self.stream_view = view,
             Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
             Msg::ShowPodcastEpisodeDetail { podcast_id, index } => {
                 self.open_podcast_episode_detail(root, &sender, podcast_id, index)
@@ -2538,7 +3212,11 @@ impl Component for App {
             Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
             Msg::SyncDialogClosed => self.teardown_sync(),
             Msg::TrackFinished => {
-                if self.playing_episode_url.is_some() && self.queue.is_empty() {
+                if self.playing_remote {
+                    // Entfernte Reihe: zum nächsten Titel weiterschalten (bzw. am
+                    // Ende stoppen). Läuft getrennt von der lokalen Warteschlange.
+                    self.remote_next();
+                } else if self.playing_episode_url.is_some() && self.queue.is_empty() {
                     // Eine gestreamte Episode ist zu Ende (keine Warteschlange
                     // dahinter): Wiedergabestand zurücksetzen, Markierung lösen.
                     self.playing = false;
@@ -2586,6 +3264,12 @@ impl Component for App {
                 }
             }
             Msg::Tick => {
+                // Laufende Timeshift-Aufnahme an den Songgrenzen fortschreiben.
+                if self.record_state.is_some() {
+                    self.drive_recording(&sender);
+                }
+                // Play/Pause- und Aufnahme-Icons der Senderzeilen abgleichen.
+                self.refresh_stream_icons();
                 if self.playing {
                     if let Some(pos) = self.player.position_ms() {
                         self.position_ms = pos;
@@ -2630,12 +3314,13 @@ impl Component for App {
                 // dieser Tick verpufft – kein Aufstauen.
                 if self.auto_enrich
                     && !self.enriching
-                    && self.root_dir.is_some()
+                    && self.music_dir.is_some()
                     && online_available()
                 {
                     self.run_enrich(&sender, false, true);
                 }
             }
+            Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::Seek(ms) => {
                 let ms = ms.max(0);
                 self.position_ms = ms;
@@ -2676,8 +3361,20 @@ impl Component for App {
                             self.refresh_queue_icons();
                         }
                     }
-                    M::Next => self.play_next(),
-                    M::Prev => self.play_prev(),
+                    M::Next => {
+                        if self.playing_remote {
+                            self.remote_next();
+                        } else {
+                            self.play_next();
+                        }
+                    }
+                    M::Prev => {
+                        if self.playing_remote {
+                            self.remote_prev();
+                        } else {
+                            self.play_prev();
+                        }
+                    }
                     M::Stop => {
                         self.save_resume();
                         self.finalize_play_session(false);
@@ -2706,8 +3403,20 @@ impl Component for App {
                     }
                 }
             }
-            Msg::Next => self.play_next(),
-            Msg::Prev => self.play_prev(),
+            Msg::Next => {
+                if self.playing_remote {
+                    self.remote_next();
+                } else {
+                    self.play_next();
+                }
+            }
+            Msg::Prev => {
+                if self.playing_remote {
+                    self.remote_prev();
+                } else {
+                    self.play_prev();
+                }
+            }
             Msg::ToggleShuffle => {
                 self.shuffle = !self.shuffle;
                 // Beim Einschalten eine frische Zufalls-Reihenfolge der ganzen
@@ -2723,6 +3432,18 @@ impl Component for App {
                     .set_setting("repeat", if self.repeat { "1" } else { "0" });
             }
             Msg::NavUp => {
+                // Entfernte Quelle: ein rel-Segment nach oben.
+                if let Some(rel) = self.remote_browse.clone() {
+                    if !rel.is_empty() {
+                        let parent = match rel.rfind('/') {
+                            Some(0) | None => String::new(),
+                            Some(i) => rel[..i].to_string(),
+                        };
+                        self.remote_browse = Some(parent);
+                        self.load_dir(&sender);
+                    }
+                    return;
+                }
                 if self.can_go_up() {
                     if let Some(parent) = self.browse_dir.as_ref().and_then(|d| d.parent()) {
                         self.browse_dir = Some(parent.to_path_buf());
@@ -2731,6 +3452,14 @@ impl Component for App {
                 }
             }
             Msg::FilesGoStart => {
+                // Entfernte Quelle: zurück an die Musikwurzel der Quelle.
+                if self.remote_browse.is_some() {
+                    if self.remote_browse.as_deref() != Some("") {
+                        self.remote_browse = Some(String::new());
+                        self.load_dir(&sender);
+                    }
+                    return;
+                }
                 if let Some(root) = self.root_dir.clone() {
                     if self.browse_dir.as_ref() != Some(&root) {
                         self.browse_dir = Some(root);
@@ -2743,7 +3472,6 @@ impl Component for App {
                 // „Neu einlesen" aktualisiert auch die Bibliothek (Interpreten/Alben).
                 self.start_scan(&sender, false);
             }
-            Msg::HideEnrichBanner => self.enrich_banner_hidden = true,
             Msg::OpenSettings => self.open_settings(root, &sender),
             Msg::CheckForUpdates => {
                 if crate::core::update::in_flatpak() {
@@ -2861,11 +3589,102 @@ impl Component for App {
                     tracing::error!("Failed to save music folder: {e}");
                 }
                 self.music_dir = Some(dir);
-                self.root_dir = Some(path.clone());
-                self.browse_dir = Some(path);
-                self.load_dir(&sender);
+                // Die Dateiansicht nur umrooten, wenn gerade der primäre Tab aktiv
+                // ist – auf einer Zusatzquelle bliebe der Nutzer sonst stehen.
+                if self.active_source == ActiveSource::Primary {
+                    self.root_dir = Some(path.clone());
+                    self.browse_dir = Some(path);
+                    self.load_dir(&sender);
+                }
                 // Neuen Ordner einlesen und (WLAN + Schalter) automatisch nachladen.
                 self.start_scan(&sender, true);
+            }
+            Msg::SelectSource(sel) => {
+                if self.active_source != sel {
+                    self.apply_source(sel, &sender);
+                }
+            }
+            Msg::SourcesChanged => {
+                self.sources = self.library.list_sources().unwrap_or_default();
+                // Ist die aktive Quelle entfernt worden, zurück auf den primären Tab.
+                let gone = match &self.active_source {
+                    ActiveSource::Primary => false,
+                    ActiveSource::Source(id) => !self.sources.iter().any(|s| s.id == *id),
+                };
+                if gone {
+                    self.apply_source(ActiveSource::Primary, &sender);
+                }
+                self.rebuild_source_tabs();
+                // Indizierte Cloud-Titel können dazugekommen/entfernt worden sein.
+                self.reload_albums();
+                self.reload_artists();
+                // „Verbunden"-Liste der Nextcloud-Einstellungsseite auffrischen,
+                // falls der Einstellungsdialog gerade offen ist.
+                let nc_list = self.settings_nc_list.borrow().clone();
+                if let Some(list) = nc_list {
+                    if list.root().is_some() {
+                        self.fill_nc_list(&list, &sender);
+                    } else {
+                        *self.settings_nc_list.borrow_mut() = None;
+                    }
+                }
+            }
+            Msg::CheckSources => {
+                let webdavs: Vec<crate::model::Source> = self
+                    .sources
+                    .iter()
+                    .filter(|s| s.kind == "webdav")
+                    .cloned()
+                    .collect();
+                if !webdavs.is_empty() {
+                    sender.spawn_command(move |out| {
+                        let status: Vec<(i64, bool)> = webdavs
+                            .iter()
+                            .map(|s| {
+                                let ok = crate::core::webdav::Creds::from_source(s)
+                                    .map(|c| crate::core::webdav::test_connection(&c).is_ok())
+                                    .unwrap_or(false);
+                                (s.id, ok)
+                            })
+                            .collect();
+                        let _ = out.send(Cmd::SourceStatus(status));
+                    });
+                }
+            }
+            Msg::AddCloudSource => self.open_cloud_dialog(root, &sender),
+            Msg::CloudManualToggle(expanded) => {
+                if expanded {
+                    // Manuell aufgeklappt → Kamera anhalten und ausblenden.
+                    self.cloud.scanner = None;
+                    if let Some(cam) = &self.cloud.cam {
+                        cam.set_visible(false);
+                    }
+                } else {
+                    // Wieder zugeklappt → Kamera erneut starten.
+                    self.start_cloud_scan(&sender);
+                }
+            }
+            Msg::CloudClosed => {
+                self.cloud.scanner = None;
+                self.cloud.dialog = None;
+            }
+            Msg::CloudQrDecoded(code) => self.handle_cloud_qr(&code),
+            Msg::CloudTest => self.test_cloud(&sender),
+            Msg::CloudSave => self.save_cloud(&sender),
+            Msg::CtxDownloadRemote(rel) => {
+                let Some(creds) = self.active_webdav_creds() else {
+                    return;
+                };
+                let Some(dest) = self.remote_cache_path(&rel) else {
+                    return;
+                };
+                self.toast(&gettext("Downloading …"));
+                sender.spawn_oneshot_command(move || {
+                    match crate::core::webdav::download(&creds, &rel, &dest) {
+                        Ok(()) => Cmd::RemoteDownloaded(Ok((rel, dest))),
+                        Err(e) => Cmd::RemoteDownloaded(Err(e.to_string())),
+                    }
+                });
             }
             Msg::SetAcoustidKey(key) => {
                 let key = key.trim().to_string();
@@ -2972,7 +3791,8 @@ impl Component for App {
                 self.apply_current_eq();
             }
             Msg::ConcertImport => {
-                let Some(root) = self.root_dir.clone() else {
+                // Konzert-Import bezieht sich auf die primäre Bibliothek.
+                let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
                     self.toast(&gettext("No music folder set"));
                     return;
                 };
@@ -3021,6 +3841,17 @@ impl Component for App {
             Msg::PlayConcert(index) => {
                 if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
                     self.play_entry(&scope, &key, is_dir);
+                }
+            }
+            Msg::OpenConcertEntry(index) => {
+                // Galerie-Tipp: wie der Listen-Tipp – Album/Ordner öffnet die
+                // Titelliste, ein einzelner Titel wird abgespielt.
+                if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
+                    if scope == "track" {
+                        self.play_entry(&scope, &key, is_dir);
+                    } else {
+                        sender.input(Msg::OpenEntryTracks { scope, key });
+                    }
                 }
             }
             Msg::SetSectionVisible { section, visible } => {
@@ -3126,6 +3957,16 @@ impl Component for App {
                     self.play_entry(&scope, &key, is_dir);
                 }
             }
+            Msg::OpenAudiobookEntry(index) => {
+                // Galerie-Tipp: Album/Ordner öffnet die Titelliste, Einzeltitel spielt.
+                if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                    if scope == "track" {
+                        self.play_entry(&scope, &key, is_dir);
+                    } else {
+                        sender.input(Msg::OpenEntryTracks { scope, key });
+                    }
+                }
+            }
             Msg::ShowAudiobookDetail(index) => {
                 if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
                     self.context_target = Some(self.entry_target(&scope, &key, is_dir));
@@ -3137,8 +3978,11 @@ impl Component for App {
                     self.save_resume();
                     self.player.pause();
                     self.playing = false;
-                } else if self.playing_path.is_some() {
-                    // Pausiert → fortsetzen.
+                } else if self.playing_path.is_some()
+                    || self.playing_stream.is_some()
+                    || self.playing_episode_url.is_some()
+                {
+                    // Pausiert (Datei, Sender oder Episode) → fortsetzen.
                     self.player.resume();
                     self.playing = true;
                 } else if !self.queue.is_empty() {
@@ -3153,6 +3997,7 @@ impl Component for App {
                 self.mpris.set_playing(self.playing);
                 // Play-/Pause-Icon des aktiven Titels in der Liste anpassen.
                 self.refresh_queue_icons();
+                self.refresh_stream_icons();
             }
             Msg::OpenNowPlaying => {
                 // Detailansicht des laufenden Titels (als Datei-Eintrag).
@@ -3183,7 +4028,9 @@ impl Component for App {
                 let mut guard = self.entries.guard();
                 guard.clear();
                 for e in entries {
-                    let queued = !e.is_dir() && queue.iter().any(|p| p == e.path());
+                    let queued = e
+                        .path()
+                        .is_some_and(|ep| queue.iter().any(|p| p == ep));
                     guard.push_back((e, opts, queued));
                 }
                 drop(guard);
@@ -3204,9 +4051,101 @@ impl Component for App {
                     }
                 }
             }
-            Cmd::EnrichProgress { phase, done, total } => {
-                self.enrich_status = format!("{phase}: {done}/{total}");
+            Cmd::RemoteEntries(result, source, rel) => {
+                // Veraltetes Ergebnis verwerfen (Quelle/Ordner inzwischen gewechselt).
+                if self.active_source != source
+                    || self.remote_browse.as_deref() != Some(rel.as_str())
+                {
+                    return;
+                }
+                self.loading = false;
+                match result {
+                    Err(e) => {
+                        tracing::warn!("WebDAV listing failed: {e}");
+                        self.entries.guard().clear();
+                        self.toast(&gettext("Could not load this folder"));
+                    }
+                    Ok(list) => {
+                        use crate::ui::app_views::natural_key;
+                        let (mut dirs, mut files): (Vec<_>, Vec<_>) =
+                            list.into_iter().partition(|e| e.is_dir);
+                        dirs.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
+                        files.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
+                        let mut entries: Vec<FsEntry> = Vec::with_capacity(dirs.len() + files.len());
+                        for d in dirs {
+                            entries.push(FsEntry::remote_dir(d.rel_path, d.name));
+                        }
+                        for f in files {
+                            let cached = self.remote_cache_path(&f.rel_path).filter(|p| p.exists());
+                            entries.push(FsEntry::remote_file(f.rel_path, f.name, cached));
+                        }
+                        let distinct: std::collections::HashSet<String> =
+                            entries.iter().filter_map(|e| e.effective_artist()).collect();
+                        let opts = RowOpts {
+                            show_artist: distinct.len() > 1,
+                        };
+                        {
+                            let mut guard = self.entries.guard();
+                            guard.clear();
+                            for e in entries {
+                                guard.push_back((e, opts, false));
+                            }
+                        }
+                        self.refresh_queue_icons();
+                        // Tags der entfernten Dateien im Hintergrund nachladen.
+                        if let Some(src) = self.active_remote_source() {
+                            self.start_remote_tag_fetch(&sender, &src);
+                        }
+                    }
+                }
             }
+            Cmd::RemoteTags(tags) => {
+                // rel-Pfad → Factory-Index, dann Tags an die jeweilige Zeile schicken.
+                let map: std::collections::HashMap<String, usize> = {
+                    let guard = self.entries.guard();
+                    (0..guard.len())
+                        .filter_map(|i| {
+                            guard.get(i).and_then(|r| match &r.entry {
+                                FsEntry::RemoteFile { rel_path, .. } => Some((rel_path.clone(), i)),
+                                _ => None,
+                            })
+                        })
+                        .collect()
+                };
+                for (rel, title, artist, duration_ms) in tags {
+                    if let Some(&i) = map.get(&rel) {
+                        self.entries.send(
+                            i,
+                            FsInput::SetTags {
+                                title,
+                                artist,
+                                duration_ms,
+                            },
+                        );
+                    }
+                }
+            }
+            Cmd::RemoteDownloaded(result) => match result {
+                Ok((rel, path)) => {
+                    let idx = {
+                        let guard = self.entries.guard();
+                        (0..guard.len()).find(|&i| {
+                            guard.get(i).is_some_and(|r| {
+                                matches!(&r.entry, FsEntry::RemoteFile { rel_path, .. } if *rel_path == rel)
+                            })
+                        })
+                    };
+                    if let Some(i) = idx {
+                        self.entries.send(i, FsInput::SetDownloaded(path));
+                    }
+                    self.toast(&gettext("Download complete"));
+                }
+                Err(e) => {
+                    tracing::warn!("Download failed: {e}");
+                    self.toast(&gettext("Download failed"));
+                }
+            },
+            Cmd::WebdavTested(result) => self.on_webdav_tested(result),
             Cmd::EnrichDone { changed } => {
                 self.enriching = false;
                 // Nur neu aufbauen, wenn der Lauf etwas geändert hat – der leise
@@ -3232,7 +4171,7 @@ impl Component for App {
                 if then_enrich
                     && self.auto_enrich
                     && !self.enriching
-                    && self.root_dir.is_some()
+                    && self.music_dir.is_some()
                     && online_available()
                 {
                     // Automatischer Lauf (ohne erneuten Tag-Scan), voller Umfang.
@@ -3259,6 +4198,37 @@ impl Component for App {
             }
             Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
             Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
+            Cmd::StreamSearchResults(results) => {
+                self.stream_search_results = results;
+                self.rebuild_stream_search_results(&sender);
+            }
+            Cmd::StreamSearchCoversReady => self.rebuild_stream_search_results(&sender),
+            Cmd::ReloadStreams => self.reload_streams(&sender),
+            Cmd::SourceStatus(status) => {
+                let mut changed = false;
+                for (id, ok) in status {
+                    if ok {
+                        changed |= self.offline_sources.remove(&id);
+                    } else {
+                        changed |= self.offline_sources.insert(id);
+                    }
+                }
+                // Geänderter Verbindungsstand → Ansichten neu aufbauen, damit der
+                // rote „Getrennt"-Hinweis erscheint/verschwindet.
+                if changed {
+                    self.reload_albums();
+                    self.reload_artists();
+                }
+            }
+            Cmd::RemoteIndexed => {
+                // Cloud-Titel sind in der DB → Alben/Interpreten neu aufbauen und
+                // (sofern erwünscht) Cover/Fotos online nachladen.
+                self.reload_albums();
+                self.reload_artists();
+                if self.auto_enrich && !self.enriching && online_available() {
+                    self.run_enrich(&sender, false, false);
+                }
+            }
             Cmd::Sync(ev) => self.on_sync_event(ev, &sender),
             Cmd::UpdateChecked(result) => match result {
                 crate::core::update::CheckResult::UpToDate => self.toast(&gettext_f(
@@ -3392,23 +4362,74 @@ pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget
 /// Eine **Galerie-Kachel**: quadratisches Cover (oder Platzhalter-Icon) mit dem
 /// Titel als halbtransparentem Band unten (Overlay). Klick-/Long-Press-Handler
 /// werden vom Aufrufer (FlowBox) ergänzt.
-pub(crate) fn gallery_cell(cover_path: Option<&str>, icon: &str, title: &str) -> gtk::Overlay {
+///
+/// Dekodiert **nicht** synchron: nur ein bereits gecachtes Cover wird sofort
+/// gesetzt. Das zurückgegebene `Picture` (falls ein Cover-Pfad vorliegt) füllt
+/// der Aufrufer per Hintergrund-Dekodierung ([`spawn_gallery_decode`]) nach.
+/// Quadratische Standard-Kantenlänge einer Galerie-Kachel, bis
+/// [`size_gallery_tiles`] die exakte Spaltenbreite kennt. Hält die Kachel von
+/// Anfang an quadratisch (statt dem Querformat des Covers zu folgen).
+const GALLERY_TILE_DEFAULT: i32 = 110;
+
+pub(crate) fn gallery_cell(
+    cover_path: Option<&str>,
+    icon: &str,
+    title: &str,
+) -> (gtk::Overlay, Option<gtk::Picture>) {
     let overlay = gtk::Overlay::new();
-    let frame = gtk::AspectFrame::new(0.5, 0.5, 1.0, false);
+    // Die exakte Kachelgröße (genau 1/Spaltenzahl der Breite) wird zentral per
+    // [`size_gallery_tiles`] als `size_request` gesetzt. **Kein `hexpand`**: sonst
+    // dehnt die FlowBox die Kacheln über ihren Anteil hinaus (z. B. bei wenigen
+    // Einträgen würde eine Kachel mehr als 100%/Spalten der Breite einnehmen).
+    // `halign: Start`, damit die Zelle nie über den `size_request` hinaus wächst.
+    overlay.set_hexpand(false);
+    overlay.set_halign(gtk::Align::Start);
+    overlay.set_valign(gtk::Align::Start);
+    // **Quadratische Default-Größe** schon ab Erstellung – damit die Kachel
+    // während der ganzen Lade-/Layout-Phase quadratisch bleibt (nie Querformat
+    // oder kollabiert), egal wann/ob asynchrone Cover eintreffen. [`size_gallery_tiles`]
+    // verfeinert anschließend nur noch die exakte Pixelgröße (Spaltenbreite).
+    overlay.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
+    // Quadratischer Kachelrahmen als simpler `Box`-Container. Seine Größe setzt
+    // [`size_gallery_tiles`] hart auf das Quadrat (Breite = Höhe). Bewusst KEIN
+    // `AspectFrame`: der ignorierte seinen `size_request` in der Höhe und ließ die
+    // Zelle dem Querformat asynchron geladener Cover folgen. Eine `Box` respektiert
+    // den `size_request` zuverlässig; das Cover füllt formatfüllend (`Cover`),
+    // `overflow: Hidden` + `card` runden/beschneiden die Ecken.
+    let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     frame.set_overflow(gtk::Overflow::Hidden);
+    frame.set_hexpand(false);
+    frame.set_halign(gtk::Align::Fill);
+    frame.set_valign(gtk::Align::Fill);
+    frame.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
     frame.add_css_class("card");
-    match cover_path.and_then(crate::ui::widgets::thumb_cached) {
-        Some(tex) => {
-            let pic = gtk::Picture::for_paintable(&tex);
+    let picture = match cover_path {
+        Some(path) => {
+            // Cover als `Picture`. **Nur** eine bereits gecachte Textur sofort
+            // setzen (kein synchrones Dekodieren – das blockierte sonst Start und
+            // Galerie-Aufbau). Sonst bleibt die Karte als Platzhalter, bis das
+            // Cover im Hintergrund nachgereicht wird.
+            let pic = gtk::Picture::new();
             pic.set_content_fit(gtk::ContentFit::Cover);
-            frame.set_child(Some(&pic));
+            pic.set_hexpand(true);
+            pic.set_vexpand(true);
+            pic.set_halign(gtk::Align::Fill);
+            pic.set_valign(gtk::Align::Fill);
+            if let Some(tex) = crate::ui::widgets::cached_thumb(path) {
+                pic.set_paintable(Some(&tex));
+            }
+            frame.append(&pic);
+            Some(pic)
         }
         None => {
             let img = gtk::Image::from_icon_name(icon);
             img.set_pixel_size(64);
-            frame.set_child(Some(&img));
+            img.set_hexpand(true);
+            img.set_vexpand(true);
+            frame.append(&img);
+            None
         }
-    }
+    };
     overlay.set_child(Some(&frame));
     let label = gtk::Label::new(Some(title));
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -3417,7 +4438,72 @@ pub(crate) fn gallery_cell(cover_path: Option<&str>, icon: &str, title: &str) ->
     label.set_halign(gtk::Align::Fill);
     label.add_css_class("emilia-gallery-title");
     overlay.add_overlay(&label);
-    overlay
+    (overlay, picture)
+}
+
+/// Dekodiert die Cover (Pfad → Ziel-`Picture`) **in einem Hintergrund-Thread**
+/// und reicht die Texturen progressiv auf dem UI-Thread nach. Dadurch blockiert
+/// weder App-Start noch Galerie-Aufbau das Bild-Dekodieren. Backpressure über
+/// einen kleinen, begrenzten Kanal, damit der Thread nicht weit vorausläuft.
+pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
+    if items.is_empty() {
+        return;
+    }
+    let (tx, rx) = async_channel::bounded::<(usize, String, gtk::gdk::Texture)>(8);
+    let paths: Vec<String> = items.iter().map(|(p, _)| p.clone()).collect();
+    let targets: Vec<gtk::Picture> = items.into_iter().map(|(_, pic)| pic).collect();
+    std::thread::spawn(move || {
+        for (i, path) in paths.into_iter().enumerate() {
+            if let Some(tex) = crate::ui::widgets::decode_thumb(&path) {
+                // Bricht ab, sobald der Empfänger weg ist (Galerie neu aufgebaut).
+                if tx.send_blocking((i, path, tex)).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    gtk::glib::spawn_future_local(async move {
+        while let Ok((i, path, tex)) = rx.recv().await {
+            crate::ui::widgets::store_thumb(path, tex.clone());
+            if let Some(pic) = targets.get(i) {
+                pic.set_paintable(Some(&tex));
+            }
+        }
+    });
+}
+
+/// Setzt jede Galerie-Kachel auf ein **Quadrat in Spaltenbreite**. Nötig, weil
+/// die `FlowBox` Kinder nicht über ihre natürliche Größe streckt: ohne festes
+/// `size_request` blieben die Thumbnails im breiten Desktop-Mode klein (das Bild
+/// „skaliert nicht mit"), während das Feld breiter wird. Wird bei jedem Befüllen
+/// und bei jeder Breitenänderung des Fensters aufgerufen.
+pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
+    let cols = fb.min_children_per_line().max(1) as i32;
+    let w = fb.width();
+    if w <= 1 {
+        return; // noch nicht zugewiesen – Resize-Hook holt das nach
+    }
+    let spacing = fb.column_spacing() as i32;
+    // `cols`-fachen Abstand abziehen (statt `cols-1`) als Sicherheitspuffer,
+    // damit immer genau `cols` Kacheln je Zeile passen und nicht umbrechen.
+    let tile = ((w - spacing * cols) / cols).max(64);
+    let mut child = fb.first_child();
+    while let Some(c) = child {
+        let next = c.next_sibling();
+        if let Some(inner) = c
+            .downcast_ref::<gtk::FlowBoxChild>()
+            .and_then(|f| f.child())
+        {
+            inner.set_size_request(tile, tile);
+            // Auch den AspectFrame (Haupt-Kind des Overlays) hart auf das Quadrat
+            // setzen – sonst folgt die Zellenhöhe dem Seitenverhältnis des (ggf.
+            // quer-/hochformatigen) Covers statt der Breite.
+            if let Some(frame) = inner.first_child() {
+                frame.set_size_request(tile, tile);
+            }
+        }
+        child = next;
+    }
 }
 
 /// Liest Unterordner und Audiodateien eines Ordners (Ordner zuerst, sortiert).
@@ -3504,15 +4590,33 @@ impl App {
         }
         fb.set_min_children_per_line(self.gallery_columns);
         fb.set_max_children_per_line(self.gallery_columns);
+        // `homogeneous(true)` gibt **allen** Kacheln genau die per `size_request`
+        // ([`size_gallery_tiles`]) gesetzte Größe (= 1/Spaltenzahl der Breite) und
+        // streckt sie NICHT auf die Zeilenbreite. Ohne das verteilt die FlowBox
+        // die Zeilenbreite auf die tatsächlich vorhandenen Kacheln – bei wenigen
+        // Einträgen würde eine Kachel dann mehr als 100%/Spalten einnehmen.
         fb.set_homogeneous(true);
         fb.set_row_spacing(8);
         fb.set_column_spacing(8);
         fb.set_selection_mode(gtk::SelectionMode::None);
+        // Die FlowBox selbst NICHT auf Einfachklick reagieren lassen – sonst
+        // schluckt sie den Klick, bevor die Kachel-Geste ihn auswerten kann.
+        fb.set_activate_on_single_click(false);
         if !fb.has_css_class("emilia-gallery") {
             fb.add_css_class("emilia-gallery");
         }
+        // Nicht gecachte Cover sammeln und nach dem Aufbau im Hintergrund laden.
+        let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (cover, icon, title)) in items.iter().enumerate() {
-            let cell = gallery_cell(cover.as_deref(), icon, title);
+            let (cell, pic) = gallery_cell(cover.as_deref(), icon, title);
+            if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
+                if crate::ui::widgets::cached_thumb(path).is_none() {
+                    to_decode.push((path.to_string(), pic));
+                }
+            }
+            // Einzeltipp → Unterseite **sofort** (`activate`), langes Drücken →
+            // Detailansicht (`detail`) – exakt wie in der Listenansicht. Bewusst
+            // KEIN Doppeltipp/keine Verzögerung, damit der Klick nicht hängt.
             let click = gtk::GestureClick::new();
             {
                 let input = self.input.clone();
@@ -3524,16 +4628,49 @@ impl App {
                 });
             }
             cell.add_controller(click);
-            let lp = gtk::GestureLongPress::new();
+            let long_press = gtk::GestureLongPress::new();
             {
                 let input = self.input.clone();
-                lp.connect_pressed(move |g, _, _| {
+                long_press.connect_pressed(move |g, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
                     let _ = input.send(detail(i));
                 });
             }
-            cell.add_controller(lp);
+            cell.add_controller(long_press);
             fb.append(&cell);
+        }
+        // Cover der noch nicht gecachten Kacheln im Hintergrund nachladen.
+        spawn_gallery_decode(to_decode);
+        // Kacheln sofort quadratisch auf Spaltenbreite bringen (greift, sobald die
+        // FlowBox alloziert ist; beim ersten Befüllen im Init noch w=0).
+        size_gallery_tiles(fb);
+        // Einmalig je FlowBox an Größenänderungen koppeln. `connect_map` feuert
+        // erst, wenn die FlowBox sichtbar **und im Baum alloziert** ist – dort
+        // vermessen wir neu und koppeln (einmal) an die `page-size` der
+        // umschließenden ScrolledWindow, damit die Kacheln im Desktop-Mode bei
+        // Fensterbreiten-Änderung mitskalieren.
+        if self.gallery_hooked.borrow_mut().insert(fb.as_ptr() as usize) {
+            let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
+            fb.connect_map(move |fb| {
+                size_gallery_tiles(fb);
+                if pagesize_done.get() {
+                    return;
+                }
+                let mut ancestor = fb.parent();
+                while let Some(w) = ancestor {
+                    if let Ok(sw) = w.clone().downcast::<gtk::ScrolledWindow>() {
+                        let weak = fb.downgrade();
+                        sw.hadjustment().connect_page_size_notify(move |_| {
+                            if let Some(fb) = weak.upgrade() {
+                                size_gallery_tiles(&fb);
+                            }
+                        });
+                        pagesize_done.set(true);
+                        break;
+                    }
+                    ancestor = w.parent();
+                }
+            });
         }
     }
 
@@ -3655,16 +4792,74 @@ impl App {
         });
     }
 
+    /// Bedarfsgesteuerte **Fingerprint-Titelerkennung** (Chromaprint → AcoustID) für
+    /// den gerade gestarteten Titel. Läuft nur mit AcoustID-Key + `fpcalc` + Netz,
+    /// nur für noch nicht zugeordnete und nicht erschöpfte Titel. Ersetzt den
+    /// früheren Massen-Lauf: erkannt wird, was tatsächlich gespielt wird.
+    pub(crate) fn fetch_focus_track(&self, sender: &ComponentSender<Self>, path: &std::path::Path) {
+        if !online_available() {
+            return;
+        }
+        let Some(key) = self.acoustid_key.clone().filter(|k| !k.is_empty()) else {
+            return;
+        };
+        if !crate::core::online::fingerprint_available() {
+            return;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        let matched = self
+            .library
+            .get_track_meta(&path_str)
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.status == "matched");
+        if matched || self.library.track_attempts(&path_str) >= crate::ui::enrich::MAX_ATTEMPTS {
+            return;
+        }
+        let path = path.to_path_buf();
+        sender.spawn_oneshot_command(move || {
+            if let Ok(lib) = Library::open() {
+                let client = crate::core::online::OnlineClient::new();
+                let _ = crate::core::online::enrich_track_fingerprint(&client, &lib, &key, &path);
+            }
+            Cmd::ReloadViews
+        });
+    }
+
     /// Nur nach oben, solange wir innerhalb des Startordners bleiben.
     pub(crate) fn can_go_up(&self) -> bool {
+        // Entfernte Quelle: zurück möglich, solange nicht an der Musikwurzel.
+        if let Some(rel) = &self.remote_browse {
+            return !rel.is_empty();
+        }
         match (&self.browse_dir, &self.root_dir) {
             (Some(cur), Some(root)) => cur != root && cur.starts_with(root),
             _ => false,
         }
     }
 
+    /// Anzeigename der aktiven Quelle (für die Pfadleiste an der Wurzel).
+    pub(crate) fn active_source_name(&self) -> String {
+        match &self.active_source {
+            ActiveSource::Primary => gettext("Music"),
+            ActiveSource::Source(id) => self
+                .sources
+                .iter()
+                .find(|s| s.id == *id)
+                .map(|s| s.name.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     /// Beschriftung der Pfadleiste (aktueller Ordnername bzw. Hinweis).
     pub(crate) fn folder_label(&self) -> String {
+        // Entfernte Quelle: letztes Pfadsegment bzw. Quellname an der Wurzel.
+        if let Some(rel) = &self.remote_browse {
+            if rel.is_empty() {
+                return self.active_source_name();
+            }
+            return rel.rsplit('/').next().unwrap_or(rel).to_string();
+        }
         match &self.browse_dir {
             Some(dir) => dir
                 .file_name()

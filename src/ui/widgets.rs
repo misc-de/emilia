@@ -94,6 +94,25 @@ pub fn thumb_frame(placeholder_icon: &str, size: i32) -> adw::Bin {
     bin
 }
 
+/// Hüllt ein Cover/Foto in ein Overlay mit rotem „Getrennt"-Abzeichen, wenn die
+/// zugehörige Quelle (Nextcloud) gerade offline ist. Andernfalls wird das Widget
+/// unverändert zurückgegeben.
+pub fn offline_overlay(child: &impl IsA<gtk::Widget>, offline: bool) -> gtk::Widget {
+    let child = child.clone().upcast::<gtk::Widget>();
+    if !offline {
+        return child;
+    }
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&child));
+    let badge = gtk::Image::from_icon_name("network-offline-symbolic");
+    badge.add_css_class("emilia-offline");
+    badge.set_halign(gtk::Align::End);
+    badge.set_valign(gtk::Align::Start);
+    badge.set_pixel_size(14);
+    overlay.add_overlay(&badge);
+    overlay.upcast()
+}
+
 /// Setzt ein Platzhalter-Icon (füllt das Quadrat) in den Rahmen.
 pub fn set_cover_placeholder(frame: &gtk::AspectFrame, placeholder_icon: &str, size: i32) {
     let img = gtk::Image::from_icon_name(placeholder_icon);

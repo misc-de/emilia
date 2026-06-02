@@ -26,10 +26,17 @@ impl App {
                 m.album.clone(),
                 false,
             ),
+            // Entfernte Einträge: über ihren rel-Pfad referenziert (lokal nicht
+            // vorhanden). So bleiben Favoriten/Markierungen konsistent adressierbar.
+            CtxTarget::Fs(e) if e.is_remote() => {
+                let key = e.rel_path().unwrap_or_default().to_string();
+                let scope = if e.is_dir() { "folder" } else { "track" };
+                (scope, key, e.display_title(), e.is_dir())
+            }
             CtxTarget::Fs(e) if e.is_dir() => {
-                let path = e.path().to_string_lossy().into_owned();
-                let name = e
-                    .path()
+                let p = e.path().map(|p| p.to_path_buf()).unwrap_or_default();
+                let path = p.to_string_lossy().into_owned();
+                let name = p
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or(&path)
@@ -37,13 +44,13 @@ impl App {
                 ("folder", path, name, true)
             }
             CtxTarget::Fs(e) => {
-                let path = e.path().to_string_lossy().into_owned();
-                let title = crate::core::scanner::read_meta(e.path())
+                let p = e.path().map(|p| p.to_path_buf()).unwrap_or_default();
+                let path = p.to_string_lossy().into_owned();
+                let title = crate::core::scanner::read_meta(&p)
                     .0
                     .filter(|s| !s.trim().is_empty())
                     .unwrap_or_else(|| {
-                        e.path()
-                            .file_stem()
+                        p.file_stem()
                             .and_then(|s| s.to_str())
                             .unwrap_or(&path)
                             .to_string()
@@ -91,17 +98,27 @@ impl App {
             .area_entries(crate::core::category::Area::Audiobooks, true, false);
         self.audiobook_items = self.expand_area_items(raw);
         let items = self.audiobook_items.clone();
-        self.fill_entry_list(
-            &self.audiobooks_list,
-            &items,
-            sender,
-            Msg::PlayAudiobook,
-            None,
-            Msg::ShowAudiobookDetail,
-            None,
-            false,
-            true,
-        );
+        if self.gallery_view {
+            let tiles = self.entry_gallery_items(&items);
+            self.fill_gallery(
+                &self.audiobooks_gallery,
+                &tiles,
+                Msg::OpenAudiobookEntry,
+                Msg::ShowAudiobookDetail,
+            );
+        } else {
+            self.fill_entry_list(
+                &self.audiobooks_list,
+                &items,
+                sender,
+                Msg::PlayAudiobook,
+                None,
+                Msg::ShowAudiobookDetail,
+                None,
+                false,
+                true,
+            );
+        }
     }
 
     /// Baut eine Eintragsliste: Cover (Album/Interpret), Titel, Untertitel,
@@ -263,6 +280,25 @@ impl App {
         }
     }
 
+    /// Wandelt Eintrags-Tupel (Favoriten/Konzerte/Hörbücher) in Galerie-Kacheln
+    /// `(Cover, Platzhalter-Icon, Titel)` um – Cover wie in der Liste.
+    pub(crate) fn entry_gallery_items(
+        &self,
+        items: &[(String, String, String, bool)],
+    ) -> Vec<(Option<String>, &'static str, String)> {
+        items
+            .iter()
+            .map(|(scope, key, title, is_dir)| {
+                let icon = if scope == "folder" {
+                    "media-optical-symbolic"
+                } else {
+                    entry_icon(scope)
+                };
+                (self.entry_cover(scope, key, *is_dir), icon, title.clone())
+            })
+            .collect()
+    }
+
     /// Gesamtlaufzeit (ms) eines als Album/Ordner dargestellten Eintrags
     /// (für die Laufzeitanzeige in Konzert-/Hörbuchlisten). 0 = unbekannt.
     fn entry_total_ms(&self, scope: &str, key: &str) -> i64 {
@@ -317,7 +353,7 @@ impl App {
     }
 
     /// Album-Cover: erst exakt (Interpret, Album), sonst irgendeines des Albums.
-    fn album_cover_for(&self, artist: &str, album: &str) -> Option<String> {
+    pub(crate) fn album_cover_for(&self, artist: &str, album: &str) -> Option<String> {
         self.library
             .get_album_meta(artist, album)
             .ok()
@@ -425,7 +461,7 @@ impl App {
 }
 
 /// Platzhalter-Icon je Ebene (falls kein Cover vorhanden).
-fn entry_icon(scope: &str) -> &'static str {
+pub(crate) fn entry_icon(scope: &str) -> &'static str {
     match scope {
         "album" => "media-optical-symbolic",
         "artist" => "avatar-default-symbolic",

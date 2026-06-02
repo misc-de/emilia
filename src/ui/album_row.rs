@@ -43,11 +43,14 @@ pub struct AlbumCard {
     pub meta: AlbumMeta,
     /// Quadratischer Cover-Rahmen; Bild wird asynchron nachgereicht.
     cover: adw::Bin,
+    /// Präfix: Cover, bei getrennter Quelle mit rotem „Getrennt"-Overlay.
+    prefix: gtk::Widget,
 }
 
 #[relm4::factory(pub)]
 impl FactoryComponent for AlbumCard {
-    type Init = AlbumMeta;
+    /// `(Album, ist die Quelle gerade offline?)`.
+    type Init = (AlbumMeta, bool);
     type Input = ();
     type Output = AlbumOutput;
     /// Das im Hintergrund dekodierte Cover (oder `None`, falls Datei fehlt/fehlerhaft).
@@ -60,7 +63,7 @@ impl FactoryComponent for AlbumCard {
             set_title: &esc(&self.meta.album),
             set_subtitle: &esc(&subtitle(&self.meta)),
             set_activatable: true,
-            add_prefix: &self.cover,
+            add_prefix: &self.prefix,
 
             // Kurzes Tippen: Lieder des Albums auflisten.
             connect_activated[sender, index] => move |_| {
@@ -77,8 +80,9 @@ impl FactoryComponent for AlbumCard {
         }
     }
 
-    fn init_model(meta: Self::Init, _index: &DynamicIndex, sender: FactorySender<Self>) -> Self {
+    fn init_model(init: Self::Init, _index: &DynamicIndex, sender: FactorySender<Self>) -> Self {
         use crate::ui::widgets;
+        let (meta, offline) = init;
         let cover = widgets::thumb_frame("media-optical-symbolic", 48);
         if let Some(path) = meta.cover_path.clone() {
             // Bereits dekodiert? Dann sofort aus dem Cache – kein Aufblitzen.
@@ -90,7 +94,12 @@ impl FactoryComponent for AlbumCard {
                 sender.spawn_oneshot_command(move || widgets::decode_thumb(&path));
             }
         }
-        Self { meta, cover }
+        let prefix = crate::ui::widgets::offline_overlay(&cover, offline);
+        Self {
+            meta,
+            cover,
+            prefix,
+        }
     }
 
     fn update_cmd(&mut self, texture: Self::CommandOutput, _sender: FactorySender<Self>) {

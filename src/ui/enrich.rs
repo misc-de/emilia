@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use crate::core::db::Library;
 use crate::core::{online, scanner};
-use crate::i18n::gettext;
 use crate::ui::app::Cmd;
 
 /// Hintergrund-Worker für die Online-Anreicherung. Öffnet eine eigene
@@ -63,39 +62,29 @@ pub(crate) fn enrich_worker(
     }
 
     let client = online::OnlineClient::new();
-    let mut artists_matched = 0usize;
     // Hat dieser Lauf irgendetwas Neues gespeichert? Steuert beim leichten Lauf,
     // ob die Ansichten am Ende überhaupt neu geladen werden.
     let mut any_change = false;
     let stopped = || cancel.load(Ordering::Relaxed);
 
-    // Gesamtsummen für die Fortschrittsanzeige (gegen die ganze Bibliothek,
-    // nicht nur gegen die Restmenge der jeweiligen Phase).
-    let total_albums = lib.album_count().unwrap_or(0).max(0) as usize;
-
     'work: {
         // Phase 1: Interpreten-Fotos (Deezer) – **höchste Priorität** (Wunsch:
         // erst Interpreten, dann Cover), parallel, kleine Bilder. Bereits
-        // zugeordnete überspringen, nur den Rest laden.
-        let all_artists = lib.distinct_artists().unwrap_or_default();
-        let total_artists = all_artists.len();
+        // zugeordnete und dauerhaft erfolglose überspringen, nur den Rest laden.
         let mut to_fetch = Vec::new();
-        let mut artists_skipped = 0usize;
-        for name in all_artists {
-            match lib.get_artist_meta(&name).ok().flatten() {
-                Some(m) if m.status == "matched" => artists_matched += 1,
-                // Nach zu vielen Fehlversuchen nicht erneut anfragen (auch manuell).
-                _ if lib.artist_attempts(&name) >= MAX_ATTEMPTS => artists_skipped += 1,
-                _ => to_fetch.push(name),
+        for name in lib.distinct_artists().unwrap_or_default() {
+            let matched = matches!(
+                lib.get_artist_meta(&name).ok().flatten(),
+                Some(m) if m.status == "matched"
+            );
+            if !matched && lib.artist_attempts(&name) < MAX_ATTEMPTS {
+                to_fetch.push(name);
             }
         }
         if stopped() {
             break 'work;
         }
-        // Zugeordnete + übersprungene Interpreten zählen als „erledigt".
-        let artists_base = artists_matched + artists_skipped;
-        let new_artists =
-            fetch_artists_parallel(&client, to_fetch, &cancel, &lib, artists_base, total_artists, out);
+        let new_artists = fetch_artists_parallel(&client, to_fetch, &cancel, &lib, out);
         if new_artists > 0 {
             any_change = true;
         }
@@ -114,10 +103,7 @@ pub(crate) fn enrich_worker(
         // Datei-Scannen aller cover-losen Alben im Minutentakt wäre reine Plattenlast.
         if !light {
             let missing = lib.albums_missing_cover().unwrap_or_default();
-            // Bereits mit Cover versehene Alben gelten als „erledigt" → der Zähler
-            // startet dort und läuft bis zur Gesamtzahl (z. B. 4717/4726 … 4726/4726).
-            let base = total_albums.saturating_sub(missing.len());
-            for (i, (artist, album, path)) in missing.iter().enumerate() {
+            for (artist, album, path) in missing.iter() {
                 if stopped() {
                     break 'work;
                 }
@@ -128,20 +114,14 @@ pub(crate) fn enrich_worker(
                     let _ = lib.upsert_album_meta(&m);
                     any_change = true;
                 }
-                let _ = out.send(Cmd::EnrichProgress {
-                    phase: gettext("Cover"),
-                    done: base + i + 1,
-                    total: total_albums,
-                });
             }
             let _ = out.send(Cmd::ReloadViews);
         }
 
         // Phase 3: Online-Cover nur noch für Alben ganz ohne Bild (Lückenfüller).
         let still_missing = lib.albums_missing_cover().unwrap_or_default();
-        let base = total_albums.saturating_sub(still_missing.len());
         let mut new_covers = 0usize;
-        for (i, (artist, album, _)) in still_missing.iter().enumerate() {
+        for (artist, album, _) in still_missing.iter() {
             if stopped() {
                 break 'work;
             }
@@ -155,14 +135,6 @@ pub(crate) fn enrich_worker(
                     any_change = true;
                 }
                 std::thread::sleep(online::RATE_LIMIT);
-            }
-            // Beim leichten Lauf ist die Leiste ausgeblendet → Fortschritt sparen.
-            if !light {
-                let _ = out.send(Cmd::EnrichProgress {
-                    phase: gettext("Cover"),
-                    done: base + i + 1,
-                    total: total_albums,
-                });
             }
         }
         if !light || new_covers > 0 {
@@ -189,10 +161,6 @@ fn fetch_artists_parallel(
     names: Vec<String>,
     cancel: &Arc<AtomicBool>,
     lib: &Library,
-    // Fortschritt gegen die Gesamtzahl: `done_base` = schon erledigte Interpreten,
-    // `grand_total` = alle Interpreten der Bibliothek.
-    done_base: usize,
-    grand_total: usize,
     out: &relm4::Sender<Cmd>,
 ) -> usize {
     use std::collections::VecDeque;
@@ -232,7 +200,8 @@ fn fetch_artists_parallel(
     }
     drop(tx); // nur die Thread-Klone halten den Sender → rx endet, wenn alle fertig
 
-    // Koordinator: Ergebnisse serialisiert in die DB schreiben + Fortschritt.
+    // Koordinator: Ergebnisse serialisiert in die DB schreiben. Zwischendurch die
+    // Ansichten auffrischen, damit neue Fotos schon während des Laufs erscheinen.
     let mut matched = 0usize;
     let mut done = 0usize;
     while let Ok((name, image, errored)) = rx.recv() {
@@ -242,11 +211,6 @@ fn fetch_artists_parallel(
         }
         let _ = lib.upsert_artist_meta(&meta);
         done += 1;
-        let _ = out.send(Cmd::EnrichProgress {
-            phase: gettext("Artists"),
-            done: done_base + done,
-            total: grand_total,
-        });
         if done % 16 == 0 {
             let _ = out.send(Cmd::ReloadViews);
         }

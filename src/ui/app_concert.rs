@@ -21,19 +21,29 @@ impl App {
             .area_entries(crate::core::category::Area::Concerts, true, false);
         self.concert_items = self.expand_area_items(raw);
         let items = self.concert_items.clone();
-        self.fill_entry_list(
-            &self.concerts_list,
-            &items,
-            sender,
-            Msg::PlayConcert,
-            // Kein Mülleimer in der Konzertliste – Entfernen läuft über die
-            // Eigenschaften (Bereich „Konzerte" abwählen).
-            None,
-            Msg::ShowConcertDetail,
-            None,
-            false,
-            true,
-        );
+        if self.gallery_view {
+            let tiles = self.entry_gallery_items(&items);
+            self.fill_gallery(
+                &self.concerts_gallery,
+                &tiles,
+                Msg::OpenConcertEntry,
+                Msg::ShowConcertDetail,
+            );
+        } else {
+            self.fill_entry_list(
+                &self.concerts_list,
+                &items,
+                sender,
+                Msg::PlayConcert,
+                // Kein Mülleimer in der Konzertliste – Entfernen läuft über die
+                // Eigenschaften (Bereich „Konzerte" abwählen).
+                None,
+                Msg::ShowConcertDetail,
+                None,
+                false,
+                true,
+            );
+        }
     }
 
     /// Import-Dialog: Liste der Kandidaten zum Markieren + „Hinzufügen".

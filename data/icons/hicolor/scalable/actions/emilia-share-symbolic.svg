@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 0 16 16" width="16px">
-  <g fill="#222222" stroke="#222222" stroke-linecap="round">
-    <line x1="5.2" y1="7.1" x2="10.8" y2="4.3" stroke-width="1.4"/>
-    <line x1="5.2" y1="8.9" x2="10.8" y2="11.7" stroke-width="1.4"/>
-    <circle cx="3.3" cy="8" r="2" stroke="none"/>
-    <circle cx="12.7" cy="3.3" r="2" stroke="none"/>
-    <circle cx="12.7" cy="12.7" r="2" stroke="none"/>
+  <g fill="#222222">
+    <rect x="4.87" y="5.0" width="6.26" height="1.5" rx="0.75" transform="rotate(-26.57 8 5.7)"/>
+    <rect x="4.87" y="9.5" width="6.26" height="1.5" rx="0.75" transform="rotate(26.57 8 10.3)"/>
+    <circle cx="3.3" cy="8" r="2.1"/>
+    <circle cx="12.7" cy="3.3" r="2.1"/>
+    <circle cx="12.7" cy="12.7" r="2.1"/>
   </g>
 </svg>

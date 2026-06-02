@@ -35,12 +35,8 @@ const RL_MAX_RETRIES: usize = 4;
 const RL_BASE_BACKOFF: Duration = Duration::from_millis(1500);
 /// Obergrenze der Backoff-Pause.
 const RL_MAX_BACKOFF: Duration = Duration::from_secs(30);
-/// AcoustID erlaubt einige Anfragen/Sekunde – konservativ gedrosselt.
-pub const ACOUSTID_DELAY: Duration = Duration::from_millis(350);
 /// Anzahl paralleler Abrufe für Künstlerfotos (Deezer verträgt das gut).
 pub const ARTIST_FETCH_THREADS: usize = 8;
-/// Anzahl paralleler Abrufe für Album-Galerien (Cover Art Archive / archive.org).
-pub const GALLERY_FETCH_THREADS: usize = 6;
 
 /// Verzeichnis für zwischengespeicherte Cover: `$XDG_CACHE_HOME/emilia/covers`.
 pub fn cover_cache_dir() -> PathBuf {
@@ -239,6 +235,44 @@ impl OnlineClient {
         }
     }
 
+    /// Sucht zu (Interpret, Titel) das Album-Cover bei Deezer (kein API-Key nötig)
+    /// und liefert `(Bildbytes, Albumname)`. Für das nachträgliche Taggen einer
+    /// Aufnahme mit dem Cover der Single/des Albums.
+    pub fn fetch_track_cover(
+        &self,
+        artist: &str,
+        title: &str,
+    ) -> Result<Option<(Vec<u8>, Option<String>)>> {
+        let q = if artist.trim().is_empty() {
+            format!("track:\"{}\"", title.replace('"', " "))
+        } else {
+            format!(
+                "artist:\"{}\" track:\"{}\"",
+                artist.replace('"', " "),
+                title.replace('"', " ")
+            )
+        };
+        let url = format!(
+            "https://api.deezer.com/search/track?q={}&limit=1",
+            percent_encode(&q)
+        );
+        let search: DzTrackSearch = match self.call_get(&url)? {
+            Some(resp) => resp.into_json()?,
+            None => return Ok(None),
+        };
+        let Some(album) = search.data.into_iter().next().and_then(|t| t.album) else {
+            return Ok(None);
+        };
+        let cover = [album.cover_big, album.cover_medium, album.cover]
+            .into_iter()
+            .flatten()
+            .find(|u| !u.is_empty());
+        let Some(cover_url) = cover else {
+            return Ok(None);
+        };
+        Ok(self.get_image(&cover_url)?.map(|b| (b, album.title)))
+    }
+
     /// Lädt mehrere Bilder eines Albums aus dem Cover Art Archive (Front, Back,
     /// Booklet, …). Liefert je (Bytes, Art). Leere Liste, wenn nichts da ist.
     pub fn fetch_album_gallery(&self, mbid: &str) -> Result<Vec<(Vec<u8>, String)>> {
@@ -426,6 +460,47 @@ pub fn cache_podcast_image(url: &str) -> Option<String> {
     p.push(format!("podcast_{}.img", name_hash(url)));
     std::fs::write(&p, &bytes).ok()?;
     Some(p.to_string_lossy().into_owned())
+}
+
+/// Lokaler Cache-Pfad eines Sender-Logos (Schlüssel = Bild-URL), **nur falls die
+/// Datei bereits vorliegt** – ohne Netzzugriff (für die Anzeige im UI-Thread).
+pub fn station_image_path(url: &str) -> Option<String> {
+    if url.trim().is_empty() {
+        return None;
+    }
+    let mut p = cover_cache_dir();
+    p.push(format!("station_{}.img", name_hash(url)));
+    p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
+/// Lädt das Sender-Logo bei Bedarf in den Cache und gibt den lokalen Pfad zurück.
+/// **Netzzugriff** – nur aus Worker-/Hintergrund-Threads aufrufen. Bereits
+/// gecachte Logos werden nicht erneut geladen.
+pub fn cache_station_image(url: &str) -> Option<String> {
+    if let Some(p) = station_image_path(url) {
+        return Some(p);
+    }
+    if url.trim().is_empty() {
+        return None;
+    }
+    let bytes = OnlineClient::new().get_image(url).ok().flatten()?;
+    let mut p = cover_cache_dir();
+    p.push(format!("station_{}.img", name_hash(url)));
+    std::fs::write(&p, &bytes).ok()?;
+    Some(p.to_string_lossy().into_owned())
+}
+
+/// Holt das Cover (und den Albumnamen) zu (Interpret, Titel) – **Netzzugriff**,
+/// nur aus Worker-/Hintergrund-Threads aufrufen. Best effort: `None`, wenn nichts
+/// gefunden wird. Für das nachträgliche Taggen einer Streaming-Aufnahme.
+pub fn recording_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>)> {
+    if title.trim().is_empty() {
+        return None;
+    }
+    OnlineClient::new()
+        .fetch_track_cover(artist, title)
+        .ok()
+        .flatten()
 }
 
 /// Cache-Pfad für ein lokal extrahiertes Album-Cover (Schlüssel: Interpret+Album).
@@ -657,7 +732,8 @@ pub fn enrich_album_gallery(client: &OnlineClient, lib: &Library, artist: &str, 
 /// Erkennt einen Titel per Fingerprint (Chromaprint → AcoustID) und legt die
 /// **vorgeschlagenen** Metadaten in der DB ab. Die Datei wird nur gelesen.
 ///
-/// Macht eine AcoustID-Anfrage – der Aufrufer hält [`ACOUSTID_DELAY`] ein.
+/// Macht eine einzelne AcoustID-Anfrage; bedarfsgesteuert beim Abspielen aufgerufen
+/// (durch das Spieltempo natürlich entzerrt), daher ohne eigene Drosselpause.
 pub fn enrich_track_fingerprint(
     client: &OnlineClient,
     lib: &Library,
@@ -739,6 +815,30 @@ struct DzArtist {
     picture_big: Option<String>,
     #[serde(default)]
     picture_xl: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DzTrackSearch {
+    #[serde(default)]
+    data: Vec<DzTrack>,
+}
+
+#[derive(Deserialize)]
+struct DzTrack {
+    #[serde(default)]
+    album: Option<DzAlbum>,
+}
+
+#[derive(Deserialize)]
+struct DzAlbum {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    cover: Option<String>,
+    #[serde(default)]
+    cover_medium: Option<String>,
+    #[serde(default)]
+    cover_big: Option<String>,
 }
 
 // ---- AcoustID-JSON (Fingerprint-Erkennung) ----

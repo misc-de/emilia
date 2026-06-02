@@ -5,7 +5,9 @@ use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::model::{AlbumMeta, ArtistMeta, Episode, StatEntry, StatTotals, Track, TrackMeta};
+use crate::model::{
+    AlbumMeta, ArtistMeta, Episode, Source, StatEntry, StatTotals, Track, TrackMeta,
+};
 
 /// Speicherort der Datenbank: `$XDG_DATA_HOME/emilia/library.db`.
 pub fn db_path() -> PathBuf {
@@ -241,6 +243,34 @@ impl Library {
                 updated_at  INTEGER NOT NULL DEFAULT 0
             );
 
+            -- Gespeicherte Streaming-Sender (Internet-Radio). Wiedergabe direkt
+            -- über die Stream-URL; nichts wird heruntergeladen.
+            CREATE TABLE IF NOT EXISTS stream (
+                id        INTEGER PRIMARY KEY,
+                name      TEXT NOT NULL,
+                url       TEXT NOT NULL UNIQUE,
+                favicon   TEXT,
+                tags      TEXT,
+                country   TEXT,
+                codec     TEXT,
+                bitrate   INTEGER,
+                favorite  INTEGER NOT NULL DEFAULT 0,
+                added_at  INTEGER
+            );
+
+            -- Timeshift-Mitschnitte (aus Sendern gespeicherte Songs). Die
+            -- Audiodatei liegt unter `path`; hier nur die Metadaten/Verwaltung.
+            CREATE TABLE IF NOT EXISTS recording (
+                id          INTEGER PRIMARY KEY,
+                path        TEXT NOT NULL,
+                artist      TEXT,
+                title       TEXT NOT NULL,
+                station     TEXT,
+                recorded_at INTEGER,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                incomplete  INTEGER NOT NULL DEFAULT 0
+            );
+
             -- Hörstatistik: ein Ereignis je gehörtem Titel (roh; nichts wird
             -- vorberechnet). Bleibt rein lokal – verlässt das Gerät nie. Interpret/
             -- Album/Genre werden zur Auswertung über `path` an `track` gejoint,
@@ -256,6 +286,25 @@ impl Library {
             );
             CREATE INDEX IF NOT EXISTS idx_play_event_path ON play_event(path);
             CREATE INDEX IF NOT EXISTS idx_play_event_time ON play_event(started_at);
+
+            -- Zusätzliche Musikquellen neben dem primären `music_dir`-Ordner.
+            -- Jede Quelle erscheint als eigener Tab in der Dateiansicht. Das
+            -- primäre Verzeichnis bleibt das Setting `music_dir` und steht hier
+            -- bewusst NICHT (kein Eintrag), damit Scan/Bibliothek unberührt sind.
+            -- kind = 'local' (zweiter Ordner, z. B. SD-Karte) | 'webdav'
+            -- (Nextcloud-Share). Das App-Passwort liegt – wie bei einem lokalen
+            -- Musikplayer üblich – im Klartext in dieser lokalen DB.
+            CREATE TABLE IF NOT EXISTS source (
+                id         INTEGER PRIMARY KEY,
+                kind       TEXT NOT NULL CHECK(kind IN ('local','webdav')),
+                name       TEXT NOT NULL,
+                position   INTEGER NOT NULL DEFAULT 0,
+                path       TEXT,   -- local:  Wurzelpfad im Dateisystem
+                base_url   TEXT,   -- webdav: z. B. https://cloud.example.com
+                username   TEXT,   -- webdav: Benutzername
+                password   TEXT,   -- webdav: App-Passwort/Token
+                music_path TEXT    -- webdav: Unterpfad zur Musik, z. B. /Music
+            );
             "#,
         )?;
 
@@ -873,6 +922,90 @@ impl Library {
         Ok(())
     }
 
+    /// Listet alle zusätzlichen Musikquellen (nach Position, dann ID).
+    pub fn list_sources(&self) -> Result<Vec<Source>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, name, position, path, base_url, username, password, music_path
+             FROM source ORDER BY position, id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Source {
+                id: r.get(0)?,
+                kind: r.get(1)?,
+                name: r.get(2)?,
+                position: r.get(3)?,
+                path: r.get(4)?,
+                base_url: r.get(5)?,
+                username: r.get(6)?,
+                password: r.get(7)?,
+                music_path: r.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Fügt eine Quelle hinzu und gibt deren neue ID zurück. `position` wird
+    /// automatisch ans Ende gesetzt (max + 1).
+    pub fn add_source(&self, s: &Source) -> Result<i64> {
+        let position: i64 = self
+            .conn
+            .query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM source", [], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0);
+        self.conn.execute(
+            "INSERT INTO source (kind, name, position, path, base_url, username, password, music_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                s.kind,
+                s.name,
+                position,
+                s.path,
+                s.base_url,
+                s.username,
+                s.password,
+                s.music_path,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Entfernt eine Quelle anhand ihrer ID.
+    pub fn delete_source(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM source WHERE id = ?1", [id])?;
+        // Indizierte Cloud-Titel dieser Quelle entfernen (synthetischer Pfad
+        // `nc:<id>:…`). Bei lokalen Quellen trifft das Muster auf nichts zu.
+        self.conn
+            .execute("DELETE FROM track WHERE path LIKE ?1", [format!("nc:{id}:%")])?;
+        Ok(())
+    }
+
+    /// (Interpret, Album)-Paare der indizierten Titel einer Quelle – für den
+    /// roten „Getrennt"-Hinweis auf den Covern, wenn die Quelle offline ist.
+    pub fn remote_album_keys(&self, source_id: i64) -> Result<Vec<(String, String)>> {
+        let like = format!("nc:{source_id}:%");
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT COALESCE(artist,''), COALESCE(album,'') FROM track \
+             WHERE path LIKE ?1 AND album IS NOT NULL AND album <> ''",
+        )?;
+        let rows =
+            stmt.query_map([like], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Interpreten-Namen der indizierten Titel einer Quelle (für den „Getrennt"-
+    /// Hinweis auf den Fotos).
+    pub fn remote_artists(&self, source_id: i64) -> Result<Vec<String>> {
+        let like = format!("nc:{source_id}:%");
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT artist FROM track \
+             WHERE path LIKE ?1 AND artist IS NOT NULL AND artist <> ''",
+        )?;
+        let rows = stmt.query_map([like], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Fügt einen Track ein oder aktualisiert dessen Metadaten (Schlüssel: Pfad).
     pub fn upsert_track(&self, t: &Track) -> Result<()> {
         self.conn.execute(
@@ -963,12 +1096,6 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    pub fn track_count(&self) -> Result<i64> {
-        Ok(self
-            .conn
-            .query_row("SELECT COUNT(*) FROM track", [], |r| r.get(0))?)
-    }
-
     // ---- Fehlversuchs-Zähler (begrenzen das wiederholte Online-Anfragen) ----
 
     /// Bisherige erfolglose Online-Versuche für ein Album (0, wenn unbekannt).
@@ -1002,23 +1129,6 @@ impl Library {
                 |r| r.get(0),
             )
             .unwrap_or(0)
-    }
-
-    /// Anzahl roher (Interpret, Album)-Gruppen – **gleiche Gruppierung** wie
-    /// [`Self::albums_missing_cover`], als Gesamtsumme für die Fortschrittsanzeige
-    /// des Cover-Abrufs. (Die *Anzeige* in [`Self::albums_overview`] fasst
-    /// feat.-Varianten zusätzlich nach Haupt-Interpret zusammen und kann daher
-    /// weniger Karten zeigen.)
-    pub fn album_count(&self) -> Result<i64> {
-        Ok(self.conn.query_row(
-            "SELECT COUNT(*) FROM (
-                 SELECT 1 FROM track
-                 WHERE album IS NOT NULL AND album <> ''
-                 GROUP BY COALESCE(artist, ''), album
-             )",
-            [],
-            |r| r.get(0),
-        )?)
     }
 
     /// Liest die Online-Metadaten zu einem Album (falls bereits gesucht).
@@ -1314,32 +1424,6 @@ impl Library {
     }
 
     // ---- Fingerprint-Erkennung (AcoustID) ----
-
-    /// Tracks mit lückenhaften Tags (Interpret oder Album fehlt) – Kandidaten
-    /// für die Fingerprint-Erkennung.
-    pub fn tracks_needing_id(&self) -> Result<Vec<Track>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
-             FROM track
-             WHERE artist IS NULL OR artist = '' OR album IS NULL OR album = ''
-             ORDER BY path",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(Track {
-                id: r.get(0)?,
-                path: r.get(1)?,
-                title: r.get(2)?,
-                artist: r.get(3)?,
-                album: r.get(4)?,
-                genre: None,
-                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
-                duration_ms: r.get(6)?,
-                resume_ms: r.get(7)?,
-                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
 
     pub fn get_track_meta(&self, path: &str) -> Result<Option<TrackMeta>> {
         let meta = self
@@ -1961,6 +2045,110 @@ impl Library {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    // ---- Streaming (Internet-Radio) ----
+
+    /// Speichert einen Sender (oder aktualisiert dessen Felder bei bekannter URL)
+    /// und gibt die Sender-ID zurück.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_stream(
+        &self,
+        name: &str,
+        url: &str,
+        favicon: Option<&str>,
+        tags: Option<&str>,
+        country: Option<&str>,
+        codec: Option<&str>,
+        bitrate: Option<i64>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO stream (name, url, favicon, tags, country, codec, bitrate, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))
+             ON CONFLICT(url) DO UPDATE SET
+                name = excluded.name, favicon = excluded.favicon, tags = excluded.tags,
+                country = excluded.country, codec = excluded.codec, bitrate = excluded.bitrate",
+            rusqlite::params![name, url, favicon, tags, country, codec, bitrate],
+        )?;
+        Ok(self
+            .conn
+            .query_row("SELECT id FROM stream WHERE url = ?1", [url], |r| r.get(0))?)
+    }
+
+    /// Alle gespeicherten Sender – Favoriten zuerst, dann die zuletzt
+    /// hinzugefügten.
+    pub fn streams(&self) -> Result<Vec<crate::model::StreamItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, url, favicon, tags, country FROM stream
+             ORDER BY added_at DESC, name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(crate::model::StreamItem {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                url: r.get(2)?,
+                favicon: r.get(3)?,
+                tags: r.get(4)?,
+                country: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Entfernt einen Sender.
+    pub fn delete_stream(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM stream WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // ---- Aufnahmen (Timeshift-Mitschnitte) ----
+
+    /// Speichert einen Mitschnitt-Eintrag und gibt dessen ID zurück.
+    pub fn add_recording(
+        &self,
+        path: &str,
+        artist: Option<&str>,
+        title: &str,
+        station: Option<&str>,
+        incomplete: bool,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO recording (path, artist, title, station, recorded_at, incomplete)
+             VALUES (?1, ?2, ?3, ?4, strftime('%s','now'), ?5)",
+            rusqlite::params![path, artist, title, station, incomplete as i64],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Alle Mitschnitte, neueste zuerst.
+    pub fn recordings(&self) -> Result<Vec<crate::model::RecordingItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, artist, title, station, recorded_at, incomplete
+             FROM recording ORDER BY recorded_at DESC, id DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(crate::model::RecordingItem {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                artist: r.get(2)?,
+                title: r.get(3)?,
+                station: r.get(4)?,
+                recorded_at: r.get(5)?,
+                incomplete: r.get::<_, i64>(6)? != 0,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Entfernt einen Mitschnitt aus der Verwaltung und gibt dessen Dateipfad
+    /// zurück (damit der Aufrufer die Datei löschen kann).
+    pub fn delete_recording(&self, id: i64) -> Result<Option<String>> {
+        let path: Option<String> = self
+            .conn
+            .query_row("SELECT path FROM recording WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        self.conn.execute("DELETE FROM recording WHERE id = ?1", [id])?;
+        Ok(path)
     }
 
     /// Alle Episoden samt Podcast-Infos (für die „Neuste"-Ansicht). Die

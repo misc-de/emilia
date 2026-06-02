@@ -5,7 +5,12 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f};
+use crate::model::Source;
 use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
 impl App {
@@ -34,8 +39,8 @@ impl App {
         // Liedtext (falls in den Datei-Tags vorhanden) – aufklappbar, oberhalb
         // der Infos (wie die Eigenschaften ein Pulldown).
         if let CtxTarget::Fs(e) = entry {
-            if !e.is_dir() {
-                if let Some(lyrics) = crate::core::scanner::read_lyrics(e.path()) {
+            if let Some(epath) = e.path().filter(|_| !e.is_dir()) {
+                if let Some(lyrics) = crate::core::scanner::read_lyrics(epath) {
                     let group = adw::PreferencesGroup::new();
                     let exp = adw::ExpanderRow::builder().title(&gettext("Lyrics")).build();
                     let label = gtk::Label::builder()
@@ -104,7 +109,7 @@ impl App {
         // Pfad des Ziel-Titels (nur Dateien) – Grundlage für die dynamische
         // Sichtbarkeit der „Abspielen"-Aktion.
         let current_path: Option<std::path::PathBuf> = match entry {
-            CtxTarget::Fs(e) if !e.is_dir() => Some(e.path().clone()),
+            CtxTarget::Fs(e) if !e.is_dir() => e.path().cloned(),
             _ => None,
         };
         // Solange genau dieser Titel **läuft**, keine „Abspielen"-Aktion zeigen;
@@ -170,6 +175,28 @@ impl App {
         play_row.set_visible(!is_current);
         // Diese Play-Zeile merken, damit sie nach Titelende wieder erscheint.
         *self.ctx_play.borrow_mut() = current_path.map(|p| (play_row.clone(), p));
+
+        // Entfernte Datei: Offline-Download anbieten (falls noch nicht vorhanden).
+        if let CtxTarget::Fs(crate::ui::fs_row::FsEntry::RemoteFile {
+            rel_path,
+            downloaded: None,
+            ..
+        }) = entry
+        {
+            let rel = rel_path.clone();
+            let dl_row = adw::ActionRow::builder()
+                .title(&gettext("Download"))
+                .activatable(true)
+                .build();
+            dl_row.add_prefix(&gtk::Image::from_icon_name("folder-download-symbolic"));
+            let sender = sender.clone();
+            let dialog = dialog.clone();
+            dl_row.connect_activated(move |_| {
+                sender.input(Msg::CtxDownloadRemote(rel.clone()));
+                dialog.close();
+            });
+            action_group.add(&dl_row);
+        }
 
         // Favorit-Stern (Markieren/Entfernen).
         let is_fav = self.target_is_favorite(entry);
@@ -323,6 +350,56 @@ impl App {
         dialog.present(Some(root));
     }
     /// Öffnet den Einstellungsdialog (u. a. Musikordner festlegen).
+    /// (Neu) Befüllt die „Verbunden"-Liste der Nextcloud-Einstellungsseite mit den
+    /// gespeicherten WebDAV-Quellen. Wird beim Öffnen **und** nach einem Connect
+    /// (über `Msg::SourcesChanged`) aufgerufen, damit die Anzeige sofort stimmt.
+    pub(crate) fn fill_nc_list(&self, list: &gtk::ListBox, sender: &ComponentSender<Self>) {
+        while let Some(c) = list.first_child() {
+            list.remove(&c);
+        }
+        let webdav_sources: Vec<Source> = Library::open()
+            .ok()
+            .and_then(|l| l.list_sources().ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| s.kind == "webdav")
+            .collect();
+        if webdav_sources.is_empty() {
+            list.append(
+                &adw::ActionRow::builder()
+                    .title(&gettext("No Nextcloud connected"))
+                    .css_classes(["dim-label"])
+                    .build(),
+            );
+            return;
+        }
+        for s in webdav_sources {
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&s.name))
+                .subtitle(gtk::glib::markup_escape_text(s.base_url.as_deref().unwrap_or("")))
+                .build();
+            row.add_prefix(&gtk::Image::from_icon_name("network-server-symbolic"));
+            let del = gtk::Button::builder()
+                .icon_name("user-trash-symbolic")
+                .tooltip_text(&gettext("Remove"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            {
+                let id = s.id;
+                let sender = sender.clone();
+                del.connect_clicked(move |_| {
+                    if let Ok(lib) = Library::open() {
+                        let _ = lib.delete_source(id);
+                    }
+                    sender.input(Msg::SourcesChanged);
+                });
+            }
+            row.add_suffix(&del);
+            list.append(&row);
+        }
+    }
+
     pub(crate) fn open_settings(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let dialog = adw::PreferencesDialog::new();
         let page = adw::PreferencesPage::builder()
@@ -377,38 +454,180 @@ impl App {
         group.add(&row);
         page.add(&group);
 
-        // --- Anzeigesprache (greift nach einem Neustart der App) ---
-        let lang_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Language"))
+        // --- Weitere Quellen (zweiter lokaler Ordner / Nextcloud) ---
+        // Eigene Verbindung zur DB (wie überall im Code per `Library::open`),
+        // damit dieser Dialog die Liste selbst pflegen kann; das Hauptfenster
+        // wird per `Msg::SourcesChanged` über Änderungen informiert.
+        let src_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Other sources"))
+            .description(&gettext("Shown as tabs in the file view"))
             .build();
-        // Stabile Codes parallel zu den Anzeige-Labels. „Deutsch"/„English"
-        // sind Eigennamen und bleiben unübersetzt.
-        let lang_codes = ["system", "de", "en"];
-        let lang_labels = [gettext("System default"), "Deutsch".into(), "English".into()];
-        let lang_label_refs: Vec<&str> = lang_labels.iter().map(String::as_str).collect();
-        let lang_row = adw::ComboRow::builder()
-            .title(&gettext("Display language"))
-            .subtitle(&gettext("Takes effect after a restart"))
-            .model(&gtk::StringList::new(&lang_label_refs))
+        let src_list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
             .build();
-        let current_idx = lang_codes
-            .iter()
-            .position(|c| *c == self.ui_language)
-            .unwrap_or(0);
-        lang_row.set_selected(current_idx as u32);
+        src_group.add(&src_list);
+
+        // (Neu) Befüllt die Quellenliste aus der DB. Selbst-referenziell, damit
+        // sich die Liste nach Hinzufügen/Entfernen ohne Dialog-Neustart auffrischt.
+        let populate: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         {
-            // Handler erst nach `set_selected` verbinden, damit die Vorauswahl
-            // keinen Sprachwechsel auslöst.
+            let populate_weak = Rc::downgrade(&populate);
+            let src_list = src_list.clone();
+            let sender_pop = sender.clone();
+            *populate.borrow_mut() = Some(Box::new(move || {
+                while let Some(c) = src_list.first_child() {
+                    src_list.remove(&c);
+                }
+                let sources = Library::open()
+                    .ok()
+                    .and_then(|l| l.list_sources().ok())
+                    .unwrap_or_default();
+                if sources.is_empty() {
+                    let empty = adw::ActionRow::builder()
+                        .title(&gettext("No additional sources"))
+                        .css_classes(["dim-label"])
+                        .build();
+                    src_list.append(&empty);
+                }
+                for s in sources {
+                    let subtitle = match s.kind.as_str() {
+                        "webdav" => s.base_url.clone().unwrap_or_default(),
+                        _ => s.path.clone().unwrap_or_default(),
+                    };
+                    let icon = if s.kind == "webdav" {
+                        "network-server-symbolic"
+                    } else {
+                        "drive-removable-media-symbolic"
+                    };
+                    let row = adw::ActionRow::builder()
+                        .title(gtk::glib::markup_escape_text(&s.name))
+                        .subtitle(gtk::glib::markup_escape_text(&subtitle))
+                        .build();
+                    row.add_prefix(&gtk::Image::from_icon_name(icon));
+                    let del = gtk::Button::builder()
+                        .icon_name("user-trash-symbolic")
+                        .tooltip_text(&gettext("Remove"))
+                        .valign(gtk::Align::Center)
+                        .css_classes(["flat"])
+                        .build();
+                    {
+                        let id = s.id;
+                        let sender = sender_pop.clone();
+                        let populate_weak = populate_weak.clone();
+                        del.connect_clicked(move |_| {
+                            if let Ok(lib) = Library::open() {
+                                let _ = lib.delete_source(id);
+                            }
+                            sender.input(Msg::SourcesChanged);
+                            if let Some(p) = populate_weak.upgrade() {
+                                if let Some(f) = p.borrow().as_ref() {
+                                    f();
+                                }
+                            }
+                        });
+                    }
+                    row.add_suffix(&del);
+                    src_list.append(&row);
+                }
+            }));
+        }
+        if let Some(f) = populate.borrow().as_ref() {
+            f();
+        }
+
+        // Button-Zeile: lokaler Ordner / Nextcloud hinzufügen.
+        let add_local = gtk::Button::builder()
+            .label(&gettext("Add local folder"))
+            .css_classes(["flat"])
+            .build();
+        {
+            let win = root.clone();
             let sender = sender.clone();
-            lang_row.connect_selected_notify(move |r| {
-                let code = lang_codes.get(r.selected() as usize).copied().unwrap_or("system");
-                sender.input(Msg::SetLanguage(code.to_string()));
+            let populate = populate.clone();
+            add_local.connect_clicked(move |_| {
+                let chooser = gtk::FileDialog::builder()
+                    .title(&gettext("Choose folder"))
+                    .build();
+                let sender = sender.clone();
+                let populate = populate.clone();
+                chooser.select_folder(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
+                    if let Ok(folder) = res {
+                        if let Some(path) = folder.path() {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("Folder")
+                                .to_string();
+                            let src = Source {
+                                id: 0,
+                                kind: "local".into(),
+                                name,
+                                position: 0,
+                                path: Some(path.to_string_lossy().into_owned()),
+                                base_url: None,
+                                username: None,
+                                password: None,
+                                music_path: None,
+                            };
+                            if let Ok(lib) = Library::open() {
+                                let _ = lib.add_source(&src);
+                            }
+                            sender.input(Msg::SourcesChanged);
+                            if let Some(f) = populate.borrow().as_ref() {
+                                f();
+                            }
+                        }
+                    }
+                });
             });
         }
-        lang_group.add(&lang_row);
-        page.add(&lang_group);
+        let btn_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .halign(gtk::Align::Center)
+            .margin_top(6)
+            .build();
+        btn_row.append(&add_local);
+        src_group.add(&btn_row);
+        page.add(&src_group);
 
-        dialog.add(&page);
+        // Nextcloud direkt in der Bibliothek (kein eigener Menüpunkt).
+        let nc_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Nextcloud"))
+            .description(&gettext(
+                "Connect a Nextcloud and index its music folder like a local library.",
+            ))
+            .build();
+        let connect = adw::ActionRow::builder()
+            .title(&gettext("Connect to Nextcloud"))
+            .subtitle(&gettext("Scan the login QR code or enter the details manually."))
+            .activatable(true)
+            .build();
+        connect.add_prefix(&gtk::Image::from_icon_name("network-server-symbolic"));
+        connect.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        {
+            let sender = sender.clone();
+            connect.connect_activated(move |_| sender.input(Msg::AddCloudSource));
+        }
+        nc_group.add(&connect);
+        page.add(&nc_group);
+
+        // Bereits verbundene Nextcloud-Quellen (zum Entfernen). Die Liste wird
+        // gemerkt, damit sie nach einem erfolgreichen Connect sofort frisch ist.
+        let nc_list_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Connected"))
+            .build();
+        let nc_list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
+            .build();
+        self.fill_nc_list(&nc_list, sender);
+        *self.settings_nc_list.borrow_mut() = Some(nc_list.clone());
+        nc_list_group.add(&nc_list);
+        page.add(&nc_list_group);
+
+        let lib_page = page;
 
         // --- Kategorie: Klang ---
         let page = adw::PreferencesPage::builder()
@@ -436,20 +655,42 @@ impl App {
         }
         eq_group.add(&eq_row);
         page.add(&eq_group);
-        dialog.add(&page);
+        let sound_page = page;
 
-        // --- Kategorie: Online ---
+        // --- Kategorie: Suche (Online-Metadaten einlesen) ---
         let page = adw::PreferencesPage::builder()
-            .title(&gettext("Online"))
-            .icon_name("network-wireless-symbolic")
+            .title(&gettext("Search"))
+            .icon_name("system-search-symbolic")
             .build();
-        // Online-Erkennung: AcoustID-Key für die Titel-Erkennung per Fingerprint.
-        let online_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Online detection"))
+
+        // 1. Automatischer Abruf (erste Option).
+        let auto_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Read music data"))
             .description(&gettext(
-                "Optional AcoustID key for fingerprint-based track detection \
-                 (free at acoustid.org/new-application). Cover art and artist photos \
-                 work without a key.",
+                "Complete missing cover art, photos and tracks from open online sources.",
+            ))
+            .build();
+        let auto_row = adw::SwitchRow::builder()
+            .title(&gettext("Fetch automatically"))
+            .subtitle(&gettext(
+                "Loads missing data in the background at startup – on any connection.",
+            ))
+            .active(self.auto_enrich)
+            .build();
+        {
+            let sender = sender.clone();
+            auto_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetAutoEnrich(r.is_active()));
+            });
+        }
+        auto_group.add(&auto_row);
+        page.add(&auto_group);
+
+        // 2. AcoustID.
+        let acoustid_group = adw::PreferencesGroup::builder()
+            .title(&gettext("AcoustID"))
+            .description(&gettext(
+                "Optional key for fingerprint-based track detection (free at acoustid.org/new-application).",
             ))
             .build();
         let key_row = adw::EntryRow::builder().title(&gettext("AcoustID API key")).build();
@@ -461,10 +702,16 @@ impl App {
                 sender.input(Msg::SetAcoustidKey(r.text().to_string()));
             });
         }
-        online_group.add(&key_row);
+        acoustid_group.add(&key_row);
+        page.add(&acoustid_group);
 
+        // 3. fanart.tv.
+        let fanart_group = adw::PreferencesGroup::builder()
+            .title(&gettext("fanart.tv"))
+            .description(&gettext("Optional key for showing several artist photos."))
+            .build();
         let fanart_row = adw::EntryRow::builder()
-            .title(&gettext("fanart.tv API key (optional, for multiple artist photos)"))
+            .title(&gettext("fanart.tv API key"))
             .build();
         fanart_row.set_text(self.fanart_key.as_deref().unwrap_or(""));
         fanart_row.set_show_apply_button(true);
@@ -474,23 +721,8 @@ impl App {
                 sender.input(Msg::SetFanartKey(r.text().to_string()));
             });
         }
-        online_group.add(&fanart_row);
-
-        let auto_row = adw::SwitchRow::builder()
-            .title(&gettext("Fetch automatically"))
-            .subtitle(&gettext(
-                "Load missing cover art, photos and tracks in the background at startup – on any connection",
-            ))
-            .active(self.auto_enrich)
-            .build();
-        {
-            let sender = sender.clone();
-            auto_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetAutoEnrich(r.is_active()));
-            });
-        }
-        online_group.add(&auto_row);
-        page.add(&online_group);
+        fanart_group.add(&fanart_row);
+        page.add(&fanart_group);
 
         // --- Geräte-Synchronisierung: in den Einstellungen ausgeblendet
         //     (Funktion bleibt über die Teilen-Schaltfläche erreichbar). ---
@@ -520,13 +752,44 @@ impl App {
             update_group.add(&update_row);
             page.add(&update_group);
         }
-        dialog.add(&page);
+        let search_page = page;
 
         // --- Kategorie: Ansicht ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("View"))
             .icon_name("view-list-symbolic")
             .build();
+
+        // Anzeigesprache ganz oben (greift nach einem Neustart der App).
+        let lang_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Language"))
+            .build();
+        // Stabile Codes parallel zu den Anzeige-Labels. „Deutsch"/„English" sind
+        // Eigennamen und bleiben unübersetzt.
+        let lang_codes = ["system", "de", "en"];
+        let lang_labels = [gettext("System default"), "Deutsch".into(), "English".into()];
+        let lang_label_refs: Vec<&str> = lang_labels.iter().map(String::as_str).collect();
+        let lang_row = adw::ComboRow::builder()
+            .title(&gettext("Display language"))
+            .subtitle(&gettext("Takes effect after a restart"))
+            .model(&gtk::StringList::new(&lang_label_refs))
+            .build();
+        let current_idx = lang_codes
+            .iter()
+            .position(|c| *c == self.ui_language)
+            .unwrap_or(0);
+        lang_row.set_selected(current_idx as u32);
+        {
+            // Handler erst nach `set_selected` verbinden, damit die Vorauswahl
+            // keinen Sprachwechsel auslöst.
+            let sender = sender.clone();
+            lang_row.connect_selected_notify(move |r| {
+                let code = lang_codes.get(r.selected() as usize).copied().unwrap_or("system");
+                sender.input(Msg::SetLanguage(code.to_string()));
+            });
+        }
+        lang_group.add(&lang_row);
+        page.add(&lang_group);
 
         // Erscheinungsbild: Farbschema automatisch/dunkel/hell (greift sofort).
         let theme_group = adw::PreferencesGroup::builder()
@@ -595,8 +858,13 @@ impl App {
         gallery_group.add(&cols_row);
         page.add(&gallery_group);
 
-        // Menüpunkte ein-/ausblenden **und** per Ziehgriff umsortieren. Die
-        // Reihenfolge/Sichtbarkeit wird sofort in die Navigation übernommen.
+        let view_page = page;
+
+        // --- Kategorie: Menü (Menüpunkte verwalten) ---
+        let page = adw::PreferencesPage::builder()
+            .title(&gettext("Menu"))
+            .icon_name("open-menu-symbolic")
+            .build();
         let sections_group = adw::PreferencesGroup::builder()
             .title(&gettext("Menu items"))
             .description(&gettext(
@@ -613,7 +881,42 @@ impl App {
         rebuild_section_rows(&list, &order, &hidden, sender);
         sections_group.add(&list);
         page.add(&sections_group);
-        dialog.add(&page);
+        let menu_page = page;
+
+        // --- Kategorie: Cache und Aufnahmen ---
+        let page = adw::PreferencesPage::builder()
+            .title(&gettext("Cache & recordings"))
+            .icon_name("media-record-symbolic")
+            .build();
+        let streaming_group = adw::PreferencesGroup::builder()
+            .title(&gettext("Streaming"))
+            .description(&gettext(
+                "Timeshift buffer for recording the currently playing station.",
+            ))
+            .build();
+        let buffer_row = adw::SpinRow::builder()
+            .title(&gettext("Recording buffer (minutes)"))
+            .subtitle(&gettext(
+                "Keep the last minutes of a station so you can record a song after it played. 0 turns it off.",
+            ))
+            .adjustment(&gtk::Adjustment::new(
+                self.recording_buffer_minutes as f64,
+                0.0,
+                60.0,
+                1.0,
+                5.0,
+                0.0,
+            ))
+            .build();
+        {
+            let sender = sender.clone();
+            buffer_row.connect_value_notify(move |r| {
+                sender.input(Msg::SetRecordingBufferMinutes(r.value() as u32));
+            });
+        }
+        streaming_group.add(&buffer_row);
+        page.add(&streaming_group);
+        let cache_page = page;
 
         // --- Kategorie: Ausgeblendet (ganz rechts) ---
         let page = adw::PreferencesPage::builder()
@@ -665,7 +968,16 @@ impl App {
             hidden_group.add(&row);
         }
         page.add(&hidden_group);
-        dialog.add(&page);
+        let hidden_page = page;
+
+        // Reihenfolge der Einstellungs-Seiten: „Ansicht" zuerst.
+        dialog.add(&view_page);
+        dialog.add(&lib_page);
+        dialog.add(&sound_page);
+        dialog.add(&search_page);
+        dialog.add(&menu_page);
+        dialog.add(&cache_page);
+        dialog.add(&hidden_page);
 
         dialog.present(Some(root));
     }

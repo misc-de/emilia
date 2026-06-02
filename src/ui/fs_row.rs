@@ -15,6 +15,20 @@ fn esc(s: &str) -> String {
 /// Name ist der Titel.
 fn split_stem(path: &PathBuf) -> (Option<String>, String) {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+    split_stem_str(stem)
+}
+
+/// Wie [`split_stem`], aber für einen (entfernten) Dateinamen als String –
+/// entfernt zuvor die Endung.
+fn split_filename(name: &str) -> (Option<String>, String) {
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name);
+    split_stem_str(stem)
+}
+
+fn split_stem_str(stem: &str) -> (Option<String>, String) {
     match stem.rfind('-') {
         Some(i) => {
             let artist = stem[..i].trim();
@@ -47,6 +61,23 @@ pub enum FsEntry {
         /// Spieldauer in Millisekunden (falls ermittelbar).
         duration_ms: Option<i64>,
     },
+    /// Ordner einer entfernten Quelle (Nextcloud/WebDAV). `rel_path` ist relativ
+    /// zur Musikwurzel der Quelle (führender Slash).
+    RemoteDir {
+        name: String,
+        rel_path: String,
+    },
+    /// Audiodatei einer entfernten Quelle. Tags werden nachträglich gefüllt
+    /// (siehe [`FsInput::SetTags`]); `downloaded` zeigt auf die lokale Kopie,
+    /// sobald die Datei offline verfügbar ist.
+    RemoteFile {
+        name: String,
+        rel_path: String,
+        title: Option<String>,
+        artist: Option<String>,
+        duration_ms: Option<i64>,
+        downloaded: Option<PathBuf>,
+    },
 }
 
 impl FsEntry {
@@ -76,10 +107,54 @@ impl FsEntry {
         }
     }
 
+    /// Ordner einer entfernten Quelle.
+    pub fn remote_dir(rel_path: String, name: String) -> Self {
+        FsEntry::RemoteDir { name, rel_path }
+    }
+
+    /// Audiodatei einer entfernten Quelle (Tags zunächst leer).
+    pub fn remote_file(rel_path: String, name: String, downloaded: Option<PathBuf>) -> Self {
+        FsEntry::RemoteFile {
+            name,
+            rel_path,
+            title: None,
+            artist: None,
+            duration_ms: None,
+            downloaded,
+        }
+    }
+
+    /// Pfad relativ zur Musikwurzel der Quelle (nur entfernte Einträge).
+    pub fn rel_path(&self) -> Option<&str> {
+        match self {
+            FsEntry::RemoteDir { rel_path, .. } | FsEntry::RemoteFile { rel_path, .. } => {
+                Some(rel_path)
+            }
+            _ => None,
+        }
+    }
+
+    /// Ist dies ein entfernter (Nextcloud/WebDAV) Eintrag?
+    pub fn is_remote(&self) -> bool {
+        matches!(self, FsEntry::RemoteDir { .. } | FsEntry::RemoteFile { .. })
+    }
+
+    /// Lokale Kopie einer heruntergeladenen entfernten Datei (falls vorhanden).
+    pub fn downloaded(&self) -> Option<&PathBuf> {
+        match self {
+            FsEntry::RemoteFile { downloaded, .. } => downloaded.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Spieldauer als „M:SS" bzw. „H:MM:SS"; bei Ordnern/ohne Dauer leer.
     fn duration_label(&self) -> String {
         match self {
             FsEntry::File {
+                duration_ms: Some(ms),
+                ..
+            }
+            | FsEntry::RemoteFile {
                 duration_ms: Some(ms),
                 ..
             } if *ms > 0 => crate::ui::app::fmt_duration(*ms),
@@ -90,14 +165,13 @@ impl FsEntry {
     /// Überschrift fürs Kontextmenü: bei Dateien „Interpret - Titel"
     /// (Interpret entfällt, wenn kein Tag); bei Ordnern der Ordnername.
     pub fn heading(&self) -> String {
-        match self {
-            FsEntry::Dir { name, .. } => name.clone(),
-            FsEntry::File { .. } => {
-                let title = self.display_title();
-                match self.effective_artist() {
-                    Some(a) => format!("{a} - {title}"),
-                    None => title,
-                }
+        if self.is_dir() {
+            self.name().to_string()
+        } else {
+            let title = self.display_title();
+            match self.effective_artist() {
+                Some(a) => format!("{a} - {title}"),
+                None => title,
             }
         }
     }
@@ -106,16 +180,20 @@ impl FsEntry {
     /// letzten „-"); bei Ordnern `None`.
     pub fn effective_artist(&self) -> Option<String> {
         match self {
-            FsEntry::File { path, artist, .. } => {
-                artist.clone().or_else(|| split_stem(path).0)
+            FsEntry::File { path, artist, .. } => artist.clone().or_else(|| split_stem(path).0),
+            FsEntry::RemoteFile { name, artist, .. } => {
+                artist.clone().or_else(|| split_filename(name).0)
             }
-            FsEntry::Dir { .. } => None,
+            FsEntry::Dir { .. } | FsEntry::RemoteDir { .. } => None,
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
-            FsEntry::Dir { name, .. } | FsEntry::File { name, .. } => name,
+            FsEntry::Dir { name, .. }
+            | FsEntry::File { name, .. }
+            | FsEntry::RemoteDir { name, .. }
+            | FsEntry::RemoteFile { name, .. } => name,
         }
     }
 
@@ -123,21 +201,24 @@ impl FsEntry {
     /// (Teil hinter dem letzten „-"); bei Ordnern der volle Name.
     pub fn display_title(&self) -> String {
         match self {
-            FsEntry::Dir { name, .. } => name.clone(),
-            FsEntry::File { path, title, .. } => {
-                title.clone().unwrap_or_else(|| split_stem(path).1)
+            FsEntry::Dir { name, .. } | FsEntry::RemoteDir { name, .. } => name.clone(),
+            FsEntry::File { path, title, .. } => title.clone().unwrap_or_else(|| split_stem(path).1),
+            FsEntry::RemoteFile { name, title, .. } => {
+                title.clone().unwrap_or_else(|| split_filename(name).1)
             }
         }
     }
 
-    pub fn path(&self) -> &PathBuf {
+    /// Lokaler Dateisystempfad – nur bei lokalen Einträgen (`None` bei entfernten).
+    pub fn path(&self) -> Option<&PathBuf> {
         match self {
-            FsEntry::Dir { path, .. } | FsEntry::File { path, .. } => path,
+            FsEntry::Dir { path, .. } | FsEntry::File { path, .. } => Some(path),
+            FsEntry::RemoteDir { .. } | FsEntry::RemoteFile { .. } => None,
         }
     }
 
     pub fn is_dir(&self) -> bool {
-        matches!(self, FsEntry::Dir { .. })
+        matches!(self, FsEntry::Dir { .. } | FsEntry::RemoteDir { .. })
     }
 
     fn prefix_icon(&self) -> &'static str {
@@ -185,6 +266,14 @@ pub enum FsInput {
     SetQueued(bool),
     /// Markierung „aktuell laufender Titel" (+ ob die Wiedergabe gerade läuft).
     SetActive { active: bool, playing: bool },
+    /// Nachträglich gelesene Tags einer entfernten Datei übernehmen.
+    SetTags {
+        title: Option<String>,
+        artist: Option<String>,
+        duration_ms: Option<i64>,
+    },
+    /// Eine entfernte Datei wurde heruntergeladen (lokale Kopie merken).
+    SetDownloaded(PathBuf),
 }
 
 #[derive(Debug)]
@@ -204,7 +293,11 @@ impl FactoryComponent for FsRow {
 
     view! {
         adw::ActionRow {
+            // #[watch], damit nachträglich gelesene Tags (entfernte Dateien) die
+            // Anzeige aktualisieren.
+            #[watch]
             set_title: &esc(&self.entry.display_title()),
+            #[watch]
             set_subtitle: &esc(&self.subtitle()),
             set_activatable: true,
             add_prefix = &gtk::Image::from_icon_name(self.entry.prefix_icon()),
@@ -212,9 +305,18 @@ impl FactoryComponent for FsRow {
             // Wie in der Interpreten-Ansicht: Laufzeit rechtsbündig & dezent
             // (nur Dateien – Ordner haben keine Spieldauer).
             add_suffix = &gtk::Label {
+                #[watch]
                 set_label: &self.entry.duration_label(),
                 set_visible: !self.entry.is_dir(),
                 set_css_classes: &["dim-label", "numeric"],
+            },
+
+            // Marker für offline verfügbare (heruntergeladene) entfernte Dateien.
+            add_suffix = &gtk::Image::from_icon_name("folder-download-symbolic") {
+                #[watch]
+                set_visible: self.entry.downloaded().is_some(),
+                set_css_classes: &["dim-label"],
+                set_tooltip_text: Some(&crate::i18n::gettext("Downloaded")),
             },
 
             // Play-Button (nur Dateien). Spiegelt zugleich den Zustand: läuft der
@@ -282,6 +384,28 @@ impl FactoryComponent for FsRow {
             FsInput::SetActive { active, playing } => {
                 self.active = active;
                 self.playing = playing;
+            }
+            FsInput::SetTags {
+                title: t,
+                artist: a,
+                duration_ms: d,
+            } => {
+                if let FsEntry::RemoteFile {
+                    title,
+                    artist,
+                    duration_ms,
+                    ..
+                } = &mut self.entry
+                {
+                    *title = t;
+                    *artist = a;
+                    *duration_ms = d;
+                }
+            }
+            FsInput::SetDownloaded(path) => {
+                if let FsEntry::RemoteFile { downloaded, .. } = &mut self.entry {
+                    *downloaded = Some(path);
+                }
             }
         }
     }

@@ -56,6 +56,9 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     toolbar.add_top_bar(&adw::HeaderBar::new());
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
+    // Volle Breite nutzen, aber nie breiter als 600 px (auf schmalen Fenstern
+    // verkleinert sich der Dialog automatisch auf die Fensterbreite).
+    dialog.set_content_width(600);
     dialog.present(Some(root));
 }
 
@@ -66,40 +69,61 @@ impl App {
     /// auch die „Neuste"-Liste.
     pub(crate) fn reload_podcasts(&mut self, sender: &ComponentSender<Self>) {
         self.podcast_items = self.library.podcasts().unwrap_or_default();
-        while let Some(child) = self.podcasts_list.first_child() {
-            self.podcasts_list.remove(&child);
-        }
-        for (id, title, image, count) in self.podcast_items.clone() {
-            // Episodenanzahl wie bei Alben/Liedern in Klammern an die Überschrift;
-            // keine separate „N Episoden"-Zeile.
-            let row = adw::ActionRow::builder()
-                .title(format!("{} ({count})", gtk::glib::markup_escape_text(&title)).as_str())
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
-            // Cover aus dem RSS-Bild (lokaler Cache); sonst Mikrofon-Platzhalter.
-            let cover = image
-                .as_deref()
-                .and_then(crate::core::online::podcast_image_path);
-            row.add_prefix(&crate::ui::app::cover_widget(
-                cover.as_deref(),
-                "microphone-symbolic",
-            ));
-            {
-                let sender = sender.clone();
-                row.connect_activated(move |_| sender.input(Msg::OpenPodcast(id)));
+        if self.gallery_view {
+            // Galerie-Variante: Cover-Gitter; Tipp öffnet die Episoden,
+            // Doppeltipp die Abo-Detailansicht.
+            let tiles: Vec<(Option<String>, &'static str, String)> = self
+                .podcast_items
+                .iter()
+                .map(|(_, title, image, _)| {
+                    let cover = image
+                        .as_deref()
+                        .and_then(crate::core::online::podcast_image_path);
+                    (cover, "microphone-symbolic", title.clone())
+                })
+                .collect();
+            self.fill_gallery(
+                &self.podcasts_gallery,
+                &tiles,
+                Msg::OpenPodcastAt,
+                Msg::ShowPodcastDetailAt,
+            );
+        } else {
+            while let Some(child) = self.podcasts_list.first_child() {
+                self.podcasts_list.remove(&child);
             }
-            // Langes Drücken → Abo-Detailansicht.
-            let lp = gtk::GestureLongPress::new();
-            {
-                let sender = sender.clone();
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::ShowPodcastDetail(id));
-                });
+            for (id, title, image, count) in self.podcast_items.clone() {
+                // Episodenanzahl wie bei Alben/Liedern in Klammern an die Überschrift;
+                // keine separate „N Episoden"-Zeile.
+                let row = adw::ActionRow::builder()
+                    .title(format!("{} ({count})", gtk::glib::markup_escape_text(&title)).as_str())
+                    .activatable(true)
+                    .build();
+                row.add_css_class("emilia-flush");
+                // Cover aus dem RSS-Bild (lokaler Cache); sonst Mikrofon-Platzhalter.
+                let cover = image
+                    .as_deref()
+                    .and_then(crate::core::online::podcast_image_path);
+                row.add_prefix(&crate::ui::app::cover_widget(
+                    cover.as_deref(),
+                    "microphone-symbolic",
+                ));
+                {
+                    let sender = sender.clone();
+                    row.connect_activated(move |_| sender.input(Msg::OpenPodcast(id)));
+                }
+                // Langes Drücken → Abo-Detailansicht.
+                let lp = gtk::GestureLongPress::new();
+                {
+                    let sender = sender.clone();
+                    lp.connect_pressed(move |g, _, _| {
+                        g.set_state(gtk::EventSequenceState::Claimed);
+                        sender.input(Msg::ShowPodcastDetail(id));
+                    });
+                }
+                row.add_controller(lp);
+                self.podcasts_list.append(&row);
             }
-            row.add_controller(lp);
-            self.podcasts_list.append(&row);
         }
         self.reload_newest(sender);
     }
@@ -290,32 +314,55 @@ impl App {
             .and_then(crate::core::online::podcast_image_path);
         pod.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "microphone-symbolic"));
         info.add(&pod);
-        if let Some(p) = ep.published.as_deref().filter(|p| !p.trim().is_empty()) {
-            info.add(
-                &adw::ActionRow::builder()
-                    .title(&gettext("Published"))
-                    .subtitle(&crate::core::podcast::pubdate_short(p))
-                    .build(),
-            );
-        }
-        if let Some(d) = ep.duration.as_deref().filter(|d| !d.trim().is_empty()) {
-            // Dauer einheitlich als h:mm:ss (bzw. m:ss) anzeigen.
-            let dur = crate::core::podcast::format_duration(d).unwrap_or_else(|| d.trim().to_string());
-            info.add(
-                &adw::ActionRow::builder()
-                    .title(&gettext("Duration"))
-                    .subtitle(gtk::glib::markup_escape_text(&dur))
-                    .build(),
-            );
+        // Veröffentlicht und Dauer **nebeneinander**, je etwa 50 % Breite.
+        let pub_txt = ep
+            .published
+            .as_deref()
+            .filter(|p| !p.trim().is_empty())
+            .map(crate::core::podcast::pubdate_short);
+        let dur_txt = ep
+            .duration
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+            .map(|d| crate::core::podcast::format_duration(d).unwrap_or_else(|| d.trim().to_string()));
+        if pub_txt.is_some() || dur_txt.is_some() {
+            let meta = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .homogeneous(true)
+                .spacing(12)
+                .margin_top(10)
+                .margin_bottom(10)
+                .margin_start(14)
+                .margin_end(14)
+                .build();
+            let cell = |title: &str, value: &str| {
+                let b = gtk::Box::new(gtk::Orientation::Vertical, 2);
+                b.append(
+                    &gtk::Label::builder()
+                        .label(title)
+                        .xalign(0.0)
+                        .css_classes(["caption", "dim-label"])
+                        .build(),
+                );
+                b.append(&gtk::Label::builder().label(value).xalign(0.0).wrap(true).build());
+                b
+            };
+            if let Some(p) = &pub_txt {
+                meta.append(&cell(&gettext("Published"), p));
+            }
+            if let Some(d) = &dur_txt {
+                meta.append(&cell(&gettext("Duration"), d));
+            }
+            info.add(&meta);
         }
         content.append(&info);
 
         // Shownotes (falls vorhanden) direkt unter „Dauer", vor den Aktionen.
         // Zeitstempel (z. B. „12:34") werden zu anklickbaren Sprungmarken.
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
-            let notes_group = adw::PreferencesGroup::builder()
-                .title(&gettext("Shownotes"))
-                .build();
+            // Überschrift ohne adw-Gruppentitel, damit sie auf gleicher Einrückung
+            // wie der Shownotes-Text steht (nicht links davor).
+            let notes_group = adw::PreferencesGroup::new();
             let label = gtk::Label::builder()
                 .label(&crate::core::podcast::linkify_timestamps(notes.trim()))
                 .use_markup(true)
@@ -345,44 +392,28 @@ impl App {
                     gtk::glib::Propagation::Proceed
                 });
             }
-            notes_group.add(&label);
+            // In eine gepolsterte Box wickeln – damit die Shownotes (wie die
+            // Published/Duration-Zeile) als eingerahmte Karte mit Innenabstand
+            // erscheinen statt bündig am Kartenrand zu kleben.
+            let wrap = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(6)
+                .margin_top(10)
+                .margin_bottom(10)
+                .margin_start(14)
+                .margin_end(14)
+                .build();
+            // Überschrift auf gleicher Einrückung wie der Text (im selben Kasten).
+            let heading = gtk::Label::builder()
+                .label(&gettext("Shownotes"))
+                .xalign(0.0)
+                .css_classes(["heading"])
+                .build();
+            wrap.append(&heading);
+            wrap.append(&label);
+            notes_group.add(&wrap);
             content.append(&notes_group);
         }
-
-        let actions = adw::PreferencesGroup::new();
-        let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
-        {
-            let (sender, dialog, url, title) =
-                (sender.clone(), dialog.clone(), ep.audio_url.clone(), ep.title.clone());
-            play.connect_activated(move |_| {
-                sender.input(Msg::ToggleEpisode {
-                    url: url.clone(),
-                    title: title.clone(),
-                });
-                dialog.close();
-            });
-        }
-        actions.add(&play);
-        // „Abspielen" ausblenden, solange genau diese Episode läuft; merken, damit
-        // `refresh_episode_icons` die Zeile bei Pause/Ende wieder einblendet.
-        let is_current =
-            self.playing && self.playing_episode_url.as_deref() == Some(ep.audio_url.as_str());
-        play.set_visible(!is_current);
-        *self.ctx_episode_play.borrow_mut() = Some((play.clone(), ep.audio_url.clone()));
-        {
-            let slot = self.ctx_episode_play.clone();
-            dialog.connect_closed(move |_| *slot.borrow_mut() = None);
-        }
-        let open = action_row(&gettext("Open podcast"), "go-next-symbolic");
-        {
-            let (sender, dialog, pid) = (sender.clone(), dialog.clone(), ep.podcast_id);
-            open.connect_activated(move |_| {
-                sender.input(Msg::OpenPodcast(pid));
-                dialog.close();
-            });
-        }
-        actions.add(&open);
-        content.append(&actions);
 
         present_detail(&dialog, &content, root);
     }
@@ -806,6 +837,9 @@ impl App {
                 self.playing = true;
                 self.playing_path = None;
                 self.playing_episode_url = Some(url.to_string());
+                self.playing_stream = None;
+                self.playing_remote = false;
+                self.stop_recorder();
                 self.queue.clear();
                 self.queue_pos = 0;
                 self.position_ms = resume.max(0);

@@ -17,7 +17,7 @@ use crate::i18n::{gettext, ngettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
     album_subtitle, cover_widget, duration_label, find_scroller, fmt_duration, most_common_artist,
-    read_entries, App, Cmd, CtxTarget, FsKind, Msg,
+    read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
 };
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::FsEntry;
@@ -199,6 +199,11 @@ impl App {
 
     /// Startet das Einlesen des aktuellen Ordners im Hintergrund (mit Spinner).
     pub(crate) fn load_dir(&mut self, sender: &ComponentSender<Self>) {
+        // Entfernte Quelle? → eigener WebDAV-Browser (PROPFIND), nicht das lokale FS.
+        if let Some(source) = self.active_remote_source() {
+            self.load_remote_dir(sender, source);
+            return;
+        }
         // Scrollposition des gerade gezeigten Ordners merken, bevor er ersetzt wird.
         if let (Some(dir), Some(sc)) = (self.shown_dir.clone(), self.fs_scroller()) {
             self.fs_scroll
@@ -219,10 +224,194 @@ impl App {
         }
     }
 
+    /// Baut die Quellen-Tab-Leiste neu: ein Tab „Musik" für das primäre
+    /// Verzeichnis plus je Zusatzquelle einer. Die Schaltflächen sind als
+    /// Radio-Gruppe verbunden; ein Klick schickt [`Msg::SelectSource`].
+    pub(crate) fn rebuild_source_tabs(&mut self) {
+        while let Some(c) = self.source_tabs.first_child() {
+            self.source_tabs.remove(&c);
+        }
+        self.source_tab_buttons.clear();
+        if self.sources.is_empty() {
+            return;
+        }
+        let mut tabs: Vec<(ActiveSource, String)> = vec![(ActiveSource::Primary, gettext("Music"))];
+        for s in &self.sources {
+            tabs.push((ActiveSource::Source(s.id), s.name.clone()));
+        }
+        let mut group: Option<gtk::ToggleButton> = None;
+        for (sel, label) in tabs {
+            let btn = gtk::ToggleButton::with_label(&label);
+            match &group {
+                Some(g) => btn.set_group(Some(g)),
+                None => group = Some(btn.clone()),
+            }
+            // Aktivzustand setzen, BEVOR der Handler verbunden wird – sonst löst
+            // die Vorauswahl bereits einen (überflüssigen) Wechsel aus.
+            btn.set_active(sel == self.active_source);
+            let input = self.input.clone();
+            let sel_cb = sel.clone();
+            btn.connect_toggled(move |b| {
+                if b.is_active() {
+                    let _ = input.send(Msg::SelectSource(sel_cb.clone()));
+                }
+            });
+            self.source_tabs.append(&btn);
+            self.source_tab_buttons.push((sel, btn));
+        }
+    }
+
+    /// Wechselt die aktive Quelle, rootet die Dateiansicht entsprechend um und
+    /// lädt den Ordner neu. Spiegelt zugleich den Aktivzustand der Tabs.
+    pub(crate) fn apply_source(&mut self, sel: ActiveSource, sender: &ComponentSender<Self>) {
+        self.active_source = sel.clone();
+        match &sel {
+            ActiveSource::Primary => {
+                self.root_dir = self.music_dir.as_ref().map(PathBuf::from);
+                self.browse_dir = self.root_dir.clone();
+            }
+            ActiveSource::Source(id) => {
+                if let Some(s) = self.sources.iter().find(|s| s.id == *id) {
+                    match s.kind.as_str() {
+                        "local" => {
+                            let p = s.path.clone().map(PathBuf::from);
+                            self.root_dir = p.clone();
+                            self.browse_dir = p;
+                            self.remote_browse = None;
+                        }
+                        // WebDAV: lokale Pfade leer, Remote-Browser an der Wurzel.
+                        _ => {
+                            self.root_dir = None;
+                            self.browse_dir = None;
+                            self.remote_browse = Some(String::new());
+                        }
+                    }
+                }
+            }
+        }
+        if !matches!(self.active_source, ActiveSource::Source(_)) {
+            self.remote_browse = None;
+        }
+        self.sync_source_tabs();
+        self.load_dir(sender);
+    }
+
+    /// Die aktive Quelle als WebDAV-Quelle (falls sie eine ist).
+    pub(crate) fn active_remote_source(&self) -> Option<crate::model::Source> {
+        let ActiveSource::Source(id) = self.active_source else {
+            return None;
+        };
+        self.sources
+            .iter()
+            .find(|s| s.id == id && s.kind == "webdav")
+            .cloned()
+    }
+
+    /// Lädt einen Ordner der aktiven entfernten Quelle (PROPFIND im Hintergrund).
+    fn load_remote_dir(&mut self, sender: &ComponentSender<Self>, source: crate::model::Source) {
+        let rel = self.remote_browse.clone().unwrap_or_default();
+        let Some(creds) = crate::core::webdav::Creds::from_source(&source) else {
+            self.entries.guard().clear();
+            self.loading = false;
+            self.toast(&gettext("This source is not configured correctly"));
+            return;
+        };
+        self.loading = true;
+        let active = self.active_source.clone();
+        sender.spawn_oneshot_command(move || {
+            let res = crate::core::webdav::list(&creds, &rel).map_err(|e| e.to_string());
+            Cmd::RemoteEntries(res, active, rel)
+        });
+    }
+
+    /// Lädt Titel/Interpret/Dauer der noch ungetaggten entfernten Dateien des
+    /// aktuellen Ordners im Hintergrund nach (Range-GET, gedeckelt auf 40) und
+    /// meldet jede gelesene Datei einzeln als [`Cmd::RemoteTags`] – so füllen sich
+    /// die Zeilen nach und nach, statt erst am Ende.
+    pub(crate) fn start_remote_tag_fetch(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        source: &crate::model::Source,
+    ) {
+        let Some(creds) = crate::core::webdav::Creds::from_source(source) else {
+            return;
+        };
+        let rels: Vec<String> = {
+            let guard = self.entries.guard();
+            (0..guard.len())
+                .filter_map(|i| {
+                    guard.get(i).and_then(|r| match &r.entry {
+                        FsEntry::RemoteFile {
+                            rel_path,
+                            downloaded: None,
+                            ..
+                        } => Some(rel_path.clone()),
+                        _ => None,
+                    })
+                })
+                .take(40)
+                .collect()
+        };
+        if rels.is_empty() {
+            return;
+        }
+        sender.spawn_command(move |out| {
+            for r in rels {
+                let (t, a, d) = crate::core::webdav::read_tags(&creds, &r);
+                if t.is_some() || a.is_some() || d.is_some() {
+                    let _ = out.send(Cmd::RemoteTags(vec![(r, t, a, d)]));
+                }
+            }
+        });
+    }
+
+    /// Spiegelt den Aktivzustand der Tab-Schaltflächen auf `active_source`.
+    pub(crate) fn sync_source_tabs(&self) {
+        for (sel, btn) in &self.source_tab_buttons {
+            let want = *sel == self.active_source;
+            if btn.is_active() != want {
+                btn.set_active(want);
+            }
+        }
+    }
+
     /// Lädt die Album-Übersicht aus der DB in die Factory (inkl. Online-Cover).
+    /// (Interpret, Album)-Schlüssel, deren Quelle gerade offline ist.
+    pub(crate) fn offline_album_keys(&self) -> std::collections::HashSet<(String, String)> {
+        let mut out = std::collections::HashSet::new();
+        for &id in &self.offline_sources {
+            if let Ok(pairs) = self.library.remote_album_keys(id) {
+                out.extend(pairs);
+            }
+        }
+        out
+    }
+
+    /// Interpreten-Namen (kleingeschrieben), deren Quelle gerade offline ist.
+    pub(crate) fn offline_artist_names_lc(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for &id in &self.offline_sources {
+            if let Ok(names) = self.library.remote_artists(id) {
+                out.extend(names.into_iter().map(|s| s.to_lowercase()));
+            }
+        }
+        out
+    }
+
+    /// Ist dieser Titel-Pfad von einer gerade getrennten Quelle?
+    pub(crate) fn is_offline_path(&self, path: &str) -> bool {
+        crate::core::webdav::parse_nc_path(path)
+            .map(|(id, _)| self.offline_sources.contains(&id))
+            .unwrap_or(false)
+    }
+
     pub(crate) fn reload_albums(&mut self) {
         let albums = self.library.albums_overview().unwrap_or_default();
         self.album_count = albums.len();
+        // Übersicht spiegeln, damit Galerie-Klicks (Factory ist dann leer) den
+        // Eintrag per Index auflösen können.
+        self.albums_overview = albums.clone();
+        let offline_keys = self.offline_album_keys();
         if self.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = albums
                 .iter()
@@ -238,7 +427,8 @@ impl App {
             let mut guard = self.albums.guard();
             guard.clear();
             for a in albums {
-                guard.push_back(a);
+                let offline = offline_keys.contains(&(a.artist.clone(), a.album.clone()));
+                guard.push_back((a, offline));
             }
         }
     }
@@ -247,7 +437,10 @@ impl App {
     /// Netz. `then_enrich`: danach ggf. automatisch online nachladen (entscheidet
     /// der `ScanDone`-Handler anhand Schalter + Verbindung).
     pub(crate) fn start_scan(&self, sender: &ComponentSender<Self>, then_enrich: bool) {
-        let Some(root) = self.root_dir.clone() else {
+        // Bewusst das **primäre** Musikverzeichnis (nicht `root_dir`, das beim
+        // Wechsel auf eine Zusatzquelle umschaltet) – Bibliothek/Scan bleiben am
+        // Hauptordner.
+        let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
             return;
         };
         sender.spawn_oneshot_command(move || {
@@ -269,14 +462,17 @@ impl App {
     /// gelesen, niemals verändert. Dauerhaft erfolglose Einträge (≥ 3 Versuche)
     /// werden in beiden Fällen übersprungen.
     /// `light`: leiser Hintergrund-Nachzug (periodisch) – nur Interpreten-Fotos &
-    /// Online-Cover, ohne Fortschrittsleiste. Siehe [`enrich_worker`].
+    /// Online-Cover. Der Abruf läuft generell ohne sichtbare Fortschrittsanzeige.
+    /// Siehe [`enrich_worker`].
     pub(crate) fn run_enrich(
         &mut self,
         sender: &ComponentSender<Self>,
         scan_first: bool,
         light: bool,
     ) {
-        let Some(root) = self.root_dir.clone() else {
+        // Anreicherung bezieht sich auf die primäre Bibliothek (`music_dir`),
+        // unabhängig davon, welche Quelle gerade in der Dateiansicht aktiv ist.
+        let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
             if !light {
                 self.toast(&gettext("No music folder set – please choose one in the settings"));
             }
@@ -288,13 +484,6 @@ impl App {
         self.enrich_cancel.store(false, Ordering::Relaxed);
         let cancel = self.enrich_cancel.clone();
         self.enriching = true;
-        // Voller Lauf → Fortschritts-Leiste einblenden; leiser Nachzug bleibt verborgen.
-        self.enrich_banner_hidden = light;
-        self.enrich_status = if scan_first {
-            gettext("Reading library …")
-        } else {
-            gettext("Searching for cover & metadata …")
-        };
         sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
     }
 
@@ -303,11 +492,40 @@ impl App {
     pub(crate) fn reload_artists(&mut self) {
         let mut artists = self.library.artists_overview().unwrap_or_default();
         self.artist_count = artists.len();
-        for a in &mut artists {
-            if a.image_path.as_deref().map_or(true, |p| p.trim().is_empty()) {
-                a.image_path = self.artist_album_cover(&a.name);
+        // Fallback-Cover (ein Album-Cover) für Interpreten **ohne** eigenes Foto.
+        // Die Album-Zuordnung in EINEM Durchlauf über `all_tracks` aufbauen –
+        // früher rief das je Interpret `artist_album_cover` → `all_tracks` auf
+        // (O(Interpreten×Tracks); dominierte den Start spürbar).
+        if artists
+            .iter()
+            .any(|a| a.image_path.as_deref().map_or(true, |p| p.trim().is_empty()))
+        {
+            use crate::core::artist::{norm_key, split_artists};
+            let mut first_album: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            for t in self.library.all_tracks().unwrap_or_default() {
+                let (Some(artist), Some(album)) = (t.artist.as_deref(), t.album.as_deref()) else {
+                    continue;
+                };
+                if album.trim().is_empty() {
+                    continue;
+                }
+                for s in split_artists(artist) {
+                    first_album
+                        .entry(norm_key(&s))
+                        .or_insert_with(|| album.to_string());
+                }
+            }
+            for a in &mut artists {
+                if a.image_path.as_deref().map_or(true, |p| p.trim().is_empty()) {
+                    if let Some(album) = first_album.get(&norm_key(&a.name)) {
+                        a.image_path = self.album_cover_for(&a.name, album);
+                    }
+                }
             }
         }
+        // Übersicht spiegeln (für Galerie-Index-Auflösung, s. reload_albums).
+        self.artists_overview = artists.clone();
         if self.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = artists
                 .iter()
@@ -320,10 +538,13 @@ impl App {
                 Msg::ShowArtistDetail,
             );
         } else {
+            let offline_names = self.offline_artist_names_lc();
             let mut guard = self.artists.guard();
             guard.clear();
             for a in artists {
-                guard.push_back(a);
+                let name_lc = a.name.to_lowercase();
+                let offline = offline_names.iter().any(|n| n.contains(&name_lc));
+                guard.push_back((a, offline));
             }
         }
     }
@@ -331,10 +552,15 @@ impl App {
     /// Liefert die abspielbaren Dateien eines Eintrags: bei Ordnern rekursiv,
     /// bei Dateien nur die eine.
     pub(crate) fn entry_files(&self, entry: &FsEntry) -> Vec<PathBuf> {
+        // Entfernte Einträge haben keinen lokalen Pfad – diese Helfer arbeiten
+        // ausschließlich auf der lokalen Bibliothek.
+        let Some(path) = entry.path() else {
+            return Vec::new();
+        };
         if entry.is_dir() {
-            scanner::collect_audio_files(entry.path())
+            scanner::collect_audio_files(path)
         } else {
-            vec![entry.path().clone()]
+            vec![path.clone()]
         }
     }
 
@@ -895,6 +1121,14 @@ impl App {
                     row.add_suffix(&duration_label(ms));
                 }
             }
+            // Roter „Getrennt"-Hinweis, wenn der Titel von einer offline-Quelle stammt.
+            if self.is_offline_path(&t.path) {
+                let badge = gtk::Image::from_icon_name("network-offline-symbolic");
+                badge.add_css_class("emilia-offline");
+                badge.set_pixel_size(14);
+                badge.set_valign(gtk::Align::Center);
+                row.add_suffix(&badge);
+            }
             row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
 
             let path = t.path.clone();
@@ -1116,7 +1350,9 @@ impl App {
             return Some(FsKind::Artist(meta.name));
         }
         // Sonst: enthält der Ordner Titel genau eines Albums? → Album.
-        let dir = entry.path();
+        let Some(dir) = entry.path() else {
+            return None;
+        };
         let tracks: Vec<Track> = self
             .library
             .all_tracks()
@@ -1274,7 +1510,9 @@ impl App {
                     let artist = if e.is_dir() {
                         Some(e.name().to_string())
                     } else {
-                        scanner::read_track(e.path()).ok().and_then(|t| t.artist)
+                        e.path()
+                            .and_then(|p| scanner::read_track(p).ok())
+                            .and_then(|t| t.artist)
                     };
                     let photo = artist
                         .filter(|a| !a.trim().is_empty())
@@ -1477,8 +1715,9 @@ impl App {
                 self.library.album_areas(&m.artist, &m.album),
             ),
             CtxTarget::Fs(e) if !e.is_dir() => {
-                let track = scanner::read_track(e.path()).ok()?;
-                let path = e.path().to_string_lossy().into_owned();
+                let p = e.path()?;
+                let track = scanner::read_track(p).ok()?;
+                let path = p.to_string_lossy().into_owned();
                 let eff =
                     self.library
                         .resolve_areas(track.artist.as_deref(), track.album.as_deref(), &path);
@@ -1496,7 +1735,7 @@ impl App {
                 // Generischer Ordner (z. B. erste Ebene): Ordner-Ebene, vererbt
                 // an alles darunter.
                 None => {
-                    let path = e.path().to_string_lossy().into_owned();
+                    let path = e.path()?.to_string_lossy().into_owned();
                     let eff = self.library.folder_areas(&path);
                     ("folder", path, eff)
                 }
@@ -1687,8 +1926,9 @@ impl App {
         value
     }
 
-    pub(crate) fn toast(&self, msg: &str) {
-        self.toast_overlay.add_toast(adw::Toast::new(msg));
+    pub(crate) fn toast(&self, _msg: &str) {
+        // Eingeblendete Meldungen am unteren Rand sind auf Wunsch deaktiviert –
+        // bewusst ein No-op (Aufrufe bleiben stehen, leicht reaktivierbar).
     }
 
     /// Beschafft ein Cover als Textur. Für einen **Ordner** das Ordner-Cover
@@ -1697,8 +1937,11 @@ impl App {
     /// das eingebettete Bild der Datei bzw. das online zugeordnete Album-Cover.
     /// `None`, wenn nichts Passendes gefunden wird.
     pub(crate) fn cover_texture(&self, entry: &FsEntry) -> Option<gtk::gdk::Texture> {
+        // Cover-Auflösung arbeitet auf dem lokalen Dateisystem; entfernte
+        // Einträge haben keines.
+        let epath = entry.path()?;
         if entry.is_dir() {
-            if let Some(path) = cover::find_cover_file(entry.path()) {
+            if let Some(path) = cover::find_cover_file(epath) {
                 if let Ok(texture) = gtk::gdk::Texture::from_filename(&path) {
                     return Some(texture);
                 }
@@ -1706,7 +1949,7 @@ impl App {
         }
 
         let audio = if entry.is_dir() {
-            std::fs::read_dir(entry.path())
+            std::fs::read_dir(epath)
                 .ok()
                 .into_iter()
                 .flatten()
@@ -1715,7 +1958,7 @@ impl App {
                 .filter(|p| scanner::is_audio(p))
                 .min()
         } else {
-            Some(entry.path().clone())
+            Some(epath.clone())
         };
 
         if let Some(audio) = &audio {
@@ -1781,8 +2024,8 @@ impl App {
                 None => {}
             }
             lines.push((gettext("Collection"), Self::files_summary(&files, !year_shown)));
-        } else {
-            match scanner::read_track(entry.path()) {
+        } else if let Some(p) = entry.path() {
+            match scanner::read_track(p) {
                 Ok(t) => {
                     lines.push((gettext("Title"), t.title));
                     // Interpret/Album für die Jahres-Auflösung merken (werden
@@ -1791,7 +2034,7 @@ impl App {
                     // Genre + Komponist aus den Datei-Tags (nur Anzeige). Der
                     // Komponist wird immer gezeigt, wenn er getaggt ist (relevant
                     // für Klassik/Hörspiele); das Genre, wann immer vorhanden.
-                    let (genre, composer) = scanner::read_genre_composer(entry.path());
+                    let (genre, composer) = scanner::read_genre_composer(p);
                     if let Some(a) = t.artist {
                         lines.push((gettext("Artist"), a));
                     }
@@ -1825,10 +2068,7 @@ impl App {
 
             // Per Fingerprint (AcoustID) erkannte Vorschläge – nur Anzeige,
             // wird nicht in die Datei geschrieben.
-            if let Ok(Some(m)) = self
-                .library
-                .get_track_meta(&entry.path().to_string_lossy())
-            {
+            if let Ok(Some(m)) = self.library.get_track_meta(&p.to_string_lossy()) {
                 if m.status == "matched" {
                     if let Some(t) = m.title {
                         lines.push((gettext("Detected (title)"), t));
@@ -1840,6 +2080,12 @@ impl App {
                         lines.push((gettext("Detected (album)"), al));
                     }
                 }
+            }
+        } else {
+            // Entfernte Datei: nur die (ggf. nachgeladenen) Anzeigewerte.
+            lines.push((gettext("Title"), entry.display_title()));
+            if let Some(a) = entry.effective_artist() {
+                lines.push((gettext("Artist"), a));
             }
         }
         lines

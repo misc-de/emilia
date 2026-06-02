@@ -49,7 +49,9 @@ impl App {
                 e.display_title(),
                 None,
                 "track",
-                e.path().to_string_lossy().into_owned(),
+                e.path()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| e.rel_path().unwrap_or_default().to_string()),
             ),
             // Ordner: als Interpret oder Album erkennen; sonst kein EQ.
             CtxTarget::Fs(e) => match self.fs_eq_level(e) {

@@ -96,7 +96,7 @@ impl App {
             group.add(&adw::ActionRow::builder().title(&gettext("No tracks yet")).build());
         }
         for path in &paths {
-            let display = Self::track_display_name(std::path::Path::new(path));
+            let display = self.display_name(std::path::Path::new(path));
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&display))
                 .activatable(true)

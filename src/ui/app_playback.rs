@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use relm4::gtk;
 
 use crate::core::scanner;
+use crate::core::webdav::{self, Creds};
 use crate::model::Track;
-use crate::ui::app::{guarded_resume, App, PlaySession};
-use crate::ui::fs_row::FsInput;
+use crate::ui::app::{guarded_resume, ActiveSource, App, Msg, PlaySession, RemoteTrack};
+use crate::ui::fs_row::{FsEntry, FsInput};
 
 impl App {
     /// Aktualisiert die Queue-Markierung aller sichtbaren Dateizeilen.
@@ -17,16 +18,33 @@ impl App {
         let queue = self.queue.clone();
         // Aktuell laufender Titel (für die Play-Markierung).
         let active_path = self.queue.get(self.queue_pos).cloned();
+        // Entfernte Wiedergabe: aktiver Eintrag wird über den rel-Pfad markiert.
+        let active_rel = if self.playing_remote {
+            self.remote_queue.get(self.remote_pos).map(|t| t.rel_path.clone())
+        } else {
+            None
+        };
         let states: Vec<(usize, bool, bool)> = {
             let guard = self.entries.guard();
             (0..guard.len())
                 .filter_map(|i| {
                     guard.get(i).map(|r| {
                         let is_file = !r.entry.is_dir();
-                        let q = is_file && queue.iter().any(|p| p == r.entry.path());
-                        let a = is_file
-                            && active_path.as_deref() == Some(r.entry.path().as_path());
-                        (i, q, a)
+                        match r.entry.path() {
+                            Some(p) => {
+                                let q = is_file && queue.iter().any(|x| x == p);
+                                let a = is_file
+                                    && active_path.as_deref() == Some(p.as_path());
+                                (i, q, a)
+                            }
+                            None => {
+                                // Entfernter Eintrag: Aktiv-Markierung über rel_path.
+                                let a = is_file
+                                    && active_rel.is_some()
+                                    && r.entry.rel_path() == active_rel.as_deref();
+                                (i, false, a)
+                            }
+                        }
                     })
                 })
                 .collect()
@@ -40,6 +58,143 @@ impl App {
         self.refresh_ctx_play();
         // Play/Pause-Icons der Podcast-Beiträge (und die Detail-„Abspielen"-Zeile).
         self.refresh_episode_icons();
+    }
+
+    /// Zugangsdaten der aktuell aktiven WebDAV-Quelle (falls eine aktiv ist).
+    pub(crate) fn active_webdav_creds(&self) -> Option<Creds> {
+        let ActiveSource::Source(id) = self.active_source else {
+            return None;
+        };
+        let s = self.sources.iter().find(|s| s.id == id)?;
+        if s.kind != "webdav" {
+            return None;
+        }
+        Creds::from_source(s)
+    }
+
+    /// Lokaler Cache-Pfad einer entfernten Datei der aktiven Quelle (oder `None`).
+    pub(crate) fn remote_cache_path(&self, rel: &str) -> Option<PathBuf> {
+        let ActiveSource::Source(id) = self.active_source else {
+            return None;
+        };
+        Some(webdav::cache_path(id, rel))
+    }
+
+    /// Eine entfernte Datei antippen: erneutes Antippen des laufenden Titels
+    /// schaltet Pause/Weiter um; sonst wird die Ordner-Reihe als entfernte Queue
+    /// gesetzt und ab dem gewählten Titel abgespielt.
+    pub(crate) fn activate_remote(&mut self, rel: &str) {
+        let is_active = self.playing_remote
+            && self
+                .remote_queue
+                .get(self.remote_pos)
+                .is_some_and(|t| t.rel_path == rel);
+        if is_active {
+            if self.playing {
+                self.save_resume();
+                self.player.pause();
+            } else {
+                self.player.resume();
+            }
+            self.playing = !self.playing;
+            self.mpris.set_playing(self.playing);
+            self.refresh_queue_icons();
+            return;
+        }
+        // Entfernte Reihe aus den sichtbaren Dateizeilen aufbauen (Ordnerfolge).
+        let mut queue = Vec::new();
+        let mut start = 0;
+        {
+            let guard = self.entries.guard();
+            for i in 0..guard.len() {
+                if let Some(row) = guard.get(i) {
+                    if let FsEntry::RemoteFile { rel_path, .. } = &row.entry {
+                        if rel_path == rel {
+                            start = queue.len();
+                        }
+                        queue.push(RemoteTrack {
+                            rel_path: rel_path.clone(),
+                            title: row.entry.display_title(),
+                        });
+                    }
+                }
+            }
+        }
+        if queue.is_empty() {
+            return;
+        }
+        self.remote_queue = queue;
+        self.remote_pos = start;
+        self.play_remote_current();
+    }
+
+    /// Spielt den aktuellen Titel der entfernten Reihe – lokal (falls bereits
+    /// heruntergeladen) oder gestreamt. Eigenständig wie Podcast/Sender; die
+    /// lokale `PathBuf`-Warteschlange bleibt dabei leer.
+    pub(crate) fn play_remote_current(&mut self) {
+        let Some(creds) = self.active_webdav_creds() else {
+            return;
+        };
+        let Some(track) = self.remote_queue.get(self.remote_pos).cloned() else {
+            return;
+        };
+        self.save_resume();
+        self.save_episode_progress();
+        self.finalize_play_session(false);
+        let cached = self.remote_cache_path(&track.rel_path);
+        let result = match &cached {
+            Some(p) if p.exists() => self.player.play_file(&p.to_string_lossy(), 0),
+            _ => self.player.play_uri(&webdav::stream_uri(&creds, &track.rel_path), 0),
+        };
+        match result {
+            Ok(()) => {
+                self.now_playing = Some(track.title.clone());
+                self.playing = true;
+                self.playing_path = None;
+                self.playing_episode_url = None;
+                self.playing_stream = None;
+                self.playing_remote = true;
+                self.stop_recorder();
+                self.queue.clear();
+                self.queue_pos = 0;
+                self.position_ms = 0;
+                self.track_duration_ms = 0;
+                *self.close_resume.borrow_mut() = None;
+                self.mpris.set_metadata(0, &track.title, None, None, None, None);
+                self.mpris.set_playing(true);
+                self.set_chapters(Vec::new());
+                self.refresh_queue_icons();
+            }
+            Err(e) => {
+                tracing::error!("Failed to play remote file: {e}");
+                self.toast(&crate::i18n::gettext("Could not play this file"));
+            }
+        }
+    }
+
+    /// Nächster Titel der entfernten Reihe (für Next-Taste und EOS-Weiterschalten).
+    pub(crate) fn remote_next(&mut self) {
+        if self.remote_pos + 1 < self.remote_queue.len() {
+            self.remote_pos += 1;
+            self.play_remote_current();
+        } else if self.repeat && !self.remote_queue.is_empty() {
+            self.remote_pos = 0;
+            self.play_remote_current();
+        } else {
+            // Ende der Reihe – Wiedergabe stoppen (wie am Episodenende).
+            self.player.stop();
+            self.playing = false;
+            self.mpris.set_playing(false);
+            self.refresh_queue_icons();
+        }
+    }
+
+    /// Voriger Titel der entfernten Reihe.
+    pub(crate) fn remote_prev(&mut self) {
+        if self.remote_pos > 0 {
+            self.remote_pos -= 1;
+            self.play_remote_current();
+        }
     }
 
     /// Baut die Zufalls-Reihenfolge neu auf (Fisher-Yates), mit dem aktuell
@@ -186,6 +341,48 @@ impl App {
     /// Spielt den aktuellen Eintrag der Warteschlange ab.
     /// Anzeigename eines Titels für die Leiste: „Interpret - Titel" aus den Tags,
     /// notfalls der Dateiname.
+    /// Startet die Wiedergabe eines Titel-Pfads. Lokale Pfade laufen über
+    /// `play_file`; **entfernte** Titel (synthetischer Pfad `nc:<id>:<rel>`) werden
+    /// aus dem lokalen Cache gespielt oder direkt von der Nextcloud gestreamt.
+    pub(crate) fn start_track_playback(&self, path_str: &str, resume_ms: i64) -> anyhow::Result<()> {
+        if let Some((sid, rel)) = crate::core::webdav::parse_nc_path(path_str) {
+            let cache = crate::core::webdav::cache_path(sid, &rel);
+            if cache.exists() {
+                return self.player.play_file(&cache.to_string_lossy(), resume_ms);
+            }
+            if let Some(creds) = self
+                .sources
+                .iter()
+                .find(|s| s.id == sid)
+                .and_then(crate::core::webdav::Creds::from_source)
+            {
+                return self
+                    .player
+                    .play_uri(&crate::core::webdav::stream_uri(&creds, &rel), resume_ms);
+            }
+            return Err(anyhow::anyhow!("Nextcloud source unavailable"));
+        }
+        self.player.play_file(path_str, resume_ms)
+    }
+
+    /// Anzeigename eines Titels für Leiste/Warteschlange: bevorzugt aus der
+    /// Datenbank (funktioniert auch für entfernte Titel), sonst aus der Datei.
+    pub(crate) fn display_name(&self, path: &std::path::Path) -> String {
+        let path_str = path.to_string_lossy();
+        if let Ok(Some(t)) = self.library.track_by_path(&path_str) {
+            let title = if t.title.trim().is_empty() {
+                path.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_string()
+            } else {
+                t.title
+            };
+            return match t.artist {
+                Some(a) if !a.trim().is_empty() => format!("{a} - {title}"),
+                _ => title,
+            };
+        }
+        Self::track_display_name(path)
+    }
+
     pub(crate) fn track_display_name(path: &std::path::Path) -> String {
         let stem = || {
             path.file_stem()
@@ -337,12 +534,16 @@ impl App {
             Some(t) if self.should_resume(t) => t.resume_ms,
             _ => 0,
         };
-        match self.player.play_file(&path_str, resume_ms) {
+        match self.start_track_playback(&path_str, resume_ms) {
             Ok(()) => {
                 self.playing_path = Some(path.clone());
-                // Es läuft wieder Musik – keine Podcast-Episode mehr aktiv.
+                // Es läuft wieder Musik – keine Podcast-Episode/kein Sender/keine
+                // entfernte Datei mehr aktiv.
                 self.playing_episode_url = None;
-                self.now_playing = Some(Self::track_display_name(&path));
+                self.playing_stream = None;
+                self.playing_remote = false;
+                self.stop_recorder();
+                self.now_playing = Some(self.display_name(&path));
                 self.playing = true;
                 // Aktiven Ausgang (kann sich geändert haben) auffrischen.
                 self.active_output = crate::core::output::default_output().unwrap_or_default();
@@ -382,6 +583,17 @@ impl App {
                 self.prev_ctx = Some((self.queue.clone(), self.queue_pos));
                 // Titel haben keine Kapitel → Marken/Hover-Liste säubern.
                 self.set_chapters(Vec::new());
+                // Fehlen brauchbare Tags (Interpret/Album), den Titel im Hintergrund
+                // per Fingerprint erkennen lassen – statt eines Massen-Laufs nur das,
+                // was tatsächlich gespielt wird. Die eigentlichen Gucklöcher (Key,
+                // fpcalc, Netz, Versuchsgrenze) prüft fetch_focus_track.
+                let needs_id = track.as_ref().map_or(true, |t| {
+                    t.artist.as_deref().unwrap_or("").trim().is_empty()
+                        || t.album.as_deref().unwrap_or("").trim().is_empty()
+                });
+                if needs_id && self.acoustid_key.as_deref().is_some_and(|k| !k.is_empty()) {
+                    let _ = self.input.send(Msg::FingerprintCurrent(path.clone()));
+                }
             }
             Err(e) => tracing::error!("Playback failed: {e}"),
         }

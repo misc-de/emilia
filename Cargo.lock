@@ -473,9 +473,10 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "emilia"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "anyhow",
+ "async-channel",
  "base64 0.22.1",
  "dirs",
  "getrandom 0.2.17",
@@ -485,7 +486,9 @@ dependencies = [
  "libadwaita",
  "lofty",
  "mpris-server",
+ "percent-encoding",
  "qrcode",
+ "quick-xml 0.36.2",
  "rcgen",
  "relm4",
  "relm4-components",
@@ -1794,6 +1797,15 @@ checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-xml"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
@@ -1952,7 +1964,7 @@ version = "2.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0e38781082c53bdde56e6081698c06831f69a27eac2593ed6b6cb2511424ad5"
 dependencies = [
- "quick-xml",
+ "quick-xml 0.39.4",
 ]
 
 [[package]]

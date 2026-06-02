@@ -97,9 +97,17 @@ impl Player {
         Ok(())
     }
 
-    /// Registriert einen Callback, der bei Titelende (EOS) aufgerufen wird –
-    /// für das Weiterschalten in der Warteschlange. Läuft im Main-Loop.
-    pub fn connect_eos<F: Fn() + 'static>(&self, on_eos: F) {
+    /// Registriert Callbacks für die Bus-Ereignisse: `on_eos` bei Titelende (für
+    /// das Weiterschalten in der Warteschlange) und `on_title` bei einem
+    /// Titel-Tag. Bei Streams (Internet-Radio) liefert `playbin3` über die
+    /// ICY-Metadaten den **aktuell laufenden Titel** als Tag – damit lässt sich
+    /// „Now Playing" anzeigen, ohne eine zweite Verbindung zu öffnen. Läuft im
+    /// Main-Loop.
+    pub fn connect_bus_events<E, T>(&self, on_eos: E, on_title: T)
+    where
+        E: Fn() + 'static,
+        T: Fn(String) + 'static,
+    {
         if let Some(bus) = self.playbin.bus() {
             let guard = bus.add_watch_local(move |_, msg| {
                 match msg.view() {
@@ -110,6 +118,16 @@ impl Player {
                             err.error(),
                             err.debug()
                         );
+                    }
+                    gst::MessageView::Tag(tag) => {
+                        // ICY-„StreamTitle" (bzw. Datei-Titel) → an die UI melden.
+                        // Der Aufrufer entscheidet, ob er ihn nutzt (nur bei Sendern).
+                        if let Some(title) = tag.tags().get::<gst::tags::Title>() {
+                            let t = title.get().to_string();
+                            if !t.trim().is_empty() {
+                                on_title(t);
+                            }
+                        }
                     }
                     _ => {}
                 }

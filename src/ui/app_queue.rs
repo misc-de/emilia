@@ -101,7 +101,7 @@ impl App {
             let qidx = pos + offset;
             let is_current = offset == 0;
             let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&Self::track_display_name(path)))
+                .title(gtk::glib::markup_escape_text(&self.display_name(path)))
                 .build();
 
             if is_current {

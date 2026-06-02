@@ -27,11 +27,14 @@ pub struct ArtistCard {
     pub meta: ArtistMeta,
     /// Quadratischer Foto-Rahmen; Bild wird asynchron nachgereicht.
     avatar: adw::Bin,
+    /// Präfix: Foto, bei getrennter Quelle mit rotem „Getrennt"-Overlay.
+    prefix: gtk::Widget,
 }
 
 #[relm4::factory(pub)]
 impl FactoryComponent for ArtistCard {
-    type Init = ArtistMeta;
+    /// `(Interpret, ist die Quelle gerade offline?)`.
+    type Init = (ArtistMeta, bool);
     type Input = ();
     type Output = ArtistOutput;
     /// Das im Hintergrund dekodierte Foto (oder `None`, falls Datei fehlt/fehlerhaft).
@@ -43,7 +46,7 @@ impl FactoryComponent for ArtistCard {
             add_css_class: "emilia-flush",
             set_title: &esc(&self.meta.name),
             set_activatable: true,
-            add_prefix: &self.avatar,
+            add_prefix: &self.prefix,
 
             // Kurzes Tippen: Alben & Lieder des Interpreten auflisten.
             connect_activated[sender, index] => move |_| {
@@ -60,8 +63,9 @@ impl FactoryComponent for ArtistCard {
         }
     }
 
-    fn init_model(meta: Self::Init, _index: &DynamicIndex, sender: FactorySender<Self>) -> Self {
+    fn init_model(init: Self::Init, _index: &DynamicIndex, sender: FactorySender<Self>) -> Self {
         use crate::ui::widgets;
+        let (meta, offline) = init;
         let avatar = widgets::thumb_frame("avatar-default-symbolic", 48);
         if let Some(path) = meta.image_path.clone() {
             // Bereits dekodiert? Dann sofort aus dem Cache – kein Aufblitzen.
@@ -73,7 +77,12 @@ impl FactoryComponent for ArtistCard {
                 sender.spawn_oneshot_command(move || widgets::decode_thumb(&path));
             }
         }
-        Self { meta, avatar }
+        let prefix = widgets::offline_overlay(&avatar, offline);
+        Self {
+            meta,
+            avatar,
+            prefix,
+        }
     }
 
     fn update_cmd(&mut self, texture: Self::CommandOutput, _sender: FactorySender<Self>) {
