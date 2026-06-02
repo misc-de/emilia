@@ -22,6 +22,87 @@ pub struct Library {
     conn: Connection,
 }
 
+/// Shared upsert for the `track` table, used by both the single-row
+/// [`Library::upsert_track`] and the batched [`Library::upsert_tracks`].
+const UPSERT_TRACK_SQL: &str = r#"
+    INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms, genre)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+    ON CONFLICT(path) DO UPDATE SET
+        title       = excluded.title,
+        artist      = excluded.artist,
+        album       = excluded.album,
+        track_no    = excluded.track_no,
+        disc_no     = excluded.disc_no,
+        duration_ms = excluded.duration_ms,
+        genre       = excluded.genre
+"#;
+
+/// Binds a `Track` to [`UPSERT_TRACK_SQL`]'s placeholders. A macro (not a fn)
+/// because `rusqlite::params!` borrows from `t` and cannot be returned.
+macro_rules! track_upsert_params {
+    ($t:expr) => {
+        rusqlite::params![
+            $t.path,
+            $t.title,
+            $t.artist,
+            $t.album,
+            $t.track_no,
+            $t.disc_no,
+            $t.duration_ms,
+            $t.genre,
+        ]
+    };
+}
+
+/// Escapes the LIKE metacharacters `\ % _` so an arbitrary (user-chosen) path
+/// can be used as a literal prefix in a `LIKE … ESCAPE '\'` pattern.
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// In-memory snapshot of the `category` table (+ one sample track path per
+/// `(artist, album)`) for resolving the areas of many items at once. Built by
+/// [`Library::category_snapshot`]. Resolution mirrors the per-item
+/// [`Library::album_areas`] / [`Library::artist_areas`].
+struct CategorySnapshot {
+    map: std::collections::HashMap<(String, String), Vec<crate::core::category::Area>>,
+    sample: std::collections::HashMap<(String, String), String>,
+}
+
+impl CategorySnapshot {
+    fn get(&self, scope: &str, key: &str) -> Option<&Vec<crate::core::category::Area>> {
+        self.map.get(&(scope.to_string(), key.to_string()))
+    }
+
+    /// Album → artist → parent-folder chain (of a sample track) → default.
+    fn album_areas(&self, artist: &str, album: &str) -> Vec<crate::core::category::Area> {
+        use crate::core::category::{album_key, Area};
+        if let Some(v) = self.get("album", &album_key(artist, album)) {
+            return v.clone();
+        }
+        if let Some(v) = self.get("artist", artist) {
+            return v.clone();
+        }
+        if let Some(path) = self.sample.get(&(artist.to_string(), album.to_string())) {
+            let mut dir = std::path::Path::new(path).parent();
+            while let Some(d) = dir {
+                if let Some(v) = self.get("folder", &d.to_string_lossy()) {
+                    return v.clone();
+                }
+                dir = d.parent();
+            }
+        }
+        Area::DEFAULT.to_vec()
+    }
+
+    /// Artist → default.
+    fn artist_areas(&self, name: &str) -> Vec<crate::core::category::Area> {
+        self.get("artist", name)
+            .cloned()
+            .unwrap_or_else(|| crate::core::category::Area::DEFAULT.to_vec())
+    }
+}
+
 /// File name without extension (fallback: the whole key).
 fn file_stem_of(path: &str) -> String {
     std::path::Path::new(path)
@@ -46,6 +127,12 @@ impl Library {
         // Multiple connections (UI thread + online worker) access in parallel:
         // wait briefly instead of aborting immediately with "database is locked".
         conn.busy_timeout(Duration::from_secs(10))?;
+        // WAL lets readers (the UI) keep working while a writer (scan/enrichment)
+        // is active, instead of every reader blocking on a single rollback-journal
+        // lock for up to the busy-timeout. `synchronous=NORMAL` is the safe, fast
+        // companion for WAL (one fsync per checkpoint, not per commit).
+        // `execute_batch` is used because `PRAGMA journal_mode` returns a row.
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         let lib = Self { conn };
         lib.migrate()?;
         Ok(lib)
@@ -571,12 +658,15 @@ impl Library {
 
     /// Stores the order of the favorites (pos = index in `ordered`).
     pub fn set_favorite_order(&self, ordered: &[(String, String)]) -> Result<()> {
-        for (i, (scope, key)) in ordered.iter().enumerate() {
-            self.conn.execute(
-                "UPDATE favorite SET pos = ?1 WHERE scope = ?2 AND key = ?3",
-                rusqlite::params![i as i64, scope, key],
-            )?;
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt =
+                tx.prepare_cached("UPDATE favorite SET pos = ?1 WHERE scope = ?2 AND key = ?3")?;
+            for (i, (scope, key)) in ordered.iter().enumerate() {
+                stmt.execute(rusqlite::params![i as i64, scope, key])?;
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -771,7 +861,7 @@ impl Library {
         if let Ok(Some(v)) = self.get_category("artist", artist) {
             return parse_areas(&v);
         }
-        if let Some(path) = self.album_sample_path(album) {
+        if let Some(path) = self.album_sample_path(artist, album) {
             let mut dir = std::path::Path::new(&path).parent();
             while let Some(d) = dir {
                 if let Ok(Some(v)) = self.get_category("folder", &d.to_string_lossy()) {
@@ -783,12 +873,14 @@ impl Library {
         Area::DEFAULT.to_vec()
     }
 
-    /// Path of any track of an album (for the folder inheritance).
-    fn album_sample_path(&self, album: &str) -> Option<String> {
+    /// Path of a track of *this* artist's album (for folder inheritance).
+    /// Filtering by artist matters: two artists can share an album name but live
+    /// in different folders, and the wrong folder would inherit the wrong areas.
+    fn album_sample_path(&self, artist: &str, album: &str) -> Option<String> {
         self.conn
             .query_row(
-                "SELECT path FROM track WHERE album = ?1 LIMIT 1",
-                [album],
+                "SELECT path FROM track WHERE COALESCE(artist, '') = ?1 AND album = ?2 LIMIT 1",
+                rusqlite::params![artist, album],
                 |r| r.get::<_, String>(0),
             )
             .ok()
@@ -801,6 +893,43 @@ impl Library {
             return parse_areas(&v);
         }
         Area::DEFAULT.to_vec()
+    }
+
+    /// Loads the whole (tiny) `category` table plus one sample track path per
+    /// `(artist, album)` into memory, so the overviews can resolve the areas of
+    /// thousands of albums/artists without a query per item (was a clear N+1).
+    /// The resolution in [`CategorySnapshot`] mirrors [`Self::album_areas`] /
+    /// [`Self::artist_areas`] exactly.
+    fn category_snapshot(&self) -> Result<CategorySnapshot> {
+        use crate::core::category::parse_areas;
+        use std::collections::HashMap;
+
+        let mut map: HashMap<(String, String), Vec<crate::core::category::Area>> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare("SELECT scope, key, value FROM category")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            })?;
+            for (scope, key, value) in rows.flatten() {
+                map.insert((scope, key), parse_areas(&value));
+            }
+        }
+
+        let mut sample: HashMap<(String, String), String> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT COALESCE(artist, ''), album, MIN(path) FROM track
+                 WHERE album IS NOT NULL AND album <> ''
+                 GROUP BY COALESCE(artist, ''), album",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            })?;
+            for (artist, album, path) in rows.flatten() {
+                sample.insert((artist, album), path);
+            }
+        }
+        Ok(CategorySnapshot { map, sample })
     }
 
     // ---- Equalizer (10 bands, with inheritance) ----
@@ -1008,31 +1137,63 @@ impl Library {
 
     /// Inserts a track or updates its metadata (key: path).
     pub fn upsert_track(&self, t: &Track) -> Result<()> {
-        self.conn.execute(
-            r#"
-            INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms, genre)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            ON CONFLICT(path) DO UPDATE SET
-                title       = excluded.title,
-                artist      = excluded.artist,
-                album       = excluded.album,
-                track_no    = excluded.track_no,
-                disc_no     = excluded.disc_no,
-                duration_ms = excluded.duration_ms,
-                genre       = excluded.genre
-            "#,
-            rusqlite::params![
-                t.path,
-                t.title,
-                t.artist,
-                t.album,
-                t.track_no,
-                t.disc_no,
-                t.duration_ms,
-                t.genre,
-            ],
-        )?;
+        self.conn.execute(UPSERT_TRACK_SQL, track_upsert_params!(t))?;
         Ok(())
+    }
+
+    /// Upserts many tracks in a single transaction. Atomic (a crash mid-scan
+    /// leaves the previous state, not a half-written batch) and dramatically
+    /// faster than one implicit transaction per row (one fsync per batch instead
+    /// of per track). Used by the directory scan.
+    pub fn upsert_tracks(&self, tracks: &[Track]) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut count = 0;
+        {
+            let mut stmt = tx.prepare_cached(UPSERT_TRACK_SQL)?;
+            for t in tracks {
+                stmt.execute(track_upsert_params!(t))?;
+                count += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// Removes tracks under `root` whose files no longer exist on disk (orphans
+    /// left behind by deletions/moves). Strictly scoped to `root`: remote
+    /// (`nc:…`) tracks and other sources keep their own path prefixes and are
+    /// never touched. `present` is the set of paths found during the scan; if it
+    /// is empty nothing is pruned, so a transiently unreadable/unmounted folder
+    /// cannot wipe the library. Returns the number of rows removed.
+    pub fn prune_tracks_under(&self, root: &std::path::Path, present: &[String]) -> Result<usize> {
+        if present.is_empty() {
+            return Ok(0);
+        }
+        // `root/%`, escaping LIKE metacharacters in the (user-chosen) path.
+        let prefix = like_escape(&root.to_string_lossy());
+        let pattern = format!("{prefix}{}%", std::path::MAIN_SEPARATOR);
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS _present(path TEXT PRIMARY KEY);
+             DELETE FROM _present;",
+        )?;
+        {
+            let mut stmt = tx.prepare("INSERT OR IGNORE INTO _present(path) VALUES (?1)")?;
+            for p in present {
+                stmt.execute([p])?;
+            }
+        }
+        let removed = tx.execute(
+            "DELETE FROM track
+             WHERE path LIKE ?1 ESCAPE '\\'
+               AND path NOT IN (SELECT path FROM _present)",
+            rusqlite::params![pattern],
+        )?;
+        tx.commit()?;
+        if removed > 0 {
+            tracing::info!("Scan: pruned {removed} orphaned track(s) under {}", root.display());
+        }
+        Ok(removed)
     }
 
     /// Stores the resume position by path. The
@@ -1295,8 +1456,10 @@ impl Library {
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
         // Properties: only show albums that are visible in the "Albums" area.
+        // Resolve from one in-memory snapshot instead of querying per album.
+        let cats = self.category_snapshot()?;
         out.retain(|a| {
-            self.album_areas(&a.artist, &a.album)
+            cats.album_areas(&a.artist, &a.album)
                 .contains(&crate::core::category::Area::Albums)
         });
         out.sort_by(|a, b| a.album.to_lowercase().cmp(&b.album.to_lowercase()));
@@ -1398,17 +1561,31 @@ impl Library {
     /// "feat." entries -- with (any available) photo.
     pub fn artists_overview(&self) -> Result<Vec<ArtistMeta>> {
         let names = self.distinct_artists()?;
+        // Resolve areas from one snapshot and pull all artist metadata in one
+        // query, instead of two queries per artist (was a clear N+1).
+        let cats = self.category_snapshot()?;
+        let mut meta_by_name: std::collections::HashMap<String, ArtistMeta> =
+            std::collections::HashMap::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT name, image_path, status FROM artist_meta")?;
+            let rows = stmt.query_map([], Self::map_artist_meta)?;
+            for m in rows.flatten() {
+                meta_by_name.insert(m.name.clone(), m);
+            }
+        }
         let mut out = Vec::with_capacity(names.len());
         for name in names {
             // Properties: only show those visible in the "Artists" area.
-            if !self
+            if !cats
                 .artist_areas(&name)
                 .contains(&crate::core::category::Area::Artists)
             {
                 continue;
             }
-            let meta = self
-                .get_artist_meta(&name)?
+            let meta = meta_by_name
+                .remove(&name)
                 .unwrap_or_else(|| ArtistMeta::pending(&name));
             out.push(meta);
         }
@@ -1757,17 +1934,22 @@ impl Library {
         album: &str,
         images: &[(String, String, String)],
     ) -> Result<()> {
-        self.conn.execute(
+        // One transaction so the gallery is never seen half-deleted/half-filled.
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "DELETE FROM album_image WHERE artist = ?1 AND album = ?2",
             rusqlite::params![artist, album],
         )?;
-        for (i, (path, kind, source)) in images.iter().enumerate() {
-            self.conn.execute(
+        {
+            let mut stmt = tx.prepare_cached(
                 "INSERT INTO album_image (artist, album, idx, path, kind, source)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![artist, album, i as i64, path, kind, source],
             )?;
+            for (i, (path, kind, source)) in images.iter().enumerate() {
+                stmt.execute(rusqlite::params![artist, album, i as i64, path, kind, source])?;
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1787,15 +1969,19 @@ impl Library {
         name: &str,
         images: &[(String, String, String)],
     ) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM artist_image WHERE name = ?1", [name])?;
-        for (i, (path, kind, source)) in images.iter().enumerate() {
-            self.conn.execute(
+        // One transaction so the gallery is never seen half-deleted/half-filled.
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM artist_image WHERE name = ?1", [name])?;
+        {
+            let mut stmt = tx.prepare_cached(
                 "INSERT INTO artist_image (name, idx, path, kind, source)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![name, i as i64, path, kind, source],
             )?;
+            for (i, (path, kind, source)) in images.iter().enumerate() {
+                stmt.execute(rusqlite::params![name, i as i64, path, kind, source])?;
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1830,9 +2016,10 @@ impl Library {
 
     /// Deletes a playlist along with its entries.
     pub fn delete_playlist(&self, id: i64) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM playlist_item WHERE playlist_id = ?1", [id])?;
-        self.conn.execute("DELETE FROM playlist WHERE id = ?1", [id])?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM playlist_item WHERE playlist_id = ?1", [id])?;
+        tx.execute("DELETE FROM playlist WHERE id = ?1", [id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1857,17 +2044,23 @@ impl Library {
 
     /// Appends paths to the end of a playlist (duplicates allowed).
     pub fn add_to_playlist(&self, id: i64, paths: &[String]) -> Result<()> {
-        let start: i64 = self.conn.query_row(
+        // Compute the start position and insert in one transaction so two
+        // concurrent appenders cannot read the same MAX(position) and collide.
+        let tx = self.conn.unchecked_transaction()?;
+        let start: i64 = tx.query_row(
             "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_item WHERE playlist_id = ?1",
             [id],
             |r| r.get(0),
         )?;
-        for (i, path) in paths.iter().enumerate() {
-            self.conn.execute(
+        {
+            let mut stmt = tx.prepare_cached(
                 "INSERT INTO playlist_item (playlist_id, position, path) VALUES (?1, ?2, ?3)",
-                rusqlite::params![id, start + i as i64, path],
             )?;
+            for (i, path) in paths.iter().enumerate() {
+                stmt.execute(rusqlite::params![id, start + i as i64, path])?;
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1943,22 +2136,27 @@ impl Library {
 
     /// Removes a podcast along with its episodes.
     pub fn delete_podcast(&self, id: i64) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM episode WHERE podcast_id = ?1", [id])?;
-        self.conn.execute("DELETE FROM podcast WHERE id = ?1", [id])?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM episode WHERE podcast_id = ?1", [id])?;
+        tx.execute("DELETE FROM podcast WHERE id = ?1", [id])?;
+        tx.commit()?;
         Ok(())
     }
 
     /// Replaces the episodes of a podcast (order = feed order).
     pub fn set_episodes(&self, podcast_id: i64, episodes: &[Episode]) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM episode WHERE podcast_id = ?1", [podcast_id])?;
-        for (i, ep) in episodes.iter().enumerate() {
-            self.conn.execute(
+        // One transaction: a refresh interrupted mid-way must not leave the feed
+        // with its old episodes deleted and only some of the new ones inserted.
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM episode WHERE podcast_id = ?1", [podcast_id])?;
+        {
+            let mut stmt = tx.prepare_cached(
                 "INSERT INTO episode
                     (podcast_id, position, guid, title, audio_url, published, duration, description)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![
+            )?;
+            for (i, ep) in episodes.iter().enumerate() {
+                stmt.execute(rusqlite::params![
                     podcast_id,
                     i as i64,
                     ep.guid,
@@ -1967,9 +2165,10 @@ impl Library {
                     ep.published,
                     ep.duration,
                     ep.description
-                ],
-            )?;
+                ])?;
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -2647,5 +2846,70 @@ mod tests {
             lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(3.0))
         );
+    }
+
+    #[test]
+    fn prune_removes_only_missing_files_under_root() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/music/a.mp3", Some("A"), Some("X"))).unwrap();
+        lib.upsert_track(&track("/music/gone.mp3", Some("A"), Some("X"))).unwrap();
+        // A remote (Nextcloud) track and a track from another folder must survive.
+        lib.upsert_track(&track("nc:7:Album/r.mp3", Some("A"), Some("X"))).unwrap();
+        lib.upsert_track(&track("/other/b.mp3", Some("B"), Some("Y"))).unwrap();
+
+        // Scan of /music found only a.mp3 (gone.mp3 was deleted on disk).
+        let present = vec!["/music/a.mp3".to_string()];
+        let removed = lib
+            .prune_tracks_under(std::path::Path::new("/music"), &present)
+            .unwrap();
+        assert_eq!(removed, 1);
+        assert!(lib.track_by_path("/music/a.mp3").unwrap().is_some());
+        assert!(lib.track_by_path("/music/gone.mp3").unwrap().is_none());
+        assert!(lib.track_by_path("nc:7:Album/r.mp3").unwrap().is_some());
+        assert!(lib.track_by_path("/other/b.mp3").unwrap().is_some());
+    }
+
+    #[test]
+    fn prune_with_empty_scan_keeps_everything() {
+        // Guards against a transiently unreadable/unmounted folder wiping the DB.
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/music/a.mp3", Some("A"), Some("X"))).unwrap();
+        let removed = lib
+            .prune_tracks_under(std::path::Path::new("/music"), &[])
+            .unwrap();
+        assert_eq!(removed, 0);
+        assert!(lib.track_by_path("/music/a.mp3").unwrap().is_some());
+    }
+
+    #[test]
+    fn prune_escapes_like_metacharacters_in_root() {
+        // A root containing `%`/`_` must match literally, not as LIKE wildcards.
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/m%/keep.mp3", Some("A"), Some("X"))).unwrap();
+        lib.upsert_track(&track("/mX/other.mp3", Some("A"), Some("X"))).unwrap();
+        // Scan of "/m%" found nothing under it → keep.mp3 is an orphan there,
+        // but "/mX/other.mp3" must NOT be touched (would match if `%` were a
+        // wildcard).
+        let removed = lib
+            .prune_tracks_under(std::path::Path::new("/m%"), &["/m%/x.mp3".to_string()])
+            .unwrap();
+        assert_eq!(removed, 1);
+        assert!(lib.track_by_path("/m%/keep.mp3").unwrap().is_none());
+        assert!(lib.track_by_path("/mX/other.mp3").unwrap().is_some());
+    }
+
+    #[test]
+    fn upsert_tracks_batch_inserts_all() {
+        let lib = Library::open_in_memory().unwrap();
+        let batch = vec![
+            track("/m/1.mp3", Some("A"), Some("X")),
+            track("/m/2.mp3", Some("A"), Some("X")),
+            track("/m/3.mp3", Some("B"), Some("Y")),
+        ];
+        assert_eq!(lib.upsert_tracks(&batch).unwrap(), 3);
+        assert!(lib.track_by_path("/m/2.mp3").unwrap().is_some());
+        // Re-running upserts (no duplicates, ON CONFLICT path).
+        assert_eq!(lib.upsert_tracks(&batch).unwrap(), 3);
+        assert_eq!(lib.all_tracks().unwrap().len(), 3);
     }
 }

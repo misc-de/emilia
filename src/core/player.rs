@@ -4,6 +4,23 @@ use anyhow::{anyhow, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
+/// Whether a remote-supplied URI (station / podcast episode / WebDAV stream) may
+/// be handed to `playbin`. Restricts to network streaming schemes so a hostile
+/// feed or station entry can never make the player open a **local** resource
+/// (`file://`, `cdda://`, `resource://` …). Local files go through `play_file`,
+/// which builds the `file://` URI itself.
+fn is_allowed_remote_uri(uri: &str) -> bool {
+    let scheme = uri
+        .split_once(':')
+        .map(|(s, _)| s)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        scheme.as_str(),
+        "http" | "https" | "rtsp" | "rtmp" | "rtmps" | "mms" | "mmsh" | "mmst"
+    )
+}
+
 pub struct Player {
     playbin: gst::Element,
     /// 10-band equalizer as `audio-filter` (if the plugin is available).
@@ -12,6 +29,12 @@ pub struct Player {
     /// that **removes** the watch again when dropped – without holding
     /// onto it, an EOS would never arrive (no automatic advancing).
     bus_watch: std::cell::RefCell<Option<gst::bus::BusWatchGuard>>,
+    /// Resume position (ms) to seek to once the freshly loaded pipeline has
+    /// prerolled (signalled by `AsyncDone` on the bus). `0` = none. This lets
+    /// `play_file`/`play_uri` arm a resume and return immediately instead of
+    /// **blocking the UI thread** for up to several seconds waiting on preroll.
+    /// Shared with the bus-watch closure (single-threaded, main loop).
+    pending_seek_ms: std::rc::Rc<std::cell::Cell<i64>>,
 }
 
 impl Player {
@@ -32,6 +55,7 @@ impl Player {
             playbin,
             equalizer,
             bus_watch: std::cell::RefCell::new(None),
+            pending_seek_ms: std::rc::Rc::new(std::cell::Cell::new(0)),
         })
     }
 
@@ -57,20 +81,7 @@ impl Player {
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri.as_str());
-        if resume_ms > 0 {
-            // For a reliable seek the pipeline must first preroll:
-            // briefly go to PAUSED, wait for the preroll (only a few
-            // milliseconds for local files), then seek to the resume position.
-            self.playbin
-                .set_state(gst::State::Paused)
-                .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
-            let _ = self.playbin.state(gst::ClockTime::from_seconds(5));
-            let _ = self.seek_ms(resume_ms);
-        }
-        self.playbin
-            .set_state(gst::State::Playing)
-            .map_err(|e| anyhow!("Failed to start playback: {e}"))?;
-        Ok(())
+        self.start(resume_ms)
     }
 
     /// Plays an arbitrary URI (e.g. an http podcast episode). Unlike
@@ -78,22 +89,32 @@ impl Player {
     /// `resume_ms > 0` seeks to the saved position after the preroll (provided
     /// the source is seekable – podcast hosts usually support ranges).
     pub fn play_uri(&self, uri: &str, resume_ms: i64) -> Result<()> {
+        if !is_allowed_remote_uri(uri) {
+            return Err(anyhow!("Refusing to play non-network URI: {uri}"));
+        }
         self.playbin
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri);
+        self.start(resume_ms)
+    }
+
+    /// Starts the freshly-set pipeline. For a resume (`resume_ms > 0`) we go to
+    /// PAUSED and **arm** the seek; the bus watch performs it on `AsyncDone`
+    /// (preroll complete) and only then starts playback — so the UI thread never
+    /// blocks waiting for preroll and audio never briefly plays from 0:00.
+    fn start(&self, resume_ms: i64) -> Result<()> {
         if resume_ms > 0 {
-            // Like play_file: briefly go to PAUSED, wait for the preroll
-            // (a bit longer for streams), then seek to the resume position.
+            self.pending_seek_ms.set(resume_ms);
             self.playbin
                 .set_state(gst::State::Paused)
                 .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
-            let _ = self.playbin.state(gst::ClockTime::from_seconds(10));
-            let _ = self.seek_ms(resume_ms);
+        } else {
+            self.pending_seek_ms.set(0);
+            self.playbin
+                .set_state(gst::State::Playing)
+                .map_err(|e| anyhow!("Failed to start playback: {e}"))?;
         }
-        self.playbin
-            .set_state(gst::State::Playing)
-            .map_err(|e| anyhow!("Failed to start playback: {e}"))?;
         Ok(())
     }
 
@@ -109,9 +130,25 @@ impl Player {
         T: Fn(String) + 'static,
     {
         if let Some(bus) = self.playbin.bus() {
+            let playbin = self.playbin.clone();
+            let pending_seek = self.pending_seek_ms.clone();
             let guard = bus.add_watch_local(move |_, msg| {
                 match msg.view() {
                     gst::MessageView::Eos(_) => on_eos(),
+                    gst::MessageView::AsyncDone(_) => {
+                        // Preroll finished. If a resume seek is armed (see
+                        // `start`), perform it now and begin playback. Our own
+                        // flush-seek posts another AsyncDone, but the pending
+                        // value is already cleared, so it is a no-op.
+                        let target = pending_seek.replace(0);
+                        if target > 0 {
+                            let _ = playbin.seek_simple(
+                                gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+                                gst::ClockTime::from_mseconds(target.max(0) as u64),
+                            );
+                            let _ = playbin.set_state(gst::State::Playing);
+                        }
+                    }
                     gst::MessageView::Error(err) => {
                         tracing::error!(
                             "GStreamer error: {} ({:?})",
@@ -172,5 +209,34 @@ impl Player {
             )
             .map_err(|e| anyhow!("Seek failed: {e}"))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_remote_uri;
+
+    #[test]
+    fn remote_uri_allowlist_blocks_local_schemes() {
+        // Network streaming schemes are allowed (radio, podcasts, WebDAV).
+        for ok in [
+            "http://radio.example/stream",
+            "https://cloud.example/remote.php/dav/x.mp3",
+            "HTTPS://Cloud.Example/x",
+            "rtsp://host/live",
+            "mms://host/live",
+        ] {
+            assert!(is_allowed_remote_uri(ok), "{ok} should be allowed");
+        }
+        // Local-resource schemes a hostile feed/station must never reach.
+        for bad in [
+            "file:///etc/passwd",
+            "cdda://1",
+            "resource:///x",
+            "/etc/passwd",
+            "",
+        ] {
+            assert!(!is_allowed_remote_uri(bad), "{bad} should be blocked");
+        }
     }
 }

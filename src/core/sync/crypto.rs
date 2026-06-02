@@ -14,8 +14,10 @@ use sha2::{Digest, Sha256};
 
 /// Freshly generated TLS identity of the server (only for the duration of a session).
 pub struct ServerIdentity {
-    pub cert_pem: String,
-    pub key_pem: String,
+    /// DER-encoded self-signed certificate.
+    pub cert_der: Vec<u8>,
+    /// DER-encoded PKCS#8 private key.
+    pub key_der: Vec<u8>,
     /// `base64url(SHA256(SubjectPublicKeyInfo))` – goes into the QR code.
     pub fingerprint: String,
 }
@@ -25,12 +27,32 @@ pub struct ServerIdentity {
 pub fn generate_identity() -> Result<ServerIdentity> {
     let key = rcgen::generate_simple_self_signed(vec!["emilia".to_string()])
         .map_err(|e| anyhow!("certificate generation failed: {e}"))?;
-    let fingerprint = spki_fingerprint(key.cert.der().as_ref())?;
+    let cert_der = key.cert.der().as_ref().to_vec();
+    let fingerprint = spki_fingerprint(&cert_der)?;
     Ok(ServerIdentity {
-        cert_pem: key.cert.pem(),
-        key_pem: key.signing_key.serialize_pem(),
+        cert_der,
+        key_der: key.signing_key.serialize_der(),
         fingerprint,
     })
+}
+
+/// rustls **server** configuration for this identity. The certificate is the
+/// per-session self-signed one; the client trusts it by SPKI-fingerprint pinning
+/// (see [`pinned_client_config`]), not via a CA chain. Uses the ring provider
+/// with safe default protocol versions (TLS 1.2/1.3) – the same maintained
+/// rustls 0.23 stack as the client (no more EOL TLS on the server side).
+pub fn server_config(identity: &ServerIdentity) -> Result<Arc<rustls::ServerConfig>> {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let cert = CertificateDer::from(identity.cert_der.clone());
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(identity.key_der.clone()));
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| anyhow!("rustls protocol versions: {e}"))?
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .map_err(|e| anyhow!("server certificate invalid: {e}"))?;
+    Ok(Arc::new(config))
 }
 
 /// SHA256 over the SubjectPublicKeyInfo of a DER certificate, base64url without

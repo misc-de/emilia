@@ -161,20 +161,38 @@ pub fn read_track(path: &Path) -> Result<Track> {
     })
 }
 
-/// Scans `root` and writes all found tracks into the library.
+/// Scans `root` and writes all found tracks into the library, then removes
+/// tracks under `root` whose files have vanished (deleted/moved).
 /// Returns the number of successfully read files.
+///
+/// Upserts are committed in batches (one transaction per `BATCH` files) so a
+/// large library is not thousands of separate fsyncs and a crash leaves whole
+/// batches, never a half-written row.
 pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
+    const BATCH: usize = 500;
     let files = collect_audio_files(root);
+    // Every audio file physically present under `root` (regardless of whether its
+    // tags read cleanly) — the set that must survive orphan pruning.
+    let present: Vec<String> = files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+
     let mut count = 0;
-    for path in files {
-        match read_track(&path) {
-            Ok(track) => {
-                if lib.upsert_track(&track).is_ok() {
-                    count += 1;
-                }
-            }
+    let mut batch: Vec<Track> = Vec::with_capacity(BATCH);
+    for path in &files {
+        match read_track(path) {
+            Ok(track) => batch.push(track),
             Err(e) => tracing::warn!("Failed to read {}: {e}", path.display()),
         }
+        if batch.len() >= BATCH {
+            count += lib.upsert_tracks(&batch)?;
+            batch.clear();
+        }
     }
+    if !batch.is_empty() {
+        count += lib.upsert_tracks(&batch)?;
+    }
+
+    // Drop DB rows for files that no longer exist under `root`. Skipped when the
+    // scan found nothing, so an unreadable/unmounted folder cannot wipe the DB.
+    lib.prune_tracks_under(root, &present)?;
     Ok(count)
 }

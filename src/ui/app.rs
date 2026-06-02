@@ -3257,7 +3257,13 @@ impl Component for App {
             Msg::RefreshStats => self.refresh_stats(&sender),
             Msg::PersistResume => {
                 if self.playing {
+                    // Persist resume points on this 5 s timer (not every Tick):
+                    // a hard crash loses at most ~5 s of position, while normal
+                    // pause/seek/track-switch/close still save immediately.
                     self.save_resume();
+                    if self.playing_episode_url.is_some() {
+                        self.save_episode_progress();
+                    }
                     if let Some(pos) = self.player.position_ms() {
                         self.mpris.set_position(pos);
                     }
@@ -3282,10 +3288,8 @@ impl Component for App {
                         entry.1 = self.position_ms;
                         entry.2 = self.track_duration_ms;
                     }
-                    // Advance the resume position of a running podcast episode.
-                    if self.playing_episode_url.is_some() {
-                        self.save_episode_progress();
-                    }
+                    // (Episode resume is persisted on the 5 s PersistResume timer,
+                    // not here — no per-second DB write on the UI thread.)
                     // Track the current chapter below the title (except while hovering).
                     self.update_current_chapter();
                     // Keep counting the listened time of the statistics session (wall clock, only

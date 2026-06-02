@@ -537,7 +537,12 @@ pub fn cache_path(source_id: i64, rel: &str) -> PathBuf {
     dir.push("emilia");
     dir.push("cache");
     dir.push(source_id.to_string());
-    for seg in rel.split('/').filter(|s| !s.is_empty()) {
+    // `rel` comes from the server's PROPFIND href: drop `.`/`..` segments so a
+    // hostile href can never traverse out of this source's cache directory.
+    for seg in rel
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+    {
         dir.push(seg);
     }
     dir

@@ -355,6 +355,7 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
         .get(url)
         .call()?
         .into_reader()
+        .take(16 * 1024 * 1024) // Cap against a hostile/broken feed streaming endlessly (OOM).
         .read_to_end(&mut bytes)?;
     parse_feed(&bytes)
 }

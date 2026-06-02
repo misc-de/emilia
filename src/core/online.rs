@@ -127,7 +127,10 @@ impl OnlineClient {
                         .map(Duration::from_secs)
                         .unwrap_or(backoff)
                         .min(RL_MAX_BACKOFF);
-                    tracing::debug!("Rate-limited ({code}) on {url}; pausing {wait:?}");
+                    // Log only the part before '?' – the query string can carry
+                    // an API key (fanart `api_key`, AcoustID `client_key`).
+                    let safe_url = url.split('?').next().unwrap_or(url);
+                    tracing::debug!("Rate-limited ({code}) on {safe_url}; pausing {wait:?}");
                     std::thread::sleep(wait);
                     backoff = (backoff * 2).min(RL_MAX_BACKOFF);
                 }
