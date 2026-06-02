@@ -1,7 +1,7 @@
-//! Audio-Fingerprint via **Chromaprint** (`fpcalc`-Binary).
+//! Audio fingerprint via **Chromaprint** (`fpcalc` binary).
 //!
-//! Liest die Datei nur (dekodiert sie zur Analyse) – verändert sie nie. Gibt
-//! Dauer (Sekunden) und Fingerprint zurück, die anschließend an AcoustID gehen.
+//! Only reads the file (decodes it for analysis) – never modifies it. Returns
+//! duration (seconds) and fingerprint, which subsequently go to AcoustID.
 
 use std::path::Path;
 use std::process::Command;
@@ -9,16 +9,16 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
-/// Ergebnis von `fpcalc -json`.
+/// Result of `fpcalc -json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Fingerprint {
-    /// Länge in Sekunden (von AcoustID benötigt).
+    /// Length in seconds (required by AcoustID).
     pub duration: f64,
-    /// Komprimierter Chromaprint-Fingerprint (base64-ähnlich).
+    /// Compressed Chromaprint fingerprint (base64-like).
     pub fingerprint: String,
 }
 
-/// Prüft, ob `fpcalc` (Chromaprint) im Pfad verfügbar ist.
+/// Checks whether `fpcalc` (Chromaprint) is available in the path.
 pub fn available() -> bool {
     Command::new("fpcalc")
         .arg("-version")
@@ -27,7 +27,7 @@ pub fn available() -> bool {
         .unwrap_or(false)
 }
 
-/// Berechnet den Chromaprint-Fingerprint einer Audiodatei.
+/// Computes the Chromaprint fingerprint of an audio file.
 pub fn compute(path: &Path) -> Result<Fingerprint> {
     let output = Command::new("fpcalc").arg("-json").arg(path).output()?;
     if !output.status.success() {

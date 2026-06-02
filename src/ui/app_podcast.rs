@@ -1,5 +1,5 @@
-//! Podcasts: Übersichtsliste, Episoden-Unterseite, Abo-Dialog und der
-//! Hintergrund-Abruf der Feeds. Episoden werden direkt gestreamt.
+//! Podcasts: overview list, episode subpage, subscription dialog, and the
+//! background fetching of feeds. Episodes are streamed directly.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -9,8 +9,8 @@ use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
 
-/// Holt einen Feed und speichert Podcast + Episoden (läuft im Worker-Thread,
-/// eigene DB-Verbindung). Gibt bei Erfolg den Podcast-Titel zurück.
+/// Fetches a feed and stores podcast + episodes (runs in the worker thread,
+/// its own DB connection). Returns the podcast title on success.
 pub(crate) fn fetch_and_store_podcast(feed_url: &str) -> Option<String> {
     let feed = crate::core::podcast::fetch_feed(feed_url).ok()?;
     let lib = Library::open().ok()?;
@@ -18,14 +18,14 @@ pub(crate) fn fetch_and_store_podcast(feed_url: &str) -> Option<String> {
         .subscribe_podcast(&feed.title, feed_url, feed.image_url.as_deref())
         .ok()?;
     let _ = lib.set_episodes(id, &feed.episodes);
-    // Feed-Bild in den Cache laden (Worker-Thread, kein UI-Block).
+    // Load the feed image into the cache (worker thread, no UI block).
     if let Some(img) = feed.image_url.as_deref() {
         crate::core::online::cache_podcast_image(img);
     }
     Some(feed.title)
 }
 
-/// Inhalts-Box für die Detail-Dialoge (einheitliche Ränder).
+/// Content box for the detail dialogs (uniform margins).
 fn detail_box() -> gtk::Box {
     gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -37,14 +37,14 @@ fn detail_box() -> gtk::Box {
         .build()
 }
 
-/// Aktivierbare Aktionszeile mit Icon-Präfix (für die Detail-Dialoge).
+/// Activatable action row with an icon prefix (for the detail dialogs).
 fn action_row(title: &str, icon: &str) -> adw::ActionRow {
     let row = adw::ActionRow::builder().title(title).activatable(true).build();
     row.add_prefix(&gtk::Image::from_icon_name(icon));
     row
 }
 
-/// Hängt den Inhalt scrollbar in einen Dialog mit Kopfleiste und zeigt ihn.
+/// Embeds the content scrollably in a dialog with a header bar and shows it.
 fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -56,22 +56,22 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     toolbar.add_top_bar(&adw::HeaderBar::new());
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
-    // Volle Breite nutzen, aber nie breiter als 600 px (auf schmalen Fenstern
-    // verkleinert sich der Dialog automatisch auf die Fensterbreite).
+    // Use full width, but never wider than 600 px (on narrow windows the
+    // dialog automatically shrinks to the window width).
     dialog.set_content_width(600);
     dialog.present(Some(root));
 }
 
 impl App {
-    /// Baut die Übersicht der abonnierten Podcasts neu auf: Cover, Titel,
-    /// Episodenzahl. Tippen öffnet die Episoden; **langes Drücken** öffnet die
-    /// Abo-Detailansicht (Aktualisieren/Entfernen). Aktualisiert anschließend
-    /// auch die „Neuste"-Liste.
+    /// Rebuilds the overview of subscribed podcasts: cover, title, episode
+    /// count. Tapping opens the episodes; **long press** opens the
+    /// subscription detail view (refresh/remove). Afterwards also refreshes
+    /// the "Newest" list.
     pub(crate) fn reload_podcasts(&mut self, sender: &ComponentSender<Self>) {
         self.podcast_items = self.library.podcasts().unwrap_or_default();
         if self.gallery_view {
-            // Galerie-Variante: Cover-Gitter; Tipp öffnet die Episoden,
-            // Doppeltipp die Abo-Detailansicht.
+            // Gallery variant: cover grid; tap opens the episodes,
+            // double-tap the subscription detail view.
             let tiles: Vec<(Option<String>, &'static str, String)> = self
                 .podcast_items
                 .iter()
@@ -93,14 +93,14 @@ impl App {
                 self.podcasts_list.remove(&child);
             }
             for (id, title, image, count) in self.podcast_items.clone() {
-                // Episodenanzahl wie bei Alben/Liedern in Klammern an die Überschrift;
-                // keine separate „N Episoden"-Zeile.
+                // Episode count in parentheses on the heading, as with albums/songs;
+                // no separate "N episodes" line.
                 let row = adw::ActionRow::builder()
                     .title(format!("{} ({count})", gtk::glib::markup_escape_text(&title)).as_str())
                     .activatable(true)
                     .build();
                 row.add_css_class("emilia-flush");
-                // Cover aus dem RSS-Bild (lokaler Cache); sonst Mikrofon-Platzhalter.
+                // Cover from the RSS image (local cache); otherwise microphone placeholder.
                 let cover = image
                     .as_deref()
                     .and_then(crate::core::online::podcast_image_path);
@@ -112,7 +112,7 @@ impl App {
                     let sender = sender.clone();
                     row.connect_activated(move |_| sender.input(Msg::OpenPodcast(id)));
                 }
-                // Langes Drücken → Abo-Detailansicht.
+                // Long press → subscription detail view.
                 let lp = gtk::GestureLongPress::new();
                 {
                     let sender = sender.clone();
@@ -128,11 +128,11 @@ impl App {
         self.reload_newest(sender);
     }
 
-    /// Baut die „Neuste"-Liste: neueste Episoden (Beiträge) über **alle** Abos,
-    /// chronologisch nach Veröffentlichungsdatum. Tippen streamt; **langes
-    /// Drücken** öffnet die Beitrag-Detailansicht.
+    /// Builds the "Newest" list: newest episodes (entries) across **all**
+    /// subscriptions, chronologically by publication date. Tapping streams;
+    /// **long press** opens the entry detail view.
     pub(crate) fn reload_newest(&mut self, sender: &ComponentSender<Self>) {
-        // Nur Episoden aus höchstens ~einem Monat anzeigen.
+        // Only show episodes from at most ~one month ago.
         let cutoff = crate::core::podcast::recent_cutoff_key();
         let mut eps: Vec<_> = self
             .library
@@ -151,10 +151,10 @@ impl App {
             self.newest_list.remove(&child);
         }
 
-        // Einsortieren nach Aktualität: Heute / Gestern / Diese Woche / Diesen
-        // Monat. Die Liste ist absteigend sortiert, daher sind die Abschnitte
-        // zusammenhängend; je Abschnitt eine eigene Gruppe (mit Überschrift), und
-        // ein Eintrag steht nur im obersten passenden Abschnitt (keine Dopplung).
+        // Sort by recency: Today / Yesterday / This week / This month. The
+        // list is sorted in descending order, so the sections are contiguous;
+        // each section gets its own group (with heading), and an entry appears
+        // only in the topmost matching section (no duplication).
         let (today, yesterday, week_start) = crate::core::podcast::recent_day_buckets();
         let bucket_of = |k: i64| -> usize {
             if k >= today {
@@ -178,7 +178,7 @@ impl App {
         let mut group: Option<adw::PreferencesGroup> = None;
         for (i, ep) in self.newest_items.iter().enumerate() {
             let b = bucket_of(crate::core::podcast::pubdate_key(ep.published.as_deref()));
-            // Neuer Abschnitt → neue Gruppe mit Überschrift (nur wenn etwas da ist).
+            // New section → new group with heading (only when there is something).
             if cur_bucket != Some(b) {
                 cur_bucket = Some(b);
                 let g = adw::PreferencesGroup::builder().title(&bucket_title(b)).build();
@@ -217,7 +217,7 @@ impl App {
                     });
                 });
             }
-            // Langes Drücken → Beitrag-Detailansicht.
+            // Long press → entry detail view.
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -231,13 +231,13 @@ impl App {
                 g.add(&row);
             }
         }
-        // Icons der neu gebauten Zeilen auf den aktuellen Wiedergabestand setzen
-        // (und tote Zeilen der vorherigen Liste aussortieren).
+        // Set the icons of the newly built rows to the current playback state
+        // (and discard dead rows from the previous list).
         self.refresh_episode_icons();
     }
 
-    /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste: Podcast,
-    /// Datum, Dauer – mit Aktionen zum Abspielen und zum Öffnen des Podcasts.
+    /// Detail view of an entry (episode) from the "Newest" list: podcast,
+    /// date, duration – with actions to play and to open the podcast.
     pub(crate) fn open_episode_detail(
         &self,
         root: &adw::ApplicationWindow,
@@ -249,8 +249,8 @@ impl App {
         }
     }
 
-    /// Episoden-Detail (inkl. Shownotes) einer Episode aus der Episodenliste
-    /// eines geöffneten Podcasts (Index = Reihenfolge in `episodes(id)`).
+    /// Episode detail (incl. shownotes) of an episode from the episode list
+    /// of an opened podcast (index = order in `episodes(id)`).
     pub(crate) fn open_podcast_episode_detail(
         &self,
         root: &adw::ApplicationWindow,
@@ -289,8 +289,8 @@ impl App {
         );
     }
 
-    /// Baut den Episoden-Detail-Dialog (geteilt von „Neuste" und der
-    /// Episodenliste eines Podcasts): Podcast, Datum, Dauer, Aktionen + Shownotes.
+    /// Builds the episode detail dialog (shared by "Newest" and the episode
+    /// list of a podcast): podcast, date, duration, actions + shownotes.
     fn show_episode_detail(
         &self,
         root: &adw::ApplicationWindow,
@@ -314,7 +314,7 @@ impl App {
             .and_then(crate::core::online::podcast_image_path);
         pod.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "microphone-symbolic"));
         info.add(&pod);
-        // Veröffentlicht und Dauer **nebeneinander**, je etwa 50 % Breite.
+        // Published and duration **side by side**, each about 50 % width.
         let pub_txt = ep
             .published
             .as_deref()
@@ -357,11 +357,11 @@ impl App {
         }
         content.append(&info);
 
-        // Shownotes (falls vorhanden) direkt unter „Dauer", vor den Aktionen.
-        // Zeitstempel (z. B. „12:34") werden zu anklickbaren Sprungmarken.
+        // Shownotes (if present) directly below "Duration", before the actions.
+        // Timestamps (e.g. "12:34") become clickable jump markers.
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
-            // Überschrift ohne adw-Gruppentitel, damit sie auf gleicher Einrückung
-            // wie der Shownotes-Text steht (nicht links davor).
+            // Heading without an adw group title, so it sits at the same
+            // indentation as the shownotes text (not to the left of it).
             let notes_group = adw::PreferencesGroup::new();
             let label = gtk::Label::builder()
                 .label(&crate::core::podcast::linkify_timestamps(notes.trim()))
@@ -371,8 +371,8 @@ impl App {
                 .selectable(true)
                 .build();
             label.add_css_class("body");
-            // Klick auf einen Zeitstempel → an die Stelle springen (Episode bei
-            // Bedarf dort starten).
+            // Click on a timestamp → jump to that position (start the episode
+            // there if needed).
             {
                 let sender = sender.clone();
                 let url = ep.audio_url.clone();
@@ -392,9 +392,9 @@ impl App {
                     gtk::glib::Propagation::Proceed
                 });
             }
-            // In eine gepolsterte Box wickeln – damit die Shownotes (wie die
-            // Published/Duration-Zeile) als eingerahmte Karte mit Innenabstand
-            // erscheinen statt bündig am Kartenrand zu kleben.
+            // Wrap in a padded box – so the shownotes (like the
+            // Published/Duration row) appear as a framed card with inner
+            // padding instead of sticking flush to the card edge.
             let wrap = gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
                 .spacing(6)
@@ -403,7 +403,7 @@ impl App {
                 .margin_start(14)
                 .margin_end(14)
                 .build();
-            // Überschrift auf gleicher Einrückung wie der Text (im selben Kasten).
+            // Heading at the same indentation as the text (in the same box).
             let heading = gtk::Label::builder()
                 .label(&gettext("Shownotes"))
                 .xalign(0.0)
@@ -418,8 +418,8 @@ impl App {
         present_detail(&dialog, &content, root);
     }
 
-    /// Detailansicht/Verwaltung eines Abos: Cover, Episodenzahl und Aktionen zum
-    /// Öffnen, Aktualisieren und Entfernen (mit Rückfrage).
+    /// Detail view/management of a subscription: cover, episode count, and
+    /// actions to open, refresh, and remove (with confirmation).
     pub(crate) fn open_podcast_detail(
         &self,
         root: &adw::ApplicationWindow,
@@ -488,10 +488,10 @@ impl App {
         present_detail(&dialog, &content, root);
     }
 
-    /// Episoden-Unterseite eines Podcasts (Tippen = Episode streamen).
+    /// Episode subpage of a podcast (tap = stream episode).
     pub(crate) fn open_podcast(&self, sender: &ComponentSender<Self>, id: i64, title: &str) {
         let episodes = self.library.episodes(id).unwrap_or_default();
-        // Cover des Podcasts einmal ermitteln und in allen Episodenzeilen zeigen.
+        // Determine the podcast cover once and show it in all episode rows.
         let cover = self
             .podcast_items
             .iter()
@@ -507,8 +507,8 @@ impl App {
             .margin_start(12)
             .margin_end(12)
             .build();
-        // Anzahl direkt in die Überschrift (in Klammern); die separate
-        // „N Episoden"-Zeile wäre dann eine Dopplung und entfällt.
+        // Count directly in the heading (in parentheses); the separate
+        // "N episodes" line would then be a duplication and is dropped.
         let group = adw::PreferencesGroup::builder()
             .title(format!("{} ({})", gtk::glib::markup_escape_text(title), episodes.len()).as_str())
             .build();
@@ -549,7 +549,7 @@ impl App {
                     });
                 });
             }
-            // Langes Drücken → Episoden-Detail (inkl. Shownotes).
+            // Long press → episode detail (incl. shownotes).
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -566,14 +566,14 @@ impl App {
         }
         content.append(&group);
         self.push_subpage(&gettext_f("Podcast – {title}", &[("title", title)]), &content);
-        // Icons auf den aktuellen Wiedergabestand setzen.
+        // Set the icons to the current playback state.
         self.refresh_episode_icons();
     }
 
-    /// Dialog zum Abonnieren: oben eine **Suche** (durchsucht das iTunes-
-    /// Podcast-Verzeichnis und zeigt antippbare Treffer), darunter ein Feld für
-    /// die **Feed-Adresse** (RSS) als manueller Weg. Beides führt am Ende über
-    /// [`Msg::PodcastSubscribeUrl`] zum üblichen Abo-Abruf.
+    /// Dialog for subscribing: at the top a **search** (searches the iTunes
+    /// podcast directory and shows tappable results), below it a field for the
+    /// **feed address** (RSS) as the manual route. Both ultimately lead via
+    /// [`Msg::PodcastSubscribeUrl`] to the usual subscription fetch.
     pub(crate) fn open_subscribe_podcast_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -585,7 +585,7 @@ impl App {
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
-        // --- Suche (iTunes-Verzeichnis) ---
+        // --- Search (iTunes directory) ---
         let search_group = adw::PreferencesGroup::builder()
             .title(&gettext("Search"))
             .description(&gettext("Find a podcast by name"))
@@ -605,7 +605,7 @@ impl App {
         search_group.add(&search_row);
         content.append(&search_group);
 
-        // Enter im Suchfeld oder Klick auf „Suchen" startet die Suche.
+        // Enter in the search field or clicking "Search" starts the search.
         {
             let (sender, entry) = (sender.clone(), search_entry.clone());
             search_entry.connect_activate(move |_| {
@@ -625,7 +625,7 @@ impl App {
             });
         }
 
-        // Trefferliste – anfangs leer/versteckt, asynchron befüllt von
+        // Results list – initially empty/hidden, filled asynchronously by
         // `rebuild_podcast_search_results`.
         let results = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
@@ -634,7 +634,7 @@ impl App {
         results.set_visible(false);
         content.append(&results);
 
-        // --- Manuell: Feed-Adresse (RSS) ---
+        // --- Manual: feed address (RSS) ---
         let url_group = adw::PreferencesGroup::builder()
             .title(&gettext("Or enter feed address"))
             .build();
@@ -655,8 +655,8 @@ impl App {
         url_group.add(&url_entry);
         content.append(&url_group);
 
-        // Dialog + Trefferliste hinterlegen, damit eintreffende Treffer in die
-        // offene Liste gezeichnet werden; beim Schließen wieder freigeben.
+        // Store dialog + results list so incoming results are drawn into the
+        // open list; release it again when closing.
         *self.podcast_search.borrow_mut() = Some((dialog.clone(), results.clone()));
         {
             let slot = self.podcast_search.clone();
@@ -669,10 +669,11 @@ impl App {
         search_entry.grab_focus();
     }
 
-    /// Zeichnet die Trefferliste im offenen Abo-Such-Dialog neu (aus
-    /// `self.podcast_search_results`). Tut nichts, wenn der Dialog zu ist. Jeder
-    /// Treffer ist antippbar: Tippen abonniert über die Feed-Adresse und schließt
-    /// den Dialog. Cover stammen aus dem lokalen Cache (sonst Mikrofon-Platzhalter).
+    /// Redraws the results list in the open subscription search dialog (from
+    /// `self.podcast_search_results`). Does nothing if the dialog is closed.
+    /// Each result is tappable: tapping subscribes via the feed address and
+    /// closes the dialog. Covers come from the local cache (otherwise a
+    /// microphone placeholder).
     pub(crate) fn rebuild_podcast_search_results(&self, sender: &ComponentSender<Self>) {
         let guard = self.podcast_search.borrow();
         let Some((dialog, list)) = guard.as_ref() else {
@@ -687,14 +688,14 @@ impl App {
             let row = adw::ActionRow::builder().title(&gettext("No podcasts found")).build();
             row.set_sensitive(false);
             list.append(&row);
-            // Knappe Höhe – nur Such- und Adressfeld plus Hinweiszeile.
+            // Compact height – only the search and address field plus a hint row.
             dialog.set_content_height(300);
             return;
         }
 
-        // Dialog so hoch machen, wie die Treffer es brauchen (gedeckelt, dann
-        // scrollt die Liste). Grob: feste Bereiche (Kopf, Suche, Adresse) +
-        // ~66 px je Trefferzeile.
+        // Make the dialog as tall as the results need (capped, then the list
+        // scrolls). Roughly: fixed areas (header, search, address) + ~66 px
+        // per result row.
         let rows = self.podcast_search_results.len() as i32;
         dialog.set_content_height((320 + rows * 66).min(760));
 
@@ -721,9 +722,9 @@ impl App {
         }
     }
 
-    /// Play/Pause-Knopf (Suffix) für eine Beitragszeile: tippt = Episode
-    /// umschalten. Wird in `episode_play_buttons` registriert, damit sein Icon
-    /// beim Wechsel des Wiedergabestands aktualisiert werden kann.
+    /// Play/Pause button (suffix) for an entry row: tap = toggle episode.
+    /// Registered in `episode_play_buttons` so its icon can be updated when the
+    /// playback state changes.
     fn episode_play_button(
         &self,
         sender: &ComponentSender<Self>,
@@ -751,9 +752,9 @@ impl App {
         btn
     }
 
-    /// Aktualisiert die Play/Pause-Icons aller sichtbaren Beitragszeilen und die
-    /// „Abspielen"-Zeile eines offenen Detaildialogs. Abgehängte Zeilen (z. B.
-    /// nach Verlassen einer Unterseite) werden dabei aussortiert.
+    /// Updates the Play/Pause icons of all visible entry rows and the "Play"
+    /// row of an open detail dialog. Detached rows (e.g. after leaving a
+    /// subpage) are discarded in the process.
     pub(crate) fn refresh_episode_icons(&self) {
         let active = self.playing_episode_url.clone();
         let playing = self.playing;
@@ -774,24 +775,24 @@ impl App {
         }
     }
 
-    /// Streamt eine Podcast-Episode (ersetzt die laufende Wiedergabe). Startet
-    /// an der gemerkten Position (Resume) und sichert vorher die Position einer
-    /// bisher laufenden Episode.
+    /// Streams a podcast episode (replaces the current playback). Starts at
+    /// the remembered position (resume) and first saves the position of a
+    /// previously playing episode.
     pub(crate) fn play_episode(&mut self, url: &str, title: &str) {
         let resume = self.library.episode_progress(url).unwrap_or(0);
         self.play_episode_from(url, title, resume);
     }
 
-    /// Wie `play_episode`, startet aber an einer bestimmten Position (für die
-    /// anklickbaren Sprungmarken in den Shownotes).
+    /// Like `play_episode`, but starts at a specific position (for the
+    /// clickable jump markers in the shownotes).
     pub(crate) fn play_episode_at(&mut self, url: &str, title: &str, ms: i64) {
         self.play_episode_from(url, title, ms.max(0));
     }
 
-    /// Setzt die Kapitel der laufenden Wiedergabe: Seekbar-Marken **und** die
-    /// geteilte Kapitelliste für die Hover-Anzeige. Leere Liste = löschen (z. B.
-    /// bei Titeln ohne Kapitel). Die Marken positionieren sich automatisch neu,
-    /// sobald die Dauer feststeht (der Tick aktualisiert den Wertebereich).
+    /// Sets the chapters of the current playback: seekbar markers **and** the
+    /// shared chapter list for the hover display. Empty list = clear (e.g. for
+    /// tracks without chapters). The markers reposition automatically once the
+    /// duration is known (the tick updates the value range).
     pub(crate) fn set_chapters(&self, chapters: Vec<(i64, String)>) {
         self.seek_scale.clear_marks();
         for (ms, _) in &chapters {
@@ -804,9 +805,9 @@ impl App {
         *self.chapters.borrow_mut() = chapters;
     }
 
-    /// Aktualisiert das Kapitel-Label auf das Kapitel an der aktuellen
-    /// Wiedergabeposition. No-op während eines Hovers (dann hat die Mausposition
-    /// Vorrang) und ohne Kapitel (Label bleibt versteckt).
+    /// Updates the chapter label to the chapter at the current playback
+    /// position. No-op during a hover (then the mouse position takes
+    /// precedence) and without chapters (the label stays hidden).
     pub(crate) fn update_current_chapter(&self) {
         if self.hovering_seek.get() {
             return;
@@ -848,8 +849,8 @@ impl App {
                 self.mpris.set_metadata(0, title, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
-                // Kapitel (Zeit + Bezeichnung) aus den Shownotes: Seekbar-Marken
-                // setzen und für die Hover-Anzeige merken.
+                // Chapters (time + label) from the shownotes: set seekbar
+                // markers and remember them for the hover display.
                 let chapters = self
                     .library
                     .episode_description_by_url(url)
@@ -858,7 +859,7 @@ impl App {
                     .map(|d| crate::core::podcast::parse_chapters(&d))
                     .unwrap_or_default();
                 self.set_chapters(chapters);
-                // Aktuelles Kapitel (an der Resume-/Startposition) sofort zeigen.
+                // Show the current chapter (at the resume/start position) immediately.
                 self.update_current_chapter();
             }
             Err(e) => tracing::error!("Failed to play episode: {e}"),

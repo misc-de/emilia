@@ -1,70 +1,70 @@
-//! Datenmodelle der Bibliothek.
+//! Data models of the library.
 
 #[derive(Debug, Clone)]
 pub struct Track {
-    /// DB-Primärschlüssel. Aktuell wird intern alles über den (eindeutigen)
-    /// Pfad adressiert; das Feld bleibt für künftige Nutzung (z. B. Playlisten).
+    /// DB primary key. Currently everything is addressed internally via the
+    /// (unique) path; the field remains for future use (e.g. playlists).
     #[allow(dead_code)]
     pub id: i64,
     pub path: String,
     pub title: String,
     pub artist: Option<String>,
     pub album: Option<String>,
-    /// Genre aus den Datei-Tags (für die Statistik); `None`, wenn nicht gesetzt
-    /// oder die Datei noch nicht (neu) eingelesen wurde.
+    /// Genre from the file tags (for statistics); `None` if not set or the file
+    /// has not yet been (re-)read.
     pub genre: Option<String>,
     pub track_no: Option<u32>,
-    /// Disc-/CD-Nummer bei Mehr-CD-Alben (None = einzelne CD).
+    /// Disc/CD number for multi-CD albums (None = single CD).
     pub disc_no: Option<u32>,
     pub duration_ms: Option<i64>,
     pub resume_ms: i64,
 }
 
-/// Eine zusätzliche Musikquelle neben dem primären `music_dir`-Ordner.
-/// Erscheint als eigener Tab in der Dateiansicht. Siehe [`crate::core::db`].
+/// An additional music source besides the primary `music_dir` folder.
+/// Appears as its own tab in the file view. See [`crate::core::db`].
 #[derive(Debug, Clone)]
 pub struct Source {
     pub id: i64,
-    /// `local` (zweiter Ordner) | `webdav` (Nextcloud-Share).
+    /// `local` (second folder) | `webdav` (Nextcloud share).
     pub kind: String,
-    /// Anzeigename (Tab-Beschriftung).
+    /// Display name (tab label).
     pub name: String,
-    /// Sortierreihenfolge der Tabs (nur in der DB genutzt: `ORDER BY position`).
+    /// Sort order of the tabs (only used in the DB: `ORDER BY position`).
     #[allow(dead_code)]
     pub position: i64,
-    /// Lokal: Wurzelpfad im Dateisystem.
+    /// Local: root path in the file system.
     pub path: Option<String>,
-    /// WebDAV: Basis-URL, z. B. `https://cloud.example.com`.
+    /// WebDAV: base URL, e.g. `https://cloud.example.com`.
     pub base_url: Option<String>,
-    /// WebDAV: Benutzername.
+    /// WebDAV: username.
     pub username: Option<String>,
-    /// WebDAV: App-Passwort/Token.
+    /// WebDAV: app password/token.
     pub password: Option<String>,
-    /// WebDAV: Unterpfad zur Musik, z. B. `/Music`.
+    /// WebDAV: subpath to the music, e.g. `/Music`.
     pub music_path: Option<String>,
 }
 
-/// Online angereicherte Albumdaten (MusicBrainz + Cover Art Archive).
+/// Online-enriched album data (MusicBrainz + Cover Art Archive).
 ///
-/// Wird ausschließlich in der Datenbank bzw. im XDG-Cache gehalten – die
-/// Audiodateien selbst werden dabei niemals verändert.
+/// Kept exclusively in the database or the XDG cache – the audio files
+/// themselves are never modified in the process.
 #[derive(Debug, Clone)]
 pub struct AlbumMeta {
     pub artist: String,
     pub album: String,
-    /// MusicBrainz-Release-ID (MBID), falls zugeordnet.
+    /// MusicBrainz release ID (MBID), if matched.
     pub mbid: Option<String>,
-    /// Pfad zur lokal zwischengespeicherten Cover-Datei.
+    /// Path to the locally cached cover file.
     pub cover_path: Option<String>,
     pub year: Option<i32>,
     /// `pending` | `matched` | `notfound` | `error`
     pub status: String,
-    /// Anzahl der Titel dieses Albums in der Bibliothek (nur für die Anzeige).
+    /// Number of tracks of this album in the library (display only).
     pub track_count: i64,
 }
 
 impl AlbumMeta {
-    /// Leerer Eintrag (noch nicht online gesucht).
+    /// Empty entry (not yet searched online).
     pub fn pending(artist: impl Into<String>, album: impl Into<String>) -> Self {
         Self {
             artist: artist.into(),
@@ -78,12 +78,12 @@ impl AlbumMeta {
     }
 }
 
-/// Online angereicherte Interpretendaten (Foto via Deezer).
-/// Nur in DB/Cache, niemals in die Audiodateien geschrieben.
+/// Online-enriched artist data (photo via Deezer).
+/// Only in DB/cache, never written into the audio files.
 #[derive(Debug, Clone)]
 pub struct ArtistMeta {
     pub name: String,
-    /// Pfad zum lokal zwischengespeicherten Künstlerfoto.
+    /// Path to the locally cached artist photo.
     pub image_path: Option<String>,
     /// `pending` | `matched` | `notfound` | `error`
     pub status: String,
@@ -99,11 +99,10 @@ impl ArtistMeta {
     }
 }
 
-/// Per Audio-Fingerprint (Chromaprint → AcoustID) erkannte Titeldaten.
+/// Track data recognized via audio fingerprint (Chromaprint → AcoustID).
 ///
-/// Dies ist eine **Vorschlags**-Schicht für Dateien mit fehlenden Tags: Die
-/// Werte werden ausschließlich in der DB gehalten und niemals in die Datei
-/// zurückgeschrieben.
+/// This is a **suggestion** layer for files with missing tags: the values are
+/// kept exclusively in the DB and never written back into the file.
 #[derive(Debug, Clone)]
 pub struct TrackMeta {
     pub path: String,
@@ -115,23 +114,23 @@ pub struct TrackMeta {
     pub status: String,
 }
 
-/// Eine Podcast-Episode aus einem RSS-Feed (Reihenfolge = Feed-Reihenfolge).
-/// Audio wird direkt von `audio_url` gestreamt, nichts wird heruntergeladen.
+/// A podcast episode from an RSS feed (order = feed order).
+/// Audio is streamed directly from `audio_url`, nothing is downloaded.
 #[derive(Debug, Clone)]
 pub struct Episode {
     pub guid: Option<String>,
     pub title: String,
     pub audio_url: String,
-    /// Veröffentlichungsdatum als Originaltext aus dem Feed (nur Anzeige).
+    /// Publication date as original text from the feed (display only).
     pub published: Option<String>,
-    /// Dauer als Text (z. B. „00:42:13" oder Sekunden), falls im Feed angegeben.
+    /// Duration as text (e.g. "00:42:13" or seconds), if given in the feed.
     pub duration: Option<String>,
-    /// Beschreibung/Shownotes (HTML zu Klartext entschärft), falls vorhanden.
+    /// Description/show notes (HTML sanitized to plain text), if present.
     pub description: Option<String>,
 }
 
-/// Eine Episode samt zugehörigem Podcast – für die podcastübergreifende
-/// „Neuste"-Ansicht (neueste Beiträge aller Abos).
+/// An episode together with its podcast – for the cross-podcast "Latest" view
+/// (newest entries from all subscriptions).
 #[derive(Debug, Clone)]
 pub struct EpisodeRef {
     pub podcast_id: i64,
@@ -141,65 +140,65 @@ pub struct EpisodeRef {
     pub audio_url: String,
     pub published: Option<String>,
     pub duration: Option<String>,
-    /// Beschreibung/Shownotes (HTML zu Klartext entschärft), falls vorhanden.
+    /// Description/show notes (HTML sanitized to plain text), if present.
     pub description: Option<String>,
 }
 
-/// Ein gespeicherter Streaming-Sender (Internet-Radio). Wiedergabe direkt über
-/// die Stream-URL – nichts wird heruntergeladen.
+/// A saved streaming station (internet radio). Playback directly via the stream
+/// URL – nothing is downloaded.
 #[derive(Debug, Clone)]
 pub struct StreamItem {
     pub id: i64,
     pub name: String,
     pub url: String,
-    /// Sender-Logo (URL); lokal gecacht wie Podcast-Cover.
+    /// Station logo (URL); cached locally like podcast covers.
     pub favicon: Option<String>,
-    /// Genre/Schlagworte (kommasepariert, aus der Radio-Browser-API).
+    /// Genre/tags (comma-separated, from the Radio Browser API).
     pub tags: Option<String>,
     pub country: Option<String>,
 }
 
-/// Ein mitgeschnittener Song aus einem Sender (Timeshift-Aufnahme). Liegt als
-/// getaggte Audiodatei unter `path`.
+/// A song recorded from a station (timeshift recording). Stored as a tagged
+/// audio file at `path`.
 #[derive(Debug, Clone)]
 pub struct RecordingItem {
     pub id: i64,
     pub path: String,
     pub artist: Option<String>,
     pub title: String,
-    /// Sender, aus dem mitgeschnitten wurde.
+    /// Station that was recorded from.
     pub station: Option<String>,
-    /// Aufnahmezeitpunkt (Unix-Sekunden).
+    /// Recording time (Unix seconds).
     pub recorded_at: i64,
-    /// Anfang fehlte (zu spät begonnen) – nur als Hinweis markiert.
+    /// Beginning was missing (started too late) – marked as a hint only.
     pub incomplete: bool,
 }
 
-/// Aggregierte Kennzahlen der Hörstatistik über einen Zeitraum. Alles aus der
-/// rohen `play_event`-Tabelle berechnet (siehe [`crate::core::db`]).
+/// Aggregated metrics of the listening statistics over a period. All computed
+/// from the raw `play_event` table (see [`crate::core::db`]).
 #[derive(Debug, Clone, Default)]
 pub struct StatTotals {
-    /// Tatsächlich gehörte Zeit (Summe aller Ereignisse, auch Teil-Wiedergaben).
+    /// Actually listened time (sum of all events, including partial plays).
     pub total_played_ms: i64,
-    /// Als Wiedergabe zählende Ereignisse (über dem Schwellwert, Last.fm-Regel).
+    /// Events counting as a play (above the threshold, Last.fm rule).
     pub plays: i64,
-    /// Abgebrochene/übersprungene Ereignisse (unter dem Schwellwert).
+    /// Aborted/skipped events (below the threshold).
     pub skips: i64,
     pub distinct_tracks: i64,
     pub distinct_artists: i64,
     pub distinct_albums: i64,
 }
 
-/// Ein Eintrag einer Rangliste (Top-Titel/-Alben/-Interpreten).
+/// An entry of a ranking (top tracks/albums/artists).
 #[derive(Debug, Clone)]
 pub struct StatEntry {
-    /// Anzeigename: Titel, Albumname oder Interpretenname.
+    /// Display name: track, album name or artist name.
     pub name: String,
-    /// Zusatz: Interpret (bei Titel/Album), bei Interpreten leer.
+    /// Extra: artist (for track/album), empty for artists.
     pub detail: String,
-    /// Als Wiedergabe zählende Ereignisse.
+    /// Events counting as a play.
     pub plays: i64,
-    /// Tatsächlich gehörte Zeit (ms).
+    /// Actually listened time (ms).
     pub played_ms: i64,
 }
 

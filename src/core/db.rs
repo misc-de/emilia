@@ -1,4 +1,4 @@
-//! SQLite-Bibliotheksindex (rusqlite).
+//! SQLite library index (rusqlite).
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
@@ -9,7 +9,7 @@ use crate::model::{
     AlbumMeta, ArtistMeta, Episode, Source, StatEntry, StatTotals, Track, TrackMeta,
 };
 
-/// Speicherort der Datenbank: `$XDG_DATA_HOME/emilia/library.db`.
+/// Database location: `$XDG_DATA_HOME/emilia/library.db`.
 pub fn db_path() -> PathBuf {
     let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     dir.push("emilia");
@@ -22,7 +22,7 @@ pub struct Library {
     conn: Connection,
 }
 
-/// Dateiname ohne Endung (Rückfall: der ganze Schlüssel).
+/// File name without extension (fallback: the whole key).
 fn file_stem_of(path: &str) -> String {
     std::path::Path::new(path)
         .file_stem()
@@ -31,7 +31,7 @@ fn file_stem_of(path: &str) -> String {
         .to_string()
 }
 
-/// Letzter Pfadbestandteil (Ordner-/Dateiname; Rückfall: der ganze Schlüssel).
+/// Last path component (directory/file name; fallback: the whole key).
 fn file_name_of(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
@@ -43,15 +43,15 @@ fn file_name_of(path: &str) -> String {
 impl Library {
     pub fn open() -> Result<Self> {
         let conn = Connection::open(db_path())?;
-        // Mehrere Verbindungen (UI-Thread + Online-Worker) greifen parallel zu:
-        // kurz warten statt sofort mit „database is locked“ abzubrechen.
+        // Multiple connections (UI thread + online worker) access in parallel:
+        // wait briefly instead of aborting immediately with "database is locked".
         conn.busy_timeout(Duration::from_secs(10))?;
         let lib = Self { conn };
         lib.migrate()?;
         Ok(lib)
     }
 
-    /// In-Memory-DB (für Tests).
+    /// In-memory DB (for tests).
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
@@ -76,7 +76,7 @@ impl Library {
                 last_played INTEGER,
                 genre       TEXT
             );
-            -- Schnelles Nachschlagen eines Beispieltitels je Album (Ordner-Vererbung).
+            -- Fast lookup of a sample track per album (folder inheritance).
             CREATE INDEX IF NOT EXISTS idx_track_album ON track(album);
 
             CREATE TABLE IF NOT EXISTS eq_preset (
@@ -97,9 +97,9 @@ impl Library {
                 value TEXT NOT NULL
             );
 
-            -- Online angereicherte Albumdaten (MusicBrainz / Cover Art Archive).
-            -- Bewusst getrennt von den Audiodateien: nichts hiervon wird je in
-            -- die Tags zurückgeschrieben.
+            -- Online-enriched album data (MusicBrainz / Cover Art Archive).
+            -- Deliberately kept separate from the audio files: none of this is ever
+            -- written back into the tags.
             CREATE TABLE IF NOT EXISTS album_meta (
                 artist     TEXT NOT NULL,
                 album      TEXT NOT NULL,
@@ -112,7 +112,7 @@ impl Library {
                 PRIMARY KEY (artist, album)
             );
 
-            -- Künstlerfotos (Deezer). Ebenfalls getrennt von den Dateien.
+            -- Artist photos (Deezer). Also kept separate from the files.
             CREATE TABLE IF NOT EXISTS artist_meta (
                 name       TEXT PRIMARY KEY,
                 image_path TEXT,
@@ -121,8 +121,8 @@ impl Library {
                 attempts   INTEGER NOT NULL DEFAULT 0
             );
 
-            -- Per Fingerprint (AcoustID) erkannte Titeldaten – reine Vorschläge,
-            -- werden nie in die Tags der Datei zurückgeschrieben.
+            -- Track data identified by fingerprint (AcoustID) -- pure suggestions,
+            -- never written back into the file's tags.
             CREATE TABLE IF NOT EXISTS track_meta (
                 path           TEXT PRIMARY KEY,
                 recording_mbid TEXT,
@@ -134,7 +134,7 @@ impl Library {
                 attempts       INTEGER NOT NULL DEFAULT 0
             );
 
-            -- Vom Nutzer als Konzert markierte Ordner/Dateien.
+            -- Folders/files marked as a concert by the user.
             CREATE TABLE IF NOT EXISTS concert (
                 path     TEXT PRIMARY KEY,
                 title    TEXT NOT NULL,
@@ -142,8 +142,8 @@ impl Library {
                 added_at INTEGER
             );
 
-            -- Favoriten (Stern in „Mehr Infos"). scope ∈ {track,folder,album,artist};
-            -- key = Pfad | Interpret\1Album | Interpretname. title = Anzeigename.
+            -- Favorites (star in "More info"). scope ∈ {track,folder,album,artist};
+            -- key = path | artist\1album | artist name. title = display name.
             CREATE TABLE IF NOT EXISTS favorite (
                 scope    TEXT NOT NULL,
                 key      TEXT NOT NULL,
@@ -154,9 +154,9 @@ impl Library {
                 PRIMARY KEY (scope, key)
             );
 
-            -- Inhalts-Merkmal (Musik/Konzert/Podcast/Hörbuch) je Ebene.
-            -- Vererbung Titel → Album → Interpret → Standard; nur Abweichungen
-            -- werden gespeichert. key = Pfad | Interpret\1Album | Interpretname.
+            -- Content attribute (music/concert/podcast/audiobook) per level.
+            -- Inheritance track → album → artist → default; only deviations
+            -- are stored. key = path | artist\1album | artist name.
             CREATE TABLE IF NOT EXISTS category (
                 scope TEXT NOT NULL,
                 key   TEXT NOT NULL,
@@ -164,11 +164,11 @@ impl Library {
                 PRIMARY KEY (scope, key)
             );
 
-            -- Equalizer-Einstellungen je Ausgang und Ebene (10 Bänder als JSON).
-            -- Vererbung Titel → Album → Interpret → Global; zusätzlich fällt ein
-            -- gerätespezifischer Ausgang auf den Standard-Ausgang ('') zurück.
-            -- output: '' (alle/Standard) | Sink-Name.  key: '' (global) |
-            -- Interpretname | Interpret\1Album | Pfad.
+            -- Equalizer settings per output and level (10 bands as JSON).
+            -- Inheritance track → album → artist → global; additionally a
+            -- device-specific output falls back to the default output ('').
+            -- output: '' (all/default) | sink name.  key: '' (global) |
+            -- artist name | artist\1album | path.
             CREATE TABLE IF NOT EXISTS eq_setting (
                 output TEXT NOT NULL DEFAULT '',
                 scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track')),
@@ -177,9 +177,9 @@ impl Library {
                 PRIMARY KEY (output, scope, key)
             );
 
-            -- Mehrere Bilder je Album bzw. Interpret (Galerie). Das in
-            -- album_meta/artist_meta gespeicherte Einzelbild bleibt das
-            -- primaer angezeigte; diese Tabellen halten den vollen Vorrat.
+            -- Multiple images per album or artist (gallery). The single image
+            -- stored in album_meta/artist_meta remains the one shown primarily;
+            -- these tables hold the full set.
             CREATE TABLE IF NOT EXISTS album_image (
                 artist TEXT NOT NULL,
                 album  TEXT NOT NULL,
@@ -199,8 +199,8 @@ impl Library {
                 PRIMARY KEY (name, idx)
             );
 
-            -- Vom Nutzer angelegte Playlisten und ihre Einträge (geordnet).
-            -- Einträge sind Pfade (wie die Warteschlange); Duplikate erlaubt.
+            -- User-created playlists and their entries (ordered).
+            -- Entries are paths (like the queue); duplicates allowed.
             CREATE TABLE IF NOT EXISTS playlist (
                 id         INTEGER PRIMARY KEY,
                 name       TEXT NOT NULL,
@@ -213,8 +213,8 @@ impl Library {
                 PRIMARY KEY (playlist_id, position)
             );
 
-            -- Abonnierte Podcasts und ihre Episoden (aus RSS-Feeds; Audio wird
-            -- gestreamt, nichts heruntergeladen).
+            -- Subscribed podcasts and their episodes (from RSS feeds; audio is
+            -- streamed, nothing is downloaded).
             CREATE TABLE IF NOT EXISTS podcast (
                 id        INTEGER PRIMARY KEY,
                 title     TEXT NOT NULL,
@@ -234,17 +234,17 @@ impl Library {
                 PRIMARY KEY (podcast_id, position)
             );
 
-            -- Wiedergabeposition (Resume) je Episode, anhand der Audio-URL –
-            -- bewusst getrennt von `episode`, damit ein Feed-Refresh (der die
-            -- Episodenzeilen ersetzt) die Hörposition nicht löscht.
+            -- Resume position per episode, keyed by audio URL --
+            -- deliberately separate from `episode`, so that a feed refresh (which
+            -- replaces the episode rows) does not delete the resume position.
             CREATE TABLE IF NOT EXISTS episode_progress (
                 url         TEXT PRIMARY KEY,
                 position_ms INTEGER NOT NULL DEFAULT 0,
                 updated_at  INTEGER NOT NULL DEFAULT 0
             );
 
-            -- Gespeicherte Streaming-Sender (Internet-Radio). Wiedergabe direkt
-            -- über die Stream-URL; nichts wird heruntergeladen.
+            -- Saved streaming stations (internet radio). Playback directly
+            -- via the stream URL; nothing is downloaded.
             CREATE TABLE IF NOT EXISTS stream (
                 id        INTEGER PRIMARY KEY,
                 name      TEXT NOT NULL,
@@ -258,8 +258,8 @@ impl Library {
                 added_at  INTEGER
             );
 
-            -- Timeshift-Mitschnitte (aus Sendern gespeicherte Songs). Die
-            -- Audiodatei liegt unter `path`; hier nur die Metadaten/Verwaltung.
+            -- Timeshift recordings (songs saved from stations). The
+            -- audio file lives at `path`; here only the metadata/management.
             CREATE TABLE IF NOT EXISTS recording (
                 id          INTEGER PRIMARY KEY,
                 path        TEXT NOT NULL,
@@ -271,44 +271,44 @@ impl Library {
                 incomplete  INTEGER NOT NULL DEFAULT 0
             );
 
-            -- Hörstatistik: ein Ereignis je gehörtem Titel (roh; nichts wird
-            -- vorberechnet). Bleibt rein lokal – verlässt das Gerät nie. Interpret/
-            -- Album/Genre werden zur Auswertung über `path` an `track` gejoint,
-            -- nicht hier dupliziert (gleiches Prinzip wie bei den Online-Metadaten).
+            -- Listening statistics: one event per played track (raw; nothing is
+            -- precomputed). Stays purely local -- never leaves the device. Artist/
+            -- album/genre are joined to `track` via `path` for analysis,
+            -- not duplicated here (same principle as the online metadata).
             CREATE TABLE IF NOT EXISTS play_event (
                 id          INTEGER PRIMARY KEY,
                 path        TEXT NOT NULL,
-                started_at  INTEGER NOT NULL,           -- Unix-Sekunden (Start)
-                played_ms   INTEGER NOT NULL,           -- tatsächlich gehört (nur „Playing")
-                duration_ms INTEGER,                    -- Schnappschuss (Datei kann verschwinden)
-                completed   INTEGER NOT NULL DEFAULT 0, -- 1 = bis EOS durchgehört, 0 = Skip/Wechsel
+                started_at  INTEGER NOT NULL,           -- Unix seconds (start)
+                played_ms   INTEGER NOT NULL,           -- actually heard (only while "Playing")
+                duration_ms INTEGER,                    -- snapshot (file may disappear)
+                completed   INTEGER NOT NULL DEFAULT 0, -- 1 = listened through to EOS, 0 = skip/switch
                 source      TEXT                        -- 'queue'|'album'|'artist'|… | NULL
             );
             CREATE INDEX IF NOT EXISTS idx_play_event_path ON play_event(path);
             CREATE INDEX IF NOT EXISTS idx_play_event_time ON play_event(started_at);
 
-            -- Zusätzliche Musikquellen neben dem primären `music_dir`-Ordner.
-            -- Jede Quelle erscheint als eigener Tab in der Dateiansicht. Das
-            -- primäre Verzeichnis bleibt das Setting `music_dir` und steht hier
-            -- bewusst NICHT (kein Eintrag), damit Scan/Bibliothek unberührt sind.
-            -- kind = 'local' (zweiter Ordner, z. B. SD-Karte) | 'webdav'
-            -- (Nextcloud-Share). Das App-Passwort liegt – wie bei einem lokalen
-            -- Musikplayer üblich – im Klartext in dieser lokalen DB.
+            -- Additional music sources besides the primary `music_dir` folder.
+            -- Each source appears as its own tab in the file view. The
+            -- primary directory stays the `music_dir` setting and is deliberately
+            -- NOT listed here (no entry), so that scan/library are untouched.
+            -- kind = 'local' (second folder, e.g. SD card) | 'webdav'
+            -- (Nextcloud share). The app password is stored -- as is usual for a
+            -- local music player -- in plain text in this local DB.
             CREATE TABLE IF NOT EXISTS source (
                 id         INTEGER PRIMARY KEY,
                 kind       TEXT NOT NULL CHECK(kind IN ('local','webdav')),
                 name       TEXT NOT NULL,
                 position   INTEGER NOT NULL DEFAULT 0,
-                path       TEXT,   -- local:  Wurzelpfad im Dateisystem
-                base_url   TEXT,   -- webdav: z. B. https://cloud.example.com
-                username   TEXT,   -- webdav: Benutzername
-                password   TEXT,   -- webdav: App-Passwort/Token
-                music_path TEXT    -- webdav: Unterpfad zur Musik, z. B. /Music
+                path       TEXT,   -- local:  root path in the filesystem
+                base_url   TEXT,   -- webdav: e.g. https://cloud.example.com
+                username   TEXT,   -- webdav: username
+                password   TEXT,   -- webdav: app password/token
+                music_path TEXT    -- webdav: subpath to the music, e.g. /Music
             );
             "#,
         )?;
 
-        // Migration: frühere eq_setting-Version ohne `output`-Spalte nachrüsten.
+        // Migration: upgrade an earlier eq_setting version without an `output` column.
         let has_output = self
             .conn
             .query_row(
@@ -336,7 +336,7 @@ impl Library {
             )?;
         }
 
-        // Migration: disc_no (Disc-Nummer für Mehr-CD-Alben) nachrüsten.
+        // Migration: add disc_no (disc number for multi-CD albums).
         let has_disc = self
             .conn
             .query_row(
@@ -351,8 +351,8 @@ impl Library {
                 .execute_batch("ALTER TABLE track ADD COLUMN disc_no INTEGER;")?;
         }
 
-        // Migration: Genre-Spalte nachrüsten (für die Genre-Statistik). Wird erst
-        // durch ein erneutes Einlesen der Bibliothek befüllt.
+        // Migration: add the genre column (for the genre statistics). It is only
+        // populated by re-scanning the library.
         let has_genre = self
             .conn
             .query_row(
@@ -367,8 +367,8 @@ impl Library {
                 .execute_batch("ALTER TABLE track ADD COLUMN genre TEXT;")?;
         }
 
-        // Migration: attempts-Zähler in den Meta-Tabellen nachrüsten (begrenzt das
-        // wiederholte Anfragen erfolglos gebliebener Online-Abrufe).
+        // Migration: add the attempts counter to the meta tables (limits the
+        // repeated retrying of online fetches that kept failing).
         for table in ["album_meta", "artist_meta", "track_meta"] {
             let has = self
                 .conn
@@ -388,7 +388,7 @@ impl Library {
             }
         }
 
-        // Migration: Sortierspalte für Favoriten (für manuelles Umsortieren).
+        // Migration: sort column for favorites (for manual reordering).
         let has_pos = self
             .conn
             .query_row(
@@ -401,7 +401,7 @@ impl Library {
         if !has_pos {
             self.conn
                 .execute_batch("ALTER TABLE favorite ADD COLUMN pos INTEGER NOT NULL DEFAULT 0;")?;
-            // Bestehende Favoriten in bisheriger Reihenfolge durchnummerieren.
+            // Number the existing favorites in their previous order.
             self.conn.execute_batch(
                 "UPDATE favorite SET pos = (
                      SELECT COUNT(*) FROM favorite f2
@@ -411,7 +411,7 @@ impl Library {
             )?;
         }
 
-        // Migration: Shownotes/Beschreibung der Episoden nachrüsten.
+        // Migration: add show notes/description for episodes.
         let has_descr = self
             .conn
             .query_row(
@@ -426,8 +426,8 @@ impl Library {
                 .execute_batch("ALTER TABLE episode ADD COLUMN description TEXT;")?;
         }
 
-        // Migration: alte Einzel-Merkmale (music/concert/…) auf die neue
-        // Bereichsliste (Eigenschaften) abbilden. Idempotent.
+        // Migration: map the old single attributes (music/concert/…) onto the new
+        // area list (properties). Idempotent.
         self.conn.execute_batch(
             "UPDATE category SET value = CASE value
                  WHEN 'music'     THEN 'filesystem,artists,albums'
@@ -438,8 +438,8 @@ impl Library {
              WHERE value IN ('music','concert','audiobook','podcast');",
         )?;
 
-        // Migration: alte CHECK-Beschränkung auf scope entfernen, damit auch die
-        // Ordner-Ebene ('folder') gespeichert werden kann.
+        // Migration: remove the old CHECK constraint on scope, so that the
+        // folder level ('folder') can be stored too.
         let has_old_check = self
             .conn
             .query_row(
@@ -464,10 +464,10 @@ impl Library {
         Ok(())
     }
 
-    /// Ergänzt einen Bereich in den Eigenschaften einer Ebene, ohne vorhandene
-    /// Bereiche zu verlieren. Fehlt eine Festlegung, wird vom Standard
-    /// ausgegangen. Genutzt vom Konzert-Import (markiert die Kategorie
-    /// „Konzerte"), damit Konzerte allein über die Eigenschaften verwaltet werden.
+    /// Adds an area to the properties of a level without losing existing
+    /// areas. If no setting exists, the default is assumed. Used by the concert
+    /// import (marks the "Concerts" category), so that concerts are managed
+    /// solely through the properties.
     pub fn add_category_area(
         &self,
         scope: &str,
@@ -485,9 +485,9 @@ impl Library {
         self.set_category(scope, key, Some(&areas_value(&areas)))
     }
 
-    /// Trägt einen Ordner/eine Datei in die Konzert-Tabelle ein – nur noch für
-    /// die Kandidaten-Filterung beim Import (damit bereits hinzugefügte nicht
-    /// erneut vorgeschlagen werden). Die Anzeige läuft über die Eigenschaften.
+    /// Records a folder/file in the concert table -- now only for the
+    /// candidate filtering during import (so that already-added ones are not
+    /// suggested again). Display happens via the properties.
     pub fn add_concert(&self, path: &str, title: &str, is_dir: bool) -> Result<()> {
         self.conn.execute(
             "INSERT INTO concert (path, title, is_dir, added_at)
@@ -498,16 +498,16 @@ impl Library {
         Ok(())
     }
 
-    /// Pfade aller markierten Konzerte (für die Kandidaten-Filterung).
+    /// Paths of all marked concerts (for the candidate filtering).
     pub fn concert_paths(&self) -> Result<std::collections::HashSet<String>> {
         let mut stmt = self.conn.prepare("SELECT path FROM concert")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
     }
 
-    // ---- Favoriten ----
+    // ---- Favorites ----
 
-    /// Setzt/entfernt einen Favoriten (Stern). `scope` ∈ {track,folder,album,artist}.
+    /// Sets/removes a favorite (star). `scope` ∈ {track,folder,album,artist}.
     pub fn set_favorite(
         &self,
         scope: &str,
@@ -517,7 +517,7 @@ impl Library {
         on: bool,
     ) -> Result<()> {
         if on {
-            // Neue Favoriten ans Ende sortieren (max pos + 1).
+            // Sort new favorites to the end (max pos + 1).
             let next_pos: i64 = self
                 .conn
                 .query_row("SELECT COALESCE(MAX(pos), -1) + 1 FROM favorite", [], |r| {
@@ -539,7 +539,7 @@ impl Library {
         Ok(())
     }
 
-    /// Ob eine Ebene als Favorit markiert ist.
+    /// Whether a level is marked as a favorite.
     pub fn is_favorite(&self, scope: &str, key: &str) -> bool {
         self.conn
             .query_row(
@@ -553,7 +553,7 @@ impl Library {
             .is_some()
     }
 
-    /// Alle Favoriten (scope, key, title, is_dir) in gespeicherter Reihenfolge.
+    /// All favorites (scope, key, title, is_dir) in stored order.
     pub fn favorites(&self) -> Result<Vec<(String, String, String, bool)>> {
         let mut stmt = self.conn.prepare(
             "SELECT scope, key, title, is_dir FROM favorite ORDER BY pos, added_at, title",
@@ -569,7 +569,7 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Speichert die Reihenfolge der Favoriten (pos = Index in `ordered`).
+    /// Stores the order of the favorites (pos = index in `ordered`).
     pub fn set_favorite_order(&self, ordered: &[(String, String)]) -> Result<()> {
         for (i, (scope, key)) in ordered.iter().enumerate() {
             self.conn.execute(
@@ -580,16 +580,16 @@ impl Library {
         Ok(())
     }
 
-    // ---- Bereichs-Einträge (Konzerte / Hörbücher aus den Eigenschaften) ----
+    // ---- Area entries (concerts / audiobooks from the properties) ----
 
-    /// Inhalte, deren Eigenschaften den Bereich `area` enthalten – **live** aus
-    /// den Festlegungen (category) abgeleitet. Liefert je Eintrag
-    /// `(scope, key, Titel, is_dir)` (dieselbe Form wie Favoriten), damit
-    /// Abspielen/Detail/Cover einheitlich aufgelöst werden können.
+    /// Content whose properties contain the area `area` -- derived **live** from
+    /// the settings (category). Returns per entry
+    /// `(scope, key, title, is_dir)` (the same form as favorites), so that
+    /// playback/detail/cover can be resolved uniformly.
     ///
-    /// `include_folders`/`include_artists` steuern, ob Ordner- bzw. Interpreten-
-    /// Festlegungen mitgenommen werden (z. B. Hörbücher: ohne Ordner, mit
-    /// Interpreten/Komponisten).
+    /// `include_folders`/`include_artists` control whether folder or artist
+    /// settings are included (e.g. audiobooks: without folders, with
+    /// artists/composers).
     pub fn area_entries(
         &self,
         area: crate::core::category::Area,
@@ -603,16 +603,16 @@ impl Library {
         )
     }
 
-    /// Alle **ausgeblendeten** Inhalte (leere Bereichsliste) – jeweils das
-    /// Objekt, das die Festlegung trägt (Interpret/Album/Titel/Ordner). Grundlage
-    /// für die Übersicht „Ausgeblendet".
+    /// All **hidden** content (empty area list) -- each the
+    /// object that carries the setting (artist/album/track/folder). Basis
+    /// for the "Hidden" overview.
     pub fn hidden_entries(&self) -> Vec<(String, String, String, bool)> {
         self.category_entries(|areas| areas.is_empty(), true, true)
     }
 
-    /// Liefert `(scope, key, Titel, is_dir)` je Festlegung, deren Bereichsliste
-    /// das Prädikat erfüllt. `include_folders`/`include_artists` steuern, ob
-    /// Ordner- bzw. Interpreten-Ebenen mitgenommen werden.
+    /// Returns `(scope, key, title, is_dir)` for each setting whose area list
+    /// satisfies the predicate. `include_folders`/`include_artists` control whether
+    /// folder or artist levels are included.
     fn category_entries(
         &self,
         keep: impl Fn(&[crate::core::category::Area]) -> bool,
@@ -652,7 +652,7 @@ impl Library {
                     Some(("track", title, false))
                 }
                 "album" => {
-                    // key = „Interpret\1Album" → Titel = Albumname.
+                    // key = "artist\1album" → title = album name.
                     let album = key.splitn(2, '\u{1}').nth(1).unwrap_or("").to_string();
                     Some(("album", album, false))
                 }
@@ -670,9 +670,9 @@ impl Library {
         out
     }
 
-    // ---- Merkmale (Kategorie mit Vererbung) ----
+    // ---- Attributes (category with inheritance) ----
 
-    /// Setzt (oder löscht bei `None`) die Festlegung einer Ebene.
+    /// Sets (or, with `None`, deletes) the setting of a level.
     /// `scope` ∈ {`artist`,`album`,`track`}.
     pub fn set_category(&self, scope: &str, key: &str, value: Option<&str>) -> Result<()> {
         match value {
@@ -689,7 +689,7 @@ impl Library {
         Ok(())
     }
 
-    /// Liest die Festlegung einer einzelnen Ebene (ohne Vererbung).
+    /// Reads the setting of a single level (without inheritance).
     pub fn get_category(&self, scope: &str, key: &str) -> Result<Option<String>> {
         let v = self
             .conn
@@ -702,7 +702,7 @@ impl Library {
         Ok(v)
     }
 
-    /// Alle gespeicherten Kategorie-Festlegungen (für die Geräte-Synchronisierung).
+    /// All stored category settings (for the device synchronization).
     pub fn all_categories(&self) -> Result<Vec<(String, String, String)>> {
         let mut stmt = self
             .conn
@@ -713,8 +713,8 @@ impl Library {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
-    /// Effektive **Bereiche** eines Titels (spezifischste Ebene gewinnt:
-    /// Titel → Album → Interpret → Standard). Leere Liste = ausgeblendet.
+    /// Effective **areas** of a track (most specific level wins:
+    /// track → album → artist → default). Empty list = hidden.
     pub fn resolve_areas(
         &self,
         artist: Option<&str>,
@@ -735,7 +735,7 @@ impl Library {
                 return parse_areas(&v);
             }
         }
-        // Ordner-Kette: vom Verzeichnis der Datei aufwärts (tiefste Festlegung gewinnt).
+        // Folder chain: from the file's directory upwards (deepest setting wins).
         let mut dir = std::path::Path::new(path).parent();
         while let Some(d) = dir {
             if let Ok(Some(v)) = self.get_category("folder", &d.to_string_lossy()) {
@@ -746,7 +746,7 @@ impl Library {
         Area::DEFAULT.to_vec()
     }
 
-    /// Effektive Bereiche eines Ordners (dieser Ordner aufwärts → Standard).
+    /// Effective areas of a folder (this folder upwards → default).
     pub fn folder_areas(&self, folder: &str) -> Vec<crate::core::category::Area> {
         use crate::core::category::{parse_areas, Area};
         let mut dir = Some(std::path::Path::new(folder));
@@ -759,10 +759,10 @@ impl Library {
         Area::DEFAULT.to_vec()
     }
 
-    /// Effektive Bereiche eines Albums: Album → Interpret → **übergeordneter
-    /// Ordner** (eines Beispieltitels, aufwärts) → Standard. So erbt ein Album
-    /// ohne eigene Festlegung die Einstellung eines übergeordneten Ordners
-    /// (nicht-destruktiv – eine eigene Festlegung gewinnt weiterhin).
+    /// Effective areas of an album: album → artist → **parent
+    /// folder** (of a sample track, upwards) → default. This way an album
+    /// without its own setting inherits the setting of a parent folder
+    /// (non-destructive -- its own setting still wins).
     pub fn album_areas(&self, artist: &str, album: &str) -> Vec<crate::core::category::Area> {
         use crate::core::category::{album_key, parse_areas, Area};
         if let Ok(Some(v)) = self.get_category("album", &album_key(artist, album)) {
@@ -783,7 +783,7 @@ impl Library {
         Area::DEFAULT.to_vec()
     }
 
-    /// Pfad eines beliebigen Titels eines Albums (für die Ordner-Vererbung).
+    /// Path of any track of an album (for the folder inheritance).
     fn album_sample_path(&self, album: &str) -> Option<String> {
         self.conn
             .query_row(
@@ -794,7 +794,7 @@ impl Library {
             .ok()
     }
 
-    /// Effektive Bereiche eines Interpreten (Interpret → Standard).
+    /// Effective areas of an artist (artist → default).
     pub fn artist_areas(&self, name: &str) -> Vec<crate::core::category::Area> {
         use crate::core::category::{parse_areas, Area};
         if let Ok(Some(v)) = self.get_category("artist", name) {
@@ -803,9 +803,9 @@ impl Library {
         Area::DEFAULT.to_vec()
     }
 
-    // ---- Equalizer (10 Bänder, mit Vererbung) ----
+    // ---- Equalizer (10 bands, with inheritance) ----
 
-    /// Speichert die 10 Band-Verstärkungen (dB) für einen Ausgang + eine Ebene.
+    /// Stores the 10 band gains (dB) for an output + a level.
     pub fn set_eq(&self, output: &str, scope: &str, key: &str, bands: &[f64; 10]) -> Result<()> {
         let json = serde_json::to_string(bands)?;
         self.conn.execute(
@@ -816,7 +816,7 @@ impl Library {
         Ok(())
     }
 
-    /// Liest die Bänder einer einzelnen Ausgang/Ebene-Kombination (ohne Vererbung).
+    /// Reads the bands of a single output/level combination (without inheritance).
     pub fn get_eq(&self, output: &str, scope: &str, key: &str) -> Result<Option<[f64; 10]>> {
         let json: Option<String> = self
             .conn
@@ -829,7 +829,7 @@ impl Library {
         Ok(json.and_then(|j| serde_json::from_str::<[f64; 10]>(&j).ok()))
     }
 
-    /// Alle gespeicherten Equalizer-Einstellungen (für die Geräte-Synchronisierung).
+    /// All stored equalizer settings (for the device synchronization).
     pub fn all_eq_settings(&self) -> Result<Vec<(String, String, String, [f64; 10])>> {
         let mut stmt = self
             .conn
@@ -852,7 +852,7 @@ impl Library {
         Ok(out)
     }
 
-    /// Entfernt die Festlegung (fällt auf die geerbte/den Standard-Ausgang zurück).
+    /// Removes the setting (falls back to the inherited/default output).
     pub fn clear_eq(&self, output: &str, scope: &str, key: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM eq_setting WHERE output = ?1 AND scope = ?2 AND key = ?3",
@@ -861,9 +861,9 @@ impl Library {
         Ok(())
     }
 
-    /// Effektiver Equalizer für Titel + Ausgang. Reihenfolge: erst der konkrete
-    /// Ausgang (Titel→Album→Interpret→Global), dann der Standard-Ausgang ('')
-    /// als Basis. `None`, wenn nirgends etwas gesetzt ist (→ neutral).
+    /// Effective equalizer for track + output. Order: first the concrete
+    /// output (track→album→artist→global), then the default output ('')
+    /// as the basis. `None` if nothing is set anywhere (→ neutral).
     pub fn resolve_eq(
         &self,
         output: &str,
@@ -873,7 +873,7 @@ impl Library {
     ) -> Option<[f64; 10]> {
         let album_key = album.map(|al| crate::core::category::album_key(artist.unwrap_or(""), al));
 
-        // Konkreter Ausgang zuerst, dann der Standard-Ausgang als Basis.
+        // Concrete output first, then the default output as the basis.
         let mut outputs: Vec<&str> = Vec::new();
         if !output.is_empty() {
             outputs.push(output);
@@ -901,7 +901,7 @@ impl Library {
         None
     }
 
-    /// Liest einen Einstellungswert (z. B. den Musikordner).
+    /// Reads a setting value (e.g. the music folder).
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let value = self
             .conn
@@ -912,7 +912,7 @@ impl Library {
         Ok(value)
     }
 
-    /// Speichert einen Einstellungswert.
+    /// Stores a setting value.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO setting (key, value) VALUES (?1, ?2)
@@ -922,7 +922,7 @@ impl Library {
         Ok(())
     }
 
-    /// Listet alle zusätzlichen Musikquellen (nach Position, dann ID).
+    /// Lists all additional music sources (by position, then ID).
     pub fn list_sources(&self) -> Result<Vec<Source>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, name, position, path, base_url, username, password, music_path
@@ -944,8 +944,8 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Fügt eine Quelle hinzu und gibt deren neue ID zurück. `position` wird
-    /// automatisch ans Ende gesetzt (max + 1).
+    /// Adds a source and returns its new ID. `position` is
+    /// automatically set to the end (max + 1).
     pub fn add_source(&self, s: &Source) -> Result<i64> {
         let position: i64 = self
             .conn
@@ -970,19 +970,19 @@ impl Library {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Entfernt eine Quelle anhand ihrer ID.
+    /// Removes a source by its ID.
     pub fn delete_source(&self, id: i64) -> Result<()> {
         self.conn
             .execute("DELETE FROM source WHERE id = ?1", [id])?;
-        // Indizierte Cloud-Titel dieser Quelle entfernen (synthetischer Pfad
-        // `nc:<id>:…`). Bei lokalen Quellen trifft das Muster auf nichts zu.
+        // Remove indexed cloud tracks of this source (synthetic path
+        // `nc:<id>:…`). For local sources the pattern matches nothing.
         self.conn
             .execute("DELETE FROM track WHERE path LIKE ?1", [format!("nc:{id}:%")])?;
         Ok(())
     }
 
-    /// (Interpret, Album)-Paare der indizierten Titel einer Quelle – für den
-    /// roten „Getrennt"-Hinweis auf den Covern, wenn die Quelle offline ist.
+    /// (artist, album) pairs of a source's indexed tracks -- for the
+    /// red "Disconnected" hint on the covers when the source is offline.
     pub fn remote_album_keys(&self, source_id: i64) -> Result<Vec<(String, String)>> {
         let like = format!("nc:{source_id}:%");
         let mut stmt = self.conn.prepare(
@@ -994,8 +994,8 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Interpreten-Namen der indizierten Titel einer Quelle (für den „Getrennt"-
-    /// Hinweis auf den Fotos).
+    /// Artist names of a source's indexed tracks (for the "Disconnected"
+    /// hint on the photos).
     pub fn remote_artists(&self, source_id: i64) -> Result<Vec<String>> {
         let like = format!("nc:{source_id}:%");
         let mut stmt = self.conn.prepare(
@@ -1006,7 +1006,7 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Fügt einen Track ein oder aktualisiert dessen Metadaten (Schlüssel: Pfad).
+    /// Inserts a track or updates its metadata (key: path).
     pub fn upsert_track(&self, t: &Track) -> Result<()> {
         self.conn.execute(
             r#"
@@ -1035,8 +1035,8 @@ impl Library {
         Ok(())
     }
 
-    /// Speichert die Wiedergabeposition (Resume) anhand des Pfads. Die
-    /// Warteschlange ist pfadbasiert; bei unbekanntem Pfad passiert nichts.
+    /// Stores the resume position by path. The
+    /// queue is path-based; nothing happens for an unknown path.
     pub fn set_resume_path(&self, path: &str, resume_ms: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE track SET resume_ms = ?1 WHERE path = ?2",
@@ -1045,7 +1045,7 @@ impl Library {
         Ok(())
     }
 
-    /// Liest einen einzelnen Track anhand seines Pfads (inkl. Resume-Position).
+    /// Reads a single track by its path (incl. resume position).
     pub fn track_by_path(&self, path: &str) -> Result<Option<Track>> {
         let track = self
             .conn
@@ -1072,7 +1072,7 @@ impl Library {
         Ok(track)
     }
 
-    /// Alle Tracks, nach Album und Tracknummer sortiert.
+    /// All tracks, sorted by album and track number.
     pub fn all_tracks(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
@@ -1096,9 +1096,9 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    // ---- Fehlversuchs-Zähler (begrenzen das wiederholte Online-Anfragen) ----
+    // ---- Failure counters (limit the repeated online retrying) ----
 
-    /// Bisherige erfolglose Online-Versuche für ein Album (0, wenn unbekannt).
+    /// Previous unsuccessful online attempts for an album (0 if unknown).
     pub fn album_attempts(&self, artist: &str, album: &str) -> i64 {
         self.conn
             .query_row(
@@ -1109,7 +1109,7 @@ impl Library {
             .unwrap_or(0)
     }
 
-    /// Bisherige erfolglose Online-Versuche für einen Interpreten.
+    /// Previous unsuccessful online attempts for an artist.
     pub fn artist_attempts(&self, name: &str) -> i64 {
         self.conn
             .query_row(
@@ -1120,7 +1120,7 @@ impl Library {
             .unwrap_or(0)
     }
 
-    /// Bisherige erfolglose Fingerprint-Versuche für einen Titel (Pfad).
+    /// Previous unsuccessful fingerprint attempts for a track (path).
     pub fn track_attempts(&self, path: &str) -> i64 {
         self.conn
             .query_row(
@@ -1131,7 +1131,7 @@ impl Library {
             .unwrap_or(0)
     }
 
-    /// Liest die Online-Metadaten zu einem Album (falls bereits gesucht).
+    /// Reads the online metadata for an album (if already looked up).
     pub fn get_album_meta(&self, artist: &str, album: &str) -> Result<Option<AlbumMeta>> {
         let meta = self
             .conn
@@ -1145,9 +1145,9 @@ impl Library {
         Ok(meta)
     }
 
-    /// Irgendein vorhandenes Cover zu einem Albumnamen (interpretenübergreifend) –
-    /// nützlich für Einzeltitel, deren Album zwar bekannt ist, aber unter einem
-    /// anderen Interpreten-Credit gespeichert wurde.
+    /// Any existing cover for an album name (across artists) --
+    /// useful for single tracks whose album is known but was stored under a
+    /// different artist credit.
     pub fn album_cover(&self, album: &str) -> Result<Option<String>> {
         let cover = self
             .conn
@@ -1162,7 +1162,7 @@ impl Library {
         Ok(cover)
     }
 
-    /// Speichert/aktualisiert die Online-Metadaten eines Albums.
+    /// Stores/updates the online metadata of an album.
     pub fn upsert_album_meta(&self, m: &AlbumMeta) -> Result<()> {
         self.conn.execute(
             r#"
@@ -1183,9 +1183,9 @@ impl Library {
         Ok(())
     }
 
-    /// Album-Übersicht für die UI: alle eindeutigen Alben aus der Bibliothek,
-    /// angereichert mit (ggf. vorhandenen) Online-Metadaten und der Titelanzahl.
-    /// Nach Albumname sortiert (wie die Dateiansicht – ohne Interpreten-Gruppen).
+    /// Album overview for the UI: all unique albums from the library,
+    /// enriched with (any available) online metadata and the track count.
+    /// Sorted by album name (like the file view -- without artist groups).
     pub fn albums_overview(&self) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
@@ -1211,14 +1211,14 @@ impl Library {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
-        // Alben werden **allein über den Albumnamen** zusammengefasst – der
-        // Interpret spielt keine Rolle. Gleichnamige Titel verschiedener
-        // Interpreten (auch „feat."-Varianten) bilden damit genau eine Karte.
-        // Anzeige-Interpret + Cover stammen vom Interpreten mit den meisten
-        // Titeln des Albums (Lücken werden aus den übrigen gefüllt).
+        // Albums are merged **by album name alone** -- the
+        // artist plays no role. Same-named tracks by different
+        // artists (including "feat." variants) thus form exactly one card.
+        // Display artist + cover come from the artist with the most
+        // tracks on the album (gaps are filled from the rest).
         use std::collections::HashMap;
-        // Je Album-Schlüssel: Statistik pro Haupt-Interpret (Titelzahl, Cover,
-        // Jahr, MBID) für die Wahl von Anzeige-Interpret/Cover.
+        // Per album key: statistics per primary artist (track count, cover,
+        // year, MBID) for choosing the display artist/cover.
         type ArtistInfo = (i64, Option<String>, Option<i32>, Option<String>);
         let mut order: Vec<String> = Vec::new();
         let mut map: HashMap<String, AlbumMeta> = HashMap::new();
@@ -1258,8 +1258,8 @@ impl Library {
                 slot.3 = mbid;
             }
         }
-        // Anzeige-Interpret = der mit den meisten Titeln; dessen Cover/Jahr/MBID
-        // bevorzugen, fehlende Felder aus den übrigen Interpreten ergänzen.
+        // Display artist = the one with the most tracks; prefer its
+        // cover/year/MBID, fill missing fields from the remaining artists.
         for (key, meta) in map.iter_mut() {
             let Some(per) = by_artist.get(key) else { continue };
             let mut artists: Vec<(&String, &ArtistInfo)> = per.iter().collect();
@@ -1268,7 +1268,7 @@ impl Library {
                     .cmp(&a.1 .0)
                     .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
             });
-            // Anzeige-Interpret = der häufigste; Jahr/MBID: erstes vorhandenes.
+            // Display artist = the most frequent; year/MBID: first available.
             if let Some((name, _)) = artists.first() {
                 meta.artist = (*name).clone();
             }
@@ -1280,10 +1280,10 @@ impl Library {
                     meta.mbid = info.3.clone();
                 }
             }
-            // Cover NUR, wenn alle (Haupt-)Interpreten dasselbe Cover liefern.
-            // Bei Sammelalben / Pseudo-Alben („[non-album tracks]",
-            // „Dancemix 2009" …) hätte ein einzelnes Mitglied-Cover sonst ein
-            // irreführendes Bild für die ganze Karte ergeben → dann neutral.
+            // Cover ONLY if all (primary) artists provide the same cover.
+            // For compilations / pseudo-albums ("[non-album tracks]",
+            // "Dancemix 2009" …) a single member's cover would otherwise have
+            // given a misleading image for the whole card → then neutral.
             let mut covers: Vec<&String> =
                 artists.iter().filter_map(|(_, i)| i.1.as_ref()).collect();
             covers.sort();
@@ -1294,7 +1294,7 @@ impl Library {
             };
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
-        // Eigenschaften: nur Alben zeigen, die im Bereich „Alben" sichtbar sind.
+        // Properties: only show albums that are visible in the "Albums" area.
         out.retain(|a| {
             self.album_areas(&a.artist, &a.album)
                 .contains(&crate::core::category::Area::Albums)
@@ -1315,8 +1315,8 @@ impl Library {
         })
     }
 
-    /// Alben **ohne** Cover, je mit einem Beispiel-Track-Pfad. Grundlage für die
-    /// lokale Cover-Extraktion (eingebettetes Bild) und die Online-Lückenfüllung.
+    /// Albums **without** a cover, each with a sample track path. Basis for the
+    /// local cover extraction (embedded image) and the online gap filling.
     pub fn albums_missing_cover(&self) -> Result<Vec<(String, String, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, MIN(t.path)
@@ -1338,12 +1338,12 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    // ---- Interpreten ----
+    // ---- Artists ----
 
-    /// Eindeutige **Einzel**-Interpreten aus der Bibliothek. Zusammengesetzte
-    /// Angaben („A feat. B & C") werden in ihre Künstler zerlegt
-    /// (siehe [`crate::core::artist::split_artists`]) und case-insensitiv
-    /// dedupliziert. Alphabetisch sortiert.
+    /// Unique **individual** artists from the library. Composite
+    /// entries ("A feat. B & C") are split into their artists
+    /// (see [`crate::core::artist::split_artists`]) and deduplicated
+    /// case-insensitively. Sorted alphabetically.
     pub fn distinct_artists(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT artist FROM track
@@ -1394,13 +1394,13 @@ impl Library {
         Ok(())
     }
 
-    /// Interpreten-Übersicht für die UI: jede(r) Einzelkünstler(in) – auch aus
-    /// „feat."-Angaben – mit (ggf. vorhandenem) Foto.
+    /// Artist overview for the UI: every individual artist -- including from
+    /// "feat." entries -- with (any available) photo.
     pub fn artists_overview(&self) -> Result<Vec<ArtistMeta>> {
         let names = self.distinct_artists()?;
         let mut out = Vec::with_capacity(names.len());
         for name in names {
-            // Eigenschaften: nur im Bereich „Interpreten" sichtbare zeigen.
+            // Properties: only show those visible in the "Artists" area.
             if !self
                 .artist_areas(&name)
                 .contains(&crate::core::category::Area::Artists)
@@ -1423,7 +1423,7 @@ impl Library {
         })
     }
 
-    // ---- Fingerprint-Erkennung (AcoustID) ----
+    // ---- Fingerprint recognition (AcoustID) ----
 
     pub fn get_track_meta(&self, path: &str) -> Result<Option<TrackMeta>> {
         let meta = self
@@ -1469,18 +1469,18 @@ impl Library {
         })
     }
 
-    // ---- Hörstatistik (play_event) ----
+    // ---- Listening statistics (play_event) ----
 
-    /// SQL-Prädikat (über Spalten von `play_event`), ab dem ein Ereignis als
-    /// „Wiedergabe" zählt: Last.fm-Regel – mindestens 30 s **oder** die halbe
-    /// Titellänge gehört. Darunter gilt es als Skip/Abbruch.
-    /// `play_event` ist in allen Auswertungs-Queries als `e` aliasiert (Spalten
-    /// wie `duration_ms` gibt es auch in `track` → sonst mehrdeutig).
+    /// SQL predicate (over columns of `play_event`) from which an event counts
+    /// as a "play": Last.fm rule -- at least 30 s **or** half the
+    /// track length heard. Below that it counts as a skip/abort.
+    /// `play_event` is aliased as `e` in all analysis queries (columns
+    /// like `duration_ms` also exist in `track` → otherwise ambiguous).
     const COUNTS_AS_PLAY: &'static str =
         "(e.played_ms >= 30000 OR (e.duration_ms > 0 AND e.played_ms * 2 >= e.duration_ms))";
 
-    /// Schreibt ein Hörereignis und führt nebenbei `track.last_played` nach
-    /// (die Spalte existiert seit jeher, war aber ungenutzt).
+    /// Writes a listening event and incidentally updates `track.last_played`
+    /// (the column has always existed but was unused).
     pub fn log_play(
         &self,
         path: &str,
@@ -1502,7 +1502,7 @@ impl Library {
                 source,
             ],
         )?;
-        // Nur vorwärts setzen (ein Resume aus der Vergangenheit darf nicht zurückdrehen).
+        // Only move forward (a resume from the past must not turn it back).
         self.conn.execute(
             "UPDATE track SET last_played = ?2
              WHERE path = ?1 AND (last_played IS NULL OR last_played < ?2)",
@@ -1511,9 +1511,9 @@ impl Library {
         Ok(())
     }
 
-    /// Gesamtkennzahlen ab `since` (Unix-Sekunden; 0 = seit Beginn). Die
-    /// `distinct_*`-Zahlen zählen nur, was tatsächlich als Wiedergabe gilt, und
-    /// werden – wie die Ranglisten – über feat.-/Albumnamen gefaltet.
+    /// Overall metrics from `since` (Unix seconds; 0 = since the beginning). The
+    /// `distinct_*` numbers count only what actually counts as a play, and
+    /// are -- like the rankings -- folded over feat./album names.
     pub fn stats_totals(&self, since: i64) -> Result<StatTotals> {
         let (total_played_ms, plays, skips): (i64, i64, i64) = self.conn.query_row(
             &format!(
@@ -1547,7 +1547,7 @@ impl Library {
         })
     }
 
-    /// Top-Titel ab `since`, nach Wiedergaben (dann gehörter Zeit) sortiert.
+    /// Top tracks from `since`, sorted by plays (then time heard).
     pub fn stats_top_tracks(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT t.title, e.path, COALESCE(t.artist, '') AS artist,
@@ -1584,8 +1584,8 @@ impl Library {
             .collect())
     }
 
-    /// Top-Alben ab `since`. Wie [`Self::albums_overview`] über den Albumnamen
-    /// gefaltet; Anzeige-Interpret = Haupt-Interpret mit den meisten Wiedergaben.
+    /// Top albums from `since`. Folded over the album name like
+    /// [`Self::albums_overview`]; display artist = primary artist with the most plays.
     pub fn stats_top_albums(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT COALESCE(t.artist, '') AS artist, t.album,
@@ -1633,8 +1633,8 @@ impl Library {
         Ok(Self::rank(map.into_values().collect(), limit))
     }
 
-    /// Top-Interpreten ab `since`. Über den Haupt-Interpreten (feat.-Auflösung)
-    /// gefaltet, damit „A" und „A feat. B" zusammenfallen.
+    /// Top artists from `since`. Folded over the primary artist (feat. resolution),
+    /// so that "A" and "A feat. B" collapse together.
     pub fn stats_top_artists(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT COALESCE(t.artist, '') AS artist,
@@ -1671,9 +1671,9 @@ impl Library {
         Ok(Self::rank(map.into_values().collect(), limit))
     }
 
-    /// Top-Genres nach Wiedergaben (aus den in der Bibliothek gespeicherten
-    /// Track-Genres). Nur Titel mit gesetztem Genre zählen; Titel ohne Genre
-    /// (oder vor der Genre-Migration eingelesene) bleiben unberücksichtigt.
+    /// Top genres by plays (from the track genres stored in the
+    /// library). Only tracks with a genre set count; tracks without a genre
+    /// (or scanned before the genre migration) are not considered.
     pub fn stats_top_genres(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT t.genre AS genre,
@@ -1699,8 +1699,8 @@ impl Library {
         Ok(Self::rank(entries, limit))
     }
 
-    /// Nur tatsächliche Wiedergaben behalten, nach Wiedergaben (dann Zeit)
-    /// sortieren und auf `limit` kürzen.
+    /// Keep only actual plays, sort by plays (then time)
+    /// and truncate to `limit`.
     fn rank(mut entries: Vec<StatEntry>, limit: usize) -> Vec<StatEntry> {
         entries.retain(|e| e.plays > 0);
         entries.sort_by(|a, b| {
@@ -1713,7 +1713,7 @@ impl Library {
         entries
     }
 
-    /// Gehörte Zeit (ms) je Stunde des Tages (Index 0..23, lokale Zeit).
+    /// Time heard (ms) per hour of the day (index 0..23, local time).
     pub fn stats_by_hour(&self, since: i64) -> Result<[i64; 24]> {
         let mut out = [0i64; 24];
         let mut stmt = self.conn.prepare(
@@ -1730,7 +1730,7 @@ impl Library {
         Ok(out)
     }
 
-    /// Gehörte Zeit (ms) je Wochentag (Index 0 = Sonntag … 6 = Samstag, lokal).
+    /// Time heard (ms) per weekday (index 0 = Sunday … 6 = Saturday, local).
     pub fn stats_by_weekday(&self, since: i64) -> Result<[i64; 7]> {
         let mut out = [0i64; 7];
         let mut stmt = self.conn.prepare(
@@ -1747,10 +1747,10 @@ impl Library {
         Ok(out)
     }
 
-    // ---- Mehrere Bilder je Album / Interpret (Galerie) ----
+    // ---- Multiple images per album / artist (gallery) ----
 
-    /// Ersetzt die gespeicherten Album-Bilder (Reihenfolge = idx).
-    /// `images`: je (Pfad, Art, Quelle).
+    /// Replaces the stored album images (order = idx).
+    /// `images`: each (path, kind, source).
     pub fn set_album_images(
         &self,
         artist: &str,
@@ -1771,7 +1771,7 @@ impl Library {
         Ok(())
     }
 
-    /// Alle gespeicherten Bildpfade eines Albums (in Reihenfolge).
+    /// All stored image paths of an album (in order).
     pub fn album_images(&self, artist: &str, album: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT path FROM album_image WHERE artist = ?1 AND album = ?2 ORDER BY idx",
@@ -1781,7 +1781,7 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Ersetzt die gespeicherten Interpreten-Bilder (Reihenfolge = idx).
+    /// Replaces the stored artist images (order = idx).
     pub fn set_artist_images(
         &self,
         name: &str,
@@ -1799,7 +1799,7 @@ impl Library {
         Ok(())
     }
 
-    /// Alle gespeicherten Bildpfade eines Interpreten (in Reihenfolge).
+    /// All stored image paths of an artist (in order).
     pub fn artist_images(&self, name: &str) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
@@ -1808,9 +1808,9 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    // ---- Playlisten ----
+    // ---- Playlists ----
 
-    /// Legt eine Playlist an und gibt ihre ID zurück.
+    /// Creates a playlist and returns its ID.
     pub fn create_playlist(&self, name: &str) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO playlist (name, created_at) VALUES (?1, strftime('%s','now'))",
@@ -1819,7 +1819,7 @@ impl Library {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Benennt eine Playlist um.
+    /// Renames a playlist.
     pub fn rename_playlist(&self, id: i64, name: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE playlist SET name = ?1 WHERE id = ?2",
@@ -1828,7 +1828,7 @@ impl Library {
         Ok(())
     }
 
-    /// Löscht eine Playlist samt ihrer Einträge.
+    /// Deletes a playlist along with its entries.
     pub fn delete_playlist(&self, id: i64) -> Result<()> {
         self.conn
             .execute("DELETE FROM playlist_item WHERE playlist_id = ?1", [id])?;
@@ -1836,7 +1836,7 @@ impl Library {
         Ok(())
     }
 
-    /// Alle Playlisten als (id, Name, Titelanzahl), alphabetisch sortiert.
+    /// All playlists as (id, name, track count), sorted alphabetically.
     pub fn playlists(&self) -> Result<Vec<(i64, String, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT p.id, p.name, COUNT(i.path)
@@ -1855,7 +1855,7 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Hängt Pfade ans Ende einer Playlist an (Duplikate erlaubt).
+    /// Appends paths to the end of a playlist (duplicates allowed).
     pub fn add_to_playlist(&self, id: i64, paths: &[String]) -> Result<()> {
         let start: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_item WHERE playlist_id = ?1",
@@ -1871,7 +1871,7 @@ impl Library {
         Ok(())
     }
 
-    /// Pfade einer Playlist in ihrer Reihenfolge.
+    /// Paths of a playlist in their order.
     pub fn playlist_paths(&self, id: i64) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
@@ -1880,7 +1880,7 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Entfernt alle Vorkommen eines Pfads aus einer Playlist.
+    /// Removes all occurrences of a path from a playlist.
     pub fn remove_from_playlist(&self, id: i64, path: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM playlist_item WHERE playlist_id = ?1 AND path = ?2",
@@ -1891,8 +1891,8 @@ impl Library {
 
     // ---- Podcasts ----
 
-    /// Abonniert einen Feed (oder aktualisiert Titel/Bild bei bekanntem Feed)
-    /// und gibt die Podcast-ID zurück.
+    /// Subscribes to a feed (or updates title/image for a known feed)
+    /// and returns the podcast ID.
     pub fn subscribe_podcast(
         &self,
         title: &str,
@@ -1913,7 +1913,7 @@ impl Library {
             })?)
     }
 
-    /// Alle Podcasts als (id, Titel, Bild-URL, Episodenzahl), neueste zuerst.
+    /// All podcasts as (id, title, image URL, episode count), newest first.
     pub fn podcasts(&self) -> Result<Vec<(i64, String, Option<String>, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT p.id, p.title, p.image_url, COUNT(e.audio_url)
@@ -1931,7 +1931,7 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Feed-URL eines Podcasts (für die Aktualisierung).
+    /// Feed URL of a podcast (for the update).
     pub fn podcast_feed_url(&self, id: i64) -> Result<Option<String>> {
         Ok(self
             .conn
@@ -1941,7 +1941,7 @@ impl Library {
             .optional()?)
     }
 
-    /// Entfernt einen Podcast samt Episoden.
+    /// Removes a podcast along with its episodes.
     pub fn delete_podcast(&self, id: i64) -> Result<()> {
         self.conn
             .execute("DELETE FROM episode WHERE podcast_id = ?1", [id])?;
@@ -1949,7 +1949,7 @@ impl Library {
         Ok(())
     }
 
-    /// Ersetzt die Episoden eines Podcasts (Reihenfolge = Feed-Reihenfolge).
+    /// Replaces the episodes of a podcast (order = feed order).
     pub fn set_episodes(&self, podcast_id: i64, episodes: &[Episode]) -> Result<()> {
         self.conn
             .execute("DELETE FROM episode WHERE podcast_id = ?1", [podcast_id])?;
@@ -1973,8 +1973,8 @@ impl Library {
         Ok(())
     }
 
-    /// Speichert/aktualisiert die Wiedergabeposition einer Episode (per URL).
-    /// `position_ms <= 0` löscht den Eintrag (gilt als „von vorn / fertig").
+    /// Stores/updates the resume position of an episode (by URL).
+    /// `position_ms <= 0` deletes the entry (counts as "from the start / finished").
     pub fn set_episode_progress(&self, url: &str, position_ms: i64) -> Result<()> {
         if position_ms <= 0 {
             self.conn
@@ -1991,7 +1991,7 @@ impl Library {
         Ok(())
     }
 
-    /// Gemerkte Wiedergabeposition einer Episode (0 = keine/von vorn).
+    /// Remembered resume position of an episode (0 = none/from the start).
     pub fn episode_progress(&self, url: &str) -> Result<i64> {
         Ok(self
             .conn
@@ -2004,7 +2004,7 @@ impl Library {
             .unwrap_or(0))
     }
 
-    /// Alle gemerkten Episodenpositionen (für den Geräte-Sync).
+    /// All remembered episode positions (for the device sync).
     pub fn all_episode_progress(&self) -> Result<Vec<(String, i64)>> {
         let mut stmt = self
             .conn
@@ -2013,8 +2013,8 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Shownotes/Beschreibung einer Episode anhand ihrer Audio-URL (für die
-    /// Kapitelmarken auf dem Seekbar). `None`, wenn unbekannt oder leer.
+    /// Show notes/description of an episode by its audio URL (for the
+    /// chapter marks on the seekbar). `None` if unknown or empty.
     pub fn episode_description_by_url(&self, url: &str) -> Result<Option<String>> {
         Ok(self
             .conn
@@ -2028,7 +2028,7 @@ impl Library {
             .filter(|s| !s.trim().is_empty()))
     }
 
-    /// Episoden eines Podcasts in Feed-Reihenfolge.
+    /// Episodes of a podcast in feed order.
     pub fn episodes(&self, podcast_id: i64) -> Result<Vec<Episode>> {
         let mut stmt = self.conn.prepare(
             "SELECT guid, title, audio_url, published, duration, description FROM episode
@@ -2047,10 +2047,10 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    // ---- Streaming (Internet-Radio) ----
+    // ---- Streaming (internet radio) ----
 
-    /// Speichert einen Sender (oder aktualisiert dessen Felder bei bekannter URL)
-    /// und gibt die Sender-ID zurück.
+    /// Stores a station (or updates its fields for a known URL)
+    /// and returns the station ID.
     #[allow(clippy::too_many_arguments)]
     pub fn add_stream(
         &self,
@@ -2075,8 +2075,8 @@ impl Library {
             .query_row("SELECT id FROM stream WHERE url = ?1", [url], |r| r.get(0))?)
     }
 
-    /// Alle gespeicherten Sender – Favoriten zuerst, dann die zuletzt
-    /// hinzugefügten.
+    /// All stored stations -- favorites first, then the most recently
+    /// added.
     pub fn streams(&self) -> Result<Vec<crate::model::StreamItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, url, favicon, tags, country FROM stream
@@ -2095,15 +2095,15 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Entfernt einen Sender.
+    /// Removes a station.
     pub fn delete_stream(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM stream WHERE id = ?1", [id])?;
         Ok(())
     }
 
-    // ---- Aufnahmen (Timeshift-Mitschnitte) ----
+    // ---- Recordings (timeshift recordings) ----
 
-    /// Speichert einen Mitschnitt-Eintrag und gibt dessen ID zurück.
+    /// Stores a recording entry and returns its ID.
     pub fn add_recording(
         &self,
         path: &str,
@@ -2120,7 +2120,7 @@ impl Library {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Alle Mitschnitte, neueste zuerst.
+    /// All recordings, newest first.
     pub fn recordings(&self) -> Result<Vec<crate::model::RecordingItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, path, artist, title, station, recorded_at, incomplete
@@ -2140,8 +2140,8 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Entfernt einen Mitschnitt aus der Verwaltung und gibt dessen Dateipfad
-    /// zurück (damit der Aufrufer die Datei löschen kann).
+    /// Removes a recording from management and returns its file path
+    /// (so that the caller can delete the file).
     pub fn delete_recording(&self, id: i64) -> Result<Option<String>> {
         let path: Option<String> = self
             .conn
@@ -2151,9 +2151,9 @@ impl Library {
         Ok(path)
     }
 
-    /// Alle Episoden samt Podcast-Infos (für die „Neuste"-Ansicht). Die
-    /// chronologische Sortierung nach Veröffentlichungsdatum übernimmt die UI
-    /// (das gespeicherte Datum ist nur Text).
+    /// All episodes along with podcast info (for the "Newest" view). The
+    /// chronological sorting by publication date is handled by the UI
+    /// (the stored date is only text).
     pub fn all_episodes(&self) -> Result<Vec<crate::model::EpisodeRef>> {
         let mut stmt = self.conn.prepare(
             "SELECT p.id, p.title, p.image_url, e.title, e.audio_url, e.published, e.duration, e.description
@@ -2204,30 +2204,30 @@ mod tests {
         lib.upsert_track(&track("/m/c1.mp3", Some("Carol"), Some("Album Y")))
             .unwrap();
 
-        // Dauer der Test-Tracks ist 60 s → Schwellwert effektiv 30 s.
+        // Duration of the test tracks is 60 s → threshold effectively 30 s.
         let t0: i64 = 1_700_000_000;
         lib.log_play("/m/a1.mp3", t0, 45_000, 60_000, true, Some("queue")).unwrap();
         lib.log_play("/m/a1.mp3", t0 + 100, 50_000, 60_000, true, None).unwrap();
         lib.log_play("/m/a2.mp3", t0 + 200, 40_000, 60_000, false, None).unwrap();
-        lib.log_play("/m/c1.mp3", t0 + 300, 5_000, 60_000, false, None).unwrap(); // Skip
+        lib.log_play("/m/c1.mp3", t0 + 300, 5_000, 60_000, false, None).unwrap(); // skip
 
         let tot = lib.stats_totals(0).unwrap();
         assert_eq!(tot.plays, 3);
         assert_eq!(tot.skips, 1);
         assert_eq!(tot.total_played_ms, 45_000 + 50_000 + 40_000 + 5_000);
-        assert_eq!(tot.distinct_tracks, 2); // a1, a2 (c1 nur Skip)
-        assert_eq!(tot.distinct_artists, 1); // Alice (a2 fällt via primary auf Alice)
-        assert_eq!(tot.distinct_albums, 1); // Album X (Album Y nur Skip)
+        assert_eq!(tot.distinct_tracks, 2); // a1, a2 (c1 only a skip)
+        assert_eq!(tot.distinct_artists, 1); // Alice (a2 falls onto Alice via primary)
+        assert_eq!(tot.distinct_albums, 1); // Album X (Album Y only a skip)
 
         let tracks = lib.stats_top_tracks(0, 10).unwrap();
         assert_eq!(tracks.len(), 2);
-        assert_eq!(tracks[0].plays, 2); // a1 zweimal
+        assert_eq!(tracks[0].plays, 2); // a1 twice
         assert_eq!(tracks[0].detail, "Alice");
 
         let artists = lib.stats_top_artists(0, 10).unwrap();
         assert_eq!(artists.len(), 1);
         assert_eq!(artists[0].name, "Alice");
-        assert_eq!(artists[0].plays, 3); // a1×2 + a2×1, gefaltet
+        assert_eq!(artists[0].plays, 3); // a1×2 + a2×1, folded
 
         let albums = lib.stats_top_albums(0, 10).unwrap();
         assert_eq!(albums.len(), 1);
@@ -2235,18 +2235,18 @@ mod tests {
         assert_eq!(albums[0].plays, 3);
         assert_eq!(albums[0].detail, "Alice");
 
-        // last_played wird mitgeführt (vorwärts: das spätere Ereignis gewinnt).
+        // last_played is tracked (forward: the later event wins).
         let lp: Option<i64> = lib
             .conn
             .query_row("SELECT last_played FROM track WHERE path = ?1", ["/m/a1.mp3"], |r| r.get(0))
             .unwrap();
         assert_eq!(lp, Some(t0 + 100));
 
-        // Verteilungen bewahren die Gesamtzeit (zeitzonenunabhängig geprüft).
+        // Distributions preserve the total time (checked timezone-independently).
         assert_eq!(lib.stats_by_hour(0).unwrap().iter().sum::<i64>(), tot.total_played_ms);
         assert_eq!(lib.stats_by_weekday(0).unwrap().iter().sum::<i64>(), tot.total_played_ms);
 
-        // since-Filter: ab t0+250 bleibt nur der Skip (c1).
+        // since filter: from t0+250 only the skip (c1) remains.
         let recent = lib.stats_totals(t0 + 250).unwrap();
         assert_eq!(recent.plays, 0);
         assert_eq!(recent.skips, 1);
@@ -2257,7 +2257,7 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         let mut m = AlbumMeta::pending("A", "B");
 
-        // Jeder erfolglose Abruf zählt hoch.
+        // Every unsuccessful fetch counts up.
         m.status = "notfound".to_string();
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 1);
@@ -2265,7 +2265,7 @@ mod tests {
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 2);
 
-        // Erfolg ('matched' oder lokal gefundenes Cover) setzt zurück.
+        // Success ('matched' or a locally found cover) resets it.
         m.status = "matched".to_string();
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 0);
@@ -2283,7 +2283,7 @@ mod tests {
         let id = lib
             .subscribe_podcast("Mein Podcast", "https://feed.example/rss", Some("https://img"))
             .unwrap();
-        // Erneutes Abo desselben Feeds → gleiche ID (Upsert), kein Duplikat.
+        // Re-subscribing to the same feed → same ID (upsert), no duplicate.
         let id2 = lib
             .subscribe_podcast("Mein Podcast (neu)", "https://feed.example/rss", None)
             .unwrap();
@@ -2330,7 +2330,7 @@ mod tests {
         let id = lib.create_playlist("Roadtrip").unwrap();
         assert_eq!(lib.playlists().unwrap(), vec![(id, "Roadtrip".to_string(), 0)]);
 
-        // Anhängen erhält die Reihenfolge (über zwei Aufrufe hinweg).
+        // Appending preserves the order (across two calls).
         lib.add_to_playlist(id, &["/a.mp3".into(), "/b.mp3".into()])
             .unwrap();
         lib.add_to_playlist(id, &["/c.mp3".into()]).unwrap();
@@ -2338,7 +2338,7 @@ mod tests {
             lib.playlist_paths(id).unwrap(),
             vec!["/a.mp3", "/b.mp3", "/c.mp3"]
         );
-        assert_eq!(lib.playlists().unwrap()[0].2, 3); // Titelanzahl
+        assert_eq!(lib.playlists().unwrap()[0].2, 3); // track count
 
         lib.rename_playlist(id, "Tour").unwrap();
         assert_eq!(lib.playlists().unwrap()[0].1, "Tour");
@@ -2357,11 +2357,11 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         lib.upsert_track(&track("/x/1.mp3", Some("X"), Some("Y")))
             .unwrap();
-        // Standard: in Alben und Interpreten sichtbar.
+        // Default: visible in albums and artists.
         assert_eq!(lib.albums_overview().unwrap().len(), 1);
         assert_eq!(lib.artists_overview().unwrap().len(), 1);
 
-        // Album aus „Alben" nehmen (nur noch Dateisystem + Interpreten).
+        // Take the album out of "Albums" (now only filesystem + artists).
         lib.set_category(
             "album",
             &album_key("X", "Y"),
@@ -2371,7 +2371,7 @@ mod tests {
         assert!(lib.albums_overview().unwrap().is_empty());
         assert_eq!(lib.artists_overview().unwrap().len(), 1);
 
-        // Interpret komplett ausblenden.
+        // Hide the artist completely.
         lib.set_category("artist", "X", Some("")).unwrap();
         assert!(lib.artists_overview().unwrap().is_empty());
     }
@@ -2382,13 +2382,13 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         lib.upsert_track(&track("/musik/Live/1.mp3", Some("X"), Some("Konzert")))
             .unwrap();
-        // Standard: Album ist im Bereich „Alben" sichtbar.
+        // Default: the album is visible in the "Albums" area.
         assert!(lib.album_areas("X", "Konzert").contains(&Area::Albums));
-        // Übergeordneten Ordner ausblenden (leere Bereichsliste).
+        // Hide the parent folder (empty area list).
         lib.set_category("folder", "/musik/Live", Some("")).unwrap();
-        // Album ohne eigene Festlegung erbt nun den Ordner → ausgeblendet.
+        // The album without its own setting now inherits the folder → hidden.
         assert!(lib.album_areas("X", "Konzert").is_empty());
-        // Eigene Album-Festlegung gewinnt weiterhin (nicht-destruktiv).
+        // Its own album setting still wins (non-destructive).
         lib.set_category("album", &crate::core::category::album_key("X", "Konzert"), Some("albums"))
             .unwrap();
         assert!(lib.album_areas("X", "Konzert").contains(&Area::Albums));
@@ -2410,7 +2410,7 @@ mod tests {
             .iter()
             .filter(|a| a.album == "Advanced Chemistry")
             .collect();
-        // feat.-Varianten desselben Haupt-Interpreten → genau EINE Karte.
+        // feat. variants of the same primary artist → exactly ONE card.
         assert_eq!(ac.len(), 1);
         assert_eq!(ac[0].artist, "Beginner");
         assert_eq!(ac[0].track_count, 3);
@@ -2419,7 +2419,7 @@ mod tests {
     #[test]
     fn albums_overview_drops_ambiguous_cover_for_compilations() {
         let lib = Library::open_in_memory().unwrap();
-        // Sammelalbum: zwei Interpreten mit unterschiedlichem Cover → neutral.
+        // Compilation: two artists with different covers → neutral.
         for (path, artist, cover) in [
             ("/c1.mp3", "DJ A", "/covers/a.jpg"),
             ("/c2.mp3", "DJ B", "/covers/b.jpg"),
@@ -2439,7 +2439,7 @@ mod tests {
             .unwrap();
         assert_eq!(dm.cover_path, None);
 
-        // Echtes Album eines Interpreten → Cover bleibt erhalten.
+        // Real album by one artist → cover is retained.
         lib.upsert_track(&track("/d1.mp3", Some("Solo"), Some("Werk")))
             .unwrap();
         let mut m = crate::model::AlbumMeta::pending("Solo", "Werk");
@@ -2458,7 +2458,7 @@ mod tests {
     #[test]
     fn albums_overview_groups_by_name_ignoring_artist() {
         let lib = Library::open_in_memory().unwrap();
-        // Gleicher Albumname, verschiedene Interpreten → genau EINE Karte.
+        // Same album name, different artists → exactly ONE card.
         for (path, artist) in [
             ("/a1.mp3", "Artist A"),
             ("/a2.mp3", "Artist A"),
@@ -2475,14 +2475,14 @@ mod tests {
             .collect();
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].track_count, 3);
-        // Anzeige-Interpret = der mit den meisten Titeln (A: 2 > B: 1).
+        // Display artist = the one with the most tracks (A: 2 > B: 1).
         assert_eq!(live[0].artist, "Artist A");
     }
 
     #[test]
     fn multi_disc_tracks_ordered_by_disc_then_track() {
         let lib = Library::open_in_memory().unwrap();
-        // Zwei CDs, absichtlich „verkehrt herum" eingefügt.
+        // Two CDs, deliberately inserted "the wrong way round".
         let rows = [
             ("/al/d2t2.mp3", 2u32, 2u32),
             ("/al/d1t1.mp3", 1, 1),
@@ -2501,7 +2501,7 @@ mod tests {
             .into_iter()
             .map(|t| (t.disc_no, t.track_no))
             .collect();
-        // Erst Disc 1 (Track 1,2), dann Disc 2 (Track 1,2).
+        // First disc 1 (track 1,2), then disc 2 (track 1,2).
         assert_eq!(
             got,
             vec![
@@ -2519,16 +2519,16 @@ mod tests {
         lib.upsert_track(&track("/a/hoerspiel.mp3", Some("X"), Some("Y")))
             .unwrap();
 
-        // Frisch eingelesener Track hat keine Resume-Position.
+        // A freshly scanned track has no resume position.
         let t = lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap();
         assert_eq!(t.resume_ms, 0);
 
-        // Position speichern und wieder auslesen.
+        // Store the position and read it back.
         lib.set_resume_path("/a/hoerspiel.mp3", 123_456).unwrap();
         let t = lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap();
         assert_eq!(t.resume_ms, 123_456);
 
-        // Zurücksetzen (Titel zu Ende gehört).
+        // Reset (track listened to the end).
         lib.set_resume_path("/a/hoerspiel.mp3", 0).unwrap();
         assert_eq!(lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap().resume_ms, 0);
     }
@@ -2537,7 +2537,7 @@ mod tests {
     fn track_by_path_unknown_is_none_and_setresume_noop() {
         let lib = Library::open_in_memory().unwrap();
         assert!(lib.track_by_path("/nicht/da.mp3").unwrap().is_none());
-        // Unbekannter Pfad: kein Fehler, kein Effekt.
+        // Unknown path: no error, no effect.
         lib.set_resume_path("/nicht/da.mp3", 5000).unwrap();
         assert!(lib.track_by_path("/nicht/da.mp3").unwrap().is_none());
     }
@@ -2546,13 +2546,13 @@ mod tests {
     fn area_cascade_resolution() {
         use crate::core::category::Area;
         let lib = Library::open_in_memory().unwrap();
-        // Ohne Festlegung: Standard = Dateisystem/Interpreten/Alben.
+        // Without a setting: default = filesystem/artists/albums.
         assert_eq!(
             lib.resolve_areas(Some("X"), Some("Y"), "/a/1.mp3"),
             Area::DEFAULT.to_vec()
         );
 
-        // Interpret-Ebene = nur Hörbücher → vererbt auf Album und Titel.
+        // Artist level = audiobooks only → inherited by album and track.
         lib.set_category("artist", "X", Some("audiobooks")).unwrap();
         assert_eq!(
             lib.resolve_areas(Some("X"), Some("Y"), "/a/1.mp3"),
@@ -2560,16 +2560,16 @@ mod tests {
         );
         assert_eq!(lib.album_areas("X", "Y"), vec![Area::Audiobooks]);
 
-        // Titel-Ebene gewinnt: leere Liste = ausgeblendet.
+        // Track level wins: empty list = hidden.
         lib.set_category("track", "/a/1.mp3", Some("")).unwrap();
         assert!(lib
             .resolve_areas(Some("X"), Some("Y"), "/a/1.mp3")
             .is_empty());
-        // album_areas/artist_areas ignorieren die Titel-Ebene.
+        // album_areas/artist_areas ignore the track level.
         assert_eq!(lib.album_areas("X", "Y"), vec![Area::Audiobooks]);
     }
 
-    // ---- Equalizer-Kaskade ----
+    // ---- Equalizer cascade ----
 
     fn bands(v: f64) -> [f64; 10] {
         [v; 10]
@@ -2591,7 +2591,7 @@ mod tests {
         lib.set_eq("", "album", &ak, &bands(3.0)).unwrap();
         lib.set_eq("", "track", "/a/1.mp3", &bands(4.0)).unwrap();
 
-        // Spezifischste Ebene gewinnt; nach dem Entfernen greift die nächsthöhere.
+        // The most specific level wins; after removal the next-higher one takes effect.
         let r = |l: &Library| l.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3");
         assert_eq!(r(&lib), Some(bands(4.0)));
         lib.clear_eq("", "track", "/a/1.mp3").unwrap();
@@ -2607,17 +2607,17 @@ mod tests {
     #[test]
     fn eq_concrete_output_cascade_beats_default_output() {
         let lib = Library::open_in_memory().unwrap();
-        // Standard-Ausgang: spezifische Titel-Einstellung.
+        // Default output: specific track setting.
         lib.set_eq("", "track", "/a/1.mp3", &bands(4.0)).unwrap();
-        // Konkreter Ausgang: nur eine globale Einstellung.
+        // Concrete output: only a global setting.
         lib.set_eq("sink1", "global", "", &bands(9.0)).unwrap();
-        // Dokumentiertes Verhalten: der konkrete Ausgang wird komplett zuerst
-        // aufgelöst – dessen Global schlägt den Titel des Standard-Ausgangs.
+        // Documented behavior: the concrete output is resolved completely first
+        // -- its global beats the track of the default output.
         assert_eq!(
             lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(9.0))
         );
-        // Für den Standard-Ausgang selbst gilt weiter die Titel-Einstellung.
+        // For the default output itself the track setting still applies.
         assert_eq!(
             lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(4.0))
@@ -2628,7 +2628,7 @@ mod tests {
     fn eq_falls_back_to_default_output() {
         let lib = Library::open_in_memory().unwrap();
         lib.set_eq("", "global", "", &bands(1.0)).unwrap();
-        // Konkreter Ausgang hat nichts → Rückfall auf den Standard-Ausgang.
+        // Concrete output has nothing → fall back to the default output.
         assert_eq!(
             lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(1.0))
@@ -2640,9 +2640,9 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         let ak = crate::core::category::album_key("X", "Y");
         lib.set_eq("", "album", &ak, &bands(3.0)).unwrap();
-        // Gleicher Albumname, anderer Interpret → kein Treffer auf Album-Ebene.
+        // Same album name, different artist → no match at the album level.
         assert_eq!(lib.resolve_eq("", Some("Z"), Some("Y"), "/a/1.mp3"), None);
-        // Richtiger Interpret → Treffer.
+        // Correct artist → match.
         assert_eq!(
             lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(3.0))

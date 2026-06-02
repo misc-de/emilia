@@ -1,6 +1,6 @@
-//! Wiedergabe: Warteschlange, Play/Pause/Next/Prev, Resume-Logik und der
-//! laufende Equalizer. Aus app.rs herausgelöst – reine Umordnung, kein
-//! Funktionswechsel; die Methoden bleiben inhärente `impl App`-Methoden.
+//! Playback: queue, play/pause/next/prev, resume logic and the
+//! running equalizer. Extracted from app.rs – pure reordering, no
+//! change in behavior; the methods remain inherent `impl App` methods.
 
 use std::path::PathBuf;
 
@@ -13,12 +13,12 @@ use crate::ui::app::{guarded_resume, ActiveSource, App, Msg, PlaySession, Remote
 use crate::ui::fs_row::{FsEntry, FsInput};
 
 impl App {
-    /// Aktualisiert die Queue-Markierung aller sichtbaren Dateizeilen.
+    /// Refreshes the queue marker of all visible file rows.
     pub(crate) fn refresh_queue_icons(&mut self) {
         let queue = self.queue.clone();
-        // Aktuell laufender Titel (für die Play-Markierung).
+        // Currently playing track (for the play marker).
         let active_path = self.queue.get(self.queue_pos).cloned();
-        // Entfernte Wiedergabe: aktiver Eintrag wird über den rel-Pfad markiert.
+        // Remote playback: the active entry is marked via the rel path.
         let active_rel = if self.playing_remote {
             self.remote_queue.get(self.remote_pos).map(|t| t.rel_path.clone())
         } else {
@@ -38,7 +38,7 @@ impl App {
                                 (i, q, a)
                             }
                             None => {
-                                // Entfernter Eintrag: Aktiv-Markierung über rel_path.
+                                // Remote entry: active marker via rel_path.
                                 let a = is_file
                                     && active_rel.is_some()
                                     && r.entry.rel_path() == active_rel.as_deref();
@@ -54,13 +54,13 @@ impl App {
             self.entries.send(i, FsInput::SetQueued(q));
             self.entries.send(i, FsInput::SetActive { active: a, playing });
         }
-        // Play-Zeile eines offenen Detail-Dialogs mit dem Wiedergabestand abgleichen.
+        // Sync the play row of an open detail dialog with the playback state.
         self.refresh_ctx_play();
-        // Play/Pause-Icons der Podcast-Beiträge (und die Detail-„Abspielen"-Zeile).
+        // Play/pause icons of the podcast episodes (and the detail "Play" row).
         self.refresh_episode_icons();
     }
 
-    /// Zugangsdaten der aktuell aktiven WebDAV-Quelle (falls eine aktiv ist).
+    /// Credentials of the currently active WebDAV source (if one is active).
     pub(crate) fn active_webdav_creds(&self) -> Option<Creds> {
         let ActiveSource::Source(id) = self.active_source else {
             return None;
@@ -72,7 +72,7 @@ impl App {
         Creds::from_source(s)
     }
 
-    /// Lokaler Cache-Pfad einer entfernten Datei der aktiven Quelle (oder `None`).
+    /// Local cache path of a remote file of the active source (or `None`).
     pub(crate) fn remote_cache_path(&self, rel: &str) -> Option<PathBuf> {
         let ActiveSource::Source(id) = self.active_source else {
             return None;
@@ -80,9 +80,9 @@ impl App {
         Some(webdav::cache_path(id, rel))
     }
 
-    /// Eine entfernte Datei antippen: erneutes Antippen des laufenden Titels
-    /// schaltet Pause/Weiter um; sonst wird die Ordner-Reihe als entfernte Queue
-    /// gesetzt und ab dem gewählten Titel abgespielt.
+    /// Tap a remote file: tapping the running track again
+    /// toggles pause/resume; otherwise the folder row is set as the remote queue
+    /// and played from the chosen track.
     pub(crate) fn activate_remote(&mut self, rel: &str) {
         let is_active = self.playing_remote
             && self
@@ -101,7 +101,7 @@ impl App {
             self.refresh_queue_icons();
             return;
         }
-        // Entfernte Reihe aus den sichtbaren Dateizeilen aufbauen (Ordnerfolge).
+        // Build the remote row from the visible file rows (folder sequence).
         let mut queue = Vec::new();
         let mut start = 0;
         {
@@ -128,9 +128,9 @@ impl App {
         self.play_remote_current();
     }
 
-    /// Spielt den aktuellen Titel der entfernten Reihe – lokal (falls bereits
-    /// heruntergeladen) oder gestreamt. Eigenständig wie Podcast/Sender; die
-    /// lokale `PathBuf`-Warteschlange bleibt dabei leer.
+    /// Plays the current track of the remote row – locally (if already
+    /// downloaded) or streamed. Self-contained like podcast/station; the
+    /// local `PathBuf` queue stays empty in the process.
     pub(crate) fn play_remote_current(&mut self) {
         let Some(creds) = self.active_webdav_creds() else {
             return;
@@ -172,7 +172,7 @@ impl App {
         }
     }
 
-    /// Nächster Titel der entfernten Reihe (für Next-Taste und EOS-Weiterschalten).
+    /// Next track of the remote row (for the next button and EOS advancing).
     pub(crate) fn remote_next(&mut self) {
         if self.remote_pos + 1 < self.remote_queue.len() {
             self.remote_pos += 1;
@@ -181,7 +181,7 @@ impl App {
             self.remote_pos = 0;
             self.play_remote_current();
         } else {
-            // Ende der Reihe – Wiedergabe stoppen (wie am Episodenende).
+            // End of the row – stop playback (like at the end of an episode).
             self.player.stop();
             self.playing = false;
             self.mpris.set_playing(false);
@@ -189,7 +189,7 @@ impl App {
         }
     }
 
-    /// Voriger Titel der entfernten Reihe.
+    /// Previous track of the remote row.
     pub(crate) fn remote_prev(&mut self) {
         if self.remote_pos > 0 {
             self.remote_pos -= 1;
@@ -197,9 +197,9 @@ impl App {
         }
     }
 
-    /// Baut die Zufalls-Reihenfolge neu auf (Fisher-Yates), mit dem aktuell
-    /// laufenden Titel an erster Stelle. So spielt jeder Titel der Queue genau
-    /// einmal, in zufälliger Folge.
+    /// Rebuilds the shuffle order (Fisher-Yates), with the currently
+    /// running track in first place. This way every track of the queue plays
+    /// exactly once, in random order.
     pub(crate) fn rebuild_shuffle_order(&mut self) {
         let len = self.queue.len();
         let mut order: Vec<usize> = (0..len).collect();
@@ -207,7 +207,7 @@ impl App {
             let j = gtk::glib::random_int_range(0, (i + 1) as i32) as usize;
             order.swap(i, j);
         }
-        // Laufenden Titel nach vorn, damit er nicht sofort übersprungen wird.
+        // Move the running track to the front so it isn't skipped immediately.
         if let Some(p) = order.iter().position(|&x| x == self.queue_pos) {
             order.swap(0, p);
         }
@@ -215,17 +215,17 @@ impl App {
         self.shuffle_idx = 0;
     }
 
-    /// Nächster Titel: bei Zufall der nächste der Zufalls-Reihenfolge, sonst der
-    /// folgende. Am Ende (alle gespielt) wird gestoppt.
+    /// Next track: when shuffling, the next of the shuffle order, otherwise the
+    /// following one. At the end (all played) playback stops.
     pub(crate) fn play_next(&mut self) {
         if self.queue.is_empty() {
             return;
         }
         let len = self.queue.len();
         let next = if self.shuffle {
-            // Neu mischen, wenn die Queue sich geänderte hat oder der laufende
-            // Titel nicht (mehr) der erwartete der Reihenfolge ist (z. B. nach
-            // manueller Auswahl) – dann ab dem aktuellen Titel weiterwürfeln.
+            // Reshuffle if the queue has changed or the running
+            // track is no longer the expected one of the order (e.g. after
+            // manual selection) – then keep shuffling from the current track.
             if self.shuffle_order.len() != len
                 || self.shuffle_order.get(self.shuffle_idx) != Some(&self.queue_pos)
             {
@@ -248,8 +248,8 @@ impl App {
                 self.play_current();
             }
             None if self.repeat && !self.queue.is_empty() => {
-                // Wiederholen: am Ende von vorn beginnen (Einzeltitel ebenso, da
-                // die Queue dann nur einen Eintrag hat). Bei Zufall neu mischen.
+                // Repeat: start over at the end (single track likewise, since
+                // the queue then has only one entry). Reshuffle when shuffling.
                 if self.shuffle {
                     self.rebuild_shuffle_order();
                     self.queue_pos = self.shuffle_order.first().copied().unwrap_or(0);
@@ -259,11 +259,11 @@ impl App {
                 self.play_current();
             }
             None => {
-                // Ende der Wiedergabe: anhalten und an den Anfang der Queue
-                // zurückspulen, damit die Play-Taste wieder auf „Play" steht und
-                // ein erneuter Druck von vorn beginnt (siehe TogglePlay).
+                // End of playback: stop and rewind to the start of the queue
+                // so that the play button shows "Play" again and
+                // pressing it again starts from the beginning (see TogglePlay).
                 self.save_resume();
-                // Laufende Sitzung abschließen (No-op, falls bereits per EOS getan).
+                // Finalize the running session (no-op if already done via EOS).
                 self.finalize_play_session(false);
                 self.player.stop();
                 self.playing = false;
@@ -281,9 +281,9 @@ impl App {
         }
     }
 
-    /// Zurück-Taste: einmaliges Drücken startet den laufenden Titel von vorn,
-    /// ein zweites Drücken **innerhalb einer Sekunde** springt zum zuvor
-    /// gespielten Titel (History).
+    /// Back button: pressing once restarts the running track from the beginning,
+    /// a second press **within one second** jumps to the previously
+    /// played track (history).
     pub(crate) fn play_prev(&mut self) {
         let now = std::time::Instant::now();
         let double = self
@@ -293,8 +293,8 @@ impl App {
 
         if double {
             if let Some(prev) = self.play_history.pop() {
-                // Vorheriges Lied: bevorzugt an seiner Queue-Position spielen,
-                // sonst direkt den Pfad (ohne erneuten History-Eintrag).
+                // Previous song: preferably play it at its queue position,
+                // otherwise the path directly (without another history entry).
                 self.skip_history_push = true;
                 if let Some(pos) = self.queue.iter().position(|p| *p == prev) {
                     self.queue_pos = pos;
@@ -306,7 +306,7 @@ impl App {
                 }
                 return;
             }
-            // Keine History → sequentiell ein Lied zurück.
+            // No history → sequentially one song back.
             if !self.queue.is_empty() && self.queue_pos > 0 {
                 self.skip_history_push = true;
                 self.queue_pos -= 1;
@@ -315,11 +315,11 @@ impl App {
             return;
         }
 
-        // Erstes Drücken: Wurde gerade erst ein neuer Kontext gestartet (Titel
-        // läuft erst < 5 s) und liegt ein verdrängter Kontext auf dem Stapel, so
-        // diesen **samt Playlist** wiederherstellen und das Lied weiterhören
-        // (Resume aus der DB). „Zurück" direkt nach einem versehentlich
-        // gestarteten Lied bringt damit zum vorherigen zurück.
+        // First press: if a new context was just started (track
+        // has been running for < 5 s) and a displaced context lies on the stack,
+        // restore it **including its playlist** and keep listening to the song
+        // (resume from the DB). "Back" right after an accidentally
+        // started song thus returns to the previous one.
         if !self.nav_stack.is_empty() && self.player.position_ms().unwrap_or(0) < 5000 {
             if let Some((q, pos)) = self.nav_stack.pop() {
                 self.skip_history_push = true;
@@ -331,19 +331,19 @@ impl App {
             }
         }
 
-        // Sonst: laufenden Titel von vorn.
+        // Otherwise: running track from the beginning.
         if self.playing_path.is_some() {
             self.skip_history_push = true;
             self.play_current();
         }
     }
 
-    /// Spielt den aktuellen Eintrag der Warteschlange ab.
-    /// Anzeigename eines Titels für die Leiste: „Interpret - Titel" aus den Tags,
-    /// notfalls der Dateiname.
-    /// Startet die Wiedergabe eines Titel-Pfads. Lokale Pfade laufen über
-    /// `play_file`; **entfernte** Titel (synthetischer Pfad `nc:<id>:<rel>`) werden
-    /// aus dem lokalen Cache gespielt oder direkt von der Nextcloud gestreamt.
+    /// Plays the current entry of the queue.
+    /// Display name of a track for the bar: "Artist - Title" from the tags,
+    /// failing that the file name.
+    /// Starts playback of a track path. Local paths go through
+    /// `play_file`; **remote** tracks (synthetic path `nc:<id>:<rel>`) are
+    /// played from the local cache or streamed directly from Nextcloud.
     pub(crate) fn start_track_playback(&self, path_str: &str, resume_ms: i64) -> anyhow::Result<()> {
         if let Some((sid, rel)) = crate::core::webdav::parse_nc_path(path_str) {
             let cache = crate::core::webdav::cache_path(sid, &rel);
@@ -365,8 +365,8 @@ impl App {
         self.player.play_file(path_str, resume_ms)
     }
 
-    /// Anzeigename eines Titels für Leiste/Warteschlange: bevorzugt aus der
-    /// Datenbank (funktioniert auch für entfernte Titel), sonst aus der Datei.
+    /// Display name of a track for the bar/queue: preferably from the
+    /// database (also works for remote tracks), otherwise from the file.
     pub(crate) fn display_name(&self, path: &std::path::Path) -> String {
         let path_str = path.to_string_lossy();
         if let Ok(Some(t)) = self.library.track_by_path(&path_str) {
@@ -406,16 +406,16 @@ impl App {
         }
     }
 
-    /// Für **alle** Titel wird eine Resume-Position geführt: beim nächsten Start
-    /// läuft der Titel dort weiter, wo er gestoppt wurde. Die `guarded_resume`-
-    /// Wächter sorgen dafür, dass ein quasi fertiger oder gerade erst begonnener
-    /// Titel wieder von vorn startet.
+    /// A resume position is kept for **all** tracks: on the next start
+    /// the track continues where it was stopped. The `guarded_resume`
+    /// guards ensure that a nearly finished or just-started
+    /// track starts over from the beginning.
     pub(crate) fn should_resume(&self, _t: &Track) -> bool {
         true
     }
 
-    /// Sichert die aktuelle Warteschlange (Pfade + Position) für die
-    /// Wiederherstellung nach einem Neustart der App.
+    /// Saves the current queue (paths + position) for
+    /// restoration after a restart of the app.
     pub(crate) fn save_queue(&self) {
         let paths = self
             .queue
@@ -429,9 +429,9 @@ impl App {
             .set_setting("queue_pos", &self.queue_pos.to_string());
     }
 
-    /// Sichert die aktuelle Wiedergabeposition des geladenen Titels als
-    /// Resume-Punkt. Nahe Anfang oder Ende wird auf 0 zurückgesetzt, damit ein
-    /// quasi fertiger Titel beim nächsten Mal von vorn beginnt.
+    /// Saves the current playback position of the loaded track as a
+    /// resume point. Near the start or end it is reset to 0 so that a
+    /// nearly finished track starts over from the beginning next time.
     pub(crate) fn save_resume(&self) {
         let Some(path) = self.playing_path.clone() else {
             return;
@@ -452,9 +452,9 @@ impl App {
             .set_resume_path(&path_str, guarded_resume(pos, dur));
     }
 
-    /// Sichert die Wiedergabeposition der laufenden Podcast-Episode (Resume,
-    /// anhand der Audio-URL). Nah am Anfang/Ende wird auf 0 gesetzt (gilt als
-    /// neu bzw. fertig). No-op, wenn gerade keine Episode läuft.
+    /// Saves the playback position of the running podcast episode (resume,
+    /// by the audio URL). Near the start/end it is set to 0 (counts as
+    /// new or finished). No-op when no episode is currently playing.
     pub(crate) fn save_episode_progress(&self) {
         let Some(url) = self.playing_episode_url.clone() else {
             return;
@@ -468,9 +468,9 @@ impl App {
             .set_episode_progress(&url, guarded_resume(pos, dur));
     }
 
-    /// Schließt die laufende Hör-Sitzung ab und schreibt sie als ein
-    /// `play_event` in die Statistik. `completed` = bis zum Ende (EOS) gehört.
-    /// Ohne Sitzung passiert nichts (idempotent).
+    /// Finalizes the running listening session and writes it as one
+    /// `play_event` into the statistics. `completed` = listened to the end (EOS).
+    /// Without a session nothing happens (idempotent).
     pub(crate) fn finalize_play_session(&mut self, completed: bool) {
         if let Some(s) = self.play_session.take() {
             let dur = if s.duration_ms > 0 {
@@ -484,27 +484,27 @@ impl App {
                 s.played_ms,
                 dur,
                 completed,
-                None, // Quelle (queue/album/…) bleibt v1 ungenutzt, Spalte reserviert.
+                None, // source (queue/album/…) stays unused in v1, column reserved.
             );
         }
         *self.close_session.borrow_mut() = None;
     }
 
     pub(crate) fn play_current(&mut self) {
-        // Position des bisher laufenden Titels sichern, bevor ein neuer geladen wird.
+        // Save the position of the previously running track before a new one is loaded.
         self.save_resume();
-        // Lief zuvor eine Podcast-Episode, deren Resume-Position sichern.
+        // If a podcast episode was playing before, save its resume position.
         self.save_episode_progress();
-        // Bisherige Hör-Sitzung als Wechsel/Skip abschließen (kam der Aufruf von
-        // einem EOS, ist sie bereits abgeschlossen → No-op).
+        // Finalize the previous listening session as a switch/skip (if the call came
+        // from an EOS, it is already finalized → no-op).
         self.finalize_play_session(false);
         let Some(path) = self.queue.get(self.queue_pos).cloned() else {
             return;
         };
-        // Kontext-Wechsel erkennen: ersetzt eine neue Auswahl die laufende
-        // Warteschlange, den alten Kontext (Queue + Position) auf den Zurück-
-        // Stapel legen – so lässt sich „voriges Lied **inkl. Playlist**
-        // weiterhören". Beim Zurückspringen selbst nicht erneut stapeln.
+        // Detect context switch: if a new selection replaces the running
+        // queue, push the old context (queue + position) onto the back
+        // stack – this allows "keep listening to the previous song **including
+        // its playlist**". When jumping back itself, don't stack again.
         if !self.skip_history_push {
             if let Some((pq, pp)) = self.prev_ctx.clone() {
                 if !pq.is_empty() && pq != self.queue {
@@ -515,8 +515,8 @@ impl App {
                 }
             }
         }
-        // History pflegen: bisher laufenden Titel merken (für „vorheriges Lied").
-        // Beim Zurückspringen aus der History selbst nicht erneut eintragen.
+        // Maintain history: remember the previously running track (for "previous song").
+        // When jumping back from the history itself, don't add it again.
         if self.skip_history_push {
             self.skip_history_push = false;
         } else if let Some(prev) = self.playing_path.clone() {
@@ -528,7 +528,7 @@ impl App {
             }
         }
         let path_str = path.to_string_lossy().to_string();
-        // Gespeicherte Resume-Position (für alle Titel; s. should_resume).
+        // Saved resume position (for all tracks; see should_resume).
         let track = self.library.track_by_path(&path_str).ok().flatten();
         let resume_ms = match &track {
             Some(t) if self.should_resume(t) => t.resume_ms,
@@ -537,35 +537,35 @@ impl App {
         match self.start_track_playback(&path_str, resume_ms) {
             Ok(()) => {
                 self.playing_path = Some(path.clone());
-                // Es läuft wieder Musik – keine Podcast-Episode/kein Sender/keine
-                // entfernte Datei mehr aktiv.
+                // Music is playing again – no podcast episode/station/
+                // remote file active anymore.
                 self.playing_episode_url = None;
                 self.playing_stream = None;
                 self.playing_remote = false;
                 self.stop_recorder();
                 self.now_playing = Some(self.display_name(&path));
                 self.playing = true;
-                // Aktiven Ausgang (kann sich geändert haben) auffrischen.
+                // Refresh the active output (may have changed).
                 self.active_output = crate::core::output::default_output().unwrap_or_default();
                 self.apply_current_eq();
-                // Sperrbildschirm/Medientasten über den neuen Titel informieren.
+                // Inform the lock screen/media keys about the new track.
                 self.update_mpris_metadata(&path, track.as_ref());
                 self.mpris.set_playing(true);
                 let start = self.player.position_ms().unwrap_or(resume_ms.max(0));
                 self.mpris.set_position(start);
                 self.mpris.seeked(start);
-                // Seekleiste auf den neuen Titel setzen (Dauer verfeinert der Tick).
+                // Set the seek bar to the new track (the tick refines the duration).
                 self.position_ms = start;
                 self.track_duration_ms = self
                     .player
                     .duration_ms()
                     .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
                     .unwrap_or(0);
-                // Schnappschuss für das Sichern beim Schließen (nur Resume-Titel).
+                // Snapshot for saving on close (resume tracks only).
                 let resumable = matches!(&track, Some(t) if self.should_resume(t));
                 *self.close_resume.borrow_mut() = resumable
                     .then(|| (path_str.clone(), start, self.track_duration_ms));
-                // Neue Hör-Sitzung für die Statistik starten.
+                // Start a new listening session for the statistics.
                 let now = crate::ui::app::unix_now();
                 self.play_session = Some(PlaySession {
                     path: path.clone(),
@@ -575,18 +575,18 @@ impl App {
                 });
                 *self.close_session.borrow_mut() =
                     Some((path_str.clone(), now, 0, self.track_duration_ms));
-                // Play-/Queue-Markierungen in der Liste an den neuen Titel anpassen.
+                // Adjust the play/queue markers in the list to the new track.
                 self.refresh_queue_icons();
-                // Warteschlange + Position für den nächsten Start sichern.
+                // Save the queue + position for the next start.
                 self.save_queue();
-                // Aktuellen Kontext merken (Erkennung künftiger Queue-Wechsel).
+                // Remember the current context (detection of future queue switches).
                 self.prev_ctx = Some((self.queue.clone(), self.queue_pos));
-                // Titel haben keine Kapitel → Marken/Hover-Liste säubern.
+                // Tracks have no chapters → clear markers/hover list.
                 self.set_chapters(Vec::new());
-                // Fehlen brauchbare Tags (Interpret/Album), den Titel im Hintergrund
-                // per Fingerprint erkennen lassen – statt eines Massen-Laufs nur das,
-                // was tatsächlich gespielt wird. Die eigentlichen Gucklöcher (Key,
-                // fpcalc, Netz, Versuchsgrenze) prüft fetch_focus_track.
+                // If usable tags are missing (artist/album), let the track be
+                // identified in the background via fingerprint – instead of a bulk
+                // run, only what is actually played. The actual gating checks (key,
+                // fpcalc, network, attempt limit) are done by fetch_focus_track.
                 let needs_id = track.as_ref().map_or(true, |t| {
                     t.artist.as_deref().unwrap_or("").trim().is_empty()
                         || t.album.as_deref().unwrap_or("").trim().is_empty()
@@ -599,8 +599,8 @@ impl App {
         }
     }
 
-    /// Schickt die Metadaten des laufenden Titels an den MPRIS-Dienst
-    /// (Sperrbildschirm). Cover wird – falls vorhanden – best effort ergänzt.
+    /// Sends the metadata of the running track to the MPRIS service
+    /// (lock screen). The cover – if present – is added best effort.
     pub(crate) fn update_mpris_metadata(&self, path: &std::path::Path, track: Option<&Track>) {
         let (title, artist, album, length) = match track {
             Some(t) => (
@@ -624,9 +624,9 @@ impl App {
         );
     }
 
-    /// Löst den Equalizer für den laufenden Titel + aktiven Ausgang auf
-    /// (Titel→Album→Interpret→Global, dann Standard-Ausgang) und setzt ihn live.
-    /// Ohne Festlegung: neutral (alle Bänder 0).
+    /// Resolves the equalizer for the running track + active output
+    /// (track→album→artist→global, then default output) and applies it live.
+    /// Without any setting: neutral (all bands 0).
     pub(crate) fn apply_current_eq(&self) {
         let Some(path) = self.queue.get(self.queue_pos) else {
             return;
@@ -647,18 +647,18 @@ impl App {
         self.player.set_eq_bands(&bands);
     }
 
-    /// Spielt einen Pfad ab (Ordner rekursiv bzw. Einzeldatei) als **eine**
-    /// Warteschlange. Bei Mehr-CD-Inhalten (z. B. Live-Konzerten) werden die CDs
-    /// zusammen abgespielt: zuerst CD1, dann CD2 … – sortiert nach Unterordner
-    /// (CD-Ordner), dann Disc- und Tracknummer aus den Tags, sonst Dateiname.
+    /// Plays a path (folder recursively or single file) as **one**
+    /// queue. For multi-CD content (e.g. live concerts) the CDs are
+    /// played together: first CD1, then CD2 … – sorted by subfolder
+    /// (CD folder), then disc and track number from the tags, otherwise file name.
     pub(crate) fn play_path(&mut self, path: &str, is_dir: bool) {
         let p = PathBuf::from(path);
         let files = if is_dir {
             let mut fs = scanner::collect_audio_files(&p);
-            // Wie die Anzeige (`folder_tracks_ordered`): **natürliche** Pfad-
-            // Sortierung, damit Wiedergabe- und Anzeigereihenfolge übereinstimmen
-            // (CD-Ordner + Dateinamen geben die Reihenfolge vor, robust gegen
-            // falsche/fehlende Disc-/Track-Tags).
+            // Like the display (`folder_tracks_ordered`): **natural** path
+            // sorting so that playback and display order match
+            // (CD folders + file names dictate the order, robust against
+            // wrong/missing disc/track tags).
             fs.sort_by_cached_key(|f| {
                 crate::ui::app_views::natural_key(&f.to_string_lossy())
             });

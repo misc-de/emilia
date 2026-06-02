@@ -1,8 +1,8 @@
-//! HTTPS-Server (TLS 1.3, `tiny_http`) für die Geräte-Synchronisierung.
+//! HTTPS server (TLS 1.3, `tiny_http`) for device sync.
 //!
-//! Läuft blockierend in einem eigenen Thread. Die Annahmeschleife prüft
-//! regelmäßig ein Stop-Flag sowie Pairing-/Sitzungs-Timeouts. Jeder
-//! authentifizierte Request verlängert die Sitzung (kein separater Ping nötig).
+//! Runs blocking in its own thread. The accept loop regularly checks
+//! a stop flag as well as pairing/session timeouts. Every
+//! authenticated request extends the session (no separate ping needed).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +18,7 @@ use crate::core::sync::protocol::{self, PairRequest, PairResponse};
 use crate::core::sync::{crypto, data, SyncEvent};
 use crate::core::sync::{ACCEPT_POLL, PORT, PORT_ATTEMPTS, QR_TTL, SESSION_TIMEOUT};
 
-/// Laufender Sync-Server mit frischer TLS-Identität und Sitzungstoken.
+/// Running sync server with a fresh TLS identity and session token.
 pub struct SyncServer {
     server: Server,
     identity: crypto::ServerIdentity,
@@ -37,8 +37,8 @@ enum Action {
 }
 
 impl SyncServer {
-    /// Erzeugt die TLS-Identität/Token und bindet den HTTPS-Server (mit
-    /// Port-Ausweichung). Der Server wartet noch nicht – siehe [`Self::run`].
+    /// Creates the TLS identity/token and binds the HTTPS server (with
+    /// port fallback). The server is not yet waiting – see [`Self::run`].
     pub fn start(device_name: String, stop: Arc<AtomicBool>) -> Result<Self> {
         let identity = crypto::generate_identity()?;
         let cert = identity.cert_pem.clone().into_bytes();
@@ -59,7 +59,7 @@ impl SyncServer {
                 Err(_) => port = port.wrapping_add(1),
             }
         }
-        let (server, port) = bound.ok_or_else(|| anyhow!("Kein freier Port für den Server"))?;
+        let (server, port) = bound.ok_or_else(|| anyhow!("no free port for the server"))?;
 
         Ok(Self {
             server,
@@ -74,7 +74,7 @@ impl SyncServer {
         })
     }
 
-    /// QR-/Pairing-URL für die Anzeige.
+    /// QR/pairing URL for display.
     pub fn pair_url(&self) -> String {
         protocol::build_pair_url(
             &self.host,
@@ -92,11 +92,11 @@ impl SyncServer {
         self.port
     }
 
-    /// Blockierende Annahmeschleife. Meldet Ereignisse über `emit`. Kehrt
-    /// zurück, wenn das Stop-Flag gesetzt ist, ein Timeout greift oder die
-    /// Gegenstelle die Verbindung trennt.
+    /// Blocking accept loop. Reports events via `emit`. Returns
+    /// when the stop flag is set, a timeout fires or the
+    /// peer drops the connection.
     pub fn run<F: FnMut(SyncEvent)>(self, mut emit: F) {
-        let deadline = Instant::now() + QR_TTL; // bis zur Kopplung
+        let deadline = Instant::now() + QR_TTL; // until pairing
         let mut paired = false;
         let mut session_deadline: Option<Instant> = None;
         let mut failed: u32 = 0;
@@ -107,7 +107,7 @@ impl SyncServer {
                 break;
             }
             if !paired && Instant::now() > deadline {
-                break; // niemand hat gekoppelt
+                break; // nobody paired
             }
             if let Some(dl) = session_deadline {
                 if Instant::now() > dl {
@@ -127,7 +127,7 @@ impl SyncServer {
                         }
                     }
                 }
-                Ok(None) => continue, // Timeout → Flags erneut prüfen
+                Ok(None) => continue, // timeout → check flags again
                 Err(_) => break,
             }
         }
@@ -176,12 +176,12 @@ impl SyncServer {
                             403,
                             &PairResponse {
                                 ok: false,
-                                error: "ungültiges Token".into(),
+                                error: "invalid token".into(),
                                 ..Default::default()
                             },
                         );
                         if *failed >= super::MAX_FAILED_PAIR {
-                            emit(SyncEvent::Error("Zu viele Kopplungsversuche".into()));
+                            emit(SyncEvent::Error("too many pairing attempts".into()));
                             Action::Stop
                         } else {
                             Action::Continue
@@ -190,7 +190,7 @@ impl SyncServer {
                 }
             }
 
-            // Ab hier: Bearer-Authentifizierung erforderlich.
+            // From here on: bearer authentication required.
             _ if !self.bearer_ok(&req) => {
                 respond_status(req, 401);
                 Action::Continue
@@ -268,7 +268,7 @@ impl SyncServer {
         })
     }
 
-    /// Liefert eine Audiodatei aus dem Musikordner (mit Path-Traversal-Schutz).
+    /// Serves an audio file from the music folder (with path-traversal protection).
     fn serve_file(&self, req: Request, query: &str) {
         let rel = query
             .split('&')
@@ -297,8 +297,8 @@ impl SyncServer {
         }
     }
 
-    /// Löst einen relativen Pfad gegen den Musikordner auf und stellt sicher,
-    /// dass das Ergebnis innerhalb des Musikordners liegt.
+    /// Resolves a relative path against the music folder and ensures
+    /// that the result lies within the music folder.
     fn resolve_safe(&self, rel: &str, music_dir: &str) -> Option<PathBuf> {
         if music_dir.is_empty() || rel.is_empty() || rel.starts_with('/') || rel.contains("..") {
             return None;
@@ -333,27 +333,27 @@ mod tests {
     use super::*;
     use crate::core::sync::client::SyncClient;
 
-    /// End-to-End: echter TLS-Handshake + Fingerprint-Pinning + Token-Kopplung.
+    /// End-to-end: real TLS handshake + fingerprint pinning + token pairing.
     #[test]
     fn pairing_handshake_with_pinning() {
         let stop = Arc::new(AtomicBool::new(false));
         let server = SyncServer::start("TestServer".to_string(), stop.clone())
-            .expect("Server startet");
+            .expect("server starts");
         let url = server.pair_url();
         let handle = std::thread::spawn(move || server.run(|_| {}));
 
         let info = protocol::parse_pair_url(&url, super::super::now_unix()).expect("URL");
 
-        // Korrekter Fingerprint + Token → Kopplung gelingt.
+        // Correct fingerprint + token → pairing succeeds.
         let mut client = SyncClient::new(&info, "dev-1".into(), "TestClient".into());
-        client.pair(&info.token).expect("Kopplung erfolgreich");
+        client.pair(&info.token).expect("pairing succeeds");
         assert_eq!(client.peer_name, "TestServer");
 
-        // Falscher Fingerprint → TLS-Pinning lehnt ab (scheitert vor dem Token).
+        // Wrong fingerprint → TLS pinning rejects (fails before the token).
         let mut bad = info.clone();
         bad.fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into();
         let mut bad_client = SyncClient::new(&bad, "dev-2".into(), "Boese".into());
-        assert!(bad_client.pair(&bad.token).is_err(), "MITM muss scheitern");
+        assert!(bad_client.pair(&bad.token).is_err(), "MITM must fail");
 
         stop.store(true, Ordering::Relaxed);
         client.disconnect();

@@ -1,6 +1,6 @@
-//! Hörstatistik-Seite: wertet die rohe `play_event`-Tabelle aus und baut die
-//! Seite imperativ auf (wie die Favoriten-/Konzertlisten). Rein lokal – die
-//! Daten verlassen das Gerät nie.
+//! Listening statistics page: evaluates the raw `play_event` table and builds
+//! the page imperatively (like the favorites/concert lists). Purely local - the
+//! data never leaves the device.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -10,11 +10,11 @@ use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::model::{StatEntry, StatTotals};
 use crate::ui::app::{App, Msg, StatsPeriod};
 
-/// Wie viele Einträge je Rangliste höchstens gezeigt werden.
+/// How many entries are shown per ranking at most.
 const TOP_N: usize = 10;
 
 impl StatsPeriod {
-    /// Untergrenze (Unix-Sekunden) für die Auswertung; `now` = jetzt.
+    /// Lower bound (Unix seconds) for the evaluation; `now` = now.
     pub(crate) fn since(self, now: i64) -> i64 {
         match self {
             StatsPeriod::Weeks4 => (now - 28 * 86_400).max(0),
@@ -33,8 +33,8 @@ impl StatsPeriod {
 }
 
 impl App {
-    /// Baut die Statistik-Seite neu auf (beim Öffnen des Bereichs und bei
-    /// Zeitraumwechsel). Liest nur – verändert nichts.
+    /// Rebuilds the statistics page (when opening the area and on a
+    /// period change). Only reads - changes nothing.
     pub(crate) fn refresh_stats(&self, sender: &ComponentSender<Self>) {
         let container = &self.stats_box;
         while let Some(child) = container.first_child() {
@@ -64,7 +64,7 @@ impl App {
             .build();
         clamp.set_child(Some(&content));
 
-        // Leerzustand, solange nichts gehört wurde.
+        // Empty state as long as nothing has been listened to.
         if totals.plays == 0 && totals.total_played_ms == 0 {
             let empty = adw::StatusPage::builder()
                 .icon_name("emilia-stats-symbolic")
@@ -104,13 +104,13 @@ impl App {
         ));
     }
 
-    /// Zeitraum-Auswahl (verlinkte Umschalter, oben zentriert).
+    /// Period selection (linked toggles, centered at the top).
     fn stats_period_selector(&self, sender: &ComponentSender<Self>) -> gtk::Box {
         let wrap = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .halign(gtk::Align::Center)
             .margin_top(2)
-            // Etwas Luft unter den Zeitraum-Schaltern vor dem Inhalt.
+            // A little space below the period toggles before the content.
             .margin_bottom(10)
             .build();
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -136,7 +136,7 @@ impl App {
     }
 }
 
-/// Gesamt-Kennzahlen: gehörte Zeit, Wiedergaben, Skip-Rate.
+/// Overall metrics: listening time, plays, skip rate.
 fn summary_group(t: &StatTotals) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder().title(&gettext("Overview")).build();
     g.add(&stat_row(&gettext("Listening time"), &fmt_listen(t.total_played_ms)));
@@ -151,7 +151,7 @@ fn summary_group(t: &StatTotals) -> adw::PreferencesGroup {
     g
 }
 
-/// Vielfalt: unterschiedliche Interpreten, Alben, Titel.
+/// Variety: distinct artists, albums, tracks.
 fn diversity_group(t: &StatTotals) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder().title(&gettext("Variety")).build();
     g.add(&stat_row(&gettext("Artists"), &t.distinct_artists.to_string()));
@@ -160,7 +160,7 @@ fn diversity_group(t: &StatTotals) -> adw::PreferencesGroup {
     g
 }
 
-/// Eine Kennzahl-Zeile: Beschriftung links, Wert rechts.
+/// A metric row: label on the left, value on the right.
 fn stat_row(title: &str, value: &str) -> adw::ActionRow {
     let row = adw::ActionRow::builder().title(title).build();
     let lbl = gtk::Label::new(Some(value));
@@ -169,8 +169,8 @@ fn stat_row(title: &str, value: &str) -> adw::ActionRow {
     row
 }
 
-/// Eine Rangliste (Top-Titel/-Alben/-Interpreten). `time_subtitle`: Untertitel
-/// ist die gehörte Zeit (Interpreten) statt des Zusatzes (Interpret bei Titel/Album).
+/// A ranking (top tracks/albums/artists). `time_subtitle`: the subtitle
+/// is the listening time (artists) instead of the detail (artist for track/album).
 fn top_group(title: &str, entries: &[StatEntry], time_subtitle: bool) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder().title(title).build();
     for (i, e) in entries.iter().enumerate() {
@@ -200,7 +200,7 @@ fn top_group(title: &str, entries: &[StatEntry], time_subtitle: bool) -> adw::Pr
     g
 }
 
-/// Gehörte Zeit je Wochentag (Montag zuerst; DB-Index 0 = Sonntag).
+/// Listening time per weekday (Monday first; DB index 0 = Sunday).
 fn weekday_group(by_weekday: &[i64; 7]) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder().title(&gettext("By weekday")).build();
     let max = by_weekday.iter().copied().max().unwrap_or(0).max(1);
@@ -228,7 +228,7 @@ fn weekday_group(by_weekday: &[i64; 7]) -> adw::PreferencesGroup {
     g
 }
 
-/// Eine waagerechte Balkenzeile: Name | Balken | Wert.
+/// A horizontal bar row: name | bar | value.
 fn hbar_row(label: &str, value: i64, max: i64) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let lbl = gtk::Label::new(Some(label));
@@ -248,9 +248,9 @@ fn hbar_row(label: &str, value: i64, max: i64) -> gtk::Box {
     row
 }
 
-/// Gehörte Zeit je Stunde des Tages als 24-Balken-Diagramm. Direkt mit Cairo
-/// gezeichnet (eine `DrawingArea`) – robust auch auf schmalen Displays, statt
-/// der früheren 24 vertikalen ProgressBars, die zu Null-Breite kollabierten.
+/// Listening time per hour of the day as a 24-bar chart. Drawn directly with
+/// Cairo (a single `DrawingArea`) - robust even on narrow displays, instead of
+/// the earlier 24 vertical ProgressBars that collapsed to zero width.
 fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder()
         .title(&gettext("By time of day"))
@@ -268,12 +268,12 @@ fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
         let max = data.iter().copied().max().unwrap_or(0).max(1) as f64;
         let w = width as f64;
         let h = height as f64;
-        let label_h = 16.0; // Platz für die Stundenbeschriftung unten
+        let label_h = 16.0; // space for the hour labels at the bottom
         let chart_h = (h - label_h).max(1.0);
         let n = 24.0;
         let gap = 2.0;
         let bar_w = ((w - gap * (n - 1.0)) / n).max(1.0);
-        // Vordergrundfarbe des Themes (passt sich hell/dunkel an).
+        // Foreground color of the theme (adapts to light/dark).
         let c = widget.color();
         let (r, gc, b) = (c.red() as f64, c.green() as f64, c.blue() as f64);
         cr.set_source_rgba(r, gc, b, 0.85);
@@ -286,7 +286,7 @@ fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
             }
         }
         let _ = cr.fill();
-        // Stundenbeschriftung alle 6 Stunden (0, 6, 12, 18).
+        // Hour labels every 6 hours (0, 6, 12, 18).
         cr.set_source_rgba(r, gc, b, 0.5);
         cr.set_font_size(10.0);
         for i in (0..24usize).step_by(6) {
@@ -299,7 +299,7 @@ fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
     g
 }
 
-/// Gehörte Zeit menschenlesbar: „3 h 12 min" bzw. „12 min".
+/// Listening time human-readable: "3 h 12 min" or "12 min".
 fn fmt_listen(ms: i64) -> String {
     let mins = ms.max(0) / 60_000;
     let (h, m) = (mins / 60, mins % 60);

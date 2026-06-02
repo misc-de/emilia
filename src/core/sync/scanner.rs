@@ -1,30 +1,30 @@
-//! Webcam-QR-Scanner über eine GStreamer-Pipeline (`zxing`-Plugin) mit
-//! Live-Vorschau (`gtk4paintablesink`).
+//! Camera QR scanner via a GStreamer pipeline (`zxing` plugin) with
+//! live preview (`gtk4paintablesink`).
 //!
-//! **Nur im Main-Thread aufrufen** – Pipeline, Bus-Watch und Paintable hängen
-//! am GLib-Main-Loop bzw. an GDK.
+//! **Call only on the main thread** – pipeline, bus watch and paintable hang
+//! off the GLib main loop or GDK.
 
 use anyhow::{anyhow, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gtk::gdk;
 
-/// Laufende Scanner-Pipeline. Wird beim Verwerfen sauber gestoppt.
+/// Running scanner pipeline. Stopped cleanly when dropped.
 pub struct Scanner {
     pipeline: gst::Pipeline,
-    /// Hält die Bus-Überwachung am Leben (analog zum Player).
+    /// Keeps the bus watch alive (analogous to the player).
     _bus_watch: gst::bus::BusWatchGuard,
 }
 
 impl Scanner {
-    /// Startet Kamera + Dekoder. `on_decode` wird im Main-Loop aufgerufen,
-    /// sobald ein QR-Code erkannt wird (kann mehrfach feuern). Liefert die
-    /// Pipeline und – falls verfügbar – ein Vorschau-`Paintable` für ein
+    /// Starts camera + decoder. `on_decode` is called on the main loop
+    /// as soon as a QR code is detected (may fire multiple times). Returns the
+    /// pipeline and – if available – a preview `Paintable` for a
     /// `gtk::Picture`.
     ///
-    /// Die Live-Vorschau (`gtk4paintablesink` aus gst-plugins-rs) ist optional:
-    /// fehlt das Plugin, wird ohne Kamerabild gescannt (der Code wird trotzdem
-    /// erkannt, solange `zxing` und eine Kameraquelle vorhanden sind).
+    /// The live preview (`gtk4paintablesink` from gst-plugins-rs) is optional:
+    /// if the plugin is missing, scanning happens without a camera image (the code is still
+    /// detected as long as `zxing` and a camera source are present).
     pub fn start<F>(on_decode: F) -> Result<(Scanner, Option<gdk::Paintable>)>
     where
         F: Fn(String) + 'static,
@@ -41,10 +41,10 @@ impl Scanner {
         };
 
         let element = gst::parse::launch_full(desc, None, gst::ParseFlags::empty())
-            .map_err(|e| anyhow!("Kamera/QR-Plugins nicht verfügbar: {e}"))?;
+            .map_err(|e| anyhow!("camera/QR plugins not available: {e}"))?;
         let pipeline = element
             .downcast::<gst::Pipeline>()
-            .map_err(|_| anyhow!("Pipeline konnte nicht erstellt werden"))?;
+            .map_err(|_| anyhow!("pipeline could not be created"))?;
 
         let paintable = if have_preview {
             pipeline
@@ -54,7 +54,7 @@ impl Scanner {
             None
         };
 
-        let bus = pipeline.bus().ok_or_else(|| anyhow!("GStreamer-Bus fehlt"))?;
+        let bus = pipeline.bus().ok_or_else(|| anyhow!("GStreamer bus missing"))?;
         let guard = bus
             .add_watch_local(move |_, msg| {
                 if let Some(s) = msg.structure() {
@@ -66,11 +66,11 @@ impl Scanner {
                 }
                 gst::glib::ControlFlow::Continue
             })
-            .map_err(|_| anyhow!("Bus-Überwachung fehlgeschlagen"))?;
+            .map_err(|_| anyhow!("bus watch failed"))?;
 
         pipeline
             .set_state(gst::State::Playing)
-            .map_err(|_| anyhow!("Kamera konnte nicht gestartet werden"))?;
+            .map_err(|_| anyhow!("camera could not be started"))?;
 
         Ok((
             Scanner {
@@ -81,7 +81,7 @@ impl Scanner {
         ))
     }
 
-    /// Stoppt die Pipeline (idempotent).
+    /// Stops the pipeline (idempotent).
     pub fn stop(&self) {
         let _ = self.pipeline.set_state(gst::State::Null);
     }

@@ -1,6 +1,6 @@
-//! Podcasts: RSS-Feeds einlesen (über die `rss`-Crate) und die Episoden
-//! bereitstellen. Audio wird direkt gestreamt (playbin3 spielt http-URLs) –
-//! es wird nichts heruntergeladen und keine Audiodatei verändert.
+//! Podcasts: reading RSS feeds (via the `rss` crate) and providing the
+//! episodes. Audio is streamed directly (playbin3 plays http URLs) –
+//! nothing is downloaded and no audio file is modified.
 
 use std::io::Read;
 use std::time::Duration;
@@ -9,9 +9,9 @@ use anyhow::{anyhow, Result};
 
 use crate::model::Episode;
 
-/// Wandelt ein RFC-2822-Veröffentlichungsdatum („Fri, 29 May 2026 22:00:00
-/// -0000") in einen **sortierbaren** Schlüssel `YYYYMMDDHHMMSS`. Zeitzone wird
-/// für die Sortierung ignoriert; unparsbare/fehlende Daten ergeben `0`.
+/// Converts an RFC-2822 publication date ("Fri, 29 May 2026 22:00:00 -0000")
+/// into a **sortable** key `YYYYMMDDHHMMSS`. The time zone is ignored for
+/// sorting; unparsable/missing dates yield `0`.
 pub fn pubdate_key(s: Option<&str>) -> i64 {
     let Some(s) = s else { return 0 };
     let tokens: Vec<&str> = s.split_whitespace().collect();
@@ -23,7 +23,7 @@ pub fn pubdate_key(s: Option<&str>) -> i64 {
         .position(|x| m.to_ascii_lowercase().starts_with(x))
         .map(|i| i as i64 + 1)
     };
-    // Monatsnamen suchen; davor steht der Tag, danach Jahr und Uhrzeit.
+    // Find the month name; before it is the day, after it the year and time.
     let mi = tokens.iter().position(|t| month_num(t).is_some());
     let Some(mi) = mi.filter(|&i| i >= 1) else { return 0 };
     let month = month_num(tokens[mi]).unwrap_or(0);
@@ -39,13 +39,13 @@ pub fn pubdate_key(s: Option<&str>) -> i64 {
     ((((year * 100 + month) * 100 + day) * 100 + h) * 100 + m) * 100 + sec
 }
 
-/// Sortier-/Vergleichsschlüssel `YYYYMMDD000000` für ein Datum (Tag genau).
+/// Sort/comparison key `YYYYMMDD000000` for a date (day precision).
 fn date_key(year: i64, month: i64, day: i64) -> i64 {
     ((year * 100 + month) * 100 + day) * 1_000_000
 }
 
-/// Bürgerliches Datum (Jahr, Monat, Tag) aus Tagen seit der Unix-Epoche
-/// (Algorithmus nach Howard Hinnant).
+/// Civil date (year, month, day) from days since the Unix epoch
+/// (algorithm after Howard Hinnant).
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let z = z + 719_468;
     let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
@@ -59,9 +59,9 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-/// Vergleichsschlüssel für „vor ~einem Monat" (heute − 31 Tage), passend zu
-/// [`pubdate_key`]. Episoden mit `pubdate_key >= recent_cutoff_key()` gelten als
-/// neu (höchstens einen Monat zurück).
+/// Comparison key for "~one month ago" (today − 31 days), matching
+/// [`pubdate_key`]. Episodes with `pubdate_key >= recent_cutoff_key()` count as
+/// new (at most one month back).
 pub fn recent_cutoff_key() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -72,10 +72,10 @@ pub fn recent_cutoff_key() -> i64 {
     date_key(y, m, d)
 }
 
-/// Schwellen-Schlüssel (passend zu [`pubdate_key`]) für die Gruppierung der
-/// neuesten Episoden – jeweils Mitternacht: `(heute, gestern, vor 7 Tagen)`.
-/// „Diese Woche" meint bewusst die **letzten 7 Tage (rollierend)**, nicht die
-/// Kalenderwoche; älter als das = „Diesen Monat".
+/// Threshold keys (matching [`pubdate_key`]) for grouping the newest
+/// episodes – each at midnight: `(today, yesterday, 7 days ago)`.
+/// "This week" deliberately means the **last 7 days (rolling)**, not the
+/// calendar week; older than that = "This month".
 pub fn recent_day_buckets() -> (i64, i64, i64) {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -89,13 +89,13 @@ pub fn recent_day_buckets() -> (i64, i64, i64) {
     };
     let today = key_of(today_days);
     let yesterday = key_of(today_days - 1);
-    // Rollierend: alles ab heute − 6 Tagen zählt zu „diese Woche" (= letzte 7 Tage).
+    // Rolling: everything from today − 6 days counts as "this week" (= last 7 days).
     let week_start = key_of(today_days - 6);
     (today, yesterday, week_start)
 }
 
-/// Kurzform eines RFC-2822-Datums für die Anzeige: „29 May 2026" (ohne Wochentag,
-/// Uhrzeit und Zeitzone). Unparsbares wird unverändert zurückgegeben.
+/// Short form of an RFC-2822 date for display: "29 May 2026" (without weekday,
+/// time, and time zone). Unparsable input is returned unchanged.
 pub fn pubdate_short(s: &str) -> String {
     const MONTHS: [&str; 12] = [
         "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
@@ -112,17 +112,17 @@ pub fn pubdate_short(s: &str) -> String {
     }
 }
 
-/// Ergebnis des Feed-Einlesens: Kanaldaten plus Episoden (mit Audio).
+/// Result of reading a feed: channel data plus episodes (with audio).
 pub struct PodcastFeed {
     pub title: String,
     pub image_url: Option<String>,
     pub episodes: Vec<Episode>,
 }
 
-/// Dekodiert verbliebene HTML-/XML-Entities in Feed-Texten (v. a. Titel):
-/// numerische Referenzen (`&#128512;`, `&#x1F600;` → Emoji/Smiley) und gängige
-/// benannte Entities. Viele Feeds sind doppelt kodiert oder nutzen HTML-Entities,
-/// die der XML-Parser stehen lässt – das holt diese Zeichen wieder hervor.
+/// Decodes remaining HTML/XML entities in feed texts (especially titles):
+/// numeric references (`&#128512;`, `&#x1F600;` → emoji/smiley) and common
+/// named entities. Many feeds are double-encoded or use HTML entities that
+/// the XML parser leaves in place – this brings those characters back out.
 pub(crate) fn decode_entities(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
@@ -165,7 +165,7 @@ pub(crate) fn decode_entities(s: &str) -> String {
     while let Some(amp) = rest.find('&') {
         out.push_str(&rest[..amp]);
         let after = &rest[amp + 1..];
-        // Entity-Namen bis zum ';' (kurz halten, sonst kein echtes Entity).
+        // Entity name up to the ';' (keep it short, otherwise not a real entity).
         if let Some(semi) = after.find(';').filter(|&p| p > 0 && p <= 12) {
             let ent = &after[..semi];
             let decoded = if let Some(hex) =
@@ -183,7 +183,7 @@ pub(crate) fn decode_entities(s: &str) -> String {
                 continue;
             }
         }
-        // Kein gültiges Entity → das „&" unverändert übernehmen.
+        // Not a valid entity → keep the "&" unchanged.
         out.push('&');
         rest = after;
     }
@@ -191,10 +191,10 @@ pub(crate) fn decode_entities(s: &str) -> String {
     out
 }
 
-/// Formatiert eine Feed-Dauerangabe einheitlich als `h:mm:ss` (bzw. `m:ss`,
-/// wenn unter einer Stunde). Akzeptiert sowohl `HH:MM:SS`/`MM:SS` als auch reine
-/// Sekunden (z. B. „3600" oder „3600.0"). Gibt `None` zurück, wenn sich nichts
-/// Sinnvolles ermitteln lässt – der Aufrufer zeigt dann den Originaltext.
+/// Formats a feed duration uniformly as `h:mm:ss` (or `m:ss` if under one
+/// hour). Accepts both `HH:MM:SS`/`MM:SS` and plain seconds (e.g. "3600" or
+/// "3600.0"). Returns `None` if nothing sensible can be determined – the
+/// caller then shows the original text.
 pub fn format_duration(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.is_empty() {
@@ -211,7 +211,7 @@ pub fn format_duration(raw: &str) -> Option<String> {
         }
         secs
     } else {
-        // Reine Sekunden, evtl. mit Nachkommastellen („1234.5").
+        // Plain seconds, possibly with decimals ("1234.5").
         s.split('.').next()?.trim().parse().ok()?
     };
     if total < 0 {
@@ -225,9 +225,9 @@ pub fn format_duration(raw: &str) -> Option<String> {
     })
 }
 
-/// Wandelt einen HTML-Beschreibungstext (Shownotes) in lesbaren Klartext:
-/// Block-/Umbruch-Tags werden zu Zeilenumbrüchen, übrige Tags entfernt,
-/// HTML-Entities dekodiert und überflüssiger Leerraum zusammengefasst.
+/// Converts an HTML description text (shownotes) into readable plain text:
+/// block/break tags become line breaks, remaining tags are removed,
+/// HTML entities are decoded, and superfluous whitespace is collapsed.
 pub(crate) fn html_to_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -240,7 +240,7 @@ pub(crate) fn html_to_text(s: &str) -> String {
             }
             '>' if in_tag => {
                 in_tag = false;
-                // Tag-Name (ohne führenden „/") bis zum ersten Nicht-Buchstaben.
+                // Tag name (without leading "/") up to the first non-letter.
                 let name: String = tag
                     .trim()
                     .trim_start_matches('/')
@@ -262,7 +262,7 @@ pub(crate) fn html_to_text(s: &str) -> String {
         }
     }
     let decoded = decode_entities(&out);
-    // Je Zeile Whitespace zusammenfassen; höchstens eine Leerzeile am Stück.
+    // Collapse whitespace per line; at most one blank line in a row.
     let mut lines: Vec<String> = Vec::new();
     let mut blank = false;
     for raw in decoded.lines() {
@@ -283,8 +283,8 @@ pub(crate) fn html_to_text(s: &str) -> String {
     lines.join("\n")
 }
 
-/// Liest einen Podcast-RSS-Feed. Nur Einträge mit Audio-Enclosure werden
-/// übernommen; Fehler, wenn keine Audio-Episode gefunden wird.
+/// Reads a podcast RSS feed. Only entries with an audio enclosure are taken;
+/// errors if no audio episode is found.
 pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
     let channel = rss::Channel::read_from(xml)?;
 
@@ -316,8 +316,8 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
             .map(|t| decode_entities(t.trim()))
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "Episode".to_string());
-        // Shownotes: bevorzugt das volle <content:encoded>, sonst <description>,
-        // sonst die iTunes-Zusammenfassung – jeweils zu Klartext entschärft.
+        // Shownotes: prefer the full <content:encoded>, otherwise <description>,
+        // otherwise the iTunes summary – each reduced to plain text.
         let description = item
             .content()
             .or_else(|| item.description())
@@ -344,7 +344,7 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
     })
 }
 
-/// Holt einen Feed per HTTP und liest ihn ein (blockierend – im Worker nutzen).
+/// Fetches a feed via HTTP and reads it (blocking – use in the worker).
 pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(8))
@@ -359,20 +359,20 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
     parse_feed(&bytes)
 }
 
-/// Ein Treffer der Podcast-Suche: genug, um ihn anzuzeigen und – bei Auswahl –
-/// über die Feed-Adresse zu abonnieren (dann läuft der übliche Abo-Weg).
+/// A podcast search result: enough to display it and – when selected –
+/// subscribe via the feed address (then the usual subscription flow runs).
 #[derive(Debug, Clone)]
 pub struct PodcastSearchResult {
     pub title: String,
     pub author: Option<String>,
     pub feed_url: String,
-    /// Cover-URL (iTunes-Artwork) – zum Vorab-Cachen und Anzeigen in der Liste.
+    /// Cover URL (iTunes artwork) – for pre-caching and displaying in the list.
     pub image_url: Option<String>,
 }
 
-/// Sucht Podcasts über die **iTunes Search API** (kein API-Key, kein Account
-/// nötig) und liefert Treffer samt RSS-Feed-Adresse. Blockierend – nur aus
-/// Worker-Threads aufrufen. Leerer Suchbegriff ergibt eine leere Liste.
+/// Searches podcasts via the **iTunes Search API** (no API key, no account
+/// needed) and returns results including the RSS feed address. Blocking – only
+/// call from worker threads. An empty search term yields an empty list.
 pub fn search_podcasts(term: &str) -> Result<Vec<PodcastSearchResult>> {
     let term = term.trim();
     if term.is_empty() {
@@ -391,13 +391,13 @@ pub fn search_podcasts(term: &str) -> Result<Vec<PodcastSearchResult>> {
         .get(&url)
         .call()?
         .into_reader()
-        .take(4 * 1024 * 1024) // Deckel gegen unerwartet große Antworten.
+        .take(4 * 1024 * 1024) // Cap against unexpectedly large responses.
         .read_to_end(&mut bytes)?;
     parse_search(&bytes)
 }
 
-/// Wertet die iTunes-Such-Antwort aus. Treffer **ohne** `feedUrl` werden
-/// verworfen – ohne Feed-Adresse lässt sich nichts abonnieren.
+/// Parses the iTunes search response. Results **without** `feedUrl` are
+/// discarded – without a feed address there is nothing to subscribe to.
 fn parse_search(body: &[u8]) -> Result<Vec<PodcastSearchResult>> {
     let resp: ItunesSearch = serde_json::from_slice(body)?;
     let results = resp
@@ -420,7 +420,7 @@ fn parse_search(body: &[u8]) -> Result<Vec<PodcastSearchResult>> {
                     .map(|a| decode_entities(a.trim()))
                     .filter(|s| !s.is_empty()),
                 feed_url,
-                // Kleines Artwork bevorzugen (reicht für den 48-px-Avatar, lädt schneller).
+                // Prefer the small artwork (enough for the 48 px avatar, loads faster).
                 image_url: r
                     .artwork_url_100
                     .or(r.artwork_url_600)
@@ -451,7 +451,7 @@ struct ItunesPodcast {
     artwork_url_600: Option<String>,
 }
 
-/// Minimales Pango-Markup-Escaping (nur die für Element-Text nötigen Zeichen).
+/// Minimal Pango markup escaping (only the characters needed for element text).
 fn escape_markup(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for c in s.chars() {
@@ -467,10 +467,10 @@ fn escape_markup(s: &str) -> String {
     o
 }
 
-/// Versucht, an Byte-Position `i` einen Zeitstempel `M:SS`/`MM:SS` bzw.
-/// `H:MM:SS`/`HH:MM:SS` zu erkennen. Gibt `(Länge in Bytes, Millisekunden)`
-/// zurück. Grenzen werden geprüft, damit nicht in längere Zahlen
-/// hineingematcht wird (z. B. „12:345" oder „2024:01").
+/// Tries to detect a timestamp `M:SS`/`MM:SS` or `H:MM:SS`/`HH:MM:SS` at byte
+/// position `i`. Returns `(length in bytes, milliseconds)`. Boundaries are
+/// checked so it does not match into longer numbers (e.g. "12:345" or
+/// "2024:01").
 fn match_timestamp_at(text: &str, i: usize) -> Option<(usize, i64)> {
     let b = text.as_bytes();
     if i > 0 {
@@ -479,7 +479,7 @@ fn match_timestamp_at(text: &str, i: usize) -> Option<(usize, i64)> {
             return None;
         }
     }
-    // 1. Gruppe: 1–2 Ziffern, dann ':'
+    // 1st group: 1–2 digits, then ':'
     let mut j = i;
     while j < b.len() && b[j].is_ascii_digit() {
         j += 1;
@@ -488,7 +488,7 @@ fn match_timestamp_at(text: &str, i: usize) -> Option<(usize, i64)> {
         return None;
     }
     let g1: i64 = text[i..j].parse().ok()?;
-    // 2. Gruppe: genau 2 Ziffern
+    // 2nd group: exactly 2 digits
     let s2 = j + 1;
     let mut k = s2;
     while k < b.len() && b[k].is_ascii_digit() {
@@ -498,7 +498,7 @@ fn match_timestamp_at(text: &str, i: usize) -> Option<(usize, i64)> {
         return None;
     }
     let g2: i64 = text[s2..k].parse().ok()?;
-    // Optional 3. Gruppe (→ Stunden:Minuten:Sekunden)
+    // Optional 3rd group (→ hours:minutes:seconds)
     if k < b.len() && b[k] == b':' {
         let s3 = k + 1;
         let mut l = s3;
@@ -524,10 +524,10 @@ fn finish_timestamp(text: &str, start: usize, end: usize, total_secs: i64) -> Op
     Some((end - start, total_secs * 1000))
 }
 
-/// Kapitel (Zeitstempel + Bezeichnung) aus den Shownotes. Pro Zeile wird der
-/// erste Zeitstempel genommen; die Bezeichnung ist der restliche Zeilentext
-/// (bevorzugt **hinter** dem Zeitstempel), von Trennzeichen befreit. Aufsteigend
-/// nach Zeit, je Zeit nur das erste Kapitel. Für Seekbar-Marken + Hover-Anzeige.
+/// Chapters (timestamp + label) from the shownotes. Per line the first
+/// timestamp is taken; the label is the remaining line text (preferably
+/// **after** the timestamp), stripped of separators. Ascending by time, only
+/// the first chapter per time. For seekbar markers + hover display.
 pub fn parse_chapters(text: &str) -> Vec<(i64, String)> {
     fn strip(s: &str) -> &str {
         s.trim().trim_matches(|c: char| {
@@ -560,13 +560,13 @@ pub fn parse_chapters(text: &str) -> Vec<(i64, String)> {
     out
 }
 
-/// Wandelt Zeitstempel in Shownotes (z. B. „12:34", „1:02:03") in anklickbare
-/// Pango-Links `emilia-seek:<ms>` um; der restliche Text wird Markup-escaped.
-/// Rückgabe ist Pango-Markup (für `gtk::Label` mit `use_markup`).
+/// Converts timestamps in shownotes (e.g. "12:34", "1:02:03") into clickable
+/// Pango links `emilia-seek:<ms>`; the rest of the text is markup-escaped.
+/// Returns Pango markup (for `gtk::Label` with `use_markup`).
 pub fn linkify_timestamps(text: &str) -> String {
     let b = text.as_bytes();
     let mut out = String::with_capacity(text.len() + 32);
-    let mut run = 0; // Anfang des aktuellen Klartext-Abschnitts
+    let mut run = 0; // start of the current plain-text section
     let mut i = 0;
     while i < b.len() {
         if b[i].is_ascii_digit() {
@@ -620,7 +620,7 @@ mod tests {
         let feed = parse_feed(SAMPLE.as_bytes()).unwrap();
         assert_eq!(feed.title, "Test Podcast");
         assert_eq!(feed.image_url.as_deref(), Some("https://example.com/cover.jpg"));
-        // Der Eintrag ohne <enclosure> wird übersprungen → 2 Episoden.
+        // The entry without <enclosure> is skipped → 2 episodes.
         assert_eq!(feed.episodes.len(), 2);
 
         let ep1 = &feed.episodes[0];
@@ -628,7 +628,7 @@ mod tests {
         assert_eq!(ep1.audio_url, "https://example.com/ep1.mp3");
         assert_eq!(ep1.guid.as_deref(), Some("ep-1"));
         assert_eq!(ep1.duration.as_deref(), Some("00:30:00"));
-        // Shownotes: HTML entschärft zu Klartext.
+        // Shownotes: HTML reduced to plain text.
         assert_eq!(ep1.description.as_deref(), Some("Hallo & Welt"));
 
         assert_eq!(feed.episodes[1].title, "Folge 2");
@@ -664,7 +664,7 @@ mod tests {
         assert!(md.contains("<a href=\"emilia-seek:754000\">12:34</a>"), "{md}");
         assert!(md.contains("<a href=\"emilia-seek:3723000\">1:02:03</a>"), "{md}");
         assert!(md.contains("&amp;"), "{md}");
-        // Keine falschen Treffer in längeren Zahlen.
+        // No false matches in longer numbers.
         let none = linkify_timestamps("Jahr 2024:01 und 12:345 sind keine Marke");
         assert!(!none.contains("emilia-seek"), "{none}");
     }
@@ -701,12 +701,12 @@ mod tests {
             {"collectionName":"Kein Feed","artistName":"Bob"}
         ]}"#;
         let r = parse_search(json).unwrap();
-        // Der Eintrag ohne feedUrl wird übersprungen → 1 Treffer.
+        // The entry without feedUrl is skipped → 1 result.
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].title, "Tech Talk");
         assert_eq!(r[0].author.as_deref(), Some("Alice"));
         assert_eq!(r[0].feed_url, "https://example.com/feed.xml");
-        // Kleines Artwork wird bevorzugt.
+        // The small artwork is preferred.
         assert_eq!(r[0].image_url.as_deref(), Some("https://example.com/100.jpg"));
     }
 }

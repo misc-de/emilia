@@ -1,4 +1,4 @@
-//! Gemeinsame UI-Helfer.
+//! Shared UI helpers.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -7,27 +7,27 @@ use adw::prelude::*;
 use relm4::{adw, gtk};
 
 
-/// Kantenlänge der gecachten Listen-Thumbnails. Die Karten zeigen 48 px; 128 px
-/// deckt HiDPI ab und hält den Cache klein (≈64 KB statt ≈1 MB je Vollbild-Cover).
+/// Edge length of the cached list thumbnails. The cards show 48 px; 128 px
+/// covers HiDPI and keeps the cache small (≈64 KB instead of ≈1 MB per full-size cover).
 const THUMB_PX: i32 = 128;
 
 thread_local! {
-    /// Prozessweiter Cache dekodierter Listen-Thumbnails (Dateipfad → Textur).
-    /// Wird ausschließlich auf dem UI-Thread benutzt (Karten-`init_model`/`update_cmd`),
-    /// daher genügt `thread_local` ohne Sperren. Verhindert wiederholtes Dekodieren
-    /// und das Aufblitzen der Platzhalter bei jedem Listen-Neuaufbau.
+    /// Process-wide cache of decoded list thumbnails (file path → texture).
+    /// Used exclusively on the UI thread (card `init_model`/`update_cmd`),
+    /// so `thread_local` without locks suffices. Prevents repeated decoding
+    /// and the flashing of placeholders on every list rebuild.
     static THUMB_CACHE: RefCell<HashMap<String, gtk::gdk::Texture>> = RefCell::new(HashMap::new());
 }
 
-/// Bereits gecachtes Thumbnail (falls vorhanden) – sofort, ohne Dekodieren.
+/// Already cached thumbnail (if present) – immediately, without decoding.
 pub fn cached_thumb(path: &str) -> Option<gtk::gdk::Texture> {
     THUMB_CACHE.with(|c| c.borrow().get(path).cloned())
 }
 
-/// Thumbnail aus dem Cache oder – bei Cache-Miss – **synchron** herunterskaliert
-/// dekodiert und gecacht. Gedacht für bedarfsweise geöffnete, kurze Listen
-/// (Interpreten-/Album-Unterseiten); lange Listenkarten laden ihr Cover
-/// stattdessen asynchron über [`cover_frame`] + [`set_cover_texture`].
+/// Thumbnail from the cache or – on a cache miss – decoded **synchronously**
+/// downscaled and cached. Intended for short lists opened on demand
+/// (artist/album subpages); long list cards instead load their cover
+/// asynchronously via [`cover_frame`] + [`set_cover_texture`].
 pub fn thumb_cached(path: &str) -> Option<gtk::gdk::Texture> {
     if let Some(texture) = cached_thumb(path) {
         return Some(texture);
@@ -37,32 +37,32 @@ pub fn thumb_cached(path: &str) -> Option<gtk::gdk::Texture> {
     Some(texture)
 }
 
-/// Legt ein dekodiertes Thumbnail im Cache ab.
+/// Stores a decoded thumbnail in the cache.
 pub fn store_thumb(path: String, texture: gtk::gdk::Texture) {
     THUMB_CACHE.with(|c| {
         c.borrow_mut().insert(path, texture);
     });
 }
 
-/// Dekodiert eine Bilddatei **herunterskaliert** auf Thumbnail-Größe und erzeugt
-/// daraus eine Textur. Gedacht für den Hintergrund-Thread (kein Widget-/UI-Bezug);
-/// liefert `None` bei fehlender/fehlerhafter Datei. Skaliertes Dekodieren ist
-/// schneller als das Vollbild und hält den Cache speicherschonend.
+/// Decodes an image file **downscaled** to thumbnail size and creates a texture
+/// from it. Intended for the background thread (no widget/UI reference);
+/// returns `None` for a missing/faulty file. Scaled decoding is faster than the
+/// full size and keeps the cache memory-friendly.
 pub fn decode_thumb(path: &str) -> Option<gtk::gdk::Texture> {
     let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, THUMB_PX, THUMB_PX, true).ok()?;
     Some(gtk::gdk::Texture::for_pixbuf(&pixbuf))
 }
 
-/// Leerer, quadratischer und abgerundeter Bildrahmen in Karten-Optik mit
-/// Platzhalter-Icon. Das eigentliche Cover/Foto wird – sofern vorhanden –
-/// asynchron dekodiert und per [`set_cover_texture`] nachgereicht, damit der
-/// UI-Thread beim Aufbau langer Listen nicht durch das Bild-Dekodieren blockiert.
+/// Empty, square and rounded image frame in card style with a placeholder icon.
+/// The actual cover/photo is – if present – decoded asynchronously and supplied
+/// via [`set_cover_texture`], so that the UI thread is not blocked by image
+/// decoding while building long lists.
 ///
-/// `AspectFrame` erzwingt 1:1, `content_fit = Cover` schneidet das Bild quadratisch
-/// zu, `overflow = Hidden` rundet die Ecken.
+/// `AspectFrame` enforces 1:1, `content_fit = Cover` crops the image to a square,
+/// `overflow = Hidden` rounds the corners.
 pub fn cover_frame(placeholder_icon: &str, size: i32) -> gtk::AspectFrame {
-    // Großes Detail-Cover: AspectFrame schneidet das Bild formatfüllend auf ein
-    // Quadrat zu. (Für kleine Listen-Thumbnails siehe `thumb_frame`.)
+    // Large detail cover: AspectFrame crops the image to fill a square.
+    // (For small list thumbnails see `thumb_frame`.)
     let frame = gtk::AspectFrame::new(0.0, 0.5, 1.0, false);
     frame.set_size_request(size, size);
     frame.set_overflow(gtk::Overflow::Hidden);
@@ -75,9 +75,9 @@ pub fn cover_frame(placeholder_icon: &str, size: i32) -> gtk::AspectFrame {
     frame
 }
 
-/// Fester, quadratischer Thumbnail-Rahmen für Listen (`adw::Bin` folgt der
-/// natürlichen Kindgröße und wächst – anders als `AspectFrame` – in höheren,
-/// mehrzeiligen Zeilen NICHT mit). Bild wird per [`set_cover_thumb`] gesetzt.
+/// Fixed, square thumbnail frame for lists (`adw::Bin` follows the natural child
+/// size and – unlike `AspectFrame` – does NOT grow with taller, multi-line
+/// rows). Image is set via [`set_cover_thumb`].
 pub fn thumb_frame(placeholder_icon: &str, size: i32) -> adw::Bin {
     let bin = adw::Bin::new();
     bin.set_size_request(size, size);
@@ -94,9 +94,9 @@ pub fn thumb_frame(placeholder_icon: &str, size: i32) -> adw::Bin {
     bin
 }
 
-/// Hüllt ein Cover/Foto in ein Overlay mit rotem „Getrennt"-Abzeichen, wenn die
-/// zugehörige Quelle (Nextcloud) gerade offline ist. Andernfalls wird das Widget
-/// unverändert zurückgegeben.
+/// Wraps a cover/photo in an overlay with a red "Disconnected" badge when the
+/// associated source (Nextcloud) is currently offline. Otherwise the widget is
+/// returned unchanged.
 pub fn offline_overlay(child: &impl IsA<gtk::Widget>, offline: bool) -> gtk::Widget {
     let child = child.clone().upcast::<gtk::Widget>();
     if !offline {
@@ -113,7 +113,7 @@ pub fn offline_overlay(child: &impl IsA<gtk::Widget>, offline: bool) -> gtk::Wid
     overlay.upcast()
 }
 
-/// Setzt ein Platzhalter-Icon (füllt das Quadrat) in den Rahmen.
+/// Sets a placeholder icon (fills the square) into the frame.
 pub fn set_cover_placeholder(frame: &gtk::AspectFrame, placeholder_icon: &str, size: i32) {
     let img = gtk::Image::from_icon_name(placeholder_icon);
     img.set_pixel_size(size);
@@ -121,7 +121,7 @@ pub fn set_cover_placeholder(frame: &gtk::AspectFrame, placeholder_icon: &str, s
     frame.set_child(Some(&img));
 }
 
-/// Setzt das (ggf. im Hintergrund dekodierte) Bild in den Rahmen.
+/// Sets the (possibly background-decoded) image into the frame.
 pub fn set_cover_texture(frame: &gtk::AspectFrame, texture: &gtk::gdk::Texture) {
     let pic = gtk::Picture::for_paintable(texture);
     pic.set_content_fit(gtk::ContentFit::Cover);
@@ -129,17 +129,17 @@ pub fn set_cover_texture(frame: &gtk::AspectFrame, texture: &gtk::gdk::Texture) 
     frame.set_child(Some(&pic));
 }
 
-/// Setzt das Bild als **fest dimensioniertes** Thumbnail (über `gtk::Image` mit
-/// `pixel_size`). Anders als ein `Picture` wächst es nicht mit der Zeilenhöhe –
-/// so bleiben Listen-Cover immer gleich groß (z. B. 48 px), egal ob die Zeile
-/// ein- oder zweizeilig ist. Die Größe wird aus dem Rahmen übernommen.
+/// Sets the image as a **fixed-size** thumbnail (via `gtk::Image` with
+/// `pixel_size`). Unlike a `Picture`, it does not grow with the row height –
+/// so list covers always stay the same size (e.g. 48 px), regardless of whether
+/// the row is single- or two-line. The size is taken from the frame.
 pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
     let size = bin.height_request().max(1);
-    // Auf Anzeigegröße herunterskalieren: Ein Paintable behält sonst seine
-    // Originalgröße als „natürliche" Größe, wodurch der Rahmen in höheren
-    // (mehrzeiligen) Zeilen mitwächst und den Titeltext nach rechts schiebt.
-    // `pixbuf_get_from_texture` ist seit GTK 4.12 deprecated; bewusst beibehalten,
-    // bis ein deprecation-freier Downscale visuell verifiziert ist (Thumbnail-Größe).
+    // Downscale to display size: otherwise a Paintable keeps its original size as
+    // its "natural" size, causing the frame to grow with taller (multi-line) rows
+    // and pushing the title text to the right.
+    // `pixbuf_get_from_texture` is deprecated since GTK 4.12; deliberately kept
+    // until a deprecation-free downscale is visually verified (thumbnail size).
     #[allow(deprecated)]
     let small = gtk::gdk::pixbuf_get_from_texture(texture)
         .and_then(|pb| pb.scale_simple(size, size, gtk::gdk_pixbuf::InterpType::Bilinear))
@@ -152,17 +152,17 @@ pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
     bin.set_child(Some(&img));
 }
 
-/// Bild oder Platzhalter als **quadratisches**, abgerundetes Bild in Karten-Optik
-/// – einheitlich für Cover/Fotos und ihre Platzhalter. Für Einzelbilder (z. B. die
-/// Detailansicht), bei denen die Textur bereits vorliegt; Listenkarten laden ihr
-/// Cover stattdessen asynchron über [`cover_frame`] + [`set_cover_texture`].
+/// Image or placeholder as a **square**, rounded image in card style –
+/// consistently for covers/photos and their placeholders. For single images
+/// (e.g. the detail view) where the texture is already available; list cards
+/// instead load their cover asynchronously via [`cover_frame`] + [`set_cover_texture`].
 pub fn rounded_image(
     texture: Option<&gtk::gdk::Texture>,
     placeholder_icon: &str,
     size: i32,
 ) -> gtk::Widget {
-    // Kleine Listen-Thumbnails: fester `adw::Bin`-Rahmen (wächst nicht mit der
-    // Zeilenhöhe). Große Cover (Detailansicht): AspectFrame mit Zuschnitt.
+    // Small list thumbnails: fixed `adw::Bin` frame (does not grow with the row
+    // height). Large covers (detail view): AspectFrame with cropping.
     if size <= 64 {
         let bin = thumb_frame(placeholder_icon, size);
         if let Some(t) = texture {

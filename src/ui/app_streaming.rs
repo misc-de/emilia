@@ -1,6 +1,6 @@
-//! Streaming (Internet-Radio): Senderliste, Sender-Detailseite und der
-//! Hinzufügen-Dialog (manuelle Stream-URL **und** weltweite Suche über die
-//! Radio-Browser-API). Sender werden direkt gestreamt – nichts heruntergeladen.
+//! Streaming (internet radio): station list, station detail page, and the
+//! add dialog (manual stream URL **and** worldwide search via the
+//! Radio-Browser API). Stations are streamed directly – nothing is downloaded.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -10,18 +10,18 @@ use crate::i18n::{gettext, gettext_f};
 use crate::model::StreamItem;
 use crate::ui::app::{App, Msg};
 
-/// Platzhalter-Icon, wenn ein Sender kein Logo hat.
+/// Placeholder icon when a station has no logo.
 const STREAM_ICON: &str = "audio-x-generic-symbolic";
 
-/// Zustand einer laufenden Daueraufnahme (Zustandsmaschine, vom 1-s-Tick
-/// getrieben; speichert komplette Songs bis zum manuellen Stopp).
+/// State of a running continuous recording (state machine, driven by the 1 s
+/// tick; saves complete songs until manually stopped).
 pub(crate) struct RecordState {
     pub stream_id: i64,
-    /// Absoluter Byte-Offset, ab dem der nächste zu speichernde Song beginnt.
+    /// Absolute byte offset at which the next song to be saved begins.
     pub next_start: u64,
 }
 
-/// Formatiert Unix-Sekunden als „TT.MM.JJJJ" (bürgerliches Datum, UTC-genähert).
+/// Formats Unix seconds as "DD.MM.YYYY" (civil date, approximated to UTC).
 fn format_date(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let z = days + 719_468;
@@ -37,7 +37,7 @@ fn format_date(secs: i64) -> String {
     format!("{d:02}.{m:02}.{y}")
 }
 
-/// Ablageordner für gespeicherte Mitschnitte: `<Musik>/Emilia-Aufnahmen`.
+/// Storage folder for saved recordings: `<Music>/Emilia-Aufnahmen`.
 pub(crate) fn recordings_dir() -> std::path::PathBuf {
     let mut dir = dirs::audio_dir()
         .or_else(dirs::home_dir)
@@ -46,7 +46,7 @@ pub(crate) fn recordings_dir() -> std::path::PathBuf {
     dir
 }
 
-/// Inhalts-Box für die Dialoge (einheitliche Ränder).
+/// Content box for the dialogs (uniform margins).
 fn detail_box() -> gtk::Box {
     gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -58,14 +58,14 @@ fn detail_box() -> gtk::Box {
         .build()
 }
 
-/// Aktivierbare Aktionszeile mit Icon-Präfix (für die Detailseite).
+/// Activatable action row with an icon prefix (for the detail page).
 fn action_row(title: &str, icon: &str) -> adw::ActionRow {
     let row = adw::ActionRow::builder().title(title).activatable(true).build();
     row.add_prefix(&gtk::Image::from_icon_name(icon));
     row
 }
 
-/// Hängt den Inhalt scrollbar in einen Dialog mit Kopfleiste und zeigt ihn.
+/// Embeds the content scrollably in a dialog with a header bar and shows it.
 fn present_dialog(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -81,11 +81,11 @@ fn present_dialog(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     dialog.present(Some(root));
 }
 
-/// Untertitel eines Senders: Genre/Land, soweit vorhanden.
+/// Subtitle of a station: genre/country, as far as available.
 fn stream_subtitle(st: &StreamItem) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(t) = st.tags.as_deref().filter(|s| !s.trim().is_empty()) {
-        // Nur die ersten paar Schlagworte zeigen (kommagetrennt → „·").
+        // Show only the first few tags (comma-separated → "·").
         let tags: Vec<&str> = t.split(',').map(str::trim).filter(|s| !s.is_empty()).take(3).collect();
         if !tags.is_empty() {
             parts.push(tags.join(" · "));
@@ -102,8 +102,8 @@ fn stream_subtitle(st: &StreamItem) -> Option<String> {
 }
 
 impl App {
-    /// Baut die Senderliste neu auf: Logo, Name, Genre/Land. **Tippen** spielt den
-    /// Sender, **langes Drücken** öffnet die Detailseite (Favorit/Entfernen).
+    /// Rebuilds the station list: logo, name, genre/country. **Tapping** plays
+    /// the station, **long press** opens the detail page (favorite/remove).
     pub(crate) fn reload_streams(&mut self, sender: &ComponentSender<Self>) {
         self.stream_items = self.library.streams().unwrap_or_default();
         self.stream_play_buttons.borrow_mut().clear();
@@ -126,7 +126,7 @@ impl App {
             row.add_prefix(&crate::ui::app::cover_widget(logo.as_deref(), STREAM_ICON));
             let id = st.id;
 
-            // Play/Pause-Knopf (Status-Icon, rechtsbündig).
+            // Play/Pause button (status icon, right-aligned).
             let pp = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
                 .valign(gtk::Align::Center)
@@ -140,12 +140,12 @@ impl App {
             self.stream_play_buttons.borrow_mut().push((id, pp.clone()));
             row.add_suffix(&pp);
 
-            // Tippen auf die Zeile = Play/Pause umschalten.
+            // Tapping the row = toggle Play/Pause.
             {
                 let sender = sender.clone();
                 row.connect_activated(move |_| sender.input(Msg::ToggleStream(id)));
             }
-            // Langes Drücken → Detailansicht (Dialog).
+            // Long press → detail view (dialog).
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -159,9 +159,9 @@ impl App {
         }
     }
 
-    /// Detailansicht eines Senders als **Dialog** (kein Unterseiten-Push): Logo +
-    /// Genre/Land sowie Aktionen zum Abspielen/Stoppen, Aufnehmen, Wiederholen,
-    /// Favorisieren und Entfernen. Jede Aktion schließt den Dialog.
+    /// Detail view of a station as a **dialog** (no subpage push): logo +
+    /// genre/country as well as actions to play/stop, record, replay,
+    /// favorite, and remove. Each action closes the dialog.
     pub(crate) fn open_stream(
         &self,
         root: &adw::ApplicationWindow,
@@ -192,7 +192,7 @@ impl App {
         info.add(&head);
         content.append(&info);
 
-        // Kleiner Helfer: Aktionszeile, die eine Nachricht sendet und schließt.
+        // Small helper: action row that sends a message and closes.
         let row_action = |title: &str, icon: &str, msg: Msg| {
             let row = action_row(title, icon);
             let (sender, dialog) = (sender.clone(), dialog.clone());
@@ -206,8 +206,8 @@ impl App {
             row
         };
 
-        // Wiedergabe/Aufnahme laufen über die Senderliste bzw. die Player-Leiste;
-        // hier nur Wiederholung (Puffer) und Entfernen.
+        // Playback/recording run via the station list or the player bar;
+        // here only replay (buffer) and remove.
         let actions = adw::PreferencesGroup::new();
         if self.recording_buffer_minutes > 5 {
             actions.add(&row_action(
@@ -237,9 +237,9 @@ impl App {
         present_dialog(&dialog, &content, root);
     }
 
-    /// Frischt die Play/Pause-Icons der Senderzeilen auf den aktuellen
-    /// Wiedergabestand auf (vom Tick und nach Zustandswechseln aufgerufen). Der
-    /// Aufnahme-Knopf sitzt in der Player-Leiste und aktualisiert sich per `#[watch]`.
+    /// Refreshes the Play/Pause icons of the station rows to the current
+    /// playback state (called from the tick and after state changes). The
+    /// record button sits in the player bar and updates itself via `#[watch]`.
     pub(crate) fn refresh_stream_icons(&self) {
         let playing = self.playing;
         let cur = self.playing_stream;
@@ -255,9 +255,9 @@ impl App {
         }
     }
 
-    /// Dialog zum Hinzufügen eines Senders: oben eine **weltweite Suche**
-    /// (Radio-Browser, antippbare Treffer), darunter ein Feld für eine
-    /// **Stream-Adresse** als manueller Weg.
+    /// Dialog for adding a station: at the top a **worldwide search**
+    /// (Radio-Browser, tappable results), below it a field for a
+    /// **stream address** as the manual route.
     pub(crate) fn open_add_stream_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -267,7 +267,7 @@ impl App {
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
-        // --- Weltweite Suche (Radio-Browser) ---
+        // --- Worldwide search (Radio-Browser) ---
         let search_group = adw::PreferencesGroup::builder()
             .title(&gettext("Search"))
             .description(&gettext("Find a station worldwide by name"))
@@ -306,7 +306,7 @@ impl App {
             });
         }
 
-        // Trefferliste – anfangs versteckt, asynchron befüllt.
+        // Results list – initially hidden, filled asynchronously.
         let results = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .build();
@@ -314,7 +314,7 @@ impl App {
         results.set_visible(false);
         content.append(&results);
 
-        // --- Manuell: Stream-Adresse ---
+        // --- Manual: stream address ---
         let url_group = adw::PreferencesGroup::builder()
             .title(&gettext("Or enter a stream address"))
             .build();
@@ -347,9 +347,9 @@ impl App {
         search_entry.grab_focus();
     }
 
-    /// Zeichnet die Trefferliste im offenen Hinzufügen-Dialog neu (aus
-    /// `self.stream_search_results`). Tippen speichert den Sender und schließt den
-    /// Dialog. Logos stammen aus dem lokalen Cache (sonst Platzhalter).
+    /// Redraws the results list in the open add dialog (from
+    /// `self.stream_search_results`). Tapping saves the station and closes the
+    /// dialog. Logos come from the local cache (otherwise a placeholder).
     pub(crate) fn rebuild_stream_search_results(&self, sender: &ComponentSender<Self>) {
         let guard = self.stream_search.borrow();
         let Some((dialog, list)) = guard.as_ref() else {
@@ -408,13 +408,13 @@ impl App {
         }
     }
 
-    /// Startet einen gespeicherten Sender (ersetzt die laufende Wiedergabe).
-    /// Live-Stream → kein Resume, keine Dauer.
+    /// Starts a saved station (replaces the current playback).
+    /// Live stream → no resume, no duration.
     pub(crate) fn play_stream(&mut self, id: i64) {
         let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
             return;
         };
-        // Position/Sitzung eines bisher laufenden Titels sichern.
+        // Save the position/session of a previously playing track.
         self.save_resume();
         self.save_episode_progress();
         self.finalize_play_session(false);
@@ -436,10 +436,10 @@ impl App {
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
                 self.set_chapters(Vec::new());
-                // Eine etwaige vorherige Aufnahme beenden …
+                // End any previous recording …
                 self.record_state = None;
-                // … und den Timeshift-Puffer für diesen Sender starten (sofern
-                // der Puffer aktiviert ist). Drop des alten Recorders räumt auf.
+                // … and start the timeshift buffer for this station (provided
+                // the buffer is enabled). Dropping the old recorder cleans up.
                 self.recorder = if self.recording_buffer_minutes > 0 {
                     Some(crate::core::recorder::Recorder::start(
                         &st.url,
@@ -453,14 +453,14 @@ impl App {
         }
     }
 
-    /// Stoppt Timeshift-Puffer und laufende Aufnahme (bei Stopp/Wechsel auf Musik).
+    /// Stops the timeshift buffer and running recording (on stop/switch to music).
     pub(crate) fn stop_recorder(&mut self) {
         self.recorder = None;
         self.record_state = None;
     }
 
-    /// Baut die „Aufnahmen"-Liste neu auf (gespeicherte Mitschnitte). Tippen
-    /// spielt die Datei, der Mülleimer-Knopf entfernt sie.
+    /// Rebuilds the "Recordings" list (saved recordings). Tapping plays the
+    /// file, the trash button removes it.
     pub(crate) fn reload_recordings(&mut self, sender: &ComponentSender<Self>) {
         self.recording_items = self.library.recordings().unwrap_or_default();
         while let Some(child) = self.recordings_list.first_child() {
@@ -513,8 +513,8 @@ impl App {
         }
     }
 
-    /// Fügt einen Suchtreffer (Index in `stream_search_results`) als Sender hinzu
-    /// und lädt sein Logo im Hintergrund nach.
+    /// Adds a search result (index in `stream_search_results`) as a station
+    /// and loads its logo in the background.
     pub(crate) fn add_stream_result(&mut self, sender: &ComponentSender<Self>, index: usize) {
         let Some(r) = self.stream_search_results.get(index).cloned() else {
             return;
@@ -542,7 +542,7 @@ impl App {
         }
     }
 
-    /// Aktiviert die Daueraufnahme: Startoffset = Anfang des laufenden Songs.
+    /// Arms the continuous recording: start offset = beginning of the current song.
     pub(crate) fn record_arm(&mut self, id: i64) {
         let Some(rec) = self.recorder.as_ref() else {
             return;
@@ -556,8 +556,8 @@ impl App {
         self.toast(&gettext("Recording …"));
     }
 
-    /// Vom 1-s-Tick getrieben: speichert fertig gewordene Songs der laufenden
-    /// Aufnahme (an den Songgrenzen) und schreitet voran.
+    /// Driven by the 1 s tick: saves songs of the running recording that have
+    /// finished (at the song boundaries) and advances.
     pub(crate) fn drive_recording(&mut self, sender: &ComponentSender<Self>) {
         let snap = match self.recorder.as_ref() {
             Some(r) => r.snapshot(),
@@ -579,18 +579,18 @@ impl App {
             .map(|s| s.name.clone());
         let dest = recordings_dir();
 
-        // Fertige Segmente einsammeln (nur gelesene Daten; keine Selbst-Mutation).
+        // Collect finished segments (read-only data; no self-mutation).
         let mut segs: Vec<(u64, u64, Option<String>, String, bool)> = Vec::new();
         loop {
-            // Song, der `next_start` enthält …
+            // The song that contains `next_start` …
             let song = match snap
                 .songs
                 .iter()
                 .find(|s| s.start <= next_start && s.end.map_or(true, |e| e > next_start))
             {
                 Some(s) => s,
-                // … sonst auf den nächsten bekannten Songanfang vorrücken (einen
-                // un-getrackten Anfang, z. B. nach frischem Start, überspringen).
+                // … otherwise advance to the next known song start (skipping an
+                // untracked beginning, e.g. after a fresh start).
                 None => match snap.songs.iter().find(|s| s.start > next_start) {
                     Some(first) => {
                         next_start = first.start;
@@ -600,7 +600,7 @@ impl App {
                 },
             };
             let Some(end) = song.end else {
-                break; // läuft noch
+                break; // still running
             };
             let (artist, title) = crate::core::recorder::split_artist_title(&song.title);
             let incomplete = !song.complete || next_start > song.start;
@@ -609,7 +609,7 @@ impl App {
         }
 
         let mut saved = 0;
-        // Frisch gespeicherte Dateien für die Cover-Anreicherung (Hintergrund).
+        // Freshly saved files for cover enrichment (background).
         let mut enrich: Vec<(std::path::PathBuf, Option<String>, String)> = Vec::new();
         for (start, end, artist, title, incomplete) in &segs {
             if let Some(rec) = self.recorder.as_ref() {
@@ -636,7 +636,7 @@ impl App {
         if saved > 0 {
             self.reload_recordings(sender);
         }
-        // Cover + Album online nachschlagen und in die Datei einbetten (best effort).
+        // Look up cover + album online and embed them into the file (best effort).
         for (path, artist, title) in enrich {
             sender.spawn_command(move |_out| {
                 let a = artist.as_deref().unwrap_or("");
@@ -653,8 +653,8 @@ impl App {
         }
     }
 
-    /// Wiederholungs-Unterseite eines Senders: die im Puffer erkannten Songs zum
-    /// Probehören oder nachträglichen Speichern. Erreichbar aus der Detailseite.
+    /// Replay subpage of a station: the songs detected in the buffer for
+    /// previewing or saving after the fact. Reachable from the detail page.
     pub(crate) fn open_stream_replay(&self, sender: &ComponentSender<Self>, id: i64) {
         let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
             return;
@@ -669,7 +669,7 @@ impl App {
             .build();
 
         let snap = self.recorder.as_ref().map(|r| r.snapshot());
-        // Nur fertige Songs (mit bekanntem Ende), neueste zuerst.
+        // Only finished songs (with a known end), newest first.
         let mut songs: Vec<crate::core::recorder::BufferedSong> = snap
             .map(|s| s.songs)
             .unwrap_or_default()

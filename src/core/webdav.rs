@@ -1,10 +1,10 @@
-//! Minimaler, **lesender** WebDAV-Client (Nextcloud) über das blockierende
-//! `ureq`. Kann Verzeichnisse auflisten (PROPFIND), Tags aus den ersten
-//! Kilobytes einer Datei lesen (Range-GET) und Dateien herunterladen (GET).
+//! Minimal, **read-only** WebDAV client (Nextcloud) via the blocking
+//! `ureq`. Can list directories (PROPFIND), read tags from the first
+//! kilobytes of a file (range GET) and download files (GET).
 //!
-//! Bewusst schlank gehalten und ausschließlich aus Hintergrund-Workern
-//! aufgerufen (siehe `src/ui/app_streaming` bzw. die `Cmd::Remote*`-Pfade).
-//! Die Audiodateien in der Cloud werden dabei niemals verändert.
+//! Deliberately kept lean and called exclusively from background workers
+//! (see `src/ui/app_streaming` or the `Cmd::Remote*` paths).
+//! The audio files in the cloud are never modified in the process.
 
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTRO
 use crate::core::scanner;
 use crate::model::Source;
 
-/// Zu kodierende Zeichen in einem einzelnen Pfadsegment (ohne den Trenner `/`).
+/// Characters to encode in a single path segment (excluding the `/` separator).
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')
@@ -33,7 +33,7 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b'}')
     .add(b'\\');
 
-/// Zu kodierende Zeichen im User-Info-Teil (`user:pass@`) einer URL.
+/// Characters to encode in the user-info part (`user:pass@`) of a URL.
 const USERINFO: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')
@@ -57,21 +57,21 @@ const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:resourcetype/><d:displayname/><d:getcontentlength/><d:getcontenttype/>
 </d:prop></d:propfind>"#;
 
-/// Zugangsdaten + Musik-Wurzel einer Nextcloud-/WebDAV-Quelle.
+/// Credentials + music root of a Nextcloud/WebDAV source.
 #[derive(Debug, Clone)]
 pub struct Creds {
-    /// Basis-URL ohne abschließenden Slash, z. B. `https://cloud.example.com`
-    /// (darf einen Unterpfad enthalten, z. B. `https://host/nextcloud`).
+    /// Base URL without trailing slash, e.g. `https://cloud.example.com`
+    /// (may contain a subpath, e.g. `https://host/nextcloud`).
     pub base_url: String,
     pub user: String,
     pub pass: String,
-    /// Unterpfad zur Musik (normalisiert: führender Slash, ohne Schluss-Slash;
-    /// leer = Cloud-Wurzel), z. B. `/Music`.
+    /// Subpath to the music (normalized: leading slash, no trailing slash;
+    /// empty = cloud root), e.g. `/Music`.
     pub music_path: String,
 }
 
 impl Creds {
-    /// Aus einer `webdav`-Quelle. `None`, wenn Pflichtfelder fehlen.
+    /// From a `webdav` source. `None` if required fields are missing.
     pub fn from_source(s: &Source) -> Option<Self> {
         Some(Self {
             base_url: s.base_url.clone()?.trim_end_matches('/').to_string(),
@@ -82,18 +82,18 @@ impl Creds {
     }
 }
 
-/// Ein Eintrag aus einem WebDAV-Verzeichnis (Ordner oder Audiodatei).
+/// An entry from a WebDAV directory (folder or audio file).
 #[derive(Debug, Clone)]
 pub struct DavEntry {
-    /// Pfad **relativ zur Musikwurzel** (führender Slash), z. B. `/Alben/X`.
+    /// Path **relative to the music root** (leading slash), e.g. `/Alben/X`.
     pub rel_path: String,
-    /// Anzeigename (letztes Pfadsegment bzw. `displayname`).
+    /// Display name (last path segment or `displayname`).
     pub name: String,
     pub is_dir: bool,
 }
 
 // ---------------------------------------------------------------------------
-// URL-/Pfad-Hilfen
+// URL/path helpers
 // ---------------------------------------------------------------------------
 
 fn normalize_path(p: &str) -> String {
@@ -113,8 +113,8 @@ fn scheme_rest(base: &str) -> (&str, &str) {
     base.split_once("://").unwrap_or(("https", base))
 }
 
-/// Zerlegt `authority[/pfad]` in (authority, pfad) – pfad inkl. führendem Slash
-/// bzw. leer.
+/// Splits `authority[/path]` into (authority, path) – path including leading
+/// slash, or empty.
 fn authority_and_path(rest: &str) -> (&str, &str) {
     match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
@@ -122,7 +122,7 @@ fn authority_and_path(rest: &str) -> (&str, &str) {
     }
 }
 
-/// Kodiert einen Pfad segmentweise (die `/`-Trenner bleiben erhalten).
+/// Encodes a path segment by segment (the `/` separators are preserved).
 fn encode_path(path: &str) -> String {
     path.split('/')
         .map(|seg| utf8_percent_encode(seg, PATH_SEGMENT).to_string())
@@ -130,19 +130,19 @@ fn encode_path(path: &str) -> String {
         .join("/")
 }
 
-/// DAV-Pfad-Suffix (kodiert) ab der Authority: `/remote.php/dav/files/USER/...`.
+/// DAV path suffix (encoded) starting from the authority: `/remote.php/dav/files/USER/...`.
 fn dav_suffix(c: &Creds, rel: &str) -> String {
     let enc_user = utf8_percent_encode(&c.user, PATH_SEGMENT).to_string();
     let full = format!("{}{}", c.music_path, rel);
     format!("/remote.php/dav/files/{}{}", enc_user, encode_path(&full))
 }
 
-/// Volle DAV-URL (für `ureq`; Authentifizierung läuft über einen Header).
+/// Full DAV URL (for `ureq`; authentication goes through a header).
 fn url_for(c: &Creds, rel: &str) -> String {
     format!("{}{}", c.base_url, dav_suffix(c, rel))
 }
 
-/// Abspielbare URI mit eingebetteten Zugangsdaten (für GStreamer/`play_uri`).
+/// Playable URI with embedded credentials (for GStreamer/`play_uri`).
 pub fn stream_uri(c: &Creds, rel: &str) -> String {
     let (scheme, rest) = scheme_rest(&c.base_url);
     let enc_user = utf8_percent_encode(&c.user, USERINFO);
@@ -150,7 +150,7 @@ pub fn stream_uri(c: &Creds, rel: &str) -> String {
     format!("{scheme}://{enc_user}:{enc_pass}@{rest}{}", dav_suffix(c, rel))
 }
 
-/// Erwarteter (dekodierter) Pfad der PROPFIND-Anfrage – Präfix der Kind-Hrefs.
+/// Expected (decoded) path of the PROPFIND request – prefix of the child hrefs.
 fn req_path_decoded(c: &Creds, rel: &str) -> String {
     let (_, rest) = scheme_rest(&c.base_url);
     let (_authority, base_path) = authority_and_path(rest);
@@ -163,7 +163,7 @@ fn req_path_decoded(c: &Creds, rel: &str) -> String {
     )
 }
 
-/// Extrahiert den (dekodierten) Pfad-Teil aus einem href (Pfad oder volle URL).
+/// Extracts the (decoded) path part from an href (path or full URL).
 fn href_to_path(href: &str) -> String {
     let path = if href.starts_with("http") {
         href.split_once("://")
@@ -188,7 +188,7 @@ fn agent() -> ureq::Agent {
 }
 
 // ---------------------------------------------------------------------------
-// PROPFIND – Verzeichnis auflisten
+// PROPFIND – list directory
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
@@ -198,14 +198,14 @@ struct RawEntry {
     is_dir: bool,
 }
 
-/// Welcher Textwert gerade eingelesen wird (zwischen Start- und End-Tag).
+/// Which text value is currently being read (between start and end tag).
 #[derive(Clone, Copy)]
 enum Field {
     Href,
     Display,
 }
 
-/// Parst eine WebDAV-`multistatus`-Antwort in rohe Einträge.
+/// Parses a WebDAV `multistatus` response into raw entries.
 fn parse_propfind(xml: &str) -> Vec<RawEntry> {
     use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(xml);
@@ -256,7 +256,7 @@ fn parse_propfind(xml: &str) -> Vec<RawEntry> {
     out
 }
 
-/// Lokaler Elementname ohne Namespace-Präfix (`d:href` → `href`).
+/// Local element name without namespace prefix (`d:href` → `href`).
 fn local_name(qname: &[u8]) -> String {
     let s = String::from_utf8_lossy(qname);
     match s.rsplit_once(':') {
@@ -265,8 +265,8 @@ fn local_name(qname: &[u8]) -> String {
     }
 }
 
-/// Listet ein Verzeichnis (Depth: 1) relativ zur Musikwurzel auf. Liefert nur
-/// Ordner und Audiodateien; der Selbst-Eintrag wird herausgefiltert.
+/// Lists a directory (Depth: 1) relative to the music root. Returns only
+/// folders and audio files; the self-entry is filtered out.
 pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
     let url = url_for(c, rel);
     let body = agent()
@@ -275,9 +275,9 @@ pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
         .set("Authorization", &auth_header(c))
         .set("Content-Type", "application/xml")
         .send_string(PROPFIND_BODY)
-        .map_err(|e| anyhow!("PROPFIND fehlgeschlagen: {e}"))?
+        .map_err(|e| anyhow!("PROPFIND failed: {e}"))?
         .into_string()
-        .map_err(|e| anyhow!("Antwort nicht lesbar: {e}"))?;
+        .map_err(|e| anyhow!("Response not readable: {e}"))?;
 
     let prefix = req_path_decoded(c, rel);
     let prefix = prefix.trim_end_matches('/');
@@ -286,7 +286,7 @@ pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
         let hp = href_to_path(&raw.href);
         let hp = hp.trim_end_matches('/');
         if hp == prefix {
-            continue; // Selbst-Eintrag
+            continue; // self-entry
         }
         let Some(rem) = hp.strip_prefix(prefix) else {
             continue;
@@ -295,11 +295,11 @@ pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
         if child.is_empty() {
             continue;
         }
-        // Bei Depth:1 nur eine Ebene – zur Sicherheit erste Komponente nehmen.
+        // With Depth:1 only one level – take the first component to be safe.
         let child_name = child.split('/').next().unwrap_or(child).to_string();
         let name = raw.display_name.clone().unwrap_or_else(|| child_name.clone());
         if !raw.is_dir && !scanner::is_audio(Path::new(&name)) {
-            continue; // Nicht-Audio-Dateien ausblenden
+            continue; // hide non-audio files
         }
         out.push(DavEntry {
             rel_path: format!("{rel}/{child_name}"),
@@ -310,8 +310,8 @@ pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
     Ok(out)
 }
 
-/// Verbindungstest: PROPFIND (Depth 0) auf die Musikwurzel. `Ok` = erreichbar
-/// und authentifiziert.
+/// Connection test: PROPFIND (Depth 0) on the music root. `Ok` = reachable
+/// and authenticated.
 pub fn test_connection(c: &Creds) -> Result<()> {
     agent()
         .request("PROPFIND", &url_for(c, ""))
@@ -324,13 +324,13 @@ pub fn test_connection(c: &Creds) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Tags & Download
+// Tags & download
 // ---------------------------------------------------------------------------
 
-/// Liest Titel/Interpret/Dauer aus den ersten ~512 KB einer Datei (Range-GET)
-/// in einen Speicherpuffer und lässt `lofty` darüber laufen. Best effort: bei
-/// Formaten mit Metadaten am Dateiende (z. B. unoptimiertes MP4) schlägt das
-/// fehl und liefert `None` – die Aufrufer fallen dann auf den Dateinamen zurück.
+/// Reads title/artist/duration from the first ~512 KB of a file (range GET)
+/// into an in-memory buffer and runs `lofty` over it. Best effort: for
+/// formats with metadata at the end of the file (e.g. unoptimized MP4) this
+/// fails and returns `None` – the callers then fall back to the file name.
 pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Option<i64>) {
     let url = url_for(c, rel);
     let resp = agent()
@@ -347,8 +347,8 @@ pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Optio
         }
         Err(_) => return (None, None, None),
     }
-    // `lofty::read_from` erwartet eine `File`; über einen Speicherpuffer geht es
-    // mit `Probe` (Read + Seek auf dem `Cursor`, rein lokal – kein HTTP-Seek).
+    // `lofty::read_from` expects a `File`; with an in-memory buffer it works
+    // via `Probe` (Read + Seek on the `Cursor`, purely local – no HTTP seek).
     let tagged = match lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type() {
         Ok(p) => match p.read() {
             Ok(t) => t,
@@ -370,8 +370,8 @@ pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Optio
     (title, artist, duration_ms)
 }
 
-/// Vollständige Metadaten eines entfernten Titels (für die Indizierung in die
-/// gleiche Datenbank wie lokale Lieder).
+/// Complete metadata of a remote track (for indexing into the
+/// same database as local songs).
 #[derive(Default)]
 pub struct RemoteMeta {
     pub title: Option<String>,
@@ -383,8 +383,8 @@ pub struct RemoteMeta {
     pub duration_ms: Option<i64>,
 }
 
-/// Wie [`read_tags`], liest aber **alle** für die Bibliothek nötigen Felder
-/// (zusätzlich Album, Genre, Track-/CD-Nr.) aus den ersten ~512 KB der Datei.
+/// Like [`read_tags`], but reads **all** fields needed for the library
+/// (additionally album, genre, track/CD no.) from the first ~512 KB of the file.
 pub fn read_meta(c: &Creds, rel: &str) -> RemoteMeta {
     let url = url_for(c, rel);
     let resp = agent()
@@ -430,22 +430,22 @@ pub fn read_meta(c: &Creds, rel: &str) -> RemoteMeta {
     m
 }
 
-/// Synthetischer Pfad eines entfernten Titels: `nc:<source_id>:<rel>`. So liegen
-/// Cloud-Titel in derselben `track`-Tabelle wie lokale und verhalten sich 1:1.
+/// Synthetic path of a remote track: `nc:<source_id>:<rel>`. This way
+/// cloud tracks live in the same `track` table as local ones and behave 1:1.
 pub fn nc_path(source_id: i64, rel: &str) -> String {
     format!("nc:{source_id}:{rel}")
 }
 
-/// Zerlegt einen synthetischen Pfad `nc:<id>:<rel>` in (Quellen-Id, rel).
+/// Splits a synthetic path `nc:<id>:<rel>` into (source id, rel).
 pub fn parse_nc_path(path: &str) -> Option<(i64, String)> {
     let rest = path.strip_prefix("nc:")?;
     let (id, rel) = rest.split_once(':')?;
     Some((id.parse().ok()?, rel.to_string()))
 }
 
-/// Sammelt **rekursiv** alle Audiodatei-Pfade (relativ zur Musikwurzel) unter
-/// `rel`. Defensiv gedeckelt (Verzeichnis-/Dateizahl), damit eine sehr große
-/// Cloud nicht endlos läuft.
+/// **Recursively** collects all audio file paths (relative to the music root)
+/// under `rel`. Defensively capped (directory/file count) so that a very large
+/// cloud does not run forever.
 pub fn walk(c: &Creds, rel: &str) -> Vec<String> {
     const MAX_DIRS: usize = 4000;
     const MAX_FILES: usize = 50_000;
@@ -459,7 +459,7 @@ pub fn walk(c: &Creds, rel: &str) -> Vec<String> {
             break;
         }
         let Ok(entries) = list(c, &dir) else {
-            continue; // Verzeichnis nicht lesbar – überspringen
+            continue; // directory not readable – skip
         };
         for e in entries {
             if e.is_dir {
@@ -472,10 +472,10 @@ pub fn walk(c: &Creds, rel: &str) -> Vec<String> {
     files
 }
 
-/// Liest die komplette Musikbibliothek einer Quelle rekursiv ein und legt die
-/// Titel in der Datenbank ab (synthetischer Pfad). Danach erscheinen sie wie
-/// lokale Lieder in Interpreten/Alben. **Blockierend** – nur aus Worker-Threads.
-/// Liefert die Anzahl indizierter Titel.
+/// Recursively reads in the complete music library of a source and stores the
+/// tracks in the database (synthetic path). Afterwards they appear like
+/// local songs in artists/albums. **Blocking** – only from worker threads.
+/// Returns the number of indexed tracks.
 pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usize> {
     let Some(c) = Creds::from_source(source) else {
         return Err(anyhow!("incomplete source credentials"));
@@ -511,14 +511,14 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
     Ok(n)
 }
 
-/// Lädt eine Datei vollständig nach `dest` (atomar über eine `.part`-Datei).
+/// Downloads a file completely to `dest` (atomically via a `.part` file).
 pub fn download(c: &Creds, rel: &str, dest: &Path) -> Result<()> {
     let url = url_for(c, rel);
     let resp = agent()
         .get(&url)
         .set("Authorization", &auth_header(c))
         .call()
-        .map_err(|e| anyhow!("Download fehlgeschlagen: {e}"))?;
+        .map_err(|e| anyhow!("Download failed: {e}"))?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -530,8 +530,8 @@ pub fn download(c: &Creds, rel: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Lokaler Cache-Pfad einer entfernten Datei:
-/// `$XDG_DATA_HOME/emilia/cache/<source-id>/<rel-pfad>`.
+/// Local cache path of a remote file:
+/// `$XDG_DATA_HOME/emilia/cache/<source-id>/<rel-path>`.
 pub fn cache_path(source_id: i64, rel: &str) -> PathBuf {
     let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     dir.push("emilia");
@@ -544,10 +544,10 @@ pub fn cache_path(source_id: i64, rel: &str) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Nextcloud-Login-QR
+// Nextcloud login QR
 // ---------------------------------------------------------------------------
 
-/// Parst einen Nextcloud-Login-QR `nc://login/server:URL&user:USER&password:PW`
+/// Parses a Nextcloud login QR `nc://login/server:URL&user:USER&password:PW`
 /// → `(server, user, password)`.
 pub fn parse_nc_login(qr: &str) -> Option<(String, String, String)> {
     let rest = qr.trim().strip_prefix("nc://login/")?;
@@ -608,7 +608,7 @@ mod tests {
             <d:resourcetype/></d:prop></d:propstat>
           </d:response>
         </d:multistatus>"#;
-        // parse + Filterung wie in `list`, aber ohne Netz:
+        // parse + filtering as in `list`, but without network:
         let prefix = req_path_decoded(&c, "");
         let prefix = prefix.trim_end_matches('/');
         let names: Vec<(String, bool)> = parse_propfind(xml)

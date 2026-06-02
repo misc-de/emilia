@@ -1,8 +1,8 @@
-//! UI-Anbindung der Geräte-Synchronisierung: mehrseitiger Dialog (Modus →
-//! Server/QR bzw. Scan/Webcam → Gepaart/Fortschritt), Anbindung des Server-
-//! Threads und des Client-Workers an relm4.
+//! UI binding of device sync: multi-page dialog (mode →
+//! server/QR or scan/camera → paired/progress), wiring the server
+//! thread and the client worker into relm4.
 //!
-//! Logik/Netzwerk liegt in [`crate::core::sync`]; hier nur Widgets + Eventfluss.
+//! Logic/network lives in [`crate::core::sync`]; here only widgets + event flow.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,32 +20,32 @@ use crate::core::sync::{self, crypto, data, SyncEvent};
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, Cmd, Msg};
 
-/// Laufzeit- und Widget-Zustand der Geräte-Synchronisierung.
+/// Runtime and widget state of device sync.
 ///
-/// Alle Felder sind `Option`, daher leitet sich `Default` ab. Die Widgets
-/// werden beim Öffnen des Dialogs erzeugt; die Handles bleiben gespeichert,
-/// damit `update_cmd` sie später aktualisieren kann.
+/// All fields are `Option`, so `Default` is derived. The widgets
+/// are created when the dialog is opened; the handles are kept stored
+/// so that `update_cmd` can update them later.
 #[derive(Default)]
 pub(crate) struct SyncState {
-    /// Stop-Flag des Server-Threads (gesetzt → Annahmeschleife endet).
+    /// Stop flag of the server thread (set → accept loop ends).
     pub stop: Option<Arc<AtomicBool>>,
-    /// Laufende Webcam-Scanner-Pipeline (Drop stoppt die Kamera).
+    /// Running camera scanner pipeline (drop stops the camera).
     pub scanner: Option<Scanner>,
     pub dialog: Option<adw::Dialog>,
     pub nav: Option<adw::NavigationView>,
     pub qr: Option<gtk::Picture>,
     pub cam: Option<gtk::Picture>,
-    /// Status-Label der Gepaart-Seite (Kopplung, Import, Übertragung).
+    /// Status label of the paired page (pairing, import, transfer).
     pub status: Option<gtk::Label>,
-    /// Status-Label der Server-Seite (Adresse/Warten).
+    /// Status label of the server page (address/waiting).
     pub server_status: Option<gtk::Label>,
     pub progress: Option<gtk::ProgressBar>,
-    /// Stabile Geräte-ID (gecacht aus den Einstellungen).
+    /// Stable device ID (cached from the settings).
     pub device_id: Option<String>,
 }
 
 impl App {
-    /// Persistente Geräte-ID (einmal erzeugt und in den Einstellungen abgelegt).
+    /// Persistent device ID (generated once and stored in the settings).
     fn sync_device_id(&mut self) -> String {
         if let Some(id) = &self.sync.device_id {
             return id.clone();
@@ -64,7 +64,7 @@ impl App {
         id
     }
 
-    /// Anzeigename dieses Geräts (Einstellung oder Hostname).
+    /// Display name of this device (setting or hostname).
     fn sync_device_name(&self) -> String {
         self.library
             .get_setting("sync_device_name")
@@ -74,13 +74,13 @@ impl App {
             .unwrap_or_else(sync::default_device_name)
     }
 
-    /// Öffnet den mehrseitigen Synchronisierungs-Dialog (Startseite: Moduswahl).
+    /// Opens the multi-page sync dialog (start page: mode selection).
     pub(crate) fn open_sync_dialog(
         &mut self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        // Eventuell offenen Dialog/Server zuerst aufräumen.
+        // Clean up any open dialog/server first.
         self.teardown_sync();
 
         let dialog = adw::Dialog::builder()
@@ -90,10 +90,10 @@ impl App {
             .build();
         let nav = adw::NavigationView::new();
 
-        // Gemeinsame Widgets, die später aktualisiert werden.
-        // `can_shrink(true)` + `Contain`: der QR-Code skaliert quadratisch auf die
-        // verfügbare Breite herunter (passt so auch auf schmale Telefon-Displays),
-        // statt in seiner vollen Pixelgröße über den Rand zu laufen.
+        // Shared widgets that are updated later.
+        // `can_shrink(true)` + `Contain`: the QR code scales down squarely to the
+        // available width (so it also fits on narrow phone displays),
+        // instead of overflowing the edge at its full pixel size.
         let qr = gtk::Picture::builder()
             .width_request(220)
             .height_request(220)
@@ -118,11 +118,11 @@ impl App {
             .build();
         let progress = gtk::ProgressBar::builder().show_text(true).visible(false).build();
 
-        // Die Modus-Seite zuerst hinzufügen → sie ist die (Wurzel-)Startseite.
-        // Server/Scan werden bei Bedarf per `push_by_tag` darüber geöffnet; käme
-        // „server" zuerst, wäre es bereits die Wurzel und `push_by_tag("server")`
-        // (aus `start_sync_server`) würde nichts tun (man bliebe auf der Modus-
-        // Seite).
+        // Add the mode page first → it is the (root) start page.
+        // Server/scan are opened on top of it via `push_by_tag` when needed; if
+        // "server" came first, it would already be the root and `push_by_tag("server")`
+        // (from `start_sync_server`) would do nothing (you'd stay on the mode
+        // page).
         nav.add(&self.sync_page_mode(sender));
         nav.add(&self.sync_page_server(&qr, &server_status));
         nav.add(&self.sync_page_scan(&cam));
@@ -241,13 +241,13 @@ impl App {
         nav_page("paired", &gettext("Connected"), &content)
     }
 
-    /// Server-Modus starten: Server-Thread aufsetzen und QR-Seite zeigen.
+    /// Start server mode: set up the server thread and show the QR page.
     pub(crate) fn start_sync_server(&mut self, sender: &ComponentSender<Self>) {
         if let Some(nav) = &self.sync.nav {
             nav.push_by_tag("server");
         }
         if self.sync.stop.is_some() {
-            return; // läuft bereits
+            return; // already running
         }
         let device_name = self.sync_device_name();
         let stop = Arc::new(AtomicBool::new(false));
@@ -273,7 +273,7 @@ impl App {
         });
     }
 
-    /// Client-Modus starten: Webcam-Scanner mit Live-Vorschau.
+    /// Start client mode: camera scanner with live preview.
     pub(crate) fn start_sync_scan(&mut self, sender: &ComponentSender<Self>) {
         if let Some(nav) = &self.sync.nav {
             nav.push_by_tag("scan");
@@ -295,16 +295,16 @@ impl App {
         }
     }
 
-    /// Ein QR-Code wurde dekodiert: URL prüfen und den Client-Sync starten.
+    /// A QR code was decoded: validate the URL and start the client sync.
     pub(crate) fn handle_sync_qr(&mut self, url: &str, sender: &ComponentSender<Self>) {
         if self.sync.stop.is_some() || self.sync.scanner.is_none() {
-            return; // bereits in Bearbeitung / Scanner gestoppt
+            return; // already being processed / scanner stopped
         }
         let info = match protocol::parse_pair_url(url, sync::now_unix()) {
             Ok(info) => info,
-            Err(_) => return, // anderer/ungültiger Code – weiterscannen
+            Err(_) => return, // other/invalid code – keep scanning
         };
-        // Kamera anhalten, sobald ein gültiger Code erkannt wurde.
+        // Stop the camera once a valid code has been detected.
         self.sync.scanner = None;
         if let Some(st) = &self.sync.status {
             st.set_text(&gettext("Connecting …"));
@@ -317,7 +317,7 @@ impl App {
         });
     }
 
-    /// Verarbeitet ein [`SyncEvent`] aus dem Server-Thread bzw. Client-Worker.
+    /// Processes a [`SyncEvent`] from the server thread or client worker.
     pub(crate) fn on_sync_event(&mut self, ev: SyncEvent, sender: &ComponentSender<Self>) {
         match ev {
             SyncEvent::ServerReady {
@@ -339,7 +339,7 @@ impl App {
                 }
             }
             SyncEvent::PeerPaired { peer_name } => {
-                // Gekoppelt → Sync-Icon oben grün einfärben.
+                // Paired → tint the sync icon at the top green.
                 self.sync_connected = true;
                 if let Some(nav) = &self.sync.nav {
                     nav.push_by_tag("paired");
@@ -362,7 +362,7 @@ impl App {
                         ],
                     ));
                 }
-                // Ansichten neu laden, damit die übernommenen Inhalte erscheinen.
+                // Reload views so the imported content appears.
                 self.load_favorites(sender);
                 self.reload_playlists(sender);
                 self.reload_podcasts(sender);
@@ -408,13 +408,13 @@ impl App {
         }
     }
 
-    /// Räumt den Sync-Zustand auf (Server stoppen, Kamera aus, Dialog schließen).
+    /// Cleans up the sync state (stop server, camera off, close dialog).
     pub(crate) fn teardown_sync(&mut self) {
         self.sync_connected = false;
         if let Some(stop) = self.sync.stop.take() {
             stop.store(true, Ordering::Relaxed);
         }
-        self.sync.scanner = None; // Drop stoppt die Kamera
+        self.sync.scanner = None; // drop stops the camera
         if let Some(dialog) = self.sync.dialog.take() {
             dialog.close();
         }
@@ -427,8 +427,8 @@ impl App {
     }
 }
 
-/// Verpackt einen Inhalt in eine `NavigationPage` mit eigener Kopfleiste
-/// (die `NavigationView` ergänzt automatisch eine Zurück-Schaltfläche).
+/// Wraps content in a `NavigationPage` with its own header bar
+/// (the `NavigationView` automatically adds a back button).
 fn nav_page(
     tag: &str,
     title: &str,
@@ -444,9 +444,9 @@ fn nav_page(
         .build()
 }
 
-/// Vollständiger Client-Sync in einem Worker-Thread: koppeln → Metadaten in
-/// beide Richtungen → Dateien (Server → Client) → trennen. Meldet jeden Schritt
-/// über `out`.
+/// Full client sync in a worker thread: pair → metadata in
+/// both directions → files (server → client) → disconnect. Reports each step
+/// via `out`.
 fn run_client_sync(
     info: PairingInfo,
     device_id: String,
@@ -472,7 +472,7 @@ fn run_client_sync(
         }
     };
 
-    // 1. Metadaten der Gegenstelle holen und lokal einspielen.
+    // 1. Fetch the peer's metadata and apply it locally.
     let server_export = match client.fetch_export() {
         Ok(exp) => exp,
         Err(e) => {
@@ -485,13 +485,13 @@ fn run_client_sync(
         let _ = out.send(Cmd::Sync(SyncEvent::ImportReceived { stats }));
     }
 
-    // 2. Eigene Metadaten an die Gegenstelle senden.
+    // 2. Send own metadata to the peer.
     if let Ok(local) = data::export_library(&lib) {
         let _ = client.push_export(&local);
         let _ = out.send(Cmd::Sync(SyncEvent::ExportSent));
     }
 
-    // 3. Audiodateien herunterladen, die lokal fehlen.
+    // 3. Download audio files that are missing locally.
     let music_dir = lib.get_setting("music_dir").ok().flatten().unwrap_or_default();
     let total = server_export.files.len() as u64;
     let mut transferred = 0usize;
@@ -506,7 +506,7 @@ fn run_client_sync(
             continue;
         }
         let dest = std::path::Path::new(&music_dir).join(&f.path);
-        // Vorhandene, größengleiche Datei nicht erneut übertragen.
+        // Don't transfer an existing file of the same size again.
         if f.size != 0
             && std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0) == f.size
         {

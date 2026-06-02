@@ -1,14 +1,14 @@
-//! Erkennung möglicher Konzerte: Alben (Ordner), deren Name auf ein Konzert
-//! hindeutet, sowie einzelne lange Audiodateien (ab 30 Minuten).
+//! Detection of possible concerts: albums (folders) whose name suggests a
+//! concert, as well as individual long audio files (from 30 minutes).
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use crate::core::scanner;
 
-/// Schlüsselwörter, die ein „Konzert-Album" vermuten lassen.
+/// Keywords that suggest a "concert album".
 const KEYWORDS: &[&str] = &["concert", "konzert", "live", "unplugged"];
-/// Mindestlänge einer Einzeldatei, um als Konzert zu gelten.
+/// Minimum length of a single file to count as a concert.
 const MIN_TRACK_SECS: u64 = 30 * 60;
 
 #[derive(Debug, Clone)]
@@ -39,8 +39,8 @@ fn fmt_hms(secs: u64) -> String {
     }
 }
 
-/// Durchsucht `root` nach Konzert-Kandidaten. Bereits markierte (`existing`)
-/// werden ausgelassen. Läuft im Hintergrund-Thread (liest Dateidauern).
+/// Searches `root` for concert candidates. Already marked ones (`existing`) are
+/// skipped. Runs in the background thread (reads file durations).
 pub fn scan_candidates(root: &Path, existing: &HashSet<String>) -> Vec<Candidate> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -74,18 +74,18 @@ pub fn scan_candidates(root: &Path, existing: &HashSet<String>) -> Vec<Candidate
                         out.push(Candidate {
                             path,
                             title: name,
-                            subtitle: format!("Album · {count} Titel"),
+                            subtitle: format!("Album · {count} tracks"),
                             is_dir: true,
                         });
                     }
-                    // Ganzes Album = ein Konzert → nicht weiter absteigen.
+                    // Whole album = one concert → do not descend further.
                     continue;
                 }
             }
             stack.push(sd);
         }
 
-        // Einzelne lange Dateien (≥ 30 min).
+        // Individual long files (≥ 30 min).
         for f in files {
             let secs = scanner::duration_secs(&f);
             if secs >= MIN_TRACK_SECS {
@@ -101,7 +101,7 @@ pub fn scan_candidates(root: &Path, existing: &HashSet<String>) -> Vec<Candidate
                 out.push(Candidate {
                     path,
                     title,
-                    subtitle: format!("Datei · {}", fmt_hms(secs)),
+                    subtitle: format!("File · {}", fmt_hms(secs)),
                     is_dir: false,
                 });
             }

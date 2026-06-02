@@ -1,7 +1,7 @@
-//! Favoriten (Stern in „Mehr Infos"), Hörbücher und Konzerte teilen sich ein
-//! einheitliches Eintrags-Modell `(scope, key, Titel, is_dir)`. Dieses Modul
-//! baut die Listen (mit Album-/Interpreten-Cover), schaltet den Favoritenstatus
-//! um und löst Abspielen/Detail/Cover einheitlich auf.
+//! Favorites (star in "More info"), audiobooks and concerts share a unified
+//! entry model `(scope, key, title, is_dir)`. This module builds the lists
+//! (with album/artist cover), toggles the favorite status and resolves
+//! playback/detail/cover uniformly.
 
 use std::path::PathBuf;
 
@@ -15,8 +15,8 @@ use crate::ui::app::{cover_widget, duration_label, App, CtxTarget, Msg};
 use crate::ui::fs_row::FsEntry;
 
 impl App {
-    /// Identität (scope, key, Anzeigename, is_dir) eines Detailziels für die
-    /// Favoriten-Tabelle.
+    /// Identity (scope, key, display name, is_dir) of a detail target for the
+    /// favorites table.
     pub(crate) fn favorite_ref(&self, target: &CtxTarget) -> (&'static str, String, String, bool) {
         match target {
             CtxTarget::Artist(m) => ("artist", m.name.clone(), m.name.clone(), false),
@@ -26,8 +26,8 @@ impl App {
                 m.album.clone(),
                 false,
             ),
-            // Entfernte Einträge: über ihren rel-Pfad referenziert (lokal nicht
-            // vorhanden). So bleiben Favoriten/Markierungen konsistent adressierbar.
+            // Remote entries: referenced via their rel path (not present
+            // locally). This keeps favorites/markers consistently addressable.
             CtxTarget::Fs(e) if e.is_remote() => {
                 let key = e.rel_path().unwrap_or_default().to_string();
                 let scope = if e.is_dir() { "folder" } else { "track" };
@@ -60,16 +60,16 @@ impl App {
         }
     }
 
-    /// Ob das aktuelle Detailziel ein Favorit ist.
+    /// Whether the current detail target is a favorite.
     pub(crate) fn target_is_favorite(&self, target: &CtxTarget) -> bool {
         let (scope, key, _, _) = self.favorite_ref(target);
         self.library.is_favorite(scope, &key)
     }
 
-    // ---- Listen aufbauen ----
+    // ---- Build lists ----
 
-    /// Lädt die Favoriten und baut die Liste neu auf (mit Cover, Mülleimer,
-    /// Ziehgriff zum Umsortieren).
+    /// Loads the favorites and rebuilds the list (with cover, trash button,
+    /// drag handle for reordering).
     pub(crate) fn load_favorites(&mut self, sender: &ComponentSender<Self>) {
         self.favorite_items = self.library.favorites().unwrap_or_default();
         let items = self.favorite_items.clone();
@@ -78,7 +78,7 @@ impl App {
             &items,
             sender,
             Msg::PlayFavorite,
-            // Kein Mülleimer – Entfernen über langes Drücken („Mehr Infos" → Stern).
+            // No trash button - removal via long press ("More info" → star).
             None,
             Msg::ShowFavoriteDetail,
             Some(|from, to| Msg::MoveFavorite { from, to }),
@@ -87,12 +87,12 @@ impl App {
         );
     }
 
-    /// Lädt die Hörbücher (Bereich „Hörbücher") – gelistet werden nur **Alben
-    /// und Einzelstücke**. Ein als Hörbuch markierter Ordner wird in die darin
-    /// enthaltenen Alben und losen Titel aufgelöst (kein Ordner-Eintrag).
+    /// Loads the audiobooks (the "Audiobooks" area) - only **albums and single
+    /// tracks** are listed. A folder marked as an audiobook is resolved into the
+    /// albums and loose tracks it contains (no folder entry).
     pub(crate) fn load_audiobooks(&mut self, sender: &ComponentSender<Self>) {
-        // Ordner mitnehmen, um sie in Alben/Einzelstücke aufzulösen; keine
-        // Interpreten – gelistet werden nur Alben und Einzelstücke.
+        // Include folders to resolve them into albums/single tracks; no
+        // artists - only albums and single tracks are listed.
         let raw = self
             .library
             .area_entries(crate::core::category::Area::Audiobooks, true, false);
@@ -121,9 +121,9 @@ impl App {
         }
     }
 
-    /// Baut eine Eintragsliste: Cover (Album/Interpret), Titel, Untertitel,
-    /// Abspielen (Tippen), Detail (langes Drücken), optional Mülleimer und
-    /// optional Ziehgriff zum Umsortieren.
+    /// Builds an entry list: cover (album/artist), title, subtitle,
+    /// playback (tap), detail (long press), optional trash button and
+    /// optional drag handle for reordering.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn fill_entry_list(
         &self,
@@ -134,9 +134,9 @@ impl App {
         remove: Option<fn(usize) -> Msg>,
         detail: fn(usize) -> Msg,
         move_msg: Option<fn(usize, usize) -> Msg>,
-        // Bei Titel-Einträgen statt „Track" den Untertitel „<Album> / <Dauer>".
+        // For track entries, use the subtitle "<album> / <duration>" instead of "Track".
         track_subtitle: bool,
-        // Ordner-Einträge als Alben darstellen (Untertitel „Album", Album-Icon).
+        // Render folder entries as albums (subtitle "Album", album icon).
         folder_as_album: bool,
     ) {
         while let Some(child) = list.first_child() {
@@ -155,10 +155,10 @@ impl App {
                 .subtitle(&subtitle)
                 .activatable(true)
                 .build();
-            // Cover/Icon bündig nach ganz links (kein Prefix-Innenabstand).
+            // Cover/icon flush to the far left (no prefix inner spacing).
             row.add_css_class("emilia-flush");
 
-            // Cover (Album/Interpret/Titel) oder passendes Platzhalter-Icon.
+            // Cover (album/artist/track) or matching placeholder icon.
             let icon = if folder_as_album && scope == "folder" {
                 "media-optical-symbolic"
             } else {
@@ -186,13 +186,13 @@ impl App {
                 });
                 row.add_suffix(&btn);
             }
-            // In Konzerten/Hörbüchern öffnet ein Album/Ordner seine Titelliste
-            // (kein direktes Abspielen → kein Play-Icon, sondern ein Chevron);
-            // nur Einzelstücke werden direkt abgespielt und tragen das Play-Icon.
+            // In concerts/audiobooks an album/folder opens its track list
+            // (no direct playback → no play icon, but a chevron instead);
+            // only single tracks are played directly and carry the play icon.
             let opens_list = folder_as_album && scope != "track";
             if opens_list {
-                // Ganz rechts: Gesamtlaufzeit + Play-Button (spielt das ganze
-                // Album/Konzert). Ein normaler Klick öffnet weiterhin die Liste.
+                // Far right: total duration + play button (plays the whole
+                // album/concert). A normal click still opens the list.
                 let total_ms = self.entry_total_ms(scope, key);
                 if total_ms > 0 {
                     row.add_suffix(&duration_label(total_ms));
@@ -209,7 +209,7 @@ impl App {
                 }
                 row.add_suffix(&play_btn);
             } else {
-                // Läuft genau dieser Titel gerade, ein Pause-Symbol zeigen.
+                // If exactly this track is currently playing, show a pause icon.
                 let is_active = scope == "track"
                     && self
                         .playing_path
@@ -223,9 +223,9 @@ impl App {
                 row.add_suffix(&gtk::Image::from_icon_name(play_icon));
             }
 
-            // Ziehgriff zum Umsortieren (falls erlaubt) – ganz rechts. Die
-            // DragSource sitzt auf der ganzen Zeile; der Griff ist nur die
-            // sichtbare Greifzone.
+            // Drag handle for reordering (if allowed) - far right. The
+            // DragSource sits on the whole row; the handle is just the
+            // visible grab zone.
             if let Some(move_msg) = move_msg {
                 let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
                 handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
@@ -280,8 +280,8 @@ impl App {
         }
     }
 
-    /// Wandelt Eintrags-Tupel (Favoriten/Konzerte/Hörbücher) in Galerie-Kacheln
-    /// `(Cover, Platzhalter-Icon, Titel)` um – Cover wie in der Liste.
+    /// Converts entry tuples (favorites/concerts/audiobooks) into gallery tiles
+    /// `(cover, placeholder icon, title)` - cover as in the list.
     pub(crate) fn entry_gallery_items(
         &self,
         items: &[(String, String, String, bool)],
@@ -299,8 +299,8 @@ impl App {
             .collect()
     }
 
-    /// Gesamtlaufzeit (ms) eines als Album/Ordner dargestellten Eintrags
-    /// (für die Laufzeitanzeige in Konzert-/Hörbuchlisten). 0 = unbekannt.
+    /// Total duration (ms) of an entry shown as an album/folder
+    /// (for the duration display in concert/audiobook lists). 0 = unknown.
     fn entry_total_ms(&self, scope: &str, key: &str) -> i64 {
         let tracks = match scope {
             "album" => {
@@ -315,10 +315,10 @@ impl App {
         tracks.iter().filter_map(|t| t.duration_ms).sum()
     }
 
-    // ---- Auflösung (Cover / Abspielen / Detail) ----
+    // ---- Resolution (cover / playback / detail) ----
 
-    /// Cover eines Eintrags: Album-Cover, Interpreten-Foto oder (bei Titeln) das
-    /// eingebettete bzw. das Album-Cover des Titels.
+    /// Cover of an entry: album cover, artist photo or (for tracks) the
+    /// embedded cover or the track's album cover.
     pub(crate) fn entry_cover(&self, scope: &str, key: &str, _is_dir: bool) -> Option<String> {
         match scope {
             "album" => {
@@ -344,15 +344,15 @@ impl App {
         }
     }
 
-    /// Fallback-Bild für einen Interpreten **ohne Foto**: das Cover eines seiner
-    /// Alben (das erste mit Cover).
+    /// Fallback image for an artist **without a photo**: the cover of one of
+    /// their albums (the first one with a cover).
     pub(crate) fn artist_album_cover(&self, name: &str) -> Option<String> {
         self.artist_albums(name)
             .into_iter()
             .find_map(|(album, _)| self.album_cover_for(name, &album))
     }
 
-    /// Album-Cover: erst exakt (Interpret, Album), sonst irgendeines des Albums.
+    /// Album cover: first an exact match (artist, album), otherwise any of the album.
     pub(crate) fn album_cover_for(&self, artist: &str, album: &str) -> Option<String> {
         self.library
             .get_album_meta(artist, album)
@@ -362,7 +362,7 @@ impl App {
             .or_else(|| self.library.album_cover(album).ok().flatten())
     }
 
-    /// Cover eines Ordners: Cover eines beliebigen Titels darin.
+    /// Cover of a folder: cover of any track within it.
     fn folder_cover(&self, folder: &str) -> Option<String> {
         let prefix = format!("{}/", folder.trim_end_matches('/'));
         let t = self
@@ -377,7 +377,7 @@ impl App {
         })
     }
 
-    /// Spielt einen Eintrag (scope/key) ab.
+    /// Plays an entry (scope/key).
     pub(crate) fn play_entry(&mut self, scope: &str, key: &str, is_dir: bool) {
         match scope {
             "track" => self.play_path(key, false),
@@ -401,7 +401,7 @@ impl App {
         }
     }
 
-    /// Detailziel (für „Mehr Infos") eines Eintrags.
+    /// Detail target (for "More info") of an entry.
     pub(crate) fn entry_target(&self, scope: &str, key: &str, is_dir: bool) -> CtxTarget {
         match scope {
             "album" => {
@@ -428,7 +428,7 @@ impl App {
         }
     }
 
-    /// Untertitel eines Titel-Eintrags: „<Album> / <Dauer>" (vorhandene Teile).
+    /// Subtitle of a track entry: "<album> / <duration>" (the parts present).
     fn track_meta_subtitle(&self, path: &str) -> String {
         let Some(t) = self.library.track_by_path(path).ok().flatten() else {
             return entry_kind("track");
@@ -448,7 +448,7 @@ impl App {
         }
     }
 
-    /// Queue = übergebene Dateien ab Titel 1, sofern nicht leer.
+    /// Queue = the given files starting at track 1, unless empty.
     fn play_track_set(&mut self, files: Vec<PathBuf>) {
         if files.is_empty() {
             return;
@@ -460,7 +460,7 @@ impl App {
     }
 }
 
-/// Platzhalter-Icon je Ebene (falls kein Cover vorhanden).
+/// Placeholder icon per level (if no cover is available).
 pub(crate) fn entry_icon(scope: &str) -> &'static str {
     match scope {
         "album" => "media-optical-symbolic",
@@ -470,7 +470,7 @@ pub(crate) fn entry_icon(scope: &str) -> &'static str {
     }
 }
 
-/// Untertitel-Kennzeichnung je Ebene.
+/// Subtitle label per level.
 fn entry_kind(scope: &str) -> String {
     match scope {
         "album" => gettext("Album"),

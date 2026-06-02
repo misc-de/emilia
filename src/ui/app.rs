@@ -17,8 +17,8 @@ use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
 use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow, RowOpts};
 
-/// Ziel der Detailansicht (langes Drücken): eine Datei/ein Ordner im
-/// Dateibrowser, ein Interpret, ein Album oder ein Konzert (= Pfad → `Fs`).
+/// Target of the detail view (long press): a file/folder in the
+/// file browser, an artist, an album or a concert (= path → `Fs`).
 #[derive(Clone)]
 pub(crate) enum CtxTarget {
     Fs(FsEntry),
@@ -27,7 +27,7 @@ pub(crate) enum CtxTarget {
 }
 
 impl CtxTarget {
-    /// Überschrift des Detaildialogs.
+    /// Heading of the detail dialog.
     pub(crate) fn heading(&self) -> String {
         match self {
             CtxTarget::Fs(e) => e.heading(),
@@ -43,39 +43,39 @@ impl CtxTarget {
     }
 }
 
-/// Aktuell in der Dateiansicht gewählte Quelle: das primäre `music_dir`
-/// (impliziter erster Tab „Musik") oder eine zusätzliche Quelle per ID.
+/// Source currently selected in the file view: the primary `music_dir`
+/// (implicit first tab "Music") or an additional source by ID.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ActiveSource {
-    /// Das primäre Musikverzeichnis (`music_dir`).
+    /// The primary music directory (`music_dir`).
     Primary,
-    /// Eine zusätzliche Quelle (lokaler Zweitordner oder WebDAV) per `source.id`.
+    /// An additional source (local secondary folder or WebDAV) by `source.id`.
     Source(i64),
 }
 
-/// Ein Titel der entfernten (Cloud-)Wiedergabe-Reihe. Eigenständig gehalten,
-/// getrennt von der lokalen `PathBuf`-Warteschlange.
+/// A track of the remote (cloud) playback queue. Kept self-contained,
+/// separate from the local `PathBuf` queue.
 #[derive(Debug, Clone)]
 pub(crate) struct RemoteTrack {
-    /// Pfad relativ zur Musikwurzel der Quelle (führender Slash).
+    /// Path relative to the source's music root (leading slash).
     pub(crate) rel_path: String,
-    /// Anzeigename (für „Now Playing").
+    /// Display name (for "Now Playing").
     pub(crate) title: String,
 }
 
-/// Musikalische Bedeutung eines Dateisystem-Ordners (für Wiedergabe & EQ).
+/// Musical meaning of a file system folder (for playback & EQ).
 pub(crate) enum FsKind {
-    /// Ordner eines Interpreten (Name = bekannter Interpret).
+    /// Folder of an artist (name = known artist).
     Artist(String),
-    /// Ordner genau eines Albums.
+    /// Folder of exactly one album.
     Album { artist: String, album: String },
 }
 
-/// Navigationsbereiche: (Stack-Name, Tooltip, Icon). Die **Standard**-Reihenfolge;
-/// die tatsächliche Anzeige-/Menüreihenfolge ist in `section_order` gespeichert
-/// und vom Nutzer verschiebbar.
-// Die Labels sind englische gettext-`msgid`; am Anzeigeort mit `gettext()`
-// übersetzen (siehe Nutzung in `build_nav` / `win_title`).
+/// Navigation sections: (stack name, tooltip, icon). The **default** order;
+/// the actual display/menu order is stored in `section_order`
+/// and can be reordered by the user.
+// The labels are English gettext `msgid`s; translate them at the display site
+// with `gettext()` (see usage in `build_nav` / `win_title`).
 pub(crate) const SECTIONS: [(&str, &str, &str); 10] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
     ("files", "Files", "folder-symbolic"),
@@ -89,8 +89,8 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 10] = [
     ("stats", "Statistics", "emilia-stats-symbolic"),
 ];
 
-/// Liefert (Tooltip/Label als msgid, Icon) eines Bereichs anhand seines
-/// Stack-Namens. Das Label am Anzeigeort mit `gettext()` übersetzen.
+/// Returns (tooltip/label as msgid, icon) of a section by its
+/// stack name. Translate the label at the display site with `gettext()`.
 pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
     SECTIONS
         .iter()
@@ -98,10 +98,10 @@ pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
         .map(|(_, label, icon)| (*label, *icon))
 }
 
-/// Sicherheitsabfrage vor destruktiven Aktionen (Löschen/Entfernen). Zeigt einen
-/// Bestätigungsdialog relativ zu `parent` (irgendein Widget im Fenster) und
-/// sendet `msg` erst nach Bestätigung. `confirm_label` beschriftet den
-/// (destruktiven) Bestätigungsknopf, z. B. `gettext("Delete")` / `gettext("Remove")`.
+/// Safety prompt before destructive actions (delete/remove). Shows a
+/// confirmation dialog relative to `parent` (any widget in the window) and
+/// sends `msg` only after confirmation. `confirm_label` labels the
+/// (destructive) confirm button, e.g. `gettext("Delete")` / `gettext("Remove")`.
 pub(crate) fn confirm_destructive(
     parent: &impl IsA<gtk::Widget>,
     heading: &str,
@@ -115,7 +115,7 @@ pub(crate) fn confirm_destructive(
     confirm.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
     confirm.set_default_response(Some("cancel"));
     confirm.set_close_response("cancel");
-    // `connect_response` ist `Fn`; die Nachricht daher nur einmalig entnehmen.
+    // `connect_response` is `Fn`; so take the message only once.
     let msg = std::cell::RefCell::new(Some(msg));
     confirm.connect_response(None, move |_, resp| {
         if resp == "ok" {
@@ -127,18 +127,18 @@ pub(crate) fn confirm_destructive(
     confirm.present(Some(parent));
 }
 
-/// Vor dieser Position wird kein Resume gemerkt (zu nah am Anfang).
+/// Before this position no resume is remembered (too close to the start).
 const RESUME_MIN_POS_MS: i64 = 5_000;
-/// So nah vor dem Ende gilt der Titel als fertig → Resume auf 0 zurücksetzen.
+/// This close to the end the track counts as finished → reset resume to 0.
 const RESUME_END_GUARD_MS: i64 = 10_000;
-/// Takt des leisen Hintergrund-Nachzugs fehlender Interpreten-Fotos & Cover.
-/// Bewusst niedrig (~1 min), damit neue Nutzer rasch eine aufgewertete Übersicht
-/// bekommen; der Worker drosselt die eigentlichen Netz-Anfragen selbst.
+/// Cadence of the quiet background backfill of missing artist photos & covers.
+/// Deliberately low (~1 min) so new users quickly get an enriched overview;
+/// the worker throttles the actual network requests itself.
 const AUTO_ENRICH_INTERVAL_SECS: u32 = 60;
 
-/// Resume-Position mit Wächtern: nahe Anfang oder Ende wird auf 0 gesetzt,
-/// damit ein quasi fertiger Titel beim nächsten Mal von vorn beginnt.
-/// Aktuelle Zeit in Unix-Sekunden (für die Hörstatistik-Zeitstempel).
+/// Resume position with guards: near start or end it is set to 0,
+/// so a nearly finished track starts from the beginning next time.
+/// Current time in Unix seconds (for the listening statistics timestamps).
 pub(crate) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -146,8 +146,8 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Wendet das Farbschema („system"/„dark"/„light") über den globalen
-/// libadwaita-StyleManager an. „system" folgt der Desktop-Einstellung.
+/// Applies the color scheme ("system"/"dark"/"light") via the global
+/// libadwaita StyleManager. "system" follows the desktop setting.
 pub(crate) fn apply_color_scheme(code: &str) {
     let scheme = match code {
         "dark" => adw::ColorScheme::ForceDark,
@@ -167,303 +167,303 @@ pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     }
 }
 
-/// Welche Ansicht die Podcast-Seite zeigt.
+/// Which view the podcast page shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PodcastView {
-    /// Neueste Episoden (Beiträge) über alle Abos hinweg.
+    /// Newest episodes (entries) across all subscriptions.
     Newest,
-    /// Übersicht der abonnierten Podcasts.
+    /// Overview of the subscribed podcasts.
     Overview,
 }
 
-/// Welche Ansicht die Streaming-Seite zeigt (Tab-Umschalter).
+/// Which view the streaming page shows (tab switcher).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StreamView {
-    /// Gespeicherte Sender/Kanäle.
+    /// Saved stations/channels.
     Channels,
-    /// Timeshift-Mitschnitte.
+    /// Timeshift recordings.
     Recordings,
 }
 
-/// Zeitraum der Hörstatistik. Bewusst gleitende Fenster (statt Kalenderjahr) –
-/// kalenderfrei und ohne zusätzliche Datums-Abhängigkeit.
+/// Time period of the listening statistics. Deliberately sliding windows
+/// (instead of a calendar year) – calendar-free and without an extra date dependency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatsPeriod {
-    /// Letzte 4 Wochen.
+    /// Last 4 weeks.
     Weeks4,
-    /// Letzte 12 Monate.
+    /// Last 12 months.
     Year,
-    /// Seit Beginn.
+    /// Since the beginning.
     All,
 }
 
-/// Laufende Hör-Sitzung eines Titels. Beim Wechsel/Ende wird sie als **ein**
-/// `play_event` in die Statistik geschrieben (siehe `finalize_play_session`).
-/// Rein lokal – verlässt das Gerät nie.
+/// Ongoing listening session of a track. On switch/end it is written as **one**
+/// `play_event` into the statistics (see `finalize_play_session`).
+/// Purely local – never leaves the device.
 pub(crate) struct PlaySession {
     pub(crate) path: PathBuf,
-    /// Startzeitpunkt (Unix-Sekunden).
+    /// Start time (Unix seconds).
     pub(crate) started_at: i64,
-    /// Tatsächlich gehörte Zeit (vom 1-s-Tick, nur während „Playing" gezählt).
+    /// Actually listened time (from the 1-s tick, counted only during "Playing").
     pub(crate) played_ms: i64,
-    /// Schnappschuss der Titellänge (0 = noch unbekannt → bei Tick nachgezogen).
+    /// Snapshot of the track length (0 = still unknown → backfilled on tick).
     pub(crate) duration_ms: i64,
 }
 
 pub struct App {
     pub(crate) library: Library,
     pub(crate) player: Player,
-    /// Sperrbildschirm-/Medientasten-Steuerung (MPRIS, optional).
+    /// Lock screen / media keys control (MPRIS, optional).
     pub(crate) mpris: crate::core::mpris::Mpris,
-    /// Eigener Eingabe-Sender, um aus Methoden ohne `ComponentSender` (z. B.
-    /// [`Self::play_current`]) Nachrichten an die Komponente zu schicken.
+    /// Own input sender to send messages to the component from methods without
+    /// a `ComponentSender` (e.g. [`Self::play_current`]).
     pub(crate) input: relm4::Sender<Msg>,
     pub(crate) entries: FactoryVecDeque<FsRow>,
     pub(crate) albums: FactoryVecDeque<AlbumCard>,
-    /// Galerie-Variante der Alben (Cover-Gitter), parallel zur Listen-Factory.
+    /// Gallery variant of the albums (cover grid), in parallel to the list factory.
     pub(crate) albums_gallery: gtk::FlowBox,
-    /// Album-Übersicht (gleiche Reihenfolge wie Factory/Galerie). Dient als
-    /// Index-Auflösung für Klicks in der Galerie, wo die Factory leer bleibt.
+    /// Album overview (same order as factory/gallery). Serves as
+    /// index resolution for clicks in the gallery, where the factory stays empty.
     pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) album_count: usize,
     pub(crate) artists: FactoryVecDeque<ArtistCard>,
-    /// Galerie-Variante der Interpreten (Foto-Gitter).
+    /// Gallery variant of the artists (photo grid).
     pub(crate) artists_gallery: gtk::FlowBox,
-    /// Interpreten-Übersicht (gleiche Reihenfolge) – Index-Auflösung für Galerie.
+    /// Artist overview (same order) – index resolution for the gallery.
     pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
     pub(crate) artist_count: usize,
-    /// Läuft gerade ein Anreicherungs-Lauf? (verhindert parallele Läufe; ohne
-    /// sichtbare Fortschrittsanzeige – der Abruf läuft still im Hintergrund).
+    /// Is an enrichment run currently in progress? (prevents parallel runs; without
+    /// a visible progress indicator – the fetch runs silently in the background).
     pub(crate) enriching: bool,
-    /// Cover & Metadaten beim Start automatisch online nachladen (nur bei
-    /// nicht-getakteter Verbindung; in den Einstellungen abschaltbar).
+    /// Automatically fetch covers & metadata online at startup (only on a
+    /// non-metered connection; can be disabled in the settings).
     pub(crate) auto_enrich: bool,
-    /// Abbruch-Flag für den Anreicherungs-Worker.
+    /// Cancel flag for the enrichment worker.
     pub(crate) enrich_cancel: Arc<AtomicBool>,
     pub(crate) acoustid_key: Option<String>,
     pub(crate) fanart_key: Option<String>,
-    /// Anzeigesprache: "system" (System-Locale), "de" oder "en". In den
-    /// Einstellungen umschaltbar; greift nach einem Neustart der App.
+    /// Display language: "system" (system locale), "de" or "en". Can be
+    /// switched in the settings; takes effect after restarting the app.
     pub(crate) ui_language: String,
-    /// Listen als **Galerie** (Cover-Gitter) statt als Liste darstellen.
+    /// Show lists as a **gallery** (cover grid) instead of as a list.
     pub(crate) gallery_view: bool,
-    /// Anzahl der Kacheln pro Reihe in der Galerie-Ansicht (2–8).
+    /// Number of tiles per row in the gallery view (2–8).
     pub(crate) gallery_columns: u32,
-    /// Aktuell aktiver Audio-Ausgang (PipeWire-Sink), für die EQ-Auflösung.
+    /// Currently active audio output (PipeWire sink), for the EQ resolution.
     pub(crate) active_output: String,
     pub(crate) music_dir: Option<String>,
     pub(crate) root_dir: Option<PathBuf>,
     pub(crate) browse_dir: Option<PathBuf>,
-    /// Aktuell im Dateibrowser angezeigter Ordner (für das Merken der Scrollposition).
+    /// Folder currently shown in the file browser (for remembering the scroll position).
     pub(crate) shown_dir: Option<PathBuf>,
-    /// Gemerkte Scrollpositionen je Ordner im Dateibrowser, damit man beim
-    /// Zurücknavigieren wieder auf gleicher Höhe landet.
+    /// Remembered scroll positions per folder in the file browser, so that when
+    /// navigating back you land at the same height again.
     pub(crate) fs_scroll: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<PathBuf, f64>>>,
     pub(crate) loading: bool,
     pub(crate) queue: Vec<PathBuf>,
     pub(crate) queue_pos: usize,
-    /// Zufalls-Reihenfolge der Queue-Indizes (Fisher-Yates), wird bei aktivem
-    /// Zufall durchlaufen, damit jeder Titel **genau einmal** an die Reihe kommt.
+    /// Random order of the queue indices (Fisher-Yates), traversed when shuffle
+    /// is active, so that each track comes up **exactly once** in turn.
     pub(crate) shuffle_order: Vec<usize>,
-    /// Position innerhalb von `shuffle_order`.
+    /// Position within `shuffle_order`.
     pub(crate) shuffle_idx: usize,
-    /// Zuletzt gespielte Titel (für „vorheriges Lied" per Doppelklick auf Zurück).
+    /// Recently played tracks (for "previous song" via double-click on back).
     pub(crate) play_history: Vec<PathBuf>,
-    /// Beim Zurückspringen aus der History nicht erneut in die History schreiben.
+    /// When jumping back out of the history, do not write to the history again.
     pub(crate) skip_history_push: bool,
-    /// Zeitpunkt des letzten Zurück-Klicks (Doppelklick-Erkennung, < 1 s).
+    /// Time of the last back click (double-click detection, < 1 s).
     pub(crate) last_prev: Option<std::time::Instant>,
-    /// Pausierte Warteschlange, während ein einzelnes Lied dazwischengespielt
-    /// wird (Liste + Position). Nach dem Einzellied wird sie fortgesetzt.
+    /// Queue paused while a single song is played in between
+    /// (list + position). After the single song it is resumed.
     pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
-    /// Zurück-Stapel verdrängter Wiedergabe-Kontexte (Queue + Position). Wird
-    /// gefüllt, wenn eine neue Auswahl die laufende Warteschlange ersetzt, und
-    /// erlaubt „voriges Lied **inkl. Playlist** weiterhören" (Zurück-Taste).
+    /// Back stack of displaced playback contexts (queue + position). Is
+    /// filled when a new selection replaces the running queue, and
+    /// allows "keep listening to previous song **including playlist**" (back button).
     pub(crate) nav_stack: Vec<(Vec<PathBuf>, usize)>,
-    /// Zuletzt von `play_current` gespielter Kontext (zur Erkennung, ob die
-    /// Warteschlange durch eine neue Auswahl ersetzt wurde).
+    /// Context last played by `play_current` (to detect whether the
+    /// queue was replaced by a new selection).
     pub(crate) prev_ctx: Option<(Vec<PathBuf>, usize)>,
-    /// Pfad des aktuell in den Player geladenen Titels (für das Sichern der
-    /// Resume-Position beim Wechsel auf einen anderen Titel).
+    /// Path of the track currently loaded into the player (for saving the
+    /// resume position when switching to another track).
     pub(crate) playing_path: Option<PathBuf>,
-    /// Schnappschuss (Pfad, Position, Dauer) des laufenden Resume-Titels, vom
-    /// 1-s-Tick aktualisiert. Wird beim Schließen einmalig in die DB geschrieben,
-    /// damit beim harten Beenden höchstens ~1 s Hörposition verloren geht.
+    /// Snapshot (path, position, duration) of the running resume track, updated
+    /// by the 1-s tick. Is written to the DB once on close,
+    /// so that on a hard exit at most ~1 s of listening position is lost.
     pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
-    /// Laufende Hör-Sitzung für die Statistik (siehe [`PlaySession`]).
+    /// Ongoing listening session for the statistics (see [`PlaySession`]).
     pub(crate) play_session: Option<PlaySession>,
-    /// Schnappschuss der Sitzung fürs Schließen (Pfad, Start, gehört, Dauer) –
-    /// analog `close_resume`, damit beim harten Beenden das letzte Ereignis
-    /// nicht verloren geht.
+    /// Snapshot of the session for the close (path, start, listened, duration) –
+    /// analogous to `close_resume`, so that on a hard exit the last event
+    /// is not lost.
     pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
     pub(crate) now_playing: Option<String>,
     pub(crate) playing: bool,
-    /// Aktuelle Position und Gesamtdauer des laufenden Titels (ms) – für die
-    /// Seekleiste im Mini-Player.
+    /// Current position and total duration of the running track (ms) – for the
+    /// seek bar in the mini player.
     pub(crate) position_ms: i64,
     pub(crate) track_duration_ms: i64,
     pub(crate) shuffle: bool,
-    /// Wiederholen: am Ende der Warteschlange bzw. des Einzeltitels von vorn.
+    /// Repeat: at the end of the queue or of the single track, start over.
     pub(crate) repeat: bool,
     pub(crate) context_target: Option<CtxTarget>,
-    /// Play-Zeile des offenen Detail-Dialogs samt zugehörigem Titel-Pfad. Wird
-    /// ausgeblendet, solange genau dieser Titel läuft, und wieder eingeblendet,
-    /// sobald er endet (siehe `refresh_ctx_play`).
+    /// Play row of the open detail dialog together with the associated track path. Is
+    /// hidden while exactly this track is playing, and shown again
+    /// as soon as it ends (see `refresh_ctx_play`).
     pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
     pub(crate) toast_overlay: adw::ToastOverlay,
-    // Konzerte
-    // Konzerte/Hörbücher: (scope, key, Titel, is_dir) – wie Favoriten.
+    // Concerts
+    // Concerts/audiobooks: (scope, key, title, is_dir) – like favorites.
     pub(crate) concert_items: Vec<(String, String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
-    /// Galerie-Variante der Konzerte (Cover-Gitter).
+    /// Gallery variant of the concerts (cover grid).
     pub(crate) concerts_gallery: gtk::FlowBox,
     pub(crate) concert_hint_dismissed: bool,
-    /// Galerien (Interpret bzw. Album), für die in **dieser Sitzung** schon ein
-    /// bedarfsgesteuerter Abruf lief – Schlüssel `"a\x01<name>"` bzw.
-    /// `"b\x01<artist>\x01<album>"`. Verhindert, dass für Einträge ohne Galerie
-    /// (die keine Versuchsgrenze haben) bei jedem Öffnen erneut angefragt wird.
+    /// Galleries (artist or album) for which an on-demand fetch already ran
+    /// in **this session** – key `"a\x01<name>"` or
+    /// `"b\x01<artist>\x01<album>"`. Prevents that entries without a gallery
+    /// (which have no attempt limit) are queried again on every open.
     pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
-    /// Galerie-FlowBoxen, deren Resize-Hook (quadratische Kacheln) bereits
-    /// einmalig verbunden wurde – verhindert, dass sich Handler aufsummieren.
+    /// Gallery FlowBoxes whose resize hook (square tiles) has already
+    /// been connected once – prevents handlers from accumulating.
     pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
-    /// Ausgeblendete Navigations-Menüpunkte (Stack-Namen). Betrifft sowohl die
-    /// Navigation als auch die Auswahl in den Eigenschaften.
+    /// Hidden navigation menu items (stack names). Affects both the
+    /// navigation and the selection in the properties.
     pub(crate) hidden_sections: std::collections::HashSet<String>,
-    /// Anzeige-Reihenfolge der Menüpunkte (Stack-Namen). Vom Nutzer verschiebbar.
+    /// Display order of the menu items (stack names). Reorderable by the user.
     pub(crate) section_order: Vec<&'static str>,
-    /// Alle Navigations-Schaltflächen je Menüpunkt mit Container-Kennung
-    /// (`true` = Seitenleiste, `false` = obere Leiste) – zum Ein-/Ausblenden und
-    /// Umsortieren zur Laufzeit.
+    /// All navigation buttons per menu item with container marker
+    /// (`true` = sidebar, `false` = top bar) – for showing/hiding and
+    /// reordering at runtime.
     pub(crate) nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)>,
-    /// Navigations-Container (Seitenleiste, obere Leiste) zum Umsortieren.
+    /// Navigation containers (sidebar, top bar) for reordering.
     pub(crate) sidebar_nav: gtk::Box,
     pub(crate) top_nav: gtk::Box,
-    /// Haupt-Splitview – eingeklappt (`is_collapsed`) bedeutet schmaler/mobiler
-    /// Modus; danach richten sich z. B. die Detail-Dialoge (volle Breite).
+    /// Main split view – collapsed (`is_collapsed`) means narrow/mobile
+    /// mode; this governs e.g. the detail dialogs (full width).
     pub(crate) split: adw::OverlaySplitView,
-    // Favoriten: (scope, key, Titel, is_dir)
+    // Favorites: (scope, key, title, is_dir)
     pub(crate) favorite_items: Vec<(String, String, String, bool)>,
     pub(crate) favorites_list: gtk::ListBox,
-    // Hörbücher: (Pfad, Titel, is_dir)
+    // Audiobooks: (path, title, is_dir)
     pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
     pub(crate) audiobooks_list: gtk::ListBox,
-    /// Galerie-Variante der Hörbücher (Cover-Gitter).
+    /// Gallery variant of the audiobooks (cover grid).
     pub(crate) audiobooks_gallery: gtk::FlowBox,
-    // Playlisten
+    // Playlists
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
     pub(crate) playlists_list: gtk::ListBox,
-    // Podcasts: (id, Titel, Bild-URL, Episodenzahl)
+    // Podcasts: (id, title, image URL, episode count)
     pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
     pub(crate) podcasts_list: gtk::ListBox,
-    /// Galerie-Variante der Podcast-Übersicht (Cover-Gitter).
+    /// Gallery variant of the podcast overview (cover grid).
     pub(crate) podcasts_gallery: gtk::FlowBox,
-    /// Welche Podcast-Ansicht sichtbar ist: neueste Episoden oder Abo-Übersicht.
+    /// Which podcast view is visible: newest episodes or subscription overview.
     pub(crate) podcast_view: PodcastView,
-    /// Welche Streaming-Ansicht sichtbar ist: Kanäle oder Aufnahmen.
+    /// Which streaming view is visible: channels or recordings.
     pub(crate) stream_view: StreamView,
-    /// Neueste Episoden über alle Abos (für die „Neuste"-Ansicht).
+    /// Newest episodes across all subscriptions (for the "Newest" view).
     pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
-    /// Container der „Neuste"-Liste: je Zeitabschnitt (Heute/Gestern/…) eine
-    /// eigene Gruppe, imperativ in `reload_newest` befüllt.
+    /// Container of the "Newest" list: one own group per time section
+    /// (Today/Yesterday/…), filled imperatively in `reload_newest`.
     pub(crate) newest_list: gtk::Box,
-    /// Treffer der letzten Podcast-Suche (iTunes), für den Abo-Dialog.
+    /// Hits of the last podcast search (iTunes), for the subscribe dialog.
     pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
-    /// Solange der Abo-Such-Dialog offen ist: (Dialog, Trefferliste). Damit lassen
-    /// sich asynchron eintreffende Treffer in die bereits gezeigte Liste einfügen.
+    /// While the subscribe search dialog is open: (dialog, hit list). This lets
+    /// asynchronously arriving hits be inserted into the already shown list.
     pub(crate) podcast_search:
         std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    /// URL der aktuell geladenen Podcast-Episode (für die Play/Pause-Markierung
-    /// der Beitragszeilen); `None`, wenn gerade Musik bzw. keine Episode läuft.
+    /// URL of the currently loaded podcast episode (for the play/pause marking
+    /// of the entry rows); `None` when music is playing or no episode is running.
     pub(crate) playing_episode_url: Option<String>,
-    // Streaming (Internet-Radio): gespeicherte Sender.
+    // Streaming (internet radio): saved stations.
     pub(crate) stream_items: Vec<crate::model::StreamItem>,
     pub(crate) streams_list: gtk::ListBox,
-    /// Treffer der letzten Sendersuche (Radio-Browser), für den Hinzufügen-Dialog.
+    /// Hits of the last station search (Radio Browser), for the add dialog.
     pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
-    /// Solange der Hinzufügen-Dialog offen ist: (Dialog, Trefferliste) – damit
-    /// asynchron eintreffende Treffer in die bereits gezeigte Liste passen.
+    /// While the add dialog is open: (dialog, hit list) – so that
+    /// asynchronously arriving hits fit into the already shown list.
     pub(crate) stream_search:
         std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    /// ID des gerade laufenden Senders (für die Detailseiten-Anzeige); `None`,
-    /// wenn gerade Musik/Episode bzw. nichts läuft.
+    /// ID of the currently running station (for the detail page display); `None`
+    /// when music/episode is playing or nothing is running.
     pub(crate) playing_stream: Option<i64>,
-    /// Aktuell laufender Titel des Senders (aus den ICY-Metadaten), für die
-    /// „Now Playing"-Anzeige; `None`, solange (noch) kein Titel gemeldet wurde.
+    /// Currently running track of the station (from the ICY metadata), for the
+    /// "Now Playing" display; `None` as long as no track has (yet) been reported.
     pub(crate) stream_title: Option<String>,
-    /// Timeshift-Mitschnitt des laufenden Senders (Ringpuffer); `None`, wenn kein
-    /// Sender läuft bzw. der Puffer auf 0 Minuten steht.
+    /// Timeshift recording of the running station (ring buffer); `None` if no
+    /// station is running or the buffer is set to 0 minutes.
     pub(crate) recorder: Option<crate::core::recorder::Recorder>,
-    /// Aktive „Aufnahme" (Zustandsmaschine, die an den Songgrenzen speichert).
+    /// Active "recording" (state machine that saves at the song boundaries).
     pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
-    /// Größe des Timeshift-Puffers in Minuten (0 = aus, max. 60).
+    /// Size of the timeshift buffer in minutes (0 = off, max. 60).
     pub(crate) recording_buffer_minutes: u32,
-    // Aufnahmen (gespeicherte Timeshift-Mitschnitte).
+    // Recordings (saved timeshift recordings).
     pub(crate) recording_items: Vec<crate::model::RecordingItem>,
     pub(crate) recordings_list: gtk::ListBox,
-    /// Play/Pause-Knöpfe der Senderzeilen (Sender-Id → Knopf), zum Auffrischen des
-    /// Icons beim Wechsel des Wiedergabestands. Abgehängte Knöpfe werden verworfen.
+    /// Play/pause buttons of the station rows (station id → button), for refreshing
+    /// the icon when the playback state changes. Detached buttons are discarded.
     pub(crate) stream_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(i64, gtk::Button)>>>,
-    /// „Verbunden"-Liste der Nextcloud-Seite im offenen Einstellungsdialog, damit
-    /// sie nach einem erfolgreichen Connect sofort aktualisiert werden kann.
+    /// "Connected" list of the Nextcloud page in the open settings dialog, so that
+    /// it can be updated immediately after a successful connect.
     pub(crate) settings_nc_list: std::rc::Rc<std::cell::RefCell<Option<gtk::ListBox>>>,
-    /// Quellen-Ids, die gerade **nicht erreichbar** sind (Nextcloud offline) –
-    /// steuert den roten „Getrennt"-Hinweis auf deren Covern/Fotos/Liedern.
+    /// Source ids that are currently **not reachable** (Nextcloud offline) –
+    /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
-    /// Play/Pause-Knöpfe der sichtbaren Beitragszeilen (Audio-URL → Knopf), um ihr
-    /// Icon beim Wechsel des Wiedergabestands aufzufrischen. Abgehängte (tote)
-    /// Einträge werden beim Auffrischen verworfen.
+    /// Play/pause buttons of the visible entry rows (audio URL → button), to refresh
+    /// their icon when the playback state changes. Detached (dead)
+    /// entries are discarded on refresh.
     pub(crate) episode_play_buttons:
         std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
-    /// „Abspielen"-Zeile eines offenen Beitrag-Detaildialogs (Zeile, Audio-URL) –
-    /// wird ausgeblendet, solange genau diese Episode läuft.
+    /// "Play" row of an open entry detail dialog (row, audio URL) –
+    /// is hidden while exactly this episode is playing.
     pub(crate) ctx_episode_play:
         std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
-    /// Liste im Warteschlangen-Dialog (wird bei Änderungen neu aufgebaut).
+    /// List in the queue dialog (rebuilt on changes).
     pub(crate) queue_list: gtk::ListBox,
-    /// Inhalt der Statistik-Seite (imperativ befüllt, wie die Listen oben).
+    /// Content of the statistics page (filled imperatively, like the lists above).
     pub(crate) stats_box: gtk::Box,
-    /// Aktuell gewählter Zeitraum der Hörstatistik.
+    /// Currently selected time period of the listening statistics.
     pub(crate) stats_period: StatsPeriod,
     pub(crate) view_stack: adw::ViewStack,
-    /// Seekleiste des Mini-Players (für Kapitelmarken via `add_mark`).
+    /// Seek bar of the mini player (for chapter marks via `add_mark`).
     pub(crate) seek_scale: gtk::Scale,
-    /// Label unter dem Titel, das beim Überfahren der Seekleiste die Bezeichnung
-    /// des Kapitels an der Mausposition zeigt (imperativ gesteuert).
+    /// Label below the title that, when hovering over the seek bar, shows the name
+    /// of the chapter at the mouse position (controlled imperatively).
     pub(crate) chapter_label: gtk::Label,
-    /// Kapitel (Zeit + Bezeichnung) der laufenden Episode – mit dem Hover-
-    /// Controller der Seekleiste geteilt.
+    /// Chapters (time + name) of the running episode – shared with the hover
+    /// controller of the seek bar.
     pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
-    /// Wird gerade über die Seekleiste gefahren? Dann zeigt das Label temporär
-    /// das überfahrene Kapitel; sonst läuft es mit der Wiedergabeposition mit.
+    /// Is the seek bar currently being hovered? Then the label temporarily shows
+    /// the hovered chapter; otherwise it tracks the playback position.
     pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
-    /// Navigations-Container für die Unterseiten (Interpret → Alben → Album).
+    /// Navigation container for the subpages (artist → albums → album).
     pub(crate) nav_view: adw::NavigationView,
-    /// Gemerkte Scrollposition der zuletzt verlassenen Übersichtsseite
-    /// (Scroller + Wert), um sie beim Zurücknavigieren wiederherzustellen.
+    /// Remembered scroll position of the most recently left overview page
+    /// (scroller + value), to restore it when navigating back.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
-    /// Zustand der Geräte-Synchronisierung (Server/Client + Dialog-Widgets).
+    /// State of the device synchronization (server/client + dialog widgets).
     pub(crate) sync: crate::ui::app_sync::SyncState,
-    /// Ob aktuell ein Gerät gekoppelt ist – steuert das grüne Sync-Icon oben.
+    /// Whether a device is currently paired – controls the green sync icon at the top.
     pub(crate) sync_connected: bool,
-    /// Widget-Zustand des Nextcloud-Einrichtungsdialogs.
+    /// Widget state of the Nextcloud setup dialog.
     pub(crate) cloud: crate::ui::app_cloud::CloudState,
-    // Zusätzliche Musikquellen (lokaler Zweitordner / Nextcloud) als Tabs.
-    /// Geladen aus der `source`-Tabelle (ohne das primäre `music_dir`).
+    // Additional music sources (local secondary folder / Nextcloud) as tabs.
+    /// Loaded from the `source` table (without the primary `music_dir`).
     pub(crate) sources: Vec<Source>,
-    /// In der Dateiansicht aktive Quelle (Primär = `music_dir`).
+    /// Source active in the file view (primary = `music_dir`).
     pub(crate) active_source: ActiveSource,
-    /// Tab-Leiste über der Dateiliste (linked ToggleButtons), nur sichtbar,
-    /// wenn mindestens eine Zusatzquelle existiert.
+    /// Tab bar above the file list (linked ToggleButtons), only visible
+    /// if at least one additional source exists.
     pub(crate) source_tabs: gtk::Box,
-    /// Tab-Schaltflächen je Quelle (inkl. Primär) – zum Spiegeln des Aktivzustands.
+    /// Tab buttons per source (incl. primary) – for mirroring the active state.
     pub(crate) source_tab_buttons: Vec<(ActiveSource, gtk::ToggleButton)>,
-    /// Aktueller Unterpfad in der entfernten Quelle (relativ zur Musikwurzel,
-    /// führender Slash; `""` = Wurzel). Nur gesetzt, wenn eine WebDAV-Quelle aktiv ist.
+    /// Current subpath in the remote source (relative to the music root,
+    /// leading slash; `""` = root). Only set when a WebDAV source is active.
     pub(crate) remote_browse: Option<String>,
-    /// Entfernte (Cloud-)Wiedergabe-Reihe des zuletzt geöffneten Ordners.
+    /// Remote (cloud) playback queue of the most recently opened folder.
     pub(crate) remote_queue: Vec<RemoteTrack>,
     pub(crate) remote_pos: usize,
-    /// Läuft gerade eine entfernte Datei (statt lokaler Queue/Episode/Sender)?
+    /// Is a remote file currently playing (instead of the local queue/episode/station)?
     pub(crate) playing_remote: bool,
 }
 
@@ -474,40 +474,40 @@ pub enum Msg {
     ShowContextMenu(usize),
     ShowArtistDetail(usize),
     ShowAlbumDetail(usize),
-    /// Detailseite eines Albums über (Interpret, Album) öffnen (aus Unterseiten).
+    /// Open the detail page of an album via (artist, album) (from subpages).
     ShowAlbumDetailFor { artist: String, album: String },
-    /// Detailseite eines einzelnen Liedes über seinen Pfad öffnen.
+    /// Open the detail page of a single song via its path.
     ShowTrackDetail(String),
-    /// Lieder-Unterseite eines Albums aus der Album-Übersicht öffnen (kurzes Tippen).
+    /// Open the songs subpage of an album from the album overview (short tap).
     ShowAlbumTracks(usize),
     ShowConcertDetail(usize),
-    /// Kurzes Tippen auf einen Interpreten: dessen Alben & Lieder auflisten.
+    /// Short tap on an artist: list its albums & songs.
     OpenArtistTracks(usize),
-    /// Tippen auf ein Album in der Interpreten-Unterseite: dessen Titel als
-    /// weitere Unterseite auflisten.
+    /// Tap on an album in the artist subpage: list its tracks as
+    /// a further subpage.
     OpenAlbumTracks { artist: String, album: String },
-    /// Einen Titel aus der Interpreten-Übersicht abspielen (Queue = alle Titel
-    /// des Interpreten, Start beim getippten).
+    /// Play a track from the artist overview (queue = all tracks
+    /// of the artist, start at the tapped one).
     PlayArtistTrack { name: String, path: String },
-    /// Einen Titel aus der Album-Unterseite abspielen (Queue = ganzes Album in
-    /// Track-Reihenfolge, Start beim getippten).
+    /// Play a track from the album subpage (queue = whole album in
+    /// track order, start at the tapped one).
     PlayAlbumTrack { artist: String, album: String, path: String },
-    /// Wie `PlayAlbumTrack`, aber interpretenübergreifend (Alben-Übersicht):
-    /// Queue = alle Titel des Albumnamens.
+    /// Like `PlayAlbumTrack`, but across artists (album overview):
+    /// queue = all tracks of the album name.
     PlayAlbumByNameTrack { album: String, path: String },
-    /// Tippen auf einen Album-/Ordner-Eintrag in Konzerten/Hörbüchern: dessen
-    /// Titel als Unterseite auflisten (statt direkt abzuspielen).
+    /// Tap on an album/folder entry in concerts/audiobooks: list its
+    /// tracks as a subpage (instead of playing directly).
     OpenEntryTracks { scope: String, key: String },
-    /// Einen Titel eines Ordner-Hörbuchs/-Konzerts abspielen (Queue = Ordner in
-    /// Reihenfolge, Start beim getippten).
+    /// Play a track of a folder audiobook/concert (queue = folder in
+    /// order, start at the tapped one).
     PlayFolderTrack { folder: String, path: String },
-    /// Ganzes Album in Track-Reihenfolge abspielen (Play-Button der Album-Zeile).
+    /// Play the whole album in track order (play button of the album row).
     PlayAlbum { artist: String, album: String },
     CtxPlay,
-    /// Album in Track-Reihenfolge abspielen (Shuffle aus, am Ende Stopp).
+    /// Play the album in track order (shuffle off, stop at the end).
     CtxPlayAlbum,
-    /// Alle Titel des Interpreten abspielen: Alben nach Jahr (neueste bzw.
-    /// älteste zuerst), je Album von Track 1 top-down (Shuffle aus).
+    /// Play all tracks of the artist: albums by year (newest or
+    /// oldest first), each album from track 1 top-down (shuffle off).
     CtxPlayArtist {
         newest_first: bool,
     },
@@ -517,33 +517,33 @@ pub enum Msg {
     CtxShare,
     ShareHost,
     ShareScan,
-    // --- Geräte-Synchronisierung (erreichbar über „Teilen") ---
-    /// Server-Modus starten (QR-Code anzeigen, auf Kopplung warten).
+    // --- Device synchronization (reachable via "Share") ---
+    /// Start server mode (show QR code, wait for pairing).
     SyncStartServer,
-    /// Client-Modus starten (Webcam-Scan).
+    /// Start client mode (webcam scan).
     SyncStartScan,
-    /// Ein QR-Code wurde dekodiert (URL als Text).
+    /// A QR code was decoded (URL as text).
     SyncQrDecoded(String),
-    /// Der Sync-Dialog wurde geschlossen – Server/Kamera aufräumen.
+    /// The sync dialog was closed – clean up server/camera.
     SyncDialogClosed,
     TrackFinished,
-    /// Zeitraum der Hörstatistik umschalten.
+    /// Switch the time period of the listening statistics.
     SetStatsPeriod(StatsPeriod),
-    /// Statistik-Seite neu aufbauen (z. B. beim Öffnen des Bereichs).
+    /// Rebuild the statistics page (e.g. when opening the section).
     RefreshStats,
-    /// Periodischer Tick: Resume-Position des laufenden Titels sichern.
+    /// Periodic tick: save the resume position of the running track.
     PersistResume,
-    /// Befehl vom Sperrbildschirm / von Medientasten (MPRIS).
+    /// Command from the lock screen / from media keys (MPRIS).
     Mpris(crate::core::mpris::MprisCommand),
-    /// 1-s-Tick: Position/Dauer der Seekleiste aktualisieren.
+    /// 1-s tick: update position/duration of the seek bar.
     Tick,
-    /// Periodischer, leiser Hintergrund-Nachzug: fehlende Interpreten-Fotos (zuerst)
-    /// und Online-Cover nachladen, ohne dass der Nutzer es anstoßen muss.
+    /// Periodic, quiet background backfill: fetch missing artist photos (first)
+    /// and online covers, without the user having to trigger it.
     AutoEnrichTick,
-    /// Bedarfsgesteuerte Fingerprint-Titelerkennung für den **gerade gestarteten**
-    /// Titel ohne brauchbare Metadaten (AcoustID), ausgelöst beim Abspielen.
+    /// On-demand fingerprint track recognition for the **just started**
+    /// track without usable metadata (AcoustID), triggered on play.
     FingerprintCurrent(PathBuf),
-    /// Sprung an eine Position (ms) durch Ziehen/Klicken der Seekleiste.
+    /// Jump to a position (ms) by dragging/clicking the seek bar.
     Seek(i64),
     Next,
     Prev,
@@ -553,271 +553,271 @@ pub enum Msg {
     FilesGoStart,
     Refresh,
     TogglePlay,
-    /// Detailansicht des gerade laufenden Titels öffnen (Klick auf die Leiste).
+    /// Open the detail view of the currently running track (click on the bar).
     OpenNowPlaying,
     OpenSettings,
-    /// Auf eine neuere Flatpak-Version prüfen (nur als Flatpak; im Hintergrund).
+    /// Check for a newer Flatpak version (only as Flatpak; in the background).
     CheckForUpdates,
-    /// Gefundene Aktualisierung über das Flatpak-Portal einspielen.
+    /// Apply a found update via the Flatpak portal.
     InstallFlatpakUpdate,
-    /// Ergebnis der Flatpak-Aktualisierung (`Ok` = fertig, Neustart nötig).
+    /// Result of the Flatpak update (`Ok` = done, restart needed).
     FlatpakUpdateFinished(Result<(), String>),
     OpenGlobalEq,
-    /// Equalizer für den gerade laufenden Titel öffnen.
+    /// Open the equalizer for the currently running track.
     OpenCurrentEq,
-    /// Warteschlangen-Dialog öffnen.
+    /// Open the queue dialog.
     ShowQueue,
-    /// Einen Eintrag aus der Warteschlange entfernen (Queue-Index).
+    /// Remove an entry from the queue (queue index).
     QueueRemove(usize),
-    /// Die gesamte Warteschlange leeren (nach Rückfrage) und Wiedergabe stoppen.
+    /// Clear the entire queue (after confirmation) and stop playback.
     QueueClear,
-    /// Einen Warteschlangen-Eintrag verschieben (Queue-Indizes).
+    /// Move a queue entry (queue indices).
     QueueMove { from: usize, to: usize },
     SetMusicDir(PathBuf),
-    /// In der Dateiansicht auf eine andere Quelle (Tab) umschalten.
+    /// Switch to another source (tab) in the file view.
     SelectSource(ActiveSource),
-    /// Die Quellenliste hat sich geändert (im Einstellungsdialog hinzugefügt/
-    /// entfernt) – Quellen neu laden und die Tab-Leiste aktualisieren.
+    /// The source list has changed (added/removed in the settings dialog)
+    /// – reload sources and update the tab bar.
     SourcesChanged,
-    /// Erreichbarkeit der Nextcloud-Quellen prüfen (periodisch + beim Start).
+    /// Check reachability of the Nextcloud sources (periodically + at startup).
     CheckSources,
-    /// Den Nextcloud-Einrichtungsdialog (QR-Scan oder manuell) öffnen.
+    /// Open the Nextcloud setup dialog (QR scan or manual).
     AddCloudSource,
-    /// Manuelle Eingabe auf-/zugeklappt: Kamera entsprechend aus-/einblenden.
+    /// Manual input expanded/collapsed: show/hide the camera accordingly.
     CloudManualToggle(bool),
-    /// Der Nextcloud-Dialog wurde geschlossen (Kamera stoppen).
+    /// The Nextcloud dialog was closed (stop camera).
     CloudClosed,
-    /// Ein QR-Code wurde im Nextcloud-Dialog dekodiert.
+    /// A QR code was decoded in the Nextcloud dialog.
     CloudQrDecoded(String),
-    /// Verbindungstest der eingegebenen Nextcloud-Daten.
+    /// Connection test of the entered Nextcloud data.
     CloudTest,
-    /// Die eingegebene Nextcloud-Quelle speichern.
+    /// Save the entered Nextcloud source.
     CloudSave,
-    /// Eine entfernte Datei offline herunterladen (rel-Pfad in der aktiven Quelle).
+    /// Download a remote file offline (rel path in the active source).
     CtxDownloadRemote(String),
     SetAcoustidKey(String),
-    /// Primäres Cover eines Albums festlegen (zuletzt im Galerie-Karussell gezeigt).
+    /// Set the primary cover of an album (last shown in the gallery carousel).
     SetAlbumCover { artist: String, album: String, path: String },
-    /// Primäres Foto eines Interpreten festlegen (zuletzt im Galerie-Karussell gezeigt).
+    /// Set the primary photo of an artist (last shown in the gallery carousel).
     SetArtistImage { name: String, path: String },
-    /// Eigenes Cover/Foto für das aktuelle Detailziel hochladen (Dateidialog).
+    /// Upload a custom cover/photo for the current detail target (file dialog).
     UploadCover,
     SetFanartKey(String),
-    /// Automatischen Online-Abruf an-/ausschalten.
+    /// Turn the automatic online fetch on/off.
     SetAutoEnrich(bool),
-    /// Anzeigesprache umstellen ("system"/"de"/"en"); startet die App neu.
+    /// Change the display language ("system"/"de"/"en"); restarts the app.
     SetLanguage(String),
-    /// Farbschema umstellen ("system"/"dark"/"light"); greift sofort.
+    /// Change the color scheme ("system"/"dark"/"light"); takes effect immediately.
     SetColorScheme(String),
-    /// Galerie-Ansicht (Cover-Gitter) an/aus; baut die Listen neu auf.
+    /// Gallery view (cover grid) on/off; rebuilds the lists.
     SetGalleryView(bool),
-    /// Kacheln pro Reihe in der Galerie-Ansicht (2–8); baut die Listen neu auf.
+    /// Tiles per row in the gallery view (2–8); rebuilds the lists.
     SetGalleryColumns(u32),
-    /// Merkmal einer Ebene setzen (oder bei `None` auf „erben" zurücksetzen).
-    /// Bereiche (Eigenschaften) einer Ebene setzen; leerer Wert = ausgeblendet.
+    /// Set a property of a level (or with `None` reset to "inherit").
+    /// Set the areas (properties) of a level; empty value = hidden.
     SetAreas {
         scope: &'static str,
         key: String,
         value: String,
     },
-    /// Equalizer-Bänder eines Ausgangs + einer Ebene speichern und anwenden.
+    /// Save and apply the equalizer bands of an output + a level.
     SetEq {
         output: String,
         scope: &'static str,
         key: String,
         bands: [f64; 10],
     },
-    /// Equalizer eines Ausgangs + einer Ebene zurücksetzen (erbt wieder).
+    /// Reset the equalizer of an output + a level (inherits again).
     ClearEq {
         output: String,
         scope: &'static str,
         key: String,
     },
-    // Konzerte
+    // Concerts
     ConcertImport,
     ConcertDismissHint,
     ConcertHideSection,
     ConcertAdd(Vec<(String, String, bool)>),
     PlayConcert(usize),
-    /// Galerie-Konzert (Index) öffnen: Album/Ordner → Titelliste, Track → Abspielen.
+    /// Open gallery concert (index): album/folder → track list, track → play.
     OpenConcertEntry(usize),
-    /// Einen Navigations-Menüpunkt ein-/ausblenden (Stack-Name).
+    /// Show/hide a navigation menu item (stack name).
     SetSectionVisible {
         section: &'static str,
         visible: bool,
     },
-    /// Menüpunkt in der Reihenfolge verschieben (Indizes in `section_order`).
+    /// Move a menu item in the order (indices in `section_order`).
     MoveSection {
         from: usize,
         to: usize,
     },
-    /// Einen ausgeblendeten Inhalt wieder einblenden (Festlegung zurücksetzen).
+    /// Show a hidden content again (reset the override).
     UnhideEntry {
         scope: String,
         key: String,
     },
-    // Favoriten
-    /// Aktuelles Detailziel als Favorit setzen/entfernen.
+    // Favorites
+    /// Set/remove the current detail target as a favorite.
     ToggleFavorite,
-    /// Favorit (Index in `favorite_items`) abspielen.
+    /// Play a favorite (index in `favorite_items`).
     PlayFavorite(usize),
-    /// Detailansicht eines Favoriten öffnen.
+    /// Open the detail view of a favorite.
     ShowFavoriteDetail(usize),
-    /// Favoriten umsortieren (Indizes in `favorite_items`).
+    /// Reorder favorites (indices in `favorite_items`).
     MoveFavorite { from: usize, to: usize },
-    // Hörbücher
-    /// Hörbuch (Index in `audiobook_items`) abspielen.
+    // Audiobooks
+    /// Play an audiobook (index in `audiobook_items`).
     PlayAudiobook(usize),
-    /// Galerie-Hörbuch (Index) öffnen: Album/Ordner → Titelliste, Track → Abspielen.
+    /// Open gallery audiobook (index): album/folder → track list, track → play.
     OpenAudiobookEntry(usize),
-    /// Detailansicht eines Hörbuchs öffnen.
+    /// Open the detail view of an audiobook.
     ShowAudiobookDetail(usize),
-    // Playlisten
-    /// „Neue Playlist"-Dialog öffnen.
+    // Playlists
+    /// Open the "New playlist" dialog.
     PlaylistNew,
-    /// Playlist mit diesem Namen anlegen.
+    /// Create a playlist with this name.
     PlaylistCreate(String),
-    /// Playlist anlegen und die aktuellen Kontext-Dateien hinzufügen.
+    /// Create a playlist and add the current context files.
     PlaylistCreateAddTo(String),
-    /// Titel-Unterseite einer Playlist öffnen.
+    /// Open the tracks subpage of a playlist.
     OpenPlaylist(i64),
-    /// Ganze Playlist abspielen.
+    /// Play the whole playlist.
     PlayPlaylist(i64),
-    /// Playlist löschen.
+    /// Delete a playlist.
     PlaylistDelete(i64),
-    /// Aktuelle Kontext-Dateien zu dieser Playlist hinzufügen.
+    /// Add the current context files to this playlist.
     PlaylistAddTo(i64),
-    /// Einen Titel aus einer Playlist abspielen (Queue = ganze Playlist).
+    /// Play a track from a playlist (queue = whole playlist).
     PlaylistTrack { id: i64, path: String },
-    /// Einen Titel aus einer Playlist entfernen.
+    /// Remove a track from a playlist.
     PlaylistRemoveTrack { id: i64, path: String },
-    /// Umbenennen-Dialog einer Playlist öffnen.
+    /// Open the rename dialog of a playlist.
     PlaylistRenameDialog(i64),
-    /// Playlist umbenennen.
+    /// Rename a playlist.
     PlaylistRename { id: i64, name: String },
     // Podcasts
-    /// Abo-Dialog (Suche + Feed-Adresse) öffnen.
+    /// Open the subscribe dialog (search + feed address).
     PodcastSubscribe,
-    /// Podcasts zu diesem Suchbegriff suchen (iTunes-Verzeichnis, im Hintergrund).
+    /// Search for podcasts matching this search term (iTunes directory, in the background).
     PodcastSearch(String),
-    /// Feed unter dieser Adresse abonnieren (im Hintergrund holen).
+    /// Subscribe to the feed at this address (fetch in the background).
     PodcastSubscribeUrl(String),
-    /// Episoden-Unterseite eines Podcasts öffnen.
+    /// Open the episodes subpage of a podcast.
     OpenPodcast(i64),
-    /// Galerie-Podcast (Index in `podcast_items`) öffnen → `OpenPodcast`.
+    /// Open gallery podcast (index in `podcast_items`) → `OpenPodcast`.
     OpenPodcastAt(usize),
-    /// Abo-Detail eines Galerie-Podcasts (Index in `podcast_items`) → `ShowPodcastDetail`.
+    /// Subscription detail of a gallery podcast (index in `podcast_items`) → `ShowPodcastDetail`.
     ShowPodcastDetailAt(usize),
-    /// Podcast entfernen.
+    /// Remove a podcast.
     PodcastDelete(i64),
-    /// Feed eines Podcasts neu laden.
+    /// Reload the feed of a podcast.
     PodcastRefresh(i64),
-    /// Beitrag (Episode) umschalten: starten bzw. – wenn schon die laufende –
-    /// pausieren/fortsetzen. Vom Antippen der Zeile und vom Play/Pause-Knopf.
+    /// Toggle an entry (episode): start or – if already the running one –
+    /// pause/resume. From tapping the row and from the play/pause button.
     ToggleEpisode { url: String, title: String },
-    /// Podcast-Ansicht umschalten (Neuste / Übersicht).
+    /// Switch the podcast view (Newest / Overview).
     SetPodcastView(PodcastView),
-    /// Streaming-Ansicht umschalten (Kanäle/Aufnahmen).
+    /// Switch the streaming view (channels/recordings).
     SetStreamView(StreamView),
-    /// Detailansicht eines Beitrags (Episode) aus der „Neuste"-Liste (Index).
+    /// Detail view of an entry (episode) from the "Newest" list (index).
     ShowEpisodeDetail(usize),
-    /// Detailansicht einer Episode aus der Episodenliste eines Podcasts.
+    /// Detail view of an episode from the episode list of a podcast.
     ShowPodcastEpisodeDetail { podcast_id: i64, index: usize },
-    /// Klick auf eine Zeitsprungmarke in den Shownotes: an die Stelle springen
-    /// (Episode bei Bedarf dort starten).
+    /// Click on a time-jump mark in the show notes: jump to the spot
+    /// (start the episode there if needed).
     EpisodeSeekTo { url: String, title: String, ms: i64 },
-    /// Detailansicht/Verwaltung eines Abos (Podcast-Id) – Aktualisieren/Entfernen.
+    /// Detail view/management of a subscription (podcast id) – refresh/remove.
     ShowPodcastDetail(i64),
-    // Streaming (Internet-Radio)
-    /// Hinzufügen-Dialog (Suche + Stream-Adresse) öffnen.
+    // Streaming (internet radio)
+    /// Open the add dialog (search + stream address).
     StreamAdd,
-    /// Sender zu diesem Suchbegriff suchen (Radio-Browser, im Hintergrund).
+    /// Search for stations matching this search term (Radio Browser, in the background).
     StreamSearch(String),
-    /// Einen Suchtreffer (Index in `stream_search_results`) als Sender speichern.
+    /// Save a search hit (index in `stream_search_results`) as a station.
     StreamAddResult(usize),
-    /// Eine Stream-Adresse manuell als Sender speichern.
+    /// Save a stream address manually as a station.
     StreamAddUrl(String),
-    /// Sender antippen: startet ihn, bei laufendem Sender Pause/Weiter umschalten.
+    /// Tap a station: starts it, toggle pause/resume on a running station.
     ToggleStream(i64),
-    /// Aufnahme-Knopf einer Senderzeile: startet/stoppt die Daueraufnahme.
+    /// Record button of a station row: starts/stops the continuous recording.
     StreamRecordToggle(i64),
-    /// Aufnahme-Knopf in der Player-Leiste: nimmt den laufenden Sender auf/stoppt.
+    /// Record button in the player bar: records/stops the running station.
     TransportRecordToggle,
-    /// Titel-Tag aus der Wiedergabe (bei Sendern: der laufende ICY-Titel).
+    /// Title tag from the playback (for stations: the running ICY title).
     StreamTitle(String),
-    /// Detailseite eines Senders öffnen.
+    /// Open the detail page of a station.
     OpenStream(i64),
-    /// Einen Sender entfernen.
+    /// Remove a station.
     StreamDelete(i64),
-    // Aufnahme (Timeshift)
-    /// Laufende Aufnahme stoppen.
+    // Recording (timeshift)
+    /// Stop the running recording.
     RecordStop,
-    /// Wiederholungs-Unterseite eines Senders öffnen.
+    /// Open the replay subpage of a station.
     OpenStreamReplay(i64),
-    /// Einen gepufferten Song probehören (absoluter Byte-Bereich).
+    /// Preview a buffered song (absolute byte range).
     ReplayPlay { start: u64, end: u64 },
-    /// Einen gepufferten Song nachträglich speichern.
+    /// Save a buffered song after the fact.
     ReplaySave {
         start: u64,
         end: u64,
         title: String,
     },
-    /// Einen gespeicherten Mitschnitt abspielen (Pfad).
+    /// Play a saved recording (path).
     PlayRecording(String),
-    /// Einen Mitschnitt löschen (Id).
+    /// Delete a recording (id).
     RecordingDelete(i64),
-    /// Größe des Timeshift-Puffers in Minuten setzen (0–60).
+    /// Set the size of the timeshift buffer in minutes (0–60).
     SetRecordingBufferMinutes(u32),
 }
 
-/// Ergebnisse der Hintergrund-Worker (Ordner lesen bzw. Online-Anreicherung).
+/// Results of the background workers (read folder or online enrichment).
 #[derive(Debug)]
 pub enum Cmd {
     Entries(Vec<FsEntry>),
-    /// Ergebnis eines WebDAV-Verzeichnislistings (Hintergrund-PROPFIND). Trägt die
-    /// Quelle und den rel-Pfad mit, damit ein zwischenzeitlicher Quellen-/Ordner-
-    /// wechsel das veraltete Ergebnis verwerfen kann.
+    /// Result of a WebDAV directory listing (background PROPFIND). Carries the
+    /// source and the rel path along, so that an intervening source/folder
+    /// switch can discard the stale result.
     RemoteEntries(
         Result<Vec<crate::core::webdav::DavEntry>, String>,
         ActiveSource,
         String,
     ),
-    /// Nachgeladene Tags entfernter Dateien: (rel-Pfad, Titel, Interpret, Dauer).
+    /// Backfilled tags of remote files: (rel path, title, artist, duration).
     RemoteTags(Vec<(String, Option<String>, Option<String>, Option<i64>)>),
-    /// Eine entfernte Datei wurde heruntergeladen: (rel-Pfad, lokale Kopie) oder Fehler.
+    /// A remote file was downloaded: (rel path, local copy) or error.
     RemoteDownloaded(Result<(String, PathBuf), String>),
-    /// Ergebnis des Nextcloud-Verbindungstests.
+    /// Result of the Nextcloud connection test.
     WebdavTested(Result<(), String>),
-    /// Online-Anreicherung abgeschlossen; `changed` = es kam etwas Neues hinzu
-    /// (steuert beim leisen Nachzug, ob die Ansichten neu geladen werden).
+    /// Online enrichment finished; `changed` = something new was added
+    /// (controls during the quiet backfill whether the views are reloaded).
     EnrichDone { changed: bool },
-    /// Zwischenstand: Alben-/Interpreten-Ansicht neu laden (z. B. nach einer Phase).
+    /// Intermediate state: reload albums/artists view (e.g. after a phase).
     ReloadViews,
-    /// Lokaler Bibliotheks-Scan fertig; `then_enrich` = danach ggf. online nachladen.
+    /// Local library scan finished; `then_enrich` = possibly fetch online afterwards.
     ScanDone { then_enrich: bool },
-    /// Gefundene Konzert-Kandidaten (für den Import-Dialog).
+    /// Found concert candidates (for the import dialog).
     Candidates(Vec<crate::core::concert::Candidate>),
-    /// Podcast-Feed geholt: `Some(Titel)` bei Erfolg, sonst `None`.
+    /// Podcast feed fetched: `Some(title)` on success, otherwise `None`.
     PodcastFetched(Option<String>),
-    /// Treffer der Podcast-Suche (für den offenen Abo-Dialog).
+    /// Hits of the podcast search (for the open subscribe dialog).
     PodcastSearchResults(Vec<crate::core::podcast::PodcastSearchResult>),
-    /// Cover-Thumbnails der Suchtreffer sind gecacht → Trefferliste neu zeichnen.
+    /// Cover thumbnails of the search hits are cached → redraw the hit list.
     PodcastSearchCoversReady,
-    /// Podcast-Liste neu aufbauen (z. B. nachdem Feed-Bilder gecacht wurden).
+    /// Rebuild the podcast list (e.g. after feed images were cached).
     ReloadPodcasts,
-    /// Treffer der Sendersuche (für den offenen Hinzufügen-Dialog).
+    /// Hits of the station search (for the open add dialog).
     StreamSearchResults(Vec<crate::core::streaming::StationResult>),
-    /// Logos der Suchtreffer sind gecacht → Trefferliste neu zeichnen.
+    /// Logos of the search hits are cached → redraw the hit list.
     StreamSearchCoversReady,
-    /// Senderliste neu aufbauen (z. B. nachdem Logos gecacht wurden).
+    /// Rebuild the station list (e.g. after logos were cached).
     ReloadStreams,
-    /// Eine Nextcloud-Quelle wurde indiziert → Alben/Interpreten neu laden.
+    /// A Nextcloud source was indexed → reload albums/artists.
     RemoteIndexed,
-    /// Erreichbarkeit der Quellen (Quellen-Id → erreichbar?).
+    /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
-    /// Ereignis aus dem Sync-Server-Thread bzw. Client-Worker.
+    /// Event from the sync server thread or client worker.
     Sync(crate::core::sync::SyncEvent),
-    /// Ergebnis der Update-Prüfung (im Hintergrund ermittelt).
+    /// Result of the update check (determined in the background).
     UpdateChecked(crate::core::update::CheckResult),
 }
 
@@ -826,7 +826,7 @@ impl Component for App {
     type Init = ();
     type Input = Msg;
     type Output = ();
-    /// Ergebnis der Hintergrund-Worker (Ordner lesen / Online-Anreicherung).
+    /// Result of the background workers (read folder / online enrichment).
     type CommandOutput = Cmd;
 
     view! {
@@ -840,8 +840,8 @@ impl Component for App {
                 #[wrap(Some)]
                 #[name = "nav_view"]
                 set_child = &adw::NavigationView {
-                    // Wurzelseite: die eigentliche App (Navigation, Inhalt, Mini-Player).
-                    // Interpreten-/Album-Unterseiten werden darauf geschoben.
+                    // Root page: the actual app (navigation, content, mini player).
+                    // Artist/album subpages are pushed onto it.
                     adw::NavigationPage {
                         set_title: "Emilia",
                         set_tag: Some("main"),
@@ -854,7 +854,7 @@ impl Component for App {
                 set_min_sidebar_width: 180.0,
                 set_max_sidebar_width: 240.0,
 
-                // Seitenleiste (Desktop): icon-only Navigation links
+                // Sidebar (desktop): icon-only navigation on the left
                 #[wrap(Some)]
                 set_sidebar = &adw::ToolbarView {
                     add_top_bar = &adw::HeaderBar {
@@ -871,7 +871,7 @@ impl Component for App {
                         set_margin_start: 6,
                         set_margin_end: 6,
                         set_halign: gtk::Align::Fill,
-                        // Volle Höhe, damit „Einstellungen" ganz unten sitzt.
+                        // Full height, so that "Settings" sits at the very bottom.
                         set_valign: gtk::Align::Fill,
                         set_vexpand: true,
                     },
@@ -884,8 +884,8 @@ impl Component for App {
                         #[wrap(Some)]
                         #[name = "win_title"]
                         set_title_widget = &adw::WindowTitle::new("Emilia", ""),
-                        // Einstellungen oben nur im schmalen (mobilen) Modus – im
-                        // Desktop-Modus sitzt der Punkt unten in der Seitenleiste.
+                        // Settings at the top only in narrow (mobile) mode – in
+                        // desktop mode the item sits at the bottom of the sidebar.
                         #[name = "settings_top_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emblem-system-symbolic",
@@ -898,10 +898,10 @@ impl Component for App {
                             set_tooltip_text: Some(&gettext("Rescan folder")),
                             connect_clicked => Msg::Refresh,
                         },
-                        // Geräte-Synchronisierung: öffnet denselben „Teilen"-Dialog
-                        // wie die Aktion im Detailmenü (kein eigenes Popover). Bei
-                        // bestehender Kopplung wird das Icon grün dargestellt
-                        // (CSS-Klasse, siehe unten).
+                        // Device synchronization: opens the same "Share" dialog
+                        // as the action in the detail menu (no separate popover). With
+                        // an existing pairing the icon is rendered green
+                        // (CSS class, see below).
                         #[name = "sync_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emilia-share-symbolic",
@@ -916,7 +916,7 @@ impl Component for App {
                         },
                     },
 
-                    // Top-Navigation (icon-only) – nur im schmalen (mobilen) Modus
+                    // Top navigation (icon-only) – only in narrow (mobile) mode
                     #[name = "top_nav"]
                     add_top_bar = &gtk::Box {
                         set_halign: gtk::Align::Center,
@@ -926,9 +926,9 @@ impl Component for App {
                         set_margin_bottom: 2,
                     },
 
-                    // Inhalt mit Lade-Overlay. Desktop: etwas Luft **zwischen
-                    // Titelleiste und Inhalt** (oben); im schmalen (mobilen) Modus
-                    // per Breakpoint wieder auf 0 (siehe `init`).
+                    // Content with loading overlay. Desktop: a bit of space **between
+                    // the title bar and the content** (top); in narrow (mobile) mode
+                    // back to 0 via breakpoint (see `init`).
                     #[wrap(Some)]
                     #[name = "content_overlay"]
                     set_content = &gtk::Overlay {
@@ -945,9 +945,9 @@ impl Component for App {
                                         set_orientation: gtk::Orientation::Vertical,
                                         set_vexpand: true,
 
-                                        // Quellen-Tabs (linked) – nur sichtbar, wenn neben dem
-                                        // primären Musikordner mindestens eine Zusatzquelle
-                                        // (SD-Karte/Nextcloud) eingerichtet ist. Befüllt in
+                                        // Source tabs (linked) – only visible if, besides the
+                                        // primary music folder, at least one additional source
+                                        // (SD card/Nextcloud) is set up. Filled in
                                         // `rebuild_source_tabs`.
                                         #[name = "source_tabs"]
                                         gtk::Box {
@@ -955,13 +955,13 @@ impl Component for App {
                                             add_css_class: "linked",
                                             set_halign: gtk::Align::Center,
                                             set_margin_top: 6,
-                                            // Etwas Luft unter dem Quellen-Tab-Menü.
+                                            // A bit of space below the source tab menu.
                                             set_margin_bottom: 10,
                                             #[watch]
                                             set_visible: !model.sources.is_empty(),
                                         },
 
-                                        // Pfad-/Zurück-Leiste – nur in Unterordnern
+                                        // Path/back bar – only in subfolders
                                         gtk::Box {
                                             set_spacing: 6,
                                             set_margin_all: 6,
@@ -1046,7 +1046,7 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    // Leerzustand, solange keine Alben bekannt sind
+                                    // Empty state while no albums are known
                                     adw::StatusPage {
                                         set_icon_name: Some("media-optical-symbolic"),
                                         set_title: &gettext("No albums"),
@@ -1072,7 +1072,7 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Galerie-Variante (Cover-Gitter)
+                                    // Gallery variant (cover grid)
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1091,7 +1091,7 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    // Liste der markierten Konzerte
+                                    // List of the marked concerts
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1106,7 +1106,7 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Galerie-Variante der Konzerte
+                                    // Gallery variant of the concerts
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1121,7 +1121,7 @@ impl Component for App {
                                         },
                                     },
 
-                                    // Hinweis + Aktionen (leer & Hinweis aktiv)
+                                    // Hint + actions (empty & hint active)
                                     adw::StatusPage {
                                         set_icon_name: Some("emilia-concert-symbolic"),
                                         set_title: &gettext("Concerts"),
@@ -1152,9 +1152,9 @@ impl Component for App {
                                         },
                                     },
 
-                                    // Leerzustand (leer & Hinweis ausgeblendet):
-                                    // Nutzer hat „Das mache ich selber" gewählt – daher
-                                    // bewusst KEIN Import-Button mehr.
+                                    // Empty state (empty & hint hidden):
+                                    // user chose "I'll do it myself" – therefore
+                                    // deliberately NO import button anymore.
                                     adw::StatusPage {
                                         set_icon_name: Some("emilia-concert-symbolic"),
                                         set_title: &gettext("No concerts"),
@@ -1192,7 +1192,7 @@ impl Component for App {
                                         set_visible: model.playlist_items.is_empty(),
                                     },
 
-                                    // Aktion ganz unten.
+                                    // Action at the very bottom.
                                     gtk::Box {
                                         set_halign: gtk::Align::Center,
                                         set_margin_top: 6,
@@ -1208,13 +1208,13 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    // Kopf: Umschalter „Neuste" / „Übersicht" und „+" zum Abonnieren.
+                                    // Header: switcher "Newest" / "Overview" and "+" to subscribe.
                                     gtk::Box {
                                         set_orientation: gtk::Orientation::Horizontal,
                                         set_spacing: 6,
                                         set_margin_top: 2,
-                                        // Etwas (knappe) Luft unter den Schaltern; die erste
-                                        // Abschnitts-Überschrift sitzt so ~10px höher.
+                                        // A bit of (sparse) space below the switches; the first
+                                        // section heading thus sits ~10px higher.
                                         set_margin_bottom: 4,
                                         set_margin_start: 12,
                                         set_margin_end: 12,
@@ -1241,7 +1241,7 @@ impl Component for App {
                                         },
                                     },
 
-                                    // „Neuste": neueste Episoden über alle Abos.
+                                    // "Newest": newest episodes across all subscriptions.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1251,7 +1251,7 @@ impl Component for App {
                                             set_orientation: gtk::Orientation::Vertical,
                                             set_spacing: 6,
                                             set_valign: gtk::Align::Start,
-                                            // Erste Überschrift dichter an die Umschalter (≈10px höher).
+                                            // First heading closer to the switchers (≈10px higher).
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
@@ -1266,7 +1266,7 @@ impl Component for App {
                                         set_visible: model.podcast_view == PodcastView::Newest && model.newest_items.is_empty(),
                                     },
 
-                                    // „Übersicht": abonnierte Podcasts.
+                                    // "Overview": subscribed podcasts.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1274,7 +1274,7 @@ impl Component for App {
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
-                                            // 10px Abstand nach unten zum Content (nicht am Umschalter kleben).
+                                            // 10px space down to the content (not stuck to the switcher).
                                             set_margin_top: 10,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
@@ -1282,7 +1282,7 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Galerie-Variante der Abo-Übersicht
+                                    // Gallery variant of the subscription overview
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1309,7 +1309,7 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    // Tab-Umschalter: Kanäle / Aufnahmen + „+" für einen neuen Kanal.
+                                    // Tab switcher: channels / recordings + "+" for a new channel.
                                     gtk::Box {
                                         set_spacing: 6,
                                         set_margin_top: 6,
@@ -1339,7 +1339,7 @@ impl Component for App {
                                         },
                                     },
 
-                                    // Kanäle.
+                                    // Channels.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1363,7 +1363,7 @@ impl Component for App {
                                         set_visible: model.stream_view == StreamView::Channels && model.stream_items.is_empty(),
                                     },
 
-                                    // Aufnahmen.
+                                    // Recordings.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1433,7 +1433,7 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Galerie-Variante der Hörbücher
+                                    // Gallery variant of the audiobooks
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
@@ -1460,7 +1460,7 @@ impl Component for App {
                             add_titled_with_icon[Some("stats"), &gettext("Statistics"), "emilia-stats-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-                                    // Inhalt wird imperativ in `refresh_stats` befüllt.
+                                    // Content is filled imperatively in `refresh_stats`.
                                     #[local_ref]
                                     stats_box -> gtk::Box {
                                         set_orientation: gtk::Orientation::Vertical,
@@ -1469,9 +1469,9 @@ impl Component for App {
                                 },
                         },
 
-                        // Zentrierter Spinner während des Einlesens – auf einer
-                        // halbtransparenten Fläche, damit die Schrift über dem
-                        // Inhalt lesbar bleibt (CSS-Klasse, siehe `init`).
+                        // Centered spinner while reading – on a
+                        // semi-transparent surface, so that the text over the
+                        // content stays readable (CSS class, see `init`).
                         add_overlay = &gtk::Box {
                             set_orientation: gtk::Orientation::Vertical,
                             set_halign: gtk::Align::Center,
@@ -1493,10 +1493,10 @@ impl Component for App {
                         },
                     },
 
-                    // Mini-Player unten mit Transport-Steuerung. Die Leiste bleibt
-                    // immer sichtbar; ohne ausgewählten Titel werden nur die
-                    // Songzeile (Titel + Seekleiste) ausgeblendet und die
-                    // Transport-Tasten ausgegraut.
+                    // Mini player at the bottom with transport controls. The bar stays
+                    // always visible; without a selected track only the
+                    // song row (title + seek bar) is hidden and the
+                    // transport buttons are grayed out.
                     add_bottom_bar = &gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
                         set_spacing: 2,
@@ -1508,9 +1508,9 @@ impl Component for App {
                         gtk::Button {
                             add_css_class: "flat",
                             set_tooltip_text: Some(&gettext("Details of the current track")),
-                            // Lied/Interpret etwas tiefer setzen (kompaktere Leiste).
+                            // Place song/artist a bit lower (more compact bar).
                             set_margin_top: 5,
-                            // Ohne ausgewählten Titel ganz ausblenden (gibt Platz frei).
+                            // Without a selected track, hide entirely (frees up space).
                             #[watch]
                             set_visible: model.now_playing.is_some(),
                             connect_clicked => Msg::OpenNowPlaying,
@@ -1518,24 +1518,24 @@ impl Component for App {
                             set_child = &gtk::Label {
                                 set_xalign: 0.5,
                                 set_justify: gtk::Justification::Center,
-                                // Lange Titel auf bis zu 2 Zeilen umbrechen statt die
-                                // Leiste zu sprengen; danach mit … kürzen. Die
-                                // Breitenbegrenzung verhindert, dass ein langer Titel
-                                // die Mindestbreite des Fensters aufbläht.
+                                // Wrap long titles onto up to 2 lines instead of
+                                // breaking the bar; then truncate with …. The
+                                // width limit prevents a long title from
+                                // inflating the minimum width of the window.
                                 set_wrap: true,
                                 set_wrap_mode: gtk::pango::WrapMode::WordChar,
                                 set_lines: 2,
                                 set_ellipsize: gtk::pango::EllipsizeMode::End,
                                 set_max_width_chars: 28,
                                 add_css_class: "caption",
-                                // Nichts ausgewählt → kein Text (Leiste wirkt inaktiv).
+                                // Nothing selected → no text (bar appears inactive).
                                 #[watch]
                                 set_label: model.now_playing.as_deref().unwrap_or(""),
                             },
                         },
 
-                        // Kapitelbezeichnung beim Überfahren der Seekleiste
-                        // (imperativ über den Hover-Controller gesteuert).
+                        // Chapter name when hovering over the seek bar
+                        // (controlled imperatively via the hover controller).
                         #[name = "chapter_label"]
                         gtk::Label {
                             set_xalign: 0.5,
@@ -1546,7 +1546,7 @@ impl Component for App {
                             add_css_class: "dim-label",
                         },
 
-                        // Seekleiste: Position / Regler / Gesamtdauer.
+                        // Seek bar: position / slider / total duration.
                         gtk::Box {
                             set_spacing: 6,
                             set_margin_start: 4,
@@ -1580,10 +1580,10 @@ impl Component for App {
                         },
 
                         gtk::CenterBox {
-                            // Links EQ + Zufall, mittig die Transport-Tasten. Die
-                            // mittige Gruppe ist symmetrisch (Zurück | Play | Vor),
-                            // damit Play/Zurück/Vor unabhängig von EQ/Zufall/
-                            // Warteschlange in der **absoluten Mitte** bleiben.
+                            // On the left EQ + shuffle, in the center the transport buttons. The
+                            // centered group is symmetric (back | play | next),
+                            // so that play/back/next stay in the **absolute center**
+                            // independently of EQ/shuffle/queue.
                             #[wrap(Some)]
                             set_start_widget = &gtk::Box {
                                 set_spacing: 6,
@@ -1597,8 +1597,8 @@ impl Component for App {
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::OpenCurrentEq,
                                 },
-                                // Zufall (nur ab 2 Titeln); links bei EQ, damit die
-                                // Transport-Mitte nicht verschoben wird.
+                                // Shuffle (only from 2 tracks); on the left near EQ, so that
+                                // the transport center is not shifted.
                                 gtk::ToggleButton {
                                     set_icon_name: "media-playlist-shuffle-symbolic",
                                     set_tooltip_text: Some(&gettext("Shuffle")),
@@ -1622,7 +1622,7 @@ impl Component for App {
                                     set_icon_name: "media-skip-backward-symbolic",
                                     set_tooltip_text: Some(&gettext("Back")),
                                     add_css_class: "flat",
-                                    // Nichts ausgewählt → ausgegraut.
+                                    // Nothing selected → grayed out.
                                     #[watch]
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::Prev,
@@ -1636,17 +1636,17 @@ impl Component for App {
                                     },
                                     set_tooltip_text: Some(&gettext("Play/Pause")),
                                     add_css_class: "circular",
-                                    // Größer als die übrigen Transport-Tasten
-                                    // (Größe via CSS-Klasse, siehe `init`).
+                                    // Larger than the other transport buttons
+                                    // (size via CSS class, see `init`).
                                     add_css_class: "emilia-bigplay",
                                     set_valign: gtk::Align::Center,
                                     #[watch]
                                     set_sensitive: model.now_playing.is_some(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
-                                // Aufnahme-Knopf direkt neben Play/Pause, etwas tiefer
-                                // (~10px). Roter Punkt; blinkt während der Aufnahme.
-                                // Nur sichtbar, wenn ein Sender läuft und der Puffer an ist.
+                                // Record button right next to play/pause, a bit lower
+                                // (~10px). Red dot; blinks during recording.
+                                // Only visible when a station is running and the buffer is on.
                                 gtk::Button {
                                     set_icon_name: "media-record-symbolic",
                                     set_tooltip_text: Some(&gettext("Record")),
@@ -1672,14 +1672,14 @@ impl Component for App {
                                     connect_clicked => Msg::Next,
                                 },
                             },
-                            // Rechts unten: Wiederholen (mittig zwischen „Vor" und der
-                            // Warteschlange) und die Warteschlange.
+                            // Bottom right: repeat (centered between "next" and the
+                            // queue) and the queue.
                             #[wrap(Some)]
                             set_end_widget = &gtk::Box {
                                 set_spacing: 18,
                                 set_valign: gtk::Align::Center,
-                                // Wiederholen (Loop): am Ende der Warteschlange bzw.
-                                // des Einzeltitels von vorn. Aktiv = weiß, aus = grau.
+                                // Repeat (loop): at the end of the queue or
+                                // of the single track, start over. Active = white, off = gray.
                                 gtk::ToggleButton {
                                     set_icon_name: "media-playlist-repeat-symbolic",
                                     set_tooltip_text: Some(&gettext("Repeat")),
@@ -1718,15 +1718,15 @@ impl Component for App {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        // Eigene App-Icons (z. B. das Konzert-Mikro) auffindbar machen.
+        // Make custom app icons (e.g. the concert mic) discoverable.
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::IconTheme::for_display(&display)
                 .add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons"));
-            // App-Icon (logo.png unter dem App-Id-Namen) für Fenster/Taskleiste –
-            // greift auch ohne installierte .desktop-Datei (z. B. `cargo run`).
+            // App icon (logo.png under the app id name) for window/taskbar –
+            // takes effect even without an installed .desktop file (e.g. `cargo run`).
             gtk::Window::set_default_icon_name("de.cais.Emilia");
 
-            // Cover/Fotos in Alben-/Interpreten-Liste ganz links (kein Einzug).
+            // Covers/photos in the album/artist list flush left (no indentation).
             let css = gtk::CssProvider::new();
             css.load_from_string(
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
@@ -1754,7 +1754,7 @@ impl Component for App {
 
         let library = Library::open().expect("Failed to open the library database");
         let player = Player::new().expect("Failed to initialize GStreamer");
-        // Farbschema (Standard: System) sofort anwenden.
+        // Apply the color scheme (default: system) immediately.
         apply_color_scheme(
             library
                 .get_setting("color_scheme")
@@ -1765,8 +1765,8 @@ impl Component for App {
         );
         let music_dir = library.get_setting("music_dir").ok().flatten();
         let root_dir = music_dir.as_ref().map(PathBuf::from);
-        // Zuletzt offenen Ordner wiederherstellen – nur wenn er noch existiert
-        // und unter dem Startordner liegt; sonst den Startordner selbst.
+        // Restore the most recently opened folder – only if it still exists
+        // and lies under the start folder; otherwise the start folder itself.
         let browse_dir = library
             .get_setting("browse_dir")
             .ok()
@@ -1775,10 +1775,10 @@ impl Component for App {
             .filter(|p| root_dir.as_ref().is_some_and(|r| p.starts_with(r)) && p.is_dir())
             .or_else(|| root_dir.clone());
 
-        // Zusätzliche Musikquellen (lokaler Zweitordner / Nextcloud) für die Tabs.
+        // Additional music sources (local secondary folder / Nextcloud) for the tabs.
         let sources = library.list_sources().unwrap_or_default();
 
-        // Zuletzt gespeicherte Fenstergröße / Maximierung.
+        // Most recently saved window size / maximization.
         let saved_w = library
             .get_setting("win_width")
             .ok()
@@ -1793,7 +1793,7 @@ impl Component for App {
             library.get_setting("win_maximized").ok().flatten().as_deref(),
             Some("1")
         );
-        // Konzerte-Optionen.
+        // Concert options.
         let concert_hint_dismissed = matches!(
             library
                 .get_setting("concert_hint_dismissed")
@@ -1802,8 +1802,8 @@ impl Component for App {
                 .as_deref(),
             Some("1")
         );
-        // Ausgeblendete Menüpunkte (kommasepariert). Alter Schlüssel
-        // „concerts_hidden=1" wird weiterhin berücksichtigt.
+        // Hidden menu items (comma-separated). The old key
+        // "concerts_hidden=1" is still honored.
         let mut hidden_sections: std::collections::HashSet<String> = library
             .get_setting("hidden_sections")
             .ok()
@@ -1822,9 +1822,9 @@ impl Component for App {
         ) {
             hidden_sections.insert("concerts".to_string());
         }
-        // Menü-Reihenfolge (kommaseparierte Stack-Namen). Unbekannte Namen werden
-        // verworfen, neue Bereiche in Standardreihenfolge hinten ergänzt – so
-        // tauchen künftige Menüpunkte automatisch auf.
+        // Menu order (comma-separated stack names). Unknown names are
+        // discarded, new sections appended at the end in default order – so
+        // future menu items appear automatically.
         let mut section_order: Vec<&'static str> = library
             .get_setting("section_order")
             .ok()
@@ -1842,25 +1842,25 @@ impl Component for App {
                 section_order.push(name);
             }
         }
-        // Automatischer Online-Abruf (Standard: an; nur „0" schaltet ihn aus).
+        // Automatic online fetch (default: on; only "0" turns it off).
         let auto_enrich = !matches!(
             library.get_setting("auto_enrich").ok().flatten().as_deref(),
             Some("0")
         );
-        // Wiederholen-Zustand (Standard: aus).
+        // Repeat state (default: off).
         let repeat_on = matches!(
             library.get_setting("repeat").ok().flatten().as_deref(),
             Some("1")
         );
-        // Anzeigesprache (Standard: System-Locale). Wirksam wurde sie bereits
-        // beim Start in `main` über `i18n::init`; hier nur für die Anzeige im
-        // Einstellungs-Umschalter.
+        // Display language (default: system locale). It already took effect
+        // at startup in `main` via `i18n::init`; here only for the display in
+        // the settings switcher.
         let ui_language = library
             .get_setting("ui_language")
             .ok()
             .flatten()
             .unwrap_or_else(|| "system".to_string());
-        // Galerie-Ansicht (Standard: aus) und Kacheln/Reihe (Standard: 3, 2–8).
+        // Gallery view (default: off) and tiles/row (default: 3, 2–8).
         let gallery_view = matches!(
             library.get_setting("gallery_view").ok().flatten().as_deref(),
             Some("1")
@@ -1872,7 +1872,7 @@ impl Component for App {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(3)
             .clamp(2, 8);
-        // Timeshift-Puffer für Sender in Minuten (Standard 5, 0 = aus, max. 60).
+        // Timeshift buffer for stations in minutes (default 5, 0 = off, max. 60).
         let recording_buffer_minutes = library
             .get_setting("recording_buffer_minutes")
             .ok()
@@ -1880,7 +1880,7 @@ impl Component for App {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(5)
             .min(60);
-        // Zuletzt offener Navigationspunkt (nur gültige Sektionsnamen zulassen).
+        // Most recently open navigation item (only allow valid section names).
         let saved_section = library
             .get_setting("active_section")
             .ok()
@@ -1913,8 +1913,8 @@ impl Component for App {
         let fanart_key = library.get_setting("fanart_key").ok().flatten();
         let active_output = crate::core::output::default_output().unwrap_or_default();
 
-        // Beim Titelende automatisch den nächsten Eintrag der Warteschlange spielen;
-        // Titel-Tags (bei Sendern: der laufende ICY-Titel) als `StreamTitle` melden.
+        // At the end of a track, automatically play the next entry of the queue;
+        // report title tags (for stations: the running ICY title) as `StreamTitle`.
         {
             let sender = sender.clone();
             player.connect_bus_events(
@@ -1926,8 +1926,8 @@ impl Component for App {
             );
         }
 
-        // Während der Wiedergabe regelmäßig die Resume-Position sichern, damit
-        // ein Hörspiel auch nach einem Absturz/Schließen dort weiterläuft.
+        // During playback, regularly save the resume position, so that
+        // an audio drama also resumes there after a crash/close.
         {
             let sender = sender.clone();
             gtk::glib::timeout_add_seconds_local(5, move || {
@@ -1936,7 +1936,7 @@ impl Component for App {
             });
         }
 
-        // Sekündlicher Tick für die Seekleiste (Position/Dauer aktualisieren).
+        // Per-second tick for the seek bar (update position/duration).
         {
             let sender = sender.clone();
             gtk::glib::timeout_add_seconds_local(1, move || {
@@ -1945,12 +1945,12 @@ impl Component for App {
             });
         }
 
-        // Leiser Hintergrund-Nachzug: füllt nach und nach fehlende Interpreten-Fotos
-        // (zuerst) und Online-Cover, ohne Zutun des Nutzers – damit auch ohne neuen
-        // Scan (zurückkehrende Nutzer, Funkloch beim ersten Lauf, fehlgeschlagene
-        // Einzelabrufe) die Übersicht aufgewertet wird. Der Worker ist rate-limitiert
-        // und überspringt bereits Geladenes/dauerhaft Erfolgloses; ist nichts offen,
-        // verpufft der Tick nahezu kostenlos (kein Netz, keine UI-Aktualisierung).
+        // Quiet background backfill: gradually fills in missing artist photos
+        // (first) and online covers, without user action – so that even without a new
+        // scan (returning users, no signal on the first run, failed
+        // individual fetches) the overview gets enriched. The worker is rate-limited
+        // and skips already loaded/permanently unsuccessful items; if nothing is pending,
+        // the tick fizzles out almost for free (no network, no UI update).
         {
             let sender = sender.clone();
             gtk::glib::timeout_add_seconds_local(AUTO_ENRICH_INTERVAL_SECS, move || {
@@ -1959,8 +1959,8 @@ impl Component for App {
             });
         }
 
-        // Erreichbarkeit der Nextcloud-Quellen einmal beim Start und danach
-        // regelmäßig prüfen (steuert den roten „Getrennt"-Hinweis).
+        // Check reachability of the Nextcloud sources once at startup and then
+        // regularly (controls the red "Disconnected" hint).
         {
             let sender = sender.clone();
             sender.input(Msg::CheckSources);
@@ -1970,8 +1970,8 @@ impl Component for App {
             });
         }
 
-        // MPRIS-Dienst starten: Befehle vom Sperrbildschirm/von Medientasten
-        // werden als Msg::Mpris in die Komponente eingespeist.
+        // Start the MPRIS service: commands from the lock screen/from media keys
+        // are fed into the component as Msg::Mpris.
         let mpris = crate::core::mpris::Mpris::start({
             let sender = sender.clone();
             move |cmd| sender.input(Msg::Mpris(cmd))
@@ -2109,9 +2109,9 @@ impl Component for App {
             playing_remote: false,
         };
 
-        // Warteschlange vom letzten Mal wiederherstellen (nur noch vorhandene
-        // Dateien). Es wird **nicht** automatisch abgespielt – der Titel steht
-        // bereit im Mini-Player und startet beim Druck auf „Play".
+        // Restore the queue from last time (only still existing
+        // files). It is **not** played automatically – the track sits
+        // ready in the mini player and starts when "Play" is pressed.
         let saved_pos: usize = model
             .library
             .get_setting("queue_pos")
@@ -2159,8 +2159,8 @@ impl Component for App {
         model.reload_streams(&sender);
         model.reload_recordings(&sender);
         model.refresh_stats(&sender);
-        // Podcast-Feed-Bilder einmalig im Hintergrund cachen, dann die Liste neu
-        // aufbauen, damit die Cover erscheinen (kein UI-Block beim Start).
+        // Cache the podcast feed images once in the background, then rebuild
+        // the list so that the covers appear (no UI block at startup).
         sender.spawn_oneshot_command(|| {
             if let Ok(lib) = Library::open() {
                 for (_, _, image, _) in lib.podcasts().unwrap_or_default() {
@@ -2171,7 +2171,7 @@ impl Component for App {
             }
             Cmd::ReloadPodcasts
         });
-        // Genauso die Sender-Logos einmalig im Hintergrund cachen.
+        // Likewise cache the station logos once in the background.
         sender.spawn_oneshot_command(|| {
             if let Ok(lib) = Library::open() {
                 for st in lib.streams().unwrap_or_default() {
@@ -2182,8 +2182,8 @@ impl Component for App {
             }
             Cmd::ReloadStreams
         });
-        // Bibliothek beim Start automatisch einlesen und – bei WLAN/LAN und
-        // aktiviertem Schalter – fehlende Cover/Metadaten im Hintergrund nachladen.
+        // Automatically read the library at startup and – on Wi-Fi/LAN and
+        // with the switch enabled – fetch missing covers/metadata in the background.
         model.start_scan(&sender, true);
 
         let entries_box = model.entries.widget();
@@ -2203,10 +2203,10 @@ impl Component for App {
         model.source_tabs = widgets.source_tabs.clone();
         model.rebuild_source_tabs();
 
-        // Hover über die Seekleiste → temporär das überfahrene Kapitel unter dem
-        // Titel anzeigen; beim Verlassen zurück auf das aktuelle Kapitel (an der
-        // Wiedergabeposition). Aktualisiert nur das Label (kein View-Neuaufbau).
-        // Eine kleine Helferfunktion setzt das Label aus einem Zeitwert.
+        // Hover over the seek bar → temporarily show the hovered chapter below the
+        // title; on leaving, back to the current chapter (at the
+        // playback position). Updates only the label (no view rebuild).
+        // A small helper function sets the label from a time value.
         fn show_chapter_at(
             label: &gtk::Label,
             chapters: &std::cell::RefCell<Vec<(i64, String)>>,
@@ -2253,16 +2253,16 @@ impl Component for App {
             }
             motion.connect_leave(move |_| {
                 hovering.set(false);
-                // Zurück auf das Kapitel an der aktuellen Wiedergabeposition.
+                // Back to the chapter at the current playback position.
                 let pos = scale.adjustment().value() as i64;
                 show_chapter_at(&label, &chapters, pos);
             });
             widgets.seek_scale.add_controller(motion);
         }
 
-        // Seekleiste: Ziehen/Klicken springt im laufenden Titel an die Position.
-        // `change-value` feuert nur bei Nutzer-Interaktion (nicht beim
-        // programmatischen `set_value` des Ticks), darum gibt es kein Zerren.
+        // Seek bar: dragging/clicking jumps to the position in the running track.
+        // `change-value` fires only on user interaction (not on the
+        // programmatic `set_value` of the tick), so there is no tug-of-war.
         {
             let sender = sender.clone();
             widgets.seek_scale.connect_change_value(move |_, _, value| {
@@ -2271,14 +2271,14 @@ impl Component for App {
             });
         }
 
-        // Scrollposition der Übersicht über Navigation hinweg erhalten:
-        // `adw::NavigationView` setzt die Position beim Wieder-Einblenden auf 0
-        // zurück. Daher beim Zurückkehren zur Wurzelseite den gemerkten Wert
-        // wiederherstellen (kurz verzögert, nach dem Neu-Layout).
+        // Preserve the scroll position of the overview across navigation:
+        // `adw::NavigationView` resets the position to 0 when shown again.
+        // Therefore, when returning to the root page, restore the remembered value
+        // (slightly delayed, after the re-layout).
         {
             let saved = model.overview_scroll.clone();
             widgets.nav_view.connect_popped(move |nav, _page| {
-                // Nur wenn wir zur Wurzel-Übersicht zurückkehren.
+                // Only when we return to the root overview.
                 let is_root = nav
                     .visible_page()
                     .and_then(|p| p.tag())
@@ -2287,9 +2287,9 @@ impl Component for App {
                     return;
                 }
                 if let Some((sc, value)) = saved.borrow().clone() {
-                    // Kurz verzögert wiederherstellen (erst nach dem Neu-Layout, das
-                    // den Scroller sonst auf 0 zurücksetzt); zweiter Versuch als
-                    // Absicherung gegen Timing-Schwankungen.
+                    // Restore with a short delay (only after the re-layout, which
+                    // otherwise resets the scroller to 0); second attempt as
+                    // a safeguard against timing fluctuations.
                     for delay in [50u64, 250] {
                         let sc = sc.clone();
                         gtk::glib::timeout_add_local_once(
@@ -2301,8 +2301,8 @@ impl Component for App {
             });
         }
 
-        // Adaptiv: nur bei mobiler (schmaler) Breite Seitenleiste einklappen und
-        // Top-Navi zeigen. Auf dem Desktop bleibt initial die linke Seitenleiste.
+        // Adaptive: only at mobile (narrow) width collapse the sidebar and
+        // show the top nav. On the desktop the left sidebar remains initially.
         let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
             adw::BreakpointConditionLengthType::MaxWidth,
             550.0,
@@ -2311,15 +2311,15 @@ impl Component for App {
         let yes = true.to_value();
         breakpoint.add_setter(&widgets.split, "collapsed", Some(&yes));
         breakpoint.add_setter(&widgets.top_nav, "visible", Some(&yes));
-        // Einstellungen oben nur im schmalen Modus zeigen (Desktop: Seitenleiste).
+        // Show settings at the top only in narrow mode (desktop: sidebar).
         breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
-        // Der Desktop-Abstand zwischen Titelleiste und Inhalt entfällt im schmalen Modus.
+        // The desktop spacing between title bar and content is dropped in narrow mode.
         breakpoint.add_setter(&widgets.content_overlay, "margin-top", Some(&0i32.to_value()));
         root.add_breakpoint(breakpoint);
 
-        // Icon-only Navigation (Seitenleiste + oben) in der **gespeicherten
-        // Reihenfolge** erzeugen und an den Stack koppeln. Alle Schaltflächen
-        // werden erzeugt; ausgeblendete Menüpunkte sind nur unsichtbar.
+        // Create the icon-only navigation (sidebar + top) in the **saved
+        // order** and couple it to the stack. All buttons
+        // are created; hidden menu items are merely invisible.
         model.sidebar_nav = widgets.sidebar_nav.clone();
         model.top_nav = widgets.top_nav.clone();
         let mut nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)> = Vec::new();
@@ -2335,11 +2335,11 @@ impl Component for App {
                 let btn = gtk::ToggleButton::builder().build();
                 btn.set_visible(!model.hidden_sections.contains(name));
                 btn.add_css_class("flat");
-                // Aktiven Menüpunkt am Icon blau hervorheben (CSS `:checked`).
+                // Highlight the active menu item blue on the icon (CSS `:checked`).
                 btn.add_css_class("emilia-nav-btn");
                 if is_sidebar {
-                    // Desktop-Seitenleiste: Icon **mit Beschriftung**. Etwas
-                    // größeres Icon (gut sichtbar, nie kleiner als der Standard).
+                    // Desktop sidebar: icon **with label**. A slightly
+                    // larger icon (clearly visible, never smaller than the default).
                     let inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
                     let img = gtk::Image::from_icon_name(icon);
                     img.set_pixel_size(22);
@@ -2348,8 +2348,8 @@ impl Component for App {
                     btn.set_child(Some(&inner));
                     btn.set_hexpand(true);
                 } else {
-                    // Mobile Top-Leiste: nur Icon, deutlich größer (≈1,6×) als die
-                    // Standardgröße – nie kleiner als jetzt.
+                    // Mobile top bar: icon only, noticeably larger (≈1.6×) than the
+                    // default size – never smaller than now.
                     let img = gtk::Image::from_icon_name(icon);
                     img.set_pixel_size(26);
                     btn.set_child(Some(&img));
@@ -2365,7 +2365,7 @@ impl Component for App {
                     btn.connect_clicked(move |b| {
                         if b.is_active() {
                             stack.set_visible_child_name(name);
-                            // Klick auf den Menüpunkt = zum Anfang des Bereichs.
+                            // Click on the menu item = to the start of the section.
                             if name == "files" {
                                 sender.input(Msg::FilesGoStart);
                             }
@@ -2378,9 +2378,9 @@ impl Component for App {
         }
         model.nav_buttons = nav_buttons.clone();
 
-        // Desktop-Seitenleiste: „Einstellungen" ganz unten – Aufbau/Design wie
-        // die Menüpunkte darüber (Icon + Beschriftung). Ein dehnbarer Zwischen-
-        // raum schiebt den Knopf ans untere Ende.
+        // Desktop sidebar: "Settings" at the very bottom – layout/design like
+        // the menu items above (icon + label). A stretchable spacer
+        // pushes the button to the bottom end.
         let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         spacer.set_vexpand(true);
         widgets.sidebar_nav.append(&spacer);
@@ -2397,8 +2397,8 @@ impl Component for App {
         }
         widgets.sidebar_nav.append(&settings_btn);
 
-        // Aktiven Button passend zur sichtbaren Stack-Seite setzen und den Namen
-        // des Menüpunkts dezent als Untertitel der Kopfzeile anzeigen.
+        // Set the active button to match the visible stack page and show the name
+        // of the menu item discreetly as the subtitle of the header.
         let win_title = widgets.win_title.clone();
         let sync_active =
             move |stack: &adw::ViewStack, buttons: &[(&'static str, bool, gtk::ToggleButton)]| {
@@ -2413,9 +2413,9 @@ impl Component for App {
                         .unwrap_or_default(),
                 );
             };
-        // Zuletzt offenen Navigationspunkt wiederherstellen – aber keinen
-        // ausgeblendeten. Notfalls auf den ersten sichtbaren Menüpunkt (in der
-        // gewählten Reihenfolge) fallen.
+        // Restore the most recently open navigation item – but not a
+        // hidden one. As a fallback, fall to the first visible menu item (in the
+        // chosen order).
         let restore = saved_section
             .as_deref()
             .filter(|s| !model.hidden_sections.contains(*s))
@@ -2436,14 +2436,14 @@ impl Component for App {
                 .view_stack
                 .connect_visible_child_notify(move |stack| {
                     sync_active(stack, &nav_buttons);
-                    // Statistik beim Öffnen des Bereichs frisch berechnen.
+                    // Recompute the statistics fresh when opening the section.
                     if stack.visible_child_name().as_deref() == Some("stats") {
                         sender.input(Msg::RefreshStats);
                     }
                 });
         }
 
-        // Wisch-Geste auf der ganzen Dateisystem-Seite: nach rechts = zurück.
+        // Swipe gesture on the whole file system page: to the right = back.
         let swipe = gtk::GestureSwipe::new();
         swipe.set_touch_only(false);
         {
@@ -2456,7 +2456,7 @@ impl Component for App {
         }
         widgets.files_page.add_controller(swipe);
 
-        // Fenstergröße wiederherstellen und beim Schließen speichern.
+        // Restore the window size and save it on close.
         if let (Some(w), Some(h)) = (saved_w, saved_h) {
             root.set_default_size(w, h);
         }
@@ -2467,14 +2467,14 @@ impl Component for App {
         let close_resume = model.close_resume.clone();
         let close_session = model.close_session.clone();
         root.connect_close_request(move |win| {
-            // Letzte Hörposition sichern (deckt den Spalt zum 5-s-Speichern).
+            // Save the last listening position (covers the gap to the 5-s save).
             if let Some((path, pos, dur)) = close_resume.borrow().clone() {
                 if let Ok(lib) = Library::open() {
                     let _ = lib.set_resume_path(&path, guarded_resume(pos, dur));
                 }
             }
-            // Laufende Hör-Sitzung als letztes Ereignis sichern (sonst ginge der
-            // gerade laufende Titel bei hartem Beenden verloren).
+            // Save the running listening session as the last event (otherwise the
+            // currently playing track would be lost on a hard exit).
             if let Some((path, started_at, played_ms, dur)) = close_session.borrow().clone() {
                 if played_ms > 0 {
                     if let Ok(lib) = Library::open() {
@@ -2502,7 +2502,7 @@ impl Component for App {
                 let Some(entry) = entry else {
                     return;
                 };
-                // Entfernte Einträge (Nextcloud) laufen über einen eigenen Pfad.
+                // Remote entries (Nextcloud) go through their own path.
                 if let crate::ui::fs_row::FsEntry::RemoteDir { rel_path, .. } = &entry {
                     self.remote_browse = Some(rel_path.clone());
                     self.load_dir(&sender);
@@ -2524,8 +2524,8 @@ impl Component for App {
                         let Some(path) = entry.path().cloned() else {
                             return;
                         };
-                        // Aktives Lied erneut antippen → Wiedergabe umschalten
-                        // (Pause/Weiter), statt neu zu starten.
+                        // Tapping the active song again → toggle playback
+                        // (pause/resume), instead of restarting.
                         let is_active = self.now_playing.is_some()
                             && self.queue.get(self.queue_pos) == Some(&path);
                         if is_active {
@@ -2539,9 +2539,9 @@ impl Component for App {
                             self.mpris.set_playing(self.playing);
                             self.refresh_queue_icons();
                         } else {
-                            // Läuft gerade eine echte Warteschlange? Dann das
-                            // Einzellied dazwischenschieben und die Warteschlange
-                            // danach an ihrer Stelle fortsetzen (sie bleibt erhalten).
+                            // Is a real queue currently running? Then slip the
+                            // single song in between and resume the queue
+                            // afterwards at its spot (it stays intact).
                             if self.playing
                                 && self.queue.len() > 1
                                 && self.interrupted_queue.is_none()
@@ -2558,8 +2558,8 @@ impl Component for App {
                 }
             }
             Msg::ToggleQueue(index) => {
-                // Entfernte Dateien wandern (noch) nicht in die lokale Queue –
-                // `path()` ist dort `None`, der Doppelklick bleibt wirkungslos.
+                // Remote files do not (yet) go into the local queue –
+                // `path()` is `None` there, the double-click stays without effect.
                 let path = self
                     .entries
                     .guard()
@@ -2600,7 +2600,7 @@ impl Component for App {
                     .map(|c| c.meta.clone())
                     .or_else(|| self.artists_overview.get(index).cloned());
                 if let Some(meta) = meta {
-                    // Foto des geöffneten Interpreten vorrangig nachladen.
+                    // Fetch the photo of the opened artist with priority.
                     self.fetch_focus_artist(&sender, &meta.name);
                     self.context_target = Some(CtxTarget::Artist(meta));
                     self.open_context_menu(root, &sender);
@@ -2614,7 +2614,7 @@ impl Component for App {
                     .map(|c| c.meta.clone())
                     .or_else(|| self.albums_overview.get(index).cloned());
                 if let Some(meta) = meta {
-                    // Cover des geöffneten Albums vorrangig nachladen.
+                    // Fetch the cover of the opened album with priority.
                     self.fetch_focus_album(&sender, &meta.artist, &meta.album);
                     self.context_target = Some(CtxTarget::Album(meta));
                     self.open_context_menu(root, &sender);
@@ -2622,7 +2622,7 @@ impl Component for App {
             }
             Msg::ShowAlbumDetailFor { artist, album } => {
                 self.fetch_focus_album(&sender, &artist, &album);
-                // Album-Metadaten laden (für Cover/Jahr), sonst leeren Eintrag.
+                // Load album metadata (for cover/year), otherwise an empty entry.
                 let meta = self
                     .library
                     .get_album_meta(&artist, &album)
@@ -2638,7 +2638,7 @@ impl Component for App {
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowAlbumTracks(index) => {
-                // Alben-Übersicht: nach Albumname öffnen (Interpret egal).
+                // Album overview: open by album name (artist irrelevant).
                 let album = self
                     .albums
                     .guard()
@@ -2663,7 +2663,7 @@ impl Component for App {
                     .map(|c| c.meta.clone())
                     .or_else(|| self.artists_overview.get(index).cloned());
                 if let Some(meta) = meta {
-                    // Foto des geöffneten Interpreten vorrangig nachladen.
+                    // Fetch the photo of the opened artist with priority.
                     self.fetch_focus_artist(&sender, &meta.name);
                     self.open_artist_tracks(&sender, &meta);
                 }
@@ -2674,7 +2674,7 @@ impl Component for App {
             }
             Msg::OpenEntryTracks { scope, key } => match scope.as_str() {
                 "album" => {
-                    // key = „Interpret\u{1}Album"
+                    // key = "Artist\u{1}Album"
                     let mut parts = key.splitn(2, '\u{1}');
                     let artist = parts.next().unwrap_or("").to_string();
                     let album = parts.next().unwrap_or("").to_string();
@@ -2699,8 +2699,8 @@ impl Component for App {
                 }
             }
             Msg::PlayArtistTrack { name, path } => {
-                // Queue = alle Titel des Interpreten (album-übergreifend),
-                // Start beim getippten Titel.
+                // Queue = all tracks of the artist (across albums),
+                // start at the tapped track.
                 let files: Vec<PathBuf> = self
                     .artist_albums(&name)
                     .into_iter()
@@ -2713,14 +2713,14 @@ impl Component for App {
                     self.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    // Zur Hauptseite zurück, damit der Mini-Player sichtbar ist.
+                    // Back to the main page, so that the mini player is visible.
                     self.nav_view.pop_to_tag("main");
                 }
             }
             Msg::PlayAlbumTrack { artist, album, path } => {
-                // Queue = ganzes Album in Track-Reihenfolge, Start beim getippten.
-                // `artist` ist hier der (Seiten-)Interpret – dieselbe Titelmenge
-                // wie auf der Album-Unterseite.
+                // Queue = whole album in track order, start at the tapped one.
+                // `artist` here is the (page) artist – the same set of tracks
+                // as on the album subpage.
                 let files: Vec<PathBuf> = self
                     .album_tracks_for_artist(&artist, &album)
                     .into_iter()
@@ -2736,8 +2736,8 @@ impl Component for App {
                 }
             }
             Msg::PlayAlbumByNameTrack { album, path } => {
-                // Queue = alle Titel des Albumnamens (interpretenübergreifend),
-                // Start beim getippten – passend zur Alben-Übersicht.
+                // Queue = all tracks of the album name (across artists),
+                // start at the tapped one – matching the album overview.
                 let files: Vec<PathBuf> = self
                     .album_tracks_by_name(&album)
                     .into_iter()
@@ -2753,7 +2753,7 @@ impl Component for App {
                 }
             }
             Msg::PlayAlbum { artist, album } => {
-                // Ganzes Album ab Titel 1 in Track-Reihenfolge (Shuffle aus).
+                // Whole album from track 1 in track order (shuffle off).
                 let files: Vec<PathBuf> = self
                     .album_tracks_for_artist(&artist, &album)
                     .into_iter()
@@ -2780,8 +2780,8 @@ impl Component for App {
                 }
             }
             Msg::CtxPlayAlbum => {
-                // Album immer in Track-Reihenfolge ab Lied 1, ohne Zufall; am Ende
-                // der Queue stoppt `play_next` von selbst (kein weiteres Lied).
+                // Album always in track order from song 1, without shuffle; at the end
+                // of the queue `play_next` stops by itself (no further song).
                 if let Some((artist, album)) = self.ctx_album() {
                     let files = self.album_files(&artist, &album);
                     if !files.is_empty() {
@@ -2794,8 +2794,8 @@ impl Component for App {
                 }
             }
             Msg::CtxPlayArtist { newest_first } => {
-                // Alben nach Jahr (älteste/neueste zuerst), je Album top-down,
-                // ohne Zufall.
+                // Albums by year (oldest/newest first), each album top-down,
+                // without shuffle.
                 if let Some(name) = self.ctx_artist() {
                     let files = self.artist_files_ordered(&name, newest_first);
                     if !files.is_empty() {
@@ -2882,7 +2882,7 @@ impl Component for App {
             Msg::PlaylistRemoveTrack { id, path } => {
                 let _ = self.library.remove_from_playlist(id, &path);
                 self.reload_playlists(&sender);
-                // Unterseite neu aufbauen (alte ersetzen).
+                // Rebuild the subpage (replace the old one).
                 self.nav_view.pop();
                 if let Some((_, name, _)) =
                     self.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
@@ -2906,9 +2906,9 @@ impl Component for App {
                     sender.spawn_command(move |out| {
                         let results =
                             crate::core::podcast::search_podcasts(&term).unwrap_or_default();
-                        // Treffer sofort zeigen (noch ohne Cover) …
+                        // Show hits immediately (still without covers) …
                         let _ = out.send(Cmd::PodcastSearchResults(results.clone()));
-                        // … und die Cover-Thumbnails danach im Hintergrund nachladen.
+                        // … and fetch the cover thumbnails afterwards in the background.
                         for r in &results {
                             if let Some(img) = r.image_url.as_deref() {
                                 crate::core::online::cache_podcast_image(img);
@@ -2957,7 +2957,7 @@ impl Component for App {
                 self.reload_podcasts(&sender);
                 self.toast(&gettext("Podcast removed"));
             }
-            // --- Streaming (Internet-Radio) ---
+            // --- Streaming (internet radio) ---
             Msg::StreamAdd => self.open_add_stream_dialog(root, &sender),
             Msg::StreamSearch(term) => {
                 let term = term.trim().to_string();
@@ -2966,9 +2966,9 @@ impl Component for App {
                     sender.spawn_command(move |out| {
                         let results =
                             crate::core::streaming::search_stations(&term).unwrap_or_default();
-                        // Treffer sofort zeigen (noch ohne Logos) …
+                        // Show hits immediately (still without logos) …
                         let _ = out.send(Cmd::StreamSearchResults(results.clone()));
-                        // … und die Logos danach im Hintergrund nachladen.
+                        // … and fetch the logos afterwards in the background.
                         for r in &results {
                             if let Some(img) = r.favicon.as_deref() {
                                 crate::core::online::cache_station_image(img);
@@ -2997,7 +2997,7 @@ impl Component for App {
             }
             Msg::ToggleStream(id) => {
                 if self.playing_stream == Some(id) {
-                    // Läuft schon → Pause/Weiter umschalten (Puffer läuft weiter).
+                    // Already running → toggle pause/resume (buffer keeps running).
                     if self.playing {
                         self.player.pause();
                         self.playing = false;
@@ -3013,12 +3013,12 @@ impl Component for App {
             }
             Msg::StreamRecordToggle(id) => {
                 if self.record_state.as_ref().map(|r| r.stream_id) == Some(id) {
-                    // Läuft → stoppen.
+                    // Running → stop.
                     sender.input(Msg::RecordStop);
                 } else if self.recording_buffer_minutes == 0 {
                     self.toast(&gettext("Enable the recording buffer in the settings first"));
                 } else {
-                    // Sender (mit Puffer) sicherstellen, dann Daueraufnahme starten.
+                    // Ensure the station (with buffer), then start the continuous recording.
                     if self.playing_stream != Some(id) {
                         self.play_stream(id);
                     }
@@ -3032,9 +3032,9 @@ impl Component for App {
                 }
             }
             Msg::StreamTitle(title) => {
-                // Nur relevant, solange ein Sender läuft (Datei-/Episoden-Tags
-                // werden ignoriert). Zeigt „Sender — Titel" im Mini-Player und
-                // meldet den Titel an Sperrbildschirm/Medientasten.
+                // Only relevant while a station is running (file/episode tags
+                // are ignored). Shows "Station — Title" in the mini player and
+                // reports the title to the lock screen/media keys.
                 let title = title.trim().to_string();
                 if let Some(id) = self.playing_stream {
                     if !title.is_empty() && self.stream_title.as_deref() != Some(title.as_str()) {
@@ -3067,7 +3067,7 @@ impl Component for App {
                 self.reload_streams(&sender);
                 self.toast(&gettext("Station removed"));
             }
-            // --- Aufnahme (Timeshift) ---
+            // --- Recording (timeshift) ---
             Msg::RecordStop => {
                 if self.record_state.take().is_some() {
                     self.toast(&gettext("Recording stopped"));
@@ -3117,7 +3117,7 @@ impl Component for App {
                             false,
                         );
                         self.reload_recordings(&sender);
-                        // Cover + Album online nachschlagen und einbetten (Hintergrund).
+                        // Look up cover + album online and embed it (background).
                         let (a, ti) = (artist.clone(), t.clone());
                         sender.spawn_command(move |_out| {
                             let aref = a.as_deref().unwrap_or("");
@@ -3164,7 +3164,7 @@ impl Component for App {
             }
             Msg::ToggleEpisode { url, title } => {
                 if self.playing_episode_url.as_deref() == Some(url.as_str()) {
-                    // Bereits geladene Episode → Pause/Weiter umschalten.
+                    // Already loaded episode → toggle pause/resume.
                     if self.playing {
                         self.player.pause();
                     } else {
@@ -3174,19 +3174,19 @@ impl Component for App {
                     self.mpris.set_playing(self.playing);
                     self.refresh_queue_icons();
                 } else {
-                    // Andere/keine Episode → diese starten.
+                    // Other/no episode → start this one.
                     self.play_episode(&url, &title);
                 }
             }
             Msg::EpisodeSeekTo { url, title, ms } => {
                 if self.playing_episode_url.as_deref() == Some(url.as_str()) {
-                    // Läuft schon → direkt an die Stelle springen.
+                    // Already running → jump directly to the spot.
                     if self.player.seek_ms(ms).is_ok() {
                         self.position_ms = ms;
                         self.save_episode_progress();
                     }
                 } else {
-                    // Sonst die Episode an der Sprungmarke starten.
+                    // Otherwise start the episode at the jump mark.
                     self.play_episode_at(&url, &title, ms);
                 }
             }
@@ -3213,29 +3213,29 @@ impl Component for App {
             Msg::SyncDialogClosed => self.teardown_sync(),
             Msg::TrackFinished => {
                 if self.playing_remote {
-                    // Entfernte Reihe: zum nächsten Titel weiterschalten (bzw. am
-                    // Ende stoppen). Läuft getrennt von der lokalen Warteschlange.
+                    // Remote queue: advance to the next track (or stop at the
+                    // end). Runs separately from the local queue.
                     self.remote_next();
                 } else if self.playing_episode_url.is_some() && self.queue.is_empty() {
-                    // Eine gestreamte Episode ist zu Ende (keine Warteschlange
-                    // dahinter): Wiedergabestand zurücksetzen, Markierung lösen.
+                    // A streamed episode has ended (no queue
+                    // behind it): reset the playback state, clear the marking.
                     self.playing = false;
                     self.playing_episode_url = None;
                     self.mpris.set_playing(false);
                     self.refresh_queue_icons();
                 } else {
-                    // Bis zum Ende gehört → Hör-Sitzung als „durchgehört" abschließen,
-                    // bevor das nachfolgende play_current eine neue Sitzung startet.
+                    // Listened to the end → finalize the listening session as "fully listened",
+                    // before the subsequent play_current starts a new session.
                     self.finalize_play_session(true);
-                    // Titel zu Ende gehört → Resume vergessen, nächstes Mal von vorn.
-                    // `take()` verhindert, dass play_current die (End-)Position erneut
-                    // als Resume-Punkt speichert.
+                    // Track finished → forget resume, next time from the start.
+                    // `take()` prevents play_current from saving the (end) position again
+                    // as a resume point.
                     if let Some(path) = self.playing_path.take() {
                         let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
                     }
                     *self.close_resume.borrow_mut() = None;
-                    // War ein Einzellied dazwischengeschoben, jetzt die unterbrochene
-                    // Warteschlange an ihrer Stelle fortsetzen.
+                    // If a single song was slipped in between, now resume the interrupted
+                    // queue at its spot.
                     if self.queue.len() == 1 && self.interrupted_queue.is_some() {
                         if let Some((q, pos)) = self.interrupted_queue.take() {
                             self.queue = q;
@@ -3243,8 +3243,8 @@ impl Component for App {
                             self.play_current();
                         }
                     } else {
-                        // Eine neue (mehrteilige) Wiedergabe verwirft eine evtl.
-                        // gemerkte Unterbrechung.
+                        // A new (multi-part) playback discards a possibly
+                        // remembered interruption.
                         self.interrupted_queue = None;
                         self.play_next();
                     }
@@ -3264,11 +3264,11 @@ impl Component for App {
                 }
             }
             Msg::Tick => {
-                // Laufende Timeshift-Aufnahme an den Songgrenzen fortschreiben.
+                // Advance the running timeshift recording at the song boundaries.
                 if self.record_state.is_some() {
                     self.drive_recording(&sender);
                 }
-                // Play/Pause- und Aufnahme-Icons der Senderzeilen abgleichen.
+                // Sync the play/pause and record icons of the station rows.
                 self.refresh_stream_icons();
                 if self.playing {
                     if let Some(pos) = self.player.position_ms() {
@@ -3277,20 +3277,20 @@ impl Component for App {
                     if let Some(dur) = self.player.duration_ms() {
                         self.track_duration_ms = dur;
                     }
-                    // Close-Schnappschuss mitführen.
+                    // Carry the close snapshot along.
                     if let Some(entry) = self.close_resume.borrow_mut().as_mut() {
                         entry.1 = self.position_ms;
                         entry.2 = self.track_duration_ms;
                     }
-                    // Resume-Position einer laufenden Podcast-Episode fortschreiben.
+                    // Advance the resume position of a running podcast episode.
                     if self.playing_episode_url.is_some() {
                         self.save_episode_progress();
                     }
-                    // Aktuelles Kapitel unter dem Titel mitführen (außer beim Hover).
+                    // Track the current chapter below the title (except while hovering).
                     self.update_current_chapter();
-                    // Gehörte Zeit der Statistik-Sitzung weiterzählen (Wanduhr, nur
-                    // während „Playing"; ~1 s je Tick). Die Dauer ggf. nachziehen,
-                    // falls sie beim Start noch nicht feststand.
+                    // Keep counting the listened time of the statistics session (wall clock, only
+                    // during "Playing"; ~1 s per tick). Backfill the duration if needed,
+                    // in case it was not yet known at the start.
                     let dur = self.track_duration_ms;
                     if let Some(s) = self.play_session.as_mut() {
                         s.played_ms += 1000;
@@ -3307,11 +3307,11 @@ impl Component for App {
                 }
             }
             Msg::AutoEnrichTick => {
-                // Leiser Nachzug fehlender Interpreten-Fotos & Online-Cover im
-                // Hintergrund (rate-limitiert im Worker). Nur, wenn gewünscht, ein
-                // Ordner gesetzt ist, gerade kein Lauf aktiv ist und Netz besteht.
-                // Läuft schon ein (voller) Abruf, greift die `enriching`-Sperre und
-                // dieser Tick verpufft – kein Aufstauen.
+                // Quiet backfill of missing artist photos & online covers in the
+                // background (rate-limited in the worker). Only if desired, a
+                // folder is set, no run is currently active and there is network.
+                // If a (full) fetch is already running, the `enriching` lock takes effect and
+                // this tick fizzles out – no pileup.
                 if self.auto_enrich
                     && !self.enriching
                     && self.music_dir.is_some()
@@ -3419,8 +3419,8 @@ impl Component for App {
             }
             Msg::ToggleShuffle => {
                 self.shuffle = !self.shuffle;
-                // Beim Einschalten eine frische Zufalls-Reihenfolge der ganzen
-                // Queue aufbauen (laufender Titel zuerst).
+                // When enabling, build a fresh random order of the whole
+                // queue (running track first).
                 if self.shuffle {
                     self.rebuild_shuffle_order();
                 }
@@ -3432,7 +3432,7 @@ impl Component for App {
                     .set_setting("repeat", if self.repeat { "1" } else { "0" });
             }
             Msg::NavUp => {
-                // Entfernte Quelle: ein rel-Segment nach oben.
+                // Remote source: one rel segment up.
                 if let Some(rel) = self.remote_browse.clone() {
                     if !rel.is_empty() {
                         let parent = match rel.rfind('/') {
@@ -3452,7 +3452,7 @@ impl Component for App {
                 }
             }
             Msg::FilesGoStart => {
-                // Entfernte Quelle: zurück an die Musikwurzel der Quelle.
+                // Remote source: back to the music root of the source.
                 if self.remote_browse.is_some() {
                     if self.remote_browse.as_deref() != Some("") {
                         self.remote_browse = Some(String::new());
@@ -3469,7 +3469,7 @@ impl Component for App {
             }
             Msg::Refresh => {
                 self.load_dir(&sender);
-                // „Neu einlesen" aktualisiert auch die Bibliothek (Interpreten/Alben).
+                // "Rescan" also updates the library (artists/albums).
                 self.start_scan(&sender, false);
             }
             Msg::OpenSettings => self.open_settings(root, &sender),
@@ -3488,7 +3488,7 @@ impl Component for App {
                     "Update started – it runs in the background. Please restart Emilia afterwards.",
                 ));
                 let sender2 = sender.clone();
-                // Über das Flatpak-Portal anstoßen (Hauptthread; Fortschritt via Signal).
+                // Trigger via the Flatpak portal (main thread; progress via signal).
                 if let Err(e) =
                     crate::core::update::install(move |res| sender2.input(Msg::FlatpakUpdateFinished(res)))
                 {
@@ -3520,8 +3520,8 @@ impl Component for App {
                         self.queue_pos -= 1;
                     }
                     if was_current {
-                        // Lief der entfernte Titel → den nun an dieser Stelle
-                        // stehenden spielen (oder stoppen, wenn leer).
+                        // If the removed track was playing → play the one now
+                        // at this spot (or stop if empty).
                         if self.queue.is_empty() {
                             self.player.stop();
                             self.playing = false;
@@ -3564,7 +3564,7 @@ impl Component for App {
                 if from < len && to < len && from != to {
                     let item = self.queue.remove(from);
                     self.queue.insert(to, item);
-                    // queue_pos so anpassen, dass derselbe Titel weiterläuft.
+                    // Adjust queue_pos so that the same track keeps playing.
                     let cur = self.queue_pos;
                     self.queue_pos = if cur == from {
                         to
@@ -3589,14 +3589,14 @@ impl Component for App {
                     tracing::error!("Failed to save music folder: {e}");
                 }
                 self.music_dir = Some(dir);
-                // Die Dateiansicht nur umrooten, wenn gerade der primäre Tab aktiv
-                // ist – auf einer Zusatzquelle bliebe der Nutzer sonst stehen.
+                // Only re-root the file view if the primary tab is currently active
+                // – on an additional source the user would otherwise be left stranded.
                 if self.active_source == ActiveSource::Primary {
                     self.root_dir = Some(path.clone());
                     self.browse_dir = Some(path);
                     self.load_dir(&sender);
                 }
-                // Neuen Ordner einlesen und (WLAN + Schalter) automatisch nachladen.
+                // Read the new folder and (Wi-Fi + switch) fetch automatically.
                 self.start_scan(&sender, true);
             }
             Msg::SelectSource(sel) => {
@@ -3606,7 +3606,7 @@ impl Component for App {
             }
             Msg::SourcesChanged => {
                 self.sources = self.library.list_sources().unwrap_or_default();
-                // Ist die aktive Quelle entfernt worden, zurück auf den primären Tab.
+                // If the active source was removed, back to the primary tab.
                 let gone = match &self.active_source {
                     ActiveSource::Primary => false,
                     ActiveSource::Source(id) => !self.sources.iter().any(|s| s.id == *id),
@@ -3615,11 +3615,11 @@ impl Component for App {
                     self.apply_source(ActiveSource::Primary, &sender);
                 }
                 self.rebuild_source_tabs();
-                // Indizierte Cloud-Titel können dazugekommen/entfernt worden sein.
+                // Indexed cloud tracks may have been added/removed.
                 self.reload_albums();
                 self.reload_artists();
-                // „Verbunden"-Liste der Nextcloud-Einstellungsseite auffrischen,
-                // falls der Einstellungsdialog gerade offen ist.
+                // Refresh the "Connected" list of the Nextcloud settings page,
+                // in case the settings dialog is currently open.
                 let nc_list = self.settings_nc_list.borrow().clone();
                 if let Some(list) = nc_list {
                     if list.root().is_some() {
@@ -3654,13 +3654,13 @@ impl Component for App {
             Msg::AddCloudSource => self.open_cloud_dialog(root, &sender),
             Msg::CloudManualToggle(expanded) => {
                 if expanded {
-                    // Manuell aufgeklappt → Kamera anhalten und ausblenden.
+                    // Manual expanded → pause the camera and hide it.
                     self.cloud.scanner = None;
                     if let Some(cam) = &self.cloud.cam {
                         cam.set_visible(false);
                     }
                 } else {
-                    // Wieder zugeklappt → Kamera erneut starten.
+                    // Collapsed again → restart the camera.
                     self.start_cloud_scan(&sender);
                 }
             }
@@ -3698,7 +3698,7 @@ impl Component for App {
                     .ok()
                     .flatten()
                     .unwrap_or_else(|| crate::model::AlbumMeta::pending(&artist, &album));
-                // Nur bei tatsächlicher Änderung speichern + Ansichten auffrischen.
+                // Save + refresh the views only on an actual change.
                 if meta.cover_path.as_deref() != Some(path.as_str()) {
                     meta.cover_path = Some(path);
                     let _ = self.library.upsert_album_meta(&meta);
@@ -3734,8 +3734,8 @@ impl Component for App {
                 if lang != self.ui_language {
                     self.ui_language = lang.clone();
                     let _ = self.library.set_setting("ui_language", &lang);
-                    // gettext liest die Sprache nur beim Start; daher die App
-                    // neu starten, damit die ganze Oberfläche umschaltet.
+                    // gettext reads the language only at startup; therefore restart
+                    // the app so that the whole interface switches over.
                     if let Ok(exe) = std::env::current_exe() {
                         let _ = std::process::Command::new(exe).spawn();
                     }
@@ -3766,9 +3766,9 @@ impl Component for App {
                 if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
                     tracing::error!("Failed to save properties: {e}");
                 }
-                // Sichtbarkeit/Zuordnung kann sich überall geändert haben →
-                // Ansichten neu laden. Konzerte/Hörbücher werden dabei live aus
-                // den Eigenschaften abgeleitet (kein separater Abgleich nötig).
+                // Visibility/assignment may have changed anywhere →
+                // reload the views. Concerts/audiobooks are derived live from
+                // the properties (no separate reconciliation needed).
                 self.reload_albums();
                 self.reload_artists();
                 self.load_concerts(&sender);
@@ -3782,8 +3782,8 @@ impl Component for App {
                 bands,
             } => {
                 let _ = self.library.set_eq(&output, scope, &key, &bands);
-                // Effektiven EQ des aktiven Ausgangs neu auflösen und anwenden
-                // (hörbar, sofern die bearbeitete Ebene aktuell greift).
+                // Re-resolve and apply the effective EQ of the active output
+                // (audible, provided the edited level currently applies).
                 self.apply_current_eq();
             }
             Msg::ClearEq { output, scope, key } => {
@@ -3791,7 +3791,7 @@ impl Component for App {
                 self.apply_current_eq();
             }
             Msg::ConcertImport => {
-                // Konzert-Import bezieht sich auf die primäre Bibliothek.
+                // Concert import refers to the primary library.
                 let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
                     self.toast(&gettext("No music folder set"));
                     return;
@@ -3813,11 +3813,11 @@ impl Component for App {
             Msg::ConcertAdd(items) => {
                 let n = items.len();
                 for (path, title, is_dir) in &items {
-                    // Tabelle: nur für die Kandidaten-Filterung beim nächsten Import.
+                    // Table: only for the candidate filtering at the next import.
                     let _ = self.library.add_concert(path, title, *is_dir);
-                    // Anzeige/Verwaltung über die Eigenschaften: den Bereich
-                    // „Konzerte" auf den enthaltenen Alben/Titeln markieren, damit
-                    // das Konzert auch wieder darüber entfernt werden kann.
+                    // Display/management via the properties: mark the
+                    // "Concerts" area on the contained albums/tracks, so that
+                    // the concert can also be removed again via it.
                     let entries = if *is_dir {
                         self.folder_albums_and_tracks(path)
                     } else {
@@ -3844,8 +3844,8 @@ impl Component for App {
                 }
             }
             Msg::OpenConcertEntry(index) => {
-                // Galerie-Tipp: wie der Listen-Tipp – Album/Ordner öffnet die
-                // Titelliste, ein einzelner Titel wird abgespielt.
+                // Gallery tap: like the list tap – album/folder opens the
+                // track list, a single track is played.
                 if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
                     if scope == "track" {
                         self.play_entry(&scope, &key, is_dir);
@@ -3863,12 +3863,12 @@ impl Component for App {
                     self.section_order.insert(to, name);
                     let value = self.section_order.join(",");
                     let _ = self.library.set_setting("section_order", &value);
-                    // Reihenfolge auf die vorhandenen Schaltflächen anwenden.
+                    // Apply the order to the existing buttons.
                     self.apply_section_order();
                 }
             }
             Msg::UnhideEntry { scope, key } => {
-                // Festlegung löschen → zurück auf Standard (wieder sichtbar).
+                // Delete the override → back to default (visible again).
                 let _ = self.library.set_category(&scope, &key, None);
                 self.reload_albums();
                 self.reload_artists();
@@ -3892,9 +3892,9 @@ impl Component for App {
             }
             Msg::PlayFavorite(index) => {
                 if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
-                    // Läuft genau dieser Titel bereits, nur Play/Pause umschalten
-                    // (Klick auf das eingeblendete Pause-Zeichen pausiert), statt
-                    // ihn neu zu starten.
+                    // If exactly this track is already playing, only toggle play/pause
+                    // (a click on the shown pause sign pauses), instead of
+                    // restarting it.
                     let is_current = scope == "track"
                         && self
                             .playing_path
@@ -3912,8 +3912,8 @@ impl Component for App {
                         self.mpris.set_playing(self.playing);
                         self.refresh_queue_icons();
                     } else if scope == "track" {
-                        // Ganze Favoriten-Titelliste als Queue (vorherige leeren),
-                        // ab dem angeklickten Titel.
+                        // Whole favorites track list as the queue (clear the previous one),
+                        // from the clicked track.
                         let tracks: Vec<PathBuf> = self
                             .favorite_items
                             .iter()
@@ -3929,7 +3929,7 @@ impl Component for App {
                     } else {
                         self.play_entry(&scope, &key, is_dir);
                     }
-                    // Aktiv-Markierung (Play-/Pause-Icon) in der Favoritenliste aktualisieren.
+                    // Update the active marking (play/pause icon) in the favorites list.
                     self.load_favorites(&sender);
                 }
             }
@@ -3958,7 +3958,7 @@ impl Component for App {
                 }
             }
             Msg::OpenAudiobookEntry(index) => {
-                // Galerie-Tipp: Album/Ordner öffnet die Titelliste, Einzeltitel spielt.
+                // Gallery tap: album/folder opens the track list, a single track plays.
                 if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
                     if scope == "track" {
                         self.play_entry(&scope, &key, is_dir);
@@ -3982,25 +3982,25 @@ impl Component for App {
                     || self.playing_stream.is_some()
                     || self.playing_episode_url.is_some()
                 {
-                    // Pausiert (Datei, Sender oder Episode) → fortsetzen.
+                    // Paused (file, station or episode) → resume.
                     self.player.resume();
                     self.playing = true;
                 } else if !self.queue.is_empty() {
-                    // Wiedergabe war beendet → von der aktuellen Position (nach dem
-                    // Ende auf 0 zurückgespult) neu starten. play_current setzt
-                    // playing/MPRIS/Icons selbst.
+                    // Playback had ended → restart from the current position (rewound
+                    // to 0 after the end). play_current sets
+                    // playing/MPRIS/icons itself.
                     self.play_current();
                     return;
                 } else {
                     return;
                 }
                 self.mpris.set_playing(self.playing);
-                // Play-/Pause-Icon des aktiven Titels in der Liste anpassen.
+                // Adjust the play/pause icon of the active track in the list.
                 self.refresh_queue_icons();
                 self.refresh_stream_icons();
             }
             Msg::OpenNowPlaying => {
-                // Detailansicht des laufenden Titels (als Datei-Eintrag).
+                // Detail view of the running track (as a file entry).
                 if let Some(path) = self.queue.get(self.queue_pos).cloned() {
                     self.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
                     self.open_context_menu(root, &sender);
@@ -4009,7 +4009,7 @@ impl Component for App {
         }
     }
 
-    /// Ergebnisse der Hintergrund-Worker verarbeiten.
+    /// Process the results of the background workers.
     fn update_cmd(
         &mut self,
         msg: Self::CommandOutput,
@@ -4018,7 +4018,7 @@ impl Component for App {
     ) {
         match msg {
             Cmd::Entries(entries) => {
-                // „Mixed Album": mehr als ein unterschiedlicher Interpret im Ordner.
+                // "Mixed album": more than one distinct artist in the folder.
                 let distinct: std::collections::HashSet<String> =
                     entries.iter().filter_map(|e| e.effective_artist()).collect();
                 let opts = RowOpts {
@@ -4036,8 +4036,8 @@ impl Component for App {
                 drop(guard);
                 self.loading = false;
 
-                // Dieser Ordner wird jetzt angezeigt; gemerkte Scrollposition (vom
-                // letzten Besuch) nach dem Layout wiederherstellen.
+                // This folder is now shown; restore the remembered scroll position (from
+                // the last visit) after the layout.
                 self.shown_dir = self.browse_dir.clone();
                 if let (Some(dir), Some(sc)) = (self.browse_dir.clone(), self.fs_scroller()) {
                     if let Some(&value) = self.fs_scroll.borrow().get(&dir) {
@@ -4052,7 +4052,7 @@ impl Component for App {
                 }
             }
             Cmd::RemoteEntries(result, source, rel) => {
-                // Veraltetes Ergebnis verwerfen (Quelle/Ordner inzwischen gewechselt).
+                // Discard the stale result (source/folder switched in the meantime).
                 if self.active_source != source
                     || self.remote_browse.as_deref() != Some(rel.as_str())
                 {
@@ -4092,7 +4092,7 @@ impl Component for App {
                             }
                         }
                         self.refresh_queue_icons();
-                        // Tags der entfernten Dateien im Hintergrund nachladen.
+                        // Fetch the tags of the remote files in the background.
                         if let Some(src) = self.active_remote_source() {
                             self.start_remote_tag_fetch(&sender, &src);
                         }
@@ -4100,7 +4100,7 @@ impl Component for App {
                 }
             }
             Cmd::RemoteTags(tags) => {
-                // rel-Pfad → Factory-Index, dann Tags an die jeweilige Zeile schicken.
+                // rel path → factory index, then send tags to the respective row.
                 let map: std::collections::HashMap<String, usize> = {
                     let guard = self.entries.guard();
                     (0..guard.len())
@@ -4148,9 +4148,9 @@ impl Component for App {
             Cmd::WebdavTested(result) => self.on_webdav_tested(result),
             Cmd::EnrichDone { changed } => {
                 self.enriching = false;
-                // Nur neu aufbauen, wenn der Lauf etwas geändert hat – der leise
-                // Minuten-Nachzug läuft sonst ins Leere und würde die Listen grundlos
-                // neu rendern.
+                // Only rebuild if the run changed something – the quiet
+                // per-minute backfill otherwise runs empty and would re-render the
+                // lists for no reason.
                 if changed {
                     self.reload_albums();
                     self.reload_artists();
@@ -4161,20 +4161,20 @@ impl Component for App {
                 self.reload_artists();
             }
             Cmd::ScanDone { then_enrich } => {
-                // Bibliothek ist eingelesen → Ansichten aktualisieren.
+                // Library is read in → update the views.
                 self.reload_albums();
                 self.reload_artists();
-                // Danach automatisch online nachladen – ohne Zutun des Nutzers,
-                // sofern gewünscht, nicht schon ein Abruf läuft und überhaupt eine
-                // Verbindung besteht (auf jeder Verbindung, auch getaktet). Der
-                // lokale Scan lief schon, daher hier ohne erneutes Einlesen.
+                // Then automatically fetch online – without user action,
+                // provided it is desired, no fetch is already running and there is any
+                // connection at all (on any connection, even metered). The
+                // local scan already ran, so here without re-reading.
                 if then_enrich
                     && self.auto_enrich
                     && !self.enriching
                     && self.music_dir.is_some()
                     && online_available()
                 {
-                    // Automatischer Lauf (ohne erneuten Tag-Scan), voller Umfang.
+                    // Automatic run (without a renewed tag scan), full scope.
                     self.run_enrich(&sender, false, false);
                 }
             }
@@ -4213,16 +4213,16 @@ impl Component for App {
                         changed |= self.offline_sources.insert(id);
                     }
                 }
-                // Geänderter Verbindungsstand → Ansichten neu aufbauen, damit der
-                // rote „Getrennt"-Hinweis erscheint/verschwindet.
+                // Changed connection state → rebuild the views, so that the
+                // red "Disconnected" hint appears/disappears.
                 if changed {
                     self.reload_albums();
                     self.reload_artists();
                 }
             }
             Cmd::RemoteIndexed => {
-                // Cloud-Titel sind in der DB → Alben/Interpreten neu aufbauen und
-                // (sofern erwünscht) Cover/Fotos online nachladen.
+                // Cloud tracks are in the DB → rebuild albums/artists and
+                // (if desired) fetch covers/photos online.
                 self.reload_albums();
                 self.reload_artists();
                 if self.auto_enrich && !self.enriching && online_available() {
@@ -4239,7 +4239,7 @@ impl Component for App {
                     self.toast(&gettext("Could not check for updates (offline?)."))
                 }
                 crate::core::update::CheckResult::Available => {
-                    // Rückfrage vor dem Einspielen – installiert über das Portal.
+                    // Confirmation before applying – installs via the portal.
                     let confirm = adw::AlertDialog::new(
                         Some(&gettext("Update available")),
                         Some(&gettext("A newer version of Emilia is available. Install it now?")),
@@ -4262,8 +4262,8 @@ impl Component for App {
     }
 }
 
-/// Speichert Fenstergröße/Maximierung und den zuletzt offenen Navigationspunkt
-/// (eigene kurzlebige DB-Verbindung, da im Close-Handler aufgerufen).
+/// Saves the window size/maximization and the most recently open navigation item
+/// (own short-lived DB connection, since called in the close handler).
 fn save_window_state(width: i32, height: i32, maximized: bool, section: Option<&str>) {
     if let Ok(lib) = Library::open() {
         let _ = lib.set_setting("win_width", &width.to_string());
@@ -4275,7 +4275,7 @@ fn save_window_state(width: i32, height: i32, maximized: bool, section: Option<&
     }
 }
 
-/// Formatiert Millisekunden als `m:ss` bzw. `h:mm:ss` (Negatives → 0).
+/// Formats milliseconds as `m:ss` or `h:mm:ss` (negative → 0).
 pub(crate) fn fmt_duration(ms: i64) -> String {
     let secs = ms.max(0) / 1000;
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
@@ -4286,18 +4286,18 @@ pub(crate) fn fmt_duration(ms: i64) -> String {
     }
 }
 
-/// Ob ein Online-Abruf sinnvoll ist: schlicht, ob überhaupt eine Verbindung
-/// besteht. Bewusst **ohne** Taktungs-Prüfung – der Sync läuft auf jeder
-/// Verbindung (Wunsch des Nutzers). Die Offline-Prüfung bleibt, damit im
-/// Funkloch nicht reihenweise „Fehlversuche" verbucht werden (die einen Eintrag
-/// dauerhaft sperren würden). Grundlage: `gio::NetworkMonitor` (NetworkManager).
+/// Whether an online fetch makes sense: simply whether there is any connection
+/// at all. Deliberately **without** a metering check – the sync runs on any
+/// connection (the user's wish). The offline check remains, so that in a
+/// dead zone "failed attempts" are not logged in droves (which would lock an entry
+/// permanently). Basis: `gio::NetworkMonitor` (NetworkManager).
 pub(crate) fn online_available() -> bool {
     use gtk::gio::prelude::NetworkMonitorExt;
     gtk::gio::NetworkMonitor::default().is_network_available()
 }
 
-/// Häufigste Interpreten-Angabe (rohe Tag-Zeichenkette) einer Titelmenge – dient
-/// als Anzeige-/Schlüsselinterpret eines Albums (für Cover & Album-Metadaten).
+/// Most common artist designation (raw tag string) of a set of tracks – serves
+/// as the display/key artist of an album (for cover & album metadata).
 pub(crate) fn most_common_artist(tracks: &[Track]) -> String {
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for t in tracks {
@@ -4312,7 +4312,7 @@ pub(crate) fn most_common_artist(tracks: &[Track]) -> String {
         .unwrap_or_default()
 }
 
-/// Untertitel einer Album-Zeile: „Jahr · N Lieder" (Jahr nur, wenn bekannt).
+/// Subtitle of an album row: "year · N songs" (year only if known).
 pub(crate) fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(y) = year {
@@ -4322,7 +4322,7 @@ pub(crate) fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
     parts.join(" · ")
 }
 
-/// Rechtsbündige, dezente Dauer-Beschriftung für eine Titel-Zeile.
+/// Right-aligned, subtle duration label for a track row.
 pub(crate) fn duration_label(ms: i64) -> gtk::Label {
     gtk::Label::builder()
         .label(fmt_duration(ms))
@@ -4330,14 +4330,14 @@ pub(crate) fn duration_label(ms: i64) -> gtk::Label {
         .build()
 }
 
-/// Quadratische 48-px-Cover-Vorschau aus einem Dateipfad – **synchron** dekodiert
-/// und gecacht; fehlt das Bild, zeigt der Rahmen das Platzhalter-Icon. Gedacht für
-/// die bedarfsweise geöffneten, kurzen Unterseiten-Listen.
-/// Erster `ScrolledWindow` im Widget-Teilbaum (Tiefensuche), z. B. um die
-/// Scrollposition der gerade sichtbaren Übersichts-Sektion zu finden.
+/// Square 48-px cover preview from a file path – decoded **synchronously**
+/// and cached; if the image is missing, the frame shows the placeholder icon. Intended for
+/// the on-demand opened, short subpage lists.
+/// First `ScrolledWindow` in the widget subtree (depth-first search), e.g. to find the
+/// scroll position of the currently visible overview section.
 pub(crate) fn find_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
-    // Unsichtbare Teilbäume überspringen – sonst greift man z. B. den internen,
-    // versteckten Scroller einer leeren `adw::StatusPage` statt der echten Liste.
+    // Skip invisible subtrees – otherwise one grabs e.g. the internal,
+    // hidden scroller of an empty `adw::StatusPage` instead of the real list.
     if !widget.is_visible() {
         return None;
     }
@@ -4359,16 +4359,16 @@ pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget
     crate::ui::widgets::rounded_image(texture.as_ref(), placeholder, 48)
 }
 
-/// Eine **Galerie-Kachel**: quadratisches Cover (oder Platzhalter-Icon) mit dem
-/// Titel als halbtransparentem Band unten (Overlay). Klick-/Long-Press-Handler
-/// werden vom Aufrufer (FlowBox) ergänzt.
+/// A **gallery tile**: square cover (or placeholder icon) with the
+/// title as a semi-transparent band at the bottom (overlay). Click/long-press handlers
+/// are added by the caller (FlowBox).
 ///
-/// Dekodiert **nicht** synchron: nur ein bereits gecachtes Cover wird sofort
-/// gesetzt. Das zurückgegebene `Picture` (falls ein Cover-Pfad vorliegt) füllt
-/// der Aufrufer per Hintergrund-Dekodierung ([`spawn_gallery_decode`]) nach.
-/// Quadratische Standard-Kantenlänge einer Galerie-Kachel, bis
-/// [`size_gallery_tiles`] die exakte Spaltenbreite kennt. Hält die Kachel von
-/// Anfang an quadratisch (statt dem Querformat des Covers zu folgen).
+/// Does **not** decode synchronously: only an already cached cover is set
+/// immediately. The returned `Picture` (if a cover path is present) is filled
+/// in by the caller via background decoding ([`spawn_gallery_decode`]).
+/// Square default edge length of a gallery tile, until
+/// [`size_gallery_tiles`] knows the exact column width. Keeps the tile
+/// square from the start (instead of following the landscape format of the cover).
 const GALLERY_TILE_DEFAULT: i32 = 110;
 
 pub(crate) fn gallery_cell(
@@ -4377,25 +4377,25 @@ pub(crate) fn gallery_cell(
     title: &str,
 ) -> (gtk::Overlay, Option<gtk::Picture>) {
     let overlay = gtk::Overlay::new();
-    // Die exakte Kachelgröße (genau 1/Spaltenzahl der Breite) wird zentral per
-    // [`size_gallery_tiles`] als `size_request` gesetzt. **Kein `hexpand`**: sonst
-    // dehnt die FlowBox die Kacheln über ihren Anteil hinaus (z. B. bei wenigen
-    // Einträgen würde eine Kachel mehr als 100%/Spalten der Breite einnehmen).
-    // `halign: Start`, damit die Zelle nie über den `size_request` hinaus wächst.
+    // The exact tile size (exactly 1/column count of the width) is set centrally via
+    // [`size_gallery_tiles`] as the `size_request`. **No `hexpand`**: otherwise
+    // the FlowBox stretches the tiles beyond their share (e.g. with few
+    // entries a tile would take up more than 100%/columns of the width).
+    // `halign: Start`, so that the cell never grows beyond the `size_request`.
     overlay.set_hexpand(false);
     overlay.set_halign(gtk::Align::Start);
     overlay.set_valign(gtk::Align::Start);
-    // **Quadratische Default-Größe** schon ab Erstellung – damit die Kachel
-    // während der ganzen Lade-/Layout-Phase quadratisch bleibt (nie Querformat
-    // oder kollabiert), egal wann/ob asynchrone Cover eintreffen. [`size_gallery_tiles`]
-    // verfeinert anschließend nur noch die exakte Pixelgröße (Spaltenbreite).
+    // **Square default size** right from creation – so that the tile
+    // stays square during the whole loading/layout phase (never landscape
+    // or collapsed), no matter when/if asynchronous covers arrive. [`size_gallery_tiles`]
+    // subsequently only refines the exact pixel size (column width).
     overlay.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
-    // Quadratischer Kachelrahmen als simpler `Box`-Container. Seine Größe setzt
-    // [`size_gallery_tiles`] hart auf das Quadrat (Breite = Höhe). Bewusst KEIN
-    // `AspectFrame`: der ignorierte seinen `size_request` in der Höhe und ließ die
-    // Zelle dem Querformat asynchron geladener Cover folgen. Eine `Box` respektiert
-    // den `size_request` zuverlässig; das Cover füllt formatfüllend (`Cover`),
-    // `overflow: Hidden` + `card` runden/beschneiden die Ecken.
+    // Square tile frame as a simple `Box` container. Its size is set hard
+    // by [`size_gallery_tiles`] to the square (width = height). Deliberately NOT
+    // an `AspectFrame`: it ignored its `size_request` in height and let the
+    // cell follow the landscape format of asynchronously loaded covers. A `Box` respects
+    // the `size_request` reliably; the cover fills format-filling (`Cover`),
+    // `overflow: Hidden` + `card` round/clip the corners.
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     frame.set_overflow(gtk::Overflow::Hidden);
     frame.set_hexpand(false);
@@ -4405,10 +4405,10 @@ pub(crate) fn gallery_cell(
     frame.add_css_class("card");
     let picture = match cover_path {
         Some(path) => {
-            // Cover als `Picture`. **Nur** eine bereits gecachte Textur sofort
-            // setzen (kein synchrones Dekodieren – das blockierte sonst Start und
-            // Galerie-Aufbau). Sonst bleibt die Karte als Platzhalter, bis das
-            // Cover im Hintergrund nachgereicht wird.
+            // Cover as a `Picture`. Set **only** an already cached texture
+            // immediately (no synchronous decoding – that would otherwise block startup and
+            // gallery construction). Otherwise the card stays as a placeholder, until the
+            // cover is delivered in the background.
             let pic = gtk::Picture::new();
             pic.set_content_fit(gtk::ContentFit::Cover);
             pic.set_hexpand(true);
@@ -4441,10 +4441,10 @@ pub(crate) fn gallery_cell(
     (overlay, picture)
 }
 
-/// Dekodiert die Cover (Pfad → Ziel-`Picture`) **in einem Hintergrund-Thread**
-/// und reicht die Texturen progressiv auf dem UI-Thread nach. Dadurch blockiert
-/// weder App-Start noch Galerie-Aufbau das Bild-Dekodieren. Backpressure über
-/// einen kleinen, begrenzten Kanal, damit der Thread nicht weit vorausläuft.
+/// Decodes the covers (path → target `Picture`) **in a background thread**
+/// and delivers the textures progressively on the UI thread. As a result, neither
+/// app startup nor gallery construction blocks the image decoding. Backpressure via
+/// a small, bounded channel, so that the thread does not run far ahead.
 pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     if items.is_empty() {
         return;
@@ -4455,7 +4455,7 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     std::thread::spawn(move || {
         for (i, path) in paths.into_iter().enumerate() {
             if let Some(tex) = crate::ui::widgets::decode_thumb(&path) {
-                // Bricht ab, sobald der Empfänger weg ist (Galerie neu aufgebaut).
+                // Aborts as soon as the receiver is gone (gallery rebuilt).
                 if tx.send_blocking((i, path, tex)).is_err() {
                     break;
                 }
@@ -4472,20 +4472,20 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     });
 }
 
-/// Setzt jede Galerie-Kachel auf ein **Quadrat in Spaltenbreite**. Nötig, weil
-/// die `FlowBox` Kinder nicht über ihre natürliche Größe streckt: ohne festes
-/// `size_request` blieben die Thumbnails im breiten Desktop-Mode klein (das Bild
-/// „skaliert nicht mit"), während das Feld breiter wird. Wird bei jedem Befüllen
-/// und bei jeder Breitenänderung des Fensters aufgerufen.
+/// Sets each gallery tile to a **square in column width**. Necessary because
+/// the `FlowBox` does not stretch children beyond their natural size: without a fixed
+/// `size_request` the thumbnails would stay small in wide desktop mode (the image
+/// "does not scale along"), while the field gets wider. Called on every fill
+/// and on every width change of the window.
 pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
     let cols = fb.min_children_per_line().max(1) as i32;
     let w = fb.width();
     if w <= 1 {
-        return; // noch nicht zugewiesen – Resize-Hook holt das nach
+        return; // not yet assigned – the resize hook catches up
     }
     let spacing = fb.column_spacing() as i32;
-    // `cols`-fachen Abstand abziehen (statt `cols-1`) als Sicherheitspuffer,
-    // damit immer genau `cols` Kacheln je Zeile passen und nicht umbrechen.
+    // Subtract `cols` times the spacing (instead of `cols-1`) as a safety buffer,
+    // so that always exactly `cols` tiles fit per row and do not wrap.
     let tile = ((w - spacing * cols) / cols).max(64);
     let mut child = fb.first_child();
     while let Some(c) = child {
@@ -4495,9 +4495,9 @@ pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
             .and_then(|f| f.child())
         {
             inner.set_size_request(tile, tile);
-            // Auch den AspectFrame (Haupt-Kind des Overlays) hart auf das Quadrat
-            // setzen – sonst folgt die Zellenhöhe dem Seitenverhältnis des (ggf.
-            // quer-/hochformatigen) Covers statt der Breite.
+            // Also set the AspectFrame (main child of the overlay) hard to the square
+            // – otherwise the cell height follows the aspect ratio of the (possibly
+            // landscape/portrait) cover instead of the width.
             if let Some(frame) = inner.first_child() {
                 frame.set_size_request(tile, tile);
             }
@@ -4506,8 +4506,8 @@ pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
     }
 }
 
-/// Liest Unterordner und Audiodateien eines Ordners (Ordner zuerst, sortiert).
-/// Läuft im Hintergrund-Thread – darf daher blockieren.
+/// Reads subfolders and audio files of a folder (folders first, sorted).
+/// Runs in a background thread – may therefore block.
 pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
     let mut dirs = Vec::new();
     let mut files = Vec::new();
@@ -4524,13 +4524,13 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
     dirs.sort();
     files.sort();
 
-    // Eigenschaften: Dateien ausblenden, die nicht im Bereich „Dateisystem"
-    // sichtbar sind (geerbt von Album/Interpret). Dateien ohne DB-Eintrag bleiben
-    // sichtbar. Ordner werden nicht gefiltert (bleiben navigierbar).
+    // Properties: hide files that are not visible in the "Filesystem" area
+    // (inherited from album/artist). Files without a DB entry stay
+    // visible. Folders are not filtered (stay navigable).
     let lib = Library::open().ok();
     let mut out = Vec::with_capacity(dirs.len() + files.len());
-    // Ordner ausblenden, deren Ordner-Eigenschaft „Dateisystem" nicht enthält
-    // (vererbt von übergeordneten Ordnern).
+    // Hide folders whose folder property does not contain "Filesystem"
+    // (inherited from parent folders).
     for d in dirs {
         let visible = match &lib {
             Some(lib) => lib
@@ -4560,9 +4560,9 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
 }
 
 impl App {
-    /// Baut **alle** Listen neu auf (nach Umschalten Galerie/Liste oder der
-    /// Spaltenzahl). Jede Reload-Funktion füllt – je nach `gallery_view` – die
-    /// Listen- oder die Galerie-Variante.
+    /// Rebuilds **all** lists (after switching gallery/list or the
+    /// column count). Each reload function fills – depending on `gallery_view` – the
+    /// list or the gallery variant.
     pub(crate) fn rebuild_all_lists(&mut self, sender: &ComponentSender<Self>) {
         self.reload_albums();
         self.reload_artists();
@@ -4573,11 +4573,11 @@ impl App {
         self.reload_podcasts(sender);
     }
 
-    /// Füllt eine FlowBox als **Galerie**: Kacheln aus `(cover, icon, title)`,
-    /// Spaltenzahl = `gallery_columns`. Einzelklick aktiviert (`activate(index)`),
-    /// langes Drücken öffnet das Detail (`detail(index)`). Nachrichten gehen über
-    /// den eigenen Input-Sender. Beim erneuten Aufruf werden alle Kacheln (samt
-    /// ihrer Controller) entfernt – keine Mehrfach-Handler.
+    /// Fills a FlowBox as a **gallery**: tiles from `(cover, icon, title)`,
+    /// column count = `gallery_columns`. A single click activates (`activate(index)`),
+    /// long press opens the detail (`detail(index)`). Messages go via
+    /// the own input sender. On a renewed call all tiles (including
+    /// their controllers) are removed – no duplicate handlers.
     pub(crate) fn fill_gallery(
         &self,
         fb: &gtk::FlowBox,
@@ -4590,22 +4590,22 @@ impl App {
         }
         fb.set_min_children_per_line(self.gallery_columns);
         fb.set_max_children_per_line(self.gallery_columns);
-        // `homogeneous(true)` gibt **allen** Kacheln genau die per `size_request`
-        // ([`size_gallery_tiles`]) gesetzte Größe (= 1/Spaltenzahl der Breite) und
-        // streckt sie NICHT auf die Zeilenbreite. Ohne das verteilt die FlowBox
-        // die Zeilenbreite auf die tatsächlich vorhandenen Kacheln – bei wenigen
-        // Einträgen würde eine Kachel dann mehr als 100%/Spalten einnehmen.
+        // `homogeneous(true)` gives **all** tiles exactly the size set via `size_request`
+        // ([`size_gallery_tiles`]) (= 1/column count of the width) and
+        // does NOT stretch them to the row width. Without it the FlowBox distributes
+        // the row width over the tiles actually present – with few
+        // entries a tile would then take up more than 100%/columns.
         fb.set_homogeneous(true);
         fb.set_row_spacing(8);
         fb.set_column_spacing(8);
         fb.set_selection_mode(gtk::SelectionMode::None);
-        // Die FlowBox selbst NICHT auf Einfachklick reagieren lassen – sonst
-        // schluckt sie den Klick, bevor die Kachel-Geste ihn auswerten kann.
+        // Do NOT let the FlowBox itself react to a single click – otherwise
+        // it swallows the click before the tile gesture can evaluate it.
         fb.set_activate_on_single_click(false);
         if !fb.has_css_class("emilia-gallery") {
             fb.add_css_class("emilia-gallery");
         }
-        // Nicht gecachte Cover sammeln und nach dem Aufbau im Hintergrund laden.
+        // Collect non-cached covers and load them in the background after construction.
         let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (cover, icon, title)) in items.iter().enumerate() {
             let (cell, pic) = gallery_cell(cover.as_deref(), icon, title);
@@ -4614,9 +4614,9 @@ impl App {
                     to_decode.push((path.to_string(), pic));
                 }
             }
-            // Einzeltipp → Unterseite **sofort** (`activate`), langes Drücken →
-            // Detailansicht (`detail`) – exakt wie in der Listenansicht. Bewusst
-            // KEIN Doppeltipp/keine Verzögerung, damit der Klick nicht hängt.
+            // Single tap → subpage **immediately** (`activate`), long press →
+            // detail view (`detail`) – exactly as in the list view. Deliberately
+            // NO double tap/no delay, so that the click does not hang.
             let click = gtk::GestureClick::new();
             {
                 let input = self.input.clone();
@@ -4639,16 +4639,16 @@ impl App {
             cell.add_controller(long_press);
             fb.append(&cell);
         }
-        // Cover der noch nicht gecachten Kacheln im Hintergrund nachladen.
+        // Fetch the covers of the not-yet-cached tiles in the background.
         spawn_gallery_decode(to_decode);
-        // Kacheln sofort quadratisch auf Spaltenbreite bringen (greift, sobald die
-        // FlowBox alloziert ist; beim ersten Befüllen im Init noch w=0).
+        // Bring the tiles immediately to a square at column width (takes effect as soon as the
+        // FlowBox is allocated; at the first fill in init still w=0).
         size_gallery_tiles(fb);
-        // Einmalig je FlowBox an Größenänderungen koppeln. `connect_map` feuert
-        // erst, wenn die FlowBox sichtbar **und im Baum alloziert** ist – dort
-        // vermessen wir neu und koppeln (einmal) an die `page-size` der
-        // umschließenden ScrolledWindow, damit die Kacheln im Desktop-Mode bei
-        // Fensterbreiten-Änderung mitskalieren.
+        // Couple to size changes once per FlowBox. `connect_map` fires
+        // only when the FlowBox is visible **and allocated in the tree** – there
+        // we re-measure and couple (once) to the `page-size` of the
+        // enclosing ScrolledWindow, so that the tiles scale along in desktop mode on
+        // a window width change.
         if self.gallery_hooked.borrow_mut().insert(fb.as_ptr() as usize) {
             let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
             fb.connect_map(move |fb| {
@@ -4674,34 +4674,34 @@ impl App {
         }
     }
 
-    /// Schmaler (mobiler) Modus? Identisch zur eingeklappten Seitenleiste, die
-    /// der Breakpoint bei geringer Fensterbreite setzt.
+    /// Narrow (mobile) mode? Identical to the collapsed sidebar that
+    /// the breakpoint sets at low window width.
     pub(crate) fn is_mobile(&self) -> bool {
         self.split.is_collapsed()
     }
 
-    /// Detail-Dialoge auf dem Phone über die **volle Breite** zeigen
-    /// (Bottom-Sheet); auf dem Desktop schwebend wie gehabt (Auto).
+    /// Show detail dialogs on the phone over the **full width**
+    /// (bottom sheet); on the desktop floating as before (auto).
     pub(crate) fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
         if self.is_mobile() {
             dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
         }
     }
 
-    /// Lädt das **Foto des gerade geöffneten Interpreten** sofort im Hintergrund
-    /// nach – damit zuerst erscheint, was der Nutzer ansieht (Vorrang vor dem
-    /// laufenden Massen-Sync). Holt zusätzlich – falls ein fanart.tv-Key vorliegt –
-    /// die **Bildergalerie** des Interpreten (mehrere Fotos), die es nur in der
-    /// Detailansicht gibt und die deshalb erst hier (bedarfsgesteuert) geladen wird.
-    /// Tut nichts ohne Netz; das Einzelfoto entfällt bei bereits zugeordnetem Foto
-    /// oder nach zu vielen Versuchen, die Galerie, wenn sie schon vorliegt oder in
-    /// dieser Sitzung bereits versucht wurde. Nach Erfolg: `Cmd::ReloadViews`.
+    /// Fetches the **photo of the currently opened artist** immediately in the background
+    /// – so that what the user is looking at appears first (priority over the
+    /// running bulk sync). Additionally fetches – if a fanart.tv key is present –
+    /// the **image gallery** of the artist (multiple photos), which exists only in the
+    /// detail view and is therefore loaded only here (on demand).
+    /// Does nothing without network; the single photo is skipped if a photo is already assigned
+    /// or after too many attempts, the gallery if it is already present or has
+    /// already been attempted in this session. On success: `Cmd::ReloadViews`.
     pub(crate) fn fetch_focus_artist(&self, sender: &ComponentSender<Self>, name: &str) {
         let name = name.trim().to_string();
         if name.is_empty() || !online_available() {
             return;
         }
-        // (a) Einzelfoto (Deezer): überspringen, wenn schon zugeordnet oder erschöpft.
+        // (a) Single photo (Deezer): skip if already assigned or exhausted.
         let matched = self
             .library
             .get_artist_meta(&name)
@@ -4710,8 +4710,8 @@ impl App {
             .is_some_and(|m| m.status == "matched");
         let need_image =
             !matched && self.library.artist_attempts(&name) < crate::ui::enrich::MAX_ATTEMPTS;
-        // (b) Galerie (fanart.tv): nur mit Key, wenn noch keine vorliegt und in dieser
-        // Sitzung noch nicht versucht (Galerien haben keine Versuchsgrenze).
+        // (b) Gallery (fanart.tv): only with a key, if none is present yet and not yet
+        // attempted in this session (galleries have no attempt limit).
         let fkey = self.fanart_key.clone().filter(|k| !k.is_empty());
         let need_gallery = fkey.is_some()
             && self
@@ -4743,13 +4743,13 @@ impl App {
         });
     }
 
-    /// Wie [`Self::fetch_focus_artist`], nur für das **gerade geöffnete Album**: lädt
-    /// das Einzelcover (MusicBrainz + Cover Art Archive) und – falls noch keine da ist –
-    /// die **Cover-Galerie** des Albums. Das Einzelcover entfällt, wenn schon eines
-    /// vorliegt oder zu viele Versuche scheiterten; die Galerie, wenn sie schon
-    /// vorliegt oder in dieser Sitzung versucht wurde. Sie braucht die beim
-    /// Cover-Abruf gesetzte MBID – beim allerersten Öffnen entsteht diese gerade erst,
-    /// die Galerie greift dann ggf. erst beim nächsten Öffnen.
+    /// Like [`Self::fetch_focus_artist`], only for the **currently opened album**: fetches
+    /// the single cover (MusicBrainz + Cover Art Archive) and – if none is there yet –
+    /// the **cover gallery** of the album. The single cover is skipped if one is already
+    /// present or too many attempts failed; the gallery if it is already
+    /// present or was attempted in this session. It needs the MBID set during the
+    /// cover fetch – at the very first open this is just being created,
+    /// so the gallery may only take effect on the next open.
     pub(crate) fn fetch_focus_album(&self, sender: &ComponentSender<Self>, artist: &str, album: &str) {
         let artist = artist.trim().to_string();
         let album = album.trim().to_string();
@@ -4779,7 +4779,7 @@ impl App {
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = Library::open() {
                 let client = crate::core::online::OnlineClient::new();
-                // Erst das Cover (setzt die MBID), dann die Galerie, die sie nutzt.
+                // First the cover (sets the MBID), then the gallery that uses it.
                 if need_cover {
                     let _ = crate::core::online::enrich_album(&client, &lib, &artist, &album);
                 }
@@ -4792,10 +4792,10 @@ impl App {
         });
     }
 
-    /// Bedarfsgesteuerte **Fingerprint-Titelerkennung** (Chromaprint → AcoustID) für
-    /// den gerade gestarteten Titel. Läuft nur mit AcoustID-Key + `fpcalc` + Netz,
-    /// nur für noch nicht zugeordnete und nicht erschöpfte Titel. Ersetzt den
-    /// früheren Massen-Lauf: erkannt wird, was tatsächlich gespielt wird.
+    /// On-demand **fingerprint track recognition** (Chromaprint → AcoustID) for
+    /// the just started track. Runs only with an AcoustID key + `fpcalc` + network,
+    /// only for not-yet-assigned and not-exhausted tracks. Replaces the
+    /// earlier bulk run: what is actually played gets recognized.
     pub(crate) fn fetch_focus_track(&self, sender: &ComponentSender<Self>, path: &std::path::Path) {
         if !online_available() {
             return;
@@ -4826,9 +4826,9 @@ impl App {
         });
     }
 
-    /// Nur nach oben, solange wir innerhalb des Startordners bleiben.
+    /// Only upwards, as long as we stay within the start folder.
     pub(crate) fn can_go_up(&self) -> bool {
-        // Entfernte Quelle: zurück möglich, solange nicht an der Musikwurzel.
+        // Remote source: going back possible as long as not at the music root.
         if let Some(rel) = &self.remote_browse {
             return !rel.is_empty();
         }
@@ -4838,7 +4838,7 @@ impl App {
         }
     }
 
-    /// Anzeigename der aktiven Quelle (für die Pfadleiste an der Wurzel).
+    /// Display name of the active source (for the path bar at the root).
     pub(crate) fn active_source_name(&self) -> String {
         match &self.active_source {
             ActiveSource::Primary => gettext("Music"),
@@ -4851,9 +4851,9 @@ impl App {
         }
     }
 
-    /// Beschriftung der Pfadleiste (aktueller Ordnername bzw. Hinweis).
+    /// Label of the path bar (current folder name or hint).
     pub(crate) fn folder_label(&self) -> String {
-        // Entfernte Quelle: letztes Pfadsegment bzw. Quellname an der Wurzel.
+        // Remote source: last path segment or source name at the root.
         if let Some(rel) = &self.remote_browse {
             if rel.is_empty() {
                 return self.active_source_name();
@@ -4870,12 +4870,12 @@ impl App {
         }
     }
 
-    /// Blendet einen Navigations-Menüpunkt ein/aus: aktualisiert den Zustand,
-    /// speichert ihn, schaltet alle zugehörigen Schaltflächen (Seitenleiste +
-    /// obere Leiste) und wechselt beim Ausblenden des aktiven Punkts auf den
-    /// ersten sichtbaren.
+    /// Shows/hides a navigation menu item: updates the state,
+    /// saves it, toggles all associated buttons (sidebar +
+    /// top bar) and, when hiding the active item, switches to the
+    /// first visible one.
     pub(crate) fn set_section_visible(&mut self, section: &str, visible: bool) {
-        // Mindestens ein Menüpunkt muss sichtbar bleiben.
+        // At least one menu item must stay visible.
         if !visible {
             let visible_count = SECTIONS
                 .iter()
@@ -4904,8 +4904,8 @@ impl App {
             }
         }
 
-        // Wird der gerade sichtbare Bereich ausgeblendet, auf den ersten
-        // sichtbaren Menüpunkt (in der gewählten Reihenfolge) wechseln.
+        // If the currently visible section is hidden, switch to the first
+        // visible menu item (in the chosen order).
         if !visible {
             let cur = self.view_stack.visible_child_name();
             if cur.as_deref() == Some(section) {
@@ -4921,9 +4921,9 @@ impl App {
         }
     }
 
-    /// Wendet `section_order` auf die Navigations-Container an, indem die
-    /// vorhandenen Schaltflächen umsortiert werden (Seitenleisten-Knöpfe vor dem
-    /// Abstandshalter + „Einstellungen", die unberührt am Ende bleiben).
+    /// Applies `section_order` to the navigation containers by reordering the
+    /// existing buttons (sidebar buttons before the
+    /// spacer + "Settings", which stay untouched at the end).
     pub(crate) fn apply_section_order(&self) {
         for sidebar in [true, false] {
             let container = if sidebar { &self.sidebar_nav } else { &self.top_nav };
@@ -4949,13 +4949,13 @@ mod tests {
     #[test]
     fn guarded_resume_clamps_start_and_end() {
         let dur = 3_600_000; // 1 h
-        // Mittendrin → unverändert.
+        // In the middle → unchanged.
         assert_eq!(guarded_resume(1_000_000, dur), 1_000_000);
-        // Nahe Anfang (< 5 s) → 0.
+        // Near the start (< 5 s) → 0.
         assert_eq!(guarded_resume(3_000, dur), 0);
-        // Nahe Ende (< 10 s Rest) → 0 (nächstes Mal von vorn).
+        // Near the end (< 10 s remaining) → 0 (next time from the start).
         assert_eq!(guarded_resume(dur - 5_000, dur), 0);
-        // Unbekannte Dauer (0) → keine Ende-Prüfung, Position bleibt.
+        // Unknown duration (0) → no end check, position stays.
         assert_eq!(guarded_resume(1_000_000, 0), 1_000_000);
     }
 
@@ -4965,9 +4965,9 @@ mod tests {
         assert_eq!(fmt_duration(5_000), "0:05");
         assert_eq!(fmt_duration(65_000), "1:05");
         assert_eq!(fmt_duration(600_000), "10:00");
-        // Hörspiel-Längen mit Stunden.
+        // Audio drama lengths with hours.
         assert_eq!(fmt_duration(3_661_000), "1:01:01");
-        // Negativwerte werden auf 0 geklemmt.
+        // Negative values are clamped to 0.
         assert_eq!(fmt_duration(-1), "0:00");
     }
 }

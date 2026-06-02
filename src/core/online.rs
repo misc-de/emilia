@@ -1,13 +1,13 @@
-//! Online-Metadaten aus offenen/kostenlosen Quellen:
-//! - **MusicBrainz** – Album-Zuordnung (CC0)
-//! - **Cover Art Archive** – Album-Cover (CC0)
-//! - **Deezer** – Künstlerfotos (kein API-Key nötig)
-//! - **AcoustID** + **Chromaprint** – Titel-Erkennung per Audio-Fingerprint
-//!   (benötigt einen kostenlosen Application-Key)
+//! Online metadata from open/free sources:
+//! - **MusicBrainz** – album matching (CC0)
+//! - **Cover Art Archive** – album covers (CC0)
+//! - **Deezer** – artist photos (no API key needed)
+//! - **AcoustID** + **Chromaprint** – track detection via audio fingerprint
+//!   (needs a free application key)
 //!
-//! Wichtig: Dieses Modul liest **niemals** Audiodateien und schreibt erst recht
-//! nichts in deren Tags zurück. Sämtliche gefundenen Daten landen ausschließlich
-//! in der Datenbank und im XDG-Cache (`~/.cache/emilia`).
+//! Important: this module **never** reads audio files and certainly never writes
+//! anything back into their tags. All data found ends up exclusively in the
+//! database and in the XDG cache (`~/.cache/emilia`).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -23,27 +23,27 @@ use crate::core::db::Library;
 use crate::core::fingerprint;
 use crate::model::{AlbumMeta, ArtistMeta, TrackMeta};
 
-/// MusicBrainz verlangt einen aussagekräftigen User-Agent mit Kontakt.
+/// MusicBrainz requires a meaningful User-Agent with contact info.
 const USER_AGENT: &str = "Emilia/0.1.0 ( https://cais.de )";
 
-/// MusicBrainz-Richtlinie: höchstens eine Anfrage pro Sekunde.
+/// MusicBrainz policy: at most one request per second.
 pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
-/// Bei Server-seitigem Rate-Limit (HTTP 429/503) so oft mit Pause wiederholen,
-/// bevor ein echter Fehler gemeldet wird.
+/// On a server-side rate limit (HTTP 429/503), retry this many times with a
+/// pause before a real error is reported.
 const RL_MAX_RETRIES: usize = 4;
-/// Erste Backoff-Pause bei Rate-Limit (verdoppelt sich je Versuch, gedeckelt).
+/// First backoff pause on a rate limit (doubles per attempt, capped).
 const RL_BASE_BACKOFF: Duration = Duration::from_millis(1500);
-/// Obergrenze der Backoff-Pause.
+/// Upper bound of the backoff pause.
 const RL_MAX_BACKOFF: Duration = Duration::from_secs(30);
-/// Anzahl paralleler Abrufe für Künstlerfotos (Deezer verträgt das gut).
+/// Number of parallel fetches for artist photos (Deezer handles this well).
 pub const ARTIST_FETCH_THREADS: usize = 8;
 
-/// Verzeichnis für zwischengespeicherte Cover: `$XDG_CACHE_HOME/emilia/covers`.
+/// Directory for cached covers: `$XDG_CACHE_HOME/emilia/covers`.
 pub fn cover_cache_dir() -> PathBuf {
     cache_subdir("covers")
 }
 
-/// Verzeichnis für Künstlerfotos: `$XDG_CACHE_HOME/emilia/artists`.
+/// Directory for artist photos: `$XDG_CACHE_HOME/emilia/artists`.
 pub fn artist_cache_dir() -> PathBuf {
     cache_subdir("artists")
 }
@@ -56,28 +56,28 @@ fn cache_subdir(name: &str) -> PathBuf {
     dir
 }
 
-/// Ob die Fingerprint-Erkennung möglich ist (Chromaprint/`fpcalc` vorhanden).
+/// Whether fingerprint detection is possible (Chromaprint/`fpcalc` present).
 pub fn fingerprint_available() -> bool {
     fingerprint::available()
 }
 
-/// Stabiler Dateiname aus einem beliebigen String (für Cache-Dateien).
+/// Stable file name from an arbitrary string (for cache files).
 fn name_hash(s: &str) -> String {
     let mut h = DefaultHasher::new();
     s.hash(&mut h);
     format!("{:016x}", h.finish())
 }
 
-/// Ergebnis einer MusicBrainz-Release-Suche.
+/// Result of a MusicBrainz release search.
 pub struct ReleaseMatch {
     pub mbid: String,
     pub release_group: Option<String>,
     pub year: Option<i32>,
 }
 
-/// HTTP-Client mit gemeinsamem Connection-Pool und Timeouts.
-/// Klonbar (der `ureq::Agent` teilt sich Pool/Konfiguration) – so kann er an
-/// mehrere Fetch-Threads übergeben werden.
+/// HTTP client with a shared connection pool and timeouts.
+/// Cloneable (the `ureq::Agent` shares the pool/configuration) – so it can be
+/// passed to multiple fetch threads.
 #[derive(Clone)]
 pub struct OnlineClient {
     agent: ureq::Agent,
@@ -91,8 +91,8 @@ impl Default for OnlineClient {
 
 impl OnlineClient {
     pub fn new() -> Self {
-        // Kurze Timeouts: eine zähe/blockierende Anfrage soll nicht den ganzen
-        // Lauf aufhalten, sondern schnell scheitern und übersprungen werden.
+        // Short timeouts: a sluggish/blocking request shouldn't hold up the whole
+        // run, but fail quickly and be skipped.
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
             .timeout_read(Duration::from_secs(8))
@@ -101,21 +101,21 @@ impl OnlineClient {
         Self { agent }
     }
 
-    /// GET mit höflichem Umgang mit Rate-Limits: Bei `429`/`503` wird – soweit per
-    /// `Retry-After` angegeben, sonst per Backoff – **pausiert und erneut versucht**,
-    /// statt sofort zu scheitern. So bricht ein vorübergehendes Limit den Lauf nicht
-    /// ab und verbraucht auch keinen „Fehlversuch". `404` ergibt `Ok(None)` (kein
-    /// Inhalt). Andere Fehler – und anhaltendes Limit nach allen Versuchen – werden
-    /// durchgereicht. Setzt stets unseren User-Agent (von allen Diensten geduldet).
+    /// GET that handles rate limits politely: on `429`/`503` it **pauses and
+    /// retries** – for as long as specified by `Retry-After`, otherwise by backoff –
+    /// instead of failing immediately. This way a temporary limit doesn't abort the
+    /// run, nor does it consume a "failed attempt". `404` yields `Ok(None)` (no
+    /// content). Other errors – and a persistent limit after all attempts – are
+    /// passed through. Always sets our User-Agent (tolerated by all services).
     fn call_get(&self, url: &str) -> Result<Option<ureq::Response>> {
         let mut backoff = RL_BASE_BACKOFF;
         let mut attempt = 0usize;
         loop {
             match self.agent.get(url).set("User-Agent", USER_AGENT).call() {
                 Ok(resp) => return Ok(Some(resp)),
-                // Kein Inhalt hinterlegt (404) – kein Fehler.
+                // No content stored (404) – not an error.
                 Err(ureq::Error::Status(404, _)) => return Ok(None),
-                // Rate-Limit: pausieren und – bis zum Limit – erneut versuchen.
+                // Rate limit: pause and – up to the limit – retry.
                 Err(ureq::Error::Status(code, resp)) if code == 429 || code == 503 => {
                     attempt += 1;
                     if attempt > RL_MAX_RETRIES {
@@ -136,8 +136,8 @@ impl OnlineClient {
         }
     }
 
-    /// Sucht das passendste MusicBrainz-Release zu (Interpret, Album).
-    /// Liefert `Ok(None)`, wenn nichts hinreichend Passendes gefunden wurde.
+    /// Finds the best-matching MusicBrainz release for (artist, album).
+    /// Returns `Ok(None)` if nothing sufficiently matching was found.
     pub fn match_release(&self, artist: &str, album: &str) -> Result<Option<ReleaseMatch>> {
         let query = format!(
             "artist:\"{}\" AND release:\"{}\"",
@@ -154,8 +154,8 @@ impl OnlineClient {
             None => return Ok(None),
         };
 
-        // MusicBrainz sortiert nach Score; wir nehmen den besten Treffer,
-        // verlangen aber eine Mindestgüte, um Fehlzuordnungen zu vermeiden.
+        // MusicBrainz sorts by score; we take the best match, but require a
+        // minimum quality to avoid mismatches.
         let best = search
             .releases
             .into_iter()
@@ -169,9 +169,9 @@ impl OnlineClient {
         }))
     }
 
-    /// Lädt das Front-Cover (max. 500 px) zu einem Release. Versucht zuerst das
-    /// konkrete Release, dann ersatzweise die Release-Gruppe.
-    /// `Ok(None)` = es existiert kein Cover.
+    /// Loads the front cover (max. 500 px) for a release. Tries the concrete
+    /// release first, then falls back to the release group.
+    /// `Ok(None)` = no cover exists.
     pub fn fetch_cover(&self, m: &ReleaseMatch) -> Result<Option<Vec<u8>>> {
         let release_url = format!(
             "https://coverartarchive.org/release/{}/front-500",
@@ -193,20 +193,20 @@ impl OnlineClient {
         match self.call_get(url)? {
             Some(resp) => {
                 let mut buf = Vec::new();
-                // Deckel gegen versehentlich riesige Antworten (10 MB).
+                // Cap against accidentally huge responses (10 MB).
                 resp.into_reader()
                     .take(10 * 1024 * 1024)
                     .read_to_end(&mut buf)?;
                 Ok(Some(buf))
             }
-            // Kein Cover hinterlegt (404) – kein Fehler.
+            // No cover stored (404) – not an error.
             None => Ok(None),
         }
     }
 
-    /// Sucht ein Künstlerfoto bei Deezer (kein API-Key nötig). Liefert die
-    /// rohen Bildbytes – bewusst in **kleiner** Auflösung (für 48-px-Avatare
-    /// reicht `picture_medium` ~250 px; spart enorm Bandbreite/Zeit).
+    /// Searches for an artist photo on Deezer (no API key needed). Returns the
+    /// raw image bytes – deliberately in a **small** resolution (for 48 px avatars
+    /// `picture_medium` ~250 px is enough; saves a lot of bandwidth/time).
     pub fn fetch_artist_image(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let url = format!(
             "https://api.deezer.com/search/artist?q={}&limit=1",
@@ -219,7 +219,7 @@ impl OnlineClient {
         let Some(artist) = search.data.into_iter().next() else {
             return Ok(None);
         };
-        // Kleinste brauchbare Größe zuerst (schnell), Platzhalter überspringen.
+        // Smallest usable size first (fast), skip placeholders.
         let pic = [
             artist.picture_medium,
             artist.picture_big,
@@ -235,9 +235,9 @@ impl OnlineClient {
         }
     }
 
-    /// Sucht zu (Interpret, Titel) das Album-Cover bei Deezer (kein API-Key nötig)
-    /// und liefert `(Bildbytes, Albumname)`. Für das nachträgliche Taggen einer
-    /// Aufnahme mit dem Cover der Single/des Albums.
+    /// Searches for the album cover on Deezer (no API key needed) for (artist, title)
+    /// and returns `(image bytes, album name)`. For subsequently tagging a
+    /// recording with the cover of the single/album.
     pub fn fetch_track_cover(
         &self,
         artist: &str,
@@ -273,8 +273,8 @@ impl OnlineClient {
         Ok(self.get_image(&cover_url)?.map(|b| (b, album.title)))
     }
 
-    /// Lädt mehrere Bilder eines Albums aus dem Cover Art Archive (Front, Back,
-    /// Booklet, …). Liefert je (Bytes, Art). Leere Liste, wenn nichts da ist.
+    /// Loads several images of an album from the Cover Art Archive (front, back,
+    /// booklet, …). Returns each as (bytes, kind). Empty list if there is nothing.
     pub fn fetch_album_gallery(&self, mbid: &str) -> Result<Vec<(Vec<u8>, String)>> {
         let url = format!("https://coverartarchive.org/release/{mbid}");
         let list: CaaList = match self.call_get(&url)? {
@@ -283,7 +283,7 @@ impl OnlineClient {
         };
         let mut out = Vec::new();
         for img in list.images.into_iter().take(MAX_GALLERY) {
-            // Bevorzugt die 500-px-Variante; sonst large; sonst das Original.
+            // Prefer the 500 px variant; otherwise large; otherwise the original.
             let u = img.thumbnails.n500.or(img.thumbnails.large).unwrap_or(img.image);
             if u.is_empty() {
                 continue;
@@ -295,7 +295,7 @@ impl OnlineClient {
         Ok(out)
     }
 
-    /// Sucht die MusicBrainz-Artist-ID (für fanart.tv). `None`, wenn unklar.
+    /// Finds the MusicBrainz artist ID (for fanart.tv). `None` if unclear.
     pub fn artist_mbid(&self, name: &str) -> Result<Option<String>> {
         let query = format!("artist:\"{}\"", escape_lucene(name));
         let url = format!(
@@ -309,8 +309,8 @@ impl OnlineClient {
         Ok(search.artists.into_iter().find(|a| a.score >= 90).map(|a| a.id))
     }
 
-    /// Lädt mehrere Künstlerbilder von fanart.tv (Thumbs + Hintergründe).
-    /// Benötigt einen (kostenlosen) persönlichen API-Key. Leere Liste = nichts.
+    /// Loads several artist images from fanart.tv (thumbs + backgrounds).
+    /// Needs a (free) personal API key. Empty list = nothing.
     pub fn fetch_artist_gallery(
         &self,
         api_key: &str,
@@ -330,14 +330,14 @@ impl OnlineClient {
                 continue;
             }
             if let Some(bytes) = self.get_image(&t.url)? {
-                out.push((bytes, "Foto".to_string()));
+                out.push((bytes, "Photo".to_string()));
             }
         }
         Ok(out)
     }
 
-    /// Fragt AcoustID mit einem Chromaprint-Fingerprint ab und liefert den
-    /// besten Treffer (Recording inkl. Interpret/Album, soweit vorhanden).
+    /// Queries AcoustID with a Chromaprint fingerprint and returns the best
+    /// match (recording incl. artist/album, where available).
     pub fn acoustid_lookup(
         &self,
         client_key: &str,
@@ -354,7 +354,7 @@ impl OnlineClient {
             None => return Ok(None),
         };
 
-        // Bestes Result (höchster Score) mit mindestens einem Recording.
+        // Best result (highest score) with at least one recording.
         let best = resp
             .results
             .into_iter()
@@ -377,7 +377,7 @@ impl OnlineClient {
     }
 }
 
-/// Treffer einer AcoustID-Fingerprint-Suche.
+/// Match of an AcoustID fingerprint search.
 pub struct AcoustIdMatch {
     pub recording_mbid: String,
     pub title: Option<String>,
@@ -385,7 +385,7 @@ pub struct AcoustIdMatch {
     pub album: Option<String>,
 }
 
-/// Speichert die Cover-Bytes im Cache und gibt den Pfad zurück.
+/// Stores the cover bytes in the cache and returns the path.
 fn save_cover(mbid: &str, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = cover_cache_dir();
     path.push(format!("{mbid}.img"));
@@ -393,20 +393,20 @@ fn save_cover(mbid: &str, bytes: &[u8]) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Ermittelt ein **lokales** Album-Cover ganz ohne Netz: bevorzugt das in den
-/// Tags eingebettete Bild des Beispiel-Tracks, sonst ein Ordnerbild
-/// (`cover.jpg`, `folder.png`, …). Gibt den Pfad zur anzeigbaren Cover-Datei
-/// zurück. Die Audiodatei wird dabei nur gelesen.
+/// Determines a **local** album cover entirely without the network: prefers the
+/// image embedded in the sample track's tags, otherwise a folder image
+/// (`cover.jpg`, `folder.png`, …). Returns the path to the displayable cover
+/// file. The audio file is only read in the process.
 pub fn local_album_cover(artist: &str, album: &str, sample_path: &str) -> Option<String> {
     let p = Path::new(sample_path);
 
-    // 1) Eingebettetes Tag-Bild → in den Cache schreiben.
+    // 1) Embedded tag image → write to the cache.
     if let Some(bytes) = cover::embedded_cover(p) {
         if let Ok(path) = save_local_cover(artist, album, &bytes) {
             return Some(path.to_string_lossy().into_owned());
         }
     }
-    // 2) Ordnerbild → direkt dessen Pfad verwenden (kein Kopieren nötig).
+    // 2) Folder image → use its path directly (no copying needed).
     if let Some(dir) = p.parent() {
         if let Some(img) = cover::find_cover_file(dir) {
             return Some(img.to_string_lossy().into_owned());
@@ -415,12 +415,12 @@ pub fn local_album_cover(artist: &str, album: &str, sample_path: &str) -> Option
     None
 }
 
-/// Cover eines **Einzeltitels** ausschließlich aus dem **eingebetteten** Tag-Bild
-/// (einmalig in den Cache geschrieben, Schlüssel = Track-Pfad). Bewusst **kein**
-/// Ordnerbild als Rückfall: Ein Einzel-/Gast-Titel in einem fremden Album-Ordner
-/// soll nicht dessen `cover.jpg` erben. Fehlt ein eingebettetes Bild, liefert die
-/// Funktion `None` – der Aufrufer fällt dann auf das Album- bzw. Interpret-Cover
-/// zurück, nie auf ein fremdes Ordnerbild. Die Audiodatei wird nur gelesen.
+/// Cover of a **single track** exclusively from the **embedded** tag image
+/// (written to the cache once, key = track path). Deliberately **no** folder
+/// image as a fallback: a single/guest track in a foreign album folder should
+/// not inherit its `cover.jpg`. If an embedded image is missing, the function
+/// returns `None` – the caller then falls back to the album or artist cover,
+/// never to a foreign folder image. The audio file is only read.
 pub fn local_track_cover(path: &str) -> Option<String> {
     let p = Path::new(path);
 
@@ -434,8 +434,8 @@ pub fn local_track_cover(path: &str) -> Option<String> {
     Some(cache.to_string_lossy().into_owned())
 }
 
-/// Lokaler Cache-Pfad eines Podcast-Bilds (Schlüssel = Bild-URL), **nur falls die
-/// Datei bereits vorliegt** – ohne Netzzugriff (für die Anzeige im UI-Thread).
+/// Local cache path of a podcast image (key = image URL), **only if the file is
+/// already present** – without network access (for display in the UI thread).
 pub fn podcast_image_path(url: &str) -> Option<String> {
     if url.trim().is_empty() {
         return None;
@@ -445,9 +445,9 @@ pub fn podcast_image_path(url: &str) -> Option<String> {
     p.exists().then(|| p.to_string_lossy().into_owned())
 }
 
-/// Lädt das Podcast-Bild (RSS/iTunes) bei Bedarf in den Cache und gibt den
-/// lokalen Pfad zurück. **Netzzugriff** – nur aus Worker-/Hintergrund-Threads
-/// aufrufen. Bereits gecachte Bilder werden nicht erneut geladen.
+/// Loads the podcast image (RSS/iTunes) into the cache on demand and returns the
+/// local path. **Network access** – only call from worker/background threads.
+/// Already cached images are not loaded again.
 pub fn cache_podcast_image(url: &str) -> Option<String> {
     if let Some(p) = podcast_image_path(url) {
         return Some(p);
@@ -462,8 +462,8 @@ pub fn cache_podcast_image(url: &str) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
 }
 
-/// Lokaler Cache-Pfad eines Sender-Logos (Schlüssel = Bild-URL), **nur falls die
-/// Datei bereits vorliegt** – ohne Netzzugriff (für die Anzeige im UI-Thread).
+/// Local cache path of a station logo (key = image URL), **only if the file is
+/// already present** – without network access (for display in the UI thread).
 pub fn station_image_path(url: &str) -> Option<String> {
     if url.trim().is_empty() {
         return None;
@@ -473,9 +473,9 @@ pub fn station_image_path(url: &str) -> Option<String> {
     p.exists().then(|| p.to_string_lossy().into_owned())
 }
 
-/// Lädt das Sender-Logo bei Bedarf in den Cache und gibt den lokalen Pfad zurück.
-/// **Netzzugriff** – nur aus Worker-/Hintergrund-Threads aufrufen. Bereits
-/// gecachte Logos werden nicht erneut geladen.
+/// Loads the station logo into the cache on demand and returns the local path.
+/// **Network access** – only call from worker/background threads. Already
+/// cached logos are not loaded again.
 pub fn cache_station_image(url: &str) -> Option<String> {
     if let Some(p) = station_image_path(url) {
         return Some(p);
@@ -490,9 +490,9 @@ pub fn cache_station_image(url: &str) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
 }
 
-/// Holt das Cover (und den Albumnamen) zu (Interpret, Titel) – **Netzzugriff**,
-/// nur aus Worker-/Hintergrund-Threads aufrufen. Best effort: `None`, wenn nichts
-/// gefunden wird. Für das nachträgliche Taggen einer Streaming-Aufnahme.
+/// Fetches the cover (and album name) for (artist, title) – **network access**,
+/// only call from worker/background threads. Best effort: `None` if nothing is
+/// found. For subsequently tagging a streaming recording.
 pub fn recording_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>)> {
     if title.trim().is_empty() {
         return None;
@@ -503,7 +503,7 @@ pub fn recording_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<Str
         .flatten()
 }
 
-/// Cache-Pfad für ein lokal extrahiertes Album-Cover (Schlüssel: Interpret+Album).
+/// Cache path for a locally extracted album cover (key: artist+album).
 fn save_local_cover(artist: &str, album: &str, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = cover_cache_dir();
     path.push(format!("local_{}.img", name_hash(&format!("{artist}\u{1}{album}"))));
@@ -511,11 +511,11 @@ fn save_local_cover(artist: &str, album: &str, bytes: &[u8]) -> Result<PathBuf> 
     Ok(path)
 }
 
-/// Reichert ein einzelnes Album an: Release suchen, Cover laden, in der DB
-/// speichern. Gibt den resultierenden Eintrag zurück (mit `status`).
+/// Enriches a single album: search for the release, load the cover, store it in
+/// the DB. Returns the resulting entry (with `status`).
 ///
-/// Macht genau eine MusicBrainz-Anfrage – der Aufrufer ist für das Einhalten
-/// des Rate-Limits ([`RATE_LIMIT`]) zwischen den Aufrufen zuständig.
+/// Makes exactly one MusicBrainz request – the caller is responsible for
+/// honoring the rate limit ([`RATE_LIMIT`]) between calls.
 pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &str) -> AlbumMeta {
     let mut meta = AlbumMeta::pending(artist, album);
 
@@ -547,7 +547,7 @@ pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &
     meta
 }
 
-/// Speichert ein Künstlerfoto im Cache und gibt den Pfad zurück.
+/// Stores an artist photo in the cache and returns the path.
 fn save_artist_image(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = artist_cache_dir();
     path.push(format!("{}.img", name_hash(name)));
@@ -555,9 +555,9 @@ fn save_artist_image(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Persistiert ein bereits (ggf. parallel) geladenes Künstlerfoto: speichert die
-/// Bytes im Cache und baut den Meta-Eintrag. Schreibt **nicht** in die DB – das
-/// übernimmt der Aufrufer serialisiert (eine SQLite-Verbindung).
+/// Persists an already (possibly in parallel) loaded artist photo: stores the
+/// bytes in the cache and builds the meta entry. Does **not** write to the DB –
+/// the caller does that serialized (a single SQLite connection).
 pub fn store_artist_image(name: &str, image: Option<Vec<u8>>, errored: bool) -> ArtistMeta {
     let mut meta = ArtistMeta::pending(name);
     match image {
@@ -578,7 +578,7 @@ pub fn store_artist_image(name: &str, image: Option<Vec<u8>>, errored: bool) -> 
     meta
 }
 
-/// Maximale Anzahl Bilder je Galerie (Album/Interpret).
+/// Maximum number of images per gallery (album/artist).
 const MAX_GALLERY: usize = 8;
 
 #[derive(serde::Deserialize)]
@@ -629,7 +629,7 @@ struct FanartImage {
     url: String,
 }
 
-/// Bestimmt die "Art" eines CAA-Bildes (Front/Back/…) für die Anzeige.
+/// Determines the "kind" of a CAA image (front/back/…) for display.
 fn caa_kind(types: &[String], front: bool, back: bool) -> String {
     if front {
         "Front".to_string()
@@ -638,11 +638,11 @@ fn caa_kind(types: &[String], front: bool, back: bool) -> String {
     } else if let Some(t) = types.first() {
         t.clone()
     } else {
-        "Bild".to_string()
+        "Image".to_string()
     }
 }
 
-/// Speichert ein Galerie-Bild im Cover-Cache und liefert den Pfad.
+/// Stores a gallery image in the cover cache and returns the path.
 fn save_gallery_image(prefix: &str, key: &str, idx: usize, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = cover_cache_dir();
     path.push(format!("{prefix}_{}_{idx}.img", name_hash(key)));
@@ -650,9 +650,9 @@ fn save_gallery_image(prefix: &str, key: &str, idx: usize, bytes: &[u8]) -> Resu
     Ok(path)
 }
 
-/// Speichert eine **bereits geladene** Album-Galerie im Cache und in der DB.
-/// (Der Netzabruf passiert getrennt – so koennen mehrere Alben parallel laden
-/// und nur das Schreiben wird ueber den Koordinator serialisiert.)
+/// Stores an **already loaded** album gallery in the cache and in the DB.
+/// (The network fetch happens separately – so multiple albums can load in
+/// parallel and only the writing is serialized via the coordinator.)
 pub fn store_album_gallery(
     lib: &Library,
     artist: &str,
@@ -675,7 +675,7 @@ pub fn store_album_gallery(
     stored.len()
 }
 
-/// Holt & speichert die Bildergalerie eines Interpreten (fanart.tv) in die DB.
+/// Fetches & stores an artist's image gallery (fanart.tv) into the DB.
 pub fn enrich_artist_gallery(
     client: &OnlineClient,
     lib: &Library,
@@ -712,10 +712,10 @@ pub fn enrich_artist_gallery(
     stored.len()
 }
 
-/// Holt & speichert die Cover-Galerie eines Albums (Cover Art Archive) in die DB.
-/// Setzt die bereits gefundene MBID aus den Album-Metadaten voraus (sie entsteht
-/// beim Einzelcover-Abruf [`enrich_album`]); ohne MBID passiert nichts. Für den
-/// bedarfsgesteuerten Abruf beim Öffnen der Album-Detailansicht.
+/// Fetches & stores an album's cover gallery (Cover Art Archive) into the DB.
+/// Requires the MBID already found in the album metadata (it is created during
+/// the single-cover fetch [`enrich_album`]); without an MBID nothing happens. For
+/// the on-demand fetch when opening the album detail view.
 pub fn enrich_album_gallery(client: &OnlineClient, lib: &Library, artist: &str, album: &str) -> usize {
     let Some(mbid) = lib
         .get_album_meta(artist, album)
@@ -729,11 +729,11 @@ pub fn enrich_album_gallery(client: &OnlineClient, lib: &Library, artist: &str, 
     store_album_gallery(lib, artist, album, &imgs)
 }
 
-/// Erkennt einen Titel per Fingerprint (Chromaprint → AcoustID) und legt die
-/// **vorgeschlagenen** Metadaten in der DB ab. Die Datei wird nur gelesen.
+/// Detects a track via fingerprint (Chromaprint → AcoustID) and stores the
+/// **suggested** metadata in the DB. The file is only read.
 ///
-/// Macht eine einzelne AcoustID-Anfrage; bedarfsgesteuert beim Abspielen aufgerufen
-/// (durch das Spieltempo natürlich entzerrt), daher ohne eigene Drosselpause.
+/// Makes a single AcoustID request; called on demand during playback (naturally
+/// spread out by the playback pace), hence without its own throttle pause.
 pub fn enrich_track_fingerprint(
     client: &OnlineClient,
     lib: &Library,
@@ -773,7 +773,7 @@ pub fn enrich_track_fingerprint(
     meta
 }
 
-// ---- MusicBrainz-JSON ----
+// ---- MusicBrainz JSON ----
 
 #[derive(Deserialize)]
 struct MbSearch {
@@ -797,7 +797,7 @@ struct MbReleaseGroup {
     id: String,
 }
 
-// ---- Deezer-JSON (Künstlerfotos) ----
+// ---- Deezer JSON (artist photos) ----
 
 #[derive(Deserialize)]
 struct DzSearch {
@@ -841,7 +841,7 @@ struct DzAlbum {
     cover_big: Option<String>,
 }
 
-// ---- AcoustID-JSON (Fingerprint-Erkennung) ----
+// ---- AcoustID JSON (fingerprint detection) ----
 
 #[derive(Deserialize)]
 struct AcoustIdResp {
@@ -879,14 +879,14 @@ struct AcoustIdReleaseGroup {
     title: Option<String>,
 }
 
-// ---- Hilfsfunktionen ----
+// ---- Helper functions ----
 
-/// Liest das Jahr aus einem MusicBrainz-Datum (`2015`, `2015-11`, `2015-11-20`).
+/// Reads the year from a MusicBrainz date (`2015`, `2015-11`, `2015-11-20`).
 fn parse_year(date: &str) -> Option<i32> {
     date.get(0..4).and_then(|y| y.parse().ok())
 }
 
-/// Maskiert Lucene-Sonderzeichen in Freitext, damit die Query gültig bleibt.
+/// Escapes Lucene special characters in free text, so the query stays valid.
 fn escape_lucene(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -898,7 +898,7 @@ fn escape_lucene(s: &str) -> String {
     out
 }
 
-/// Minimales Percent-Encoding für Query-Strings (RFC 3986 unreserved bleibt).
+/// Minimal percent-encoding for query strings (RFC 3986 unreserved is kept).
 pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

@@ -1,4 +1,4 @@
-//! GStreamer-Playback über `playbin3`.
+//! GStreamer playback via `playbin3`.
 
 use anyhow::{anyhow, Result};
 use gstreamer as gst;
@@ -6,11 +6,11 @@ use gstreamer::prelude::*;
 
 pub struct Player {
     playbin: gst::Element,
-    /// 10-Band-Equalizer als `audio-filter` (falls das Plugin vorhanden ist).
+    /// 10-band equalizer as `audio-filter` (if the plugin is available).
     equalizer: Option<gst::Element>,
-    /// Hält die Bus-Überwachung am Leben. `add_watch_local` gibt einen Guard
-    /// zurück, der die Überwachung beim Verwerfen wieder **entfernt** – ohne ihn
-    /// festzuhalten käme nie ein EOS an (kein automatisches Weiterschalten).
+    /// Keeps the bus watch alive. `add_watch_local` returns a guard
+    /// that **removes** the watch again when dropped – without holding
+    /// onto it, an EOS would never arrive (no automatic advancing).
     bus_watch: std::cell::RefCell<Option<gst::bus::BusWatchGuard>>,
 }
 
@@ -21,7 +21,7 @@ impl Player {
             .build()
             .map_err(|_| anyhow!("playbin3 unavailable – is gstreamer installed?"))?;
 
-        // Equalizer als Audio-Filter einhängen (optional – nur wenn verfügbar).
+        // Hook in the equalizer as an audio filter (optional – only if available).
         let equalizer = gst::ElementFactory::make("equalizer-10bands").build().ok();
         match &equalizer {
             Some(eq) => playbin.set_property("audio-filter", eq),
@@ -35,7 +35,7 @@ impl Player {
         })
     }
 
-    /// Setzt die 10 Band-Verstärkungen (dB, jeweils −24…+12) live.
+    /// Sets the 10 band gains (dB, each −24…+12) live.
     pub fn set_eq_bands(&self, bands: &[f64; 10]) {
         let Some(eq) = &self.equalizer else {
             return;
@@ -45,22 +45,22 @@ impl Player {
         }
     }
 
-    /// Lädt eine lokale Datei und startet die Wiedergabe. Ist `resume_ms > 0`,
-    /// wird vor dem Start an diese Position gesprungen (Resume bei Hörspielen).
+    /// Loads a local file and starts playback. If `resume_ms > 0`,
+    /// it seeks to that position before starting (resume for audio dramas).
     pub fn play_file(&self, path: &str, resume_ms: i64) -> Result<()> {
         let uri = gst::glib::filename_to_uri(path, None)
             .map_err(|e| anyhow!("Invalid path {path}: {e}"))?;
-        // playbin3 liest die `uri` nur beim Zustandswechsel neu ein – läuft schon
-        // ein Titel, muss die Pipeline erst zurückgesetzt werden, sonst spielt
-        // der alte Titel weiter.
+        // playbin3 only re-reads the `uri` on a state change – if a track is
+        // already playing, the pipeline must first be reset, otherwise the
+        // old track keeps playing.
         self.playbin
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri.as_str());
         if resume_ms > 0 {
-            // Für einen zuverlässigen Sprung muss die Pipeline erst prerollen:
-            // kurz nach PAUSED, auf den Preroll warten (bei lokalen Dateien nur
-            // wenige Millisekunden), dann an die Resume-Position springen.
+            // For a reliable seek the pipeline must first preroll:
+            // briefly go to PAUSED, wait for the preroll (only a few
+            // milliseconds for local files), then seek to the resume position.
             self.playbin
                 .set_state(gst::State::Paused)
                 .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
@@ -73,18 +73,18 @@ impl Player {
         Ok(())
     }
 
-    /// Spielt eine beliebige URI (z. B. eine http-Podcast-Episode). Anders als
-    /// `play_file` wird die URI unverändert übernommen (kein Datei-Pfad).
-    /// `resume_ms > 0` springt nach dem Preroll an die gemerkte Position (sofern
-    /// die Quelle seekbar ist – Podcast-Hoster unterstützen i. d. R. Ranges).
+    /// Plays an arbitrary URI (e.g. an http podcast episode). Unlike
+    /// `play_file`, the URI is taken as-is (not a file path).
+    /// `resume_ms > 0` seeks to the saved position after the preroll (provided
+    /// the source is seekable – podcast hosts usually support ranges).
     pub fn play_uri(&self, uri: &str, resume_ms: i64) -> Result<()> {
         self.playbin
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.playbin.set_property("uri", uri);
         if resume_ms > 0 {
-            // Wie play_file: kurz nach PAUSED, auf den Preroll warten (bei
-            // Streams etwas länger), dann an die Resume-Position springen.
+            // Like play_file: briefly go to PAUSED, wait for the preroll
+            // (a bit longer for streams), then seek to the resume position.
             self.playbin
                 .set_state(gst::State::Paused)
                 .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
@@ -97,12 +97,12 @@ impl Player {
         Ok(())
     }
 
-    /// Registriert Callbacks für die Bus-Ereignisse: `on_eos` bei Titelende (für
-    /// das Weiterschalten in der Warteschlange) und `on_title` bei einem
-    /// Titel-Tag. Bei Streams (Internet-Radio) liefert `playbin3` über die
-    /// ICY-Metadaten den **aktuell laufenden Titel** als Tag – damit lässt sich
-    /// „Now Playing" anzeigen, ohne eine zweite Verbindung zu öffnen. Läuft im
-    /// Main-Loop.
+    /// Registers callbacks for the bus events: `on_eos` at track end (for
+    /// advancing in the queue) and `on_title` on a
+    /// title tag. For streams (internet radio), `playbin3` delivers the
+    /// **currently playing track** as a tag via the ICY metadata – this lets
+    /// us show "Now Playing" without opening a second connection. Runs in the
+    /// main loop.
     pub fn connect_bus_events<E, T>(&self, on_eos: E, on_title: T)
     where
         E: Fn() + 'static,
@@ -120,8 +120,8 @@ impl Player {
                         );
                     }
                     gst::MessageView::Tag(tag) => {
-                        // ICY-„StreamTitle" (bzw. Datei-Titel) → an die UI melden.
-                        // Der Aufrufer entscheidet, ob er ihn nutzt (nur bei Sendern).
+                        // ICY "StreamTitle" (or file title) → report to the UI.
+                        // The caller decides whether to use it (only for stations).
                         if let Some(title) = tag.tags().get::<gst::tags::Title>() {
                             let t = title.get().to_string();
                             if !t.trim().is_empty() {
@@ -133,8 +133,8 @@ impl Player {
                 }
                 gst::glib::ControlFlow::Continue
             });
-            // Guard festhalten – sonst wird die Überwachung sofort wieder entfernt
-            // und es käme nie ein EOS (kein automatisches Weiterschalten).
+            // Hold onto the guard – otherwise the watch is removed again right
+            // away and an EOS would never arrive (no automatic advancing).
             *self.bus_watch.borrow_mut() = guard.ok();
         }
     }
@@ -163,7 +163,7 @@ impl Player {
             .map(|t| t.mseconds() as i64)
     }
 
-    /// Springt zur angegebenen Position (z. B. für Resume bei Hörspielen).
+    /// Seeks to the given position (e.g. for resume in audio dramas).
     pub fn seek_ms(&self, ms: i64) -> Result<()> {
         self.playbin
             .seek_simple(

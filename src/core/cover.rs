@@ -1,4 +1,4 @@
-//! Cover-Beschaffung: Bilddatei im Ordner oder eingebettetes Bild aus den Tags.
+//! Cover retrieval: image file in the folder or embedded image from the tags.
 
 use lofty::file::TaggedFileExt;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ fn is_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Sucht im Ordner nach einer Cover-Bilddatei (bevorzugt bekannte Namen).
+/// Searches the folder for a cover image file (preferring known names).
 pub fn find_cover_file(dir: &Path) -> Option<PathBuf> {
     let images: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
@@ -38,7 +38,7 @@ pub fn find_cover_file(dir: &Path) -> Option<PathBuf> {
     images.into_iter().next()
 }
 
-/// Liest ein eingebettetes Cover aus den Tags einer Audiodatei.
+/// Reads an embedded cover from the tags of an audio file.
 pub fn embedded_cover(file: &Path) -> Option<Vec<u8>> {
     let tagged = lofty::read_from_path(file).ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;

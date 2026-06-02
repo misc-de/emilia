@@ -1,10 +1,10 @@
-//! MPRIS-Bridge: Steuerung über Sperrbildschirm und Medientasten
-//! (`org.mpris.MediaPlayer2`) via D-Bus.
+//! MPRIS bridge: control via lock screen and media keys
+//! (`org.mpris.MediaPlayer2`) over D-Bus.
 //!
-//! Alles läuft auf dem glib-Main-Loop (die `mpris-server`-`Player`-Tasks werden
-//! mit `spawn_future_local` gestartet), darum kommen die Desktop-Befehle direkt
-//! auf dem UI-Thread an – kein Thread-Bridging nötig. Ist kein D-Bus erreichbar
-//! (z. B. headless), schlägt der Aufbau still fehl und alle Aufrufe sind No-Ops.
+//! Everything runs on the glib main loop (the `mpris-server` `Player` tasks are
+//! started with `spawn_future_local`), so the desktop commands arrive directly
+//! on the UI thread – no thread bridging needed. If no D-Bus is reachable
+//! (e.g. headless), setup fails silently and all calls are no-ops.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,7 +12,7 @@ use std::rc::Rc;
 use gtk::glib;
 use mpris_server::{Metadata, PlaybackStatus, Player, Time, TrackId};
 
-/// Befehl vom Desktop an die App. Wird auf dem Main-Thread ausgeliefert.
+/// Command from the desktop to the app. Delivered on the main thread.
 #[derive(Debug, Clone, Copy)]
 pub enum MprisCommand {
     PlayPause,
@@ -22,33 +22,33 @@ pub enum MprisCommand {
     Prev,
     Stop,
     Raise,
-    /// Relativer Sprung um Mikrosekunden (kann negativ sein).
+    /// Relative jump by microseconds (can be negative).
     SeekBy(i64),
-    /// Sprung an eine absolute Position in Mikrosekunden.
+    /// Jump to an absolute position in microseconds.
     SetPosition(i64),
 }
 
-/// Der `Player` wird erst asynchron aufgebaut; bis dahin (oder wenn kein D-Bus
-/// vorhanden ist) bleibt der Platz leer und alle Aufrufe sind wirkungslos.
+/// The `Player` is built up asynchronously; until then (or when no D-Bus
+/// is present) the slot stays empty and all calls have no effect.
 type Slot = Rc<RefCell<Option<Rc<Player>>>>;
 
-/// Griff auf den laufenden MPRIS-Dienst zum Aktualisieren des Zustands.
+/// Handle on the running MPRIS service for updating the state.
 #[derive(Clone)]
 pub struct Mpris {
     player: Slot,
 }
 
 impl Mpris {
-    /// Startet den MPRIS-Dienst auf dem glib-Main-Loop. `on_cmd` wird bei jedem
-    /// Desktop-Befehl (Play/Pause/Next/…) auf dem Main-Thread aufgerufen.
+    /// Starts the MPRIS service on the glib main loop. `on_cmd` is called on
+    /// the main thread for every desktop command (play/pause/next/…).
     pub fn start<F>(on_cmd: F) -> Self
     where
         F: Fn(MprisCommand) + 'static,
     {
         let slot: Slot = Rc::new(RefCell::new(None));
         let on_cmd: Rc<dyn Fn(MprisCommand)> = Rc::new(on_cmd);
-        // Eindeutiger Bus-Name je Prozess: im Dev-Modus laufen mehrere Instanzen
-        // (NON_UNIQUE), die sich sonst um denselben Namen streiten würden.
+        // Unique bus name per process: in dev mode multiple instances run
+        // (NON_UNIQUE) that would otherwise fight over the same name.
         let suffix = format!("Emilia.instance{}", std::process::id());
 
         let slot_for_task = slot.clone();
@@ -99,7 +99,7 @@ impl Mpris {
                 });
             }
 
-            // Eingehende Methodenaufrufe abarbeiten (läuft im Main-Loop weiter).
+            // Handle incoming method calls (keeps running on the main loop).
             glib::spawn_future_local(player.run());
             *slot_for_task.borrow_mut() = Some(Rc::new(player));
         });
@@ -107,7 +107,7 @@ impl Mpris {
         Mpris { player: slot }
     }
 
-    /// Setzt den Wiedergabestatus (Playing/Paused).
+    /// Sets the playback status (Playing/Paused).
     pub fn set_playing(&self, playing: bool) {
         self.set_status(if playing {
             PlaybackStatus::Playing
@@ -129,8 +129,8 @@ impl Mpris {
         });
     }
 
-    /// Aktualisiert die Titel-Metadaten für den Sperrbildschirm. `index` dient
-    /// als stabile (Sitzungs-)Track-ID; `length_ms`/`art_path` sind optional.
+    /// Updates the track metadata for the lock screen. `index` serves
+    /// as a stable (session) track ID; `length_ms`/`art_path` are optional.
     pub fn set_metadata(
         &self,
         index: usize,
@@ -168,15 +168,15 @@ impl Mpris {
         });
     }
 
-    /// Setzt die aktuelle Position (für Lese-Abfragen der Clients). Synchron und
-    /// günstig – für regelmäßige Updates gedacht.
+    /// Sets the current position (for clients' read queries). Synchronous and
+    /// cheap – intended for regular updates.
     pub fn set_position(&self, pos_ms: i64) {
         if let Some(player) = self.player.borrow().as_ref() {
             player.set_position(Time::from_millis(pos_ms.max(0)));
         }
     }
 
-    /// Meldet einen Positionssprung (Seeked-Signal) nach dem Spulen.
+    /// Reports a position jump (Seeked signal) after seeking.
     pub fn seeked(&self, pos_ms: i64) {
         let Some(player) = self.player.borrow().clone() else {
             return;

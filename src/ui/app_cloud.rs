@@ -1,6 +1,6 @@
-//! Einrichtungsdialog für eine Nextcloud-/WebDAV-Quelle: Zugangsdaten per
-//! Login-QR-Code (Standard der Nextcloud-App) **oder** manuell, plus
-//! Verbindungstest. Reine UI/Eventfluss-Anbindung – die WebDAV-Logik liegt in
+//! Setup dialog for a Nextcloud/WebDAV source: credentials via
+//! login QR code (the Nextcloud app's default) **or** manually, plus a
+//! connection test. Pure UI/event-flow wiring - the WebDAV logic lives in
 //! [`crate::core::webdav`].
 
 use adw::prelude::*;
@@ -14,15 +14,15 @@ use crate::i18n::gettext;
 use crate::model::Source;
 use crate::ui::app::{App, Cmd, Msg};
 
-/// Widget-Zustand des Nextcloud-Dialogs (Handles, damit ein per QR gescanntes
-/// Ergebnis die Formularfelder füllen kann).
+/// Widget state of the Nextcloud dialog (handles, so that a result scanned via
+/// QR can fill the form fields).
 #[derive(Default)]
 pub(crate) struct CloudState {
     pub dialog: Option<adw::Dialog>,
-    /// Laufende Webcam-Scanner-Pipeline (Drop stoppt die Kamera).
+    /// Running webcam scanner pipeline (dropping it stops the camera).
     pub scanner: Option<Scanner>,
     pub cam: Option<gtk::Picture>,
-    /// Aufklappbarer Bereich für die manuelle Eingabe (klappt die Kamera weg).
+    /// Expandable area for manual entry (folds the camera away).
     pub manual: Option<adw::ExpanderRow>,
     pub url_row: Option<adw::EntryRow>,
     pub user_row: Option<adw::EntryRow>,
@@ -32,7 +32,7 @@ pub(crate) struct CloudState {
 }
 
 impl App {
-    /// Öffnet den Dialog „Nextcloud hinzufügen".
+    /// Opens the "Add Nextcloud" dialog.
     pub(crate) fn open_cloud_dialog(
         &mut self,
         root: &adw::ApplicationWindow,
@@ -56,7 +56,7 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Kamera-Vorschau: liest sofort den Login-QR-Code (Standard).
+        // Camera preview: reads the login QR code right away (default).
         let cam = gtk::Picture::builder()
             .height_request(180)
             .visible(false)
@@ -71,8 +71,8 @@ impl App {
             .build();
         content.append(&hint);
 
-        // Manuelle Eingabe als aufklappbarer Bereich. Aufklappen blendet die
-        // Kamera aus (nur manuelle Eingabe), Zuklappen bringt sie zurück.
+        // Manual entry as an expandable area. Expanding hides the
+        // camera (manual entry only), collapsing brings it back.
         let manual_group = adw::PreferencesGroup::new();
         let manual = adw::ExpanderRow::builder()
             .title(&gettext("Enter the details manually"))
@@ -96,7 +96,7 @@ impl App {
             });
         }
 
-        // Musikordner zum Indizieren – immer sichtbar (bei Verbindung anzugeben).
+        // Music folder to index - always visible (to be given when connecting).
         let path_group = adw::PreferencesGroup::builder()
             .title(&gettext("Music folder to index"))
             .build();
@@ -113,7 +113,7 @@ impl App {
             .build();
         content.append(&status);
 
-        // Aktionsknöpfe.
+        // Action buttons.
         let buttons = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
@@ -155,11 +155,11 @@ impl App {
         self.cloud.status = Some(status);
         self.cloud.dialog = Some(dialog);
 
-        // Kamera direkt starten – sie liest den Login-QR sofort.
+        // Start the camera right away - it reads the login QR immediately.
         self.start_cloud_scan(sender);
     }
 
-    /// Startet den Webcam-Scanner für den Login-QR-Code.
+    /// Starts the webcam scanner for the login QR code.
     pub(crate) fn start_cloud_scan(&mut self, sender: &ComponentSender<Self>) {
         if self.cloud.scanner.is_some() {
             return;
@@ -175,7 +175,7 @@ impl App {
                 self.cloud_status(&gettext("Point the camera at the login QR code"));
             }
             Err(e) => {
-                // Keine Kamera verfügbar → direkt auf manuelle Eingabe umschalten.
+                // No camera available → switch straight to manual entry.
                 tracing::info!("Nextcloud camera unavailable: {e}");
                 if let Some(m) = &self.cloud.manual {
                     m.set_expanded(true);
@@ -184,17 +184,17 @@ impl App {
         }
     }
 
-    /// Ein QR-Code wurde dekodiert: als Nextcloud-Login-Code deuten und die
-    /// Formularfelder füllen.
+    /// A QR code was decoded: interpret it as a Nextcloud login code and fill
+    /// the form fields.
     pub(crate) fn handle_cloud_qr(&mut self, code: &str) {
         let Some((server, user, pass)) = webdav::parse_nc_login(code) else {
-            return; // anderer/ungültiger Code – weiterscannen
+            return; // other/invalid code - keep scanning
         };
-        self.cloud.scanner = None; // Kamera anhalten
+        self.cloud.scanner = None; // stop the camera
         if let Some(cam) = &self.cloud.cam {
             cam.set_visible(false);
         }
-        // Manuelle Eingabe aufklappen, damit die gescannten Daten sichtbar sind.
+        // Expand the manual entry so the scanned data is visible.
         if let Some(m) = &self.cloud.manual {
             m.set_expanded(true);
         }
@@ -210,7 +210,7 @@ impl App {
         self.cloud_status(&gettext("Login data scanned – set the music path and save"));
     }
 
-    /// Liest die Formularfelder zu Zugangsdaten (alle Pflichtfelder außer Pfad).
+    /// Reads the form fields into credentials (all required fields except the path).
     fn cloud_creds(&self) -> Option<Creds> {
         let url = self.cloud.url_row.as_ref()?.text().trim().to_string();
         let user = self.cloud.user_row.as_ref()?.text().trim().to_string();
@@ -227,7 +227,7 @@ impl App {
         })
     }
 
-    /// Verbindungstest im Hintergrund (PROPFIND auf die Musikwurzel).
+    /// Connection test in the background (PROPFIND on the music root).
     pub(crate) fn test_cloud(&mut self, sender: &ComponentSender<Self>) {
         let Some(creds) = self.cloud_creds() else {
             self.cloud_status(&gettext("Please fill in URL, user and app password"));
@@ -239,13 +239,13 @@ impl App {
         });
     }
 
-    /// Speichert die Quelle (nach gefülltem Formular) und schließt den Dialog.
+    /// Saves the source (after the form is filled in) and closes the dialog.
     pub(crate) fn save_cloud(&mut self, sender: &ComponentSender<Self>) {
         let Some(creds) = self.cloud_creds() else {
             self.cloud_status(&gettext("Please fill in URL, user and app password"));
             return;
         };
-        // Anzeigename: Host der URL.
+        // Display name: host of the URL.
         let name = creds
             .base_url
             .split_once("://")
@@ -273,8 +273,8 @@ impl App {
                 if let Some(d) = self.cloud.dialog.take() {
                     d.close();
                 }
-                // Die Cloud-Bibliothek im Hintergrund einlesen, damit sich die
-                // Titel wie lokale anfühlen (Interpreten/Alben + Cover/Fotos).
+                // Index the cloud library in the background so the tracks
+                // feel like local ones (artists/albums + covers/photos).
                 let mut indexed = src.clone();
                 indexed.id = id;
                 sender.spawn_command(move |out| {
@@ -294,7 +294,7 @@ impl App {
         }
     }
 
-    /// Ergebnis des Verbindungstests anzeigen.
+    /// Show the result of the connection test.
     pub(crate) fn on_webdav_tested(&mut self, result: Result<(), String>) {
         match result {
             Ok(()) => self.cloud_status(&gettext("Connection works")),
@@ -309,8 +309,8 @@ impl App {
     }
 }
 
-/// Normalisiert den Musik-Unterpfad (führender Slash, ohne Schluss-Slash;
-/// leer = Cloud-Wurzel).
+/// Normalizes the music subpath (leading slash, without a trailing slash;
+/// empty = cloud root).
 fn normalize_music_path(p: &str) -> String {
     let p = p.trim().trim_end_matches('/');
     if p.is_empty() {

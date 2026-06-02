@@ -1,6 +1,6 @@
-//! Konzerte: markierte Live-/Unplugged-Aufnahmen auflisten und der
-//! Import-Dialog für erkannte Kandidaten. Aus app.rs herausgelöst – reine
-//! Umordnung, kein Funktionswechsel.
+//! Concerts: listing marked live/unplugged recordings and the import dialog for
+//! detected candidates. Extracted from app.rs – pure reorganization, no change
+//! in functionality.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -10,11 +10,11 @@ use crate::i18n::{gettext, ngettext_n};
 use crate::ui::app::{App, Msg};
 
 impl App {
-    /// Lädt die Konzerte und baut die Liste neu auf. Einzige Quelle sind die
-    /// Inhalte, deren **Eigenschaften** den Bereich „Konzerte" enthalten
-    /// (Alben/Ordner/Titel). So lässt sich ein Konzert allein über die
-    /// Eigenschaften (Detailansicht) wieder entfernen. Markierte Ordner werden
-    /// in ihre Alben/Einzelstücke aufgelöst (kein Ordner-Eintrag).
+    /// Loads the concerts and rebuilds the list. The only source is the content
+    /// whose **properties** include the "Concerts" area (albums/folders/tracks).
+    /// This way a concert can be removed again solely via the properties (detail
+    /// view). Marked folders are resolved into their albums/individual pieces (no
+    /// folder entry).
     pub(crate) fn load_concerts(&mut self, sender: &ComponentSender<Self>) {
         let raw = self
             .library
@@ -35,8 +35,8 @@ impl App {
                 &items,
                 sender,
                 Msg::PlayConcert,
-                // Kein Mülleimer in der Konzertliste – Entfernen läuft über die
-                // Eigenschaften (Bereich „Konzerte" abwählen).
+                // No trash button in the concert list – removal goes via the
+                // properties (deselect the "Concerts" area).
                 None,
                 Msg::ShowConcertDetail,
                 None,
@@ -46,7 +46,7 @@ impl App {
         }
     }
 
-    /// Import-Dialog: Liste der Kandidaten zum Markieren + „Hinzufügen".
+    /// Import dialog: list of candidates to mark + "Add".
     pub(crate) fn open_concert_import_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -70,7 +70,7 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Alle-auswählen-Schalter
+        // Select-all switch
         let all_group = adw::PreferencesGroup::new();
         let all = adw::SwitchRow::builder()
             .title(&gettext("Select all"))
@@ -79,7 +79,7 @@ impl App {
         all_group.add(&all);
         content.append(&all_group);
 
-        // Kandidaten
+        // Candidates
         let group = adw::PreferencesGroup::builder()
             .title(ngettext_n(
                 "{n} candidate",

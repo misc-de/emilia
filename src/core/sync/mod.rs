@@ -1,9 +1,9 @@
-//! Geräte-zu-Gerät-Synchronisierung im LAN (Port der DrivePulse-Logik).
+//! Device-to-device sync over the LAN (port of the DrivePulse logic).
 //!
-//! Ablauf: ein Gerät startet einen HTTPS-Server ([`server`]) und zeigt einen
-//! QR-Code ([`qr`]); das andere scannt ihn ([`scanner`]), pinnt den Zertifikat-
-//! Fingerprint ([`crypto`]) und koppelt sich ([`client`]). Danach werden
-//! Bibliotheks-Metadaten und Audiodateien übertragen ([`data`], [`protocol`]).
+//! Flow: one device starts an HTTPS server ([`server`]) and shows a
+//! QR code ([`qr`]); the other scans it ([`scanner`]), pins the certificate
+//! fingerprint ([`crypto`]) and pairs ([`client`]). Afterwards
+//! library metadata and audio files are transferred ([`data`], [`protocol`]).
 
 pub mod client;
 pub mod crypto;
@@ -17,49 +17,49 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-/// Bevorzugter TCP-Port des Sync-Servers (weicht bei Belegung aus).
+/// Preferred TCP port of the sync server (falls back if taken).
 pub const PORT: u16 = 8765;
-/// Anzahl ausweichender Ports, falls [`PORT`] belegt ist.
+/// Number of fallback ports to try if [`PORT`] is taken.
 pub const PORT_ATTEMPTS: u16 = 10;
-/// Sitzung läuft ab, wenn der Client länger nichts anfragt.
+/// Session expires if the client makes no request for a while.
 pub const SESSION_TIMEOUT: Duration = Duration::from_secs(30);
-/// Gültigkeitsdauer des QR-Codes (zugleich die Wartezeit auf eine Kopplung).
+/// Validity period of the QR code (also the wait time for a pairing).
 pub const QR_TTL: Duration = Duration::from_secs(120);
-/// Annahmeschleife: maximale Blockierzeit, danach wird das Stop-Flag geprüft.
+/// Accept loop: maximum blocking time, after which the stop flag is checked.
 pub const ACCEPT_POLL: Duration = Duration::from_millis(500);
-/// Abbruch nach so vielen fehlgeschlagenen Kopplungsversuchen (Bruteforce-Schutz).
+/// Abort after this many failed pairing attempts (brute-force protection).
 pub const MAX_FAILED_PAIR: u32 = 5;
 
-/// Ereignisse aus dem Server-Thread bzw. dem Client-Worker an die UI.
+/// Events from the server thread or the client worker to the UI.
 ///
-/// Muss `Debug + Send` sein (wird in `Cmd` transportiert).
+/// Must be `Debug + Send` (transported inside `Cmd`).
 #[derive(Debug)]
 pub enum SyncEvent {
-    /// Server läuft; `pair_url` ist als QR-Code anzuzeigen.
+    /// Server is running; `pair_url` should be shown as a QR code.
     ServerReady {
         pair_url: String,
         host: String,
         port: u16,
     },
-    /// Server wurde beendet (Timeout, Stop oder Fehler nach Start).
+    /// Server was stopped (timeout, stop or error after start).
     ServerStopped,
-    /// Ein anderes Gerät hat sich erfolgreich gekoppelt.
+    /// Another device paired successfully.
     PeerPaired { peer_name: String },
-    /// Verbindung wurde getrennt (durch Gegenstelle oder Timeout).
+    /// Connection was dropped (by the peer or by timeout).
     PeerDisconnected,
-    /// Eingehender Metadaten-Import wurde eingespielt (Server-Seite).
+    /// An incoming metadata import was applied (server side).
     ImportReceived { stats: ImportStats },
-    /// Metadaten wurden an die Gegenstelle gesendet.
+    /// Metadata was sent to the peer.
     ExportSent,
-    /// Fortschritt einer Dateiübertragung.
+    /// Progress of a file transfer.
     FileProgress { done: u64, total: u64, name: String },
-    /// Dateiübertragung abgeschlossen.
+    /// File transfer finished.
     TransferDone { files: usize },
-    /// Fehler (Anzeige als Toast).
+    /// Error (shown as a toast).
     Error(String),
 }
 
-/// Zähler darüber, was bei einem Import angelegt/aktualisiert wurde.
+/// Counters of what was created/updated during an import.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportStats {
     pub favorites: usize,
@@ -70,7 +70,7 @@ pub struct ImportStats {
     pub files: usize,
 }
 
-/// Aktueller Unix-Zeitstempel in Sekunden.
+/// Current Unix timestamp in seconds.
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -78,7 +78,7 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Lokale IPv4-Adresse über einen UDP-„Verbindungsversuch“ (kein echter Traffic).
+/// Local IPv4 address via a UDP "connection attempt" (no real traffic).
 pub fn local_ip() -> String {
     use std::net::UdpSocket;
     UdpSocket::bind("0.0.0.0:0")
@@ -89,7 +89,7 @@ pub fn local_ip() -> String {
         .unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
-/// Anzeigename dieses Geräts (Hostname, sonst „Emilia“).
+/// Display name of this device (hostname, otherwise "Emilia").
 pub fn default_device_name() -> String {
     std::fs::read_to_string("/etc/hostname")
         .ok()

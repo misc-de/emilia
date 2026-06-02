@@ -1,8 +1,8 @@
-//! Brücke zwischen der SQLite-`Library` und dem übertragbaren [`LibraryExport`].
+//! Bridge between the SQLite `Library` and the transferable [`LibraryExport`].
 //!
-//! Bewusst ohne Netzwerk/Server, damit Export↔Import eigenständig testbar ist.
-//! Dateipfade werden relativ zum Musikordner abgelegt, damit sie auf dem
-//! Zielgerät gegen dessen Musikordner aufgelöst werden können.
+//! Deliberately without network/server so that export↔import is testable standalone.
+//! File paths are stored relative to the music folder so they can be
+//! resolved against the target device's music folder.
 
 use anyhow::Result;
 
@@ -10,17 +10,17 @@ use crate::core::db::Library;
 use crate::core::sync::protocol::*;
 use crate::core::sync::ImportStats;
 
-/// Liest den eingestellten Musikordner (leer, falls nicht gesetzt).
+/// Reads the configured music folder (empty if not set).
 fn music_dir(lib: &Library) -> String {
     lib.get_setting("music_dir").ok().flatten().unwrap_or_default()
 }
 
-/// Für welche Ebenen ist der `key` ein Dateipfad (statt Interpret/Album-Name)?
+/// For which scopes is the `key` a file path (instead of an artist/album name)?
 fn key_is_path(scope: &str) -> bool {
     matches!(scope, "track" | "folder")
 }
 
-/// Absoluten Pfad relativ zum Musikordner machen (sonst unverändert lassen).
+/// Make an absolute path relative to the music folder (otherwise leave unchanged).
 fn relativize(path: &str, base: &str) -> String {
     if base.is_empty() {
         return path.to_string();
@@ -32,7 +32,7 @@ fn relativize(path: &str, base: &str) -> String {
     }
 }
 
-/// Relativen Pfad gegen den lokalen Musikordner auflösen.
+/// Resolve a relative path against the local music folder.
 fn resolve(rel: &str, base: &str) -> String {
     if rel.starts_with('/') || base.is_empty() {
         return rel.to_string();
@@ -40,7 +40,7 @@ fn resolve(rel: &str, base: &str) -> String {
     format!("{}/{}", base.trim_end_matches('/'), rel)
 }
 
-/// Stellt den vollständigen Bibliotheks-Export zusammen.
+/// Assembles the full library export.
 pub fn export_library(lib: &Library) -> Result<LibraryExport> {
     let base = music_dir(lib);
     let device_name = lib
@@ -167,9 +167,9 @@ pub fn export_library(lib: &Library) -> Result<LibraryExport> {
     })
 }
 
-/// Spielt einen empfangenen Export in die lokale Bibliothek ein (additiv/mergend).
-/// Dateipfade werden gegen den lokalen Musikordner aufgelöst. Die Audiodateien
-/// selbst werden separat übertragen – hier zählt nur der Metadaten-Import.
+/// Applies a received export into the local library (additive/merging).
+/// File paths are resolved against the local music folder. The audio files
+/// themselves are transferred separately – only the metadata import counts here.
 pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats> {
     let base = music_dir(lib);
     let mut stats = ImportStats::default();
@@ -188,7 +188,7 @@ pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats>
     let existing: Vec<String> = lib.playlists()?.into_iter().map(|(_, n, _)| n).collect();
     for pl in &exp.playlists {
         if existing.contains(&pl.name) {
-            continue; // gleichnamige Playlist nicht duplizieren
+            continue; // don't duplicate a playlist with the same name
         }
         let id = lib.create_playlist(&pl.name)?;
         let paths: Vec<String> = pl.paths.iter().map(|p| resolve(p, &base)).collect();
@@ -199,9 +199,9 @@ pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats>
     for pc in &exp.podcasts {
         if let Ok(id) = lib.subscribe_podcast(&pc.title, &pc.feed_url, pc.image_url.as_deref()) {
             stats.podcasts += 1;
-            // Episoden inkl. Shownotes übernehmen – aber nur, wenn lokal noch
-            // keine vorliegen, damit vorhandene/aktuellere Episoden (vom eigenen
-            // Feed-Abruf) nicht überschrieben werden.
+            // Take over episodes incl. show notes – but only if none exist
+            // locally yet, so that existing/more recent episodes (from one's own
+            // feed fetch) are not overwritten.
             if !pc.episodes.is_empty()
                 && lib.episodes(id).map(|e| e.is_empty()).unwrap_or(false)
             {
@@ -219,8 +219,8 @@ pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats>
                     .collect();
                 let _ = lib.set_episodes(id, &eps);
             }
-            // Episodenpositionen mergen: die weiteste Position gewinnt, damit man
-            // auf jedem Gerät dort weiterhört, wo man am weitesten war.
+            // Merge episode positions: the furthest position wins, so that on
+            // every device you continue listening from where you were furthest along.
             for ep in &pc.episodes {
                 if ep.position_ms > 0
                     && ep.position_ms > lib.episode_progress(&ep.audio_url).unwrap_or(0)
@@ -277,11 +277,11 @@ mod tests {
             .unwrap();
 
         let exp = export_library(&src).unwrap();
-        // Pfade sind relativ exportiert.
+        // Paths are exported relative.
         assert!(exp.files.iter().all(|f| !f.path.starts_with('/')));
         assert_eq!(exp.playlists[0].paths[0], "song.mp3");
 
-        // Import in ein Zielgerät mit anderem Musikordner.
+        // Import into a target device with a different music folder.
         let dst = Library::open_in_memory().unwrap();
         dst.set_setting("music_dir", "/data/Audio").unwrap();
         let stats = import_library(&dst, &exp).unwrap();
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(stats.playlists, 1);
         assert_eq!(stats.eq, 1);
 
-        // Track-Favorit gegen den lokalen Musikordner aufgelöst.
+        // Track favorite resolved against the local music folder.
         assert!(dst.is_favorite("track", "/data/Audio/song.mp3"));
         assert!(dst.is_favorite("album", "Künstler\u{1}Album"));
         assert_eq!(
@@ -320,11 +320,11 @@ mod tests {
             }],
         )
         .unwrap();
-        // Gemerkte Wiedergabeposition der Episode.
+        // Saved playback position of the episode.
         src.set_episode_progress("https://example.com/1.mp3", 90_000)
             .unwrap();
 
-        // Export enthält die Episode inkl. Shownotes und Position.
+        // Export contains the episode incl. show notes and position.
         let exp = export_library(&src).unwrap();
         assert_eq!(exp.podcasts.len(), 1);
         assert_eq!(exp.podcasts[0].episodes.len(), 1);
@@ -334,7 +334,7 @@ mod tests {
         );
         assert_eq!(exp.podcasts[0].episodes[0].position_ms, 90_000);
 
-        // Import in ein leeres Zielgerät: Episoden inkl. Shownotes + Position.
+        // Import into an empty target device: episodes incl. show notes + position.
         let dst = Library::open_in_memory().unwrap();
         let stats = import_library(&dst, &exp).unwrap();
         assert_eq!(stats.podcasts, 1);

@@ -1,4 +1,4 @@
-//! Eine Track-Zeile in der Bibliotheksliste (relm4-Factory).
+//! A track row in the library list (relm4 factory).
 
 use adw::prelude::*;
 use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
@@ -15,7 +15,7 @@ pub enum TrackOutput {
     Play(DynamicIndex),
 }
 
-/// Escaped Sonderzeichen (`&`, `<`, …), damit Pango-Markup sie wörtlich anzeigt.
+/// Escapes special characters (`&`, `<`, …) so that Pango markup displays them literally.
 fn esc(s: &str) -> String {
     gtk::glib::markup_escape_text(s).to_string()
 }

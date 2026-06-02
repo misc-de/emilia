@@ -1,5 +1,5 @@
-//! Playlisten: Übersichtsliste, Titel-Unterseite und die Dialoge zum Anlegen
-//! bzw. Hinzufügen. Einträge sind Pfade (wie die Warteschlange).
+//! Playlists: overview list, track subpage and the dialogs for creating
+//! or adding. Entries are paths (like the queue).
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -9,7 +9,7 @@ use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
 
 impl App {
-    /// Baut die Playlisten-Liste neu auf (Name, Titelzahl, Abspielen, Löschen).
+    /// Rebuilds the playlist list (name, track count, play, delete).
     pub(crate) fn reload_playlists(&mut self, sender: &ComponentSender<Self>) {
         self.playlist_items = self.library.playlists().unwrap_or_default();
 
@@ -60,7 +60,7 @@ impl App {
                 let sender = sender.clone();
                 row.connect_activated(move |_| sender.input(Msg::OpenPlaylist(id)));
             }
-            // Langes Drücken: umbenennen.
+            // Long press: rename.
             let long_press = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -74,7 +74,7 @@ impl App {
         }
     }
 
-    /// Öffnet die Titel-Unterseite einer Playlist (Tippen = ab hier abspielen).
+    /// Opens the track subpage of a playlist (tap = play from here).
     pub(crate) fn open_playlist(&self, sender: &ComponentSender<Self>, id: i64, name: &str) {
         let paths = self.library.playlist_paths(id).unwrap_or_default();
 
@@ -142,7 +142,7 @@ impl App {
         self.push_subpage(&gettext_f("Playlist – {name}", &[("name", name)]), &content);
     }
 
-    /// Dialog: Name eingeben und eine neue (leere) Playlist anlegen.
+    /// Dialog: enter a name and create a new (empty) playlist.
     pub(crate) fn open_new_playlist_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -171,8 +171,8 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Dialog: aktuelle Kontext-Dateien zu einer bestehenden Playlist hinzufügen
-    /// oder eine neue anlegen.
+    /// Dialog: add the current context files to an existing playlist
+    /// or create a new one.
     pub(crate) fn open_add_to_playlist_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -194,7 +194,7 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Neue Playlist anlegen (Name eingeben, Enter bestätigt).
+        // Create a new playlist (enter a name, Enter confirms).
         let new_group = adw::PreferencesGroup::builder().title(&gettext("New playlist")).build();
         let entry = adw::EntryRow::builder().title(&gettext("Name")).build();
         new_group.add(&entry);
@@ -211,7 +211,7 @@ impl App {
             });
         }
 
-        // Bestehende Playlisten (Tippen = hinzufügen).
+        // Existing playlists (tap = add).
         if !playlists.is_empty() {
             let group = adw::PreferencesGroup::builder().title(&gettext("Existing")).build();
             for (id, name, count) in playlists {
@@ -243,7 +243,7 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Dialog: Playlist umbenennen (Name vorbelegt).
+    /// Dialog: rename a playlist (name prefilled).
     pub(crate) fn open_rename_playlist_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -282,7 +282,7 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Fügt die Dateien des aktuellen Kontextziels einer Playlist hinzu.
+    /// Adds the files of the current context target to a playlist.
     pub(crate) fn add_context_to_playlist(&mut self, id: i64, sender: &ComponentSender<Self>) {
         let Some(target) = self.context_target.clone() else {
             return;

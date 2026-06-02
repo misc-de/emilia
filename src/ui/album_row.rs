@@ -1,9 +1,9 @@
-//! Eine Album-Zeile mit Cover (relm4-Factory).
+//! An album row with cover (relm4 factory).
 //!
-//! Das Cover stammt aus dem XDG-Cache (online via Cover Art Archive geladen);
-//! fehlt es, wird ein Platzhalter-Icon gezeigt. Die Karte erscheint sofort mit
-//! Platzhalter; das Bild wird in einem Hintergrund-Thread dekodiert und erst
-//! danach gesetzt, damit lange Listen den UI-Thread nicht blockieren.
+//! The cover comes from the XDG cache (loaded online via the Cover Art Archive);
+//! if it is missing, a placeholder icon is shown. The card appears immediately
+//! with a placeholder; the image is decoded in a background thread and only set
+//! afterwards, so that long lists do not block the UI thread.
 
 use adw::prelude::*;
 use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
@@ -16,7 +16,7 @@ fn esc(s: &str) -> String {
     gtk::glib::markup_escape_text(s).to_string()
 }
 
-/// Untertitel: „Interpret · Jahr · N Titel" (vorhandene Teile, mit „ · " verbunden).
+/// Subtitle: "Artist · Year · N tracks" (available parts, joined with " · ").
 fn subtitle(m: &AlbumMeta) -> String {
     let mut parts: Vec<String> = Vec::new();
     if !m.artist.is_empty() {
@@ -33,27 +33,27 @@ fn subtitle(m: &AlbumMeta) -> String {
 
 #[derive(Debug)]
 pub enum AlbumOutput {
-    /// Kurzes Tippen: Lieder-Unterseite des Albums öffnen.
+    /// Short tap: open the album's song subpage.
     Activated(DynamicIndex),
-    /// Langes Drücken: Detailansicht öffnen (wie im Dateibrowser).
+    /// Long press: open the detail view (like in the file browser).
     LongPress(DynamicIndex),
 }
 
 pub struct AlbumCard {
     pub meta: AlbumMeta,
-    /// Quadratischer Cover-Rahmen; Bild wird asynchron nachgereicht.
+    /// Square cover frame; image is supplied asynchronously.
     cover: adw::Bin,
-    /// Präfix: Cover, bei getrennter Quelle mit rotem „Getrennt"-Overlay.
+    /// Prefix: cover, with a red "Disconnected" overlay when the source is offline.
     prefix: gtk::Widget,
 }
 
 #[relm4::factory(pub)]
 impl FactoryComponent for AlbumCard {
-    /// `(Album, ist die Quelle gerade offline?)`.
+    /// `(album, is the source currently offline?)`.
     type Init = (AlbumMeta, bool);
     type Input = ();
     type Output = AlbumOutput;
-    /// Das im Hintergrund dekodierte Cover (oder `None`, falls Datei fehlt/fehlerhaft).
+    /// The cover decoded in the background (or `None` if the file is missing/faulty).
     type CommandOutput = Option<gtk::gdk::Texture>;
     type ParentWidget = gtk::ListBox;
 
@@ -65,12 +65,12 @@ impl FactoryComponent for AlbumCard {
             set_activatable: true,
             add_prefix: &self.prefix,
 
-            // Kurzes Tippen: Lieder des Albums auflisten.
+            // Short tap: list the album's songs.
             connect_activated[sender, index] => move |_| {
                 let _ = sender.output(AlbumOutput::Activated(index.clone()));
             },
 
-            // Langes Drücken: Detailansicht – wie unter „Dateisystem".
+            // Long press: detail view – like under "Filesystem".
             add_controller = gtk::GestureLongPress {
                 connect_pressed[sender, index] => move |gesture, _, _| {
                     gesture.set_state(gtk::EventSequenceState::Claimed);
@@ -85,12 +85,12 @@ impl FactoryComponent for AlbumCard {
         let (meta, offline) = init;
         let cover = widgets::thumb_frame("media-optical-symbolic", 48);
         if let Some(path) = meta.cover_path.clone() {
-            // Bereits dekodiert? Dann sofort aus dem Cache – kein Aufblitzen.
+            // Already decoded? Then immediately from the cache – no flashing.
             if let Some(texture) = widgets::cached_thumb(&path) {
                 widgets::set_cover_thumb(&cover, &texture);
             } else {
-                // Sonst herunterskaliert im Hintergrund dekodieren – nicht auf dem
-                // UI-Thread, damit der Listenaufbau flüssig bleibt.
+                // Otherwise decode downscaled in the background – not on the
+                // UI thread, so that building the list stays smooth.
                 sender.spawn_oneshot_command(move || widgets::decode_thumb(&path));
             }
         }
@@ -104,7 +104,7 @@ impl FactoryComponent for AlbumCard {
 
     fn update_cmd(&mut self, texture: Self::CommandOutput, _sender: FactorySender<Self>) {
         if let Some(texture) = texture {
-            // Fürs nächste Mal cachen, dann setzen.
+            // Cache for next time, then set.
             if let Some(path) = &self.meta.cover_path {
                 crate::ui::widgets::store_thumb(path.clone(), texture.clone());
             }

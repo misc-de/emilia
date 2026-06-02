@@ -1,17 +1,17 @@
-//! Drahtformat (JSON-Payloads) und die `emilia://pair?…`-URL-Kodierung.
+//! Wire format (JSON payloads) and the `emilia://pair?…` URL encoding.
 //!
-//! Wird sowohl server- als auch clientseitig genutzt; bewusst frei von GTK-
-//! und Netzwerkdetails, damit es eigenständig getestet werden kann.
+//! Used on both the server and client sides; deliberately free of GTK
+//! and network details so it can be tested standalone.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-/// Protokollversion der QR-/Pairing-URL.
+/// Protocol version of the QR/pairing URL.
 pub const PROTOCOL_VERSION: u32 = 1;
-/// Versionsstempel des Bibliotheks-Exports (für künftige Migrationen).
+/// Version stamp of the library export (for future migrations).
 pub const SCHEMA_VERSION: u32 = 1;
 
-// --- Pairing-Handshake (`POST /pair`) ---
+// --- Pairing handshake (`POST /pair`) ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PairRequest {
@@ -31,7 +31,7 @@ pub struct PairResponse {
     pub error: String,
 }
 
-// --- Bibliotheks-Export (`GET /sync/export`, `POST /sync/import`) ---
+// --- Library export (`GET /sync/export`, `POST /sync/import`) ---
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LibraryExport {
@@ -47,8 +47,8 @@ pub struct LibraryExport {
     pub categories: Vec<CategoryRec>,
     #[serde(default)]
     pub eq: Vec<EqRec>,
-    /// Audiodateien (Pfade relativ zum Musikordner) – die eigentlichen Bytes
-    /// werden separat über `/files/get` übertragen.
+    /// Audio files (paths relative to the music folder) – the actual bytes
+    /// are transferred separately via `/files/get`.
     #[serde(default)]
     pub files: Vec<FileRec>,
 }
@@ -73,13 +73,13 @@ pub struct PodcastRec {
     pub feed_url: String,
     #[serde(default)]
     pub image_url: Option<String>,
-    /// Episoden inkl. Shownotes – damit sie auf dem Zielgerät sofort und
-    /// dauerhaft vorliegen, unabhängig vom Feed. Leer bei älteren Exporten.
+    /// Episodes incl. show notes – so they are available on the target device
+    /// immediately and permanently, independent of the feed. Empty for older exports.
     #[serde(default)]
     pub episodes: Vec<EpisodeRec>,
 }
 
-/// Eine Podcast-Episode im Sync-Format (Spiegel von [`crate::model::Episode`]).
+/// A podcast episode in the sync format (mirror of [`crate::model::Episode`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpisodeRec {
     #[serde(default)]
@@ -90,11 +90,11 @@ pub struct EpisodeRec {
     pub published: Option<String>,
     #[serde(default)]
     pub duration: Option<String>,
-    /// Shownotes (HTML zu Klartext entschärft), falls vorhanden.
+    /// Show notes (HTML sanitized to plain text), if present.
     #[serde(default)]
     pub description: Option<String>,
-    /// Gemerkte Wiedergabeposition in ms (0 = von vorn). Wird beim Sync
-    /// mitübertragen, sofern vorhanden.
+    /// Saved playback position in ms (0 = from the start). Transferred along
+    /// during sync if present.
     #[serde(default)]
     pub position_ms: i64,
 }
@@ -116,7 +116,7 @@ pub struct EqRec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRec {
-    /// Pfad relativ zum Musikordner des sendenden Geräts.
+    /// Path relative to the music folder of the sending device.
     pub path: String,
     #[serde(default)]
     pub title: String,
@@ -130,35 +130,35 @@ pub struct FileRec {
     pub size: u64,
 }
 
-// --- `emilia://pair?…`-URL (Out-of-Band-Kanal des QR-Codes) ---
+// --- `emilia://pair?…` URL (out-of-band channel of the QR code) ---
 
-/// Aus der QR-URL geparste Verbindungsdaten.
+/// Connection data parsed from the QR URL.
 #[derive(Debug, Clone)]
 pub struct PairingInfo {
     pub host: String,
     pub port: u16,
     pub fingerprint: String,
     pub token: String,
-    /// Ablaufzeitpunkt aus dem QR-Code (bereits in `parse_pair_url` geprüft).
+    /// Expiry time from the QR code (already checked in `parse_pair_url`).
     #[allow(dead_code)]
     pub expiry: u64,
 }
 
-/// Baut die QR-/Pairing-URL. Alle Werte sind URL-sicher (IP, Zahl,
-/// base64url-Token ohne Padding) – daher ist keine Prozentkodierung nötig.
+/// Builds the QR/pairing URL. All values are URL-safe (IP, number,
+/// base64url token without padding) – so no percent encoding is needed.
 pub fn build_pair_url(host: &str, port: u16, fingerprint: &str, token: &str, expiry: u64) -> String {
     format!(
         "emilia://pair?v={PROTOCOL_VERSION}&h={host}&p={port}&fp={fingerprint}&t={token}&exp={expiry}"
     )
 }
 
-/// Parst eine QR-/Pairing-URL. `now` = aktueller Unix-Zeitstempel (Sekunden)
-/// für die Ablaufprüfung.
+/// Parses a QR/pairing URL. `now` = current Unix timestamp (seconds)
+/// for the expiry check.
 pub fn parse_pair_url(text: &str, now: u64) -> Result<PairingInfo> {
     let rest = text
         .trim()
         .strip_prefix("emilia://pair?")
-        .ok_or_else(|| anyhow!("Kein Emilia-Kopplungscode"))?;
+        .ok_or_else(|| anyhow!("not an Emilia pairing code"))?;
 
     let mut host = String::new();
     let mut port = 0u16;
@@ -170,11 +170,11 @@ pub fn parse_pair_url(text: &str, now: u64) -> Result<PairingInfo> {
     for part in rest.split('&') {
         let (k, v) = part
             .split_once('=')
-            .ok_or_else(|| anyhow!("Ungültiger Parameter im Kopplungscode"))?;
+            .ok_or_else(|| anyhow!("invalid parameter in pairing code"))?;
         match k {
             "v" => version = v.parse().unwrap_or(0),
             "h" => host = v.to_string(),
-            "p" => port = v.parse().map_err(|_| anyhow!("Ungültiger Port"))?,
+            "p" => port = v.parse().map_err(|_| anyhow!("invalid port"))?,
             "fp" => fingerprint = v.to_string(),
             "t" => token = v.to_string(),
             "exp" => expiry = v.parse().unwrap_or(0),
@@ -183,13 +183,13 @@ pub fn parse_pair_url(text: &str, now: u64) -> Result<PairingInfo> {
     }
 
     if version != PROTOCOL_VERSION {
-        return Err(anyhow!("Nicht unterstützte Protokollversion"));
+        return Err(anyhow!("unsupported protocol version"));
     }
     if host.is_empty() || port == 0 || fingerprint.is_empty() || token.is_empty() {
-        return Err(anyhow!("Unvollständiger Kopplungscode"));
+        return Err(anyhow!("incomplete pairing code"));
     }
     if expiry != 0 && now > expiry {
-        return Err(anyhow!("Kopplungscode abgelaufen"));
+        return Err(anyhow!("pairing code expired"));
     }
 
     Ok(PairingInfo {
@@ -201,7 +201,7 @@ pub fn parse_pair_url(text: &str, now: u64) -> Result<PairingInfo> {
     })
 }
 
-/// Minimale Prozentkodierung für Query-Werte (Pfadtrenner `/` bleibt lesbar).
+/// Minimal percent encoding for query values (path separator `/` stays readable).
 pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -215,7 +215,7 @@ pub fn percent_encode(s: &str) -> String {
     out
 }
 
-/// Gegenstück zu [`percent_encode`].
+/// Counterpart to [`percent_encode`].
 pub fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn url_roundtrip() {
         let url = build_pair_url("192.168.1.42", 8765, "abc-DEF_123", "tok-EN_xyz", 2_000_000_000);
-        let info = parse_pair_url(&url, 1_000_000_000).expect("parst");
+        let info = parse_pair_url(&url, 1_000_000_000).expect("parses");
         assert_eq!(info.host, "192.168.1.42");
         assert_eq!(info.port, 8765);
         assert_eq!(info.fingerprint, "abc-DEF_123");

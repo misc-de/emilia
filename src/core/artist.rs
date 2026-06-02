@@ -1,10 +1,10 @@
-//! Zerlegen zusammengesetzter Interpreten-Angaben in einzelne Künstler.
+//! Splitting compound artist entries into individual artists.
 //!
-//! „Drake feat. Rihanna & Future" → `["Drake", "Rihanna", "Future"]`. So wird
-//! ein Titel jedem beteiligten Künstler einzeln zugeordnet (Interpreten-Ansicht,
-//! Foto-Abruf). Verändert wird dabei nichts an der Datei – nur die Anzeige.
+//! "Drake feat. Rihanna & Future" → `["Drake", "Rihanna", "Future"]`. This way a
+//! track is assigned to each participating artist individually (artist view,
+//! photo fetch). Nothing about the file is changed in the process – only the display.
 
-/// Wort-Trenner (mit umgebenden Leerzeichen), case-insensitiv.
+/// Word separators (with surrounding spaces), case-insensitive.
 const WORD_SEPARATORS: &[&str] = &[
     " feat. ",
     " feat ",
@@ -12,37 +12,37 @@ const WORD_SEPARATORS: &[&str] = &[
     " ft ",
     " featuring ",
     " feature ",
-    " with ", // englisch
-    " mit ",  // deutsch
+    " with ", // English
+    " mit ",  // German
 ];
 
-/// Einzelzeichen-Trenner (gelten auch ohne umgebende Leerzeichen).
+/// Single-character separators (also apply without surrounding spaces).
 const CHAR_SEPARATORS: &[char] = &['&', ',', '/', '+', ';', '×'];
 
-/// Schlagwörter, die eine Auftritts-Variante kennzeichnen. Klammer-Zusätze mit
-/// diesen Wörtern (z. B. „(Live)", „[Live in Concert]") werden aus der Anzeige
-/// entfernt – ein Live-Mitschnitt ist derselbe Interpret.
+/// Keywords that mark a performance variant. Bracketed additions containing
+/// these words (e.g. "(Live)", "[Live in Concert]") are removed from the
+/// display – a live recording is the same artist.
 const QUALIFIER_KEYWORDS: &[&str] = &["live", "concert", "konzert", "unplugged"];
 
-/// Zerlegt eine Interpreten-Angabe in einzelne, getrimmte Künstlernamen.
-/// Dubletten (case-insensitiv) werden entfernt, die Reihenfolge bleibt erhalten.
+/// Splits an artist entry into individual, trimmed artist names.
+/// Duplicates (case-insensitive) are removed, the order is preserved.
 ///
-/// Hinweis: Bandnamen mit Kommata/`&` (z. B. „Earth, Wind & Fire") werden dabei
-/// ebenfalls getrennt – ein bewusster Kompromiss zugunsten der feat.-Auflösung.
+/// Note: band names with commas/`&` (e.g. "Earth, Wind & Fire") are also split
+/// in the process – a deliberate compromise in favor of feat. resolution.
 pub fn split_artists(raw: &str) -> Vec<String> {
-    // 1) Wort-Trenner auf ';' normalisieren (case-insensitiv, ASCII-sicher).
+    // 1) Normalize word separators to ';' (case-insensitive, ASCII-safe).
     let mut normalized = format!(" {} ", raw);
     for sep in WORD_SEPARATORS {
         normalized = replace_ci_ascii(&normalized, sep, " ; ");
     }
 
-    // 2) Zeichen-Trenner ebenfalls zu ';'.
+    // 2) Character separators likewise to ';'.
     let normalized: String = normalized
         .chars()
         .map(|c| if CHAR_SEPARATORS.contains(&c) { ';' } else { c })
         .collect();
 
-    // 3) Aufteilen, Auftritts-Zusätze entfernen, trimmen, dedup.
+    // 3) Split, remove performance additions, trim, dedup.
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for part in normalized.split(';') {
@@ -57,10 +57,9 @@ pub fn split_artists(raw: &str) -> Vec<String> {
     out
 }
 
-/// Vergleichs-Schlüssel für Interpretennamen: getrimmt, ohne abschließende
-/// Punkte, klein geschrieben. So gelten „RZA" und „RZA." (oder „M.I.A" und
-/// „M.I.A.") als **derselbe** Interpret – ein abschließender Abkürzungspunkt
-/// soll nicht zu zwei Einträgen führen.
+/// Comparison key for artist names: trimmed, without trailing dots, lowercased.
+/// This way "RZA" and "RZA." (or "M.I.A" and "M.I.A.") count as the **same**
+/// artist – a trailing abbreviation dot should not lead to two entries.
 pub fn norm_key(name: &str) -> String {
     name.trim()
         .trim_end_matches(['.', ' '])
@@ -68,8 +67,8 @@ pub fn norm_key(name: &str) -> String {
         .to_lowercase()
 }
 
-/// Haupt-Interpret einer Angabe (der erstgenannte, vor „feat."). Dient der
-/// Album-Gruppierung: „Beginner feat. X" gehört zum Album von „Beginner".
+/// Primary artist of an entry (the first named, before "feat."). Used for
+/// album grouping: "Beginner feat. X" belongs to the album by "Beginner".
 pub fn primary_artist(raw: &str) -> String {
     split_artists(raw)
         .into_iter()
@@ -77,14 +76,14 @@ pub fn primary_artist(raw: &str) -> String {
         .unwrap_or_else(|| raw.trim().to_string())
 }
 
-/// Entfernt Auftritts-Zusätze aus einem Interpretennamen:
-/// Klammer-/eckige Gruppen mit Schlagwörtern (z. B. „(Live)", „[in Concert]")
-/// und abschließende „– Live …"-Anhänge.
+/// Removes performance additions from an artist name:
+/// round/square-bracketed groups with keywords (e.g. "(Live)", "[in Concert]")
+/// and trailing "– Live …" suffixes.
 pub fn strip_qualifiers(name: &str) -> String {
     let mut s = remove_qualifier_brackets(name, '(', ')');
     s = remove_qualifier_brackets(&s, '[', ']');
 
-    // Abschließender „- Live"/„– Konzert …"-Zusatz nach Gedankenstrich.
+    // Trailing "- Live"/"– Concert …" addition after a dash.
     for dash in [" - ", " – ", " — "] {
         if let Some(idx) = s.find(dash) {
             let tail = s[idx + dash.len()..].to_lowercase();
@@ -96,9 +95,9 @@ pub fn strip_qualifiers(name: &str) -> String {
     s.trim().to_string()
 }
 
-/// Entfernt Klammergruppen `open … close`, deren Inhalt ein Auftritts-Schlagwort
-/// enthält; andere Klammergruppen bleiben unverändert. Mehrfach-Leerzeichen
-/// werden anschließend zusammengefasst.
+/// Removes bracket groups `open … close` whose content contains a performance
+/// keyword; other bracket groups remain unchanged. Multiple spaces are
+/// collapsed afterwards.
 fn remove_qualifier_brackets(s: &str, open: char, close: char) -> String {
     let mut out = String::with_capacity(s.len());
     let mut buf = String::new();
@@ -116,7 +115,7 @@ fn remove_qualifier_brackets(s: &str, open: char, close: char) -> String {
             if depth == 0 {
                 let low = buf.to_lowercase();
                 if !QUALIFIER_KEYWORDS.iter().any(|k| low.contains(k)) {
-                    // Keine Auftritts-Klammer → unverändert behalten.
+                    // Not a performance bracket → keep unchanged.
                     out.push(open);
                     out.push_str(&buf);
                     out.push(close);
@@ -131,7 +130,7 @@ fn remove_qualifier_brackets(s: &str, open: char, close: char) -> String {
             out.push(c);
         }
     }
-    // Unbalancierte offene Klammer: Rest wörtlich übernehmen.
+    // Unbalanced open bracket: keep the rest verbatim.
     if depth > 0 {
         out.push(open);
         out.push_str(&buf);
@@ -139,9 +138,9 @@ fn remove_qualifier_brackets(s: &str, open: char, close: char) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Ersetzt alle (ASCII-case-insensitiven) Vorkommen von `needle` durch `repl`.
-/// Arbeitet byte-weise, bleibt aber an UTF-8-Grenzen korrekt, da Treffer nur an
-/// rein-ASCII-Stellen entstehen können.
+/// Replaces all (ASCII case-insensitive) occurrences of `needle` with `repl`.
+/// Works byte-wise, but stays correct at UTF-8 boundaries, since matches can
+/// only occur at pure-ASCII positions.
 fn replace_ci_ascii(haystack: &str, needle: &str, repl: &str) -> String {
     let hb = haystack.as_bytes();
     let nb = needle.as_bytes();
@@ -176,7 +175,7 @@ mod tests {
     fn variants_and_case() {
         assert_eq!(split_artists("A FT. B"), vec!["A", "B"]);
         assert_eq!(split_artists("A Featuring B"), vec!["A", "B"]);
-        assert_eq!(split_artists("A x B"), vec!["A x B"]); // kein Trenner
+        assert_eq!(split_artists("A x B"), vec!["A x B"]); // no separator
     }
 
     #[test]
@@ -202,7 +201,7 @@ mod tests {
         assert_eq!(split_artists("Queen [Live in Concert]"), vec!["Queen"]);
         assert_eq!(split_artists("Nirvana (Unplugged)"), vec!["Nirvana"]);
         assert_eq!(split_artists("Eagles - Live"), vec!["Eagles"]);
-        // pro Einzelkünstler angewandt
+        // applied per individual artist
         assert_eq!(
             split_artists("ACDC (Live) feat. Bon Scott"),
             vec!["ACDC", "Bon Scott"]
@@ -220,7 +219,7 @@ mod tests {
         assert_eq!(norm_key("RZA"), norm_key("RZA."));
         assert_eq!(norm_key("M.I.A"), norm_key("M.I.A."));
         assert_ne!(norm_key("RZA"), norm_key("GZA"));
-        // Dedup auch innerhalb einer Angabe.
+        // Dedup also within a single entry.
         assert_eq!(split_artists("RZA & RZA."), vec!["RZA"]);
     }
 

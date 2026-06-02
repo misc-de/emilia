@@ -1,6 +1,6 @@
-//! QR-Code-Erzeugung als `gdk::Texture` (zur Anzeige in einem `gtk::Picture`).
+//! QR code generation as a `gdk::Texture` (for display in a `gtk::Picture`).
 //!
-//! **Nur im Main-Thread aufrufen** – erzeugt GDK-Objekte.
+//! **Call only on the main thread** – creates GDK objects.
 
 use anyhow::{anyhow, Result};
 use gtk::gdk;
@@ -8,20 +8,20 @@ use gtk::glib;
 use gtk::prelude::*;
 use qrcode::{Color, QrCode};
 
-/// Kantenlänge eines Moduls in Pixeln.
+/// Edge length of a module in pixels.
 const SCALE: usize = 8;
-/// Ruhezone (Module) rund um den Code.
+/// Quiet zone (modules) around the code.
 const QUIET: usize = 4;
 
-/// Rendert `text` als schwarz-weißen QR-Code-Textur.
+/// Renders `text` as a black-and-white QR code texture.
 pub fn render_qr(text: &str) -> Result<gdk::Texture> {
-    let code = QrCode::new(text.as_bytes()).map_err(|e| anyhow!("QR-Code zu lang: {e}"))?;
+    let code = QrCode::new(text.as_bytes()).map_err(|e| anyhow!("QR code too long: {e}"))?;
     let modules = code.width();
     let colors = code.to_colors();
     let total = modules + 2 * QUIET;
     let size = total * SCALE;
 
-    // RGB-Puffer, weißer Hintergrund.
+    // RGB buffer, white background.
     let mut buf = vec![255u8; size * size * 3];
     for my in 0..modules {
         for mx in 0..modules {

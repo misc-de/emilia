@@ -1,6 +1,6 @@
-//! Equalizer- und Eigenschaft-Dialoge: der 10-Band-EQ-Editor (Kaskade je Ebene und
-//! Ausgabegerät) sowie die Eigenschaft-Auswahl (Musik/Konzert/Podcast/Hörbuch).
-//! Aus app.rs herausgelöst – reine Umordnung, kein Funktionswechsel.
+//! Equalizer and property dialogs: the 10-band EQ editor (cascade per level and
+//! output device) plus the property selection (music/concert/podcast/audiobook).
+//! Split out of app.rs - pure reordering, no change in functionality.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -11,18 +11,18 @@ use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, CtxTarget, Msg};
 
 impl App {
-    /// Equalizer-Dialog: oben **Ausgang** (Gerät/Bluetooth) und **Ebene**
-    /// (Global/Interpret/Album/Titel) wählen, darunter zehn Frequenzregler.
-    /// Änderungen wirken sofort und werden je Ausgang+Ebene gespeichert; beim
-    /// Abspielen greift die Vererbung (Titel→Album→Interpret→Global, dann der
-    /// Standard-Ausgang als Basis).
+    /// Equalizer dialog: at the top choose **output** (device/Bluetooth) and
+    /// **level** (global/artist/album/track), below them ten frequency sliders.
+    /// Changes take effect immediately and are saved per output+level; during
+    /// playback the inheritance applies (track→album→artist→global, then the
+    /// default output as the base).
     pub(crate) fn open_eq_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let Some(entry) = self.context_target.as_ref() else {
             return;
         };
 
-        // Genau eine Ebene je Ziel; die Vererbung nach unten (Interpret→Album→Titel)
-        // übernimmt beim Abspielen `resolve_eq`. „Global" liegt in den Einstellungen.
+        // Exactly one level per target; the downward inheritance (artist→album→track)
+        // is handled by `resolve_eq` during playback. "Global" lives in the settings.
         let (subject, name, note, scope, key): (
             &'static str,
             String,
@@ -53,7 +53,7 @@ impl App {
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|| e.rel_path().unwrap_or_default().to_string()),
             ),
-            // Ordner: als Interpret oder Album erkennen; sonst kein EQ.
+            // Folder: detect as artist or album; otherwise no EQ.
             CtxTarget::Fs(e) => match self.fs_eq_level(e) {
                 Some(level) => level,
                 None => {
@@ -66,8 +66,8 @@ impl App {
         self.open_eq_editor(root, sender, subject, &name, note, scope, key);
     }
 
-    /// Globaler Equalizer (aus den Einstellungen): Basis für alles ohne eigene
-    /// Festlegung auf Interpret-, Album- oder Titel-Ebene.
+    /// Global equalizer (from the settings): the base for everything without its
+    /// own setting at the artist, album or track level.
     pub(crate) fn open_global_eq(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         self.open_eq_editor(
             root,
@@ -80,8 +80,8 @@ impl App {
         );
     }
 
-    /// Equalizer-Editor für genau eine Ebene (scope/key) mit Ausgang-Auswahl.
-    /// Genutzt vom Detail-EQ (Interpret/Album/Titel) und vom globalen EQ.
+    /// Equalizer editor for exactly one level (scope/key) with output selection.
+    /// Used by the detail EQ (artist/album/track) and by the global EQ.
     pub(crate) fn open_eq_editor(
         &self,
         root: &adw::ApplicationWindow,
@@ -95,7 +95,7 @@ impl App {
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
 
-        // Ausgänge: „Standard (alle)" als Basis + automatisch erkannte Geräte.
+        // Outputs: "Default (all)" as the base + automatically detected devices.
         let mut outputs: Vec<(String, String)> =
             vec![(gettext("Default (all outputs)"), String::new())];
         for o in crate::core::output::list_outputs() {
@@ -106,7 +106,7 @@ impl App {
             .position(|(_, id)| !id.is_empty() && *id == self.active_output)
             .unwrap_or(0);
 
-        // Bänder je Ausgang vorladen (kein DB-Zugriff in den Closures).
+        // Preload the bands per output (no DB access in the closures).
         let preloaded: Vec<[f64; 10]> = outputs
             .iter()
             .map(|(_, oid)| self.library.get_eq(oid, scope, &key).ok().flatten().unwrap_or([0.0; 10]))
@@ -132,9 +132,9 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Kopf: „Einstellungen für …" dezent, der Name darunter zentriert und
-        // hervorgehoben. Beim globalen EQ (ohne Namen) trägt der Präfix selbst die
-        // Überschrift.
+        // Header: "Settings for …" subtle, the name below it centered and
+        // highlighted. For the global EQ (without a name) the prefix itself
+        // carries the heading.
         let has_name = !name.is_empty();
         let header = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -178,7 +178,7 @@ impl App {
         }
         content.append(&header);
 
-        // Ausgang-Auswahl (eigene Gruppe ohne Titel – Kopf steht darüber).
+        // Output selection (its own group without a title - the header is above it).
         let sel_group = adw::PreferencesGroup::new();
 
         let out_labels: Vec<&str> = outputs.iter().map(|(l, _)| l.as_str()).collect();
@@ -191,7 +191,7 @@ impl App {
         sel_group.add(&out_combo);
         content.append(&sel_group);
 
-        // Zehn Frequenzregler.
+        // Ten frequency sliders.
         let freqs = [
             "29 Hz", "59 Hz", "119 Hz", "237 Hz", "474 Hz", "947 Hz", "1.9 kHz", "3.8 kHz",
             "7.5 kHz", "15 kHz",
@@ -227,7 +227,7 @@ impl App {
         let scales = Rc::new(scales);
         content.append(&bands_box);
 
-        // Reglerbewegung → Wert merken + speichern (+ live anwenden via Msg).
+        // Slider movement → remember value + save (+ apply live via Msg).
         for (i, scale) in scales.iter().enumerate() {
             let bands = bands.clone();
             let cur_out = cur_out.clone();
@@ -252,7 +252,7 @@ impl App {
             });
         }
 
-        // Ausgang wechseln → Regler aus den Vorlade-Werten neu laden.
+        // Switch output → reload the sliders from the preloaded values.
         {
             let bands = bands.clone();
             let cur_out = cur_out.clone();
@@ -269,7 +269,7 @@ impl App {
             });
         }
 
-        // Aktuelle Auswahl neutralstellen und auf „erben" zurücksetzen.
+        // Neutralize the current selection and reset it to "inherit".
         let reset = gtk::Button::builder()
             .label(gettext("Reset"))
             .css_classes(["pill"])
@@ -299,9 +299,9 @@ impl App {
                 });
             });
         }
-        // EQ für diese Ebene **ausschalten**: flache Nullbänder fest speichern.
-        // Anders als „Zurücksetzen" (löschen → erbt Album/Interpret/Global)
-        // überschreibt das eine vererbte Einstellung mit „kein EQ".
+        // **Turn off** the EQ for this level: store flat zero bands persistently.
+        // Unlike "Reset" (delete → inherits album/artist/global), this
+        // overrides an inherited setting with "no EQ".
         let off = gtk::Button::builder()
             .label(gettext("Turn off"))
             .css_classes(["pill"])

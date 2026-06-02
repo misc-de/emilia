@@ -1,6 +1,6 @@
-//! Hintergrund-Worker für die Online-Anreicherung (Cover, Interpreten-/Album-
-//! Bilder, Fingerprint-Titelerkennung). Läuft in einem relm4-Command-Thread und
-//! meldet den Fortschritt über [`Cmd`] zurück an die Wurzel-Komponente.
+//! Background worker for online enrichment (covers, artist/album images,
+//! fingerprint track recognition). Runs in a relm4 command thread and reports
+//! progress via [`Cmd`] back to the root component.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,33 +10,32 @@ use crate::core::db::Library;
 use crate::core::{online, scanner};
 use crate::ui::app::Cmd;
 
-/// Hintergrund-Worker für die Online-Anreicherung. Öffnet eine eigene
-/// DB-Verbindung, liest die Tags unter `root` ein (read-only auf den Dateien!)
-/// und reichert **priorisiert von oben nach unten** an – zuerst Interpreten,
-/// dann Cover:
-///   1. **Interpreten-Fotos** → Deezer (höchste Priorität)
-///   2. Cover aus lokalen Dateien (eingebettet/Ordnerbild) – offline, sofort
-///   3. **Album-Cover** → MusicBrainz + Cover Art Archive
-/// Galerien (fanart.tv / Cover Art Archive) und die Fingerprint-Titelerkennung
-/// (AcoustID) laufen **nicht** hier, sondern bedarfsgesteuert beim Öffnen der
-/// Detailansicht bzw. beim Abspielen – siehe [`crate::ui::app::App::fetch_focus_artist`],
-/// [`fetch_focus_album`](crate::ui::app::App::fetch_focus_album) und
+/// Background worker for online enrichment. Opens its own DB connection, reads
+/// the tags under `root` (read-only on the files!) and enriches **prioritized
+/// from top to bottom** – artists first, then covers:
+///   1. **Artist photos** → Deezer (highest priority)
+///   2. Covers from local files (embedded/folder image) – offline, immediate
+///   3. **Album covers** → MusicBrainz + Cover Art Archive
+/// Galleries (fanart.tv / Cover Art Archive) and the fingerprint track recognition
+/// (AcoustID) do **not** run here, but on demand when opening the detail view or
+/// when playing – see [`crate::ui::app::App::fetch_focus_artist`],
+/// [`fetch_focus_album`](crate::ui::app::App::fetch_focus_album) and
 /// [`fetch_focus_track`](crate::ui::app::App::fetch_focus_track).
-/// Zwischen den Netz-Anfragen wird pausiert (Rate-Limit); ein vorübergehendes
-/// Server-Limit (HTTP 429/503) wird in [`online`] abgefangen (Backoff + Retry)
-/// und zählt **nicht** als Fehlversuch. Erst nach so vielen *echten* erfolglosen
-/// Versuchen wird ein Eintrag nicht erneut abgefragt – weder beim automatischen
-/// Sync noch beim manuellen Abruf –, damit dauerhaft Erfolgloses nicht endlos
-/// wiederholt wird.
+/// Between network requests there is a pause (rate limit); a temporary server
+/// limit (HTTP 429/503) is caught in [`online`] (backoff + retry) and does **not**
+/// count as a failed attempt. Only after this many *real* unsuccessful attempts
+/// is an entry no longer queried again – neither during the automatic sync nor
+/// on manual fetch –, so that persistently unsuccessful items are not retried
+/// endlessly.
 pub(crate) const MAX_ATTEMPTS: i64 = 3;
 
 ///
-/// `light`: **leichter Hintergrund-Nachzug** (periodischer Timer). Lädt nur die
-/// gut „skip-fähigen" Phasen – **Interpreten-Fotos (1)** und **Online-Cover (3)** –
-/// und überspringt das lokale Cover-Scannen (Phase 2, bereits beim Scan erledigt)
-/// sowie die Galerien/Fingerprint (Phasen 4–6, die bei jedem Lauf erneut laden
-/// würden). Läuft leise: `ReloadViews` wird nur gesendet, wenn sich tatsächlich
-/// etwas geändert hat – sonst würde die UI im Minutentakt grundlos neu aufbauen.
+/// `light`: **lightweight background catch-up** (periodic timer). Loads only the
+/// well "skippable" phases – **artist photos (1)** and **online covers (3)** –
+/// and skips the local cover scanning (phase 2, already done during the scan)
+/// as well as the galleries/fingerprint (phases 4–6, which would reload on every
+/// run). Runs quietly: `ReloadViews` is only sent if something actually
+/// changed – otherwise the UI would rebuild needlessly every minute.
 pub(crate) fn enrich_worker(
     root: PathBuf,
     cancel: Arc<AtomicBool>,
@@ -53,8 +52,8 @@ pub(crate) fn enrich_worker(
         }
     };
 
-    // Tags in die Bibliothek einlesen (verändert die Dateien nicht). Beim
-    // automatischen Lauf entfällt das – der lokale Scan lief bereits.
+    // Read the tags into the library (does not modify the files). During the
+    // automatic run this is skipped – the local scan already ran.
     if scan_first {
         if let Err(e) = scanner::scan_into(&lib, &root) {
             tracing::warn!("Scan before online fetch failed: {e}");
@@ -62,15 +61,15 @@ pub(crate) fn enrich_worker(
     }
 
     let client = online::OnlineClient::new();
-    // Hat dieser Lauf irgendetwas Neues gespeichert? Steuert beim leichten Lauf,
-    // ob die Ansichten am Ende überhaupt neu geladen werden.
+    // Did this run save anything new? During the lightweight run this controls
+    // whether the views are reloaded at the end at all.
     let mut any_change = false;
     let stopped = || cancel.load(Ordering::Relaxed);
 
     'work: {
-        // Phase 1: Interpreten-Fotos (Deezer) – **höchste Priorität** (Wunsch:
-        // erst Interpreten, dann Cover), parallel, kleine Bilder. Bereits
-        // zugeordnete und dauerhaft erfolglose überspringen, nur den Rest laden.
+        // Phase 1: artist photos (Deezer) – **highest priority** (preference:
+        // artists first, then covers), in parallel, small images. Skip already
+        // matched and permanently unsuccessful ones, load only the rest.
         let mut to_fetch = Vec::new();
         for name in lib.distinct_artists().unwrap_or_default() {
             let matched = matches!(
@@ -88,8 +87,8 @@ pub(crate) fn enrich_worker(
         if new_artists > 0 {
             any_change = true;
         }
-        // Beim leichten Lauf nur neu laden, wenn neue Fotos kamen (sonst grundloser
-        // UI-Neuaufbau im Minutentakt).
+        // During the lightweight run only reload if new photos arrived (otherwise
+        // a needless UI rebuild every minute).
         if !light || new_artists > 0 {
             let _ = out.send(Cmd::ReloadViews);
         }
@@ -97,10 +96,10 @@ pub(crate) fn enrich_worker(
             break 'work;
         }
 
-        // Phase 2: Cover aus den lokalen Dateien (eingebettet/Ordnerbild) – offline
-        // und schnell, daher direkt nach den Interpreten und vor dem Online-Cover.
-        // Beim leichten Nachzug ausgelassen: das lief bereits beim Scan; ein erneutes
-        // Datei-Scannen aller cover-losen Alben im Minutentakt wäre reine Plattenlast.
+        // Phase 2: covers from the local files (embedded/folder image) – offline
+        // and fast, hence right after the artists and before the online covers.
+        // Skipped during the lightweight catch-up: this already ran during the scan;
+        // re-scanning all cover-less albums every minute would be pure disk load.
         if !light {
             let missing = lib.albums_missing_cover().unwrap_or_default();
             for (artist, album, path) in missing.iter() {
@@ -118,14 +117,14 @@ pub(crate) fn enrich_worker(
             let _ = out.send(Cmd::ReloadViews);
         }
 
-        // Phase 3: Online-Cover nur noch für Alben ganz ohne Bild (Lückenfüller).
+        // Phase 3: online covers only for albums with no image at all (gap filler).
         let still_missing = lib.albums_missing_cover().unwrap_or_default();
         let mut new_covers = 0usize;
         for (artist, album, _) in still_missing.iter() {
             if stopped() {
                 break 'work;
             }
-            // Nach zu vielen erfolglosen Versuchen überspringen (auch manuell).
+            // Skip after too many unsuccessful attempts (also manually).
             let exhausted = lib.album_attempts(artist, album) >= MAX_ATTEMPTS;
             if !exhausted {
                 if !artist.is_empty()
@@ -141,21 +140,22 @@ pub(crate) fn enrich_worker(
             let _ = out.send(Cmd::ReloadViews);
         }
 
-        // Galerien (mehrere Fotos/Cover je Interpret bzw. Album) und die
-        // Fingerprint-Titelerkennung laufen **nicht** mehr im Sweep, sondern
-        // bedarfsgesteuert: Galerien beim Öffnen der Detailansicht, der Fingerprint
-        // beim Abspielen eines Titels ohne Metadaten. Beides würde hier sonst bei
-        // jedem Lauf erneut abgefragt (Galerien haben keine „schon vorhanden"-Prüfung).
+        // Galleries (multiple photos/covers per artist or album) and the
+        // fingerprint track recognition no longer run in the sweep, but on demand:
+        // galleries when opening the detail view, the fingerprint when playing a
+        // track without metadata. Otherwise both would be queried again here on
+        // every run (galleries have no "already present" check).
     }
 
-    // Voller Lauf: immer neu laden (wie bisher – u. a. zeigt das die Ergebnisse der
-    // Fingerprint-Phase). Leichter Lauf: nur, wenn wirklich etwas dazukam.
+    // Full run: always reload (as before – this shows, among other things, the
+    // results of the fingerprint phase). Lightweight run: only if something was
+    // actually added.
     let _ = out.send(Cmd::EnrichDone { changed: !light || any_change });
 }
 
-/// Lädt Künstlerfotos **parallel** (mehrere Netz-Threads), schreibt die
-/// Ergebnisse aber serialisiert über die eine DB-Verbindung des Koordinators.
-/// Gibt die Anzahl neu zugeordneter Interpreten zurück.
+/// Loads artist photos **in parallel** (multiple network threads), but writes the
+/// results serialized through the coordinator's single DB connection.
+/// Returns the number of newly matched artists.
 fn fetch_artists_parallel(
     client: &online::OnlineClient,
     names: Vec<String>,
@@ -198,10 +198,10 @@ fn fetch_artists_parallel(
             }
         }));
     }
-    drop(tx); // nur die Thread-Klone halten den Sender → rx endet, wenn alle fertig
+    drop(tx); // only the thread clones hold the sender → rx ends when all are done
 
-    // Koordinator: Ergebnisse serialisiert in die DB schreiben. Zwischendurch die
-    // Ansichten auffrischen, damit neue Fotos schon während des Laufs erscheinen.
+    // Coordinator: write results serialized into the DB. In between, refresh the
+    // views so that new photos appear already during the run.
     let mut matched = 0usize;
     let mut done = 0usize;
     while let Ok((name, image, errored)) = rx.recv() {

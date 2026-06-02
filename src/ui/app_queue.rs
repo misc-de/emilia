@@ -1,5 +1,5 @@
-//! Warteschlangen-Dialog: der laufende Titel steht oben, die folgenden lassen
-//! sich per Ziehgriff umsortieren und per Mülleimer entfernen.
+//! Queue dialog: the currently playing track is at the top, the following ones
+//! can be reordered via a drag handle and removed via a trash button.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -9,14 +9,14 @@ use crate::i18n::gettext;
 use crate::ui::app::{App, Msg};
 
 impl App {
-    /// Öffnet den Warteschlangen-Dialog.
+    /// Opens the queue dialog.
     pub(crate) fn open_queue_dialog(
         &self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        // Die Liste ist ein Modell-Widget (wird bei Änderungen neu aufgebaut);
-        // vor erneutem Einhängen von einem evtl. alten Dialog lösen.
+        // The list is a model widget (rebuilt on changes); detach it from any
+        // possibly old dialog before re-attaching.
         if self.queue_list.parent().is_some() {
             self.queue_list.unparent();
         }
@@ -44,8 +44,8 @@ impl App {
             .content_height(620)
             .build();
 
-        // Kopfzeile mit Mülleimer links oben zum Leeren (mit Rückfrage). Nach dem
-        // Leeren schließt sich der Dialog automatisch.
+        // Header bar with a trash button at the top left for clearing (with
+        // confirmation). After clearing, the dialog closes automatically.
         let header = adw::HeaderBar::new();
         let clear = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
@@ -84,8 +84,8 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Baut die Warteschlangen-Liste neu auf: ab dem laufenden Titel (oben), die
-    /// folgenden mit Ziehgriff + Mülleimer.
+    /// Rebuilds the queue list: starting from the currently playing track (top),
+    /// the following ones with drag handle + trash button.
     pub(crate) fn reload_queue_list(&self, sender: &ComponentSender<Self>) {
         while let Some(child) = self.queue_list.first_child() {
             self.queue_list.remove(&child);
@@ -108,7 +108,7 @@ impl App {
                 row.set_subtitle(&gettext("Now playing"));
                 row.add_prefix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
             } else {
-                // Ziehgriff (links) zum Umsortieren.
+                // Drag handle (left) for reordering.
                 let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
                 handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
                 row.add_prefix(&handle);
@@ -137,7 +137,7 @@ impl App {
                 row.add_controller(drop);
             }
 
-            // Mülleimer (rechts) zum Entfernen.
+            // Trash button (right) for removing.
             let trash = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .tooltip_text(&gettext("Remove from queue"))

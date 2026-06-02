@@ -1,69 +1,81 @@
 # Emilia
 
-**Adaptiver Musik- & Hörspielplayer für Linux-Phosh-Smartphones** (Librem 5,
-PinePhone & Co.) – läuft genauso am Desktop. Geschrieben in **Rust** mit
-**relm4 + GTK4/libadwaita**, Audio über **GStreamer** (`playbin3`),
-Bibliotheksindex in **SQLite**.
+**Adaptive music & audio-drama player for Linux Phosh smartphones** (Librem 5,
+PinePhone & co.) – runs equally well on the desktop. Written in **Rust** with
+**relm4 + GTK4/libadwaita**, audio via **GStreamer** (`playbin3`), library index
+in **SQLite**.
 
-> App-ID: `de.cais.Emilia` · Lizenz: GPL-3.0-or-later · Status: in Entwicklung (0.1.0)
+> App ID: `de.cais.Emilia` · License: GPL-3.0-or-later · Status: in development
 
 ---
 
-## Was Emilia kann
+## What Emilia can do
 
-- **Adaptive Oberfläche** – funktioniert im schmalen Hochformat (Phone) und am
-  Desktop; die Navigation klappt mobil automatisch ein.
-- **Musikordner einlesen** – rekursiver Scan im Hintergrund, Tags & Cover über
-  `lofty`. Die Audiodateien werden dabei ausschließlich **gelesen**, niemals
-  verändert.
-- **Mehrere Ansichten** auf die Bibliothek:
-  - **Dateisystem** – verlässliche Navigation, auch bei lückenhaften Tags
-    (wichtig für Hörspiele).
-  - **Interpreten** – einfacher Klick öffnet eine Unterseite mit den **Alben**
-    des Interpreten (mit Cover) und darunter den **Einzelliedern** (Gast-/
-    Feature-Titel & Titel ohne Album). Ein Album öffnet seine Titelliste.
-  - **Alben** – alle Alben mit Cover.
-  - **Konzerte** – Live-/Unplugged-Aufnahmen markieren und sammeln; ein Import
-    schlägt passende Kandidaten vor.
-- **Wiedergabe** – Play/Pause, Vor/Zurück, Zufallswiedergabe, Warteschlange und
-  ein Mini-Player am unteren Rand mit **Seekleiste** (Positionsregler zum Spulen
-  in langen Titeln).
-- **Resume für Hörspiele** – lange Titel (ab 15 min oder als Hörbuch/Podcast
-  eingestuft) merken sich die Hörposition und laufen beim nächsten Mal dort
-  weiter; bei Titelende wird wieder von vorn begonnen.
-- **Sperrbildschirm & Medientasten** – Steuerung über **MPRIS**
-  (Play/Pause, Vor/Zurück, Spulen) samt Titel-/Albumanzeige.
-- **Playlisten** – eigene Playlisten anlegen, Titel/Alben/Ordner über die
-  Optionen hinzufügen, abspielen, umbenennen und einzelne Titel wieder
-  entfernen.
-- **Podcasts** – Feeds per RSS-Adresse abonnieren; Episoden werden direkt
-  **gestreamt** (kein Download). Feed aktualisieren, Podcast entfernen.
-- **Equalizer mit Kaskade** – 10-Band-EQ (`equalizer-10bands`), live während der
-  Wiedergabe. Einstellungen wirken in der Reihenfolge
-  **Global → Interpret → Album → Titel** (spezifischste Ebene gewinnt),
-  zusätzlich pro **Ausgabegerät/Kopfhörer** (PipeWire-Sink).
-- **Online-Metadaten abrufen** (optional, auf Knopfdruck) – aus offenen Quellen:
-  - Album-Cover über **MusicBrainz** + **Cover Art Archive**
-  - Interpretenfotos über **Deezer** (kein Schlüssel nötig)
-  - Titel-Erkennung per **AcoustID/Chromaprint** (benötigt `fpcalc` + kostenlosen
-    AcoustID-Key) für Dateien mit lückenhaften Tags
-  - zusätzliche Bildergalerien über **fanart.tv** (optionaler Key)
+- **Adaptive interface** – works in narrow portrait (phone) and on the desktop;
+  the navigation collapses automatically on mobile.
+- **Scan a music folder** – recursive background scan, tags & covers via
+  `lofty`. Audio files are only ever **read**, never modified.
+- **Several views** of the library:
+  - **File system** – reliable navigation even with patchy tags (important for
+    audio dramas).
+  - **Artists** – a single tap opens a subpage with the artist's **albums** (with
+    covers) and, below them, the **single tracks** (guest/feature tracks and
+    tracks without an album). An album opens its track list.
+  - **Albums** – all albums with covers.
+  - **Concerts** – mark and collect live/unplugged recordings; an import suggests
+    likely candidates.
+  - **Favorites**, **Audiobooks**, **Statistics**.
+- **Playback** – play/pause, next/previous, shuffle, repeat, a queue, and a
+  bottom mini-player with a **seek bar** (scrub through long tracks).
+- **Resume for audio dramas** – long tracks (15 min+ or classified as
+  audiobook/podcast) remember the playback position and continue there next time;
+  once a track ends it starts from the beginning again.
+- **Lock screen & media keys** – control via **MPRIS** (play/pause, next/previous,
+  seek) including title/album display.
+- **Playlists** – create your own playlists, add tracks/albums/folders via the
+  options, play, rename and remove individual tracks.
+- **Podcasts** – subscribe to feeds by RSS address or search the iTunes directory;
+  episodes are **streamed** directly (no download), with show notes, chapter marks
+  and resume. Refresh a feed, remove a podcast.
+- **Streaming / Internet radio** – add a stream URL or **search stations
+  worldwide** (Radio-Browser API). Live now-playing title from the ICY metadata,
+  plus a **timeshift recorder**:
+  - a rolling ring buffer (configurable up to 60 minutes) lets you **record a song
+    even after it has played** – press record at the end of a song and the whole
+    song is saved;
+  - automatic split at song boundaries, online cover/metadata embedded into the
+    saved file;
+  - saved songs live in a dedicated **Recordings** section.
+- **Nextcloud** – connect a Nextcloud (login QR code or manual), then **index its
+  music into the library** so the tracks behave 1:1 like local songs (Artists,
+  Albums, queue, resume). Audio streams on demand (cached on play); duration,
+  covers and photos are cached locally for performance. A red **disconnected**
+  badge appears on the affected covers, photos and songs while the source is
+  unreachable.
+- **Device sync** – share library/resume data between devices over the LAN with a
+  QR-code pairing handshake.
+- **Equalizer with cascade** – 10-band EQ (`equalizer-10bands`), live during
+  playback. Settings apply in the order **Global → Artist → Album → Track** (the
+  most specific level wins), additionally per **output device/headphones**
+  (PipeWire sink).
+- **Fetch online metadata** (optional) – from open sources:
+  - album covers via **MusicBrainz** + **Cover Art Archive**
+  - artist photos via **Deezer** (no key required)
+  - track recognition via **AcoustID/Chromaprint** (needs `fpcalc` + a free
+    AcoustID key) for files with patchy tags
+  - extra image galleries via **fanart.tv** (optional key)
 
-  Alles landet nur in der lokalen Datenbank bzw. im XDG-Cache – nie in den
-  Audiodateien.
-
-### Geplant (Roadmap)
-
-- Streaming-Backend (Subsonic/Navidrome oder Jellyfin)
+  Everything is stored only in the local database and the XDG cache – never in the
+  audio files.
 
 ---
 
 ## Installation
 
-### Flatpak (empfohlen)
+### Flatpak (recommended)
 
-Vorgebautes, **GPG-signiertes** Bundle für **x86_64 und aarch64** – ideal fürs
-Phone, ohne Build-Werkzeuge. Aus dem Projekt-Repo (GitHub Pages):
+Pre-built, **GPG-signed** bundle for **x86_64 and aarch64** – ideal for the phone,
+no build tools needed. From the project repo (GitHub Pages):
 
 ```bash
 flatpak remote-add --if-not-exists emilia https://misc-de.github.io/emilia/de.cais.Emilia.flatpakrepo
@@ -71,66 +83,79 @@ flatpak install emilia de.cais.Emilia
 flatpak run de.cais.Emilia
 ```
 
-Später aktualisieren mit `flatpak update de.cais.Emilia`. Der Signaturschlüssel
-steckt bereits in der `.flatpakrepo`-Datei – es muss nichts separat importiert
-werden.
+Update later with `flatpak update de.cais.Emilia`. The signing key is already
+embedded in the `.flatpakrepo` file – nothing needs to be imported separately.
 
-> Du möchtest lieber selbst kompilieren? Siehe
-> [Aus dem Quellcode bauen](#aus-dem-quellcode-bauen-für-entwickler) ganz unten.
-
----
-
-## Erste Schritte
-
-1. Emilia starten und oben links auf **Einstellungen** (Zahnrad) gehen.
-2. Den **Musikordner** auswählen – Emilia liest die Bibliothek im Hintergrund ein.
-3. Über **Interpreten** / **Alben** / **Dateisystem** stöbern und abspielen.
-4. Optional: oben auf **„Cover & Metadaten online abrufen"** klicken, um Cover,
-   Interpretenfotos und (mit `fpcalc` + AcoustID-Key) fehlende Titel zu ergänzen.
-5. Equalizer: Titel/Album/Interpret per langem Druck öffnen → **Equalizer**, oder
-   den globalen EQ in den Einstellungen.
-
-### Online-Metadaten (optional)
-
-- **AcoustID-Key** (kostenlos, für die Fingerprint-Titelerkennung) und
-  **fanart.tv-Key** (für zusätzliche Bilder) lassen sich in den **Einstellungen**
-  hinterlegen. Ohne Keys werden diese Phasen einfach übersprungen.
-- Cover (MusicBrainz/Cover Art Archive) und Interpretenfotos (Deezer)
-  funktionieren ohne Schlüssel.
+> Prefer to compile it yourself? See
+> [Building from source](#building-from-source-for-developers) at the bottom.
 
 ---
 
-## Datenspeicherorte
+## Getting started
 
-| Inhalt                     | Pfad                                         |
-|----------------------------|----------------------------------------------|
-| Bibliothek & Einstellungen | `~/.local/share/emilia/library.db`           |
-| Cover-Cache                | `~/.cache/emilia/covers/`                    |
-| Interpretenfotos-Cache     | `~/.cache/emilia/artists/`                   |
+1. Start Emilia and open **Settings** (the gear) at the top.
+2. Pick the **music folder** – Emilia scans the library in the background.
+3. Browse and play via **Artists** / **Albums** / **File system**.
+4. Optional: under **Search**, enable "Fetch automatically" to fill in covers,
+   artist photos and (with `fpcalc` + an AcoustID key) missing tracks.
+5. Equalizer: long-press a track/album/artist → **Equalizer**, or the global EQ in
+   the settings.
 
-Alle Einstellungen (Musikordner, API-Keys, Fensterzustand …) liegen in der
-SQLite-Datenbank.
+### Streaming & recordings
+
+- Open the **Streaming** section, tap **+** to add a stream URL or search for a
+  station worldwide.
+- Tap a station to play; the player bar shows a red **record** button next to
+  play/pause. Set the recording buffer under **Settings → Cache & recordings**
+  (0 turns it off). Recorded songs appear under **Recordings**.
+
+### Nextcloud
+
+- **Settings → Library → Connect to Nextcloud**: scan the login QR code (the
+  camera starts immediately) or expand the manual entry, then set the music
+  folder. On connect the cloud library is indexed in the background and shows up
+  under Artists/Albums.
+
+### Online metadata (optional)
+
+- An **AcoustID key** (free, for fingerprint track recognition) and a
+  **fanart.tv key** (for extra images) can be stored under **Settings → Search**.
+  Without keys those phases are simply skipped.
+- Covers (MusicBrainz/Cover Art Archive) and artist photos (Deezer) work without a
+  key.
 
 ---
 
-## Aus dem Quellcode bauen (für Entwickler)
+## Where data is stored
 
-> Für die normale Nutzung **nicht nötig** – dafür gibt es das
-> [Flatpak](#flatpak-empfohlen). Dieser Abschnitt richtet sich an Entwickler und
-> alle, die selbst kompilieren möchten.
+| Content                  | Path                                        |
+|--------------------------|---------------------------------------------|
+| Library & settings       | `~/.local/share/emilia/library.db`          |
+| Cover cache              | `~/.cache/emilia/covers/`                   |
+| Artist photo cache       | `~/.cache/emilia/artists/`                  |
+| Remote (Nextcloud) cache | `~/.local/share/emilia/cache/<source-id>/`  |
 
-### Voraussetzungen
+All settings (music folder, API keys, window state …) live in the SQLite database.
 
-- **Rust-Toolchain** (Edition 2021), am einfachsten über [rustup](https://rustup.rs)
-- **GTK ≥ 4.14** und **libadwaita ≥ 1.5** (inkl. Dev-Header)
-- **GStreamer 1.x** (Core + Dev-Header) sowie die Plugin-Pakete
-  *base*, *good*, *bad*, *ugly* und *libav* (für `playbin3`, den Equalizer und
-  gängige Codecs)
-- **PipeWire** als Audio-Ausgabe (auf Phosh/aktuellen Distros vorhanden)
-- ein **C-Compiler** + `pkg-config` (SQLite wird gebündelt aus dem Quellcode gebaut)
-- *optional:* **`fpcalc`** (Chromaprint) für die Titel-Erkennung per Fingerprint
+---
 
-### 1. Abhängigkeiten installieren
+## Building from source (for developers)
+
+> **Not needed** for normal use – that's what the
+> [Flatpak](#flatpak-recommended) is for. This section is for developers and
+> anyone who wants to compile it themselves.
+
+### Requirements
+
+- **Rust toolchain** (edition 2021), easiest via [rustup](https://rustup.rs)
+- **GTK ≥ 4.14** and **libadwaita ≥ 1.5** (incl. dev headers)
+- **GStreamer 1.x** (core + dev headers) plus the plugin packages *base*, *good*,
+  *bad*, *ugly* and *libav* (for `playbin3`, the equalizer and common codecs)
+- **PipeWire** for audio output (present on Phosh / recent distros)
+- a **C compiler** + `pkg-config` (SQLite is bundled and built from source)
+- *optional:* **`fpcalc`** (Chromaprint) for fingerprint track recognition
+
+### 1. Install dependencies
 
 **Arch / Manjaro**
 
@@ -138,7 +163,7 @@ SQLite-Datenbank.
 sudo pacman -S --needed rustup base-devel pkgconf \
   gtk4 libadwaita \
   gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav \
-  chromaprint        # optional, liefert fpcalc
+  chromaprint        # optional, provides fpcalc
 rustup default stable
 ```
 
@@ -151,8 +176,8 @@ sudo apt install build-essential pkg-config curl \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
   gstreamer1.0-pipewire \
-  libchromaprint-tools   # optional, liefert fpcalc
-# Rust über rustup, falls noch nicht vorhanden:
+  libchromaprint-tools   # optional, provides fpcalc
+# Rust via rustup if not already present:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -163,92 +188,99 @@ sudo dnf install cargo rust gcc pkgconf-pkg-config \
   gtk4-devel libadwaita-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
   gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-libav \
-  chromaprint-tools     # optional, liefert fpcalc
-# gstreamer1-plugins-ugly liegt in RPM Fusion
+  chromaprint-tools     # optional, provides fpcalc
+# gstreamer1-plugins-ugly is in RPM Fusion
 ```
 
-### 2. Bauen & starten
+### 2. Build & run
 
 ```bash
 git clone <repo-url> Emilia
 cd Emilia
 
-# Während der Entwicklung:
+# During development:
 cargo run
 
-# Optimiertes Release-Binary:
+# Optimized release binary:
 cargo build --release
 ./target/release/emilia
 ```
 
-> Hinweis: Beim Start aus dem Projektordner (`cargo run`) werden die Icons aus
-> `data/icons` gefunden. Für den dauerhaften Betrieb lieber installieren (unten).
+> Note: when started from the project folder (`cargo run`) the icons in
+> `data/icons` are found. For permanent use, install it instead (below).
 
-### 3. Installieren (optional)
+### 3. Install (optional)
 
-Damit Emilia im App-Raster erscheint und ihr Icon am Sperrbildschirm zeigt,
-installiert das `Makefile` Binary, `.desktop`-Datei, App-Icon und
-AppStream-Metainfo an die richtigen XDG-Orte:
+So Emilia shows up in the app grid and displays its icon on the lock screen, the
+`Makefile` installs the binary, `.desktop` file, app icon and AppStream metainfo
+to the right XDG locations:
 
 ```bash
-# systemweit (braucht Root):
+# system-wide (needs root):
 sudo make install
 
-# oder nur für den eigenen Benutzer (gut fürs Phone, ohne Root):
+# or just for your user (good for the phone, no root):
 make install PREFIX=$HOME/.local
 ```
 
-Wieder entfernen mit `make uninstall` (gleicher `PREFIX`). `make check` prüft
-`.desktop` und Metainfo mit `desktop-file-validate` bzw. `appstreamcli`.
+Remove again with `make uninstall` (same `PREFIX`). `make check` validates the
+`.desktop` and metainfo with `desktop-file-validate` / `appstreamcli`.
 
-### Flatpak selbst bauen
+### Build the Flatpak yourself
 
-Wer lieber selbst ein Bundle baut (statt das vorgebaute oben zu nutzen): Ein
-Manifest liegt unter [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml) (GNOME-Runtime
-+ rust-stable-SDK). Bauen mit `flatpak-builder` – die genauen Befehle stehen im
-Kopf des Manifests.
+If you prefer to build a bundle yourself (instead of the pre-built one above): a
+manifest is in [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml) (GNOME runtime +
+rust-stable SDK). Build with `flatpak-builder` – the exact commands are in the
+header of the manifest.
 
 ---
 
-## Projektstruktur
+## Project layout
 
 ```
 src/
-  main.rs            App-Start (Adw::Application, App-ID de.cais.Emilia)
-  model.rs           Datenmodelle (Track, AlbumMeta, ArtistMeta, …)
+  main.rs            App start (Adw::Application, app ID de.cais.Emilia)
+  model.rs           Data models (Track, AlbumMeta, ArtistMeta, …)
   ui/
-    app.rs           Wurzel-Komponente (init/update/view!), Navigation, Player
-    app_views.rs     Laden/Gruppieren, Unterseiten, ctx-/Cover-Helfer
-    app_playback.rs  Wiedergabe, Warteschlange, Resume
-    app_playlist.rs  Playlisten (Liste, Unterseite, Dialoge)
-    app_podcast.rs   Podcasts (Feeds abonnieren, Episoden streamen)
-    app_eq.rs        Equalizer-Editor + Merkmal-Dialoge
-    app_dialogs.rs   Kontextmenü, Teilen, Einstellungen
-    app_concert.rs   Konzerte
-    enrich.rs        Online-Anreicherungs-Worker (Hintergrund)
-    artist_row.rs    Interpreten-Karte (mit Foto)
-    album_row.rs     Album-Karte (mit Cover)
-    track_row.rs     Titel-Zeile
-    fs_row.rs        Dateisystem-Zeile
-    widgets.rs       gemeinsame UI-Helfer (Cover-Rahmen, Thumbnails)
+    app.rs           Root component (init/update/view!), navigation, player
+    app_views.rs     Loading/grouping, subpages, ctx/cover helpers
+    app_playback.rs  Playback, queue, resume (local & remote)
+    app_playlist.rs  Playlists (list, subpage, dialogs)
+    app_podcast.rs   Podcasts (subscribe to feeds, stream episodes)
+    app_streaming.rs Internet radio (stations, timeshift recording, replay)
+    app_cloud.rs     Nextcloud connect dialog (QR camera + manual)
+    app_sync.rs      Device sync UI (QR pairing, optional webcam)
+    app_eq.rs        Equalizer editor + property dialogs
+    app_dialogs.rs   Context menu, share, settings
+    app_concert.rs   Concerts
+    enrich.rs        Online enrichment worker (background)
+    artist_row.rs    Artist card (with photo)
+    album_row.rs     Album card (with cover)
+    fs_row.rs        File-system row
+    widgets.rs       Shared UI helpers (cover frames, thumbnails)
   core/
-    scanner.rs       Verzeichnis-Scan + lofty-Metadaten → DB (Hintergrund-Worker)
-    db.rs            SQLite (rusqlite, gebündelt) + Abfragen
-    player.rs        GStreamer-Wrapper (playbin3 + equalizer-10bands)
-    online.rs        Online-Anreicherung (MusicBrainz/CAA/Deezer/AcoustID/fanart)
-    podcast.rs       Podcast-Feeds (RSS) einlesen, Episoden bereitstellen
-    fingerprint.rs   Chromaprint (fpcalc) für die Titel-Erkennung
-    cover.rs         eingebettete & Ordner-Cover
-    category.rs      EQ-/Merkmals-Schlüssel und Kaskaden-Auflösung
-    output.rs        Audio-Ausgänge (PipeWire-Sinks) für EQ-Profile
-    concert.rs       Konzert-Kandidaten erkennen
-    artist.rs        „feat."-Aufteilung von Interpreten-Angaben
+    scanner.rs       Directory scan + lofty metadata → DB (background worker)
+    db.rs            SQLite (rusqlite, bundled) + queries
+    player.rs        GStreamer wrapper (playbin3 + equalizer-10bands)
+    online.rs        Online enrichment (MusicBrainz/CAA/Deezer/AcoustID/fanart)
+    podcast.rs       Read podcast feeds (RSS), provide episodes
+    streaming.rs     Station search (Radio-Browser API)
+    recorder.rs      Timeshift ring buffer + ICY reader for recording
+    webdav.rs        Nextcloud/WebDAV: list, read tags, index, stream
+    sync/            LAN device sync (server, client, QR scanner)
+    mpris.rs         MPRIS lock-screen / media-key control
+    fingerprint.rs   Chromaprint (fpcalc) for track recognition
+    cover.rs         Embedded & folder covers
+    category.rs      EQ/property keys and cascade resolution
+    output.rs        Audio outputs (PipeWire sinks) for EQ profiles
+    concert.rs       Detect concert candidates
+    artist.rs        "feat." splitting of artist credits
+    update.rs        Flatpak update check
 ```
 
 ---
 
-## Lizenz
+## License
 
-GPL-3.0-or-later. Online-Metadaten stammen aus offenen Quellen
-(MusicBrainz/Cover Art Archive: CC0; Deezer-Such-API; AcoustID/Chromaprint;
-fanart.tv).
+GPL-3.0-or-later. Online metadata comes from open sources (MusicBrainz/Cover Art
+Archive: CC0; Deezer search API; AcoustID/Chromaprint; fanart.tv; Radio-Browser).

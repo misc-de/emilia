@@ -1,5 +1,5 @@
-//! Dialoge: Aktionsmenü (langes Drücken), Teilen-Dialog und Einstellungen.
-//! Aus app.rs herausgelöst – reine Umordnung, kein Funktionswechsel.
+//! Dialogs: action menu (long press), share dialog and settings.
+//! Split out of app.rs – pure reordering, no functional change.
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -14,14 +14,14 @@ use crate::model::Source;
 use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
 impl App {
-    /// Aktionsmenü beim langen Drücken (Ordner oder Titel).
+    /// Action menu on long press (folder or track).
     pub(crate) fn open_context_menu(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let Some(entry) = self.context_target.as_ref() else {
             return;
         };
 
         let dialog = adw::Dialog::builder().title(entry.heading()).build();
-        // Auf dem Phone über die volle Breite (Bottom-Sheet) statt schwebend.
+        // On the phone use the full width (bottom sheet) instead of floating.
         self.adapt_detail_dialog(&dialog);
 
         let content = gtk::Box::builder()
@@ -33,11 +33,11 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Cover/Foto bzw. – bei mehreren Bildern – ein Karussell mit Punkten.
+        // Cover/photo, or – when there are multiple images – a carousel with dots.
         self.append_cover_or_gallery(&content, entry, sender, &dialog);
 
-        // Liedtext (falls in den Datei-Tags vorhanden) – aufklappbar, oberhalb
-        // der Infos (wie die Eigenschaften ein Pulldown).
+        // Lyrics (if present in the file tags) – expandable, above the info
+        // (a pulldown like the properties).
         if let CtxTarget::Fs(e) = entry {
             if let Some(epath) = e.path().filter(|_| !e.is_dir()) {
                 if let Some(lyrics) = crate::core::scanner::read_lyrics(epath) {
@@ -60,7 +60,7 @@ impl App {
             }
         }
 
-        // „Infos" – aufklappbar mit Detailzeilen
+        // "Info" – expandable with detail rows
         let info_group = adw::PreferencesGroup::new();
         let expander = adw::ExpanderRow::builder().title(&gettext("Info")).build();
         for (label, value) in self.ctx_info_lines(entry) {
@@ -74,14 +74,14 @@ impl App {
         info_group.add(&expander);
         content.append(&info_group);
 
-        // "Eigenschaften" – Kategorie je Ebene (Titel/Album/Interpret), vererbt.
+        // "Properties" – category per level (track/album/artist), inherited.
         if let Some(merkmale) = self.ctx_merkmale(entry, sender) {
             content.append(&merkmale);
         }
 
-        // Aktionen
+        // Actions
         let action_group = adw::PreferencesGroup::new();
-        // Wiedergabe-Art des Ziels bestimmen (Label + Reihenfolge der Play-Aktion).
+        // Determine the target's playback kind (label + order of the play action).
         #[derive(Clone, Copy)]
         enum PlayKind {
             Album,
@@ -98,29 +98,29 @@ impl App {
             },
             CtxTarget::Fs(_) => PlayKind::Other,
         };
-        // Equalizer dort anbieten, wo es eine eindeutige Ebene gibt: bei Titeln
-        // und Karten sowie bei Ordnern, die als Interpret oder Album erkannt werden.
+        // Offer the equalizer where there is an unambiguous level: for tracks
+        // and cards, and for folders recognized as an artist or album.
         let show_eq = !matches!(
             (entry, play_kind),
             (CtxTarget::Fs(e), PlayKind::Other) if e.is_dir()
         );
 
-        // Play-Aktion: bei Album/Interpret eigener Text und eigene Reihenfolge.
-        // Pfad des Ziel-Titels (nur Dateien) – Grundlage für die dynamische
-        // Sichtbarkeit der „Abspielen"-Aktion.
+        // Play action: for album/artist its own text and its own order.
+        // Path of the target track (files only) – basis for the dynamic
+        // visibility of the "Play" action.
         let current_path: Option<std::path::PathBuf> = match entry {
             CtxTarget::Fs(e) if !e.is_dir() => e.path().cloned(),
             _ => None,
         };
-        // Solange genau dieser Titel **läuft**, keine „Abspielen"-Aktion zeigen;
-        // endet er, wird sie wieder eingeblendet (siehe `refresh_ctx_play`).
+        // As long as exactly this track is **playing**, don't show a "Play" action;
+        // once it ends, it is shown again (see `refresh_ctx_play`).
         let is_current =
             current_path.is_some() && self.playing_path.as_deref() == current_path.as_deref();
 
-        // Interpret mit nur **einem** Lied: „Interpret abspielen" + Reihenfolge
-        // ist unsinnig (und die Reihenfolge erfasst Einzellieder ohne Album gar
-        // nicht). Daher wie ein einzelnes Stück behandeln – schlichtes
-        // „Abspielen", Klick startet genau dieses Lied (`CtxPlay`).
+        // Artist with only **one** song: "Play artist" + order makes no sense
+        // (and the order doesn't even capture single songs without an album).
+        // So treat it like a single piece – a plain "Play"; a click starts
+        // exactly this song (`CtxPlay`).
         let play_kind = if matches!(play_kind, PlayKind::Artist)
             && self.ctx_artist().is_some_and(|n| self.artist_files(&n).len() == 1)
         {
@@ -140,7 +140,7 @@ impl App {
         play_row.add_prefix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
         match play_kind {
             PlayKind::Artist => {
-                // Album-Reihenfolge wählbar, auf gleicher Höhe wie die Aktion.
+                // Album order selectable, on the same line as the action.
                 let order = gtk::DropDown::from_strings(&[&gettext("Oldest first"), &gettext("Newest first")]);
                 order.set_valign(gtk::Align::Center);
                 order.set_tooltip_text(Some(&gettext("Album order")));
@@ -173,10 +173,10 @@ impl App {
         }
         action_group.add(&play_row);
         play_row.set_visible(!is_current);
-        // Diese Play-Zeile merken, damit sie nach Titelende wieder erscheint.
+        // Remember this play row so it reappears after the track ends.
         *self.ctx_play.borrow_mut() = current_path.map(|p| (play_row.clone(), p));
 
-        // Entfernte Datei: Offline-Download anbieten (falls noch nicht vorhanden).
+        // Remote file: offer an offline download (if not already present).
         if let CtxTarget::Fs(crate::ui::fs_row::FsEntry::RemoteFile {
             rel_path,
             downloaded: None,
@@ -198,7 +198,7 @@ impl App {
             action_group.add(&dl_row);
         }
 
-        // Favorit-Stern (Markieren/Entfernen).
+        // Favorite star (mark/remove).
         let is_fav = self.target_is_favorite(entry);
         let fav_row = adw::ActionRow::builder()
             .title(&if is_fav {
@@ -219,7 +219,7 @@ impl App {
         }
         action_group.add(&fav_row);
 
-        // Übrige Aktionen.
+        // Remaining actions.
         let mut actions: Vec<(String, &str, fn() -> Msg)> = vec![
             (gettext("Add to queue"), "list-add-symbolic", || Msg::CtxAddQueue),
             (gettext("Add to playlist"), "view-list-symbolic", || {
@@ -248,10 +248,10 @@ impl App {
         }
         content.append(&action_group);
 
-        // Bei zu großem Inhalt (z. B. auf dem Phone) vertikal scrollen, sonst
-        // den Dialog auf die natürliche Inhaltshöhe wachsen lassen. `Automatic`
-        // blendet bei Überlauf einen Scrollbalken ein – mit `External` wurden die
-        // unteren Aktionen (Equalizer, Teilen) auf schmalen Fenstern unerreichbar.
+        // For overly large content (e.g. on the phone) scroll vertically, otherwise
+        // let the dialog grow to the natural content height. `Automatic` shows a
+        // scrollbar on overflow – with `External` the lower actions (equalizer,
+        // share) became unreachable on narrow windows.
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -264,7 +264,7 @@ impl App {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         toolbar.set_content(Some(&scroller));
         dialog.set_child(Some(&toolbar));
-        // Gemerkte Play-Zeile wieder vergessen, sobald der Dialog schließt.
+        // Forget the remembered play row as soon as the dialog closes.
         {
             let ctx_play = self.ctx_play.clone();
             dialog.connect_closed(move |_| *ctx_play.borrow_mut() = None);
@@ -272,17 +272,17 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Blendet die gemerkte Play-Zeile des Detail-Dialogs passend ein/aus:
-    /// versteckt, solange genau dieser Titel läuft; sichtbar, sobald er endet
-    /// oder gewechselt wird.
+    /// Shows/hides the detail dialog's remembered play row accordingly:
+    /// hidden as long as exactly this track is playing; visible once it ends
+    /// or is switched.
     pub(crate) fn refresh_ctx_play(&self) {
         if let Some((row, path)) = self.ctx_play.borrow().as_ref() {
             row.set_visible(self.playing_path.as_deref() != Some(path.as_path()));
         }
     }
 
-    /// „Teilen"-Dialog: Verbindung anbieten (Dienst starten) oder QR-Code einlesen.
-    /// Die eigentliche Geräte-Sync-Logik folgt später.
+    /// "Share" dialog: offer a connection (start the service) or scan a QR code.
+    /// The actual device sync logic follows later.
     pub(crate) fn open_share_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
         let dialog = adw::Dialog::builder().title(&gettext("Share")).build();
 
@@ -332,9 +332,9 @@ impl App {
 
         content.append(&group);
 
-        // Bei zu großem Inhalt (z. B. auf dem Phone) vertikal scrollen, sonst
-        // den Dialog auf die natürliche Inhaltshöhe wachsen lassen. `Automatic`
-        // blendet bei Überlauf einen Scrollbalken ein.
+        // For overly large content (e.g. on the phone) scroll vertically, otherwise
+        // let the dialog grow to the natural content height. `Automatic` shows a
+        // scrollbar on overflow.
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -349,10 +349,10 @@ impl App {
         dialog.set_child(Some(&toolbar));
         dialog.present(Some(root));
     }
-    /// Öffnet den Einstellungsdialog (u. a. Musikordner festlegen).
-    /// (Neu) Befüllt die „Verbunden"-Liste der Nextcloud-Einstellungsseite mit den
-    /// gespeicherten WebDAV-Quellen. Wird beim Öffnen **und** nach einem Connect
-    /// (über `Msg::SourcesChanged`) aufgerufen, damit die Anzeige sofort stimmt.
+    /// Opens the settings dialog (among others, sets the music folder).
+    /// (New) Fills the "Connected" list of the Nextcloud settings page with the
+    /// stored WebDAV sources. Called on open **and** after a connect
+    /// (via `Msg::SourcesChanged`), so the display is correct immediately.
     pub(crate) fn fill_nc_list(&self, list: &gtk::ListBox, sender: &ComponentSender<Self>) {
         while let Some(c) = list.first_child() {
             list.remove(&c);
@@ -413,7 +413,7 @@ impl App {
 
         let not_set = gettext("Not set");
         let current = self.music_dir.as_deref().unwrap_or(&not_set);
-        // Erster Eintrag zeigt nur den Pfad (keine „Music folder"-Beschriftung).
+        // First entry shows only the path (no "Music folder" label).
         let row = adw::ActionRow::builder()
             .title(gtk::glib::markup_escape_text(current))
             .title_lines(2)
@@ -454,10 +454,10 @@ impl App {
         group.add(&row);
         page.add(&group);
 
-        // --- Weitere Quellen (zweiter lokaler Ordner / Nextcloud) ---
-        // Eigene Verbindung zur DB (wie überall im Code per `Library::open`),
-        // damit dieser Dialog die Liste selbst pflegen kann; das Hauptfenster
-        // wird per `Msg::SourcesChanged` über Änderungen informiert.
+        // --- Other sources (second local folder / Nextcloud) ---
+        // Its own connection to the DB (like everywhere in the code via `Library::open`),
+        // so this dialog can maintain the list itself; the main window is
+        // informed about changes via `Msg::SourcesChanged`.
         let src_group = adw::PreferencesGroup::builder()
             .title(&gettext("Other sources"))
             .description(&gettext("Shown as tabs in the file view"))
@@ -468,8 +468,8 @@ impl App {
             .build();
         src_group.add(&src_list);
 
-        // (Neu) Befüllt die Quellenliste aus der DB. Selbst-referenziell, damit
-        // sich die Liste nach Hinzufügen/Entfernen ohne Dialog-Neustart auffrischt.
+        // (New) Fills the source list from the DB. Self-referential, so the
+        // list refreshes after adding/removing without restarting the dialog.
         let populate: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         {
             let populate_weak = Rc::downgrade(&populate);
@@ -536,7 +536,7 @@ impl App {
             f();
         }
 
-        // Button-Zeile: lokaler Ordner / Nextcloud hinzufügen.
+        // Button row: add a local folder / Nextcloud.
         let add_local = gtk::Button::builder()
             .label(&gettext("Add local folder"))
             .css_classes(["flat"])
@@ -592,7 +592,7 @@ impl App {
         src_group.add(&btn_row);
         page.add(&src_group);
 
-        // Nextcloud direkt in der Bibliothek (kein eigener Menüpunkt).
+        // Nextcloud directly in the library (no separate menu item).
         let nc_group = adw::PreferencesGroup::builder()
             .title(&gettext("Nextcloud"))
             .description(&gettext(
@@ -613,8 +613,8 @@ impl App {
         nc_group.add(&connect);
         page.add(&nc_group);
 
-        // Bereits verbundene Nextcloud-Quellen (zum Entfernen). Die Liste wird
-        // gemerkt, damit sie nach einem erfolgreichen Connect sofort frisch ist.
+        // Already connected Nextcloud sources (for removal). The list is
+        // remembered so it is fresh immediately after a successful connect.
         let nc_list_group = adw::PreferencesGroup::builder()
             .title(&gettext("Connected"))
             .build();
@@ -629,12 +629,12 @@ impl App {
 
         let lib_page = page;
 
-        // --- Kategorie: Klang ---
+        // --- Category: Sound ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("Sound"))
             .icon_name("preferences-other-symbolic")
             .build();
-        // Globaler Equalizer (Basis für alles ohne eigene Interpret-/Album-/Titel-EQ).
+        // Global equalizer (basis for everything without a custom artist/album/track EQ).
         let eq_group = adw::PreferencesGroup::builder()
             .title(&gettext("Equalizer"))
             .description(&gettext(
@@ -657,13 +657,13 @@ impl App {
         page.add(&eq_group);
         let sound_page = page;
 
-        // --- Kategorie: Suche (Online-Metadaten einlesen) ---
+        // --- Category: Search (read online metadata) ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("Search"))
             .icon_name("system-search-symbolic")
             .build();
 
-        // 1. Automatischer Abruf (erste Option).
+        // 1. Automatic fetch (first option).
         let auto_group = adw::PreferencesGroup::builder()
             .title(&gettext("Read music data"))
             .description(&gettext(
@@ -724,10 +724,10 @@ impl App {
         fanart_group.add(&fanart_row);
         page.add(&fanart_group);
 
-        // --- Geräte-Synchronisierung: in den Einstellungen ausgeblendet
-        //     (Funktion bleibt über die Teilen-Schaltfläche erreichbar). ---
+        // --- Device synchronization: hidden in the settings
+        //     (the feature stays reachable via the share button). ---
 
-        // --- Software-Aktualisierung (nur in der Flatpak-Version) ---
+        // --- Software update (only in the Flatpak version) ---
         if crate::core::update::in_flatpak() {
             let update_group = adw::PreferencesGroup::builder()
                 .title(&gettext("App update"))
@@ -754,18 +754,18 @@ impl App {
         }
         let search_page = page;
 
-        // --- Kategorie: Ansicht ---
+        // --- Category: View ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("View"))
             .icon_name("view-list-symbolic")
             .build();
 
-        // Anzeigesprache ganz oben (greift nach einem Neustart der App).
+        // Display language at the very top (takes effect after restarting the app).
         let lang_group = adw::PreferencesGroup::builder()
             .title(&gettext("Language"))
             .build();
-        // Stabile Codes parallel zu den Anzeige-Labels. „Deutsch"/„English" sind
-        // Eigennamen und bleiben unübersetzt.
+        // Stable codes alongside the display labels. "Deutsch"/"English" are
+        // proper names and stay untranslated.
         let lang_codes = ["system", "de", "en"];
         let lang_labels = [gettext("System default"), "Deutsch".into(), "English".into()];
         let lang_label_refs: Vec<&str> = lang_labels.iter().map(String::as_str).collect();
@@ -780,8 +780,8 @@ impl App {
             .unwrap_or(0);
         lang_row.set_selected(current_idx as u32);
         {
-            // Handler erst nach `set_selected` verbinden, damit die Vorauswahl
-            // keinen Sprachwechsel auslöst.
+            // Connect the handler only after `set_selected`, so the preselection
+            // doesn't trigger a language change.
             let sender = sender.clone();
             lang_row.connect_selected_notify(move |r| {
                 let code = lang_codes.get(r.selected() as usize).copied().unwrap_or("system");
@@ -791,7 +791,7 @@ impl App {
         lang_group.add(&lang_row);
         page.add(&lang_group);
 
-        // Erscheinungsbild: Farbschema automatisch/dunkel/hell (greift sofort).
+        // Appearance: color scheme automatic/dark/light (takes effect immediately).
         let theme_group = adw::PreferencesGroup::builder()
             .title(&gettext("Appearance"))
             .build();
@@ -811,8 +811,8 @@ impl App {
         let cur_theme_idx = theme_codes.iter().position(|c| *c == cur_scheme).unwrap_or(0);
         theme_row.set_selected(cur_theme_idx as u32);
         {
-            // Handler erst nach `set_selected` verbinden, damit die Vorauswahl
-            // keinen Wechsel auslöst.
+            // Connect the handler only after `set_selected`, so the preselection
+            // doesn't trigger a change.
             let sender = sender.clone();
             theme_row.connect_selected_notify(move |r| {
                 let code = theme_codes.get(r.selected() as usize).copied().unwrap_or("system");
@@ -822,7 +822,7 @@ impl App {
         theme_group.add(&theme_row);
         page.add(&theme_group);
 
-        // Galerie-Ansicht (Cover-Gitter) statt Liste + Kacheln pro Reihe.
+        // Gallery view (cover grid) instead of a list + tiles per row.
         let gallery_group = adw::PreferencesGroup::builder()
             .title(&gettext("List display"))
             .build();
@@ -860,7 +860,7 @@ impl App {
 
         let view_page = page;
 
-        // --- Kategorie: Menü (Menüpunkte verwalten) ---
+        // --- Category: Menu (manage menu items) ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("Menu"))
             .icon_name("open-menu-symbolic")
@@ -875,7 +875,7 @@ impl App {
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
             .build();
-        // Gemeinsamer, lokaler Zustand des Dialogs (parallel zum Modell).
+        // Shared, local state of the dialog (alongside the model).
         let order = std::rc::Rc::new(std::cell::RefCell::new(self.section_order.clone()));
         let hidden = std::rc::Rc::new(std::cell::RefCell::new(self.hidden_sections.clone()));
         rebuild_section_rows(&list, &order, &hidden, sender);
@@ -883,7 +883,7 @@ impl App {
         page.add(&sections_group);
         let menu_page = page;
 
-        // --- Kategorie: Cache und Aufnahmen ---
+        // --- Category: Cache and recordings ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("Cache & recordings"))
             .icon_name("media-record-symbolic")
@@ -918,7 +918,7 @@ impl App {
         page.add(&streaming_group);
         let cache_page = page;
 
-        // --- Kategorie: Ausgeblendet (ganz rechts) ---
+        // --- Category: Hidden (far right) ---
         let page = adw::PreferencesPage::builder()
             .title(&gettext("Hidden"))
             .icon_name("view-conceal-symbolic")
@@ -970,7 +970,7 @@ impl App {
         page.add(&hidden_group);
         let hidden_page = page;
 
-        // Reihenfolge der Einstellungs-Seiten: „Ansicht" zuerst.
+        // Order of the settings pages: "View" first.
         dialog.add(&view_page);
         dialog.add(&lib_page);
         dialog.add(&sound_page);
@@ -982,9 +982,9 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Dateidialog zum Hochladen eines eigenen Covers/Fotos für das aktuelle
-    /// Detailziel (Album → Cover, Interpret → Foto). Das gewählte Bild wird in
-    /// den Cache kopiert und als primäres Bild gesetzt.
+    /// File dialog for uploading a custom cover/photo for the current detail
+    /// target (album → cover, artist → photo). The chosen image is copied into
+    /// the cache and set as the primary image.
     pub(crate) fn open_cover_upload_dialog(
         &self,
         root: &adw::ApplicationWindow,
@@ -997,7 +997,7 @@ impl App {
         let dest = match self.context_target.as_ref() {
             Some(CtxTarget::Album(m)) => Some(Dest::Album(m.artist.clone(), m.album.clone())),
             Some(CtxTarget::Artist(m)) => Some(Dest::Artist(m.name.clone())),
-            // Ordner im Dateibrowser: als Album bzw. Interpret auflösen.
+            // Folder in the file browser: resolve as an album or artist.
             _ => match self.ctx_album() {
                 Some((a, al)) => Some(Dest::Album(a, al)),
                 None => self.ctx_artist().map(Dest::Artist),
@@ -1040,9 +1040,9 @@ impl App {
     }
 }
 
-/// Kopiert ein gewähltes Bild in den Cover- bzw. Künstler-Cache und gibt den
-/// neuen Pfad zurück. Der Dateiname ist eindeutig (Zeitstempel), damit das Bild
-/// sofort frisch geladen wird und kein alter Cache-Eintrag greift.
+/// Copies a chosen image into the cover or artist cache and returns the new
+/// path. The file name is unique (timestamp), so the image is loaded fresh
+/// immediately and no old cache entry applies.
 fn store_custom_image(src: &std::path::Path, is_artist: bool) -> Option<String> {
     let dir = if is_artist {
         crate::core::online::artist_cache_dir()
@@ -1063,10 +1063,10 @@ fn store_custom_image(src: &std::path::Path, is_artist: bool) -> Option<String> 
     Some(out.to_string_lossy().into_owned())
 }
 
-/// Baut die Menüpunkt-Zeilen (Ziehgriff, Beschriftung, Sichtbarkeits-Schalter)
-/// in der aktuellen Reihenfolge neu auf. Per Ziehen umsortierbar; jede Änderung
-/// aktualisiert den lokalen Dialog-Zustand (`order`/`hidden`) und meldet sie dem
-/// Modell, das Navigation und Reihenfolge sofort übernimmt.
+/// Rebuilds the menu item rows (drag handle, label, visibility switch) in the
+/// current order. Reorderable by dragging; every change updates the local dialog
+/// state (`order`/`hidden`) and reports it to the model, which applies navigation
+/// and order immediately.
 fn rebuild_section_rows(
     list: &gtk::ListBox,
     order: &std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
@@ -1083,7 +1083,7 @@ fn rebuild_section_rows(
         };
         let row = adw::ActionRow::builder().title(label).build();
 
-        // Ziehgriff links (Hinweis); gezogen wird die ganze Zeile.
+        // Drag handle on the left (a hint); the whole row is dragged.
         let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
         handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
         row.add_prefix(&handle);
@@ -1098,7 +1098,7 @@ fn rebuild_section_rows(
         }
         row.add_controller(drag);
 
-        // DropTarget auf der ganzen Zeile: Quelle an diese Position verschieben.
+        // DropTarget on the whole row: move the source to this position.
         let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
         {
             let (list, order, hidden, sender) =
@@ -1133,7 +1133,7 @@ fn rebuild_section_rows(
         }
         row.add_controller(drop);
 
-        // Sichtbarkeits-Schalter rechts.
+        // Visibility switch on the right.
         let sw = gtk::Switch::builder()
             .active(!hidden.borrow().contains(name))
             .valign(gtk::Align::Center)
@@ -1141,7 +1141,7 @@ fn rebuild_section_rows(
         {
             let (hidden, sender) = (hidden.clone(), sender.clone());
             sw.connect_active_notify(move |s| {
-                // Mindestens ein Menüpunkt muss sichtbar bleiben.
+                // At least one menu item must stay visible.
                 if !s.is_active() {
                     let visible = crate::ui::app::SECTIONS
                         .iter()
@@ -1169,7 +1169,7 @@ fn rebuild_section_rows(
     }
 }
 
-/// Platzhalter-Icon je Ebene in der Übersicht „Ausgeblendet".
+/// Placeholder icon per level in the "Hidden" overview.
 fn hidden_icon(scope: &str) -> &'static str {
     match scope {
         "album" => "media-optical-symbolic",
@@ -1179,7 +1179,7 @@ fn hidden_icon(scope: &str) -> &'static str {
     }
 }
 
-/// Untertitel-Kennzeichnung je Ebene in der Übersicht „Ausgeblendet".
+/// Subtitle label per level in the "Hidden" overview.
 fn hidden_kind(scope: &str) -> String {
     match scope {
         "album" => gettext("Album"),

@@ -1,19 +1,19 @@
-//! Audio-Ausgänge (PipeWire/PulseAudio über `pactl`).
+//! Audio outputs (PipeWire/PulseAudio via `pactl`).
 //!
-//! Erkennt vorhandene Ausgabegeräte – inklusive bekannter Bluetooth-Lautsprecher
-//! (`bluez_output.*`) – und den aktuell aktiven Standard-Ausgang. Wird nur
-//! gelesen; an der Audio-Konfiguration des Systems wird nichts verändert.
+//! Detects available output devices – including known Bluetooth speakers
+//! (`bluez_output.*`) – and the currently active default output. Read-only;
+//! nothing in the system's audio configuration is modified.
 
 use std::process::Command;
 
-/// Ein Audio-Ausgang: `id` = stabiler Sink-Name, `name` = Anzeigename.
+/// An audio output: `id` = stable sink name, `name` = display name.
 #[derive(Debug, Clone)]
 pub struct Output {
     pub id: String,
     pub name: String,
 }
 
-/// Führt `pactl` mit neutraler Locale aus (stabile, englische Feldnamen).
+/// Runs `pactl` with a neutral locale (stable, English field names).
 fn pactl(args: &[&str]) -> Option<String> {
     let out = Command::new("pactl")
         .env("LC_ALL", "C")
@@ -26,7 +26,7 @@ fn pactl(args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Listet alle Ausgabegeräte (Sinks) auf.
+/// Lists all output devices (sinks).
 pub fn list_outputs() -> Vec<Output> {
     let Some(text) = pactl(&["list", "sinks"]) else {
         return Vec::new();
@@ -49,7 +49,7 @@ pub fn list_outputs() -> Vec<Output> {
     outputs
 }
 
-/// Aktuell aktiver Standard-Ausgang (Sink-Name), falls ermittelbar.
+/// Currently active default output (sink name), if determinable.
 pub fn default_output() -> Option<String> {
     let s = pactl(&["get-default-sink"])?.trim().to_string();
     if s.is_empty() || s == "@DEFAULT_SINK@" {

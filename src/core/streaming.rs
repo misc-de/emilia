@@ -1,39 +1,39 @@
-//! Streaming / Internet-Radio: Sender weltweit über die **Radio-Browser-API**
-//! suchen (kein API-Key nötig). Die Wiedergabe selbst läuft – wie bei Podcasts –
-//! direkt über `playbin3`; es wird nichts heruntergeladen.
+//! Streaming / internet radio: searching stations worldwide via the
+//! **Radio-Browser API** (no API key needed). Playback itself runs – as with
+//! podcasts – directly through `playbin3`; nothing is downloaded.
 
 use std::io::Read;
 use std::time::Duration;
 
 use anyhow::Result;
 
-/// Ein Treffer der Sendersuche (Radio-Browser): genug, um ihn anzuzeigen und –
-/// bei Auswahl – als Sender zu speichern.
+/// A station search result (Radio-Browser): enough to display it and –
+/// when selected – save it as a station.
 #[derive(Debug, Clone)]
 pub struct StationResult {
     pub name: String,
-    /// Spielbare Stream-URL. Bevorzugt `url_resolved` (löst `.pls`/`.m3u` bereits
-    /// auf), sonst die Roh-URL.
+    /// Playable stream URL. Prefers `url_resolved` (already resolves
+    /// `.pls`/`.m3u`), otherwise the raw URL.
     pub url: String,
     pub favicon: Option<String>,
-    /// Genre/Schlagworte (kommasepariert).
+    /// Genre/tags (comma-separated).
     pub tags: Option<String>,
     pub country: Option<String>,
     pub codec: Option<String>,
     pub bitrate: Option<i64>,
 }
 
-/// Bevorzugter Radio-Browser-Spiegel. Es gibt mehrere; einer genügt.
+/// Preferred Radio-Browser mirror. There are several; one is enough.
 const API_BASE: &str = "https://de1.api.radio-browser.info";
 
-/// Sucht Sender über die Radio-Browser-API. **Blockierend** – nur aus
-/// Worker-Threads aufrufen. Leerer Suchbegriff ergibt eine leere Liste.
+/// Searches stations via the Radio-Browser API. **Blocking** – only call
+/// from worker threads. An empty search term yields an empty list.
 pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
     let term = term.trim();
     if term.is_empty() {
         return Ok(Vec::new());
     }
-    // Nach Beliebtheit (Stimmen) sortiert; defekte Sender ausblenden.
+    // Sorted by popularity (votes); hide broken stations.
     let url = format!(
         "{API_BASE}/json/stations/search?limit=60&hidebroken=true&order=votes&reverse=true&name={}",
         crate::core::online::percent_encode(term),
@@ -45,17 +45,17 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
     let mut bytes = Vec::new();
     agent
         .get(&url)
-        // Die API bittet um einen aussagekräftigen User-Agent.
+        // The API asks for a meaningful User-Agent.
         .set("User-Agent", &format!("Emilia/{}", env!("CARGO_PKG_VERSION")))
         .call()?
         .into_reader()
-        .take(8 * 1024 * 1024) // Deckel gegen unerwartet große Antworten.
+        .take(8 * 1024 * 1024) // Cap against unexpectedly large responses.
         .read_to_end(&mut bytes)?;
     parse_stations(&bytes)
 }
 
-/// Wertet die Radio-Browser-Antwort aus. Treffer ohne spielbare URL werden
-/// verworfen.
+/// Parses the Radio-Browser response. Results without a playable URL are
+/// discarded.
 fn parse_stations(body: &[u8]) -> Result<Vec<StationResult>> {
     let raw: Vec<RbStation> = serde_json::from_slice(body)?;
     let results = raw
@@ -72,7 +72,7 @@ fn parse_stations(body: &[u8]) -> Result<Vec<StationResult>> {
             }
             let name = s.name.unwrap_or_default().trim().to_string();
             let name = if name.is_empty() {
-                "Sender".to_string()
+                "Station".to_string()
             } else {
                 name
             };
@@ -90,8 +90,8 @@ fn parse_stations(body: &[u8]) -> Result<Vec<StationResult>> {
     Ok(results)
 }
 
-/// Leitet aus einer Stream-URL einen brauchbaren Anzeigenamen ab (Host ohne
-/// „www."). Für manuell hinzugefügte Sender, die keine Metadaten mitbringen.
+/// Derives a usable display name from a stream URL (host without
+/// "www."). For manually added stations that bring no metadata.
 pub fn name_from_url(url: &str) -> String {
     let host = url
         .split("://")

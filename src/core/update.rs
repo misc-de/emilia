@@ -1,15 +1,15 @@
-//! Selbst-Aktualisierung der **Flatpak**-Version.
+//! Self-update of the **Flatpak** version.
 //!
-//! - **Prüfen** (sofort, ohne auf das Portal zu warten): den lokal installierten
-//!   OSTree-Commit (aus `/.flatpak-info`) mit dem neuesten Commit im veröffentlichten
-//!   Repo (per HTTP) vergleichen.
-//! - **Installieren**: über das **Flatpak-Portal**
-//!   (`org.freedesktop.portal.Flatpak`) – die einzige aus der Sandbox heraus
-//!   zulässige Möglichkeit, sich selbst zu aktualisieren. Das eigentliche
-//!   Herunterladen läuft im Hintergrund; das Portal meldet den Fortschritt per
-//!   Signal. Nach Abschluss muss die App neu gestartet werden.
+//! - **Check** (immediately, without waiting for the portal): compare the locally
+//!   installed OSTree commit (from `/.flatpak-info`) with the latest commit in the
+//!   published repo (via HTTP).
+//! - **Install**: via the **Flatpak portal**
+//!   (`org.freedesktop.portal.Flatpak`) – the only way to update oneself that is
+//!   permitted from within the sandbox. The actual download runs in the
+//!   background; the portal reports progress via a signal. After completion the
+//!   app must be restarted.
 //!
-//! Außerhalb von Flatpak (z. B. `cargo run`) ist nichts davon verfügbar.
+//! Outside of Flatpak (e.g. `cargo run`) none of this is available.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -19,7 +19,7 @@ use anyhow::{anyhow, Result};
 use gtk::gio;
 use gtk::glib;
 
-/// Basis-URL des veröffentlichten OSTree-Repos (siehe `data/de.cais.Emilia.flatpakrepo`).
+/// Base URL of the published OSTree repo (see `data/de.cais.Emilia.flatpakrepo`).
 const REPO_BASE: &str = "https://misc-de.github.io/emilia/repo";
 
 const PORTAL_NAME: &str = "org.freedesktop.portal.Flatpak";
@@ -27,22 +27,22 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/Flatpak";
 const PORTAL_IFACE: &str = "org.freedesktop.portal.Flatpak";
 const MONITOR_IFACE: &str = "org.freedesktop.portal.Flatpak.UpdateMonitor";
 
-/// Läuft die App als Flatpak? Nur dann ist Selbst-Aktualisierung möglich.
+/// Is the app running as a Flatpak? Only then is self-update possible.
 pub fn in_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
-/// Aus `/.flatpak-info` gelesene Eckdaten der laufenden Instanz.
+/// Key data of the running instance read from `/.flatpak-info`.
 pub struct AppInfo {
     pub id: String,
     pub arch: String,
     pub branch: String,
-    /// Aktuell laufender OSTree-Commit (volle 64-Hex), falls ermittelbar.
+    /// Currently running OSTree commit (full 64-hex), if determinable.
     pub commit: Option<String>,
 }
 
-/// Liest `/.flatpak-info` (INI-artig): App-Id, Architektur, Branch und den
-/// laufenden Commit (bevorzugt `app-commit`, sonst aus dem Deploy-Pfad).
+/// Reads `/.flatpak-info` (INI-like): app id, architecture, branch and the
+/// running commit (preferring `app-commit`, otherwise from the deploy path).
 pub fn app_info() -> Option<AppInfo> {
     let text = std::fs::read_to_string("/.flatpak-info").ok()?;
     let (mut id, mut arch, mut branch) = (None, None, None);
@@ -73,26 +73,26 @@ pub fn app_info() -> Option<AppInfo> {
     })
 }
 
-/// Sucht im Deploy-Pfad das 64-stellige Hex-Segment = OSTree-Commit.
+/// Looks for the 64-character hex segment = OSTree commit in the deploy path.
 fn extract_commit(path: &str) -> Option<String> {
     path.split('/')
         .find(|seg| seg.len() == 64 && seg.bytes().all(|b| b.is_ascii_hexdigit()))
         .map(str::to_string)
 }
 
-/// Ergebnis der Update-Prüfung.
+/// Result of the update check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckResult {
-    /// Lokaler Commit = Remote-Commit – nichts zu tun.
+    /// Local commit = remote commit – nothing to do.
     UpToDate,
-    /// Im Repo liegt ein neuerer Commit vor.
+    /// A newer commit is available in the repo.
     Available,
-    /// Nicht ermittelbar (kein Flatpak, offline, Repo nicht erreichbar …).
+    /// Not determinable (no Flatpak, offline, repo unreachable …).
     Unknown,
 }
 
-/// Vergleicht den lokalen mit dem neuesten Repo-Commit. **Netzzugriff** – im
-/// Worker-Thread aufrufen, nicht im UI-Thread.
+/// Compares the local with the latest repo commit. **Network access** – call in
+/// the worker thread, not in the UI thread.
 pub fn check() -> CheckResult {
     let Some(info) = app_info() else {
         return CheckResult::Unknown;
@@ -100,7 +100,7 @@ pub fn check() -> CheckResult {
     let Some(local) = info.commit else {
         return CheckResult::Unknown;
     };
-    // OSTree-Ref des App-Builds: app/<id>/<arch>/<branch> → Datei mit dem Commit.
+    // OSTree ref of the app build: app/<id>/<arch>/<branch> → file with the commit.
     let url = format!("{REPO_BASE}/refs/heads/app/{}/{}/{}", info.id, info.arch, info.branch);
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(5))
@@ -122,14 +122,14 @@ pub fn check() -> CheckResult {
     }
 }
 
-/// Startet die Selbst-Aktualisierung über das Flatpak-Portal. `on_finish` wird
-/// genau einmal aufgerufen: `Ok(())` = fertig (Neustart nötig), `Err(msg)` =
-/// Fehler. Der eigentliche Download läuft asynchron; diese Funktion kehrt sofort
-/// zurück. **Muss im Hauptthread laufen** (GLib-Main-Context für die Signale).
+/// Starts the self-update via the Flatpak portal. `on_finish` is called exactly
+/// once: `Ok(())` = done (restart needed), `Err(msg)` = error. The actual
+/// download runs asynchronously; this function returns immediately. **Must run
+/// in the main thread** (GLib main context for the signals).
 pub fn install<F: Fn(Result<(), String>) + 'static>(on_finish: F) -> Result<()> {
     let conn = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)?;
 
-    // 1) Update-Monitor anlegen → liefert dessen Objektpfad.
+    // 1) Create an update monitor → yields its object path.
     let create_params = glib::Variant::parse(None, "(@a{sv} {},)")?;
     let reply = conn
         .call_sync(
@@ -150,7 +150,7 @@ pub fn install<F: Fn(Result<(), String>) + 'static>(on_finish: F) -> Result<()> 
         .ok_or_else(|| anyhow!("invalid monitor path"))?
         .to_string();
 
-    // 2) Auf Fortschritts-Signale lauschen; bei Abschluss/Fehler abmelden.
+    // 2) Listen for progress signals; unsubscribe on completion/error.
     let on_finish = Rc::new(on_finish);
     let sub: Rc<Cell<Option<gio::SignalSubscriptionId>>> = Rc::new(Cell::new(None));
     let id = {
@@ -164,8 +164,8 @@ pub fn install<F: Fn(Result<(), String>) + 'static>(on_finish: F) -> Result<()> 
             None,
             gio::DBusSignalFlags::NONE,
             move |conn, _sender, _path, _iface, _signal, params| {
-                // params: (a{sv}) mit u. a. `status` (u: 0 läuft, 1 leer, 2 fertig)
-                // und – im Fehlerfall – `error`/`error_message` (s).
+                // params: (a{sv}) with, among others, `status` (u: 0 running, 1 empty, 2 done)
+                // and – in the error case – `error`/`error_message` (s).
                 let info = params.child_value(0);
                 let status = dict_get(&info, "status").and_then(|v| v.get::<u32>());
                 let err = dict_get(&info, "error_message")
@@ -187,7 +187,7 @@ pub fn install<F: Fn(Result<(), String>) + 'static>(on_finish: F) -> Result<()> 
     };
     sub.set(Some(id));
 
-    // 3) Aktualisierung anstoßen (kehrt sofort zurück; Fortschritt via Signal).
+    // 3) Trigger the update (returns immediately; progress via signal).
     let update_params = glib::Variant::parse(None, "('', @a{sv} {})")?;
     conn.call_sync(
         Some(PORTAL_NAME),
@@ -205,19 +205,19 @@ pub fn install<F: Fn(Result<(), String>) + 'static>(on_finish: F) -> Result<()> 
     Ok(())
 }
 
-/// Schlägt einen Schlüssel in einem `a{sv}`-Variant nach und entpackt den
-/// (in `v` verpackten) Wert. `None`, wenn der Schlüssel fehlt.
+/// Looks up a key in an `a{sv}` variant and unpacks the (in `v` wrapped) value.
+/// `None` if the key is missing.
 fn dict_get(dict: &glib::Variant, key: &str) -> Option<glib::Variant> {
     for i in 0..dict.n_children() {
         let entry = dict.child_value(i); // {sv}
         if entry.child_value(0).str() == Some(key) {
-            return entry.child_value(1).as_variant(); // v → innerer Wert
+            return entry.child_value(1).as_variant(); // v → inner value
         }
     }
     None
 }
 
-/// Für Hinweise/Fallback: der manuelle Aktualisierungsbefehl.
+/// For hints/fallback: the manual update command.
 pub fn manual_command() -> String {
     let id = app_info().map(|i| i.id).unwrap_or_else(|| "de.cais.Emilia".to_string());
     format!("flatpak update {id}")

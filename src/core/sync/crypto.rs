@@ -1,9 +1,9 @@
-//! TLS-Identität, Zertifikat-Fingerprint-Pinning und Token-Erzeugung.
+//! TLS identity, certificate fingerprint pinning and token generation.
 //!
-//! Sicherheitsmodell (wie in DrivePulse): selbstsigniertes EC-Zertifikat pro
-//! Sitzung, dessen SubjectPublicKeyInfo-Fingerprint im QR-Code steht. Der Client
-//! verifiziert ausschließlich diesen Fingerprint (Pinning) statt einer Zertifikat-
-//! kette – das schützt im LAN gegen Man-in-the-Middle ohne PKI.
+//! Security model (as in DrivePulse): a self-signed EC certificate per
+//! session, whose SubjectPublicKeyInfo fingerprint is encoded in the QR code. The client
+//! verifies only this fingerprint (pinning) instead of a certificate
+//! chain – this protects against man-in-the-middle attacks on the LAN without PKI.
 
 use std::sync::Arc;
 
@@ -12,19 +12,19 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 
-/// Frisch erzeugte TLS-Identität des Servers (nur für die Dauer einer Sitzung).
+/// Freshly generated TLS identity of the server (only for the duration of a session).
 pub struct ServerIdentity {
     pub cert_pem: String,
     pub key_pem: String,
-    /// `base64url(SHA256(SubjectPublicKeyInfo))` – wandert in den QR-Code.
+    /// `base64url(SHA256(SubjectPublicKeyInfo))` – goes into the QR code.
     pub fingerprint: String,
 }
 
-/// Erzeugt ein selbstsigniertes EC-Zertifikat (P-256) samt Schlüssel und
-/// berechnet den SPKI-Fingerprint.
+/// Generates a self-signed EC certificate (P-256) together with its key and
+/// computes the SPKI fingerprint.
 pub fn generate_identity() -> Result<ServerIdentity> {
     let key = rcgen::generate_simple_self_signed(vec!["emilia".to_string()])
-        .map_err(|e| anyhow!("Zertifikat-Erzeugung fehlgeschlagen: {e}"))?;
+        .map_err(|e| anyhow!("certificate generation failed: {e}"))?;
     let fingerprint = spki_fingerprint(key.cert.der().as_ref())?;
     Ok(ServerIdentity {
         cert_pem: key.cert.pem(),
@@ -33,28 +33,28 @@ pub fn generate_identity() -> Result<ServerIdentity> {
     })
 }
 
-/// SHA256 über die SubjectPublicKeyInfo eines DER-Zertifikats, base64url ohne
-/// Padding. Server- und clientseitig identisch, damit die Fingerprints exakt
-/// übereinstimmen.
+/// SHA256 over the SubjectPublicKeyInfo of a DER certificate, base64url without
+/// padding. Identical on the server and client sides so the fingerprints match
+/// exactly.
 pub fn spki_fingerprint(cert_der: &[u8]) -> Result<String> {
     use x509_parser::prelude::*;
     let (_, cert) =
-        X509Certificate::from_der(cert_der).map_err(|e| anyhow!("Zertifikat nicht lesbar: {e}"))?;
+        X509Certificate::from_der(cert_der).map_err(|e| anyhow!("certificate not readable: {e}"))?;
     let spki = cert.public_key().raw;
     Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(spki)))
 }
 
-/// Zufälliges base64url-Token mit `n` Byte Entropie.
+/// Random base64url token with `n` bytes of entropy.
 pub fn generate_token(n: usize) -> String {
     let mut buf = vec![0u8; n];
-    getrandom::getrandom(&mut buf).expect("Systemzufall nicht verfügbar");
+    getrandom::getrandom(&mut buf).expect("system randomness not available");
     URL_SAFE_NO_PAD.encode(buf)
 }
 
-/// Zufällige Hex-ID (für die persistente Geräte-ID in den Einstellungen).
+/// Random hex ID (for the persistent device ID in the settings).
 pub fn random_hex(n: usize) -> String {
     let mut buf = vec![0u8; n];
-    getrandom::getrandom(&mut buf).expect("Systemzufall nicht verfügbar");
+    getrandom::getrandom(&mut buf).expect("system randomness not available");
     let mut s = String::with_capacity(n * 2);
     for b in buf {
         s.push_str(&format!("{b:02x}"));
@@ -62,7 +62,7 @@ pub fn random_hex(n: usize) -> String {
     s
 }
 
-/// Konstantzeitiger Vergleich (gegen Timing-Angriffe auf Token).
+/// Constant-time comparison (against timing attacks on tokens).
 pub fn constant_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {
@@ -75,8 +75,8 @@ pub fn constant_eq(a: &str, b: &str) -> bool {
     diff == 0
 }
 
-/// rustls-Client-Konfiguration, die genau den gepinnten Fingerprint akzeptiert
-/// (für den `ureq`-Client).
+/// rustls client configuration that accepts exactly the pinned fingerprint
+/// (for the `ureq` client).
 pub fn pinned_client_config(fingerprint: String) -> Arc<rustls::ClientConfig> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let verifier = Arc::new(FingerprintVerifier {
@@ -85,14 +85,14 @@ pub fn pinned_client_config(fingerprint: String) -> Arc<rustls::ClientConfig> {
     });
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .expect("rustls-Protokollversionen")
+        .expect("rustls protocol versions")
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     Arc::new(config)
 }
 
-/// Verifier, der die Zertifikatkette ignoriert und nur den SPKI-Fingerprint prüft.
+/// Verifier that ignores the certificate chain and only checks the SPKI fingerprint.
 #[derive(Debug)]
 struct FingerprintVerifier {
     fingerprint: String,
@@ -113,7 +113,7 @@ impl rustls::client::danger::ServerCertVerifier for FingerprintVerifier {
                 Ok(rustls::client::danger::ServerCertVerified::assertion())
             }
             _ => Err(rustls::Error::General(
-                "Zertifikat-Fingerprint stimmt nicht überein".into(),
+                "certificate fingerprint does not match".into(),
             )),
         }
     }
@@ -160,9 +160,9 @@ mod tests {
     #[test]
     fn fingerprint_is_stable_and_url_safe() {
         let id = generate_identity().expect("identity");
-        // base64url ohne Padding: keine '+', '/', '='.
+        // base64url without padding: no '+', '/', '='.
         assert!(!id.fingerprint.contains(['+', '/', '=']));
-        // Deterministisch bezogen auf dasselbe Zertifikat.
+        // Deterministic with respect to the same certificate.
         let again = spki_fingerprint(
             rcgen::generate_simple_self_signed(vec!["emilia".to_string()])
                 .unwrap()
@@ -171,7 +171,7 @@ mod tests {
                 .as_ref(),
         )
         .unwrap();
-        assert_ne!(id.fingerprint, again, "verschiedene Zertifikate → verschiedene Fingerprints");
+        assert_ne!(id.fingerprint, again, "different certificates → different fingerprints");
     }
 
     #[test]

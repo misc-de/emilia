@@ -1,8 +1,8 @@
-//! Internationalisierung (i18n) über gettext.
+//! Internationalization (i18n) via gettext.
 //!
-//! Die Quelltext-Strings sind in **Englisch** (gettext-`msgid`); Übersetzungen
-//! liegen als `po/<lang>.po` → `<lang>/LC_MESSAGES/emilia.mo`. Fehlt ein
-//! Katalog oder ein Eintrag, erscheint automatisch der englische Originaltext.
+//! The source strings are in **English** (gettext `msgid`); translations are
+//! stored as `po/<lang>.po` → `<lang>/LC_MESSAGES/emilia.mo`. If a catalog or an
+//! entry is missing, the English original text automatically appears.
 
 use std::path::PathBuf;
 
@@ -12,17 +12,17 @@ use gettextrs::{
 
 pub use gettextrs::{gettext, ngettext};
 
-/// Textdomain (entspricht dem `.mo`-Dateinamen `emilia.mo`).
+/// Text domain (corresponds to the `.mo` file name `emilia.mo`).
 pub const DOMAIN: &str = "emilia";
 
-/// Initialisiert gettext. Muss vor jeder Übersetzung laufen (früh in `main`).
+/// Initializes gettext. Must run before any translation (early in `main`).
 ///
-/// `lang`: `None` folgt der System-Locale (`LANG`/`LC_*`); `Some("de"|"en")`
-/// erzwingt die jeweilige Sprache über die `LANGUAGE`-Umgebungsvariable.
+/// `lang`: `None` follows the system locale (`LANG`/`LC_*`); `Some("de"|"en")`
+/// forces the respective language via the `LANGUAGE` environment variable.
 pub fn init(lang: Option<&str>) {
     if let Some(code) = lang {
-        // gettext wertet LANGUAGE vor LC_MESSAGES aus (sofern die Locale nicht
-        // C/POSIX ist) – so lässt sich die Sprache unabhängig vom System wählen.
+        // gettext evaluates LANGUAGE before LC_MESSAGES (as long as the locale is
+        // not C/POSIX) – this way the language can be chosen independently of the system.
         std::env::set_var("LANGUAGE", code);
     }
     setlocale(LocaleCategory::LcAll, "");
@@ -33,9 +33,9 @@ pub fn init(lang: Option<&str>) {
     let _ = textdomain(DOMAIN);
 }
 
-/// Verzeichnis mit den `.mo`-Katalogen ermitteln:
-/// `EMILIA_LOCALEDIR` (Entwicklung) → `<exe>/../share/locale` (lokal
-/// installiert) → `/usr/share/locale` (Systeminstallation).
+/// Determine the directory with the `.mo` catalogs:
+/// `EMILIA_LOCALEDIR` (development) → `<exe>/../share/locale` (locally
+/// installed) → `/usr/share/locale` (system installation).
 fn locale_dir() -> PathBuf {
     if let Ok(d) = std::env::var("EMILIA_LOCALEDIR") {
         return PathBuf::from(d);
@@ -51,10 +51,10 @@ fn locale_dir() -> PathBuf {
     PathBuf::from("/usr/share/locale")
 }
 
-/// `gettext` mit benannten Platzhaltern `{name}`.
+/// `gettext` with named placeholders `{name}`.
 ///
-/// Nötig, weil `format!` keinen Laufzeit-String als Formatvorlage akzeptiert.
-/// Beispiel: `gettext_f("Added {n} tracks", &[("n", &n.to_string())])`.
+/// Needed because `format!` does not accept a runtime string as a format
+/// template. Example: `gettext_f("Added {n} tracks", &[("n", &n.to_string())])`.
 pub fn gettext_f(msgid: &str, args: &[(&str, &str)]) -> String {
     let mut s = gettext(msgid);
     for (key, value) in args {
@@ -63,9 +63,9 @@ pub fn gettext_f(msgid: &str, args: &[(&str, &str)]) -> String {
     s
 }
 
-/// `ngettext` (Singular/Plural je `n`) mit automatischem `{n}`-Platzhalter.
+/// `ngettext` (singular/plural depending on `n`) with an automatic `{n}` placeholder.
 ///
-/// Beispiel: `ngettext_n("{n} album", "{n} albums", count)`.
+/// Example: `ngettext_n("{n} album", "{n} albums", count)`.
 pub fn ngettext_n(msgid: &str, msgid_plural: &str, n: u32) -> String {
     ngettext(msgid, msgid_plural, n).replace("{n}", &n.to_string())
 }

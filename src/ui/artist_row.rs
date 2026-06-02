@@ -1,9 +1,9 @@
-//! Eine Interpreten-Zeile mit Foto (relm4-Factory).
+//! An artist row with photo (relm4 factory).
 //!
-//! Das Foto stammt aus dem XDG-Cache (online via Deezer geladen); fehlt es,
-//! wird ein Avatar-Platzhalter gezeigt. Die Karte erscheint sofort mit
-//! Platzhalter; das Bild wird in einem Hintergrund-Thread dekodiert und erst
-//! danach gesetzt, damit lange Listen den UI-Thread nicht blockieren.
+//! The photo comes from the XDG cache (loaded online via Deezer); if it is
+//! missing, an avatar placeholder is shown. The card appears immediately with a
+//! placeholder; the image is decoded in a background thread and only set
+//! afterwards, so that long lists do not block the UI thread.
 
 use adw::prelude::*;
 use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
@@ -17,27 +17,27 @@ fn esc(s: &str) -> String {
 
 #[derive(Debug)]
 pub enum ArtistOutput {
-    /// Kurzes Tippen: Alben & Lieder des Interpreten auflisten.
+    /// Short tap: list the artist's albums & songs.
     Activated(DynamicIndex),
-    /// Langes Drücken: Detailansicht öffnen (wie im Dateibrowser).
+    /// Long press: open the detail view (like in the file browser).
     LongPress(DynamicIndex),
 }
 
 pub struct ArtistCard {
     pub meta: ArtistMeta,
-    /// Quadratischer Foto-Rahmen; Bild wird asynchron nachgereicht.
+    /// Square photo frame; image is supplied asynchronously.
     avatar: adw::Bin,
-    /// Präfix: Foto, bei getrennter Quelle mit rotem „Getrennt"-Overlay.
+    /// Prefix: photo, with a red "Disconnected" overlay when the source is offline.
     prefix: gtk::Widget,
 }
 
 #[relm4::factory(pub)]
 impl FactoryComponent for ArtistCard {
-    /// `(Interpret, ist die Quelle gerade offline?)`.
+    /// `(artist, is the source currently offline?)`.
     type Init = (ArtistMeta, bool);
     type Input = ();
     type Output = ArtistOutput;
-    /// Das im Hintergrund dekodierte Foto (oder `None`, falls Datei fehlt/fehlerhaft).
+    /// The photo decoded in the background (or `None` if the file is missing/faulty).
     type CommandOutput = Option<gtk::gdk::Texture>;
     type ParentWidget = gtk::ListBox;
 
@@ -48,12 +48,12 @@ impl FactoryComponent for ArtistCard {
             set_activatable: true,
             add_prefix: &self.prefix,
 
-            // Kurzes Tippen: Alben & Lieder des Interpreten auflisten.
+            // Short tap: list the artist's albums & songs.
             connect_activated[sender, index] => move |_| {
                 let _ = sender.output(ArtistOutput::Activated(index.clone()));
             },
 
-            // Langes Drücken: Detailansicht – wie unter „Dateisystem".
+            // Long press: detail view – like under "Filesystem".
             add_controller = gtk::GestureLongPress {
                 connect_pressed[sender, index] => move |gesture, _, _| {
                     gesture.set_state(gtk::EventSequenceState::Claimed);
@@ -68,12 +68,12 @@ impl FactoryComponent for ArtistCard {
         let (meta, offline) = init;
         let avatar = widgets::thumb_frame("avatar-default-symbolic", 48);
         if let Some(path) = meta.image_path.clone() {
-            // Bereits dekodiert? Dann sofort aus dem Cache – kein Aufblitzen.
+            // Already decoded? Then immediately from the cache – no flashing.
             if let Some(texture) = widgets::cached_thumb(&path) {
                 widgets::set_cover_thumb(&avatar, &texture);
             } else {
-                // Sonst herunterskaliert im Hintergrund dekodieren – nicht auf dem
-                // UI-Thread, damit der Listenaufbau flüssig bleibt.
+                // Otherwise decode downscaled in the background – not on the
+                // UI thread, so that building the list stays smooth.
                 sender.spawn_oneshot_command(move || widgets::decode_thumb(&path));
             }
         }
@@ -87,7 +87,7 @@ impl FactoryComponent for ArtistCard {
 
     fn update_cmd(&mut self, texture: Self::CommandOutput, _sender: FactorySender<Self>) {
         if let Some(texture) = texture {
-            // Fürs nächste Mal cachen, dann setzen.
+            // Cache for next time, then set.
             if let Some(path) = &self.meta.image_path {
                 crate::ui::widgets::store_thumb(path.clone(), texture.clone());
             }

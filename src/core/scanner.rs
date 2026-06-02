@@ -1,4 +1,4 @@
-//! Rekursiver Verzeichnis-Scan + Metadaten via lofty.
+//! Recursive directory scan + metadata via lofty.
 
 use anyhow::Result;
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -12,8 +12,8 @@ const AUDIO_EXTS: &[&str] = &[
     "mp3", "flac", "ogg", "oga", "opus", "m4a", "aac", "wav", "wma", "mka",
 ];
 
-/// Liest Titel, Interpret und Spieldauer (ms) einer Datei in einem Durchgang
-/// (für die Anzeige in der Dateiliste).
+/// Reads title, artist and playback duration (ms) of a file in a single pass
+/// (for display in the file list).
 pub fn read_meta(path: &Path) -> (Option<String>, Option<String>, Option<i64>) {
     let Ok(tagged) = lofty::read_from_path(path) else {
         return (None, None, None);
@@ -36,8 +36,8 @@ pub fn read_meta(path: &Path) -> (Option<String>, Option<String>, Option<i64>) {
     (title, artist, duration_ms)
 }
 
-/// Liest Album-Tag und Erscheinungsjahr in einem Durchgang
-/// (für die Kurzübersicht in „Mehr Infos").
+/// Reads album tag and release year in a single pass
+/// (for the brief overview in "More info").
 pub fn read_album_year(path: &Path) -> (Option<String>, Option<u32>) {
     let Ok(tagged) = lofty::read_from_path(path) else {
         return (None, None);
@@ -52,9 +52,9 @@ pub fn read_album_year(path: &Path) -> (Option<String>, Option<u32>) {
     (album, tag.year())
 }
 
-/// Liest Genre und Komponist aus den Datei-Tags (für „Mehr Infos").
-/// Beide nur, wenn tatsächlich gesetzt; leere Tags ergeben `None`. Wie überall
-/// hier wird die Datei dabei ausschließlich gelesen, nie verändert.
+/// Reads genre and composer from the file tags (for "More info").
+/// Both only if actually set; empty tags yield `None`. As everywhere
+/// here, the file is only read, never modified.
 pub fn read_genre_composer(path: &Path) -> (Option<String>, Option<String>) {
     let Ok(tagged) = lofty::read_from_path(path) else {
         return (None, None);
@@ -73,8 +73,8 @@ pub fn read_genre_composer(path: &Path) -> (Option<String>, Option<String>) {
     (genre, composer)
 }
 
-/// Liest den (unsynchronisierten) Liedtext aus den Tags, falls vorhanden.
-/// Die Audiodatei wird dabei nur gelesen.
+/// Reads the (unsynchronized) lyrics from the tags, if present.
+/// The audio file is only read in the process.
 pub fn read_lyrics(path: &Path) -> Option<String> {
     let tagged = lofty::read_from_path(path).ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
@@ -83,7 +83,7 @@ pub fn read_lyrics(path: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Spieldauer einer Audiodatei in Sekunden (0, wenn nicht lesbar).
+/// Playback duration of an audio file in seconds (0 if not readable).
 pub fn duration_secs(path: &Path) -> u64 {
     lofty::read_from_path(path)
         .ok()
@@ -98,7 +98,7 @@ pub fn is_audio(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Sammelt rekursiv alle Audiodateien unterhalb von `root`.
+/// Recursively collects all audio files below `root`.
 pub fn collect_audio_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -119,8 +119,8 @@ pub fn collect_audio_files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Liest die Metadaten einer Datei in ein `Track`-Modell.
-/// Fällt bei fehlenden Tags auf den Dateinamen zurück (wichtig bei Hörspielen).
+/// Reads a file's metadata into a `Track` model.
+/// Falls back to the file name when tags are missing (important for audio dramas).
 pub fn read_track(path: &Path) -> Result<Track> {
     let tagged = lofty::read_from_path(path)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
@@ -128,7 +128,7 @@ pub fn read_track(path: &Path) -> Result<Track> {
     let file_stem = path
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("Unbekannt")
+        .unwrap_or("Unknown")
         .to_string();
 
     let (title, artist, album, genre, track_no, disc_no) = match tag {
@@ -161,8 +161,8 @@ pub fn read_track(path: &Path) -> Result<Track> {
     })
 }
 
-/// Scannt `root` und schreibt alle gefundenen Tracks in die Bibliothek.
-/// Gibt die Anzahl erfolgreich eingelesener Dateien zurück.
+/// Scans `root` and writes all found tracks into the library.
+/// Returns the number of successfully read files.
 pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
     let files = collect_audio_files(root);
     let mut count = 0;

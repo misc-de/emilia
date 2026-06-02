@@ -1,11 +1,11 @@
-//! Timeshift-Mitschnitt für Streaming-Sender („Mini-DVR"). Ein Hintergrund-Thread
-//! liest den Stream über eine **eigene** ICY-Verbindung (zusätzlich zur
-//! GStreamer-Wiedergabe), hält die letzten N Minuten in einer **Ring-Datei** im
-//! Cache und merkt sich die Songgrenzen (Wechsel von `StreamTitle`). Daraus
-//! lassen sich Songs **rückwirkend** als Datei speichern – auch wenn man erst am
-//! Songende auf „Aufnahme" drückt.
+//! Timeshift recording for streaming stations ("mini DVR"). A background thread
+//! reads the stream over its **own** ICY connection (in addition to the
+//! GStreamer playback), keeps the last N minutes in a **ring file** in the
+//! cache and remembers the song boundaries (changes of `StreamTitle`). From this,
+//! songs can be saved as a file **retroactively** – even if you only press
+//! "record" at the end of the song.
 //!
-//! Bewusst entkoppelt von der Wiedergabe: GStreamer spielt, dieser Worker puffert.
+//! Deliberately decoupled from playback: GStreamer plays, this worker buffers.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -15,28 +15,28 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-/// Ein im Puffer erkannter Song (Grenze zu Grenze).
+/// A song detected in the buffer (boundary to boundary).
 #[derive(Debug, Clone)]
 pub struct BufferedSong {
-    /// Fortlaufender (absoluter, monotoner) Byte-Offset des Songanfangs.
+    /// Running (absolute, monotonic) byte offset of the song start.
     pub start: u64,
-    /// Byte-Offset des Songendes (= Anfang des nächsten Songs); `None` = der Song
-    /// läuft gerade noch.
+    /// Byte offset of the song end (= start of the next song); `None` = the song
+    /// is still playing.
     pub end: Option<u64>,
-    /// „Interpret - Titel" aus den ICY-Metadaten.
+    /// "Artist - Title" from the ICY metadata.
     pub title: String,
-    /// Liegt der **Anfang** noch im Puffer? Sonst wäre eine Aufnahme unvollständig.
+    /// Is the **start** still in the buffer? Otherwise a recording would be incomplete.
     pub complete: bool,
 }
 
-/// Schnappschuss des Pufferzustands für die UI (Wiederholungs-Seite, Aufnahme).
+/// Snapshot of the buffer state for the UI (replay page, recording).
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
-    /// Anfang des laufenden Songs (absoluter Offset), falls bekannt.
+    /// Start of the running song (absolute offset), if known.
     pub current_start: Option<u64>,
-    /// Erkannte Songs (neueste zuletzt), inkl. dem laufenden.
+    /// Detected songs (newest last), including the running one.
     pub songs: Vec<BufferedSong>,
-    /// Worker beendet (Stream zu Ende/Fehler)?
+    /// Worker finished (stream ended/error)?
     pub ended: bool,
 }
 
@@ -54,25 +54,25 @@ struct Shared {
     ended: bool,
 }
 
-/// Eindeutige Pufferdateinamen, damit ein neuer Recorder die Datei eines gerade
-/// noch auslaufenden alten Workers nicht überschreibt.
+/// Unique buffer file names so that a new recorder does not overwrite the file
+/// of an old worker that is still winding down.
 static BUFFER_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Steuert den Mitschnitt-Worker eines Senders. Beim Verwerfen (`Drop`) wird der
-/// Worker gestoppt und die Pufferdatei entfernt.
+/// Controls the recording worker of a station. On drop (`Drop`), the
+/// worker is stopped and the buffer file is removed.
 pub struct Recorder {
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
     buffer_path: PathBuf,
-    /// Endung der gepufferten Audiodaten (z. B. „mp3"/„aac"). Wird vom Worker
-    /// gesetzt, sobald der Content-Type bekannt ist – daher geteilt und beim
-    /// Speichern frisch gelesen.
+    /// Extension of the buffered audio data (e.g. "mp3"/"aac"). Set by the
+    /// worker as soon as the Content-Type is known – therefore shared and read
+    /// fresh when saving.
     ext: Arc<Mutex<String>>,
 }
 
 impl Recorder {
-    /// Startet den Mitschnitt-Worker für `url` mit einem Puffer von `cap_minutes`
-    /// Minuten. Liefert sofort zurück; der Worker läuft im Hintergrund.
+    /// Starts the recording worker for `url` with a buffer of `cap_minutes`
+    /// minutes. Returns immediately; the worker runs in the background.
     pub fn start(url: &str, cap_minutes: u32) -> Recorder {
         let n = BUFFER_SEQ.fetch_add(1, Ordering::Relaxed);
         let mut buffer_path = crate::core::online::cover_cache_dir();
@@ -80,8 +80,8 @@ impl Recorder {
 
         let shared = Arc::new(Mutex::new(Shared::default()));
         let stop = Arc::new(AtomicBool::new(false));
-        // Endung wird vom Worker gesetzt, sobald der Content-Type bekannt ist;
-        // als sinnvoller Standard „mp3" (häufigster ICY-Codec).
+        // Extension is set by the worker as soon as the Content-Type is known;
+        // as a sensible default "mp3" (most common ICY codec).
         let ext = Arc::new(Mutex::new(String::from("mp3")));
 
         {
@@ -108,7 +108,7 @@ impl Recorder {
         }
     }
 
-    /// Schnappschuss des Pufferzustands für die UI.
+    /// Snapshot of the buffer state for the UI.
     pub fn snapshot(&self) -> Snapshot {
         let s = self.shared.lock().unwrap();
         let avail = s.total.saturating_sub(s.cap);
@@ -130,9 +130,9 @@ impl Recorder {
         }
     }
 
-    /// Schneidet den Byte-Bereich `[start, end)` aus dem Ringpuffer und speichert
-    /// ihn als getaggte Audiodatei in `dest_dir`. Gibt den Dateipfad zurück.
-    /// `incomplete` markiert (nur Hinweis), dass der Anfang gefehlt haben kann.
+    /// Cuts the byte range `[start, end)` out of the ring buffer and saves
+    /// it as a tagged audio file in `dest_dir`. Returns the file path.
+    /// `incomplete` marks (hint only) that the start may have been missing.
     pub fn save_song(
         &self,
         start: u64,
@@ -160,8 +160,8 @@ impl Recorder {
         Ok(path)
     }
 
-    /// Schneidet `[start, end)` in eine **temporäre** Datei (zum Probehören in der
-    /// Wiederholung) und gibt deren Pfad zurück.
+    /// Cuts `[start, end)` into a **temporary** file (for previewing in the
+    /// replay) and returns its path.
     pub fn extract_temp(&self, start: u64, end: u64) -> Result<PathBuf> {
         let cap = self.shared.lock().unwrap().cap;
         let avail = self.shared.lock().unwrap().total.saturating_sub(cap);
@@ -186,8 +186,8 @@ impl Drop for Recorder {
     }
 }
 
-/// Worker-Schleife: liest den ICY-Stream, puffert Audio im Ring und führt die
-/// Songgrenzen nach.
+/// Worker loop: reads the ICY stream, buffers audio in the ring and tracks the
+/// song boundaries.
 fn run(
     url: &str,
     cap_minutes: u32,
@@ -212,7 +212,7 @@ fn run(
         .unwrap_or(0);
     let ext = ext_from_content_type(resp.header("Content-Type"));
     *ext_out.lock().unwrap() = ext.to_string();
-    // Pufferkapazität in Bytes aus der Bitrate ableiten (Standard 256 kbit/s).
+    // Derive buffer capacity in bytes from the bitrate (default 256 kbit/s).
     let br_kbps: u64 = resp
         .header("icy-br")
         .and_then(|s| s.split(',').next())
@@ -232,20 +232,20 @@ fn run(
     let mut reader = std::io::BufReader::new(resp.into_reader());
     let mut total: u64 = 0;
     let mut buf = vec![0u8; 16 * 1024];
-    // Entprellung: Ein neuer `StreamTitle` gilt erst dann als echte Songgrenze,
-    // wenn er mindestens `min_bytes` (≈ MIN_SONG_SECS Sekunden) lang anliegt. So
-    // werden Sender-Kennungen, Werbe-Einblendungen und schnelle Hin-und-Her-
-    // Wechsel der Anzeige ignoriert (sonst entstünden mehrere Dateien je Lied).
+    // Debounce: a new `StreamTitle` only counts as a real song boundary once
+    // it has been present for at least `min_bytes` (≈ MIN_SONG_SECS seconds). This
+    // ignores station idents, ad insertions and fast back-and-forth
+    // changes of the display (otherwise several files per song would arise).
     let min_bytes = MIN_SONG_SECS * bytes_per_sec;
-    // Kandidat für die nächste Songgrenze: (Startoffset, Titel).
+    // Candidate for the next song boundary: (start offset, title).
     let mut pending: Option<(u64, String)> = None;
 
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
-        // Audio-Anteil lesen (entweder bis zur nächsten Metadaten-Marke, oder –
-        // ohne ICY-Metadaten – einfach blockweise).
+        // Read the audio portion (either up to the next metadata marker, or –
+        // without ICY metadata – simply block by block).
         let chunk = if metaint > 0 { metaint } else { buf.len() };
         let mut remaining = chunk;
         while remaining > 0 {
@@ -264,7 +264,7 @@ fn run(
         {
             let mut s = shared.lock().unwrap();
             s.total = total;
-            // Hält ein Kandidat lange genug an → als echte Songgrenze festschreiben.
+            // If a candidate persists long enough → commit it as a real song boundary.
             let commit = pending
                 .as_ref()
                 .filter(|(off, _)| total.saturating_sub(*off) >= min_bytes)
@@ -287,7 +287,7 @@ fn run(
             continue;
         }
 
-        // Metadatenblock: 1 Längenbyte, dann len*16 Bytes Text.
+        // Metadata block: 1 length byte, then len*16 bytes of text.
         let mut lenb = [0u8; 1];
         if reader.read(&mut lenb)? == 0 {
             return Ok(());
@@ -300,28 +300,28 @@ fn run(
                 if !title.trim().is_empty() {
                     let current = shared.lock().unwrap().current_title.clone();
                     if current.as_deref() == Some(title.as_str()) {
-                        // Zurück zum laufenden Lied (z. B. nach einer Einblendung)
-                        // → Kandidat verwerfen, kein neuer Song.
+                        // Back to the running song (e.g. after an insertion)
+                        // → discard candidate, no new song.
                         pending = None;
                     } else if pending.as_ref().map(|(_, t)| t.as_str()) != Some(title.as_str()) {
-                        // Neuer Kandidat – Startoffset = hier; muss sich erst halten.
+                        // New candidate – start offset = here; it must hold first.
                         pending = Some((total, title));
                     }
-                    // Gleicher Kandidat: Startoffset beibehalten (nichts tun).
+                    // Same candidate: keep the start offset (do nothing).
                 }
             }
         }
     }
 }
 
-/// Mindestdauer (Sekunden), die ein Titel anliegen muss, um als eigener Song zu
-/// gelten. Kürzere Einblendungen (Werbung, Sender-Kennung, schnelle Wechsel)
-/// werden dem laufenden Song zugeschlagen statt eine zweite Datei zu erzeugen.
+/// Minimum duration (seconds) a title must be present to count as its own song.
+/// Shorter insertions (ads, station idents, fast changes)
+/// are attributed to the running song instead of producing a second file.
 const MIN_SONG_SECS: u64 = 30;
 
-/// Entfernt vollständig aus dem Puffer gelaufene Songgrenzen (deren Folge-Grenze
-/// schon jenseits des verfügbaren Fensters liegt) – behält aber den ältesten
-/// noch teilweise vorhandenen Song.
+/// Removes song boundaries that have fully scrolled out of the buffer (whose
+/// following boundary already lies beyond the available window) – but keeps the
+/// oldest song that is still partially present.
 fn prune_markers(s: &mut Shared) {
     let avail = s.total.saturating_sub(s.cap);
     while s.markers.len() >= 2 && s.markers[1].offset <= avail {
@@ -329,8 +329,8 @@ fn prune_markers(s: &mut Shared) {
     }
 }
 
-/// Schreibt `data` an die absolute Position `total` in die Ring-Datei (wrappt am
-/// Kapazitätsende).
+/// Writes `data` at the absolute position `total` into the ring file (wraps at
+/// the capacity end).
 fn write_ring(file: &mut std::fs::File, cap: u64, total: u64, data: &[u8]) -> Result<()> {
     let pos = total % cap;
     let first = ((cap - pos) as usize).min(data.len());
@@ -343,8 +343,8 @@ fn write_ring(file: &mut std::fs::File, cap: u64, total: u64, data: &[u8]) -> Re
     Ok(())
 }
 
-/// Liest den absoluten Byte-Bereich `[start, end)` aus der Ring-Datei (mit
-/// eigenem Lese-Handle; wrappt am Kapazitätsende).
+/// Reads the absolute byte range `[start, end)` from the ring file (with
+/// its own read handle; wraps at the capacity end).
 fn read_ring(buffer_path: &Path, cap: u64, start: u64, end: u64) -> Result<Vec<u8>> {
     let len = (end - start) as usize;
     let mut out = vec![0u8; len];
@@ -360,12 +360,12 @@ fn read_ring(buffer_path: &Path, cap: u64, start: u64, end: u64) -> Result<Vec<u
     Ok(out)
 }
 
-/// Liest den Wert von `StreamTitle='…'` aus einem ICY-Metadatenblock.
+/// Reads the value of `StreamTitle='…'` from an ICY metadata block.
 fn parse_stream_title(meta: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(meta);
     let start = text.find("StreamTitle=")? + "StreamTitle=".len();
     let rest = &text[start..];
-    // Wert steht in einfachen Anführungszeichen: 'Interpret - Titel';
+    // Value is in single quotes: 'Artist - Title';
     let rest = rest.strip_prefix('\'').unwrap_or(rest);
     let endq = rest.find("';").or_else(|| rest.find('\'')).unwrap_or(rest.len());
     let value = rest[..endq].trim_matches(char::from(0)).trim();
@@ -376,8 +376,8 @@ fn parse_stream_title(meta: &[u8]) -> Option<String> {
     }
 }
 
-/// Teilt „Interpret - Titel" auf (für Tags/Dateiname). Ohne Trenner gilt alles
-/// als Titel.
+/// Splits "Artist - Title" (for tags/file name). Without a separator everything
+/// counts as the title.
 pub fn split_artist_title(stream_title: &str) -> (Option<String>, String) {
     if let Some((a, t)) = stream_title.split_once(" - ") {
         let a = a.trim();
@@ -398,7 +398,7 @@ fn ext_from_content_type(ct: Option<&str>) -> &'static str {
     }
 }
 
-/// Macht aus „Interpret - Titel" einen brauchbaren Dateinamensstamm.
+/// Turns "Artist - Title" into a usable file name stem.
 fn sanitize_filename(artist: Option<&str>, title: &str) -> String {
     let raw = match artist {
         Some(a) if !a.trim().is_empty() => format!("{a} - {title}"),
@@ -410,13 +410,13 @@ fn sanitize_filename(artist: Option<&str>, title: &str) -> String {
         .collect();
     let cleaned = cleaned.trim().trim_matches('.').trim();
     if cleaned.is_empty() {
-        "Aufnahme".to_string()
+        "Recording".to_string()
     } else {
         cleaned.chars().take(120).collect()
     }
 }
 
-/// Findet einen freien Dateipfad (hängt bei Bedarf „ (2)" usw. an).
+/// Finds a free file path (appends " (2)" etc. if needed).
 fn unique_path(dir: &Path, base: &str, ext: &str) -> PathBuf {
     let mut p = dir.join(format!("{base}.{ext}"));
     let mut i = 2;
@@ -427,9 +427,9 @@ fn unique_path(dir: &Path, base: &str, ext: &str) -> PathBuf {
     p
 }
 
-/// Schreibt Interpret/Titel/Album **und ein Cover** in eine bereits gespeicherte
-/// Aufnahme (best effort). Wird im Hintergrund aufgerufen, nachdem online ein
-/// Cover gefunden wurde.
+/// Writes artist/title/album **and a cover** into an already saved
+/// recording (best effort). Called in the background after a cover has been
+/// found online.
 pub fn embed_cover(
     path: &Path,
     artist: Option<&str>,
@@ -462,8 +462,8 @@ pub fn embed_cover(
     }
 }
 
-/// Schreibt Interpret/Titel als Tag (best effort – schlägt es fehl, bleibt die
-/// Datei eben untagged, der Dateiname trägt die Info bereits).
+/// Writes artist/title as a tag (best effort – if it fails, the
+/// file just stays untagged; the file name already carries the info).
 fn tag_file(path: &Path, artist: Option<&str>, title: &str) {
     use lofty::config::WriteOptions;
     use lofty::prelude::{Accessor, TagExt};
