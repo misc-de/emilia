@@ -19,19 +19,19 @@ impl App {
         let raw = self
             .library
             .area_entries(crate::core::category::Area::Concerts, true, false);
-        self.concert_items = self.expand_area_items(raw);
-        let items = self.concert_items.clone();
+        self.concerts.concert_items = self.expand_area_items(raw);
+        let items = self.concerts.concert_items.clone();
         if self.gallery_view {
             let tiles = self.entry_gallery_items(&items);
             self.fill_gallery(
-                &self.concerts_gallery,
+                &self.concerts.concerts_gallery,
                 &tiles,
                 Msg::OpenConcertEntry,
                 Msg::ShowConcertDetail,
             );
         } else {
             self.fill_entry_list(
-                &self.concerts_list,
+                &self.concerts.concerts_list,
                 &items,
                 sender,
                 Msg::PlayConcert,

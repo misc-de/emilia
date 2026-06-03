@@ -210,6 +210,16 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Concerts page state, grouped off the `App` god-object.
+pub(crate) struct ConcertsState {
+    /// Concerts/audiobooks entries: (scope, key, title, is_dir) – like favorites.
+    pub(crate) concert_items: Vec<(String, String, String, bool)>,
+    pub(crate) concerts_list: gtk::ListBox,
+    /// Gallery variant of the concerts (cover grid).
+    pub(crate) concerts_gallery: gtk::FlowBox,
+    pub(crate) concert_hint_dismissed: bool,
+}
+
 /// Online-enrichment state, grouped off the `App` god-object.
 pub(crate) struct EnrichState {
     /// Is an enrichment run currently in progress? (prevents parallel runs; without
@@ -323,13 +333,8 @@ pub struct App {
     /// as soon as it ends (see `refresh_ctx_play`).
     pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
     pub(crate) toast_overlay: adw::ToastOverlay,
-    // Concerts
-    // Concerts/audiobooks: (scope, key, title, is_dir) – like favorites.
-    pub(crate) concert_items: Vec<(String, String, String, bool)>,
-    pub(crate) concerts_list: gtk::ListBox,
-    /// Gallery variant of the concerts (cover grid).
-    pub(crate) concerts_gallery: gtk::FlowBox,
-    pub(crate) concert_hint_dismissed: bool,
+    /// Concerts page state (live-recording collection).
+    pub(crate) concerts: ConcertsState,
     /// Galleries (artist or album) for which an on-demand fetch already ran
     /// in **this session** – key `"a\x01<name>"` or
     /// `"b\x01<artist>\x01<album>"`. Prevents that entries without a gallery
@@ -1107,7 +1112,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concert_items.is_empty() && !model.gallery_view,
+                                        set_visible: !model.concerts.concert_items.is_empty() && !model.gallery_view,
                                         #[local_ref]
                                         concerts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1122,7 +1127,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concert_items.is_empty() && model.gallery_view,
+                                        set_visible: !model.concerts.concert_items.is_empty() && model.gallery_view,
                                         #[local_ref]
                                         concerts_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1140,7 +1145,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Here you can list your collected concerts. Via Import concerts you get an overview of likely concerts: albums with live, unplugged or concert in the name, plus single files of 30 minutes or more. Mark them as a concert and they'll appear here. You can also add concerts later at any time via the options.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.concert_items.is_empty() && !model.concert_hint_dismissed,
+                                        set_visible: model.concerts.concert_items.is_empty() && !model.concerts.concert_hint_dismissed,
                                         #[wrap(Some)]
                                         set_child = &gtk::Box {
                                             set_orientation: gtk::Orientation::Vertical,
@@ -1173,7 +1178,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Mark an album or a track as a concert via the options.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.concert_items.is_empty() && model.concert_hint_dismissed,
+                                        set_visible: model.concerts.concert_items.is_empty() && model.concerts.concert_hint_dismissed,
                                     },
                                 },
                             add_titled_with_icon[Some("playlists"), &gettext("Playlists"), "view-list-symbolic"] =
@@ -2057,9 +2062,12 @@ impl Component for App {
             context_target: None,
             ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             toast_overlay: toast_overlay.clone(),
-            concert_items: Vec::new(),
-            concerts_list: concerts_list.clone(),
-            concerts_gallery: gtk::FlowBox::new(),
+            concerts: ConcertsState {
+                concert_items: Vec::new(),
+                concerts_list: concerts_list.clone(),
+                concerts_gallery: gtk::FlowBox::new(),
+                concert_hint_dismissed,
+            },
             favorite_items: Vec::new(),
             favorites_list: favorites_list.clone(),
             audiobook_items: Vec::new(),
@@ -2096,7 +2104,6 @@ impl Component for App {
             queue_list: queue_list.clone(),
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
-            concert_hint_dismissed,
             gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
             gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
             hidden_sections,
@@ -2207,7 +2214,7 @@ impl Component for App {
         let artists_box = model.artists.widget();
         let albums_gallery = model.albums_gallery.clone();
         let artists_gallery = model.artists_gallery.clone();
-        let concerts_gallery = model.concerts_gallery.clone();
+        let concerts_gallery = model.concerts.concerts_gallery.clone();
         let audiobooks_gallery = model.audiobooks_gallery.clone();
         let podcasts_gallery = model.podcasts_gallery.clone();
         let widgets = view_output!();
@@ -2666,7 +2673,7 @@ impl Component for App {
                 }
             }
             Msg::ShowConcertDetail(index) => {
-                if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
                     self.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
@@ -3823,7 +3830,7 @@ impl Component for App {
                 });
             }
             Msg::ConcertDismissHint => {
-                self.concert_hint_dismissed = true;
+                self.concerts.concert_hint_dismissed = true;
                 let _ = self.library.set_setting("concert_hint_dismissed", "1");
             }
             Msg::ConcertHideSection => {
@@ -3859,14 +3866,14 @@ impl Component for App {
                 ));
             }
             Msg::PlayConcert(index) => {
-                if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
                     self.play_entry(&scope, &key, is_dir);
                 }
             }
             Msg::OpenConcertEntry(index) => {
                 // Gallery tap: like the list tap – album/folder opens the
                 // track list, a single track is played.
-                if let Some((scope, key, _, is_dir)) = self.concert_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
                     if scope == "track" {
                         self.play_entry(&scope, &key, is_dir);
                     } else {
