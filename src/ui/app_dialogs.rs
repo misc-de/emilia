@@ -208,34 +208,40 @@ impl App {
             action_group.add(&dl_row);
         }
 
-        // Favorite star (mark/remove).
-        let is_fav = self.target_is_favorite(entry);
-        let fav_row = adw::ActionRow::builder()
-            .title(&if is_fav {
-                gettext("Remove from favorites")
-            } else {
-                gettext("Add to favorites")
-            })
-            .activatable(true)
-            .build();
-        fav_row.add_prefix(&gtk::Image::from_icon_name("emilia-favorite-symbolic"));
-        {
-            let sender = sender.clone();
-            let dialog = dialog.clone();
-            fav_row.connect_activated(move |_| {
-                sender.input(Msg::ToggleFavorite);
-                dialog.close();
-            });
+        // Favorite star (mark/remove) – only when Favorites is enabled as a nav
+        // section (otherwise the action would point at a hidden view).
+        if !self.nav.hidden_sections.contains("favorites") {
+            let is_fav = self.target_is_favorite(entry);
+            let fav_row = adw::ActionRow::builder()
+                .title(&if is_fav {
+                    gettext("Remove from favorites")
+                } else {
+                    gettext("Add to favorites")
+                })
+                .activatable(true)
+                .build();
+            fav_row.add_prefix(&gtk::Image::from_icon_name("emilia-favorite-symbolic"));
+            {
+                let sender = sender.clone();
+                let dialog = dialog.clone();
+                fav_row.connect_activated(move |_| {
+                    sender.input(Msg::ToggleFavorite);
+                    dialog.close();
+                });
+            }
+            action_group.add(&fav_row);
         }
-        action_group.add(&fav_row);
 
         // Remaining actions.
         let mut actions: Vec<(String, &str, fn() -> Msg)> = vec![
             (gettext("Add to queue"), "list-add-symbolic", || Msg::CtxAddQueue),
-            (gettext("Add to playlist"), "view-list-symbolic", || {
-                Msg::CtxAddPlaylist
-            }),
         ];
+        // "Add to playlist" only when Playlists is enabled as a nav section.
+        if !self.nav.hidden_sections.contains("playlists") {
+            actions.push((gettext("Add to playlist"), "view-list-symbolic", || {
+                Msg::CtxAddPlaylist
+            }));
+        }
         if show_eq {
             actions.push((gettext("Equalizer settings"), "preferences-other-symbolic", || {
                 Msg::CtxEqualizer

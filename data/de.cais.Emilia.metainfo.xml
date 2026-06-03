@@ -84,6 +84,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.1.7" date="2026-06-03">
+      <description>
+        <p>The player bar no longer overflows on narrow phone screens (the equalizer button moves to the track's context menu there). The "Add to favorites" and "Add to playlist" actions now only appear when those sections are enabled in the navigation.</p>
+        <p xml:lang="de">Die Player-Leiste läuft auf schmalen Handy-Bildschirmen nicht mehr über (der Equalizer-Knopf wandert dort ins Kontextmenü des Titels). Die Aktionen „Zu Favoriten hinzufügen" und „Zu Playlist hinzufügen" erscheinen nur noch, wenn die jeweiligen Bereiche in der Navigation aktiv sind.</p>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-06-03">
       <description>
         <p>Stream recordings now appear instantly with live song/artist info and cover art, keep the in-progress song when you stop, find metadata even when the station name is in the title, and have a detail page on long press. New playback speed control (0.25×–2×, pitch-preserving). The queue shows runtimes and groups whole albums into one entry; adding to the queue no longer starts playback automatically. Tracks that can't be played (offline Nextcloud, unmounted drive) are skipped automatically.</p>

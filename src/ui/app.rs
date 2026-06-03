@@ -1624,6 +1624,7 @@ impl Component for App {
                             set_start_widget = &gtk::Box {
                                 set_spacing: 6,
                                 set_valign: gtk::Align::Center,
+                                #[name = "eq_btn"]
                                 gtk::Button {
                                     set_label: "EQ",
                                     set_tooltip_text: Some(&gettext("Equalizer for this track")),
@@ -1761,7 +1762,7 @@ impl Component for App {
                             // queue) and the queue.
                             #[wrap(Some)]
                             set_end_widget = &gtk::Box {
-                                set_spacing: 18,
+                                set_spacing: 6,
                                 set_valign: gtk::Align::Center,
                                 // Repeat (loop): at the end of the queue or
                                 // of the single track, start over. Active = white, off = gray.
@@ -2445,6 +2446,9 @@ impl Component for App {
         breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
         // The desktop spacing between title bar and content is dropped in narrow mode.
         breakpoint.add_setter(&widgets.content_overlay, "margin-top", Some(&0i32.to_value()));
+        // The transport bar would otherwise overflow on narrow phones: hide the
+        // EQ button there (still reachable via the track's context menu).
+        breakpoint.add_setter(&widgets.eq_btn, "visible", Some(&false.to_value()));
         root.add_breakpoint(breakpoint);
 
         // Create the icon-only navigation (sidebar + top) in the **saved
