@@ -675,7 +675,7 @@ impl App {
             .subtitle(&gettext(
                 "Loads missing data in the background at startup – on any connection.",
             ))
-            .active(self.auto_enrich)
+            .active(self.enrich_state.auto_enrich)
             .build();
         {
             let sender = sender.clone();
@@ -694,7 +694,7 @@ impl App {
             ))
             .build();
         let key_row = adw::EntryRow::builder().title(&gettext("AcoustID API key")).build();
-        key_row.set_text(self.acoustid_key.as_deref().unwrap_or(""));
+        key_row.set_text(self.enrich_state.acoustid_key.as_deref().unwrap_or(""));
         key_row.set_show_apply_button(true);
         {
             let sender = sender.clone();
@@ -713,7 +713,7 @@ impl App {
         let fanart_row = adw::EntryRow::builder()
             .title(&gettext("fanart.tv API key"))
             .build();
-        fanart_row.set_text(self.fanart_key.as_deref().unwrap_or(""));
+        fanart_row.set_text(self.enrich_state.fanart_key.as_deref().unwrap_or(""));
         fanart_row.set_show_apply_button(true);
         {
             let sender = sender.clone();

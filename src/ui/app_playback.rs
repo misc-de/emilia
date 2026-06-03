@@ -592,7 +592,7 @@ impl App {
                     t.artist.as_deref().unwrap_or("").trim().is_empty()
                         || t.album.as_deref().unwrap_or("").trim().is_empty()
                 });
-                if needs_id && self.acoustid_key.as_deref().is_some_and(|k| !k.is_empty()) {
+                if needs_id && self.enrich_state.acoustid_key.as_deref().is_some_and(|k| !k.is_empty()) {
                     let _ = self.input.send(Msg::FingerprintCurrent(path.clone()));
                 }
             }

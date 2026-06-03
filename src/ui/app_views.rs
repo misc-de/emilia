@@ -478,12 +478,12 @@ impl App {
             }
             return;
         };
-        if self.enriching {
+        if self.enrich_state.enriching {
             return;
         }
-        self.enrich_cancel.store(false, Ordering::Relaxed);
-        let cancel = self.enrich_cancel.clone();
-        self.enriching = true;
+        self.enrich_state.enrich_cancel.store(false, Ordering::Relaxed);
+        let cancel = self.enrich_state.enrich_cancel.clone();
+        self.enrich_state.enriching = true;
         sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
     }
 

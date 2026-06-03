@@ -210,6 +210,20 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Online-enrichment state, grouped off the `App` god-object.
+pub(crate) struct EnrichState {
+    /// Is an enrichment run currently in progress? (prevents parallel runs; without
+    /// a visible progress indicator – the fetch runs silently in the background).
+    pub(crate) enriching: bool,
+    /// Automatically fetch covers & metadata online at startup (only on a
+    /// non-metered connection; can be disabled in the settings).
+    pub(crate) auto_enrich: bool,
+    /// Cancel flag for the enrichment worker.
+    pub(crate) enrich_cancel: Arc<AtomicBool>,
+    pub(crate) acoustid_key: Option<String>,
+    pub(crate) fanart_key: Option<String>,
+}
+
 /// App-wide preferences, grouped off the `App` god-object.
 pub(crate) struct Settings {
     /// Display language: "system" (system locale), "de" or "en". Can be
@@ -241,16 +255,8 @@ pub struct App {
     /// Artist overview (same order) – index resolution for the gallery.
     pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
     pub(crate) artist_count: usize,
-    /// Is an enrichment run currently in progress? (prevents parallel runs; without
-    /// a visible progress indicator – the fetch runs silently in the background).
-    pub(crate) enriching: bool,
-    /// Automatically fetch covers & metadata online at startup (only on a
-    /// non-metered connection; can be disabled in the settings).
-    pub(crate) auto_enrich: bool,
-    /// Cancel flag for the enrichment worker.
-    pub(crate) enrich_cancel: Arc<AtomicBool>,
-    pub(crate) acoustid_key: Option<String>,
-    pub(crate) fanart_key: Option<String>,
+    /// Online-enrichment state (covers/artist photos/fingerprint fetching).
+    pub(crate) enrich_state: EnrichState,
     /// App-wide preferences (display language, active audio output).
     pub(crate) settings: Settings,
     /// Show lists as a **gallery** (cover grid) instead of as a list.
@@ -2009,11 +2015,13 @@ impl Component for App {
             album_count: 0,
             artists,
             artist_count: 0,
-            enriching: false,
-            auto_enrich,
-            enrich_cancel: Arc::new(AtomicBool::new(false)),
-            acoustid_key,
-            fanart_key,
+            enrich_state: EnrichState {
+                enriching: false,
+                auto_enrich,
+                enrich_cancel: Arc::new(AtomicBool::new(false)),
+                acoustid_key,
+                fanart_key,
+            },
             settings: Settings {
                 ui_language,
                 active_output,
@@ -3324,8 +3332,8 @@ impl Component for App {
                 // folder is set, no run is currently active and there is network.
                 // If a (full) fetch is already running, the `enriching` lock takes effect and
                 // this tick fizzles out – no pileup.
-                if self.auto_enrich
-                    && !self.enriching
+                if self.enrich_state.auto_enrich
+                    && !self.enrich_state.enriching
                     && self.music_dir.is_some()
                     && online_available()
                 {
@@ -3701,7 +3709,7 @@ impl Component for App {
             Msg::SetAcoustidKey(key) => {
                 let key = key.trim().to_string();
                 let _ = self.library.set_setting("acoustid_key", &key);
-                self.acoustid_key = if key.is_empty() { None } else { Some(key) };
+                self.enrich_state.acoustid_key = if key.is_empty() { None } else { Some(key) };
             }
             Msg::SetAlbumCover { artist, album, path } => {
                 let mut meta = self
@@ -3734,10 +3742,10 @@ impl Component for App {
             Msg::SetFanartKey(key) => {
                 let key = key.trim().to_string();
                 let _ = self.library.set_setting("fanart_key", &key);
-                self.fanart_key = if key.is_empty() { None } else { Some(key) };
+                self.enrich_state.fanart_key = if key.is_empty() { None } else { Some(key) };
             }
             Msg::SetAutoEnrich(on) => {
-                self.auto_enrich = on;
+                self.enrich_state.auto_enrich = on;
                 let _ = self
                     .library
                     .set_setting("auto_enrich", if on { "1" } else { "0" });
@@ -4159,7 +4167,7 @@ impl Component for App {
             },
             Cmd::WebdavTested(result) => self.on_webdav_tested(result),
             Cmd::EnrichDone { changed } => {
-                self.enriching = false;
+                self.enrich_state.enriching = false;
                 // Only rebuild if the run changed something – the quiet
                 // per-minute backfill otherwise runs empty and would re-render the
                 // lists for no reason.
@@ -4181,8 +4189,8 @@ impl Component for App {
                 // connection at all (on any connection, even metered). The
                 // local scan already ran, so here without re-reading.
                 if then_enrich
-                    && self.auto_enrich
-                    && !self.enriching
+                    && self.enrich_state.auto_enrich
+                    && !self.enrich_state.enriching
                     && self.music_dir.is_some()
                     && online_available()
                 {
@@ -4237,7 +4245,7 @@ impl Component for App {
                 // (if desired) fetch covers/photos online.
                 self.reload_albums();
                 self.reload_artists();
-                if self.auto_enrich && !self.enriching && online_available() {
+                if self.enrich_state.auto_enrich && !self.enrich_state.enriching && online_available() {
                     self.run_enrich(&sender, false, false);
                 }
             }
@@ -4724,7 +4732,7 @@ impl App {
             !matched && self.library.artist_attempts(&name) < crate::ui::enrich::MAX_ATTEMPTS;
         // (b) Gallery (fanart.tv): only with a key, if none is present yet and not yet
         // attempted in this session (galleries have no attempt limit).
-        let fkey = self.fanart_key.clone().filter(|k| !k.is_empty());
+        let fkey = self.enrich_state.fanart_key.clone().filter(|k| !k.is_empty());
         let need_gallery = fkey.is_some()
             && self
                 .library
@@ -4812,7 +4820,7 @@ impl App {
         if !online_available() {
             return;
         }
-        let Some(key) = self.acoustid_key.clone().filter(|k| !k.is_empty()) else {
+        let Some(key) = self.enrich_state.acoustid_key.clone().filter(|k| !k.is_empty()) else {
             return;
         };
         if !crate::core::online::fingerprint_available() {
