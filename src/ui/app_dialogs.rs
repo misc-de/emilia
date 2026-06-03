@@ -20,6 +20,16 @@ impl App {
             return;
         };
 
+        // Fetch the cover/photo of an artist/album target on demand, so it also
+        // loads when the detail was opened from Favorites/Audiobooks/Concerts –
+        // not just from the Artists/Albums overviews (which already do this).
+        // Like there, the image appears on the next open (background fetch).
+        match entry {
+            CtxTarget::Artist(m) => self.fetch_focus_artist(sender, &m.name),
+            CtxTarget::Album(m) => self.fetch_focus_album(sender, &m.artist, &m.album),
+            CtxTarget::Fs(_) => {}
+        }
+
         let dialog = adw::Dialog::builder().title(entry.heading()).build();
         // On the phone use the full width (bottom sheet) instead of floating.
         self.adapt_detail_dialog(&dialog);
