@@ -502,8 +502,8 @@ pub struct App {
     /// Whether a device is currently paired – controls the green sync icon at the
     /// top. Kept here (parent chrome); set via the component's `ConnectedChanged`.
     pub(crate) sync_connected: bool,
-    /// Widget state of the Nextcloud setup dialog.
-    pub(crate) cloud: crate::ui::app_cloud::CloudState,
+    /// Nextcloud setup dialog, extracted into its own relm4 component.
+    pub(crate) cloud_page: relm4::Controller<crate::ui::cloud_page::CloudPage>,
 }
 
 #[derive(Debug)]
@@ -614,16 +614,8 @@ pub enum Msg {
     CheckSources,
     /// Open the Nextcloud setup dialog (QR scan or manual).
     AddCloudSource,
-    /// Manual input expanded/collapsed: show/hide the camera accordingly.
-    CloudManualToggle(bool),
-    /// The Nextcloud dialog was closed (stop camera).
-    CloudClosed,
-    /// A QR code was decoded in the Nextcloud dialog.
-    CloudQrDecoded(String),
-    /// Connection test of the entered Nextcloud data.
-    CloudTest,
-    /// Save the entered Nextcloud source.
-    CloudSave,
+    /// The CloudPage component finished indexing a newly added source.
+    CloudIndexed,
     /// Download a remote file offline (rel path in the active source).
     CtxDownloadRemote(String),
     SetAcoustidKey(String),
@@ -817,8 +809,6 @@ pub enum Cmd {
     RemoteTags(Vec<(String, Option<String>, Option<String>, Option<i64>)>),
     /// A remote file was downloaded: (rel path, local copy) or error.
     RemoteDownloaded(Result<(String, PathBuf), String>),
-    /// Result of the Nextcloud connection test.
-    WebdavTested(Result<(), String>),
     /// Online enrichment finished; `changed` = something new was added
     /// (controls during the quiet backfill whether the views are reloaded).
     EnrichDone { changed: bool },
@@ -842,8 +832,6 @@ pub enum Cmd {
     StreamSearchCoversReady,
     /// Rebuild the station list (e.g. after logos were cached).
     ReloadStreams,
-    /// A Nextcloud source was indexed → reload albums/artists.
-    RemoteIndexed,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
     /// Result of the update check (determined in the background).
@@ -2021,6 +2009,12 @@ impl Component for App {
                 crate::ui::sync_page::SyncOutput::ConnectedChanged(b) => Msg::SyncConnected(b),
                 crate::ui::sync_page::SyncOutput::Imported => Msg::SyncImported,
             });
+        let cloud_page = crate::ui::cloud_page::CloudPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |out| match out {
+                crate::ui::cloud_page::CloudOutput::SourcesChanged => Msg::SourcesChanged,
+                crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
+            });
 
         let mut model = App {
             library,
@@ -2162,7 +2156,7 @@ impl Component for App {
             },
             sync_page,
             sync_connected: false,
-            cloud: crate::ui::app_cloud::CloudState::default(),
+            cloud_page,
         };
 
         // Restore the queue from last time (only still existing
@@ -3721,26 +3715,22 @@ impl Component for App {
                     });
                 }
             }
-            Msg::AddCloudSource => self.open_cloud_dialog(root, &sender),
-            Msg::CloudManualToggle(expanded) => {
-                if expanded {
-                    // Manual expanded → pause the camera and hide it.
-                    self.cloud.scanner = None;
-                    if let Some(cam) = &self.cloud.cam {
-                        cam.set_visible(false);
-                    }
-                } else {
-                    // Collapsed again → restart the camera.
-                    self.start_cloud_scan(&sender);
+            Msg::AddCloudSource => {
+                use crate::ui::cloud_page::CloudInput;
+                self.cloud_page.emit(CloudInput::Open {
+                    window: root.clone(),
+                    mobile: self.is_mobile(),
+                });
+            }
+            Msg::CloudIndexed => {
+                // Cloud tracks are in the DB → rebuild albums/artists and
+                // (if desired) fetch covers/photos online.
+                self.reload_albums();
+                self.reload_artists();
+                if self.enrich_state.auto_enrich && !self.enrich_state.enriching && online_available() {
+                    self.run_enrich(&sender, false, false);
                 }
             }
-            Msg::CloudClosed => {
-                self.cloud.scanner = None;
-                self.cloud.dialog = None;
-            }
-            Msg::CloudQrDecoded(code) => self.handle_cloud_qr(&code),
-            Msg::CloudTest => self.test_cloud(&sender),
-            Msg::CloudSave => self.save_cloud(&sender),
             Msg::CtxDownloadRemote(rel) => {
                 let Some(creds) = self.active_webdav_creds() else {
                     return;
@@ -4218,7 +4208,6 @@ impl Component for App {
                     self.toast(&gettext("Download failed"));
                 }
             },
-            Cmd::WebdavTested(result) => self.on_webdav_tested(result),
             Cmd::EnrichDone { changed } => {
                 self.enrich_state.enriching = false;
                 // Only rebuild if the run changed something – the quiet
@@ -4291,15 +4280,6 @@ impl Component for App {
                 if changed {
                     self.reload_albums();
                     self.reload_artists();
-                }
-            }
-            Cmd::RemoteIndexed => {
-                // Cloud tracks are in the DB → rebuild albums/artists and
-                // (if desired) fetch covers/photos online.
-                self.reload_albums();
-                self.reload_artists();
-                if self.enrich_state.auto_enrich && !self.enrich_state.enriching && online_available() {
-                    self.run_enrich(&sender, false, false);
                 }
             }
             Cmd::UpdateChecked(result) => match result {
