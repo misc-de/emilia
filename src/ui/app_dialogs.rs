@@ -412,7 +412,7 @@ impl App {
             .build();
 
         let not_set = gettext("Not set");
-        let current = self.music_dir.as_deref().unwrap_or(&not_set);
+        let current = self.files.music_dir.as_deref().unwrap_or(&not_set);
         // First entry shows only the path (no "Music folder" label).
         let row = adw::ActionRow::builder()
             .title(gtk::glib::markup_escape_text(current))

@@ -19,8 +19,8 @@ impl App {
         // Currently playing track (for the play marker).
         let active_path = self.queue.get(self.queue_pos).cloned();
         // Remote playback: the active entry is marked via the rel path.
-        let active_rel = if self.playing_remote {
-            self.remote_queue.get(self.remote_pos).map(|t| t.rel_path.clone())
+        let active_rel = if self.files.playing_remote {
+            self.files.remote_queue.get(self.files.remote_pos).map(|t| t.rel_path.clone())
         } else {
             None
         };
@@ -62,10 +62,10 @@ impl App {
 
     /// Credentials of the currently active WebDAV source (if one is active).
     pub(crate) fn active_webdav_creds(&self) -> Option<Creds> {
-        let ActiveSource::Source(id) = self.active_source else {
+        let ActiveSource::Source(id) = self.files.active_source else {
             return None;
         };
-        let s = self.sources.iter().find(|s| s.id == id)?;
+        let s = self.files.sources.iter().find(|s| s.id == id)?;
         if s.kind != "webdav" {
             return None;
         }
@@ -74,7 +74,7 @@ impl App {
 
     /// Local cache path of a remote file of the active source (or `None`).
     pub(crate) fn remote_cache_path(&self, rel: &str) -> Option<PathBuf> {
-        let ActiveSource::Source(id) = self.active_source else {
+        let ActiveSource::Source(id) = self.files.active_source else {
             return None;
         };
         Some(webdav::cache_path(id, rel))
@@ -84,10 +84,11 @@ impl App {
     /// toggles pause/resume; otherwise the folder row is set as the remote queue
     /// and played from the chosen track.
     pub(crate) fn activate_remote(&mut self, rel: &str) {
-        let is_active = self.playing_remote
+        let is_active = self.files.playing_remote
             && self
+                .files
                 .remote_queue
-                .get(self.remote_pos)
+                .get(self.files.remote_pos)
                 .is_some_and(|t| t.rel_path == rel);
         if is_active {
             if self.playing {
@@ -123,8 +124,8 @@ impl App {
         if queue.is_empty() {
             return;
         }
-        self.remote_queue = queue;
-        self.remote_pos = start;
+        self.files.remote_queue = queue;
+        self.files.remote_pos = start;
         self.play_remote_current();
     }
 
@@ -135,7 +136,7 @@ impl App {
         let Some(creds) = self.active_webdav_creds() else {
             return;
         };
-        let Some(track) = self.remote_queue.get(self.remote_pos).cloned() else {
+        let Some(track) = self.files.remote_queue.get(self.files.remote_pos).cloned() else {
             return;
         };
         self.save_resume();
@@ -153,7 +154,7 @@ impl App {
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
-                self.playing_remote = true;
+                self.files.playing_remote = true;
                 self.stop_recorder();
                 self.queue.clear();
                 self.queue_pos = 0;
@@ -174,11 +175,11 @@ impl App {
 
     /// Next track of the remote row (for the next button and EOS advancing).
     pub(crate) fn remote_next(&mut self) {
-        if self.remote_pos + 1 < self.remote_queue.len() {
-            self.remote_pos += 1;
+        if self.files.remote_pos + 1 < self.files.remote_queue.len() {
+            self.files.remote_pos += 1;
             self.play_remote_current();
-        } else if self.repeat && !self.remote_queue.is_empty() {
-            self.remote_pos = 0;
+        } else if self.repeat && !self.files.remote_queue.is_empty() {
+            self.files.remote_pos = 0;
             self.play_remote_current();
         } else {
             // End of the row – stop playback (like at the end of an episode).
@@ -191,8 +192,8 @@ impl App {
 
     /// Previous track of the remote row.
     pub(crate) fn remote_prev(&mut self) {
-        if self.remote_pos > 0 {
-            self.remote_pos -= 1;
+        if self.files.remote_pos > 0 {
+            self.files.remote_pos -= 1;
             self.play_remote_current();
         }
     }
@@ -351,6 +352,7 @@ impl App {
                 return self.player.play_file(&cache.to_string_lossy(), resume_ms);
             }
             if let Some(creds) = self
+                .files
                 .sources
                 .iter()
                 .find(|s| s.id == sid)
@@ -541,7 +543,7 @@ impl App {
                 // remote file active anymore.
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
-                self.playing_remote = false;
+                self.files.playing_remote = false;
                 self.stop_recorder();
                 self.now_playing = Some(self.display_name(&path));
                 self.playing = true;

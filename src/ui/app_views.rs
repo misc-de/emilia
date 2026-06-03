@@ -205,12 +205,12 @@ impl App {
             return;
         }
         // Remember the scroll position of the currently shown folder before it is replaced.
-        if let (Some(dir), Some(sc)) = (self.shown_dir.clone(), self.fs_scroller()) {
-            self.fs_scroll
+        if let (Some(dir), Some(sc)) = (self.files.shown_dir.clone(), self.fs_scroller()) {
+            self.files.fs_scroll
                 .borrow_mut()
                 .insert(dir, sc.vadjustment().value());
         }
-        match self.browse_dir.clone() {
+        match self.files.browse_dir.clone() {
             Some(dir) => {
                 // Remember the current folder (for "continue where you left off").
                 let _ = self.library.set_setting("browse_dir", &dir.to_string_lossy());
@@ -228,15 +228,15 @@ impl App {
     /// directory plus one per additional source. The buttons are connected as a
     /// radio group; a click sends [`Msg::SelectSource`].
     pub(crate) fn rebuild_source_tabs(&mut self) {
-        while let Some(c) = self.source_tabs.first_child() {
-            self.source_tabs.remove(&c);
+        while let Some(c) = self.files.source_tabs.first_child() {
+            self.files.source_tabs.remove(&c);
         }
-        self.source_tab_buttons.clear();
-        if self.sources.is_empty() {
+        self.files.source_tab_buttons.clear();
+        if self.files.sources.is_empty() {
             return;
         }
         let mut tabs: Vec<(ActiveSource, String)> = vec![(ActiveSource::Primary, gettext("Music"))];
-        for s in &self.sources {
+        for s in &self.files.sources {
             tabs.push((ActiveSource::Source(s.id), s.name.clone()));
         }
         let mut group: Option<gtk::ToggleButton> = None;
@@ -248,7 +248,7 @@ impl App {
             }
             // Set the active state BEFORE the handler is connected – otherwise
             // the preselection already triggers a (superfluous) switch.
-            btn.set_active(sel == self.active_source);
+            btn.set_active(sel == self.files.active_source);
             let input = self.input.clone();
             let sel_cb = sel.clone();
             btn.connect_toggled(move |b| {
@@ -256,41 +256,41 @@ impl App {
                     let _ = input.send(Msg::SelectSource(sel_cb.clone()));
                 }
             });
-            self.source_tabs.append(&btn);
-            self.source_tab_buttons.push((sel, btn));
+            self.files.source_tabs.append(&btn);
+            self.files.source_tab_buttons.push((sel, btn));
         }
     }
 
     /// Switches the active source, re-roots the file view accordingly and
     /// reloads the folder. Also mirrors the active state of the tabs.
     pub(crate) fn apply_source(&mut self, sel: ActiveSource, sender: &ComponentSender<Self>) {
-        self.active_source = sel.clone();
+        self.files.active_source = sel.clone();
         match &sel {
             ActiveSource::Primary => {
-                self.root_dir = self.music_dir.as_ref().map(PathBuf::from);
-                self.browse_dir = self.root_dir.clone();
+                self.files.root_dir = self.files.music_dir.as_ref().map(PathBuf::from);
+                self.files.browse_dir = self.files.root_dir.clone();
             }
             ActiveSource::Source(id) => {
-                if let Some(s) = self.sources.iter().find(|s| s.id == *id) {
+                if let Some(s) = self.files.sources.iter().find(|s| s.id == *id) {
                     match s.kind.as_str() {
                         "local" => {
                             let p = s.path.clone().map(PathBuf::from);
-                            self.root_dir = p.clone();
-                            self.browse_dir = p;
-                            self.remote_browse = None;
+                            self.files.root_dir = p.clone();
+                            self.files.browse_dir = p;
+                            self.files.remote_browse = None;
                         }
                         // WebDAV: local paths empty, remote browser at the root.
                         _ => {
-                            self.root_dir = None;
-                            self.browse_dir = None;
-                            self.remote_browse = Some(String::new());
+                            self.files.root_dir = None;
+                            self.files.browse_dir = None;
+                            self.files.remote_browse = Some(String::new());
                         }
                     }
                 }
             }
         }
-        if !matches!(self.active_source, ActiveSource::Source(_)) {
-            self.remote_browse = None;
+        if !matches!(self.files.active_source, ActiveSource::Source(_)) {
+            self.files.remote_browse = None;
         }
         self.sync_source_tabs();
         self.load_dir(sender);
@@ -298,10 +298,10 @@ impl App {
 
     /// The active source as a WebDAV source (if it is one).
     pub(crate) fn active_remote_source(&self) -> Option<crate::model::Source> {
-        let ActiveSource::Source(id) = self.active_source else {
+        let ActiveSource::Source(id) = self.files.active_source else {
             return None;
         };
-        self.sources
+        self.files.sources
             .iter()
             .find(|s| s.id == id && s.kind == "webdav")
             .cloned()
@@ -309,7 +309,7 @@ impl App {
 
     /// Loads a folder of the active remote source (PROPFIND in the background).
     fn load_remote_dir(&mut self, sender: &ComponentSender<Self>, source: crate::model::Source) {
-        let rel = self.remote_browse.clone().unwrap_or_default();
+        let rel = self.files.remote_browse.clone().unwrap_or_default();
         let Some(creds) = crate::core::webdav::Creds::from_source(&source) else {
             self.entries.guard().clear();
             self.loading = false;
@@ -317,7 +317,7 @@ impl App {
             return;
         };
         self.loading = true;
-        let active = self.active_source.clone();
+        let active = self.files.active_source.clone();
         sender.spawn_oneshot_command(move || {
             let res = crate::core::webdav::list(&creds, &rel).map_err(|e| e.to_string());
             Cmd::RemoteEntries(res, active, rel)
@@ -367,8 +367,8 @@ impl App {
 
     /// Mirrors the active state of the tab buttons onto `active_source`.
     pub(crate) fn sync_source_tabs(&self) {
-        for (sel, btn) in &self.source_tab_buttons {
-            let want = *sel == self.active_source;
+        for (sel, btn) in &self.files.source_tab_buttons {
+            let want = *sel == self.files.active_source;
             if btn.is_active() != want {
                 btn.set_active(want);
             }
@@ -440,7 +440,7 @@ impl App {
         // Deliberately the **primary** music directory (not `root_dir`, which
         // switches when changing to an additional source) – library/scan stay on
         // the main folder.
-        let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
+        let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
             return;
         };
         sender.spawn_oneshot_command(move || {
@@ -472,7 +472,7 @@ impl App {
     ) {
         // Enrichment refers to the primary library (`music_dir`),
         // regardless of which source is currently active in the file view.
-        let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
+        let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
             if !light {
                 self.toast(&gettext("No music folder set – please choose one in the settings"));
             }

@@ -210,6 +210,32 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// File browser + extra music sources (2nd local folder / Nextcloud) state.
+pub(crate) struct FilesState {
+    pub(crate) music_dir: Option<String>,
+    pub(crate) root_dir: Option<PathBuf>,
+    pub(crate) browse_dir: Option<PathBuf>,
+    /// Folder currently shown in the file browser (remembers scroll position).
+    pub(crate) shown_dir: Option<PathBuf>,
+    /// Remembered scroll positions per folder in the file browser.
+    pub(crate) fs_scroll: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<PathBuf, f64>>>,
+    /// Extra music sources (2nd local folder / Nextcloud), from the `source` table.
+    pub(crate) sources: Vec<Source>,
+    /// Source active in the file view (primary = `music_dir`).
+    pub(crate) active_source: ActiveSource,
+    /// Tab bar above the file list (linked ToggleButtons).
+    pub(crate) source_tabs: gtk::Box,
+    /// Tab buttons per source (incl. primary), for mirroring the active state.
+    pub(crate) source_tab_buttons: Vec<(ActiveSource, gtk::ToggleButton)>,
+    /// Current subpath in the remote source (leading slash; `""` = root).
+    pub(crate) remote_browse: Option<String>,
+    /// Remote (cloud) playback queue of the most recently opened folder.
+    pub(crate) remote_queue: Vec<RemoteTrack>,
+    pub(crate) remote_pos: usize,
+    /// Is a remote file currently playing (instead of local queue/episode/station)?
+    pub(crate) playing_remote: bool,
+}
+
 /// Streaming (internet radio) + timeshift-recording page state.
 pub(crate) struct StreamingState {
     /// Which streaming view is visible: channels or recordings.
@@ -356,14 +382,8 @@ pub struct App {
     pub(crate) gallery_view: bool,
     /// Number of tiles per row in the gallery view (2–8).
     pub(crate) gallery_columns: u32,
-    pub(crate) music_dir: Option<String>,
-    pub(crate) root_dir: Option<PathBuf>,
-    pub(crate) browse_dir: Option<PathBuf>,
-    /// Folder currently shown in the file browser (for remembering the scroll position).
-    pub(crate) shown_dir: Option<PathBuf>,
-    /// Remembered scroll positions per folder in the file browser, so that when
-    /// navigating back you land at the same height again.
-    pub(crate) fs_scroll: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<PathBuf, f64>>>,
+    /// File browser + extra music sources (2nd local folder / Nextcloud) state.
+    pub(crate) files: FilesState,
     pub(crate) loading: bool,
     pub(crate) queue: Vec<PathBuf>,
     pub(crate) queue_pos: usize,
@@ -484,24 +504,6 @@ pub struct App {
     pub(crate) sync_connected: bool,
     /// Widget state of the Nextcloud setup dialog.
     pub(crate) cloud: crate::ui::app_cloud::CloudState,
-    // Additional music sources (local secondary folder / Nextcloud) as tabs.
-    /// Loaded from the `source` table (without the primary `music_dir`).
-    pub(crate) sources: Vec<Source>,
-    /// Source active in the file view (primary = `music_dir`).
-    pub(crate) active_source: ActiveSource,
-    /// Tab bar above the file list (linked ToggleButtons), only visible
-    /// if at least one additional source exists.
-    pub(crate) source_tabs: gtk::Box,
-    /// Tab buttons per source (incl. primary) – for mirroring the active state.
-    pub(crate) source_tab_buttons: Vec<(ActiveSource, gtk::ToggleButton)>,
-    /// Current subpath in the remote source (relative to the music root,
-    /// leading slash; `""` = root). Only set when a WebDAV source is active.
-    pub(crate) remote_browse: Option<String>,
-    /// Remote (cloud) playback queue of the most recently opened folder.
-    pub(crate) remote_queue: Vec<RemoteTrack>,
-    pub(crate) remote_pos: usize,
-    /// Is a remote file currently playing (instead of the local queue/episode/station)?
-    pub(crate) playing_remote: bool,
 }
 
 #[derive(Debug)]
@@ -995,7 +997,7 @@ impl Component for App {
                                             // A bit of space below the source tab menu.
                                             set_margin_bottom: 10,
                                             #[watch]
-                                            set_visible: !model.sources.is_empty(),
+                                            set_visible: !model.files.sources.is_empty(),
                                         },
 
                                         // Path/back bar – only in subfolders
@@ -2053,11 +2055,21 @@ impl Component for App {
             },
             gallery_view,
             gallery_columns,
-            music_dir,
-            root_dir,
-            browse_dir,
-            shown_dir: None,
-            fs_scroll: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
+            files: FilesState {
+                music_dir,
+                root_dir,
+                browse_dir,
+                shown_dir: None,
+                fs_scroll: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
+                sources,
+                active_source: ActiveSource::Primary,
+                source_tabs: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+                source_tab_buttons: Vec::new(),
+                remote_browse: None,
+                remote_queue: Vec::new(),
+                remote_pos: 0,
+                playing_remote: false,
+            },
             loading: false,
             queue: Vec::new(),
             queue_pos: 0,
@@ -2150,14 +2162,6 @@ impl Component for App {
             sync: crate::ui::app_sync::SyncState::default(),
             sync_connected: false,
             cloud: crate::ui::app_cloud::CloudState::default(),
-            sources,
-            active_source: ActiveSource::Primary,
-            source_tabs: gtk::Box::new(gtk::Orientation::Horizontal, 0),
-            source_tab_buttons: Vec::new(),
-            remote_browse: None,
-            remote_queue: Vec::new(),
-            remote_pos: 0,
-            playing_remote: false,
         };
 
         // Restore the queue from last time (only still existing
@@ -2251,7 +2255,7 @@ impl Component for App {
         model.split = widgets.split.clone();
         model.seek_scale = widgets.seek_scale.clone();
         model.chapter_label = widgets.chapter_label.clone();
-        model.source_tabs = widgets.source_tabs.clone();
+        model.files.source_tabs = widgets.source_tabs.clone();
         model.rebuild_source_tabs();
 
         // Hover over the seek bar → temporarily show the hovered chapter below the
@@ -2555,7 +2559,7 @@ impl Component for App {
                 };
                 // Remote entries (Nextcloud) go through their own path.
                 if let crate::ui::fs_row::FsEntry::RemoteDir { rel_path, .. } = &entry {
-                    self.remote_browse = Some(rel_path.clone());
+                    self.files.remote_browse = Some(rel_path.clone());
                     self.load_dir(&sender);
                     return;
                 }
@@ -2569,7 +2573,7 @@ impl Component for App {
                         let Some(p) = entry.path().cloned() else {
                             return;
                         };
-                        self.browse_dir = Some(p);
+                        self.files.browse_dir = Some(p);
                         self.load_dir(&sender);
                     } else {
                         let Some(path) = entry.path().cloned() else {
@@ -3266,7 +3270,7 @@ impl Component for App {
             Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
             Msg::SyncDialogClosed => self.teardown_sync(),
             Msg::TrackFinished => {
-                if self.playing_remote {
+                if self.files.playing_remote {
                     // Remote queue: advance to the next track (or stop at the
                     // end). Runs separately from the local queue.
                     self.remote_next();
@@ -3372,7 +3376,7 @@ impl Component for App {
                 // this tick fizzles out – no pileup.
                 if self.enrich_state.auto_enrich
                     && !self.enrich_state.enriching
-                    && self.music_dir.is_some()
+                    && self.files.music_dir.is_some()
                     && online_available()
                 {
                     self.run_enrich(&sender, false, true);
@@ -3420,14 +3424,14 @@ impl Component for App {
                         }
                     }
                     M::Next => {
-                        if self.playing_remote {
+                        if self.files.playing_remote {
                             self.remote_next();
                         } else {
                             self.play_next();
                         }
                     }
                     M::Prev => {
-                        if self.playing_remote {
+                        if self.files.playing_remote {
                             self.remote_prev();
                         } else {
                             self.play_prev();
@@ -3462,14 +3466,14 @@ impl Component for App {
                 }
             }
             Msg::Next => {
-                if self.playing_remote {
+                if self.files.playing_remote {
                     self.remote_next();
                 } else {
                     self.play_next();
                 }
             }
             Msg::Prev => {
-                if self.playing_remote {
+                if self.files.playing_remote {
                     self.remote_prev();
                 } else {
                     self.play_prev();
@@ -3491,36 +3495,36 @@ impl Component for App {
             }
             Msg::NavUp => {
                 // Remote source: one rel segment up.
-                if let Some(rel) = self.remote_browse.clone() {
+                if let Some(rel) = self.files.remote_browse.clone() {
                     if !rel.is_empty() {
                         let parent = match rel.rfind('/') {
                             Some(0) | None => String::new(),
                             Some(i) => rel[..i].to_string(),
                         };
-                        self.remote_browse = Some(parent);
+                        self.files.remote_browse = Some(parent);
                         self.load_dir(&sender);
                     }
                     return;
                 }
                 if self.can_go_up() {
-                    if let Some(parent) = self.browse_dir.as_ref().and_then(|d| d.parent()) {
-                        self.browse_dir = Some(parent.to_path_buf());
+                    if let Some(parent) = self.files.browse_dir.as_ref().and_then(|d| d.parent()) {
+                        self.files.browse_dir = Some(parent.to_path_buf());
                         self.load_dir(&sender);
                     }
                 }
             }
             Msg::FilesGoStart => {
                 // Remote source: back to the music root of the source.
-                if self.remote_browse.is_some() {
-                    if self.remote_browse.as_deref() != Some("") {
-                        self.remote_browse = Some(String::new());
+                if self.files.remote_browse.is_some() {
+                    if self.files.remote_browse.as_deref() != Some("") {
+                        self.files.remote_browse = Some(String::new());
                         self.load_dir(&sender);
                     }
                     return;
                 }
-                if let Some(root) = self.root_dir.clone() {
-                    if self.browse_dir.as_ref() != Some(&root) {
-                        self.browse_dir = Some(root);
+                if let Some(root) = self.files.root_dir.clone() {
+                    if self.files.browse_dir.as_ref() != Some(&root) {
+                        self.files.browse_dir = Some(root);
                         self.load_dir(&sender);
                     }
                 }
@@ -3646,28 +3650,28 @@ impl Component for App {
                 if let Err(e) = self.library.set_setting("music_dir", &dir) {
                     tracing::error!("Failed to save music folder: {e}");
                 }
-                self.music_dir = Some(dir);
+                self.files.music_dir = Some(dir);
                 // Only re-root the file view if the primary tab is currently active
                 // – on an additional source the user would otherwise be left stranded.
-                if self.active_source == ActiveSource::Primary {
-                    self.root_dir = Some(path.clone());
-                    self.browse_dir = Some(path);
+                if self.files.active_source == ActiveSource::Primary {
+                    self.files.root_dir = Some(path.clone());
+                    self.files.browse_dir = Some(path);
                     self.load_dir(&sender);
                 }
                 // Read the new folder and (Wi-Fi + switch) fetch automatically.
                 self.start_scan(&sender, true);
             }
             Msg::SelectSource(sel) => {
-                if self.active_source != sel {
+                if self.files.active_source != sel {
                     self.apply_source(sel, &sender);
                 }
             }
             Msg::SourcesChanged => {
-                self.sources = self.library.list_sources().unwrap_or_default();
+                self.files.sources = self.library.list_sources().unwrap_or_default();
                 // If the active source was removed, back to the primary tab.
-                let gone = match &self.active_source {
+                let gone = match &self.files.active_source {
                     ActiveSource::Primary => false,
-                    ActiveSource::Source(id) => !self.sources.iter().any(|s| s.id == *id),
+                    ActiveSource::Source(id) => !self.files.sources.iter().any(|s| s.id == *id),
                 };
                 if gone {
                     self.apply_source(ActiveSource::Primary, &sender);
@@ -3689,6 +3693,7 @@ impl Component for App {
             }
             Msg::CheckSources => {
                 let webdavs: Vec<crate::model::Source> = self
+                    .files
                     .sources
                     .iter()
                     .filter(|s| s.kind == "webdav")
@@ -3850,7 +3855,7 @@ impl Component for App {
             }
             Msg::ConcertImport => {
                 // Concert import refers to the primary library.
-                let Some(root) = self.music_dir.as_ref().map(PathBuf::from) else {
+                let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
                     self.toast(&gettext("No music folder set"));
                     return;
                 };
@@ -4098,9 +4103,9 @@ impl Component for App {
 
                 // This folder is now shown; restore the remembered scroll position (from
                 // the last visit) after the layout.
-                self.shown_dir = self.browse_dir.clone();
-                if let (Some(dir), Some(sc)) = (self.browse_dir.clone(), self.fs_scroller()) {
-                    if let Some(&value) = self.fs_scroll.borrow().get(&dir) {
+                self.files.shown_dir = self.files.browse_dir.clone();
+                if let (Some(dir), Some(sc)) = (self.files.browse_dir.clone(), self.fs_scroller()) {
+                    if let Some(&value) = self.files.fs_scroll.borrow().get(&dir) {
                         for delay in [50u64, 250] {
                             let sc = sc.clone();
                             gtk::glib::timeout_add_local_once(
@@ -4113,8 +4118,8 @@ impl Component for App {
             }
             Cmd::RemoteEntries(result, source, rel) => {
                 // Discard the stale result (source/folder switched in the meantime).
-                if self.active_source != source
-                    || self.remote_browse.as_deref() != Some(rel.as_str())
+                if self.files.active_source != source
+                    || self.files.remote_browse.as_deref() != Some(rel.as_str())
                 {
                     return;
                 }
@@ -4231,7 +4236,7 @@ impl Component for App {
                 if then_enrich
                     && self.enrich_state.auto_enrich
                     && !self.enrich_state.enriching
-                    && self.music_dir.is_some()
+                    && self.files.music_dir.is_some()
                     && online_available()
                 {
                     // Automatic run (without a renewed tag scan), full scope.
@@ -4889,10 +4894,10 @@ impl App {
     /// Only upwards, as long as we stay within the start folder.
     pub(crate) fn can_go_up(&self) -> bool {
         // Remote source: going back possible as long as not at the music root.
-        if let Some(rel) = &self.remote_browse {
+        if let Some(rel) = &self.files.remote_browse {
             return !rel.is_empty();
         }
-        match (&self.browse_dir, &self.root_dir) {
+        match (&self.files.browse_dir, &self.files.root_dir) {
             (Some(cur), Some(root)) => cur != root && cur.starts_with(root),
             _ => false,
         }
@@ -4900,9 +4905,10 @@ impl App {
 
     /// Display name of the active source (for the path bar at the root).
     pub(crate) fn active_source_name(&self) -> String {
-        match &self.active_source {
+        match &self.files.active_source {
             ActiveSource::Primary => gettext("Music"),
             ActiveSource::Source(id) => self
+                .files
                 .sources
                 .iter()
                 .find(|s| s.id == *id)
@@ -4914,13 +4920,13 @@ impl App {
     /// Label of the path bar (current folder name or hint).
     pub(crate) fn folder_label(&self) -> String {
         // Remote source: last path segment or source name at the root.
-        if let Some(rel) = &self.remote_browse {
+        if let Some(rel) = &self.files.remote_browse {
             if rel.is_empty() {
                 return self.active_source_name();
             }
             return rel.rsplit('/').next().unwrap_or(rel).to_string();
         }
-        match &self.browse_dir {
+        match &self.files.browse_dir {
             Some(dir) => dir
                 .file_name()
                 .and_then(|n| n.to_str())
