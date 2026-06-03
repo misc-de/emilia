@@ -1,6 +1,6 @@
 # Emilia
 
-**Adaptive music & audio-drama player for Linux Phosh smartphones** (Librem 5,
+**Adaptive music, podcast, streaming and audio-drama player for Linux Phosh smartphones** (Librem 5,
 PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
 
 ⚠️ **AI-assisted project**  
