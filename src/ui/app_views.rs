@@ -191,7 +191,7 @@ fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
 impl App {
     /// Scroller of the file list (ancestor of the entries `ListBox`).
     pub(crate) fn fs_scroller(&self) -> Option<gtk::ScrolledWindow> {
-        self.entries
+        self.libview.entries
             .widget()
             .ancestor(gtk::ScrolledWindow::static_type())
             .and_downcast::<gtk::ScrolledWindow>()
@@ -214,12 +214,12 @@ impl App {
             Some(dir) => {
                 // Remember the current folder (for "continue where you left off").
                 let _ = self.library.set_setting("browse_dir", &dir.to_string_lossy());
-                self.loading = true;
+                self.libview.loading = true;
                 sender.spawn_oneshot_command(move || Cmd::Entries(read_entries(dir)));
             }
             None => {
-                self.entries.guard().clear();
-                self.loading = false;
+                self.libview.entries.guard().clear();
+                self.libview.loading = false;
             }
         }
     }
@@ -311,12 +311,12 @@ impl App {
     fn load_remote_dir(&mut self, sender: &ComponentSender<Self>, source: crate::model::Source) {
         let rel = self.files.remote_browse.clone().unwrap_or_default();
         let Some(creds) = crate::core::webdav::Creds::from_source(&source) else {
-            self.entries.guard().clear();
-            self.loading = false;
+            self.libview.entries.guard().clear();
+            self.libview.loading = false;
             self.toast(&gettext("This source is not configured correctly"));
             return;
         };
-        self.loading = true;
+        self.libview.loading = true;
         let active = self.files.active_source.clone();
         sender.spawn_oneshot_command(move || {
             let res = crate::core::webdav::list(&creds, &rel).map_err(|e| e.to_string());
@@ -337,7 +337,7 @@ impl App {
             return;
         };
         let rels: Vec<String> = {
-            let guard = self.entries.guard();
+            let guard = self.libview.entries.guard();
             (0..guard.len())
                 .filter_map(|i| {
                     guard.get(i).and_then(|r| match &r.entry {
@@ -407,24 +407,24 @@ impl App {
 
     pub(crate) fn reload_albums(&mut self) {
         let albums = self.library.albums_overview().unwrap_or_default();
-        self.album_count = albums.len();
+        self.libview.album_count = albums.len();
         // Mirror the overview so that gallery clicks (the factory is empty then) can
         // resolve the entry by index.
-        self.albums_overview = albums.clone();
+        self.libview.albums_overview = albums.clone();
         let offline_keys = self.offline_album_keys();
-        if self.gallery_view {
+        if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = albums
                 .iter()
                 .map(|a| (a.cover_path.clone(), "media-optical-symbolic", a.album.clone()))
                 .collect();
             self.fill_gallery(
-                &self.albums_gallery,
+                &self.libview.albums_gallery,
                 &items,
                 Msg::ShowAlbumTracks,
                 Msg::ShowAlbumDetail,
             );
         } else {
-            let mut guard = self.albums.guard();
+            let mut guard = self.libview.albums.guard();
             guard.clear();
             for a in albums {
                 let offline = offline_keys.contains(&(a.artist.clone(), a.album.clone()));
@@ -491,7 +491,7 @@ impl App {
     /// If the artist photo is missing, an album cover is used as a substitute.
     pub(crate) fn reload_artists(&mut self) {
         let mut artists = self.library.artists_overview().unwrap_or_default();
-        self.artist_count = artists.len();
+        self.libview.artist_count = artists.len();
         // Fallback cover (an album cover) for artists **without** their own photo.
         // Build the album assignment in ONE pass over `all_tracks` –
         // previously this called `artist_album_cover` → `all_tracks` per artist
@@ -525,21 +525,21 @@ impl App {
             }
         }
         // Mirror the overview (for gallery index resolution, see reload_albums).
-        self.artists_overview = artists.clone();
-        if self.gallery_view {
+        self.libview.artists_overview = artists.clone();
+        if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = artists
                 .iter()
                 .map(|a| (a.image_path.clone(), "avatar-default-symbolic", a.name.clone()))
                 .collect();
             self.fill_gallery(
-                &self.artists_gallery,
+                &self.libview.artists_gallery,
                 &items,
                 Msg::OpenArtistTracks,
                 Msg::ShowArtistDetail,
             );
         } else {
             let offline_names = self.offline_artist_names_lc();
-            let mut guard = self.artists.guard();
+            let mut guard = self.libview.artists.guard();
             guard.clear();
             for a in artists {
                 let name_lc = a.name.to_lowercase();

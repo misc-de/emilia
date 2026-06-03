@@ -829,7 +829,7 @@ impl App {
         let gallery_row = adw::SwitchRow::builder()
             .title(&gettext("Gallery view"))
             .subtitle(&gettext("Show lists as a grid of cover thumbnails"))
-            .active(self.gallery_view)
+            .active(self.libview.gallery_view)
             .build();
         {
             let sender = sender.clone();
@@ -841,7 +841,7 @@ impl App {
         let cols_row = adw::SpinRow::builder()
             .title(&gettext("Tiles per row"))
             .adjustment(&gtk::Adjustment::new(
-                self.gallery_columns as f64,
+                self.libview.gallery_columns as f64,
                 2.0,
                 8.0,
                 1.0,

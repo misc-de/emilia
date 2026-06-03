@@ -210,6 +210,32 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Album/artist overviews + file-list factory + gallery rendering state.
+pub(crate) struct LibView {
+    pub(crate) entries: FactoryVecDeque<FsRow>,
+    pub(crate) albums: FactoryVecDeque<AlbumCard>,
+    /// Gallery variant of the albums (cover grid), parallel to the list factory.
+    pub(crate) albums_gallery: gtk::FlowBox,
+    /// Album overview (same order as factory/gallery); index resolution for the gallery.
+    pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
+    pub(crate) album_count: usize,
+    pub(crate) artists: FactoryVecDeque<ArtistCard>,
+    /// Gallery variant of the artists (photo grid).
+    pub(crate) artists_gallery: gtk::FlowBox,
+    /// Artist overview (same order); index resolution for the gallery.
+    pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
+    pub(crate) artist_count: usize,
+    /// Show lists as a gallery (cover grid) instead of a list.
+    pub(crate) gallery_view: bool,
+    /// Number of tiles per row in the gallery view (2–8).
+    pub(crate) gallery_columns: u32,
+    pub(crate) loading: bool,
+    /// Galleries (artist/album) for which an on-demand fetch already ran this session.
+    pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Gallery FlowBoxes whose resize hook has already been connected once.
+    pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
+}
+
 /// Playback transport: queue, shuffle order, history, resume/stats sessions.
 pub(crate) struct TransportState {
     pub(crate) queue: Vec<PathBuf>,
@@ -438,31 +464,14 @@ pub struct App {
     /// Own input sender to send messages to the component from methods without
     /// a `ComponentSender` (e.g. [`Self::play_current`]).
     pub(crate) input: relm4::Sender<Msg>,
-    pub(crate) entries: FactoryVecDeque<FsRow>,
-    pub(crate) albums: FactoryVecDeque<AlbumCard>,
-    /// Gallery variant of the albums (cover grid), in parallel to the list factory.
-    pub(crate) albums_gallery: gtk::FlowBox,
-    /// Album overview (same order as factory/gallery). Serves as
-    /// index resolution for clicks in the gallery, where the factory stays empty.
-    pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
-    pub(crate) album_count: usize,
-    pub(crate) artists: FactoryVecDeque<ArtistCard>,
-    /// Gallery variant of the artists (photo grid).
-    pub(crate) artists_gallery: gtk::FlowBox,
-    /// Artist overview (same order) – index resolution for the gallery.
-    pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
-    pub(crate) artist_count: usize,
+    /// Album/artist overviews + file-list factory + gallery rendering state.
+    pub(crate) libview: LibView,
     /// Online-enrichment state (covers/artist photos/fingerprint fetching).
     pub(crate) enrich_state: EnrichState,
     /// App-wide preferences (display language, active audio output).
     pub(crate) settings: Settings,
-    /// Show lists as a **gallery** (cover grid) instead of as a list.
-    pub(crate) gallery_view: bool,
-    /// Number of tiles per row in the gallery view (2–8).
-    pub(crate) gallery_columns: u32,
     /// File browser + extra music sources (2nd local folder / Nextcloud) state.
     pub(crate) files: FilesState,
-    pub(crate) loading: bool,
     /// Playback transport: queue, shuffle order, history, resume/stats sessions.
     pub(crate) transport: TransportState,
     /// Mini-player / now-playing strip state.
@@ -470,14 +479,6 @@ pub struct App {
     pub(crate) toast_overlay: adw::ToastOverlay,
     /// Concerts page state (live-recording collection).
     pub(crate) concerts: ConcertsState,
-    /// Galleries (artist or album) for which an on-demand fetch already ran
-    /// in **this session** – key `"a\x01<name>"` or
-    /// `"b\x01<artist>\x01<album>"`. Prevents that entries without a gallery
-    /// (which have no attempt limit) are queried again on every open.
-    pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
-    /// Gallery FlowBoxes whose resize hook (square tiles) has already
-    /// been connected once – prevents handlers from accumulating.
-    pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
     /// Navigation + layout chrome.
     pub(crate) nav: NavState,
     /// Favorites + audiobooks page state.
@@ -1050,13 +1051,13 @@ impl Component for App {
                                         ),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.artist_count == 0,
+                                        set_visible: model.libview.artist_count == 0,
                                     },
 
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.artist_count > 0 && !model.gallery_view,
+                                        set_visible: model.libview.artist_count > 0 && !model.libview.gallery_view,
                                         #[local_ref]
                                         artists_box -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1070,7 +1071,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.artist_count > 0 && model.gallery_view,
+                                        set_visible: model.libview.artist_count > 0 && model.libview.gallery_view,
                                         #[local_ref]
                                         artists_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1094,13 +1095,13 @@ impl Component for App {
                                         ),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.album_count == 0,
+                                        set_visible: model.libview.album_count == 0,
                                     },
 
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.album_count > 0 && !model.gallery_view,
+                                        set_visible: model.libview.album_count > 0 && !model.libview.gallery_view,
                                         #[local_ref]
                                         albums_box -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1115,7 +1116,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.album_count > 0 && model.gallery_view,
+                                        set_visible: model.libview.album_count > 0 && model.libview.gallery_view,
                                         #[local_ref]
                                         albums_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1134,7 +1135,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concerts.concert_items.is_empty() && !model.gallery_view,
+                                        set_visible: !model.concerts.concert_items.is_empty() && !model.libview.gallery_view,
                                         #[local_ref]
                                         concerts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1149,7 +1150,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concerts.concert_items.is_empty() && model.gallery_view,
+                                        set_visible: !model.concerts.concert_items.is_empty() && model.libview.gallery_view,
                                         #[local_ref]
                                         concerts_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1309,7 +1310,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && !model.gallery_view,
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && !model.libview.gallery_view,
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1325,7 +1326,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && model.gallery_view,
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && model.libview.gallery_view,
                                         #[local_ref]
                                         podcasts_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1461,7 +1462,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.favorites.audiobook_items.is_empty() && !model.gallery_view,
+                                        set_visible: !model.favorites.audiobook_items.is_empty() && !model.libview.gallery_view,
                                         #[local_ref]
                                         audiobooks_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1476,7 +1477,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.favorites.audiobook_items.is_empty() && model.gallery_view,
+                                        set_visible: !model.favorites.audiobook_items.is_empty() && model.libview.gallery_view,
                                         #[local_ref]
                                         audiobooks_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1519,7 +1520,7 @@ impl Component for App {
                             set_can_target: false,
                             add_css_class: "emilia-loading",
                             #[watch]
-                            set_visible: model.loading,
+                            set_visible: model.libview.loading,
 
                             gtk::Spinner {
                                 set_spinning: true,
@@ -2033,15 +2034,22 @@ impl Component for App {
             player,
             mpris,
             input: sender.input_sender().clone(),
-            entries,
-            albums,
-            albums_gallery: gtk::FlowBox::new(),
-            albums_overview: Vec::new(),
-            artists_gallery: gtk::FlowBox::new(),
-            artists_overview: Vec::new(),
-            album_count: 0,
-            artists,
-            artist_count: 0,
+            libview: LibView {
+                entries,
+                albums,
+                albums_gallery: gtk::FlowBox::new(),
+                albums_overview: Vec::new(),
+                album_count: 0,
+                artists,
+                artists_gallery: gtk::FlowBox::new(),
+                artists_overview: Vec::new(),
+                artist_count: 0,
+                gallery_view,
+                gallery_columns,
+                loading: false,
+                gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
+                gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
+            },
             enrich_state: EnrichState {
                 enriching: false,
                 auto_enrich,
@@ -2053,8 +2061,6 @@ impl Component for App {
                 ui_language,
                 active_output,
             },
-            gallery_view,
-            gallery_columns,
             files: FilesState {
                 music_dir,
                 root_dir,
@@ -2070,7 +2076,6 @@ impl Component for App {
                 remote_pos: 0,
                 playing_remote: false,
             },
-            loading: false,
             transport: TransportState {
                 queue: Vec::new(),
                 queue_pos: 0,
@@ -2150,8 +2155,6 @@ impl Component for App {
             offline_sources: std::collections::HashSet::new(),
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
-            gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
-            gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
             nav: NavState {
                 split: adw::OverlaySplitView::new(),
                 view_stack: adw::ViewStack::new(),
@@ -2247,11 +2250,11 @@ impl Component for App {
         // with the switch enabled – fetch missing covers/metadata in the background.
         model.start_scan(&sender, true);
 
-        let entries_box = model.entries.widget();
-        let albums_box = model.albums.widget();
-        let artists_box = model.artists.widget();
-        let albums_gallery = model.albums_gallery.clone();
-        let artists_gallery = model.artists_gallery.clone();
+        let entries_box = model.libview.entries.widget();
+        let albums_box = model.libview.albums.widget();
+        let artists_box = model.libview.artists.widget();
+        let albums_gallery = model.libview.albums_gallery.clone();
+        let artists_gallery = model.libview.artists_gallery.clone();
         let concerts_gallery = model.concerts.concerts_gallery.clone();
         let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
         let podcasts_gallery = model.podcasts.podcasts_gallery.clone();
@@ -2560,7 +2563,7 @@ impl Component for App {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
         match msg {
             Msg::Activate(index) => {
-                let entry = self.entries.guard().get(index).map(|r| r.entry.clone());
+                let entry = self.libview.entries.guard().get(index).map(|r| r.entry.clone());
                 let Some(entry) = entry else {
                     return;
                 };
@@ -2623,6 +2626,7 @@ impl Component for App {
                 // Remote files do not (yet) go into the local queue –
                 // `path()` is `None` there, the double-click stays without effect.
                 let path = self
+                    .libview
                     .entries
                     .guard()
                     .get(index)
@@ -2645,6 +2649,7 @@ impl Component for App {
             }
             Msg::ShowContextMenu(index) => {
                 let entry = self
+                    .libview
                     .entries
                     .guard()
                     .get(index)
@@ -2656,11 +2661,12 @@ impl Component for App {
             }
             Msg::ShowArtistDetail(index) => {
                 let meta = self
+                    .libview
                     .artists
                     .guard()
                     .get(index)
                     .map(|c| c.meta.clone())
-                    .or_else(|| self.artists_overview.get(index).cloned());
+                    .or_else(|| self.libview.artists_overview.get(index).cloned());
                 if let Some(meta) = meta {
                     // Fetch the photo of the opened artist with priority.
                     self.fetch_focus_artist(&sender, &meta.name);
@@ -2670,11 +2676,12 @@ impl Component for App {
             }
             Msg::ShowAlbumDetail(index) => {
                 let meta = self
+                    .libview
                     .albums
                     .guard()
                     .get(index)
                     .map(|c| c.meta.clone())
-                    .or_else(|| self.albums_overview.get(index).cloned());
+                    .or_else(|| self.libview.albums_overview.get(index).cloned());
                 if let Some(meta) = meta {
                     // Fetch the cover of the opened album with priority.
                     self.fetch_focus_album(&sender, &meta.artist, &meta.album);
@@ -2702,11 +2709,12 @@ impl Component for App {
             Msg::ShowAlbumTracks(index) => {
                 // Album overview: open by album name (artist irrelevant).
                 let album = self
+                    .libview
                     .albums
                     .guard()
                     .get(index)
                     .map(|c| c.meta.album.clone())
-                    .or_else(|| self.albums_overview.get(index).map(|m| m.album.clone()));
+                    .or_else(|| self.libview.albums_overview.get(index).map(|m| m.album.clone()));
                 if let Some(album) = album {
                     self.open_album_by_name(&sender, &album);
                 }
@@ -2719,11 +2727,12 @@ impl Component for App {
             }
             Msg::OpenArtistTracks(index) => {
                 let meta = self
+                    .libview
                     .artists
                     .guard()
                     .get(index)
                     .map(|c| c.meta.clone())
-                    .or_else(|| self.artists_overview.get(index).cloned());
+                    .or_else(|| self.libview.artists_overview.get(index).cloned());
                 if let Some(meta) = meta {
                     // Fetch the photo of the opened artist with priority.
                     self.fetch_focus_artist(&sender, &meta.name);
@@ -3817,18 +3826,18 @@ impl Component for App {
                 let _ = self.library.set_setting("color_scheme", &scheme);
             }
             Msg::SetGalleryView(on) => {
-                self.gallery_view = on;
+                self.libview.gallery_view = on;
                 let _ = self
                     .library
                     .set_setting("gallery_view", if on { "1" } else { "0" });
                 self.rebuild_all_lists(&sender);
             }
             Msg::SetGalleryColumns(n) => {
-                self.gallery_columns = n.clamp(2, 8);
+                self.libview.gallery_columns = n.clamp(2, 8);
                 let _ = self
                     .library
-                    .set_setting("gallery_columns", &self.gallery_columns.to_string());
-                if self.gallery_view {
+                    .set_setting("gallery_columns", &self.libview.gallery_columns.to_string());
+                if self.libview.gallery_view {
                     self.rebuild_all_lists(&sender);
                 }
             }
@@ -4098,7 +4107,7 @@ impl Component for App {
                     show_artist: distinct.len() > 1,
                 };
                 let queue = self.transport.queue.clone();
-                let mut guard = self.entries.guard();
+                let mut guard = self.libview.entries.guard();
                 guard.clear();
                 for e in entries {
                     let queued = e
@@ -4107,7 +4116,7 @@ impl Component for App {
                     guard.push_back((e, opts, queued));
                 }
                 drop(guard);
-                self.loading = false;
+                self.libview.loading = false;
 
                 // This folder is now shown; restore the remembered scroll position (from
                 // the last visit) after the layout.
@@ -4131,11 +4140,11 @@ impl Component for App {
                 {
                     return;
                 }
-                self.loading = false;
+                self.libview.loading = false;
                 match result {
                     Err(e) => {
                         tracing::warn!("WebDAV listing failed: {e}");
-                        self.entries.guard().clear();
+                        self.libview.entries.guard().clear();
                         self.toast(&gettext("Could not load this folder"));
                     }
                     Ok(list) => {
@@ -4158,7 +4167,7 @@ impl Component for App {
                             show_artist: distinct.len() > 1,
                         };
                         {
-                            let mut guard = self.entries.guard();
+                            let mut guard = self.libview.entries.guard();
                             guard.clear();
                             for e in entries {
                                 guard.push_back((e, opts, false));
@@ -4175,7 +4184,7 @@ impl Component for App {
             Cmd::RemoteTags(tags) => {
                 // rel path → factory index, then send tags to the respective row.
                 let map: std::collections::HashMap<String, usize> = {
-                    let guard = self.entries.guard();
+                    let guard = self.libview.entries.guard();
                     (0..guard.len())
                         .filter_map(|i| {
                             guard.get(i).and_then(|r| match &r.entry {
@@ -4187,7 +4196,7 @@ impl Component for App {
                 };
                 for (rel, title, artist, duration_ms) in tags {
                     if let Some(&i) = map.get(&rel) {
-                        self.entries.send(
+                        self.libview.entries.send(
                             i,
                             FsInput::SetTags {
                                 title,
@@ -4201,7 +4210,7 @@ impl Component for App {
             Cmd::RemoteDownloaded(result) => match result {
                 Ok((rel, path)) => {
                     let idx = {
-                        let guard = self.entries.guard();
+                        let guard = self.libview.entries.guard();
                         (0..guard.len()).find(|&i| {
                             guard.get(i).is_some_and(|r| {
                                 matches!(&r.entry, FsEntry::RemoteFile { rel_path, .. } if *rel_path == rel)
@@ -4209,7 +4218,7 @@ impl Component for App {
                         })
                     };
                     if let Some(i) = idx {
-                        self.entries.send(i, FsInput::SetDownloaded(path));
+                        self.libview.entries.send(i, FsInput::SetDownloaded(path));
                     }
                     self.toast(&gettext("Download complete"));
                 }
@@ -4661,8 +4670,8 @@ impl App {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
         }
-        fb.set_min_children_per_line(self.gallery_columns);
-        fb.set_max_children_per_line(self.gallery_columns);
+        fb.set_min_children_per_line(self.libview.gallery_columns);
+        fb.set_max_children_per_line(self.libview.gallery_columns);
         // `homogeneous(true)` gives **all** tiles exactly the size set via `size_request`
         // ([`size_gallery_tiles`]) (= 1/column count of the width) and
         // does NOT stretch them to the row width. Without it the FlowBox distributes
@@ -4722,7 +4731,7 @@ impl App {
         // we re-measure and couple (once) to the `page-size` of the
         // enclosing ScrolledWindow, so that the tiles scale along in desktop mode on
         // a window width change.
-        if self.gallery_hooked.borrow_mut().insert(fb.as_ptr() as usize) {
+        if self.libview.gallery_hooked.borrow_mut().insert(fb.as_ptr() as usize) {
             let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
             fb.connect_map(move |fb| {
                 size_gallery_tiles(fb);
@@ -4792,7 +4801,7 @@ impl App {
                 .artist_images(&name)
                 .map(|imgs| imgs.is_empty())
                 .unwrap_or(false)
-            && self.gallery_tried.borrow_mut().insert(format!("a\u{1}{name}"));
+            && self.libview.gallery_tried.borrow_mut().insert(format!("a\u{1}{name}"));
         if !need_image && !need_gallery {
             return;
         }
@@ -4843,6 +4852,7 @@ impl App {
             .map(|imgs| imgs.is_empty())
             .unwrap_or(false)
             && self
+                .libview
                 .gallery_tried
                 .borrow_mut()
                 .insert(format!("b\u{1}{artist}\u{1}{album}"));

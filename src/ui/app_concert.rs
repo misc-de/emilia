@@ -21,7 +21,7 @@ impl App {
             .area_entries(crate::core::category::Area::Concerts, true, false);
         self.concerts.concert_items = self.expand_area_items(raw);
         let items = self.concerts.concert_items.clone();
-        if self.gallery_view {
+        if self.libview.gallery_view {
             let tiles = self.entry_gallery_items(&items);
             self.fill_gallery(
                 &self.concerts.concerts_gallery,

@@ -69,7 +69,7 @@ impl App {
     /// the "Newest" list.
     pub(crate) fn reload_podcasts(&mut self, sender: &ComponentSender<Self>) {
         self.podcasts.podcast_items = self.library.podcasts().unwrap_or_default();
-        if self.gallery_view {
+        if self.libview.gallery_view {
             // Gallery variant: cover grid; tap opens the episodes,
             // double-tap the subscription detail view.
             let tiles: Vec<(Option<String>, &'static str, String)> = self

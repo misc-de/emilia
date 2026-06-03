@@ -98,7 +98,7 @@ impl App {
             .area_entries(crate::core::category::Area::Audiobooks, true, false);
         self.favorites.audiobook_items = self.expand_area_items(raw);
         let items = self.favorites.audiobook_items.clone();
-        if self.gallery_view {
+        if self.libview.gallery_view {
             let tiles = self.entry_gallery_items(&items);
             self.fill_gallery(
                 &self.favorites.audiobooks_gallery,

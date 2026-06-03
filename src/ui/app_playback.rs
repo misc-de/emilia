@@ -25,7 +25,7 @@ impl App {
             None
         };
         let states: Vec<(usize, bool, bool)> = {
-            let guard = self.entries.guard();
+            let guard = self.libview.entries.guard();
             (0..guard.len())
                 .filter_map(|i| {
                     guard.get(i).map(|r| {
@@ -51,8 +51,8 @@ impl App {
         };
         let playing = self.mini.playing;
         for (i, q, a) in states {
-            self.entries.send(i, FsInput::SetQueued(q));
-            self.entries.send(i, FsInput::SetActive { active: a, playing });
+            self.libview.entries.send(i, FsInput::SetQueued(q));
+            self.libview.entries.send(i, FsInput::SetActive { active: a, playing });
         }
         // Sync the play row of an open detail dialog with the playback state.
         self.refresh_ctx_play();
@@ -106,7 +106,7 @@ impl App {
         let mut queue = Vec::new();
         let mut start = 0;
         {
-            let guard = self.entries.guard();
+            let guard = self.libview.entries.guard();
             for i in 0..guard.len() {
                 if let Some(row) = guard.get(i) {
                     if let FsEntry::RemoteFile { rel_path, .. } = &row.entry {
