@@ -832,6 +832,50 @@ msgstr "Weiter aufnehmen"
 msgid "Recording …"
 msgstr "Aufnahme läuft …"
 
+#: src/ui/app_streaming.rs:519
+msgid "Current recording"
+msgstr "Aktuelle Aufnahme"
+
+#: src/ui/app_streaming.rs:519
+msgid "Recording"
+msgstr "Aufnahme"
+
+#: src/ui/app_streaming.rs:519
+msgid "Station"
+msgstr "Sender"
+
+#: src/ui/app_streaming.rs:519
+msgid "Recorded"
+msgstr "Aufgenommen"
+
+#: src/ui/app_streaming.rs:519
+msgid "Note"
+msgstr "Hinweis"
+
+#: src/ui/app_streaming.rs:519
+msgid "Delete recording"
+msgstr "Aufnahme löschen"
+
+#: src/ui/app_streaming.rs:519
+msgid "Delete this recording?"
+msgstr "Diese Aufnahme löschen?"
+
+#: src/ui/app_queue.rs:1
+msgid "Various artists"
+msgstr "Verschiedene Künstler"
+
+#: src/ui/app.rs:1
+msgid "Playback speed"
+msgstr "Abspielgeschwindigkeit"
+
+#: src/ui/app_playback.rs:1
+msgid "Skipping unavailable track"
+msgstr "Nicht verfügbar – übersprungen"
+
+#: src/ui/app_playback.rs:1
+msgid "No playable tracks"
+msgstr "Keine abspielbaren Titel"
+
 #: src/ui/app_streaming.rs:616
 msgid "Recording stopped (stream ended)"
 msgstr "Aufnahme gestoppt (Stream endete)"

@@ -161,7 +161,7 @@ pub(crate) fn enrich_worker(
                     let album_less = t.album.as_deref().map_or(true, |a| a.trim().is_empty());
                     if album_less {
                         if let Some((bytes, _)) =
-                            online::recording_cover(t.artist.as_deref().unwrap_or(""), &t.title)
+                            online::track_cover(t.artist.as_deref().unwrap_or(""), &t.title)
                         {
                             if online::store_track_cover_bytes(&key, &bytes).is_some() {
                                 any_change = true;

@@ -1,11 +1,13 @@
 //! Queue dialog: the currently playing track is at the top, the following ones
-//! can be reordered via a drag handle and removed via a trash button.
+//! can be reordered via a drag handle. Each row shows its runtime and a play
+//! button on the right (the current one toggles play/pause, others jump to that
+//! entry). The whole queue is cleared via the header button.
 
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::i18n::gettext;
+use crate::i18n::{gettext, ngettext_n};
 use crate::ui::app::{App, Msg};
 
 impl App {
@@ -84,8 +86,10 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Rebuilds the queue list: starting from the currently playing track (top),
-    /// the following ones with drag handle + trash button.
+    /// Rebuilds the queue list: starting from the currently playing track (top).
+    /// Consecutive tracks of the same album collapse into a single album row
+    /// (showing the total runtime); lone tracks stay individual rows with a drag
+    /// handle. Each row carries its runtime and a play button on the right.
     pub(crate) fn reload_queue_list(&self, sender: &ComponentSender<Self>) {
         while let Some(child) = self.transport.queue_list.first_child() {
             self.transport.queue_list.remove(&child);
@@ -97,67 +101,154 @@ impl App {
         }
 
         let pos = self.transport.queue_pos;
-        for (offset, path) in self.transport.queue.iter().skip(pos).enumerate() {
-            let qidx = pos + offset;
-            let is_current = offset == 0;
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&self.display_name(path)))
-                .build();
+        // Metadata for the visible slice (current track onward): album/artist/runtime.
+        let items: Vec<(usize, Option<String>, Option<String>, i64)> = self
+            .transport
+            .queue
+            .iter()
+            .enumerate()
+            .skip(pos)
+            .map(|(idx, path)| {
+                let t = self.library.track_by_path(&path.to_string_lossy()).ok().flatten();
+                let album = t.as_ref().and_then(|t| t.album.clone()).filter(|a| !a.trim().is_empty());
+                let artist = t.as_ref().and_then(|t| t.artist.clone()).filter(|a| !a.trim().is_empty());
+                let dur = t.and_then(|t| t.duration_ms).unwrap_or(0).max(0);
+                (idx, album, artist, dur)
+            })
+            .collect();
 
-            // Cover of the track (embedded/cached, else its album cover).
-            let cover = self.entry_cover("track", &path.to_string_lossy(), false);
-            row.add_prefix(&crate::ui::app::cover_widget(
-                cover.as_deref(),
-                "audio-x-generic-symbolic",
-            ));
-
-            if is_current {
-                row.set_subtitle(&gettext("Now playing"));
-                row.add_prefix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-            } else {
-                // Drag handle (left) for reordering.
-                let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-                handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
-                row.add_prefix(&handle);
-
-                let drag = gtk::DragSource::new();
-                drag.set_actions(gtk::gdk::DragAction::MOVE);
-                drag.connect_prepare(move |_, _, _| {
-                    Some(gtk::gdk::ContentProvider::for_value(&(qidx as i32).to_value()))
-                });
-                row.add_controller(drag);
-
-                let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
-                {
-                    let sender = sender.clone();
-                    drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
-                        Ok(from) => {
-                            sender.input(Msg::QueueMove {
-                                from: from as usize,
-                                to: qidx,
-                            });
-                            true
-                        }
-                        Err(_) => false,
-                    });
-                }
-                row.add_controller(drop);
-            }
-
-            // Trash button (right) for removing.
-            let trash = gtk::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .tooltip_text(&gettext("Remove from queue"))
+        // Shared trailing widgets: runtime + play/pause button (far right, like
+        // single-song rows). `idx` is the queue index playback should start at.
+        let add_tail = |row: &adw::ActionRow, idx: usize, total_ms: i64, is_current: bool| {
+            let dur = (total_ms > 0)
+                .then(|| crate::ui::app::fmt_duration(total_ms))
+                .unwrap_or_default();
+            row.add_suffix(
+                &gtk::Label::builder()
+                    .label(&dur)
+                    .valign(gtk::Align::Center)
+                    .css_classes(["dim-label", "numeric"])
+                    .build(),
+            );
+            let play = gtk::Button::builder()
+                .icon_name(if is_current && self.mini.playing {
+                    "media-playback-pause-symbolic"
+                } else {
+                    "media-playback-start-symbolic"
+                })
+                .tooltip_text(&gettext("Play/Pause"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
-            {
-                let sender = sender.clone();
-                trash.connect_clicked(move |_| sender.input(Msg::QueueRemove(qidx)));
-            }
-            row.add_suffix(&trash);
+            let sender = sender.clone();
+            play.connect_clicked(move |_| {
+                sender.input(if is_current {
+                    Msg::TogglePlay
+                } else {
+                    Msg::PlayQueueAt(idx)
+                });
+            });
+            row.add_suffix(&play);
+        };
 
-            self.transport.queue_list.append(&row);
+        // Render: consecutive tracks of the same album collapse into one album
+        // row (total runtime); lone tracks stay individual rows. The first row is
+        // always the current track/album ("Now playing").
+        let mut gi = 0;
+        let mut first = true;
+        while gi < items.len() {
+            let album = items[gi].1.clone();
+            let mut end = gi + 1;
+            if album.is_some() {
+                while end < items.len() && items[end].1 == album {
+                    end += 1;
+                }
+            }
+            let group = &items[gi..end];
+            let start_idx = group[0].0;
+            let is_current = first;
+            first = false;
+
+            if group.len() >= 2 {
+                // --- Album row: a single entry with the total runtime. ---
+                let total: i64 = group.iter().map(|g| g.3).sum();
+                let count = ngettext_n("{n} track", "{n} tracks", group.len() as u32);
+                let artist0 = group[0].2.clone();
+                let group_artist = if group.iter().all(|g| g.2 == artist0) {
+                    artist0
+                } else {
+                    Some(gettext("Various artists"))
+                };
+                let subtitle = if is_current {
+                    format!("{} · {count}", gettext("Now playing"))
+                } else {
+                    match group_artist {
+                        Some(a) => format!("{a} · {count}"),
+                        None => count,
+                    }
+                };
+                let row = adw::ActionRow::builder()
+                    .title(gtk::glib::markup_escape_text(&album.unwrap_or_default()))
+                    .build();
+                row.set_subtitle(&gtk::glib::markup_escape_text(&subtitle));
+                let cover = self.entry_cover(
+                    "track",
+                    &self.transport.queue[start_idx].to_string_lossy(),
+                    false,
+                );
+                row.add_prefix(&crate::ui::app::cover_widget(
+                    cover.as_deref(),
+                    "media-optical-symbolic",
+                ));
+                add_tail(&row, start_idx, total, is_current);
+                self.transport.queue_list.append(&row);
+            } else {
+                // --- Single track row. ---
+                let path = &self.transport.queue[start_idx];
+                let row = adw::ActionRow::builder()
+                    .title(gtk::glib::markup_escape_text(&self.display_name(path)))
+                    .build();
+                let cover = self.entry_cover("track", &path.to_string_lossy(), false);
+                row.add_prefix(&crate::ui::app::cover_widget(
+                    cover.as_deref(),
+                    "audio-x-generic-symbolic",
+                ));
+                if is_current {
+                    row.set_subtitle(&gettext("Now playing"));
+                } else {
+                    // Drag handle (left) for reordering individual tracks.
+                    let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+                    handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
+                    row.add_prefix(&handle);
+
+                    let qidx = start_idx;
+                    let drag = gtk::DragSource::new();
+                    drag.set_actions(gtk::gdk::DragAction::MOVE);
+                    drag.connect_prepare(move |_, _, _| {
+                        Some(gtk::gdk::ContentProvider::for_value(&(qidx as i32).to_value()))
+                    });
+                    row.add_controller(drag);
+
+                    let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
+                    {
+                        let sender = sender.clone();
+                        drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
+                            Ok(from) => {
+                                sender.input(Msg::QueueMove {
+                                    from: from as usize,
+                                    to: qidx,
+                                });
+                                true
+                            }
+                            Err(_) => false,
+                        });
+                    }
+                    row.add_controller(drop);
+                }
+                add_tail(&row, start_idx, group[0].3, is_current);
+                self.transport.queue_list.append(&row);
+            }
+            gi = end;
         }
     }
 }

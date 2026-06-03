@@ -539,14 +539,137 @@ pub fn cache_station_image(url: &str) -> Option<String> {
 /// Fetches the cover (and album name) for (artist, title) – **network access**,
 /// only call from worker/background threads. Best effort: `None` if nothing is
 /// found. For subsequently tagging a streaming recording.
-pub fn recording_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>)> {
+/// Fetches a cover (+ album name) for a **clean** artist/title pair (no station
+/// noise) – e.g. for an album-less single track. Network – background only.
+pub fn track_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>)> {
     if title.trim().is_empty() {
         return None;
     }
-    OnlineClient::new()
-        .fetch_track_cover(artist, title)
-        .ok()
-        .flatten()
+    OnlineClient::new().fetch_track_cover(artist, title).ok().flatten()
+}
+
+pub fn recording_cover(raw_title: &str, station: Option<&str>) -> Option<(Vec<u8>, Option<String>)> {
+    let client = OnlineClient::new();
+    let candidates = recording_query_candidates(raw_title, station);
+    // The first candidate is also the best guess for storage/display – the cover
+    // is cached under it so the recordings list finds it ([`recording_cover_path`]).
+    let key = candidates.first().cloned();
+    for (artist, title) in &candidates {
+        if let Ok(Some(hit)) = client.search_track_cover(artist.as_deref().unwrap_or(""), title) {
+            if let Some((ka, kt)) = &key {
+                let _ = std::fs::write(recording_cover_file(ka.as_deref().unwrap_or(""), kt), &hit.0);
+            }
+            return Some(hit);
+        }
+    }
+    None
+}
+
+/// Builds `(artist, title)` search candidates from a raw ICY stream title that
+/// may also carry the **station name** (a frequent reason the lookup misses).
+/// Best-first; the **first** element is also the best guess for storing/display.
+///
+/// Strategy: strip the station name and "now playing" noise, split on the common
+/// separators, then offer the plausible pairings – including the swapped order
+/// ("Title - Artist") and a title-only fallback.
+pub fn recording_query_candidates(raw: &str, station: Option<&str>) -> Vec<(Option<String>, String)> {
+    let cleaned = clean_stream_title(raw, station);
+    let parts = split_title_parts(&cleaned, station);
+    let mut out: Vec<(Option<String>, String)> = Vec::new();
+    let mut push = |a: Option<&str>, t: &str| {
+        let t = t.trim();
+        if t.is_empty() {
+            return;
+        }
+        let cand = (
+            a.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+            t.to_string(),
+        );
+        if !out.contains(&cand) {
+            out.push(cand);
+        }
+    };
+    match parts.as_slice() {
+        [] => {}
+        [only] => push(None, only),
+        [a, b] => {
+            push(Some(a), b);
+            push(Some(b), a);
+        }
+        // 3+ parts: one is likely the station or extra info – try adjacent pairs.
+        [a, b, c, ..] => {
+            push(Some(a), b);
+            push(Some(b), a);
+            push(Some(b), c);
+            push(Some(a), c);
+        }
+    }
+    // Always also try the whole cleaned string as a title-only search.
+    push(None, &cleaned);
+    out
+}
+
+/// Removes "now playing" noise and the station name from a raw stream title.
+fn clean_stream_title(raw: &str, station: Option<&str>) -> String {
+    let mut s = raw.trim().to_string();
+    for p in ["now playing:", "now playing", "playing:", "live:", "on air:", "▶"] {
+        if s.to_ascii_lowercase().starts_with(p) {
+            s = s[p.len()..].trim().to_string();
+        }
+    }
+    if let Some(st) = station.map(str::trim).filter(|s| !s.is_empty()) {
+        for (o, c) in [('(', ')'), ('[', ']')] {
+            s = s.replace(&format!("{o}{st}{c}"), " ");
+        }
+        s = remove_ci(&s, st);
+    }
+    s.trim().trim_matches(|c| "-–—|/ ".contains(c)).trim().to_string()
+}
+
+/// Splits a cleaned title on the common separators (dash variants, pipe, slash),
+/// dropping empty parts and any part that is just the station name.
+fn split_title_parts(s: &str, station: Option<&str>) -> Vec<String> {
+    let normalized = s.replace(['–', '—', '|'], "-").replace(" / ", " - ");
+    normalized
+        .split(" - ")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .filter(|p| station.map_or(true, |st| !p.eq_ignore_ascii_case(st.trim())))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Case-insensitive (ASCII) removal of every occurrence of `needle` from `haystack`.
+fn remove_ci(haystack: &str, needle: &str) -> String {
+    if needle.is_empty() {
+        return haystack.to_string();
+    }
+    let (hl, nl) = (haystack.to_ascii_lowercase(), needle.to_ascii_lowercase());
+    let mut result = String::new();
+    let mut i = 0;
+    while let Some(pos) = hl[i..].find(&nl) {
+        result.push_str(&haystack[i..i + pos]);
+        i += pos + nl.len();
+    }
+    result.push_str(&haystack[i..]);
+    result
+}
+
+/// Cache file of a recording cover (key = artist+title).
+fn recording_cover_file(artist: &str, title: &str) -> PathBuf {
+    let mut p = cover_cache_dir();
+    p.push(format!("rec_{}.img", name_hash(&format!("{artist}\u{1}{title}"))));
+    p
+}
+
+/// Local cache path of a recording cover, **only if already present** – without
+/// network access (for display in the UI thread).
+pub fn recording_cover_path(artist: &str, title: &str) -> Option<String> {
+    if title.trim().is_empty() {
+        return None;
+    }
+    let p = recording_cover_file(artist, title);
+    p.exists().then(|| p.to_string_lossy().into_owned())
 }
 
 /// Cache path for a locally extracted album cover (key: artist+album).

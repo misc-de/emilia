@@ -21,10 +21,42 @@ fn is_allowed_remote_uri(uri: &str) -> bool {
     )
 }
 
+/// Combines the available audio-filter elements (scaletempo, equalizer) into a
+/// single element for `playbin`'s `audio-filter` property. With both present a
+/// `Bin` (scaletempo → equalizer) with ghost pads is returned; with only one,
+/// that element; with none, `None`.
+fn build_audio_filter(
+    scaletempo: Option<&gst::Element>,
+    equalizer: Option<&gst::Element>,
+) -> Option<gst::Element> {
+    match (scaletempo, equalizer) {
+        (Some(st), Some(eq)) => {
+            let bin = gst::Bin::new();
+            bin.add(st).ok()?;
+            bin.add(eq).ok()?;
+            st.link(eq).ok()?;
+            let sink = st.static_pad("sink")?;
+            let src = eq.static_pad("src")?;
+            bin.add_pad(&gst::GhostPad::with_target(&sink).ok()?).ok()?;
+            bin.add_pad(&gst::GhostPad::with_target(&src).ok()?).ok()?;
+            Some(bin.upcast())
+        }
+        (Some(st), None) => Some(st.clone()),
+        (None, Some(eq)) => Some(eq.clone()),
+        (None, None) => None,
+    }
+}
+
 pub struct Player {
     playbin: gst::Element,
-    /// 10-band equalizer as `audio-filter` (if the plugin is available).
+    /// 10-band equalizer (lives inside the `audio-filter` chain if available).
     equalizer: Option<gst::Element>,
+    /// Current playback rate (speed). Applied via a rate-seek and re-applied
+    /// after each track load (a new segment always starts at 1.0). 1.0 = normal.
+    rate: std::rc::Rc<std::cell::Cell<f64>>,
+    /// A fresh track was just loaded → the bus watch re-applies `rate` once the
+    /// pipeline has prerolled.
+    fresh_load: std::rc::Rc<std::cell::Cell<bool>>,
     /// Keeps the bus watch alive. `add_watch_local` returns a guard
     /// that **removes** the watch again when dropped – without holding
     /// onto it, an EOS would never arrive (no automatic advancing).
@@ -44,16 +76,26 @@ impl Player {
             .build()
             .map_err(|_| anyhow!("playbin3 unavailable – is gstreamer installed?"))?;
 
-        // Hook in the equalizer as an audio filter (optional – only if available).
+        // Audio-filter chain: scaletempo (pitch-preserving speed change) followed
+        // by the 10-band equalizer. Each element is optional – the chain adapts to
+        // whatever plugins are present.
+        let scaletempo = gst::ElementFactory::make("scaletempo").build().ok();
+        if scaletempo.is_none() {
+            tracing::warn!("scaletempo unavailable – speed changes would alter pitch");
+        }
         let equalizer = gst::ElementFactory::make("equalizer-10bands").build().ok();
-        match &equalizer {
-            Some(eq) => playbin.set_property("audio-filter", eq),
-            None => tracing::warn!("equalizer-10bands unavailable – EQ disabled"),
+        if equalizer.is_none() {
+            tracing::warn!("equalizer-10bands unavailable – EQ disabled");
+        }
+        if let Some(filter) = build_audio_filter(scaletempo.as_ref(), equalizer.as_ref()) {
+            playbin.set_property("audio-filter", &filter);
         }
 
         Ok(Self {
             playbin,
             equalizer,
+            rate: std::rc::Rc::new(std::cell::Cell::new(1.0)),
+            fresh_load: std::rc::Rc::new(std::cell::Cell::new(false)),
             bus_watch: std::cell::RefCell::new(None),
             pending_seek_ms: std::rc::Rc::new(std::cell::Cell::new(0)),
         })
@@ -104,6 +146,9 @@ impl Player {
     /// (preroll complete) and only then starts playback — so the UI thread never
     /// blocks waiting for preroll and audio never briefly plays from 0:00.
     fn start(&self, resume_ms: i64) -> Result<()> {
+        // A new segment starts at rate 1.0 – let the bus watch re-apply our rate
+        // once the pipeline has prerolled.
+        self.fresh_load.set(true);
         if resume_ms > 0 {
             self.pending_seek_ms.set(resume_ms);
             self.playbin
@@ -124,29 +169,60 @@ impl Player {
     /// **currently playing track** as a tag via the ICY metadata – this lets
     /// us show "Now Playing" without opening a second connection. Runs in the
     /// main loop.
-    pub fn connect_bus_events<E, T>(&self, on_eos: E, on_title: T)
+    pub fn connect_bus_events<E, T, R>(&self, on_eos: E, on_title: T, on_error: R)
     where
         E: Fn() + 'static,
         T: Fn(String) + 'static,
+        R: Fn() + 'static,
     {
         if let Some(bus) = self.playbin.bus() {
             let playbin = self.playbin.clone();
             let pending_seek = self.pending_seek_ms.clone();
+            let rate = self.rate.clone();
+            let fresh_load = self.fresh_load.clone();
             let guard = bus.add_watch_local(move |_, msg| {
                 match msg.view() {
                     gst::MessageView::Eos(_) => on_eos(),
                     gst::MessageView::AsyncDone(_) => {
-                        // Preroll finished. If a resume seek is armed (see
-                        // `start`), perform it now and begin playback. Our own
-                        // flush-seek posts another AsyncDone, but the pending
-                        // value is already cleared, so it is a no-op.
+                        // Preroll finished. Apply an armed resume seek and/or the
+                        // current playback rate (a freshly loaded segment always
+                        // starts at 1.0). Our own flush-seek posts another
+                        // AsyncDone, but the armed values are already cleared, so
+                        // it is a no-op.
                         let target = pending_seek.replace(0);
+                        let fresh = fresh_load.replace(false);
+                        let r = rate.get();
+                        let want_rate = (r - 1.0).abs() > 1e-3;
                         if target > 0 {
-                            let _ = playbin.seek_simple(
-                                gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
-                                gst::ClockTime::from_mseconds(target.max(0) as u64),
-                            );
+                            let pos = gst::ClockTime::from_mseconds(target.max(0) as u64);
+                            if want_rate {
+                                let _ = playbin.seek(
+                                    r,
+                                    gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+                                    gst::SeekType::Set,
+                                    pos,
+                                    gst::SeekType::End,
+                                    gst::ClockTime::ZERO,
+                                );
+                            } else {
+                                let _ = playbin.seek_simple(
+                                    gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+                                    pos,
+                                );
+                            }
                             let _ = playbin.set_state(gst::State::Playing);
+                        } else if fresh && want_rate {
+                            let pos = playbin
+                                .query_position::<gst::ClockTime>()
+                                .unwrap_or(gst::ClockTime::ZERO);
+                            let _ = playbin.seek(
+                                r,
+                                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+                                gst::SeekType::Set,
+                                pos,
+                                gst::SeekType::End,
+                                gst::ClockTime::ZERO,
+                            );
                         }
                     }
                     gst::MessageView::Error(err) => {
@@ -155,6 +231,9 @@ impl Player {
                             err.error(),
                             err.debug()
                         );
+                        // The current track can't be played (missing file/mount,
+                        // unreachable Nextcloud, decode error) → let the app skip.
+                        on_error();
                     }
                     gst::MessageView::Tag(tag) => {
                         // ICY "StreamTitle" (or file title) → report to the UI.
@@ -209,6 +288,25 @@ impl Player {
             )
             .map_err(|e| anyhow!("Seek failed: {e}"))?;
         Ok(())
+    }
+
+    /// Sets the playback speed (clamped to 0.25–2.0; pitch preserved via
+    /// scaletempo). Applies to the current track immediately and persists across
+    /// tracks in the session (re-applied after each load). A failing rate-seek
+    /// (e.g. a non-seekable live stream) is ignored.
+    pub fn set_rate(&self, rate: f64) {
+        let rate = rate.clamp(0.25, 2.0);
+        self.rate.set(rate);
+        if let Some(pos) = self.playbin.query_position::<gst::ClockTime>() {
+            let _ = self.playbin.seek(
+                rate,
+                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+                gst::SeekType::Set,
+                pos,
+                gst::SeekType::End,
+                gst::ClockTime::ZERO,
+            );
+        }
     }
 }
 

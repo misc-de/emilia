@@ -269,6 +269,10 @@ pub(crate) struct TransportState {
     pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
     /// List in the queue dialog (rebuilt on changes).
     pub(crate) queue_list: gtk::ListBox,
+    /// Consecutive unplayable tracks skipped since the last successful start.
+    /// Bounds auto-skipping so an entirely unplayable queue stops instead of
+    /// looping (see [`App::skip_current_track`]).
+    pub(crate) skip_count: u32,
 }
 
 /// Mini-player / now-playing strip state, grouped off the `App` god-object.
@@ -279,6 +283,8 @@ pub(crate) struct MiniState {
     /// Current position and total duration of the running track (ms).
     pub(crate) position_ms: i64,
     pub(crate) track_duration_ms: i64,
+    /// Playback speed (0.25–2.0, pitch-preserving). Not used for live streams.
+    pub(crate) playback_rate: f64,
     /// Seek bar of the mini player (for chapter marks via `add_mark`).
     pub(crate) seek_scale: gtk::Scale,
     /// Label that, on hover over the seek bar, shows the chapter at the cursor.
@@ -598,8 +604,13 @@ pub enum Msg {
     OpenCurrentEq,
     /// Open the queue dialog.
     ShowQueue,
-    /// Remove an entry from the queue (queue index).
-    QueueRemove(usize),
+    /// Start playback at a specific queue entry (queue index).
+    PlayQueueAt(usize),
+    /// Set the playback speed (0.25–2.0, in 0.25 steps).
+    SetPlaybackRate(f64),
+    /// The current track failed to play (missing file/mount, unreachable
+    /// Nextcloud, …) → skip to the next entry.
+    PlaybackError,
     /// Clear the entire queue (after confirmation) and stop playback.
     QueueClear,
     /// Move a queue entry (queue indices).
@@ -787,6 +798,8 @@ pub enum Msg {
     },
     /// Play a saved recording (path).
     PlayRecording(String),
+    /// Open the detail page of a recording (id) – via long press.
+    OpenRecording(i64),
     /// Delete a recording (id).
     RecordingDelete(i64),
     /// Set the size of the timeshift buffer in minutes (0–60).
@@ -832,6 +845,8 @@ pub enum Cmd {
     StreamSearchCoversReady,
     /// Rebuild the station list (e.g. after logos were cached).
     ReloadStreams,
+    /// Rebuild the recordings list (e.g. after a recording cover was cached).
+    ReloadRecordings,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
     /// Result of the update check (determined in the background).
@@ -1392,7 +1407,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.streaming.stream_view == StreamView::Recordings && !model.streaming.recording_items.is_empty(),
+                                        set_visible: model.streaming.stream_view == StreamView::Recordings && (!model.streaming.recording_items.is_empty() || model.streaming.record_state.is_some()),
                                         #[local_ref]
                                         recordings_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1409,7 +1424,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Record the current song while a station plays.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.streaming.stream_view == StreamView::Recordings && model.streaming.recording_items.is_empty(),
+                                        set_visible: model.streaming.stream_view == StreamView::Recordings && model.streaming.recording_items.is_empty() && model.streaming.record_state.is_none(),
                                     },
                                 },
                             add_titled_with_icon[Some("favorites"), &gettext("Favorites"), "emilia-favorite-symbolic"] =
@@ -1618,6 +1633,53 @@ impl Component for App {
                                     set_sensitive: model.mini.now_playing.is_some(),
                                     connect_clicked => Msg::OpenCurrentEq,
                                 },
+                                // Playback speed (0.25–2.0). Label shows the current
+                                // rate; the popover holds the step slider. Hidden for
+                                // live streams (not seekable).
+                                gtk::MenuButton {
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    set_tooltip_text: Some(&gettext("Playback speed")),
+                                    #[watch]
+                                    set_label: &fmt_rate(model.mini.playback_rate),
+                                    #[watch]
+                                    set_visible: model.streaming.playing_stream.is_none(),
+                                    #[watch]
+                                    set_sensitive: model.mini.now_playing.is_some(),
+                                    #[wrap(Some)]
+                                    set_popover = &gtk::Popover {
+                                        gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 8,
+                                            set_margin_top: 10,
+                                            set_margin_bottom: 10,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            gtk::Label {
+                                                set_label: &gettext("Playback speed"),
+                                                add_css_class: "dim-label",
+                                                set_xalign: 0.0,
+                                            },
+                                            gtk::Scale {
+                                                set_orientation: gtk::Orientation::Horizontal,
+                                                set_width_request: 220,
+                                                set_draw_value: true,
+                                                set_value_pos: gtk::PositionType::Right,
+                                                set_digits: 2,
+                                                set_round_digits: 2,
+                                                set_range: (0.25, 2.0),
+                                                set_increments: (0.25, 0.25),
+                                                // #[watch] snaps the thumb to the
+                                                // rounded (0.25-step) model value.
+                                                #[watch]
+                                                set_value: model.mini.playback_rate,
+                                                connect_value_changed[sender] => move |s| {
+                                                    sender.input(Msg::SetPlaybackRate(s.value()));
+                                                },
+                                            },
+                                        }
+                                    },
+                                },
                                 // Shuffle (only from 2 tracks); on the left near EQ, so that
                                 // the transport center is not shifted.
                                 gtk::ToggleButton {
@@ -1661,18 +1723,20 @@ impl Component for App {
                                     // (size via CSS class, see `init`).
                                     add_css_class: "emilia-bigplay",
                                     set_valign: gtk::Align::Center,
+                                    // Enabled while something is loaded OR a queue
+                                    // exists (so a freshly enqueued track can be
+                                    // started without auto-playing on add).
                                     #[watch]
-                                    set_sensitive: model.mini.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some() || !model.transport.queue.is_empty(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
-                                // Record button right next to play/pause, a bit lower
-                                // (~10px). Red dot; blinks during recording.
+                                // Record button right next to play/pause, on the
+                                // same height. Red dot; blinks during recording.
                                 // Only visible when a station is running and the buffer is on.
                                 gtk::Button {
                                     set_icon_name: "media-record-symbolic",
                                     set_tooltip_text: Some(&gettext("Record")),
-                                    set_valign: gtk::Align::Start,
-                                    set_margin_top: 10,
+                                    set_valign: gtk::Align::Center,
                                     #[watch]
                                     set_visible: model.streaming.playing_stream.is_some()
                                         && model.streaming.recording_buffer_minutes > 0,
@@ -1756,8 +1820,10 @@ impl Component for App {
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
                  button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\
                  button.emilia-record-dot image { color: @error_color; }\
+                 image.emilia-record-dot { color: @error_color; }\
                  @keyframes emilia-blink { 0% { opacity: 1; } 50% { opacity: 0.25; } 100% { opacity: 1; } }\
                  button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
+                 image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  button.emilia-nav-btn:checked image { color: @accent_color; }\
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
@@ -1943,7 +2009,11 @@ impl Component for App {
                     let sender = sender.clone();
                     move || sender.input(Msg::TrackFinished)
                 },
-                move |title| sender.input(Msg::StreamTitle(title)),
+                {
+                    let sender = sender.clone();
+                    move |title| sender.input(Msg::StreamTitle(title))
+                },
+                move || sender.input(Msg::PlaybackError),
             );
         }
 
@@ -2089,12 +2159,14 @@ impl Component for App {
                 play_session: None,
                 close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 queue_list: queue_list.clone(),
+                skip_count: 0,
             },
             mini: MiniState {
                 now_playing: None,
                 playing: false,
                 position_ms: 0,
                 track_duration_ms: 0,
+                playback_rate: 1.0,
                 seek_scale: gtk::Scale::default(),
                 chapter_label: gtk::Label::default(),
                 chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
@@ -2879,11 +2951,14 @@ impl Component for App {
                     let n = files.len();
                     let was_empty = self.transport.queue.is_empty();
                     self.transport.queue.append(&mut files);
-                    if was_empty && !self.transport.queue.is_empty() {
+                    // Don't auto-start: just enqueue. If the queue was empty,
+                    // point the position at the first added track so the play
+                    // button starts there when the user decides to play.
+                    if was_empty {
                         self.transport.queue_pos = 0;
-                        self.play_current();
                     }
                     self.refresh_queue_icons();
+                    self.save_queue();
                     self.toast(&gettext_f(
                         "Added {n} tracks to the queue",
                         &[("n", &n.to_string())],
@@ -3088,7 +3163,7 @@ impl Component for App {
                     if self.streaming.playing_stream != Some(id) {
                         self.play_stream(id);
                     }
-                    self.record_arm(id);
+                    self.record_arm(&sender, id);
                     self.refresh_stream_icons();
                 }
             }
@@ -3136,7 +3211,10 @@ impl Component for App {
             }
             // --- Recording (timeshift) ---
             Msg::RecordStop => {
-                if self.streaming.record_state.take().is_some() {
+                if self.streaming.record_state.is_some() {
+                    // Finalize the song still in progress so it isn't lost.
+                    self.finalize_recording(&sender);
+                    self.streaming.record_state = None;
                     self.toast(&gettext("Recording stopped"));
                     self.reload_recordings(&sender);
                 }
@@ -3164,46 +3242,15 @@ impl Component for App {
                 }
             }
             Msg::ReplaySave { start, end, title } => {
-                let (artist, t) = crate::core::recorder::split_artist_title(&title);
                 let station = self
                     .streaming
                     .playing_stream
                     .and_then(|id| self.streaming.stream_items.iter().find(|s| s.id == id))
                     .map(|s| s.name.clone());
-                let dest = crate::ui::app_streaming::recordings_dir();
-                let saved = self
-                    .streaming
-                    .recorder
-                    .as_ref()
-                    .and_then(|r| r.save_song(start, end, artist.as_deref(), &t, &dest).ok());
-                match saved {
-                    Some(path) => {
-                        let _ = self.library.add_recording(
-                            &path.to_string_lossy(),
-                            artist.as_deref(),
-                            &t,
-                            station.as_deref(),
-                            false,
-                        );
-                        self.reload_recordings(&sender);
-                        // Look up cover + album online and embed it (background).
-                        let (a, ti) = (artist.clone(), t.clone());
-                        sender.spawn_command(move |_out| {
-                            let aref = a.as_deref().unwrap_or("");
-                            if let Some((bytes, album)) =
-                                crate::core::online::recording_cover(aref, &ti)
-                            {
-                                crate::core::recorder::embed_cover(
-                                    &path,
-                                    a.as_deref(),
-                                    &ti,
-                                    album.as_deref(),
-                                    &bytes,
-                                );
-                            }
-                        });
-                    }
-                    None => {}
+                if self.store_segment(&sender, start, end, &title, station.as_deref(), false) {
+                    self.reload_recordings(&sender);
+                } else {
+                    self.toast(&gettext("Could not extract from buffer"));
                 }
             }
             Msg::PlayRecording(path) => {
@@ -3217,6 +3264,7 @@ impl Component for App {
                     self.toast(&gettext("File not found"));
                 }
             }
+            Msg::OpenRecording(id) => self.open_recording(root, &sender, id),
             Msg::RecordingDelete(id) => {
                 if let Ok(Some(path)) = self.library.delete_recording(id) {
                     let _ = std::fs::remove_file(&path);
@@ -3588,33 +3636,32 @@ impl Component for App {
                 }
             }
             Msg::ShowQueue => self.open_queue_dialog(root, &sender),
-            Msg::QueueRemove(idx) => {
+            Msg::PlayQueueAt(idx) => {
                 if idx < self.transport.queue.len() {
-                    let was_current = idx == self.transport.queue_pos;
-                    self.transport.queue.remove(idx);
-                    if self.transport.queue_pos > idx {
-                        self.transport.queue_pos -= 1;
-                    }
-                    if was_current {
-                        // If the removed track was playing → play the one now
-                        // at this spot (or stop if empty).
-                        if self.transport.queue.is_empty() {
-                            self.player.stop();
-                            self.mini.playing = false;
-                            self.mini.now_playing = None;
-                            self.transport.playing_path = None;
-                            self.mini.position_ms = 0;
-                            self.mini.track_duration_ms = 0;
-                            *self.transport.close_resume.borrow_mut() = None;
-                            self.mpris.set_stopped();
-                        } else {
-                            self.transport.queue_pos = self.transport.queue_pos.min(self.transport.queue.len() - 1);
-                            self.play_current();
-                        }
-                    }
+                    self.transport.queue_pos = idx;
+                    self.play_current();
                     self.reload_queue_list(&sender);
-                    self.refresh_queue_icons();
-                    self.save_queue();
+                }
+            }
+            Msg::SetPlaybackRate(rate) => {
+                let rate = (rate / 0.25).round() * 0.25;
+                let rate = rate.clamp(0.25, 2.0);
+                // Guard against the scale's #[watch] re-emitting the same value.
+                if (rate - self.mini.playback_rate).abs() > 1e-3 {
+                    self.mini.playback_rate = rate;
+                    self.player.set_rate(rate);
+                }
+            }
+            Msg::PlaybackError => {
+                // Streams/episodes have no "next" → don't skip on their errors.
+                if self.streaming.playing_stream.is_some()
+                    || self.podcasts.playing_episode_url.is_some()
+                {
+                    return;
+                }
+                // Only skip when something is actually queued.
+                if self.files.playing_remote || !self.transport.queue.is_empty() {
+                    self.skip_current_track();
                 }
             }
             Msg::QueueClear => {
@@ -4317,6 +4364,7 @@ impl Component for App {
             }
             Cmd::StreamSearchCoversReady => self.rebuild_stream_search_results(&sender),
             Cmd::ReloadStreams => self.reload_streams(&sender),
+            Cmd::ReloadRecordings => self.reload_recordings(&sender),
             Cmd::SourceStatus(status) => {
                 let mut changed = false;
                 for (id, ok) in status {
@@ -4387,6 +4435,13 @@ pub(crate) fn fmt_duration(ms: i64) -> String {
     } else {
         format!("{m}:{s:02}")
     }
+}
+
+/// Formats a playback rate compactly: `1.0 → "1×"`, `1.5 → "1.5×"`, `0.25 → "0.25×"`.
+pub(crate) fn fmt_rate(rate: f64) -> String {
+    let s = format!("{rate:.2}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    format!("{s}×")
 }
 
 /// Whether an online fetch makes sense: simply whether there is any connection

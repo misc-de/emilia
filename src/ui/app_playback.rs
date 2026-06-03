@@ -142,6 +142,9 @@ impl App {
         self.save_resume();
         self.save_episode_progress();
         self.finalize_play_session(false);
+        // Mark the remote context up front so a failure routes the skip to the
+        // remote row (not the main queue).
+        self.files.playing_remote = true;
         let cached = self.remote_cache_path(&track.rel_path);
         let result = match &cached {
             Some(p) if p.exists() => self.player.play_file(&p.to_string_lossy(), 0),
@@ -149,6 +152,7 @@ impl App {
         };
         match result {
             Ok(()) => {
+                self.transport.skip_count = 0;
                 self.mini.now_playing = Some(track.title.clone());
                 self.mini.playing = true;
                 self.transport.playing_path = None;
@@ -167,8 +171,10 @@ impl App {
                 self.refresh_queue_icons();
             }
             Err(e) => {
-                tracing::error!("Failed to play remote file: {e}");
-                self.toast(&crate::i18n::gettext("Could not play this file"));
+                // Unreachable Nextcloud → skip to the next remote entry
+                // (message-driven, so no recursion here).
+                tracing::warn!("Remote playback failed, skipping: {e}");
+                let _ = self.input.send(Msg::PlaybackError);
             }
         }
     }
@@ -185,6 +191,7 @@ impl App {
             // End of the row – stop playback (like at the end of an episode).
             self.player.stop();
             self.mini.playing = false;
+            self.transport.skip_count = 0;
             self.mpris.set_playing(false);
             self.refresh_queue_icons();
         }
@@ -274,6 +281,7 @@ impl App {
                 self.mini.track_duration_ms = 0;
                 self.transport.shuffle_order.clear();
                 self.transport.shuffle_idx = 0;
+                self.transport.skip_count = 0;
                 *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
                 self.refresh_queue_icons();
@@ -364,6 +372,11 @@ impl App {
                     .play_uri(&crate::core::webdav::stream_uri(&creds, &rel), resume_ms);
             }
             return Err(anyhow::anyhow!("Nextcloud source unavailable"));
+        }
+        // Local file: a missing path usually means an unmounted SD card / mount
+        // point. Fail fast so the caller skips it (instead of a GStreamer round-trip).
+        if !std::path::Path::new(path_str).exists() {
+            return Err(anyhow::anyhow!("file unavailable (mount missing?): {path_str}"));
         }
         self.player.play_file(path_str, resume_ms)
     }
@@ -540,6 +553,8 @@ impl App {
         };
         match self.start_track_playback(&path_str, resume_ms) {
             Ok(()) => {
+                // A track started → reset the unplayable-skip guard.
+                self.transport.skip_count = 0;
                 self.transport.playing_path = Some(path.clone());
                 // Music is playing again – no podcast episode/station/
                 // remote file active anymore.
@@ -600,7 +615,49 @@ impl App {
                     let _ = self.input.send(Msg::FingerprintCurrent(path.clone()));
                 }
             }
-            Err(e) => tracing::error!("Playback failed: {e}"),
+            Err(e) => {
+                // Synchronous failure (e.g. Nextcloud source without credentials)
+                // → skip this entry (message-driven, so no recursion here).
+                tracing::warn!("Playback failed, skipping: {e}");
+                let _ = self.input.send(Msg::PlaybackError);
+            }
+        }
+    }
+
+    /// Skips the current (unplayable) track and advances to the next queue
+    /// entry. Bounded by [`TransportState::skip_count`] so an entirely
+    /// unplayable queue (e.g. an unmounted SD card / offline Nextcloud) stops
+    /// instead of looping forever.
+    pub(crate) fn skip_current_track(&mut self) {
+        let limit = self
+            .transport
+            .queue
+            .len()
+            .max(self.files.remote_queue.len())
+            .max(1);
+        self.transport.skip_count += 1;
+        if self.transport.skip_count > limit as u32 {
+            // Whole queue unplayable → give up and stop.
+            self.transport.skip_count = 0;
+            self.player.stop();
+            self.mini.playing = false;
+            self.mini.now_playing = None;
+            self.transport.playing_path = None;
+            self.files.playing_remote = false;
+            *self.transport.close_resume.borrow_mut() = None;
+            self.mpris.set_stopped();
+            self.refresh_queue_icons();
+            self.toast(&crate::i18n::gettext("No playable tracks"));
+            return;
+        }
+        // Brief, non-spammy hint on the first skip of a run.
+        if self.transport.skip_count == 1 {
+            self.toast(&crate::i18n::gettext("Skipping unavailable track"));
+        }
+        if self.files.playing_remote {
+            self.remote_next();
+        } else {
+            self.play_next();
         }
     }
 

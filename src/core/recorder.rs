@@ -36,6 +36,9 @@ pub struct Snapshot {
     pub current_start: Option<u64>,
     /// Detected songs (newest last), including the running one.
     pub songs: Vec<BufferedSong>,
+    /// Running (absolute, monotonic) byte offset of the buffer end – i.e. the
+    /// most recent data written. Used to finalize the running song on stop.
+    pub total: u64,
     /// Worker finished (stream ended/error)?
     pub ended: bool,
 }
@@ -126,6 +129,7 @@ impl Recorder {
         Snapshot {
             current_start,
             songs,
+            total: s.total,
             ended: s.ended,
         }
     }
@@ -374,19 +378,6 @@ fn parse_stream_title(meta: &[u8]) -> Option<String> {
     } else {
         Some(value.to_string())
     }
-}
-
-/// Splits "Artist - Title" (for tags/file name). Without a separator everything
-/// counts as the title.
-pub fn split_artist_title(stream_title: &str) -> (Option<String>, String) {
-    if let Some((a, t)) = stream_title.split_once(" - ") {
-        let a = a.trim();
-        let t = t.trim();
-        if !a.is_empty() && !t.is_empty() {
-            return (Some(a.to_string()), t.to_string());
-        }
-    }
-    (None, stream_title.trim().to_string())
 }
 
 fn ext_from_content_type(ct: Option<&str>) -> &'static str {

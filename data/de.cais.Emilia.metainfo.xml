@@ -84,6 +84,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.1.6" date="2026-06-03">
+      <description>
+        <p>Stream recordings now appear instantly with live song/artist info and cover art, keep the in-progress song when you stop, find metadata even when the station name is in the title, and have a detail page on long press. New playback speed control (0.25×–2×, pitch-preserving). The queue shows runtimes and groups whole albums into one entry; adding to the queue no longer starts playback automatically. Tracks that can't be played (offline Nextcloud, unmounted drive) are skipped automatically.</p>
+        <p xml:lang="de">Stream-Aufnahmen erscheinen sofort mit Live-Songinfo und Cover, behalten das laufende Lied beim Stoppen, finden Metadaten auch wenn der Sendername im Titel steht, und haben eine Detailseite per langem Druck. Neue Abspielgeschwindigkeit (0,25×–2×, tonhöhentreu). Die Warteschlange zeigt Laufzeiten und fasst ganze Alben zu einem Eintrag zusammen; Hinzufügen startet die Wiedergabe nicht mehr automatisch. Nicht abspielbare Titel (Nextcloud offline, nicht eingebundenes Laufwerk) werden übersprungen.</p>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-06-02">
       <description>
         <p>Podcast show notes everywhere with clickable chapter timestamps and seek-bar chapter marks, per-episode resume, and device sync of episodes, show notes and playback position. Robust audiobook ordering by file structure, and various list and layout polish.</p>

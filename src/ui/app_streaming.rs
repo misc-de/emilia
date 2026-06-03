@@ -8,7 +8,7 @@ use relm4::{adw, gtk};
 
 use crate::i18n::{gettext, gettext_f};
 use crate::model::StreamItem;
-use crate::ui::app::{App, Msg};
+use crate::ui::app::{App, Cmd, Msg};
 
 /// Placeholder icon when a station has no logo.
 const STREAM_ICON: &str = "audio-x-generic-symbolic";
@@ -19,6 +19,13 @@ pub(crate) struct RecordState {
     pub stream_id: i64,
     /// Absolute byte offset at which the next song to be saved begins.
     pub next_start: u64,
+    /// ICY title of the song currently being recorded. Drives the **live entry**
+    /// at the top of the recordings list. `None` until a title is firmly
+    /// assigned (a committed marker) – then the entry shows "Current recording".
+    pub current_title: Option<String>,
+    /// Title we already kicked off an online cover lookup for (dedupes the
+    /// per-tick fetch so a not-found title is not searched again and again).
+    pub cover_fetch_for: Option<String>,
 }
 
 /// Formats Unix seconds as "DD.MM.YYYY" (civil date, approximated to UTC).
@@ -466,6 +473,52 @@ impl App {
         while let Some(child) = self.streaming.recordings_list.first_child() {
             self.streaming.recordings_list.remove(&child);
         }
+
+        // Live entry for the song currently being recorded (not yet a saved
+        // file): newest on top. Shows the firmly-assigned song/artist, otherwise
+        // a "Current recording" placeholder; its cover arrives via the online
+        // lookup ([`maybe_fetch_live_cover`]).
+        if let Some(rs) = self.streaming.record_state.as_ref() {
+            let station = self
+                .streaming
+                .stream_items
+                .iter()
+                .find(|s| s.id == rs.stream_id)
+                .map(|s| s.name.clone());
+            let (artist, title) = match rs.current_title.as_deref() {
+                Some(t) => crate::core::online::recording_query_candidates(t, station.as_deref())
+                    .into_iter()
+                    .next()
+                    .unwrap_or((None, t.trim().to_string())),
+                None => (None, gettext("Current recording")),
+            };
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&title))
+                .build();
+            row.add_css_class("emilia-flush");
+            let mut sub: Vec<String> = Vec::new();
+            if let Some(a) = artist.as_deref().filter(|s| !s.trim().is_empty()) {
+                sub.push(a.to_string());
+            }
+            if let Some(s) = station.as_deref().filter(|s| !s.trim().is_empty()) {
+                sub.push(s.to_string());
+            }
+            sub.push(gettext("Recording …"));
+            row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
+            let cover =
+                crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &title);
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "media-record-symbolic",
+            ));
+            // Blinking red record dot marks this as the live entry.
+            let dot = gtk::Image::from_icon_name("media-record-symbolic");
+            dot.set_valign(gtk::Align::Center);
+            dot.set_css_classes(&["emilia-record-dot", "emilia-recording"]);
+            row.add_suffix(&dot);
+            self.streaming.recordings_list.append(&row);
+        }
+
         for rec in self.streaming.recording_items.clone() {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&rec.title))
@@ -483,12 +536,17 @@ impl App {
             if !sub.is_empty() {
                 row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
             }
-            let icon = if rec.incomplete {
+            let placeholder = if rec.incomplete {
                 "media-playlist-consecutive-symbolic"
             } else {
                 "audio-x-generic-symbolic"
             };
-            row.add_prefix(&gtk::Image::from_icon_name(icon));
+            // Cover from the online lookup (cached); placeholder icon otherwise.
+            let cover = crate::core::online::recording_cover_path(
+                rec.artist.as_deref().unwrap_or(""),
+                &rec.title,
+            );
+            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), placeholder));
             if rec.incomplete {
                 row.set_tooltip_text(Some(&gettext("Incomplete (beginning was missing)")));
             }
@@ -509,8 +567,114 @@ impl App {
                 let path = rec.path.clone();
                 row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
             }
+            // Long press → detail page (metadata + cover).
+            let lp = gtk::GestureLongPress::new();
+            {
+                let sender = sender.clone();
+                let id = rec.id;
+                lp.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    sender.input(Msg::OpenRecording(id));
+                });
+            }
+            row.add_controller(lp);
             self.streaming.recordings_list.append(&row);
         }
+    }
+
+    /// Detail page of a saved recording as a **dialog**: cover + metadata read
+    /// from the file tags (artist/title/album), the station and the recording
+    /// date, plus play/delete actions. Reachable via long press in the list.
+    pub(crate) fn open_recording(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        id: i64,
+    ) {
+        let Some(rec) = self.streaming.recording_items.iter().find(|r| r.id == id).cloned() else {
+            return;
+        };
+        // Album comes from the embedded tag (written during enrichment); best effort.
+        let album = crate::core::scanner::read_track(std::path::Path::new(&rec.path))
+            .ok()
+            .and_then(|t| t.album)
+            .filter(|a| !a.trim().is_empty());
+
+        let dialog = adw::Dialog::builder()
+            .title(gtk::glib::markup_escape_text(&rec.title))
+            .build();
+        self.adapt_detail_dialog(&dialog);
+        let content = detail_box();
+
+        // Header: cover + title/artist.
+        let info = adw::PreferencesGroup::new();
+        let head = adw::ActionRow::builder()
+            .title(gtk::glib::markup_escape_text(&rec.title))
+            .build();
+        if let Some(a) = rec.artist.as_deref().filter(|s| !s.trim().is_empty()) {
+            head.set_subtitle(&gtk::glib::markup_escape_text(a));
+        }
+        let cover = crate::core::online::recording_cover_path(
+            rec.artist.as_deref().unwrap_or(""),
+            &rec.title,
+        );
+        head.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
+        info.add(&head);
+        content.append(&info);
+
+        // Metadata (album / station / date), each as label → value.
+        let details = adw::PreferencesGroup::new();
+        let info_row = |label: &str, value: &str| {
+            let r = adw::ActionRow::builder().title(label).build();
+            r.set_subtitle(&gtk::glib::markup_escape_text(value));
+            r.add_css_class("property");
+            r
+        };
+        if let Some(al) = album.as_deref() {
+            details.add(&info_row(&gettext("Album"), al));
+        }
+        if let Some(st) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
+            details.add(&info_row(&gettext("Station"), st));
+        }
+        details.add(&info_row(&gettext("Recorded"), &format_date(rec.recorded_at)));
+        if rec.incomplete {
+            details.add(&info_row(
+                &gettext("Note"),
+                &gettext("Incomplete (beginning was missing)"),
+            ));
+        }
+        content.append(&details);
+
+        // Actions: play / delete.
+        let actions = adw::PreferencesGroup::new();
+        let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
+        {
+            let (sender, dialog, path) = (sender.clone(), dialog.clone(), rec.path.clone());
+            play.connect_activated(move |_| {
+                sender.input(Msg::PlayRecording(path.clone()));
+                dialog.close();
+            });
+        }
+        actions.add(&play);
+        let remove = action_row(&gettext("Delete recording"), "user-trash-symbolic");
+        {
+            let sender = sender.clone();
+            let (overlay, dialog) = (self.toast_overlay.clone(), dialog.clone());
+            remove.connect_activated(move |_| {
+                dialog.close();
+                crate::ui::app::confirm_destructive(
+                    &overlay,
+                    &gettext("Delete this recording?"),
+                    &gettext("Delete"),
+                    sender.clone(),
+                    Msg::RecordingDelete(id),
+                );
+            });
+        }
+        actions.add(&remove);
+        content.append(&actions);
+
+        present_dialog(&dialog, &content, root);
     }
 
     /// Adds a search result (index in `stream_search_results`) as a station
@@ -543,17 +707,66 @@ impl App {
     }
 
     /// Arms the continuous recording: start offset = beginning of the current song.
-    pub(crate) fn record_arm(&mut self, id: i64) {
+    pub(crate) fn record_arm(&mut self, sender: &ComponentSender<Self>, id: i64) {
         let Some(rec) = self.streaming.recorder.as_ref() else {
             return;
         };
         let snap = rec.snapshot();
         let next_start = snap.current_start.unwrap_or(0);
+        // Title of the song currently running (firmly assigned), if any.
+        let current_title = snap
+            .songs
+            .last()
+            .filter(|s| s.end.is_none())
+            .map(|s| s.title.clone());
         self.streaming.record_state = Some(RecordState {
             stream_id: id,
             next_start,
+            current_title,
+            cover_fetch_for: None,
         });
         self.toast(&gettext("Recording …"));
+        // Show the live entry ("Current recording" / the song title) immediately …
+        self.reload_recordings(sender);
+        // … and fetch its cover from the online DB in the background.
+        self.maybe_fetch_live_cover(sender);
+    }
+
+    /// Kicks off – once per title – an online cover lookup for the song
+    /// currently being recorded, so the live entry at the top of the recordings
+    /// list gets a cover. Reuses the cache; on success the list is reloaded.
+    fn maybe_fetch_live_cover(&mut self, sender: &ComponentSender<Self>) {
+        let (raw, stream_id) = match self.streaming.record_state.as_mut() {
+            Some(rs) => {
+                let Some(raw) = rs.current_title.clone() else {
+                    return;
+                };
+                if rs.cover_fetch_for.as_deref() == Some(raw.as_str()) {
+                    return;
+                }
+                rs.cover_fetch_for = Some(raw.clone());
+                (raw, rs.stream_id)
+            }
+            None => return,
+        };
+        let station = self
+            .streaming
+            .stream_items
+            .iter()
+            .find(|s| s.id == stream_id)
+            .map(|s| s.name.clone());
+        // Already cached (under the best-guess key) → the pending reload shows it.
+        if let Some((a, t)) =
+            crate::core::online::recording_query_candidates(&raw, station.as_deref()).first()
+        {
+            if crate::core::online::recording_cover_path(a.as_deref().unwrap_or(""), t).is_some() {
+                return;
+            }
+        }
+        sender.spawn_command(move |out| {
+            let _ = crate::core::online::recording_cover(&raw, station.as_deref());
+            let _ = out.send(Cmd::ReloadRecordings);
+        });
     }
 
     /// Driven by the 1 s tick: saves songs of the running recording that have
@@ -568,8 +781,12 @@ impl App {
             None => return,
         };
         if snap.ended {
-            self.toast(&gettext("Recording stopped (stream ended)"));
+            // The stream ended: finalize the song still in progress so it isn't
+            // lost, then end the recording.
+            self.finalize_recording(sender);
             self.streaming.record_state = None;
+            self.toast(&gettext("Recording stopped (stream ended)"));
+            self.reload_recordings(sender);
             return;
         }
         let station = self
@@ -578,10 +795,10 @@ impl App {
             .iter()
             .find(|s| s.id == stream_id)
             .map(|s| s.name.clone());
-        let dest = recordings_dir();
 
-        // Collect finished segments (read-only data; no self-mutation).
-        let mut segs: Vec<(u64, u64, Option<String>, String, bool)> = Vec::new();
+        // Collect finished segments (read-only data; no self-mutation): start,
+        // end, the raw ICY title, and whether the beginning was missing.
+        let mut segs: Vec<(u64, u64, String, bool)> = Vec::new();
         loop {
             // The song that contains `next_start` …
             let song = match snap
@@ -603,55 +820,134 @@ impl App {
             let Some(end) = song.end else {
                 break; // still running
             };
-            let (artist, title) = crate::core::recorder::split_artist_title(&song.title);
             let incomplete = !song.complete || next_start > song.start;
-            segs.push((next_start, end, artist, title, incomplete));
+            segs.push((next_start, end, song.title.clone(), incomplete));
             next_start = end;
         }
 
         let mut saved = 0;
-        // Freshly saved files for cover enrichment (background).
-        let mut enrich: Vec<(std::path::PathBuf, Option<String>, String)> = Vec::new();
-        for (start, end, artist, title, incomplete) in &segs {
-            if let Some(rec) = self.streaming.recorder.as_ref() {
-                match rec.save_song(*start, *end, artist.as_deref(), title, &dest) {
-                    Ok(path) => {
-                        let _ = self.library.add_recording(
-                            &path.to_string_lossy(),
-                            artist.as_deref(),
-                            title,
-                            station.as_deref(),
-                            *incomplete,
-                        );
-                        enrich.push((path, artist.clone(), title.clone()));
-                        saved += 1;
-                    }
-                    Err(e) => tracing::warn!("Could not save recording: {e}"),
-                }
+        for (start, end, raw_title, incomplete) in &segs {
+            if self.store_segment(sender, *start, *end, raw_title, station.as_deref(), *incomplete) {
+                saved += 1;
             }
         }
 
+        // Title of the song now running (firmly assigned). When it changes, the
+        // live entry at the top of the list must follow it.
+        let live_title = snap
+            .songs
+            .last()
+            .filter(|s| s.end.is_none())
+            .map(|s| s.title.clone());
+        let title_changed = self
+            .streaming
+            .record_state
+            .as_ref()
+            .map_or(false, |rs| rs.current_title != live_title);
         if let Some(rs) = self.streaming.record_state.as_mut() {
             rs.next_start = next_start;
+            if title_changed {
+                rs.current_title = live_title;
+            }
         }
-        if saved > 0 {
+        if saved > 0 || title_changed {
             self.reload_recordings(sender);
         }
-        // Look up cover + album online and embed them into the file (best effort).
-        for (path, artist, title) in enrich {
-            sender.spawn_command(move |_out| {
-                let a = artist.as_deref().unwrap_or("");
-                if let Some((bytes, album)) = crate::core::online::recording_cover(a, &title) {
-                    crate::core::recorder::embed_cover(
-                        &path,
-                        artist.as_deref(),
-                        &title,
-                        album.as_deref(),
-                        &bytes,
-                    );
-                }
-            });
+        if title_changed {
+            self.maybe_fetch_live_cover(sender);
         }
+    }
+
+    /// Cuts `[start, end)` out of the buffer, stores it as a recording (with the
+    /// station-aware best guess for artist/title), and queues an online lookup
+    /// that embeds clean tags + cover and refreshes the list. Returns `true` on
+    /// success. Shared by the continuous recording, the stop-finalize and the
+    /// replay "save".
+    pub(crate) fn store_segment(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        start: u64,
+        end: u64,
+        raw_title: &str,
+        station: Option<&str>,
+        incomplete: bool,
+    ) -> bool {
+        // Best guess for storage/display = the first search candidate (station
+        // name stripped); falls back to the raw title.
+        let (artist, title) = crate::core::online::recording_query_candidates(raw_title, station)
+            .into_iter()
+            .next()
+            .filter(|(_, t)| !t.trim().is_empty())
+            .unwrap_or((None, gettext("Recording")));
+        let Some(rec) = self.streaming.recorder.as_ref() else {
+            return false;
+        };
+        let dest = recordings_dir();
+        let path = match rec.save_song(start, end, artist.as_deref(), &title, &dest) {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!("Could not save recording: {e}");
+                return false;
+            }
+        };
+        let _ = self.library.add_recording(
+            &path.to_string_lossy(),
+            artist.as_deref(),
+            &title,
+            station,
+            incomplete,
+        );
+        // Look up cover + album online (trying several combinations) and embed
+        // them into the file (best effort); refresh the list once cached.
+        let (raw, st) = (raw_title.to_string(), station.map(str::to_string));
+        sender.spawn_command(move |out| {
+            if let Some((bytes, album)) = crate::core::online::recording_cover(&raw, st.as_deref()) {
+                crate::core::recorder::embed_cover(
+                    &path,
+                    artist.as_deref(),
+                    &title,
+                    album.as_deref(),
+                    &bytes,
+                );
+                let _ = out.send(Cmd::ReloadRecordings);
+            }
+        });
+        true
+    }
+
+    /// On stop: saves the song currently being recorded (from `next_start` up to
+    /// the current buffer end) so the in-progress song is not lost. Best effort;
+    /// does nothing if nothing has been buffered/identified yet.
+    pub(crate) fn finalize_recording(&mut self, sender: &ComponentSender<Self>) {
+        let Some(rs) = self.streaming.record_state.as_ref() else {
+            return;
+        };
+        let (stream_id, next_start) = (rs.stream_id, rs.next_start);
+        let live_title = rs.current_title.clone();
+        let Some(rec) = self.streaming.recorder.as_ref() else {
+            return;
+        };
+        let snap = rec.snapshot();
+        let end = snap.total;
+        if end <= next_start {
+            return;
+        }
+        // The running song (for its title + completeness).
+        let song = snap
+            .songs
+            .iter()
+            .find(|s| s.start <= next_start && s.end.is_none());
+        let Some(raw_title) = live_title.or_else(|| song.map(|s| s.title.clone())) else {
+            return; // nothing identified yet → don't save an untitled blob
+        };
+        let incomplete = song.map_or(true, |s| !s.complete || next_start > s.start);
+        let station = self
+            .streaming
+            .stream_items
+            .iter()
+            .find(|s| s.id == stream_id)
+            .map(|s| s.name.clone());
+        self.store_segment(sender, next_start, end, &raw_title, station.as_deref(), incomplete);
     }
 
     /// Replay subpage of a station: the songs detected in the buffer for
