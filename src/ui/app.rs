@@ -210,6 +210,18 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Favorites + audiobooks page state, grouped off the `App` god-object.
+pub(crate) struct FavoritesState {
+    /// Favorites: (scope, key, title, is_dir).
+    pub(crate) favorite_items: Vec<(String, String, String, bool)>,
+    pub(crate) favorites_list: gtk::ListBox,
+    /// Audiobooks: (scope, key, title, is_dir).
+    pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
+    pub(crate) audiobooks_list: gtk::ListBox,
+    /// Gallery variant of the audiobooks (cover grid).
+    pub(crate) audiobooks_gallery: gtk::FlowBox,
+}
+
 /// Playlists page state, grouped off the `App` god-object.
 pub(crate) struct PlaylistsState {
     /// (id, name, track count) per playlist.
@@ -365,14 +377,8 @@ pub struct App {
     /// Main split view – collapsed (`is_collapsed`) means narrow/mobile
     /// mode; this governs e.g. the detail dialogs (full width).
     pub(crate) split: adw::OverlaySplitView,
-    // Favorites: (scope, key, title, is_dir)
-    pub(crate) favorite_items: Vec<(String, String, String, bool)>,
-    pub(crate) favorites_list: gtk::ListBox,
-    // Audiobooks: (path, title, is_dir)
-    pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
-    pub(crate) audiobooks_list: gtk::ListBox,
-    /// Gallery variant of the audiobooks (cover grid).
-    pub(crate) audiobooks_gallery: gtk::FlowBox,
+    /// Favorites + audiobooks page state.
+    pub(crate) favorites: FavoritesState,
     /// Playlists page state.
     pub(crate) playlists: PlaylistsState,
     // Podcasts: (id, title, image URL, episode count)
@@ -1417,7 +1423,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.favorite_items.is_empty(),
+                                        set_visible: !model.favorites.favorite_items.is_empty(),
                                         #[local_ref]
                                         favorites_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1435,7 +1441,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Mark tracks, albums or artists with the star under \"More info\".")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.favorite_items.is_empty(),
+                                        set_visible: model.favorites.favorite_items.is_empty(),
                                     },
                                 },
                             add_titled_with_icon[Some("audiobooks"), &gettext("Audiobooks"), "emilia-audiobook-symbolic"] =
@@ -1445,7 +1451,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.audiobook_items.is_empty() && !model.gallery_view,
+                                        set_visible: !model.favorites.audiobook_items.is_empty() && !model.gallery_view,
                                         #[local_ref]
                                         audiobooks_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1460,7 +1466,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.audiobook_items.is_empty() && model.gallery_view,
+                                        set_visible: !model.favorites.audiobook_items.is_empty() && model.gallery_view,
                                         #[local_ref]
                                         audiobooks_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1477,7 +1483,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Mark albums, folders or tracks as audiobooks via the properties.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.audiobook_items.is_empty(),
+                                        set_visible: model.favorites.audiobook_items.is_empty(),
                                     },
                                 },
                             add_titled_with_icon[Some("stats"), &gettext("Statistics"), "emilia-stats-symbolic"] =
@@ -2074,11 +2080,13 @@ impl Component for App {
                 concerts_gallery: gtk::FlowBox::new(),
                 concert_hint_dismissed,
             },
-            favorite_items: Vec::new(),
-            favorites_list: favorites_list.clone(),
-            audiobook_items: Vec::new(),
-            audiobooks_list: audiobooks_list.clone(),
-            audiobooks_gallery: gtk::FlowBox::new(),
+            favorites: FavoritesState {
+                favorite_items: Vec::new(),
+                favorites_list: favorites_list.clone(),
+                audiobook_items: Vec::new(),
+                audiobooks_list: audiobooks_list.clone(),
+                audiobooks_gallery: gtk::FlowBox::new(),
+            },
             playlists: PlaylistsState {
                 playlist_items: Vec::new(),
                 playlists_list: playlists_list.clone(),
@@ -2223,7 +2231,7 @@ impl Component for App {
         let albums_gallery = model.albums_gallery.clone();
         let artists_gallery = model.artists_gallery.clone();
         let concerts_gallery = model.concerts.concerts_gallery.clone();
-        let audiobooks_gallery = model.audiobooks_gallery.clone();
+        let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
         let podcasts_gallery = model.podcasts_gallery.clone();
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
@@ -3926,7 +3934,7 @@ impl Component for App {
                 }
             }
             Msg::PlayFavorite(index) => {
-                if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.favorites.favorite_items.get(index).cloned() {
                     // If exactly this track is already playing, only toggle play/pause
                     // (a click on the shown pause sign pauses), instead of
                     // restarting it.
@@ -3950,6 +3958,7 @@ impl Component for App {
                         // Whole favorites track list as the queue (clear the previous one),
                         // from the clicked track.
                         let tracks: Vec<PathBuf> = self
+                            .favorites
                             .favorite_items
                             .iter()
                             .filter(|(s, _, _, _)| s == "track")
@@ -3969,16 +3978,17 @@ impl Component for App {
                 }
             }
             Msg::ShowFavoriteDetail(index) => {
-                if let Some((scope, key, _, is_dir)) = self.favorite_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.favorites.favorite_items.get(index).cloned() {
                     self.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
             Msg::MoveFavorite { from, to } => {
-                if from < self.favorite_items.len() && to < self.favorite_items.len() && from != to {
-                    let item = self.favorite_items.remove(from);
-                    self.favorite_items.insert(to, item);
+                if from < self.favorites.favorite_items.len() && to < self.favorites.favorite_items.len() && from != to {
+                    let item = self.favorites.favorite_items.remove(from);
+                    self.favorites.favorite_items.insert(to, item);
                     let order: Vec<(String, String)> = self
+                        .favorites
                         .favorite_items
                         .iter()
                         .map(|(s, k, _, _)| (s.clone(), k.clone()))
@@ -3988,13 +3998,13 @@ impl Component for App {
                 }
             }
             Msg::PlayAudiobook(index) => {
-                if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
                     self.play_entry(&scope, &key, is_dir);
                 }
             }
             Msg::OpenAudiobookEntry(index) => {
                 // Gallery tap: album/folder opens the track list, a single track plays.
-                if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
                     if scope == "track" {
                         self.play_entry(&scope, &key, is_dir);
                     } else {
@@ -4003,7 +4013,7 @@ impl Component for App {
                 }
             }
             Msg::ShowAudiobookDetail(index) => {
-                if let Some((scope, key, _, is_dir)) = self.audiobook_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
                     self.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }

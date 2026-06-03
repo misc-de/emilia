@@ -71,10 +71,10 @@ impl App {
     /// Loads the favorites and rebuilds the list (with cover, trash button,
     /// drag handle for reordering).
     pub(crate) fn load_favorites(&mut self, sender: &ComponentSender<Self>) {
-        self.favorite_items = self.library.favorites().unwrap_or_default();
-        let items = self.favorite_items.clone();
+        self.favorites.favorite_items = self.library.favorites().unwrap_or_default();
+        let items = self.favorites.favorite_items.clone();
         self.fill_entry_list(
-            &self.favorites_list,
+            &self.favorites.favorites_list,
             &items,
             sender,
             Msg::PlayFavorite,
@@ -96,19 +96,19 @@ impl App {
         let raw = self
             .library
             .area_entries(crate::core::category::Area::Audiobooks, true, false);
-        self.audiobook_items = self.expand_area_items(raw);
-        let items = self.audiobook_items.clone();
+        self.favorites.audiobook_items = self.expand_area_items(raw);
+        let items = self.favorites.audiobook_items.clone();
         if self.gallery_view {
             let tiles = self.entry_gallery_items(&items);
             self.fill_gallery(
-                &self.audiobooks_gallery,
+                &self.favorites.audiobooks_gallery,
                 &tiles,
                 Msg::OpenAudiobookEntry,
                 Msg::ShowAudiobookDetail,
             );
         } else {
             self.fill_entry_list(
-                &self.audiobooks_list,
+                &self.favorites.audiobooks_list,
                 &items,
                 sender,
                 Msg::PlayAudiobook,
