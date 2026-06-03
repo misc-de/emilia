@@ -495,10 +495,8 @@ pub struct App {
     /// Source ids that are currently **not reachable** (Nextcloud offline) –
     /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
-    /// Content of the statistics page (filled imperatively, like the lists above).
-    pub(crate) stats_box: gtk::Box,
-    /// Currently selected time period of the listening statistics.
-    pub(crate) stats_period: StatsPeriod,
+    /// Statistics page, extracted into its own relm4 component.
+    pub(crate) stats_page: relm4::Controller<crate::ui::stats_page::StatsPage>,
     /// State of the device synchronization (server/client + dialog widgets).
     pub(crate) sync: crate::ui::app_sync::SyncState,
     /// Whether a device is currently paired – controls the green sync icon at the top.
@@ -567,10 +565,6 @@ pub enum Msg {
     /// The sync dialog was closed – clean up server/camera.
     SyncDialogClosed,
     TrackFinished,
-    /// Switch the time period of the listening statistics.
-    SetStatsPeriod(StatsPeriod),
-    /// Rebuild the statistics page (e.g. when opening the section).
-    RefreshStats,
     /// Periodic tick: save the resume position of the running track.
     PersistResume,
     /// Command from the lock screen / from media keys (MPRIS).
@@ -1500,12 +1494,8 @@ impl Component for App {
                             add_titled_with_icon[Some("stats"), &gettext("Statistics"), "emilia-stats-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-                                    // Content is filled imperatively in `refresh_stats`.
-                                    #[local_ref]
-                                    stats_box -> gtk::Box {
-                                        set_orientation: gtk::Orientation::Vertical,
-                                        set_vexpand: true,
-                                    },
+                                    // Statistics live in their own relm4 component.
+                                    append: model.stats_page.widget(),
                                 },
                         },
 
@@ -2027,7 +2017,9 @@ impl Component for App {
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
-        let stats_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let stats_page = crate::ui::stats_page::StatsPage::builder()
+            .launch(())
+            .detach();
 
         let mut model = App {
             library,
@@ -2153,8 +2145,7 @@ impl Component for App {
             },
             settings_nc_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
-            stats_box: stats_box.clone(),
-            stats_period: StatsPeriod::All,
+            stats_page,
             nav: NavState {
                 split: adw::OverlaySplitView::new(),
                 view_stack: adw::ViewStack::new(),
@@ -2222,7 +2213,7 @@ impl Component for App {
         model.reload_podcasts(&sender);
         model.reload_streams(&sender);
         model.reload_recordings(&sender);
-        model.refresh_stats(&sender);
+        // (Statistics build themselves in the StatsPage component's init.)
         // Cache the podcast feed images once in the background, then rebuild
         // the list so that the covers appear (no UI block at startup).
         sender.spawn_oneshot_command(|| {
@@ -2496,14 +2487,14 @@ impl Component for App {
         }
         sync_active(&widgets.view_stack, &nav_buttons);
         {
-            let sender = sender.clone();
+            let stats_sender = model.stats_page.sender().clone();
             widgets
                 .view_stack
                 .connect_visible_child_notify(move |stack| {
                     sync_active(stack, &nav_buttons);
                     // Recompute the statistics fresh when opening the section.
                     if stack.visible_child_name().as_deref() == Some("stats") {
-                        sender.input(Msg::RefreshStats);
+                        stats_sender.emit(crate::ui::stats_page::StatsInput::Refresh);
                     }
                 });
         }
@@ -3324,11 +3315,6 @@ impl Component for App {
                     }
                 }
             }
-            Msg::SetStatsPeriod(period) => {
-                self.stats_period = period;
-                self.refresh_stats(&sender);
-            }
-            Msg::RefreshStats => self.refresh_stats(&sender),
             Msg::PersistResume => {
                 if self.mini.playing {
                     // Persist resume points on this 5 s timer (not every Tick):
