@@ -1,9 +1,9 @@
 # Emilia
 
 **Adaptive music & audio-drama player for Linux Phosh smartphones** (Librem 5,
-PinePhone & co.) – runs equally well on the desktop. Written in **Rust** with
-**relm4 + GTK4/libadwaita**, audio via **GStreamer** (`playbin3`), library index
-in **SQLite**.
+PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
+
+⚠️ **AI-assisted project**  
 
 > App ID: `de.cais.Emilia` · License: GPL-3.0-or-later · Status: in development
 
