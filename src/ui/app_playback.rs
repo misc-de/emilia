@@ -546,7 +546,8 @@ impl App {
                 self.now_playing = Some(self.display_name(&path));
                 self.playing = true;
                 // Refresh the active output (may have changed).
-                self.active_output = crate::core::output::default_output().unwrap_or_default();
+                self.settings.active_output =
+                    crate::core::output::default_output().unwrap_or_default();
                 self.apply_current_eq();
                 // Inform the lock screen/media keys about the new track.
                 self.update_mpris_metadata(&path, track.as_ref());
@@ -638,7 +639,7 @@ impl App {
         let bands = self
             .library
             .resolve_eq(
-                &self.active_output,
+                &self.settings.active_output,
                 artist.as_deref(),
                 album.as_deref(),
                 &path.to_string_lossy(),

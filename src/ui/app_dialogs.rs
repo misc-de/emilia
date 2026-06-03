@@ -776,7 +776,7 @@ impl App {
             .build();
         let current_idx = lang_codes
             .iter()
-            .position(|c| *c == self.ui_language)
+            .position(|c| *c == self.settings.ui_language)
             .unwrap_or(0);
         lang_row.set_selected(current_idx as u32);
         {

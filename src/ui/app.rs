@@ -210,6 +210,15 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// App-wide preferences, grouped off the `App` god-object.
+pub(crate) struct Settings {
+    /// Display language: "system" (system locale), "de" or "en". Can be
+    /// switched in the settings; takes effect after restarting the app.
+    pub(crate) ui_language: String,
+    /// Currently active audio output (PipeWire sink), for the EQ resolution.
+    pub(crate) active_output: String,
+}
+
 pub struct App {
     pub(crate) library: Library,
     pub(crate) player: Player,
@@ -242,15 +251,12 @@ pub struct App {
     pub(crate) enrich_cancel: Arc<AtomicBool>,
     pub(crate) acoustid_key: Option<String>,
     pub(crate) fanart_key: Option<String>,
-    /// Display language: "system" (system locale), "de" or "en". Can be
-    /// switched in the settings; takes effect after restarting the app.
-    pub(crate) ui_language: String,
+    /// App-wide preferences (display language, active audio output).
+    pub(crate) settings: Settings,
     /// Show lists as a **gallery** (cover grid) instead of as a list.
     pub(crate) gallery_view: bool,
     /// Number of tiles per row in the gallery view (2–8).
     pub(crate) gallery_columns: u32,
-    /// Currently active audio output (PipeWire sink), for the EQ resolution.
-    pub(crate) active_output: String,
     pub(crate) music_dir: Option<String>,
     pub(crate) root_dir: Option<PathBuf>,
     pub(crate) browse_dir: Option<PathBuf>,
@@ -2008,10 +2014,12 @@ impl Component for App {
             enrich_cancel: Arc::new(AtomicBool::new(false)),
             acoustid_key,
             fanart_key,
-            ui_language,
+            settings: Settings {
+                ui_language,
+                active_output,
+            },
             gallery_view,
             gallery_columns,
-            active_output,
             music_dir,
             root_dir,
             browse_dir,
@@ -3735,8 +3743,8 @@ impl Component for App {
                     .set_setting("auto_enrich", if on { "1" } else { "0" });
             }
             Msg::SetLanguage(lang) => {
-                if lang != self.ui_language {
-                    self.ui_language = lang.clone();
+                if lang != self.settings.ui_language {
+                    self.settings.ui_language = lang.clone();
                     let _ = self.library.set_setting("ui_language", &lang);
                     // gettext reads the language only at startup; therefore restart
                     // the app so that the whole interface switches over.

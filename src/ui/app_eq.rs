@@ -103,7 +103,7 @@ impl App {
         }
         let out_default = outputs
             .iter()
-            .position(|(_, id)| !id.is_empty() && *id == self.active_output)
+            .position(|(_, id)| !id.is_empty() && *id == self.settings.active_output)
             .unwrap_or(0);
 
         // Preload the bands per output (no DB access in the closures).
