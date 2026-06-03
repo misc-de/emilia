@@ -154,7 +154,7 @@ msgstr "Abonniere einen Podcast über seine Feed-Adresse (RSS)."
 
 #: src/ui/app.rs:1297 src/ui/app_dialogs.rs:776
 msgid "Streaming"
-msgstr ""
+msgstr "Streaming"
 
 #: src/ui/app.rs:1310
 msgid "Stations"
@@ -166,23 +166,23 @@ msgstr "Aufnahmen"
 
 #: src/ui/app.rs:1325 src/ui/app_streaming.rs:262
 msgid "Add station"
-msgstr ""
+msgstr "Sender hinzufügen"
 
 #: src/ui/app.rs:1348
 msgid "No stations"
-msgstr ""
+msgstr "Keine Sender"
 
 #: src/ui/app.rs:1349
 msgid "Add a stream address or search for a station worldwide."
-msgstr ""
+msgstr "Stream-Adresse hinzufügen oder weltweit nach einem Sender suchen."
 
 #: src/ui/app.rs:1372
 msgid "No recordings"
-msgstr ""
+msgstr "Keine Aufnahmen"
 
 #: src/ui/app.rs:1373
 msgid "Record the current song while a station plays."
-msgstr ""
+msgstr "Nimm den aktuellen Titel auf, während ein Sender läuft."
 
 #: src/ui/app.rs:1379
 msgid "Favorites"
@@ -283,46 +283,43 @@ msgstr "Podcast entfernt"
 
 #: src/ui/app.rs:2935
 msgid "Station added"
-msgstr ""
+msgstr "Sender hinzugefügt"
 
 #: src/ui/app.rs:2937 src/ui/app_streaming.rs:537
-#, fuzzy
 msgid "Could not add station"
-msgstr "Feed konnte nicht geladen werden"
+msgstr "Sender konnte nicht hinzugefügt werden"
 
 #: src/ui/app.rs:2997
-#, fuzzy
 msgid "Station removed"
-msgstr "Podcast entfernt"
+msgstr "Sender entfernt"
 
 #: src/ui/app.rs:3004
 msgid "Recording stopped"
-msgstr ""
+msgstr "Aufnahme gestoppt"
 
 #: src/ui/app.rs:3017
 msgid "Replay"
-msgstr ""
+msgstr "Wiedergabe"
 
 #: src/ui/app.rs:3027
 msgid "Could not extract from buffer"
-msgstr ""
+msgstr "Konnte nicht aus dem Puffer extrahieren"
 
 #: src/ui/app.rs:3051 src/ui/app_streaming.rs:672
 msgid "Recording saved"
-msgstr ""
+msgstr "Aufnahme gespeichert"
 
 #: src/ui/app.rs:3053
-#, fuzzy
 msgid "Could not save recording"
-msgstr "Feed konnte nicht geladen werden"
+msgstr "Aufnahme konnte nicht gespeichert werden"
 
 #: src/ui/app.rs:3064
 msgid "File not found"
-msgstr ""
+msgstr "Datei nicht gefunden"
 
 #: src/ui/app.rs:3072
 msgid "Recording deleted"
-msgstr ""
+msgstr "Aufnahme gelöscht"
 
 #: src/ui/app.rs:3392
 msgid "Checking for updates …"
@@ -748,19 +745,19 @@ msgstr "Abspielen"
 
 #: src/ui/app_streaming.rs:194
 msgid "Stop"
-msgstr ""
+msgstr "Stopp"
 
 #: src/ui/app_streaming.rs:203
 msgid "Stop recording"
-msgstr ""
+msgstr "Aufnahme stoppen"
 
 #: src/ui/app_streaming.rs:205 src/ui/app_streaming.rs:567
 msgid "Record"
-msgstr ""
+msgstr "Aufnehmen"
 
 #: src/ui/app_streaming.rs:215
 msgid "Replay (buffer)"
-msgstr ""
+msgstr "Wiedergabe (Puffer)"
 
 #: src/ui/app_streaming.rs:224 src/ui/app_dialogs.rs:205
 msgid "Remove from favorites"
@@ -771,101 +768,93 @@ msgid "Add to favorites"
 msgstr "Zu Favoriten"
 
 #: src/ui/app_streaming.rs:234
-#, fuzzy
 msgid "Remove station"
-msgstr "Podcast entfernen"
+msgstr "Sender entfernen"
 
 #: src/ui/app_streaming.rs:241
-#, fuzzy
 msgid "Remove this station?"
-msgstr "Diesen Podcast entfernen?"
+msgstr "Diesen Sender entfernen?"
 
 #: src/ui/app_streaming.rs:269
-#, fuzzy
 msgid "Find a station worldwide by name"
-msgstr "Podcast nach Namen finden"
+msgstr "Sender weltweit nach Namen finden"
 
 #: src/ui/app_streaming.rs:276
-#, fuzzy
 msgid "Station name …"
-msgstr "Podcast-Name …"
+msgstr "Sendername …"
 
 #: src/ui/app_streaming.rs:315
-#, fuzzy
 msgid "Or enter a stream address"
-msgstr "Oder Feed-Adresse eingeben"
+msgstr "Oder Stream-Adresse eingeben"
 
 #: src/ui/app_streaming.rs:318
-#, fuzzy
 msgid "Stream address (URL)"
-msgstr "Feed-Adresse (RSS)"
+msgstr "Stream-Adresse (URL)"
 
 #: src/ui/app_streaming.rs:361
-#, fuzzy
 msgid "No stations found"
-msgstr "Keine Podcasts gefunden"
+msgstr "Keine Sender gefunden"
 
 #: src/ui/app_streaming.rs:489
 msgid "Incomplete (beginning was missing)"
-msgstr ""
+msgstr "Unvollständig (Anfang fehlte)"
 
 #: src/ui/app_streaming.rs:529
-#, fuzzy
 msgid "Added: {n}"
-msgstr "{n} Konzert hinzugefügt"
+msgstr "Hinzugefügt: {n}"
 
 #: src/ui/app_streaming.rs:554
 msgid "Start the station first"
-msgstr ""
+msgstr "Erst den Sender starten"
 
 #: src/ui/app_streaming.rs:563
 msgid ""
 "The beginning of the current song is not in the buffer yet — the recording "
 "would be incomplete. Record anyway?"
 msgstr ""
+"Der Anfang des aktuellen Titels ist noch nicht im Puffer — die Aufnahme wäre "
+"unvollständig. Trotzdem aufnehmen?"
 
 #: src/ui/app_streaming.rs:565
 msgid "Record just the current song, or keep recording until you stop?"
 msgstr ""
+"Nur den aktuellen Titel aufnehmen oder weiter aufnehmen, bis du stoppst?"
 
 #: src/ui/app_streaming.rs:569
-#, fuzzy
 msgid "This song"
-msgstr "Diesen Monat"
+msgstr "Dieser Titel"
 
 #: src/ui/app_streaming.rs:570
 msgid "Keep recording"
-msgstr ""
+msgstr "Weiter aufnehmen"
 
 #: src/ui/app_streaming.rs:601
-#, fuzzy
 msgid "Recording …"
-msgstr "Suche läuft …"
+msgstr "Aufnahme läuft …"
 
 #: src/ui/app_streaming.rs:616
 msgid "Recording stopped (stream ended)"
-msgstr ""
+msgstr "Aufnahme gestoppt (Stream endete)"
 
 #: src/ui/app_streaming.rs:707
 msgid "Recently detected"
-msgstr ""
+msgstr "Kürzlich erkannt"
 
 #: src/ui/app_streaming.rs:712
 msgid "Nothing buffered yet"
-msgstr ""
+msgstr "Noch nichts gepuffert"
 
 #: src/ui/app_streaming.rs:722
 msgid "Beginning missing"
-msgstr ""
+msgstr "Anfang fehlt"
 
 #: src/ui/app_streaming.rs:727 src/ui/app_cloud.rs:117
 msgid "Save"
 msgstr "Speichern"
 
 #: src/ui/app_streaming.rs:760
-#, fuzzy
 msgid "Replay – {name}"
-msgstr "Playlist – {name}"
+msgstr "Wiedergabe – {name}"
 
 #: src/ui/app_concert.rs:76
 msgid "Select all"
@@ -1124,7 +1113,6 @@ msgid "Sound"
 msgstr "Klang"
 
 #: src/ui/app_dialogs.rs:598
-#, fuzzy
 msgid ""
 "Global sound control. It applies everywhere unless a custom setting is set "
 "for an artist, an album or a track."
@@ -1149,7 +1137,6 @@ msgid "Online detection"
 msgstr "Online-Erkennung"
 
 #: src/ui/app_dialogs.rs:626
-#, fuzzy
 msgid ""
 "Optional AcoustID key for fingerprint-based track detection (free at "
 "acoustid.org/new-application). Cover art and artist photos work without a "
@@ -1242,13 +1229,15 @@ msgstr "Kacheln pro Reihe"
 
 #: src/ui/app_dialogs.rs:779
 msgid "Recording buffer (minutes)"
-msgstr ""
+msgstr "Aufnahme-Puffer (Minuten)"
 
 #: src/ui/app_dialogs.rs:781
 msgid ""
 "Keep the last minutes of a station so you can record a song after it played. "
 "0 turns it off."
 msgstr ""
+"Behält die letzten Minuten eines Senders, damit du einen Titel auch nach dem "
+"Abspielen aufnehmen kannst. 0 schaltet es aus."
 
 #: src/ui/app_dialogs.rs:804
 msgid "Menu items"
