@@ -760,7 +760,7 @@ impl App {
     /// subpage) are discarded in the process.
     pub(crate) fn refresh_episode_icons(&self) {
         let active = self.podcasts.playing_episode_url.clone();
-        let playing = self.playing;
+        let playing = self.mini.playing;
         let is_active = |url: &str| playing && active.as_deref() == Some(url);
         {
             let mut buttons = self.podcasts.episode_play_buttons.borrow_mut();
@@ -797,39 +797,39 @@ impl App {
     /// tracks without chapters). The markers reposition automatically once the
     /// duration is known (the tick updates the value range).
     pub(crate) fn set_chapters(&self, chapters: Vec<(i64, String)>) {
-        self.seek_scale.clear_marks();
+        self.mini.seek_scale.clear_marks();
         for (ms, _) in &chapters {
             if *ms > 0 {
-                self.seek_scale
+                self.mini.seek_scale
                     .add_mark(*ms as f64, gtk::PositionType::Top, None);
             }
         }
-        self.chapter_label.set_visible(false);
-        *self.chapters.borrow_mut() = chapters;
+        self.mini.chapter_label.set_visible(false);
+        *self.mini.chapters.borrow_mut() = chapters;
     }
 
     /// Updates the chapter label to the chapter at the current playback
     /// position. No-op during a hover (then the mouse position takes
     /// precedence) and without chapters (the label stays hidden).
     pub(crate) fn update_current_chapter(&self) {
-        if self.hovering_seek.get() {
+        if self.mini.hovering_seek.get() {
             return;
         }
         let name = {
-            let chaps = self.chapters.borrow();
+            let chaps = self.mini.chapters.borrow();
             chaps
                 .iter()
                 .rev()
-                .find(|(ms, _)| *ms <= self.position_ms)
+                .find(|(ms, _)| *ms <= self.mini.position_ms)
                 .map(|(_, n)| n.clone())
                 .filter(|n| !n.is_empty())
         };
         match name {
             Some(n) => {
-                self.chapter_label.set_text(&n);
-                self.chapter_label.set_visible(true);
+                self.mini.chapter_label.set_text(&n);
+                self.mini.chapter_label.set_visible(true);
             }
-            None => self.chapter_label.set_visible(false),
+            None => self.mini.chapter_label.set_visible(false),
         }
     }
 
@@ -837,8 +837,8 @@ impl App {
         self.save_episode_progress();
         match self.player.play_uri(url, resume) {
             Ok(()) => {
-                self.now_playing = Some(title.to_string());
-                self.playing = true;
+                self.mini.now_playing = Some(title.to_string());
+                self.mini.playing = true;
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = Some(url.to_string());
                 self.streaming.playing_stream = None;
@@ -846,8 +846,8 @@ impl App {
                 self.stop_recorder();
                 self.queue.clear();
                 self.queue_pos = 0;
-                self.position_ms = resume.max(0);
-                self.track_duration_ms = 0;
+                self.mini.position_ms = resume.max(0);
+                self.mini.track_duration_ms = 0;
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, title, None, None, None, None);
                 self.mpris.set_playing(true);

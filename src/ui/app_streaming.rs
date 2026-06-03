@@ -241,7 +241,7 @@ impl App {
     /// playback state (called from the tick and after state changes). The
     /// record button sits in the player bar and updates itself via `#[watch]`.
     pub(crate) fn refresh_stream_icons(&self) {
-        let playing = self.playing;
+        let playing = self.mini.playing;
         let cur = self.streaming.playing_stream;
         let mut btns = self.streaming.stream_play_buttons.borrow_mut();
         btns.retain(|(_, b)| b.root().is_some());
@@ -420,8 +420,8 @@ impl App {
         self.finalize_play_session(false);
         match self.player.play_uri(&st.url, 0) {
             Ok(()) => {
-                self.now_playing = Some(st.name.clone());
-                self.playing = true;
+                self.mini.now_playing = Some(st.name.clone());
+                self.mini.playing = true;
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = Some(id);
@@ -429,8 +429,8 @@ impl App {
                 self.streaming.stream_title = None;
                 self.queue.clear();
                 self.queue_pos = 0;
-                self.position_ms = 0;
-                self.track_duration_ms = 0;
+                self.mini.position_ms = 0;
+                self.mini.track_duration_ms = 0;
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, &st.name, None, None, None, None);
                 self.mpris.set_playing(true);

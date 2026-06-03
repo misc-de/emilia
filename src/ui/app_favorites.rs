@@ -215,7 +215,7 @@ impl App {
                         .playing_path
                         .as_ref()
                         .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
-                let play_icon = if is_active && self.playing {
+                let play_icon = if is_active && self.mini.playing {
                     "media-playback-pause-symbolic"
                 } else {
                     "media-playback-start-symbolic"

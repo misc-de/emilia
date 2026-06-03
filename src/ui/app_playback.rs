@@ -49,7 +49,7 @@ impl App {
                 })
                 .collect()
         };
-        let playing = self.playing;
+        let playing = self.mini.playing;
         for (i, q, a) in states {
             self.entries.send(i, FsInput::SetQueued(q));
             self.entries.send(i, FsInput::SetActive { active: a, playing });
@@ -91,14 +91,14 @@ impl App {
                 .get(self.files.remote_pos)
                 .is_some_and(|t| t.rel_path == rel);
         if is_active {
-            if self.playing {
+            if self.mini.playing {
                 self.save_resume();
                 self.player.pause();
             } else {
                 self.player.resume();
             }
-            self.playing = !self.playing;
-            self.mpris.set_playing(self.playing);
+            self.mini.playing = !self.mini.playing;
+            self.mpris.set_playing(self.mini.playing);
             self.refresh_queue_icons();
             return;
         }
@@ -149,8 +149,8 @@ impl App {
         };
         match result {
             Ok(()) => {
-                self.now_playing = Some(track.title.clone());
-                self.playing = true;
+                self.mini.now_playing = Some(track.title.clone());
+                self.mini.playing = true;
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
@@ -158,8 +158,8 @@ impl App {
                 self.stop_recorder();
                 self.queue.clear();
                 self.queue_pos = 0;
-                self.position_ms = 0;
-                self.track_duration_ms = 0;
+                self.mini.position_ms = 0;
+                self.mini.track_duration_ms = 0;
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, &track.title, None, None, None, None);
                 self.mpris.set_playing(true);
@@ -184,7 +184,7 @@ impl App {
         } else {
             // End of the row – stop playback (like at the end of an episode).
             self.player.stop();
-            self.playing = false;
+            self.mini.playing = false;
             self.mpris.set_playing(false);
             self.refresh_queue_icons();
         }
@@ -267,11 +267,11 @@ impl App {
                 // Finalize the running session (no-op if already done via EOS).
                 self.finalize_play_session(false);
                 self.player.stop();
-                self.playing = false;
+                self.mini.playing = false;
                 self.playing_path = None;
                 self.queue_pos = 0;
-                self.position_ms = 0;
-                self.track_duration_ms = 0;
+                self.mini.position_ms = 0;
+                self.mini.track_duration_ms = 0;
                 self.shuffle_order.clear();
                 self.shuffle_idx = 0;
                 *self.close_resume.borrow_mut() = None;
@@ -464,7 +464,7 @@ impl App {
         let Some(pos) = self.player.position_ms() else {
             return;
         };
-        let dur = self.player.duration_ms().unwrap_or(self.track_duration_ms);
+        let dur = self.player.duration_ms().unwrap_or(self.mini.track_duration_ms);
         let _ = self
             .library
             .set_episode_progress(&url, guarded_resume(pos, dur));
@@ -478,7 +478,7 @@ impl App {
             let dur = if s.duration_ms > 0 {
                 s.duration_ms
             } else {
-                self.track_duration_ms
+                self.mini.track_duration_ms
             };
             let _ = self.library.log_play(
                 &s.path.to_string_lossy(),
@@ -545,8 +545,8 @@ impl App {
                 self.streaming.playing_stream = None;
                 self.files.playing_remote = false;
                 self.stop_recorder();
-                self.now_playing = Some(self.display_name(&path));
-                self.playing = true;
+                self.mini.now_playing = Some(self.display_name(&path));
+                self.mini.playing = true;
                 // Refresh the active output (may have changed).
                 self.settings.active_output =
                     crate::core::output::default_output().unwrap_or_default();
@@ -558,8 +558,8 @@ impl App {
                 self.mpris.set_position(start);
                 self.mpris.seeked(start);
                 // Set the seek bar to the new track (the tick refines the duration).
-                self.position_ms = start;
-                self.track_duration_ms = self
+                self.mini.position_ms = start;
+                self.mini.track_duration_ms = self
                     .player
                     .duration_ms()
                     .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
@@ -567,17 +567,17 @@ impl App {
                 // Snapshot for saving on close (resume tracks only).
                 let resumable = matches!(&track, Some(t) if self.should_resume(t));
                 *self.close_resume.borrow_mut() = resumable
-                    .then(|| (path_str.clone(), start, self.track_duration_ms));
+                    .then(|| (path_str.clone(), start, self.mini.track_duration_ms));
                 // Start a new listening session for the statistics.
                 let now = crate::ui::app::unix_now();
                 self.play_session = Some(PlaySession {
                     path: path.clone(),
                     started_at: now,
                     played_ms: 0,
-                    duration_ms: self.track_duration_ms,
+                    duration_ms: self.mini.track_duration_ms,
                 });
                 *self.close_session.borrow_mut() =
-                    Some((path_str.clone(), now, 0, self.track_duration_ms));
+                    Some((path_str.clone(), now, 0, self.mini.track_duration_ms));
                 // Adjust the play/queue markers in the list to the new track.
                 self.refresh_queue_icons();
                 // Save the queue + position for the next start.

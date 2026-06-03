@@ -210,6 +210,24 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Mini-player / now-playing strip state, grouped off the `App` god-object.
+pub(crate) struct MiniState {
+    /// Title shown in the player bar; `None` when nothing is loaded.
+    pub(crate) now_playing: Option<String>,
+    pub(crate) playing: bool,
+    /// Current position and total duration of the running track (ms).
+    pub(crate) position_ms: i64,
+    pub(crate) track_duration_ms: i64,
+    /// Seek bar of the mini player (for chapter marks via `add_mark`).
+    pub(crate) seek_scale: gtk::Scale,
+    /// Label that, on hover over the seek bar, shows the chapter at the cursor.
+    pub(crate) chapter_label: gtk::Label,
+    /// Chapters (time + name) of the running episode.
+    pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
+    /// Is the seek bar currently being hovered?
+    pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
 /// Navigation + layout chrome, grouped off the `App` god-object.
 pub(crate) struct NavState {
     /// Main split view – collapsed (`is_collapsed`) means narrow/mobile mode.
@@ -446,12 +464,8 @@ pub struct App {
     /// analogous to `close_resume`, so that on a hard exit the last event
     /// is not lost.
     pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
-    pub(crate) now_playing: Option<String>,
-    pub(crate) playing: bool,
-    /// Current position and total duration of the running track (ms) – for the
-    /// seek bar in the mini player.
-    pub(crate) position_ms: i64,
-    pub(crate) track_duration_ms: i64,
+    /// Mini-player / now-playing strip state.
+    pub(crate) mini: MiniState,
     pub(crate) shuffle: bool,
     /// Repeat: at the end of the queue or of the single track, start over.
     pub(crate) repeat: bool,
@@ -488,17 +502,6 @@ pub struct App {
     pub(crate) stats_box: gtk::Box,
     /// Currently selected time period of the listening statistics.
     pub(crate) stats_period: StatsPeriod,
-    /// Seek bar of the mini player (for chapter marks via `add_mark`).
-    pub(crate) seek_scale: gtk::Scale,
-    /// Label below the title that, when hovering over the seek bar, shows the name
-    /// of the chapter at the mouse position (controlled imperatively).
-    pub(crate) chapter_label: gtk::Label,
-    /// Chapters (time + name) of the running episode – shared with the hover
-    /// controller of the seek bar.
-    pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
-    /// Is the seek bar currently being hovered? Then the label temporarily shows
-    /// the hovered chapter; otherwise it tracks the playback position.
-    pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
     /// State of the device synchronization (server/client + dialog widgets).
     pub(crate) sync: crate::ui::app_sync::SyncState,
     /// Whether a device is currently paired – controls the green sync icon at the top.
@@ -1552,7 +1555,7 @@ impl Component for App {
                             set_margin_top: 5,
                             // Without a selected track, hide entirely (frees up space).
                             #[watch]
-                            set_visible: model.now_playing.is_some(),
+                            set_visible: model.mini.now_playing.is_some(),
                             connect_clicked => Msg::OpenNowPlaying,
                             #[wrap(Some)]
                             set_child = &gtk::Label {
@@ -1570,7 +1573,7 @@ impl Component for App {
                                 add_css_class: "caption",
                                 // Nothing selected → no text (bar appears inactive).
                                 #[watch]
-                                set_label: model.now_playing.as_deref().unwrap_or(""),
+                                set_label: model.mini.now_playing.as_deref().unwrap_or(""),
                             },
                         },
 
@@ -1592,13 +1595,13 @@ impl Component for App {
                             set_margin_start: 4,
                             set_margin_end: 4,
                             #[watch]
-                            set_visible: model.now_playing.is_some(),
+                            set_visible: model.mini.now_playing.is_some(),
 
                             gtk::Label {
                                 add_css_class: "caption",
                                 add_css_class: "numeric",
                                 #[watch]
-                                set_label: &fmt_duration(model.position_ms),
+                                set_label: &fmt_duration(model.mini.position_ms),
                             },
                             #[name = "seek_scale"]
                             gtk::Scale {
@@ -1607,15 +1610,15 @@ impl Component for App {
                                 set_draw_value: false,
                                 set_valign: gtk::Align::Center,
                                 #[watch]
-                                set_range: (0.0, model.track_duration_ms.max(1000) as f64),
+                                set_range: (0.0, model.mini.track_duration_ms.max(1000) as f64),
                                 #[watch]
-                                set_value: model.position_ms as f64,
+                                set_value: model.mini.position_ms as f64,
                             },
                             gtk::Label {
                                 add_css_class: "caption",
                                 add_css_class: "numeric",
                                 #[watch]
-                                set_label: &fmt_duration(model.track_duration_ms),
+                                set_label: &fmt_duration(model.mini.track_duration_ms),
                             },
                         },
 
@@ -1634,7 +1637,7 @@ impl Component for App {
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     connect_clicked => Msg::OpenCurrentEq,
                                 },
                                 // Shuffle (only from 2 tracks); on the left near EQ, so that
@@ -1647,7 +1650,7 @@ impl Component for App {
                                     #[watch]
                                     set_visible: model.queue.len() >= 2,
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     #[watch]
                                     set_active: model.shuffle,
                                     #[watch]
@@ -1664,12 +1667,12 @@ impl Component for App {
                                     add_css_class: "flat",
                                     // Nothing selected → grayed out.
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     connect_clicked => Msg::Prev,
                                 },
                                 gtk::Button {
                                     #[watch]
-                                    set_icon_name: if model.playing {
+                                    set_icon_name: if model.mini.playing {
                                         "media-playback-pause-symbolic"
                                     } else {
                                         "media-playback-start-symbolic"
@@ -1681,7 +1684,7 @@ impl Component for App {
                                     add_css_class: "emilia-bigplay",
                                     set_valign: gtk::Align::Center,
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
                                 // Record button right next to play/pause, a bit lower
@@ -1708,7 +1711,7 @@ impl Component for App {
                                     set_tooltip_text: Some(&gettext("Forward")),
                                     add_css_class: "flat",
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     connect_clicked => Msg::Next,
                                 },
                             },
@@ -1726,7 +1729,7 @@ impl Component for App {
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     #[watch]
                                     set_active: model.repeat,
                                     #[watch]
@@ -1739,7 +1742,7 @@ impl Component for App {
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
                                     #[watch]
-                                    set_sensitive: model.now_playing.is_some(),
+                                    set_sensitive: model.mini.now_playing.is_some(),
                                     connect_clicked => Msg::ShowQueue,
                                 },
                             },
@@ -2086,10 +2089,16 @@ impl Component for App {
             close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
             play_session: None,
             close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
-            now_playing: None,
-            playing: false,
-            position_ms: 0,
-            track_duration_ms: 0,
+            mini: MiniState {
+                now_playing: None,
+                playing: false,
+                position_ms: 0,
+                track_duration_ms: 0,
+                seek_scale: gtk::Scale::default(),
+                chapter_label: gtk::Label::default(),
+                chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
+            },
             shuffle: false,
             repeat: repeat_on,
             toast_overlay: toast_overlay.clone(),
@@ -2158,10 +2167,6 @@ impl Component for App {
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
-            seek_scale: gtk::Scale::default(),
-            chapter_label: gtk::Label::default(),
-            chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
             sync: crate::ui::app_sync::SyncState::default(),
             sync_connected: false,
             cloud: crate::ui::app_cloud::CloudState::default(),
@@ -2201,7 +2206,7 @@ impl Component for App {
         }
         if !q.is_empty() {
             q_pos = q_pos.min(q.len() - 1);
-            model.now_playing = Some(model.display_name(&q[q_pos]));
+            model.mini.now_playing = Some(model.display_name(&q[q_pos]));
             model.queue = q;
             model.queue_pos = q_pos;
         }
@@ -2256,8 +2261,8 @@ impl Component for App {
         model.nav.view_stack = widgets.view_stack.clone();
         model.nav.nav_view = widgets.nav_view.clone();
         model.nav.split = widgets.split.clone();
-        model.seek_scale = widgets.seek_scale.clone();
-        model.chapter_label = widgets.chapter_label.clone();
+        model.mini.seek_scale = widgets.seek_scale.clone();
+        model.mini.chapter_label = widgets.chapter_label.clone();
         model.files.source_tabs = widgets.source_tabs.clone();
         model.rebuild_source_tabs();
 
@@ -2286,8 +2291,8 @@ impl Component for App {
             }
         }
         {
-            let chapters = model.chapters.clone();
-            let hovering = model.hovering_seek.clone();
+            let chapters = model.mini.chapters.clone();
+            let hovering = model.mini.hovering_seek.clone();
             let scale = widgets.seek_scale.clone();
             let label = widgets.chapter_label.clone();
             let motion = gtk::EventControllerMotion::new();
@@ -2585,23 +2590,23 @@ impl Component for App {
                         };
                         // Tapping the active song again → toggle playback
                         // (pause/resume), instead of restarting.
-                        let is_active = self.now_playing.is_some()
+                        let is_active = self.mini.now_playing.is_some()
                             && self.queue.get(self.queue_pos) == Some(&path);
                         if is_active {
-                            if self.playing {
+                            if self.mini.playing {
                                 self.save_resume();
                                 self.player.pause();
                             } else {
                                 self.player.resume();
                             }
-                            self.playing = !self.playing;
-                            self.mpris.set_playing(self.playing);
+                            self.mini.playing = !self.mini.playing;
+                            self.mpris.set_playing(self.mini.playing);
                             self.refresh_queue_icons();
                         } else {
                             // Is a real queue currently running? Then slip the
                             // single song in between and resume the queue
                             // afterwards at its spot (it stays intact).
-                            if self.playing
+                            if self.mini.playing
                                 && self.queue.len() > 1
                                 && self.interrupted_queue.is_none()
                             {
@@ -3057,14 +3062,14 @@ impl Component for App {
             Msg::ToggleStream(id) => {
                 if self.streaming.playing_stream == Some(id) {
                     // Already running → toggle pause/resume (buffer keeps running).
-                    if self.playing {
+                    if self.mini.playing {
                         self.player.pause();
-                        self.playing = false;
+                        self.mini.playing = false;
                     } else {
                         self.player.resume();
-                        self.playing = true;
+                        self.mini.playing = true;
                     }
-                    self.mpris.set_playing(self.playing);
+                    self.mpris.set_playing(self.mini.playing);
                 } else {
                     self.play_stream(id);
                 }
@@ -3104,7 +3109,7 @@ impl Component for App {
                             .iter()
                             .find(|s| s.id == id)
                             .map(|s| s.name.clone());
-                        self.now_playing = Some(match &station {
+                        self.mini.now_playing = Some(match &station {
                             Some(name) => format!("{name} — {title}"),
                             None => title.clone(),
                         });
@@ -3117,9 +3122,9 @@ impl Component for App {
             Msg::StreamDelete(id) => {
                 if self.streaming.playing_stream == Some(id) {
                     self.player.stop();
-                    self.playing = false;
+                    self.mini.playing = false;
                     self.streaming.playing_stream = None;
-                    self.now_playing = None;
+                    self.mini.now_playing = None;
                     self.mpris.set_playing(false);
                     self.stop_recorder();
                 }
@@ -3143,8 +3148,8 @@ impl Component for App {
                         self.player.stop();
                         match self.player.play_file(&p, 0) {
                             Ok(()) => {
-                                self.now_playing = Some(gettext("Replay"));
-                                self.playing = true;
+                                self.mini.now_playing = Some(gettext("Replay"));
+                                self.mini.playing = true;
                                 self.playing_path = Some(path);
                                 self.podcasts.playing_episode_url = None;
                                 self.streaming.playing_stream = None;
@@ -3227,13 +3232,13 @@ impl Component for App {
             Msg::ToggleEpisode { url, title } => {
                 if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
                     // Already loaded episode → toggle pause/resume.
-                    if self.playing {
+                    if self.mini.playing {
                         self.player.pause();
                     } else {
                         self.player.resume();
                     }
-                    self.playing = !self.playing;
-                    self.mpris.set_playing(self.playing);
+                    self.mini.playing = !self.mini.playing;
+                    self.mpris.set_playing(self.mini.playing);
                     self.refresh_queue_icons();
                 } else {
                     // Other/no episode → start this one.
@@ -3244,7 +3249,7 @@ impl Component for App {
                 if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
                     // Already running → jump directly to the spot.
                     if self.player.seek_ms(ms).is_ok() {
-                        self.position_ms = ms;
+                        self.mini.position_ms = ms;
                         self.save_episode_progress();
                     }
                 } else {
@@ -3281,7 +3286,7 @@ impl Component for App {
                 } else if self.podcasts.playing_episode_url.is_some() && self.queue.is_empty() {
                     // A streamed episode has ended (no queue
                     // behind it): reset the playback state, clear the marking.
-                    self.playing = false;
+                    self.mini.playing = false;
                     self.podcasts.playing_episode_url = None;
                     self.mpris.set_playing(false);
                     self.refresh_queue_icons();
@@ -3318,7 +3323,7 @@ impl Component for App {
             }
             Msg::RefreshStats => self.refresh_stats(&sender),
             Msg::PersistResume => {
-                if self.playing {
+                if self.mini.playing {
                     // Persist resume points on this 5 s timer (not every Tick):
                     // a hard crash loses at most ~5 s of position, while normal
                     // pause/seek/track-switch/close still save immediately.
@@ -3338,17 +3343,17 @@ impl Component for App {
                 }
                 // Sync the play/pause and record icons of the station rows.
                 self.refresh_stream_icons();
-                if self.playing {
+                if self.mini.playing {
                     if let Some(pos) = self.player.position_ms() {
-                        self.position_ms = pos;
+                        self.mini.position_ms = pos;
                     }
                     if let Some(dur) = self.player.duration_ms() {
-                        self.track_duration_ms = dur;
+                        self.mini.track_duration_ms = dur;
                     }
                     // Carry the close snapshot along.
                     if let Some(entry) = self.close_resume.borrow_mut().as_mut() {
-                        entry.1 = self.position_ms;
-                        entry.2 = self.track_duration_ms;
+                        entry.1 = self.mini.position_ms;
+                        entry.2 = self.mini.track_duration_ms;
                     }
                     // (Episode resume is persisted on the 5 s PersistResume timer,
                     // not here — no per-second DB write on the UI thread.)
@@ -3357,7 +3362,7 @@ impl Component for App {
                     // Keep counting the listened time of the statistics session (wall clock, only
                     // during "Playing"; ~1 s per tick). Backfill the duration if needed,
                     // in case it was not yet known at the start.
-                    let dur = self.track_duration_ms;
+                    let dur = self.mini.track_duration_ms;
                     if let Some(s) = self.play_session.as_mut() {
                         s.played_ms += 1000;
                         if s.duration_ms == 0 {
@@ -3389,7 +3394,7 @@ impl Component for App {
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::Seek(ms) => {
                 let ms = ms.max(0);
-                self.position_ms = ms;
+                self.mini.position_ms = ms;
                 if self.player.seek_ms(ms).is_ok() {
                     self.mpris.seeked(ms);
                 }
@@ -3398,31 +3403,31 @@ impl Component for App {
                 use crate::core::mpris::MprisCommand as M;
                 match cmd {
                     M::PlayPause => {
-                        if self.now_playing.is_some() {
-                            if self.playing {
+                        if self.mini.now_playing.is_some() {
+                            if self.mini.playing {
                                 self.save_resume();
                                 self.player.pause();
                             } else {
                                 self.player.resume();
                             }
-                            self.playing = !self.playing;
-                            self.mpris.set_playing(self.playing);
+                            self.mini.playing = !self.mini.playing;
+                            self.mpris.set_playing(self.mini.playing);
                             self.refresh_queue_icons();
                         }
                     }
                     M::Play => {
-                        if self.now_playing.is_some() && !self.playing {
+                        if self.mini.now_playing.is_some() && !self.mini.playing {
                             self.player.resume();
-                            self.playing = true;
+                            self.mini.playing = true;
                             self.mpris.set_playing(true);
                             self.refresh_queue_icons();
                         }
                     }
                     M::Pause => {
-                        if self.now_playing.is_some() && self.playing {
+                        if self.mini.now_playing.is_some() && self.mini.playing {
                             self.save_resume();
                             self.player.pause();
-                            self.playing = false;
+                            self.mini.playing = false;
                             self.mpris.set_playing(false);
                             self.refresh_queue_icons();
                         }
@@ -3445,10 +3450,10 @@ impl Component for App {
                         self.save_resume();
                         self.finalize_play_session(false);
                         self.player.stop();
-                        self.playing = false;
+                        self.mini.playing = false;
                         self.playing_path = None;
-                        self.position_ms = 0;
-                        self.track_duration_ms = 0;
+                        self.mini.position_ms = 0;
+                        self.mini.track_duration_ms = 0;
                         *self.close_resume.borrow_mut() = None;
                         self.mpris.set_stopped();
                         self.refresh_queue_icons();
@@ -3590,11 +3595,11 @@ impl Component for App {
                         // at this spot (or stop if empty).
                         if self.queue.is_empty() {
                             self.player.stop();
-                            self.playing = false;
-                            self.now_playing = None;
+                            self.mini.playing = false;
+                            self.mini.now_playing = None;
                             self.playing_path = None;
-                            self.position_ms = 0;
-                            self.track_duration_ms = 0;
+                            self.mini.position_ms = 0;
+                            self.mini.track_duration_ms = 0;
                             *self.close_resume.borrow_mut() = None;
                             self.mpris.set_stopped();
                         } else {
@@ -3613,11 +3618,11 @@ impl Component for App {
                 self.queue_pos = 0;
                 self.shuffle_order.clear();
                 self.shuffle_idx = 0;
-                self.playing = false;
-                self.now_playing = None;
+                self.mini.playing = false;
+                self.mini.now_playing = None;
                 self.playing_path = None;
-                self.position_ms = 0;
-                self.track_duration_ms = 0;
+                self.mini.position_ms = 0;
+                self.mini.track_duration_ms = 0;
                 *self.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
                 self.reload_queue_list(&sender);
@@ -3968,15 +3973,15 @@ impl Component for App {
                             .as_ref()
                             .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
                     if is_current {
-                        if self.playing {
+                        if self.mini.playing {
                             self.save_resume();
                             self.player.pause();
-                            self.playing = false;
+                            self.mini.playing = false;
                         } else {
                             self.player.resume();
-                            self.playing = true;
+                            self.mini.playing = true;
                         }
-                        self.mpris.set_playing(self.playing);
+                        self.mpris.set_playing(self.mini.playing);
                         self.refresh_queue_icons();
                     } else if scope == "track" {
                         // Whole favorites track list as the queue (clear the previous one),
@@ -4043,17 +4048,17 @@ impl Component for App {
                 }
             }
             Msg::TogglePlay => {
-                if self.playing {
+                if self.mini.playing {
                     self.save_resume();
                     self.player.pause();
-                    self.playing = false;
+                    self.mini.playing = false;
                 } else if self.playing_path.is_some()
                     || self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
                 {
                     // Paused (file, station or episode) → resume.
                     self.player.resume();
-                    self.playing = true;
+                    self.mini.playing = true;
                 } else if !self.queue.is_empty() {
                     // Playback had ended → restart from the current position (rewound
                     // to 0 after the end). play_current sets
@@ -4063,7 +4068,7 @@ impl Component for App {
                 } else {
                     return;
                 }
-                self.mpris.set_playing(self.playing);
+                self.mpris.set_playing(self.mini.playing);
                 // Adjust the play/pause icon of the active track in the list.
                 self.refresh_queue_icons();
                 self.refresh_stream_icons();
