@@ -246,6 +246,25 @@ impl OnlineClient {
         artist: &str,
         title: &str,
     ) -> Result<Option<(Vec<u8>, Option<String>)>> {
+        // Try the artist as-is, then a cleaned variant: strip "(…)"/"[…]"
+        // suffixes (e.g. "AnnenMayKantereit (Live in Berlin)") that converters
+        // dump into the artist tag and that make the search miss.
+        let cleaned = artist.split(['(', '[']).next().unwrap_or(artist).trim();
+        if !cleaned.is_empty() && cleaned != artist.trim() {
+            if let Some(hit) = self.search_track_cover(artist, title)? {
+                return Ok(Some(hit));
+            }
+            return self.search_track_cover(cleaned, title);
+        }
+        self.search_track_cover(artist, title)
+    }
+
+    /// One Deezer track search for (artist, title) → (cover bytes, album name).
+    fn search_track_cover(
+        &self,
+        artist: &str,
+        title: &str,
+    ) -> Result<Option<(Vec<u8>, Option<String>)>> {
         let q = if artist.trim().is_empty() {
             format!("track:\"{}\"", title.replace('"', " "))
         } else {
@@ -435,6 +454,30 @@ pub fn local_track_cover(path: &str) -> Option<String> {
     let bytes = cover::embedded_cover(p)?;
     std::fs::write(&cache, &bytes).ok()?;
     Some(cache.to_string_lossy().into_owned())
+}
+
+/// Stores album cover bytes (e.g. pulled from a remote source over WebDAV) in
+/// the cache under the same key as [`local_album_cover`] and returns the path.
+pub fn store_album_cover_bytes(artist: &str, album: &str, bytes: &[u8]) -> Option<String> {
+    save_local_cover(artist, album, bytes)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Stores embedded cover bytes of a single track under the same key as
+/// [`local_track_cover`], so the display picks it up without any network access.
+pub fn store_track_cover_bytes(path: &str, bytes: &[u8]) -> Option<String> {
+    let mut cache = cover_cache_dir();
+    cache.push(format!("track_{}.img", name_hash(path)));
+    std::fs::write(&cache, bytes).ok()?;
+    Some(cache.to_string_lossy().into_owned())
+}
+
+/// Whether a per-track cover is already cached (no network – UI-thread safe).
+pub fn track_cover_cached(path: &str) -> bool {
+    let mut cache = cover_cache_dir();
+    cache.push(format!("track_{}.img", name_hash(path)));
+    cache.exists()
 }
 
 /// Local cache path of a podcast image (key = image URL), **only if the file is

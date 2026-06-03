@@ -112,14 +112,23 @@ impl FsEntry {
         FsEntry::RemoteDir { name, rel_path }
     }
 
-    /// Audio file of a remote source (tags empty at first).
-    pub fn remote_file(rel_path: String, name: String, downloaded: Option<PathBuf>) -> Self {
+    /// Audio file of a remote source. Tags are passed in when they are already
+    /// known from the DB (indexed source); otherwise they stay empty and are
+    /// filled in later via [`FsInput::SetTags`].
+    pub fn remote_file(
+        rel_path: String,
+        name: String,
+        downloaded: Option<PathBuf>,
+        title: Option<String>,
+        artist: Option<String>,
+        duration_ms: Option<i64>,
+    ) -> Self {
         FsEntry::RemoteFile {
             name,
             rel_path,
-            title: None,
-            artist: None,
-            duration_ms: None,
+            title,
+            artist,
+            duration_ms,
             downloaded,
         }
     }

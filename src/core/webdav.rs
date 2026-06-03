@@ -436,6 +436,25 @@ pub fn nc_path(source_id: i64, rel: &str) -> String {
     format!("nc:{source_id}:{rel}")
 }
 
+/// Reads the first **embedded** cover image of a remote track. Fetches a larger
+/// prefix than the tag read (covers usually sit right behind the text tags) and
+/// extracts the picture via lofty from the in-memory buffer. **Blocking** –
+/// only from worker threads.
+pub fn fetch_cover(c: &Creds, rel: &str) -> Option<Vec<u8>> {
+    let url = url_for(c, rel);
+    let resp = agent()
+        .get(&url)
+        .set("Authorization", &auth_header(c))
+        .set("Range", "bytes=0-4194303")
+        .call()
+        .ok()?;
+    let mut buf = Vec::new();
+    resp.into_reader().take(4_400_000).read_to_end(&mut buf).ok()?;
+    let tagged = lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type().ok()?.read().ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    Some(tag.pictures().first()?.data().to_vec())
+}
+
 /// Splits a synthetic path `nc:<id>:<rel>` into (source id, rel).
 pub fn parse_nc_path(path: &str) -> Option<(i64, String)> {
     let rest = path.strip_prefix("nc:")?;

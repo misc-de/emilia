@@ -101,12 +101,30 @@ pub(crate) fn enrich_worker(
         // Skipped during the lightweight catch-up: this already ran during the scan;
         // re-scanning all cover-less albums every minute would be pure disk load.
         if !light {
+            // Credentials of the remote sources, so embedded covers of indexed
+            // Nextcloud albums/tracks (sample path `nc:<id>:<rel>`) can be pulled
+            // over WebDAV – their `Path` is synthetic and has no local file.
+            let sources = lib.list_sources().unwrap_or_default();
+            let remote = |path: &str| -> Option<(crate::core::webdav::Creds, String)> {
+                let (id, rel) = crate::core::webdav::parse_nc_path(path)?;
+                let creds = sources
+                    .iter()
+                    .find(|s| s.id == id)
+                    .and_then(crate::core::webdav::Creds::from_source)?;
+                Some((creds, rel))
+            };
+
             let missing = lib.albums_missing_cover().unwrap_or_default();
             for (artist, album, path) in missing.iter() {
                 if stopped() {
                     break 'work;
                 }
-                if let Some(cover_path) = online::local_album_cover(artist, album, path) {
+                let cover_path = match remote(path) {
+                    Some((creds, rel)) => crate::core::webdav::fetch_cover(&creds, &rel)
+                        .and_then(|b| online::store_album_cover_bytes(artist, album, &b)),
+                    None => online::local_album_cover(artist, album, path),
+                };
+                if let Some(cover_path) = cover_path {
                     let mut m = crate::model::AlbumMeta::pending(artist, album);
                     m.cover_path = Some(cover_path);
                     m.status = "local".to_string();
@@ -115,6 +133,44 @@ pub(crate) fn enrich_worker(
                 }
             }
             let _ = out.send(Cmd::ReloadViews);
+
+            // Covers for favorited single tracks that have none yet.
+            for (scope, key, _title, _is_dir) in lib.favorites().unwrap_or_default() {
+                if stopped() {
+                    break 'work;
+                }
+                if scope != "track" || online::track_cover_cached(&key) {
+                    continue;
+                }
+                // 1) Embedded cover. Remote (NC) tracks need a WebDAV fetch;
+                //    local files are read directly (same as the display path).
+                let embedded = match remote(&key) {
+                    Some((creds, rel)) => crate::core::webdav::fetch_cover(&creds, &rel),
+                    None => crate::core::cover::embedded_cover(std::path::Path::new(&key)),
+                };
+                if let Some(bytes) = embedded {
+                    if online::store_track_cover_bytes(&key, &bytes).is_some() {
+                        any_change = true;
+                    }
+                    continue;
+                }
+                // 2) No embedded art → an album-less single track has no album
+                //    cover to fall back to, so fetch one online by artist+title
+                //    (like other players do for e.g. converted downloads).
+                if let Ok(Some(t)) = lib.track_by_path(&key) {
+                    let album_less = t.album.as_deref().map_or(true, |a| a.trim().is_empty());
+                    if album_less {
+                        if let Some((bytes, _)) =
+                            online::recording_cover(t.artist.as_deref().unwrap_or(""), &t.title)
+                        {
+                            if online::store_track_cover_bytes(&key, &bytes).is_some() {
+                                any_change = true;
+                            }
+                        }
+                        std::thread::sleep(online::RATE_LIMIT);
+                    }
+                }
+            }
         }
 
         // Phase 3: online covers only for albums with no image at all (gap filler).

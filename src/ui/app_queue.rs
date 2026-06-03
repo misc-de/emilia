@@ -104,6 +104,13 @@ impl App {
                 .title(gtk::glib::markup_escape_text(&self.display_name(path)))
                 .build();
 
+            // Cover of the track (embedded/cached, else its album cover).
+            let cover = self.entry_cover("track", &path.to_string_lossy(), false);
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "audio-x-generic-symbolic",
+            ));
+
             if is_current {
                 row.set_subtitle(&gettext("Now playing"));
                 row.add_prefix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));

@@ -165,19 +165,23 @@ impl StatsPage {
         ));
     }
 
-    /// Period selection (linked toggles, centered at the top).
+    /// Period selection (linked toggles, full width like the Podcast/Streaming
+    /// tab switchers).
     fn period_selector(&self, sender: &ComponentSender<Self>) -> gtk::Box {
         let wrap = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .halign(gtk::Align::Center)
             .margin_top(2)
             .margin_bottom(10)
+            .margin_start(12)
+            .margin_end(12)
             .build();
-        let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let group = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         group.add_css_class("linked");
+        group.set_hexpand(true);
         let mut leader: Option<gtk::ToggleButton> = None;
         for period in [StatsPeriod::Weeks4, StatsPeriod::Year, StatsPeriod::All] {
             let btn = gtk::ToggleButton::with_label(&period.label());
+            btn.set_hexpand(true);
             btn.set_active(period == self.period);
             match &leader {
                 Some(l) => btn.set_group(Some(l)),

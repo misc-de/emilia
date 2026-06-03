@@ -242,6 +242,8 @@ impl App {
         let mut group: Option<gtk::ToggleButton> = None;
         for (sel, label) in tabs {
             let btn = gtk::ToggleButton::with_label(&label);
+            // Full width like the Podcast/Streaming tab switchers.
+            btn.set_hexpand(true);
             match &group {
                 Some(g) => btn.set_group(Some(g)),
                 None => group = Some(btn.clone()),
@@ -341,8 +343,11 @@ impl App {
             (0..guard.len())
                 .filter_map(|i| {
                     guard.get(i).and_then(|r| match &r.entry {
+                        // Only files whose tags are not already known from the DB
+                        // (title still empty) need a network read.
                         FsEntry::RemoteFile {
                             rel_path,
+                            title: None,
                             downloaded: None,
                             ..
                         } => Some(rel_path.clone()),
@@ -487,6 +492,35 @@ impl App {
         sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
     }
 
+    /// Re-indexes all Nextcloud/WebDAV sources in the background (refresh
+    /// button). Existing sources are only indexed when first added, so this is
+    /// the way to pull newly added remote tracks (and their embedded covers)
+    /// into the library afterwards. On completion [`Cmd::CloudReindexed`]
+    /// rebuilds the views and fetches covers/photos.
+    pub(crate) fn reindex_cloud_sources(&mut self, sender: &ComponentSender<Self>) {
+        let sources: Vec<crate::model::Source> = self
+            .files
+            .sources
+            .iter()
+            .filter(|s| s.kind == "webdav")
+            .cloned()
+            .collect();
+        if sources.is_empty() {
+            return;
+        }
+        sender.spawn_oneshot_command(move || {
+            if let Ok(lib) = crate::core::db::Library::open() {
+                for s in &sources {
+                    match crate::core::webdav::index_into(&lib, s) {
+                        Ok(n) => tracing::info!("Re-indexed {n} tracks from '{}'", s.name),
+                        Err(e) => tracing::warn!("Re-index of '{}' failed: {e}", s.name),
+                    }
+                }
+            }
+            Cmd::CloudReindexed
+        });
+    }
+
     /// Loads the artists overview from the DB into the factory (incl. photo).
     /// If the artist photo is missing, an album cover is used as a substitute.
     pub(crate) fn reload_artists(&mut self) {
@@ -552,8 +586,32 @@ impl App {
     /// Returns the playable files of an entry: recursive for folders,
     /// only the single one for files.
     pub(crate) fn entry_files(&self, entry: &FsEntry) -> Vec<PathBuf> {
-        // Remote entries have no local path – these helpers work
-        // exclusively on the local library.
+        // Remote (Nextcloud) entries: build the synthetic nc: paths so they can
+        // be queued and played like local tracks (`start_track_playback` streams
+        // them). Needs the source to be indexed (the DB holds the nc: tracks).
+        if entry.is_remote() {
+            let (Some(rel), ActiveSource::Source(id)) =
+                (entry.rel_path(), &self.files.active_source)
+            else {
+                return Vec::new();
+            };
+            if entry.is_dir() {
+                // All indexed tracks below this folder, in path (≈ track) order.
+                let prefix =
+                    format!("{}/", crate::core::webdav::nc_path(*id, rel).trim_end_matches('/'));
+                let mut paths: Vec<PathBuf> = self
+                    .library
+                    .all_tracks()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|t| t.path.starts_with(&prefix))
+                    .map(|t| PathBuf::from(t.path))
+                    .collect();
+                paths.sort();
+                return paths;
+            }
+            return vec![PathBuf::from(crate::core::webdav::nc_path(*id, rel))];
+        }
         let Some(path) = entry.path() else {
             return Vec::new();
         };
@@ -1720,9 +1778,15 @@ impl App {
                 let p = e.path()?;
                 let track = scanner::read_track(p).ok()?;
                 let path = p.to_string_lossy().into_owned();
-                let eff =
+                let mut eff =
                     self.library
                         .resolve_areas(track.artist.as_deref(), track.album.as_deref(), &path);
+                // A song without an album never appears in the Albums overview
+                // (its query skips album-less tracks), so leave the "Albums"
+                // switch off for it initially instead of showing it ticked.
+                if track.album.as_deref().map_or(true, |a| a.trim().is_empty()) {
+                    eff.retain(|a| *a != Area::Albums);
+                }
                 ("track", path, eff)
             }
             CtxTarget::Fs(e) => match self.fs_music_kind(e) {
@@ -1939,8 +2003,22 @@ impl App {
     /// the embedded image of the file or the online-assigned album cover.
     /// `None` if nothing suitable is found.
     pub(crate) fn cover_texture(&self, entry: &FsEntry) -> Option<gtk::gdk::Texture> {
-        // Cover resolution works on the local filesystem; remote
-        // entries have none.
+        // Remote (Nextcloud) entries have no local path: resolve the cover via
+        // the DB using the synthetic nc: path of the active source. A file uses
+        // its (cached/album) cover, a folder the album cover of a track within.
+        if entry.is_remote() {
+            if let (Some(rel), ActiveSource::Source(id)) =
+                (entry.rel_path(), &self.files.active_source)
+            {
+                let nc = crate::core::webdav::nc_path(*id, rel);
+                let scope = if entry.is_dir() { "folder" } else { "track" };
+                if let Some(p) = self.entry_cover(scope, &nc, entry.is_dir()) {
+                    return gtk::gdk::Texture::from_filename(&p).ok();
+                }
+            }
+            return None;
+        }
+        // Cover resolution works on the local filesystem.
         let epath = entry.path()?;
         if entry.is_dir() {
             if let Some(path) = cover::find_cover_file(epath) {

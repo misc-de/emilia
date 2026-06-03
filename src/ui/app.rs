@@ -836,6 +836,8 @@ pub enum Cmd {
     SourceStatus(Vec<(i64, bool)>),
     /// Result of the update check (determined in the background).
     UpdateChecked(crate::core::update::CheckResult),
+    /// Cloud sources were re-indexed (refresh button) → rebuild views + covers.
+    CloudReindexed,
 }
 
 #[relm4::component(pub)]
@@ -969,11 +971,14 @@ impl Component for App {
                                         #[name = "source_tabs"]
                                         gtk::Box {
                                             set_orientation: gtk::Orientation::Horizontal,
+                                            set_spacing: 6,
                                             add_css_class: "linked",
-                                            set_halign: gtk::Align::Center,
-                                            set_margin_top: 6,
-                                            // A bit of space below the source tab menu.
-                                            set_margin_bottom: 10,
+                                            // Flush to the top like the Artists/Albums lists.
+                                            set_margin_top: 0,
+                                            // A small gap below the source tab menu.
+                                            set_margin_bottom: 4,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                             #[watch]
                                             set_visible: !model.files.sources.is_empty(),
                                         },
@@ -1225,7 +1230,8 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
-                                    // Header: switcher "Newest" / "Overview" and "+" to subscribe.
+                                    // Header: linked tab switcher "Newest" / "Overview"
+                                    // (same style as the Streaming tab) and "+" to subscribe.
                                     gtk::Box {
                                         set_orientation: gtk::Orientation::Horizontal,
                                         set_spacing: 6,
@@ -1235,6 +1241,7 @@ impl Component for App {
                                         set_margin_bottom: 4,
                                         set_margin_start: 12,
                                         set_margin_end: 12,
+                                        add_css_class: "linked",
 
                                         gtk::ToggleButton {
                                             set_label: &gettext("Newest"),
@@ -1329,8 +1336,9 @@ impl Component for App {
                                     // Tab switcher: channels / recordings + "+" for a new channel.
                                     gtk::Box {
                                         set_spacing: 6,
-                                        set_margin_top: 6,
-                                        set_margin_bottom: 6,
+                                        // Flush to the top like the Artists/Albums lists.
+                                        set_margin_top: 0,
+                                        set_margin_bottom: 4,
                                         set_margin_start: 12,
                                         set_margin_end: 12,
                                         add_css_class: "linked",
@@ -1745,8 +1753,8 @@ impl Component for App {
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
                  row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
                  button.sync-connected { color: @success_color; }\
-                 button.emilia-bigplay { min-width: 46px; min-height: 46px; padding: 0px; }\
-                 button.emilia-bigplay image { -gtk-icon-size: 34px; }\
+                 button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
+                 button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\
                  button.emilia-record-dot image { color: @error_color; }\
                  @keyframes emilia-blink { 0% { opacity: 1; } 50% { opacity: 0.25; } 100% { opacity: 1; } }\
                  button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
@@ -2609,15 +2617,16 @@ impl Component for App {
                 }
             }
             Msg::ToggleQueue(index) => {
-                // Remote files do not (yet) go into the local queue –
-                // `path()` is `None` there, the double-click stays without effect.
-                let path = self
+                // Local files use their path, remote (NC) files their synthetic
+                // nc: path (resolved via `entry_files`), so both can be queued.
+                let entry = self
                     .libview
                     .entries
                     .guard()
                     .get(index)
                     .filter(|r| !r.entry.is_dir())
-                    .and_then(|r| r.entry.path().cloned());
+                    .map(|r| r.entry.clone());
+                let path = entry.and_then(|e| self.entry_files(&e).into_iter().next());
                 if let Some(path) = path {
                     if let Some(pos) = self.transport.queue.iter().position(|p| *p == path) {
                         self.transport.queue.remove(pos);
@@ -3532,7 +3541,11 @@ impl Component for App {
             }
             Msg::Refresh => {
                 self.load_dir(&sender);
-                // "Rescan" also updates the library (artists/albums).
+                // Re-index the cloud sources too, so their structure and covers
+                // update (existing sources are only indexed when first added).
+                // On completion this rebuilds the views and fetches covers.
+                self.reindex_cloud_sources(&sender);
+                // "Rescan" also updates the local library (artists/albums).
                 self.start_scan(&sender, false);
             }
             Msg::OpenSettings => self.open_settings(root, &sender),
@@ -4134,13 +4147,39 @@ impl Component for App {
                             list.into_iter().partition(|e| e.is_dir);
                         dirs.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
                         files.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
+                        // Source id, to read already-indexed track metadata
+                        // (title/artist/duration) straight from the DB.
+                        let source_id = match &source {
+                            ActiveSource::Source(id) => Some(*id),
+                            _ => None,
+                        };
                         let mut entries: Vec<FsEntry> = Vec::with_capacity(dirs.len() + files.len());
                         for d in dirs {
                             entries.push(FsEntry::remote_dir(d.rel_path, d.name));
                         }
                         for f in files {
                             let cached = self.remote_cache_path(&f.rel_path).filter(|p| p.exists());
-                            entries.push(FsEntry::remote_file(f.rel_path, f.name, cached));
+                            // If the source was indexed, the tags already live in
+                            // the DB → show them at once instead of re-reading them
+                            // over the network row by row.
+                            let meta = source_id.and_then(|id| {
+                                self.library
+                                    .track_by_path(&crate::core::webdav::nc_path(id, &f.rel_path))
+                                    .ok()
+                                    .flatten()
+                            });
+                            let (title, artist, duration_ms) = match meta {
+                                Some(t) => (Some(t.title), t.artist, t.duration_ms),
+                                None => (None, None, None),
+                            };
+                            entries.push(FsEntry::remote_file(
+                                f.rel_path,
+                                f.name,
+                                cached,
+                                title,
+                                artist,
+                                duration_ms,
+                            ));
                         }
                         let distinct: std::collections::HashSet<String> =
                             entries.iter().filter_map(|e| e.effective_artist()).collect();
@@ -4237,6 +4276,18 @@ impl Component for App {
                     && online_available()
                 {
                     // Automatic run (without a renewed tag scan), full scope.
+                    self.run_enrich(&sender, false, false);
+                }
+            }
+            Cmd::CloudReindexed => {
+                // Freshly indexed remote tracks → rebuild the library views and
+                // favorites. Then fetch covers/photos (incl. the embedded covers
+                // of the remote tracks); a manual refresh does this regardless of
+                // the passive auto-enrich setting.
+                self.reload_albums();
+                self.reload_artists();
+                self.load_favorites(&sender);
+                if !self.enrich_state.enriching && online_available() {
                     self.run_enrich(&sender, false, false);
                 }
             }
