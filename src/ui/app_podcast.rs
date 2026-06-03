@@ -841,7 +841,7 @@ impl App {
                 self.playing = true;
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = Some(url.to_string());
-                self.playing_stream = None;
+                self.streaming.playing_stream = None;
                 self.playing_remote = false;
                 self.stop_recorder();
                 self.queue.clear();

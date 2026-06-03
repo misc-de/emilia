@@ -152,7 +152,7 @@ impl App {
                 self.playing = true;
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = None;
-                self.playing_stream = None;
+                self.streaming.playing_stream = None;
                 self.playing_remote = true;
                 self.stop_recorder();
                 self.queue.clear();
@@ -540,7 +540,7 @@ impl App {
                 // Music is playing again – no podcast episode/station/
                 // remote file active anymore.
                 self.podcasts.playing_episode_url = None;
-                self.playing_stream = None;
+                self.streaming.playing_stream = None;
                 self.playing_remote = false;
                 self.stop_recorder();
                 self.now_playing = Some(self.display_name(&path));

@@ -210,6 +210,38 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Streaming (internet radio) + timeshift-recording page state.
+pub(crate) struct StreamingState {
+    /// Which streaming view is visible: channels or recordings.
+    pub(crate) stream_view: StreamView,
+    /// Saved stations.
+    pub(crate) stream_items: Vec<crate::model::StreamItem>,
+    pub(crate) streams_list: gtk::ListBox,
+    /// Hits of the last station search (Radio Browser), for the add dialog.
+    pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
+    /// While the add dialog is open: (dialog, hit list), so that asynchronously
+    /// arriving hits fit into the already shown list.
+    pub(crate) stream_search:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    /// ID of the currently running station; `None` when nothing/other is running.
+    pub(crate) playing_stream: Option<i64>,
+    /// Currently running track of the station (ICY metadata) for "Now Playing".
+    pub(crate) stream_title: Option<String>,
+    /// Timeshift recording of the running station (ring buffer); `None` if no
+    /// station is running or the buffer is set to 0 minutes.
+    pub(crate) recorder: Option<crate::core::recorder::Recorder>,
+    /// Active recording (state machine that saves at the song boundaries).
+    pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
+    /// Size of the timeshift buffer in minutes (0 = off, max. 60).
+    pub(crate) recording_buffer_minutes: u32,
+    /// Saved timeshift recordings.
+    pub(crate) recording_items: Vec<crate::model::RecordingItem>,
+    pub(crate) recordings_list: gtk::ListBox,
+    /// Play/pause buttons of the station rows (station id → button), for
+    /// refreshing the icon when the playback state changes.
+    pub(crate) stream_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(i64, gtk::Button)>>>,
+}
+
 /// Podcasts page state, grouped off the `App` god-object.
 pub(crate) struct PodcastsState {
     /// (id, title, image URL, episode count) per podcast.
@@ -415,36 +447,8 @@ pub struct App {
     pub(crate) playlists: PlaylistsState,
     /// Podcasts page state.
     pub(crate) podcasts: PodcastsState,
-    /// Which streaming view is visible: channels or recordings.
-    pub(crate) stream_view: StreamView,
-    // Streaming (internet radio): saved stations.
-    pub(crate) stream_items: Vec<crate::model::StreamItem>,
-    pub(crate) streams_list: gtk::ListBox,
-    /// Hits of the last station search (Radio Browser), for the add dialog.
-    pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
-    /// While the add dialog is open: (dialog, hit list) – so that
-    /// asynchronously arriving hits fit into the already shown list.
-    pub(crate) stream_search:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    /// ID of the currently running station (for the detail page display); `None`
-    /// when music/episode is playing or nothing is running.
-    pub(crate) playing_stream: Option<i64>,
-    /// Currently running track of the station (from the ICY metadata), for the
-    /// "Now Playing" display; `None` as long as no track has (yet) been reported.
-    pub(crate) stream_title: Option<String>,
-    /// Timeshift recording of the running station (ring buffer); `None` if no
-    /// station is running or the buffer is set to 0 minutes.
-    pub(crate) recorder: Option<crate::core::recorder::Recorder>,
-    /// Active "recording" (state machine that saves at the song boundaries).
-    pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
-    /// Size of the timeshift buffer in minutes (0 = off, max. 60).
-    pub(crate) recording_buffer_minutes: u32,
-    // Recordings (saved timeshift recordings).
-    pub(crate) recording_items: Vec<crate::model::RecordingItem>,
-    pub(crate) recordings_list: gtk::ListBox,
-    /// Play/pause buttons of the station rows (station id → button), for refreshing
-    /// the icon when the playback state changes. Detached buttons are discarded.
-    pub(crate) stream_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(i64, gtk::Button)>>>,
+    /// Streaming (internet radio) + timeshift-recording page state.
+    pub(crate) streaming: StreamingState,
     /// "Connected" list of the Nextcloud page in the open settings dialog, so that
     /// it can be updated immediately after a successful connect.
     pub(crate) settings_nc_list: std::rc::Rc<std::cell::RefCell<Option<gtk::ListBox>>>,
@@ -1354,14 +1358,14 @@ impl Component for App {
                                             set_label: &gettext("Stations"),
                                             set_hexpand: true,
                                             #[watch]
-                                            set_active: model.stream_view == StreamView::Channels,
+                                            set_active: model.streaming.stream_view == StreamView::Channels,
                                             connect_clicked => Msg::SetStreamView(StreamView::Channels),
                                         },
                                         gtk::ToggleButton {
                                             set_label: &gettext("Recordings"),
                                             set_hexpand: true,
                                             #[watch]
-                                            set_active: model.stream_view == StreamView::Recordings,
+                                            set_active: model.streaming.stream_view == StreamView::Recordings,
                                             connect_clicked => Msg::SetStreamView(StreamView::Recordings),
                                         },
                                         gtk::Button {
@@ -1376,7 +1380,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.stream_view == StreamView::Channels && !model.stream_items.is_empty(),
+                                        set_visible: model.streaming.stream_view == StreamView::Channels && !model.streaming.stream_items.is_empty(),
                                         #[local_ref]
                                         streams_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1393,14 +1397,14 @@ impl Component for App {
                                         set_description: Some(&gettext("Add a stream address or search for a station worldwide.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.stream_view == StreamView::Channels && model.stream_items.is_empty(),
+                                        set_visible: model.streaming.stream_view == StreamView::Channels && model.streaming.stream_items.is_empty(),
                                     },
 
                                     // Recordings.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.stream_view == StreamView::Recordings && !model.recording_items.is_empty(),
+                                        set_visible: model.streaming.stream_view == StreamView::Recordings && !model.streaming.recording_items.is_empty(),
                                         #[local_ref]
                                         recordings_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1417,7 +1421,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Record the current song while a station plays.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.stream_view == StreamView::Recordings && model.recording_items.is_empty(),
+                                        set_visible: model.streaming.stream_view == StreamView::Recordings && model.streaming.recording_items.is_empty(),
                                     },
                                 },
                             add_titled_with_icon[Some("favorites"), &gettext("Favorites"), "emilia-favorite-symbolic"] =
@@ -1686,10 +1690,10 @@ impl Component for App {
                                     set_valign: gtk::Align::Start,
                                     set_margin_top: 10,
                                     #[watch]
-                                    set_visible: model.playing_stream.is_some()
-                                        && model.recording_buffer_minutes > 0,
+                                    set_visible: model.streaming.playing_stream.is_some()
+                                        && model.streaming.recording_buffer_minutes > 0,
                                     #[watch]
-                                    set_css_classes: if model.record_state.is_some() {
+                                    set_css_classes: if model.streaming.record_state.is_some() {
                                         &["flat", "circular", "emilia-record-dot", "emilia-recording"]
                                     } else {
                                         &["flat", "circular", "emilia-record-dot"]
@@ -2108,19 +2112,21 @@ impl Component for App {
                 episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
-            stream_view: StreamView::Channels,
-            stream_items: Vec::new(),
-            streams_list: streams_list.clone(),
-            stream_search_results: Vec::new(),
-            stream_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
-            playing_stream: None,
-            stream_title: None,
-            recorder: None,
-            record_state: None,
-            recording_buffer_minutes,
-            recording_items: Vec::new(),
-            recordings_list: recordings_list.clone(),
-            stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+            streaming: StreamingState {
+                stream_view: StreamView::Channels,
+                stream_items: Vec::new(),
+                streams_list: streams_list.clone(),
+                stream_search_results: Vec::new(),
+                stream_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                playing_stream: None,
+                stream_title: None,
+                recorder: None,
+                record_state: None,
+                recording_buffer_minutes,
+                recording_items: Vec::new(),
+                recordings_list: recordings_list.clone(),
+                stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+            },
             settings_nc_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
             queue_list: queue_list.clone(),
@@ -3041,7 +3047,7 @@ impl Component for App {
                 }
             }
             Msg::ToggleStream(id) => {
-                if self.playing_stream == Some(id) {
+                if self.streaming.playing_stream == Some(id) {
                     // Already running → toggle pause/resume (buffer keeps running).
                     if self.playing {
                         self.player.pause();
@@ -3057,14 +3063,14 @@ impl Component for App {
                 self.refresh_stream_icons();
             }
             Msg::StreamRecordToggle(id) => {
-                if self.record_state.as_ref().map(|r| r.stream_id) == Some(id) {
+                if self.streaming.record_state.as_ref().map(|r| r.stream_id) == Some(id) {
                     // Running → stop.
                     sender.input(Msg::RecordStop);
-                } else if self.recording_buffer_minutes == 0 {
+                } else if self.streaming.recording_buffer_minutes == 0 {
                     self.toast(&gettext("Enable the recording buffer in the settings first"));
                 } else {
                     // Ensure the station (with buffer), then start the continuous recording.
-                    if self.playing_stream != Some(id) {
+                    if self.streaming.playing_stream != Some(id) {
                         self.play_stream(id);
                     }
                     self.record_arm(id);
@@ -3072,7 +3078,7 @@ impl Component for App {
                 }
             }
             Msg::TransportRecordToggle => {
-                if let Some(id) = self.playing_stream {
+                if let Some(id) = self.streaming.playing_stream {
                     sender.input(Msg::StreamRecordToggle(id));
                 }
             }
@@ -3081,10 +3087,11 @@ impl Component for App {
                 // are ignored). Shows "Station — Title" in the mini player and
                 // reports the title to the lock screen/media keys.
                 let title = title.trim().to_string();
-                if let Some(id) = self.playing_stream {
-                    if !title.is_empty() && self.stream_title.as_deref() != Some(title.as_str()) {
-                        self.stream_title = Some(title.clone());
+                if let Some(id) = self.streaming.playing_stream {
+                    if !title.is_empty() && self.streaming.stream_title.as_deref() != Some(title.as_str()) {
+                        self.streaming.stream_title = Some(title.clone());
                         let station = self
+                            .streaming
                             .stream_items
                             .iter()
                             .find(|s| s.id == id)
@@ -3100,10 +3107,10 @@ impl Component for App {
             }
             Msg::OpenStream(id) => self.open_stream(root, &sender, id),
             Msg::StreamDelete(id) => {
-                if self.playing_stream == Some(id) {
+                if self.streaming.playing_stream == Some(id) {
                     self.player.stop();
                     self.playing = false;
-                    self.playing_stream = None;
+                    self.streaming.playing_stream = None;
                     self.now_playing = None;
                     self.mpris.set_playing(false);
                     self.stop_recorder();
@@ -3114,14 +3121,14 @@ impl Component for App {
             }
             // --- Recording (timeshift) ---
             Msg::RecordStop => {
-                if self.record_state.take().is_some() {
+                if self.streaming.record_state.take().is_some() {
                     self.toast(&gettext("Recording stopped"));
                     self.reload_recordings(&sender);
                 }
             }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::ReplayPlay { start, end } => {
-                let temp = self.recorder.as_ref().and_then(|r| r.extract_temp(start, end).ok());
+                let temp = self.streaming.recorder.as_ref().and_then(|r| r.extract_temp(start, end).ok());
                 match temp {
                     Some(path) => {
                         let p = path.to_string_lossy().to_string();
@@ -3132,7 +3139,7 @@ impl Component for App {
                                 self.playing = true;
                                 self.playing_path = Some(path);
                                 self.podcasts.playing_episode_url = None;
-                                self.playing_stream = None;
+                                self.streaming.playing_stream = None;
                                 self.mpris.set_playing(true);
                             }
                             Err(e) => tracing::error!("Replay failed: {e}"),
@@ -3144,11 +3151,13 @@ impl Component for App {
             Msg::ReplaySave { start, end, title } => {
                 let (artist, t) = crate::core::recorder::split_artist_title(&title);
                 let station = self
+                    .streaming
                     .playing_stream
-                    .and_then(|id| self.stream_items.iter().find(|s| s.id == id))
+                    .and_then(|id| self.streaming.stream_items.iter().find(|s| s.id == id))
                     .map(|s| s.name.clone());
                 let dest = crate::ui::app_streaming::recordings_dir();
                 let saved = self
+                    .streaming
                     .recorder
                     .as_ref()
                     .and_then(|r| r.save_song(start, end, artist.as_deref(), &t, &dest).ok());
@@ -3201,10 +3210,10 @@ impl Component for App {
                 self.toast(&gettext("Recording deleted"));
             }
             Msg::SetRecordingBufferMinutes(n) => {
-                self.recording_buffer_minutes = n.min(60);
+                self.streaming.recording_buffer_minutes = n.min(60);
                 let _ = self.library.set_setting(
                     "recording_buffer_minutes",
-                    &self.recording_buffer_minutes.to_string(),
+                    &self.streaming.recording_buffer_minutes.to_string(),
                 );
             }
             Msg::ToggleEpisode { url, title } => {
@@ -3236,7 +3245,7 @@ impl Component for App {
                 }
             }
             Msg::SetPodcastView(view) => self.podcasts.podcast_view = view,
-            Msg::SetStreamView(view) => self.stream_view = view,
+            Msg::SetStreamView(view) => self.streaming.stream_view = view,
             Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
             Msg::ShowPodcastEpisodeDetail { podcast_id, index } => {
                 self.open_podcast_episode_detail(root, &sender, podcast_id, index)
@@ -3316,7 +3325,7 @@ impl Component for App {
             }
             Msg::Tick => {
                 // Advance the running timeshift recording at the song boundaries.
-                if self.record_state.is_some() {
+                if self.streaming.record_state.is_some() {
                     self.drive_recording(&sender);
                 }
                 // Sync the play/pause and record icons of the station rows.
@@ -4030,7 +4039,7 @@ impl Component for App {
                     self.player.pause();
                     self.playing = false;
                 } else if self.playing_path.is_some()
-                    || self.playing_stream.is_some()
+                    || self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
                 {
                     // Paused (file, station or episode) → resume.
@@ -4250,7 +4259,7 @@ impl Component for App {
             Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
             Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
             Cmd::StreamSearchResults(results) => {
-                self.stream_search_results = results;
+                self.streaming.stream_search_results = results;
                 self.rebuild_stream_search_results(&sender);
             }
             Cmd::StreamSearchCoversReady => self.rebuild_stream_search_results(&sender),

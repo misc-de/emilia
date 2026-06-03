@@ -900,7 +900,7 @@ impl App {
                 "Keep the last minutes of a station so you can record a song after it played. 0 turns it off.",
             ))
             .adjustment(&gtk::Adjustment::new(
-                self.recording_buffer_minutes as f64,
+                self.streaming.recording_buffer_minutes as f64,
                 0.0,
                 60.0,
                 1.0,

@@ -105,12 +105,12 @@ impl App {
     /// Rebuilds the station list: logo, name, genre/country. **Tapping** plays
     /// the station, **long press** opens the detail page (favorite/remove).
     pub(crate) fn reload_streams(&mut self, sender: &ComponentSender<Self>) {
-        self.stream_items = self.library.streams().unwrap_or_default();
-        self.stream_play_buttons.borrow_mut().clear();
-        while let Some(child) = self.streams_list.first_child() {
-            self.streams_list.remove(&child);
+        self.streaming.stream_items = self.library.streams().unwrap_or_default();
+        self.streaming.stream_play_buttons.borrow_mut().clear();
+        while let Some(child) = self.streaming.streams_list.first_child() {
+            self.streaming.streams_list.remove(&child);
         }
-        for st in self.stream_items.clone() {
+        for st in self.streaming.stream_items.clone() {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&st.name))
                 .activatable(true)
@@ -137,7 +137,7 @@ impl App {
                 let sender = sender.clone();
                 pp.connect_clicked(move |_| sender.input(Msg::ToggleStream(id)));
             }
-            self.stream_play_buttons.borrow_mut().push((id, pp.clone()));
+            self.streaming.stream_play_buttons.borrow_mut().push((id, pp.clone()));
             row.add_suffix(&pp);
 
             // Tapping the row = toggle Play/Pause.
@@ -155,7 +155,7 @@ impl App {
                 });
             }
             row.add_controller(lp);
-            self.streams_list.append(&row);
+            self.streaming.streams_list.append(&row);
         }
     }
 
@@ -168,7 +168,7 @@ impl App {
         sender: &ComponentSender<Self>,
         id: i64,
     ) {
-        let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
+        let Some(st) = self.streaming.stream_items.iter().find(|s| s.id == id).cloned() else {
             return;
         };
         let dialog = adw::Dialog::builder()
@@ -209,7 +209,7 @@ impl App {
         // Playback/recording run via the station list or the player bar;
         // here only replay (buffer) and remove.
         let actions = adw::PreferencesGroup::new();
-        if self.recording_buffer_minutes > 5 {
+        if self.streaming.recording_buffer_minutes > 5 {
             actions.add(&row_action(
                 &gettext("Replay (buffer)"),
                 "media-seek-backward-symbolic",
@@ -242,8 +242,8 @@ impl App {
     /// record button sits in the player bar and updates itself via `#[watch]`.
     pub(crate) fn refresh_stream_icons(&self) {
         let playing = self.playing;
-        let cur = self.playing_stream;
-        let mut btns = self.stream_play_buttons.borrow_mut();
+        let cur = self.streaming.playing_stream;
+        let mut btns = self.streaming.stream_play_buttons.borrow_mut();
         btns.retain(|(_, b)| b.root().is_some());
         for (id, btn) in btns.iter() {
             let active = cur == Some(*id) && playing;
@@ -335,9 +335,9 @@ impl App {
         url_group.add(&url_entry);
         content.append(&url_group);
 
-        *self.stream_search.borrow_mut() = Some((dialog.clone(), results.clone()));
+        *self.streaming.stream_search.borrow_mut() = Some((dialog.clone(), results.clone()));
         {
-            let slot = self.stream_search.clone();
+            let slot = self.streaming.stream_search.clone();
             dialog.connect_closed(move |_| {
                 *slot.borrow_mut() = None;
             });
@@ -348,10 +348,10 @@ impl App {
     }
 
     /// Redraws the results list in the open add dialog (from
-    /// `self.stream_search_results`). Tapping saves the station and closes the
+    /// `self.streaming.stream_search_results`). Tapping saves the station and closes the
     /// dialog. Logos come from the local cache (otherwise a placeholder).
     pub(crate) fn rebuild_stream_search_results(&self, sender: &ComponentSender<Self>) {
-        let guard = self.stream_search.borrow();
+        let guard = self.streaming.stream_search.borrow();
         let Some((dialog, list)) = guard.as_ref() else {
             return;
         };
@@ -360,7 +360,7 @@ impl App {
         }
         list.set_visible(true);
 
-        if self.stream_search_results.is_empty() {
+        if self.streaming.stream_search_results.is_empty() {
             let row = adw::ActionRow::builder()
                 .title(&gettext("No stations found"))
                 .build();
@@ -370,10 +370,10 @@ impl App {
             return;
         }
 
-        let rows = self.stream_search_results.len() as i32;
+        let rows = self.streaming.stream_search_results.len() as i32;
         dialog.set_content_height((320 + rows * 66).min(760));
 
-        for (i, r) in self.stream_search_results.iter().enumerate() {
+        for (i, r) in self.streaming.stream_search_results.iter().enumerate() {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&r.name))
                 .activatable(true)
@@ -411,7 +411,7 @@ impl App {
     /// Starts a saved station (replaces the current playback).
     /// Live stream → no resume, no duration.
     pub(crate) fn play_stream(&mut self, id: i64) {
-        let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
+        let Some(st) = self.streaming.stream_items.iter().find(|s| s.id == id).cloned() else {
             return;
         };
         // Save the position/session of a previously playing track.
@@ -424,9 +424,9 @@ impl App {
                 self.playing = true;
                 self.playing_path = None;
                 self.podcasts.playing_episode_url = None;
-                self.playing_stream = Some(id);
+                self.streaming.playing_stream = Some(id);
                 self.playing_remote = false;
-                self.stream_title = None;
+                self.streaming.stream_title = None;
                 self.queue.clear();
                 self.queue_pos = 0;
                 self.position_ms = 0;
@@ -437,13 +437,13 @@ impl App {
                 self.refresh_queue_icons();
                 self.set_chapters(Vec::new());
                 // End any previous recording …
-                self.record_state = None;
+                self.streaming.record_state = None;
                 // … and start the timeshift buffer for this station (provided
                 // the buffer is enabled). Dropping the old recorder cleans up.
-                self.recorder = if self.recording_buffer_minutes > 0 {
+                self.streaming.recorder = if self.streaming.recording_buffer_minutes > 0 {
                     Some(crate::core::recorder::Recorder::start(
                         &st.url,
-                        self.recording_buffer_minutes,
+                        self.streaming.recording_buffer_minutes,
                     ))
                 } else {
                     None
@@ -455,18 +455,18 @@ impl App {
 
     /// Stops the timeshift buffer and running recording (on stop/switch to music).
     pub(crate) fn stop_recorder(&mut self) {
-        self.recorder = None;
-        self.record_state = None;
+        self.streaming.recorder = None;
+        self.streaming.record_state = None;
     }
 
     /// Rebuilds the "Recordings" list (saved recordings). Tapping plays the
     /// file, the trash button removes it.
     pub(crate) fn reload_recordings(&mut self, sender: &ComponentSender<Self>) {
-        self.recording_items = self.library.recordings().unwrap_or_default();
-        while let Some(child) = self.recordings_list.first_child() {
-            self.recordings_list.remove(&child);
+        self.streaming.recording_items = self.library.recordings().unwrap_or_default();
+        while let Some(child) = self.streaming.recordings_list.first_child() {
+            self.streaming.recordings_list.remove(&child);
         }
-        for rec in self.recording_items.clone() {
+        for rec in self.streaming.recording_items.clone() {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&rec.title))
                 .activatable(true)
@@ -509,14 +509,14 @@ impl App {
                 let path = rec.path.clone();
                 row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
             }
-            self.recordings_list.append(&row);
+            self.streaming.recordings_list.append(&row);
         }
     }
 
     /// Adds a search result (index in `stream_search_results`) as a station
     /// and loads its logo in the background.
     pub(crate) fn add_stream_result(&mut self, sender: &ComponentSender<Self>, index: usize) {
-        let Some(r) = self.stream_search_results.get(index).cloned() else {
+        let Some(r) = self.streaming.stream_search_results.get(index).cloned() else {
             return;
         };
         match self.library.add_stream(
@@ -544,12 +544,12 @@ impl App {
 
     /// Arms the continuous recording: start offset = beginning of the current song.
     pub(crate) fn record_arm(&mut self, id: i64) {
-        let Some(rec) = self.recorder.as_ref() else {
+        let Some(rec) = self.streaming.recorder.as_ref() else {
             return;
         };
         let snap = rec.snapshot();
         let next_start = snap.current_start.unwrap_or(0);
-        self.record_state = Some(RecordState {
+        self.streaming.record_state = Some(RecordState {
             stream_id: id,
             next_start,
         });
@@ -559,20 +559,21 @@ impl App {
     /// Driven by the 1 s tick: saves songs of the running recording that have
     /// finished (at the song boundaries) and advances.
     pub(crate) fn drive_recording(&mut self, sender: &ComponentSender<Self>) {
-        let snap = match self.recorder.as_ref() {
+        let snap = match self.streaming.recorder.as_ref() {
             Some(r) => r.snapshot(),
             None => return,
         };
-        let (stream_id, mut next_start) = match self.record_state.as_ref() {
+        let (stream_id, mut next_start) = match self.streaming.record_state.as_ref() {
             Some(rs) => (rs.stream_id, rs.next_start),
             None => return,
         };
         if snap.ended {
             self.toast(&gettext("Recording stopped (stream ended)"));
-            self.record_state = None;
+            self.streaming.record_state = None;
             return;
         }
         let station = self
+            .streaming
             .stream_items
             .iter()
             .find(|s| s.id == stream_id)
@@ -612,7 +613,7 @@ impl App {
         // Freshly saved files for cover enrichment (background).
         let mut enrich: Vec<(std::path::PathBuf, Option<String>, String)> = Vec::new();
         for (start, end, artist, title, incomplete) in &segs {
-            if let Some(rec) = self.recorder.as_ref() {
+            if let Some(rec) = self.streaming.recorder.as_ref() {
                 match rec.save_song(*start, *end, artist.as_deref(), title, &dest) {
                     Ok(path) => {
                         let _ = self.library.add_recording(
@@ -630,7 +631,7 @@ impl App {
             }
         }
 
-        if let Some(rs) = self.record_state.as_mut() {
+        if let Some(rs) = self.streaming.record_state.as_mut() {
             rs.next_start = next_start;
         }
         if saved > 0 {
@@ -656,7 +657,7 @@ impl App {
     /// Replay subpage of a station: the songs detected in the buffer for
     /// previewing or saving after the fact. Reachable from the detail page.
     pub(crate) fn open_stream_replay(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
+        let Some(st) = self.streaming.stream_items.iter().find(|s| s.id == id).cloned() else {
             return;
         };
         let content = gtk::Box::builder()
@@ -668,7 +669,7 @@ impl App {
             .margin_end(12)
             .build();
 
-        let snap = self.recorder.as_ref().map(|r| r.snapshot());
+        let snap = self.streaming.recorder.as_ref().map(|r| r.snapshot());
         // Only finished songs (with a known end), newest first.
         let mut songs: Vec<crate::core::recorder::BufferedSong> = snap
             .map(|s| s.songs)
