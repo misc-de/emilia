@@ -497,9 +497,10 @@ pub struct App {
     pub(crate) offline_sources: std::collections::HashSet<i64>,
     /// Statistics page, extracted into its own relm4 component.
     pub(crate) stats_page: relm4::Controller<crate::ui::stats_page::StatsPage>,
-    /// State of the device synchronization (server/client + dialog widgets).
-    pub(crate) sync: crate::ui::app_sync::SyncState,
-    /// Whether a device is currently paired – controls the green sync icon at the top.
+    /// Device sync, extracted into its own relm4 component (dialog + worker).
+    pub(crate) sync_page: relm4::Controller<crate::ui::sync_page::SyncPage>,
+    /// Whether a device is currently paired – controls the green sync icon at the
+    /// top. Kept here (parent chrome); set via the component's `ConnectedChanged`.
     pub(crate) sync_connected: bool,
     /// Widget state of the Nextcloud setup dialog.
     pub(crate) cloud: crate::ui::app_cloud::CloudState,
@@ -555,15 +556,11 @@ pub enum Msg {
     CtxShare,
     ShareHost,
     ShareScan,
-    // --- Device synchronization (reachable via "Share") ---
-    /// Start server mode (show QR code, wait for pairing).
-    SyncStartServer,
-    /// Start client mode (webcam scan).
-    SyncStartScan,
-    /// A QR code was decoded (URL as text).
-    SyncQrDecoded(String),
-    /// The sync dialog was closed – clean up server/camera.
-    SyncDialogClosed,
+    // --- Device synchronization (handled by the SyncPage component) ---
+    /// The sync component paired/disconnected → tint the header icon.
+    SyncConnected(bool),
+    /// The sync component imported metadata → reload the affected views.
+    SyncImported,
     TrackFinished,
     /// Periodic tick: save the resume position of the running track.
     PersistResume,
@@ -849,8 +846,6 @@ pub enum Cmd {
     RemoteIndexed,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
-    /// Event from the sync server thread or client worker.
-    Sync(crate::core::sync::SyncEvent),
     /// Result of the update check (determined in the background).
     UpdateChecked(crate::core::update::CheckResult),
 }
@@ -2020,6 +2015,12 @@ impl Component for App {
         let stats_page = crate::ui::stats_page::StatsPage::builder()
             .launch(())
             .detach();
+        let sync_page = crate::ui::sync_page::SyncPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |out| match out {
+                crate::ui::sync_page::SyncOutput::ConnectedChanged(b) => Msg::SyncConnected(b),
+                crate::ui::sync_page::SyncOutput::Imported => Msg::SyncImported,
+            });
 
         let mut model = App {
             library,
@@ -2159,7 +2160,7 @@ impl Component for App {
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
-            sync: crate::ui::app_sync::SyncState::default(),
+            sync_page,
             sync_connected: false,
             cloud: crate::ui::app_cloud::CloudState::default(),
         };
@@ -3265,17 +3266,21 @@ impl Component for App {
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.open_share_dialog(root, &sender),
             Msg::ShareHost => {
-                self.open_sync_dialog(root, &sender);
-                self.start_sync_server(&sender);
+                use crate::ui::sync_page::SyncInput;
+                self.sync_page.emit(SyncInput::Open(root.clone()));
+                self.sync_page.emit(SyncInput::StartServer);
             }
             Msg::ShareScan => {
-                self.open_sync_dialog(root, &sender);
-                self.start_sync_scan(&sender);
+                use crate::ui::sync_page::SyncInput;
+                self.sync_page.emit(SyncInput::Open(root.clone()));
+                self.sync_page.emit(SyncInput::StartScan);
             }
-            Msg::SyncStartServer => self.start_sync_server(&sender),
-            Msg::SyncStartScan => self.start_sync_scan(&sender),
-            Msg::SyncQrDecoded(url) => self.handle_sync_qr(&url, &sender),
-            Msg::SyncDialogClosed => self.teardown_sync(),
+            Msg::SyncConnected(connected) => self.sync_connected = connected,
+            Msg::SyncImported => {
+                self.load_favorites(&sender);
+                self.reload_playlists(&sender);
+                self.reload_podcasts(&sender);
+            }
             Msg::TrackFinished => {
                 if self.files.playing_remote {
                     // Remote queue: advance to the next track (or stop at the
@@ -4297,7 +4302,6 @@ impl Component for App {
                     self.run_enrich(&sender, false, false);
                 }
             }
-            Cmd::Sync(ev) => self.on_sync_event(ev, &sender),
             Cmd::UpdateChecked(result) => match result {
                 crate::core::update::CheckResult::UpToDate => self.toast(&gettext_f(
                     "Emilia is up to date (version {v}).",
