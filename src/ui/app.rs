@@ -210,6 +210,13 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Playlists page state, grouped off the `App` god-object.
+pub(crate) struct PlaylistsState {
+    /// (id, name, track count) per playlist.
+    pub(crate) playlist_items: Vec<(i64, String, i64)>,
+    pub(crate) playlists_list: gtk::ListBox,
+}
+
 /// Concerts page state, grouped off the `App` god-object.
 pub(crate) struct ConcertsState {
     /// Concerts/audiobooks entries: (scope, key, title, is_dir) – like favorites.
@@ -366,9 +373,8 @@ pub struct App {
     pub(crate) audiobooks_list: gtk::ListBox,
     /// Gallery variant of the audiobooks (cover grid).
     pub(crate) audiobooks_gallery: gtk::FlowBox,
-    // Playlists
-    pub(crate) playlist_items: Vec<(i64, String, i64)>,
-    pub(crate) playlists_list: gtk::ListBox,
+    /// Playlists page state.
+    pub(crate) playlists: PlaylistsState,
     // Podcasts: (id, title, image URL, episode count)
     pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
     pub(crate) podcasts_list: gtk::ListBox,
@@ -1188,7 +1194,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.playlist_items.is_empty(),
+                                        set_visible: !model.playlists.playlist_items.is_empty(),
                                         #[local_ref]
                                         playlists_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1206,7 +1212,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Create a playlist or add tracks via the options.")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.playlist_items.is_empty(),
+                                        set_visible: model.playlists.playlist_items.is_empty(),
                                     },
 
                                     // Action at the very bottom.
@@ -2073,8 +2079,10 @@ impl Component for App {
             audiobook_items: Vec::new(),
             audiobooks_list: audiobooks_list.clone(),
             audiobooks_gallery: gtk::FlowBox::new(),
-            playlist_items: Vec::new(),
-            playlists_list: playlists_list.clone(),
+            playlists: PlaylistsState {
+                playlist_items: Vec::new(),
+                playlists_list: playlists_list.clone(),
+            },
             podcast_items: Vec::new(),
             podcasts_list: podcasts_list.clone(),
             podcasts_gallery: gtk::FlowBox::new(),
@@ -2868,7 +2876,7 @@ impl Component for App {
             Msg::PlaylistAddTo(id) => self.add_context_to_playlist(id, &sender),
             Msg::OpenPlaylist(id) => {
                 if let Some((_, name, _)) =
-                    self.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
+                    self.playlists.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
                 {
                     self.open_playlist(&sender, id, &name);
                 }
@@ -2908,7 +2916,7 @@ impl Component for App {
                 // Rebuild the subpage (replace the old one).
                 self.nav_view.pop();
                 if let Some((_, name, _)) =
-                    self.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
+                    self.playlists.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
                 {
                     self.open_playlist(&sender, id, &name);
                 }

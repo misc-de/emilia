@@ -11,12 +11,12 @@ use crate::ui::app::{App, Msg};
 impl App {
     /// Rebuilds the playlist list (name, track count, play, delete).
     pub(crate) fn reload_playlists(&mut self, sender: &ComponentSender<Self>) {
-        self.playlist_items = self.library.playlists().unwrap_or_default();
+        self.playlists.playlist_items = self.library.playlists().unwrap_or_default();
 
-        while let Some(child) = self.playlists_list.first_child() {
-            self.playlists_list.remove(&child);
+        while let Some(child) = self.playlists.playlists_list.first_child() {
+            self.playlists.playlists_list.remove(&child);
         }
-        for (id, name, count) in self.playlist_items.clone() {
+        for (id, name, count) in self.playlists.playlist_items.clone() {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&name))
                 .subtitle(ngettext_n("{n} track", "{n} tracks", count as u32))
@@ -70,7 +70,7 @@ impl App {
                 });
             }
             row.add_controller(long_press);
-            self.playlists_list.append(&row);
+            self.playlists.playlists_list.append(&row);
         }
     }
 
@@ -251,6 +251,7 @@ impl App {
         id: i64,
     ) {
         let current = self
+            .playlists
             .playlist_items
             .iter()
             .find(|(pid, _, _)| *pid == id)
