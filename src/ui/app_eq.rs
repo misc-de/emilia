@@ -17,7 +17,7 @@ impl App {
     /// playback the inheritance applies (track→album→artist→global, then the
     /// default output as the base).
     pub(crate) fn open_eq_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
-        let Some(entry) = self.context_target.as_ref() else {
+        let Some(entry) = self.nav.context_target.as_ref() else {
             return;
         };
 

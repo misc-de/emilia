@@ -16,7 +16,7 @@ use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 impl App {
     /// Action menu on long press (folder or track).
     pub(crate) fn open_context_menu(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
-        let Some(entry) = self.context_target.as_ref() else {
+        let Some(entry) = self.nav.context_target.as_ref() else {
             return;
         };
 
@@ -174,7 +174,7 @@ impl App {
         action_group.add(&play_row);
         play_row.set_visible(!is_current);
         // Remember this play row so it reappears after the track ends.
-        *self.ctx_play.borrow_mut() = current_path.map(|p| (play_row.clone(), p));
+        *self.nav.ctx_play.borrow_mut() = current_path.map(|p| (play_row.clone(), p));
 
         // Remote file: offer an offline download (if not already present).
         if let CtxTarget::Fs(crate::ui::fs_row::FsEntry::RemoteFile {
@@ -266,7 +266,7 @@ impl App {
         dialog.set_child(Some(&toolbar));
         // Forget the remembered play row as soon as the dialog closes.
         {
-            let ctx_play = self.ctx_play.clone();
+            let ctx_play = self.nav.ctx_play.clone();
             dialog.connect_closed(move |_| *ctx_play.borrow_mut() = None);
         }
         dialog.present(Some(root));
@@ -276,7 +276,7 @@ impl App {
     /// hidden as long as exactly this track is playing; visible once it ends
     /// or is switched.
     pub(crate) fn refresh_ctx_play(&self) {
-        if let Some((row, path)) = self.ctx_play.borrow().as_ref() {
+        if let Some((row, path)) = self.nav.ctx_play.borrow().as_ref() {
             row.set_visible(self.playing_path.as_deref() != Some(path.as_path()));
         }
     }
@@ -876,8 +876,8 @@ impl App {
             .css_classes(["boxed-list"])
             .build();
         // Shared, local state of the dialog (alongside the model).
-        let order = std::rc::Rc::new(std::cell::RefCell::new(self.section_order.clone()));
-        let hidden = std::rc::Rc::new(std::cell::RefCell::new(self.hidden_sections.clone()));
+        let order = std::rc::Rc::new(std::cell::RefCell::new(self.nav.section_order.clone()));
+        let hidden = std::rc::Rc::new(std::cell::RefCell::new(self.nav.hidden_sections.clone()));
         rebuild_section_rows(&list, &order, &hidden, sender);
         sections_group.add(&list);
         page.add(&sections_group);
@@ -994,7 +994,7 @@ impl App {
             Album(String, String),
             Artist(String),
         }
-        let dest = match self.context_target.as_ref() {
+        let dest = match self.nav.context_target.as_ref() {
             Some(CtxTarget::Album(m)) => Some(Dest::Album(m.artist.clone(), m.album.clone())),
             Some(CtxTarget::Artist(m)) => Some(Dest::Artist(m.name.clone())),
             // Folder in the file browser: resolve as an album or artist.

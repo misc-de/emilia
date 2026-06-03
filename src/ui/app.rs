@@ -210,6 +210,31 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Navigation + layout chrome, grouped off the `App` god-object.
+pub(crate) struct NavState {
+    /// Main split view – collapsed (`is_collapsed`) means narrow/mobile mode.
+    pub(crate) split: adw::OverlaySplitView,
+    pub(crate) view_stack: adw::ViewStack,
+    /// Navigation container for the subpages (artist → albums → album).
+    pub(crate) nav_view: adw::NavigationView,
+    /// Navigation containers (sidebar, top bar) for reordering.
+    pub(crate) sidebar_nav: gtk::Box,
+    pub(crate) top_nav: gtk::Box,
+    /// All navigation buttons per menu item with container marker
+    /// (`true` = sidebar, `false` = top bar), for showing/hiding and reordering.
+    pub(crate) nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)>,
+    /// Display order of the menu items (stack names). Reorderable by the user.
+    pub(crate) section_order: Vec<&'static str>,
+    /// Hidden navigation menu items (stack names).
+    pub(crate) hidden_sections: std::collections::HashSet<String>,
+    /// Target of the open context/detail dialog.
+    pub(crate) context_target: Option<CtxTarget>,
+    /// Play row of the open detail dialog + its track path (hidden while playing).
+    pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
+    /// Remembered scroll position of the most recently left overview page.
+    pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
+}
+
 /// File browser + extra music sources (2nd local folder / Nextcloud) state.
 pub(crate) struct FilesState {
     pub(crate) music_dir: Option<String>,
@@ -430,11 +455,6 @@ pub struct App {
     pub(crate) shuffle: bool,
     /// Repeat: at the end of the queue or of the single track, start over.
     pub(crate) repeat: bool,
-    pub(crate) context_target: Option<CtxTarget>,
-    /// Play row of the open detail dialog together with the associated track path. Is
-    /// hidden while exactly this track is playing, and shown again
-    /// as soon as it ends (see `refresh_ctx_play`).
-    pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
     pub(crate) toast_overlay: adw::ToastOverlay,
     /// Concerts page state (live-recording collection).
     pub(crate) concerts: ConcertsState,
@@ -446,21 +466,8 @@ pub struct App {
     /// Gallery FlowBoxes whose resize hook (square tiles) has already
     /// been connected once – prevents handlers from accumulating.
     pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
-    /// Hidden navigation menu items (stack names). Affects both the
-    /// navigation and the selection in the properties.
-    pub(crate) hidden_sections: std::collections::HashSet<String>,
-    /// Display order of the menu items (stack names). Reorderable by the user.
-    pub(crate) section_order: Vec<&'static str>,
-    /// All navigation buttons per menu item with container marker
-    /// (`true` = sidebar, `false` = top bar) – for showing/hiding and
-    /// reordering at runtime.
-    pub(crate) nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)>,
-    /// Navigation containers (sidebar, top bar) for reordering.
-    pub(crate) sidebar_nav: gtk::Box,
-    pub(crate) top_nav: gtk::Box,
-    /// Main split view – collapsed (`is_collapsed`) means narrow/mobile
-    /// mode; this governs e.g. the detail dialogs (full width).
-    pub(crate) split: adw::OverlaySplitView,
+    /// Navigation + layout chrome.
+    pub(crate) nav: NavState,
     /// Favorites + audiobooks page state.
     pub(crate) favorites: FavoritesState,
     /// Playlists page state.
@@ -481,7 +488,6 @@ pub struct App {
     pub(crate) stats_box: gtk::Box,
     /// Currently selected time period of the listening statistics.
     pub(crate) stats_period: StatsPeriod,
-    pub(crate) view_stack: adw::ViewStack,
     /// Seek bar of the mini player (for chapter marks via `add_mark`).
     pub(crate) seek_scale: gtk::Scale,
     /// Label below the title that, when hovering over the seek bar, shows the name
@@ -493,11 +499,6 @@ pub struct App {
     /// Is the seek bar currently being hovered? Then the label temporarily shows
     /// the hovered chapter; otherwise it tracks the playback position.
     pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
-    /// Navigation container for the subpages (artist → albums → album).
-    pub(crate) nav_view: adw::NavigationView,
-    /// Remembered scroll position of the most recently left overview page
-    /// (scroller + value), to restore it when navigating back.
-    pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// State of the device synchronization (server/client + dialog widgets).
     pub(crate) sync: crate::ui::app_sync::SyncState,
     /// Whether a device is currently paired – controls the green sync icon at the top.
@@ -2091,8 +2092,6 @@ impl Component for App {
             track_duration_ms: 0,
             shuffle: false,
             repeat: repeat_on,
-            context_target: None,
-            ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             toast_overlay: toast_overlay.clone(),
             concerts: ConcertsState {
                 concert_items: Vec::new(),
@@ -2146,19 +2145,23 @@ impl Component for App {
             stats_period: StatsPeriod::All,
             gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
             gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
-            hidden_sections,
-            section_order,
-            nav_buttons: Vec::new(),
-            sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
-            top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
-            split: adw::OverlaySplitView::new(),
-            view_stack: adw::ViewStack::new(),
+            nav: NavState {
+                split: adw::OverlaySplitView::new(),
+                view_stack: adw::ViewStack::new(),
+                nav_view: adw::NavigationView::new(),
+                sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
+                top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+                nav_buttons: Vec::new(),
+                section_order,
+                hidden_sections,
+                context_target: None,
+                ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            },
             seek_scale: gtk::Scale::default(),
             chapter_label: gtk::Label::default(),
             chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
-            nav_view: adw::NavigationView::new(),
-            overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
             sync: crate::ui::app_sync::SyncState::default(),
             sync_connected: false,
             cloud: crate::ui::app_cloud::CloudState::default(),
@@ -2250,9 +2253,9 @@ impl Component for App {
         let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
         let podcasts_gallery = model.podcasts.podcasts_gallery.clone();
         let widgets = view_output!();
-        model.view_stack = widgets.view_stack.clone();
-        model.nav_view = widgets.nav_view.clone();
-        model.split = widgets.split.clone();
+        model.nav.view_stack = widgets.view_stack.clone();
+        model.nav.nav_view = widgets.nav_view.clone();
+        model.nav.split = widgets.split.clone();
         model.seek_scale = widgets.seek_scale.clone();
         model.chapter_label = widgets.chapter_label.clone();
         model.files.source_tabs = widgets.source_tabs.clone();
@@ -2331,7 +2334,7 @@ impl Component for App {
         // Therefore, when returning to the root page, restore the remembered value
         // (slightly delayed, after the re-layout).
         {
-            let saved = model.overview_scroll.clone();
+            let saved = model.nav.overview_scroll.clone();
             widgets.nav_view.connect_popped(move |nav, _page| {
                 // Only when we return to the root overview.
                 let is_root = nav
@@ -2375,20 +2378,20 @@ impl Component for App {
         // Create the icon-only navigation (sidebar + top) in the **saved
         // order** and couple it to the stack. All buttons
         // are created; hidden menu items are merely invisible.
-        model.sidebar_nav = widgets.sidebar_nav.clone();
-        model.top_nav = widgets.top_nav.clone();
+        model.nav.sidebar_nav = widgets.sidebar_nav.clone();
+        model.nav.top_nav = widgets.top_nav.clone();
         let mut nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)> = Vec::new();
         for (is_sidebar, container) in [
             (true, widgets.sidebar_nav.clone()),
             (false, widgets.top_nav.clone()),
         ] {
             let mut group_leader: Option<gtk::ToggleButton> = None;
-            for &name in &model.section_order {
+            for &name in &model.nav.section_order {
                 let Some((label, icon)) = section_meta(name) else {
                     continue;
                 };
                 let btn = gtk::ToggleButton::builder().build();
-                btn.set_visible(!model.hidden_sections.contains(name));
+                btn.set_visible(!model.nav.hidden_sections.contains(name));
                 btn.add_css_class("flat");
                 // Highlight the active menu item blue on the icon (CSS `:checked`).
                 btn.add_css_class("emilia-nav-btn");
@@ -2431,7 +2434,7 @@ impl Component for App {
                 nav_buttons.push((name, is_sidebar, btn));
             }
         }
-        model.nav_buttons = nav_buttons.clone();
+        model.nav.nav_buttons = nav_buttons.clone();
 
         // Desktop sidebar: "Settings" at the very bottom – layout/design like
         // the menu items above (icon + label). A stretchable spacer
@@ -2473,13 +2476,14 @@ impl Component for App {
         // chosen order).
         let restore = saved_section
             .as_deref()
-            .filter(|s| !model.hidden_sections.contains(*s))
+            .filter(|s| !model.nav.hidden_sections.contains(*s))
             .or_else(|| {
                 model
+                    .nav
                     .section_order
                     .iter()
                     .copied()
-                    .find(|n| !model.hidden_sections.contains(*n))
+                    .find(|n| !model.nav.hidden_sections.contains(*n))
             });
         if let Some(section) = restore {
             widgets.view_stack.set_visible_child_name(section);
@@ -2643,7 +2647,7 @@ impl Component for App {
                     .get(index)
                     .map(|r| CtxTarget::Fs(r.entry.clone()));
                 if entry.is_some() {
-                    self.context_target = entry;
+                    self.nav.context_target = entry;
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -2657,7 +2661,7 @@ impl Component for App {
                 if let Some(meta) = meta {
                     // Fetch the photo of the opened artist with priority.
                     self.fetch_focus_artist(&sender, &meta.name);
-                    self.context_target = Some(CtxTarget::Artist(meta));
+                    self.nav.context_target = Some(CtxTarget::Artist(meta));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -2671,7 +2675,7 @@ impl Component for App {
                 if let Some(meta) = meta {
                     // Fetch the cover of the opened album with priority.
                     self.fetch_focus_album(&sender, &meta.artist, &meta.album);
-                    self.context_target = Some(CtxTarget::Album(meta));
+                    self.nav.context_target = Some(CtxTarget::Album(meta));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -2684,11 +2688,11 @@ impl Component for App {
                     .ok()
                     .flatten()
                     .unwrap_or_else(|| crate::model::AlbumMeta::pending(artist, album));
-                self.context_target = Some(CtxTarget::Album(meta));
+                self.nav.context_target = Some(CtxTarget::Album(meta));
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowTrackDetail(path) => {
-                self.context_target =
+                self.nav.context_target =
                     Some(CtxTarget::Fs(FsEntry::file(PathBuf::from(path))));
                 self.open_context_menu(root, &sender);
             }
@@ -2706,7 +2710,7 @@ impl Component for App {
             }
             Msg::ShowConcertDetail(index) => {
                 if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
-                    self.context_target = Some(self.entry_target(&scope, &key, is_dir));
+                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -2750,7 +2754,7 @@ impl Component for App {
                     self.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav_view.pop_to_tag("main");
+                    self.nav.nav_view.pop_to_tag("main");
                 }
             }
             Msg::PlayArtistTrack { name, path } => {
@@ -2769,7 +2773,7 @@ impl Component for App {
                     self.play_current();
                     self.refresh_queue_icons();
                     // Back to the main page, so that the mini player is visible.
-                    self.nav_view.pop_to_tag("main");
+                    self.nav.nav_view.pop_to_tag("main");
                 }
             }
             Msg::PlayAlbumTrack { artist, album, path } => {
@@ -2787,7 +2791,7 @@ impl Component for App {
                     self.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav_view.pop_to_tag("main");
+                    self.nav.nav_view.pop_to_tag("main");
                 }
             }
             Msg::PlayAlbumByNameTrack { album, path } => {
@@ -2804,7 +2808,7 @@ impl Component for App {
                     self.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav_view.pop_to_tag("main");
+                    self.nav.nav_view.pop_to_tag("main");
                 }
             }
             Msg::PlayAlbum { artist, album } => {
@@ -2820,11 +2824,11 @@ impl Component for App {
                     self.queue_pos = 0;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav_view.pop_to_tag("main");
+                    self.nav.nav_view.pop_to_tag("main");
                 }
             }
             Msg::CtxPlay => {
-                if let Some(entry) = self.context_target.clone() {
+                if let Some(entry) = self.nav.context_target.clone() {
                     let files = self.ctx_files(&entry);
                     if !files.is_empty() {
                         self.queue = files;
@@ -2863,7 +2867,7 @@ impl Component for App {
                 }
             }
             Msg::CtxAddQueue => {
-                if let Some(entry) = self.context_target.clone() {
+                if let Some(entry) = self.nav.context_target.clone() {
                     let mut files = self.ctx_files(&entry);
                     let n = files.len();
                     let was_empty = self.queue.is_empty();
@@ -2938,7 +2942,7 @@ impl Component for App {
                 let _ = self.library.remove_from_playlist(id, &path);
                 self.reload_playlists(&sender);
                 // Rebuild the subpage (replace the old one).
-                self.nav_view.pop();
+                self.nav.nav_view.pop();
                 if let Some((_, name, _)) =
                     self.playlists.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
                 {
@@ -3921,10 +3925,10 @@ impl Component for App {
                 self.set_section_visible(section, visible);
             }
             Msg::MoveSection { from, to } => {
-                if from < self.section_order.len() && to < self.section_order.len() && from != to {
-                    let name = self.section_order.remove(from);
-                    self.section_order.insert(to, name);
-                    let value = self.section_order.join(",");
+                if from < self.nav.section_order.len() && to < self.nav.section_order.len() && from != to {
+                    let name = self.nav.section_order.remove(from);
+                    self.nav.section_order.insert(to, name);
+                    let value = self.nav.section_order.join(",");
                     let _ = self.library.set_setting("section_order", &value);
                     // Apply the order to the existing buttons.
                     self.apply_section_order();
@@ -3941,7 +3945,7 @@ impl Component for App {
                 self.toast(&gettext("Shown again"));
             }
             Msg::ToggleFavorite => {
-                if let Some(target) = self.context_target.clone() {
+                if let Some(target) = self.nav.context_target.clone() {
                     let (scope, key, title, is_dir) = self.favorite_ref(&target);
                     let on = !self.library.is_favorite(scope, &key);
                     let _ = self.library.set_favorite(scope, &key, &title, is_dir, on);
@@ -3999,7 +4003,7 @@ impl Component for App {
             }
             Msg::ShowFavoriteDetail(index) => {
                 if let Some((scope, key, _, is_dir)) = self.favorites.favorite_items.get(index).cloned() {
-                    self.context_target = Some(self.entry_target(&scope, &key, is_dir));
+                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -4034,7 +4038,7 @@ impl Component for App {
             }
             Msg::ShowAudiobookDetail(index) => {
                 if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
-                    self.context_target = Some(self.entry_target(&scope, &key, is_dir));
+                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -4067,7 +4071,7 @@ impl Component for App {
             Msg::OpenNowPlaying => {
                 // Detail view of the running track (as a file entry).
                 if let Some(path) = self.queue.get(self.queue_pos).cloned() {
-                    self.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
+                    self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
                     self.open_context_menu(root, &sender);
                 }
             }
@@ -4742,7 +4746,7 @@ impl App {
     /// Narrow (mobile) mode? Identical to the collapsed sidebar that
     /// the breakpoint sets at low window width.
     pub(crate) fn is_mobile(&self) -> bool {
-        self.split.is_collapsed()
+        self.nav.split.is_collapsed()
     }
 
     /// Show detail dialogs on the phone over the **full width**
@@ -4945,26 +4949,26 @@ impl App {
         if !visible {
             let visible_count = SECTIONS
                 .iter()
-                .filter(|(n, _, _)| !self.hidden_sections.contains(*n))
+                .filter(|(n, _, _)| !self.nav.hidden_sections.contains(*n))
                 .count();
             if visible_count <= 1 {
                 return;
             }
         }
         if visible {
-            self.hidden_sections.remove(section);
+            self.nav.hidden_sections.remove(section);
         } else {
-            self.hidden_sections.insert(section.to_string());
+            self.nav.hidden_sections.insert(section.to_string());
         }
         let value = SECTIONS
             .iter()
             .map(|(n, _, _)| *n)
-            .filter(|n| self.hidden_sections.contains(*n))
+            .filter(|n| self.nav.hidden_sections.contains(*n))
             .collect::<Vec<_>>()
             .join(",");
         let _ = self.library.set_setting("hidden_sections", &value);
 
-        for (name, _is_sidebar, btn) in &self.nav_buttons {
+        for (name, _is_sidebar, btn) in &self.nav.nav_buttons {
             if *name == section {
                 btn.set_visible(visible);
             }
@@ -4973,15 +4977,16 @@ impl App {
         // If the currently visible section is hidden, switch to the first
         // visible menu item (in the chosen order).
         if !visible {
-            let cur = self.view_stack.visible_child_name();
+            let cur = self.nav.view_stack.visible_child_name();
             if cur.as_deref() == Some(section) {
                 if let Some(next) = self
+                    .nav
                     .section_order
                     .iter()
                     .copied()
-                    .find(|n| !self.hidden_sections.contains(*n))
+                    .find(|n| !self.nav.hidden_sections.contains(*n))
                 {
-                    self.view_stack.set_visible_child_name(next);
+                    self.nav.view_stack.set_visible_child_name(next);
                 }
             }
         }
@@ -4992,10 +4997,11 @@ impl App {
     /// spacer + "Settings", which stay untouched at the end).
     pub(crate) fn apply_section_order(&self) {
         for sidebar in [true, false] {
-            let container = if sidebar { &self.sidebar_nav } else { &self.top_nav };
+            let container = if sidebar { &self.nav.sidebar_nav } else { &self.nav.top_nav };
             let mut prev: Option<gtk::Widget> = None;
-            for &name in &self.section_order {
+            for &name in &self.nav.section_order {
                 if let Some((_, _, btn)) = self
+                    .nav
                     .nav_buttons
                     .iter()
                     .find(|(n, s, _)| *n == name && *s == sidebar)

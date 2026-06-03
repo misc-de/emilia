@@ -758,18 +758,20 @@ impl App {
         // If we are leaving the root overview, remember the current scroll position
         // of the visible section (restored when returning).
         let leaving_root = self
+            .nav
             .nav_view
             .visible_page()
             .and_then(|p| p.tag())
             .is_some_and(|t| t == "main");
         if leaving_root {
             if let Some(sc) = self
+                .nav
                 .view_stack
                 .visible_child()
                 .and_then(|c| find_scroller(&c))
             {
                 let value = sc.vadjustment().value();
-                *self.overview_scroll.borrow_mut() = Some((sc, value));
+                *self.nav.overview_scroll.borrow_mut() = Some((sc, value));
             }
         }
 
@@ -786,7 +788,7 @@ impl App {
             .title(title)
             .child(&toolbar)
             .build();
-        self.nav_view.push(&page);
+        self.nav.nav_view.push(&page);
     }
 
     /// Short tap on an artist: opens a subpage that first lists
@@ -1406,7 +1408,7 @@ impl App {
     /// Album identity (artist, album) of the current context target, if it is an
     /// album (album card or folder recognized as an album).
     pub(crate) fn ctx_album(&self) -> Option<(String, String)> {
-        match self.context_target.as_ref()? {
+        match self.nav.context_target.as_ref()? {
             CtxTarget::Album(m) => Some((m.artist.clone(), m.album.clone())),
             CtxTarget::Fs(e) => match self.fs_music_kind(e)? {
                 FsKind::Album { artist, album } => Some((artist, album)),
@@ -1419,7 +1421,7 @@ impl App {
     /// Artist name of the current context target, if it is an artist
     /// (artist card or folder recognized as an artist).
     pub(crate) fn ctx_artist(&self) -> Option<String> {
-        match self.context_target.as_ref()? {
+        match self.nav.context_target.as_ref()? {
             CtxTarget::Artist(m) => Some(m.name.clone()),
             CtxTarget::Fs(e) => match self.fs_music_kind(e)? {
                 FsKind::Artist(name) => Some(name),
@@ -1764,7 +1766,7 @@ impl App {
             Area::ALL
                 .iter()
                 .copied()
-                .filter(|a| a.section().map_or(true, |s| !self.hidden_sections.contains(s)))
+                .filter(|a| a.section().map_or(true, |s| !self.nav.hidden_sections.contains(s)))
                 .collect(),
         );
         let group = adw::PreferencesGroup::builder().build();

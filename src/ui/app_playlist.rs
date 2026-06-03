@@ -285,7 +285,7 @@ impl App {
 
     /// Adds the files of the current context target to a playlist.
     pub(crate) fn add_context_to_playlist(&mut self, id: i64, sender: &ComponentSender<Self>) {
-        let Some(target) = self.context_target.clone() else {
+        let Some(target) = self.nav.context_target.clone() else {
             return;
         };
         let files: Vec<String> = self
