@@ -210,6 +210,41 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Playback transport: queue, shuffle order, history, resume/stats sessions.
+pub(crate) struct TransportState {
+    pub(crate) queue: Vec<PathBuf>,
+    pub(crate) queue_pos: usize,
+    pub(crate) shuffle: bool,
+    /// Random order of the queue indices (Fisher-Yates) for shuffle.
+    pub(crate) shuffle_order: Vec<usize>,
+    /// Position within `shuffle_order`.
+    pub(crate) shuffle_idx: usize,
+    /// Repeat: at the end of the queue / single track, start over.
+    pub(crate) repeat: bool,
+    /// Recently played tracks (for "previous song" via double-click on back).
+    pub(crate) play_history: Vec<PathBuf>,
+    /// When jumping back out of history, do not write to the history again.
+    pub(crate) skip_history_push: bool,
+    /// Time of the last back click (double-click detection, < 1 s).
+    pub(crate) last_prev: Option<std::time::Instant>,
+    /// Queue paused while a single song is played in between (list + position).
+    pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
+    /// Back stack of displaced playback contexts (queue + position).
+    pub(crate) nav_stack: Vec<(Vec<PathBuf>, usize)>,
+    /// Context last played by `play_current` (to detect queue replacement).
+    pub(crate) prev_ctx: Option<(Vec<PathBuf>, usize)>,
+    /// Path of the track currently loaded into the player.
+    pub(crate) playing_path: Option<PathBuf>,
+    /// Snapshot (path, position, duration) of the running resume track.
+    pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
+    /// Ongoing listening session for the statistics (see [`PlaySession`]).
+    pub(crate) play_session: Option<PlaySession>,
+    /// Snapshot of the session for close (path, start, listened, duration).
+    pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
+    /// List in the queue dialog (rebuilt on changes).
+    pub(crate) queue_list: gtk::ListBox,
+}
+
 /// Mini-player / now-playing strip state, grouped off the `App` god-object.
 pub(crate) struct MiniState {
     /// Title shown in the player bar; `None` when nothing is loaded.
@@ -428,47 +463,10 @@ pub struct App {
     /// File browser + extra music sources (2nd local folder / Nextcloud) state.
     pub(crate) files: FilesState,
     pub(crate) loading: bool,
-    pub(crate) queue: Vec<PathBuf>,
-    pub(crate) queue_pos: usize,
-    /// Random order of the queue indices (Fisher-Yates), traversed when shuffle
-    /// is active, so that each track comes up **exactly once** in turn.
-    pub(crate) shuffle_order: Vec<usize>,
-    /// Position within `shuffle_order`.
-    pub(crate) shuffle_idx: usize,
-    /// Recently played tracks (for "previous song" via double-click on back).
-    pub(crate) play_history: Vec<PathBuf>,
-    /// When jumping back out of the history, do not write to the history again.
-    pub(crate) skip_history_push: bool,
-    /// Time of the last back click (double-click detection, < 1 s).
-    pub(crate) last_prev: Option<std::time::Instant>,
-    /// Queue paused while a single song is played in between
-    /// (list + position). After the single song it is resumed.
-    pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
-    /// Back stack of displaced playback contexts (queue + position). Is
-    /// filled when a new selection replaces the running queue, and
-    /// allows "keep listening to previous song **including playlist**" (back button).
-    pub(crate) nav_stack: Vec<(Vec<PathBuf>, usize)>,
-    /// Context last played by `play_current` (to detect whether the
-    /// queue was replaced by a new selection).
-    pub(crate) prev_ctx: Option<(Vec<PathBuf>, usize)>,
-    /// Path of the track currently loaded into the player (for saving the
-    /// resume position when switching to another track).
-    pub(crate) playing_path: Option<PathBuf>,
-    /// Snapshot (path, position, duration) of the running resume track, updated
-    /// by the 1-s tick. Is written to the DB once on close,
-    /// so that on a hard exit at most ~1 s of listening position is lost.
-    pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
-    /// Ongoing listening session for the statistics (see [`PlaySession`]).
-    pub(crate) play_session: Option<PlaySession>,
-    /// Snapshot of the session for the close (path, start, listened, duration) –
-    /// analogous to `close_resume`, so that on a hard exit the last event
-    /// is not lost.
-    pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
+    /// Playback transport: queue, shuffle order, history, resume/stats sessions.
+    pub(crate) transport: TransportState,
     /// Mini-player / now-playing strip state.
     pub(crate) mini: MiniState,
-    pub(crate) shuffle: bool,
-    /// Repeat: at the end of the queue or of the single track, start over.
-    pub(crate) repeat: bool,
     pub(crate) toast_overlay: adw::ToastOverlay,
     /// Concerts page state (live-recording collection).
     pub(crate) concerts: ConcertsState,
@@ -496,8 +494,6 @@ pub struct App {
     /// Source ids that are currently **not reachable** (Nextcloud offline) –
     /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
-    /// List in the queue dialog (rebuilt on changes).
-    pub(crate) queue_list: gtk::ListBox,
     /// Content of the statistics page (filled imperatively, like the lists above).
     pub(crate) stats_box: gtk::Box,
     /// Currently selected time period of the listening statistics.
@@ -1648,13 +1644,13 @@ impl Component for App {
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
                                     #[watch]
-                                    set_visible: model.queue.len() >= 2,
+                                    set_visible: model.transport.queue.len() >= 2,
                                     #[watch]
                                     set_sensitive: model.mini.now_playing.is_some(),
                                     #[watch]
-                                    set_active: model.shuffle,
+                                    set_active: model.transport.shuffle,
                                     #[watch]
-                                    set_opacity: if model.shuffle { 1.0 } else { 0.4 },
+                                    set_opacity: if model.transport.shuffle { 1.0 } else { 0.4 },
                                     connect_clicked => Msg::ToggleShuffle,
                                 },
                             },
@@ -1731,9 +1727,9 @@ impl Component for App {
                                     #[watch]
                                     set_sensitive: model.mini.now_playing.is_some(),
                                     #[watch]
-                                    set_active: model.repeat,
+                                    set_active: model.transport.repeat,
                                     #[watch]
-                                    set_opacity: if model.repeat { 1.0 } else { 0.4 },
+                                    set_opacity: if model.transport.repeat { 1.0 } else { 0.4 },
                                     connect_clicked => Msg::ToggleRepeat,
                                 },
                                 gtk::Button {
@@ -2075,20 +2071,25 @@ impl Component for App {
                 playing_remote: false,
             },
             loading: false,
-            queue: Vec::new(),
-            queue_pos: 0,
-            shuffle_order: Vec::new(),
-            shuffle_idx: 0,
-            play_history: Vec::new(),
-            skip_history_push: false,
-            last_prev: None,
-            interrupted_queue: None,
-            nav_stack: Vec::new(),
-            prev_ctx: None,
-            playing_path: None,
-            close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
-            play_session: None,
-            close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            transport: TransportState {
+                queue: Vec::new(),
+                queue_pos: 0,
+                shuffle: false,
+                shuffle_order: Vec::new(),
+                shuffle_idx: 0,
+                repeat: repeat_on,
+                play_history: Vec::new(),
+                skip_history_push: false,
+                last_prev: None,
+                interrupted_queue: None,
+                nav_stack: Vec::new(),
+                prev_ctx: None,
+                playing_path: None,
+                close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                play_session: None,
+                close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                queue_list: queue_list.clone(),
+            },
             mini: MiniState {
                 now_playing: None,
                 playing: false,
@@ -2099,8 +2100,6 @@ impl Component for App {
                 chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
             },
-            shuffle: false,
-            repeat: repeat_on,
             toast_overlay: toast_overlay.clone(),
             concerts: ConcertsState {
                 concert_items: Vec::new(),
@@ -2149,7 +2148,6 @@ impl Component for App {
             },
             settings_nc_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
-            queue_list: queue_list.clone(),
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
             gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
@@ -2207,8 +2205,8 @@ impl Component for App {
         if !q.is_empty() {
             q_pos = q_pos.min(q.len() - 1);
             model.mini.now_playing = Some(model.display_name(&q[q_pos]));
-            model.queue = q;
-            model.queue_pos = q_pos;
+            model.transport.queue = q;
+            model.transport.queue_pos = q_pos;
         }
 
         model.load_dir(&sender);
@@ -2528,8 +2526,8 @@ impl Component for App {
             root.maximize();
         }
         let stack_for_close = widgets.view_stack.clone();
-        let close_resume = model.close_resume.clone();
-        let close_session = model.close_session.clone();
+        let close_resume = model.transport.close_resume.clone();
+        let close_session = model.transport.close_session.clone();
         root.connect_close_request(move |win| {
             // Save the last listening position (covers the gap to the 5-s save).
             if let Some((path, pos, dur)) = close_resume.borrow().clone() {
@@ -2591,7 +2589,7 @@ impl Component for App {
                         // Tapping the active song again → toggle playback
                         // (pause/resume), instead of restarting.
                         let is_active = self.mini.now_playing.is_some()
-                            && self.queue.get(self.queue_pos) == Some(&path);
+                            && self.transport.queue.get(self.transport.queue_pos) == Some(&path);
                         if is_active {
                             if self.mini.playing {
                                 self.save_resume();
@@ -2607,14 +2605,14 @@ impl Component for App {
                             // single song in between and resume the queue
                             // afterwards at its spot (it stays intact).
                             if self.mini.playing
-                                && self.queue.len() > 1
-                                && self.interrupted_queue.is_none()
+                                && self.transport.queue.len() > 1
+                                && self.transport.interrupted_queue.is_none()
                             {
-                                self.interrupted_queue =
-                                    Some((self.queue.clone(), self.queue_pos));
+                                self.transport.interrupted_queue =
+                                    Some((self.transport.queue.clone(), self.transport.queue_pos));
                             }
-                            self.queue = vec![path];
-                            self.queue_pos = 0;
+                            self.transport.queue = vec![path];
+                            self.transport.queue_pos = 0;
                             self.play_current();
                             self.refresh_queue_icons();
                         }
@@ -2631,14 +2629,14 @@ impl Component for App {
                     .filter(|r| !r.entry.is_dir())
                     .and_then(|r| r.entry.path().cloned());
                 if let Some(path) = path {
-                    if let Some(pos) = self.queue.iter().position(|p| *p == path) {
-                        self.queue.remove(pos);
-                        if self.queue_pos > pos {
-                            self.queue_pos -= 1;
+                    if let Some(pos) = self.transport.queue.iter().position(|p| *p == path) {
+                        self.transport.queue.remove(pos);
+                        if self.transport.queue_pos > pos {
+                            self.transport.queue_pos -= 1;
                         }
                         self.toast(&gettext("Removed from queue"));
                     } else {
-                        self.queue.push(path);
+                        self.transport.queue.push(path);
                         self.toast(&gettext("Will play next"));
                     }
                     self.refresh_queue_icons();
@@ -2755,8 +2753,8 @@ impl Component for App {
                     .collect();
                 let target = PathBuf::from(&path);
                 if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.queue = files;
-                    self.queue_pos = pos;
+                    self.transport.queue = files;
+                    self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
                     self.nav.nav_view.pop_to_tag("main");
@@ -2773,8 +2771,8 @@ impl Component for App {
                     .collect();
                 let target = PathBuf::from(&path);
                 if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.queue = files;
-                    self.queue_pos = pos;
+                    self.transport.queue = files;
+                    self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
                     // Back to the main page, so that the mini player is visible.
@@ -2792,8 +2790,8 @@ impl Component for App {
                     .collect();
                 let target = PathBuf::from(&path);
                 if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.queue = files;
-                    self.queue_pos = pos;
+                    self.transport.queue = files;
+                    self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
                     self.nav.nav_view.pop_to_tag("main");
@@ -2809,8 +2807,8 @@ impl Component for App {
                     .collect();
                 let target = PathBuf::from(&path);
                 if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.queue = files;
-                    self.queue_pos = pos;
+                    self.transport.queue = files;
+                    self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
                     self.nav.nav_view.pop_to_tag("main");
@@ -2824,9 +2822,9 @@ impl Component for App {
                     .map(|t| PathBuf::from(t.path))
                     .collect();
                 if !files.is_empty() {
-                    self.shuffle = false;
-                    self.queue = files;
-                    self.queue_pos = 0;
+                    self.transport.shuffle = false;
+                    self.transport.queue = files;
+                    self.transport.queue_pos = 0;
                     self.play_current();
                     self.refresh_queue_icons();
                     self.nav.nav_view.pop_to_tag("main");
@@ -2836,8 +2834,8 @@ impl Component for App {
                 if let Some(entry) = self.nav.context_target.clone() {
                     let files = self.ctx_files(&entry);
                     if !files.is_empty() {
-                        self.queue = files;
-                        self.queue_pos = 0;
+                        self.transport.queue = files;
+                        self.transport.queue_pos = 0;
                         self.play_current();
                         self.refresh_queue_icons();
                     }
@@ -2849,9 +2847,9 @@ impl Component for App {
                 if let Some((artist, album)) = self.ctx_album() {
                     let files = self.album_files(&artist, &album);
                     if !files.is_empty() {
-                        self.shuffle = false;
-                        self.queue = files;
-                        self.queue_pos = 0;
+                        self.transport.shuffle = false;
+                        self.transport.queue = files;
+                        self.transport.queue_pos = 0;
                         self.play_current();
                         self.refresh_queue_icons();
                     }
@@ -2863,9 +2861,9 @@ impl Component for App {
                 if let Some(name) = self.ctx_artist() {
                     let files = self.artist_files_ordered(&name, newest_first);
                     if !files.is_empty() {
-                        self.shuffle = false;
-                        self.queue = files;
-                        self.queue_pos = 0;
+                        self.transport.shuffle = false;
+                        self.transport.queue = files;
+                        self.transport.queue_pos = 0;
                         self.play_current();
                         self.refresh_queue_icons();
                     }
@@ -2875,10 +2873,10 @@ impl Component for App {
                 if let Some(entry) = self.nav.context_target.clone() {
                     let mut files = self.ctx_files(&entry);
                     let n = files.len();
-                    let was_empty = self.queue.is_empty();
-                    self.queue.append(&mut files);
-                    if was_empty && !self.queue.is_empty() {
-                        self.queue_pos = 0;
+                    let was_empty = self.transport.queue.is_empty();
+                    self.transport.queue.append(&mut files);
+                    if was_empty && !self.transport.queue.is_empty() {
+                        self.transport.queue_pos = 0;
                         self.play_current();
                     }
                     self.refresh_queue_icons();
@@ -2917,8 +2915,8 @@ impl Component for App {
             Msg::PlayPlaylist(id) => {
                 let paths = self.library.playlist_paths(id).unwrap_or_default();
                 if !paths.is_empty() {
-                    self.queue = paths.into_iter().map(PathBuf::from).collect();
-                    self.queue_pos = 0;
+                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
+                    self.transport.queue_pos = 0;
                     self.play_current();
                     self.refresh_queue_icons();
                 }
@@ -2932,8 +2930,8 @@ impl Component for App {
                     .map(PathBuf::from)
                     .collect();
                 if let Some(pos) = queue.iter().position(|p| p.to_string_lossy() == path) {
-                    self.queue = queue;
-                    self.queue_pos = pos;
+                    self.transport.queue = queue;
+                    self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
                 }
@@ -3150,7 +3148,7 @@ impl Component for App {
                             Ok(()) => {
                                 self.mini.now_playing = Some(gettext("Replay"));
                                 self.mini.playing = true;
-                                self.playing_path = Some(path);
+                                self.transport.playing_path = Some(path);
                                 self.podcasts.playing_episode_url = None;
                                 self.streaming.playing_stream = None;
                                 self.mpris.set_playing(true);
@@ -3208,8 +3206,8 @@ impl Component for App {
                 let p = PathBuf::from(&path);
                 if p.exists() {
                     self.stop_recorder();
-                    self.queue = vec![p];
-                    self.queue_pos = 0;
+                    self.transport.queue = vec![p];
+                    self.transport.queue_pos = 0;
                     self.play_current();
                 } else {
                     self.toast(&gettext("File not found"));
@@ -3283,7 +3281,7 @@ impl Component for App {
                     // Remote queue: advance to the next track (or stop at the
                     // end). Runs separately from the local queue.
                     self.remote_next();
-                } else if self.podcasts.playing_episode_url.is_some() && self.queue.is_empty() {
+                } else if self.podcasts.playing_episode_url.is_some() && self.transport.queue.is_empty() {
                     // A streamed episode has ended (no queue
                     // behind it): reset the playback state, clear the marking.
                     self.mini.playing = false;
@@ -3297,22 +3295,22 @@ impl Component for App {
                     // Track finished → forget resume, next time from the start.
                     // `take()` prevents play_current from saving the (end) position again
                     // as a resume point.
-                    if let Some(path) = self.playing_path.take() {
+                    if let Some(path) = self.transport.playing_path.take() {
                         let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
                     }
-                    *self.close_resume.borrow_mut() = None;
+                    *self.transport.close_resume.borrow_mut() = None;
                     // If a single song was slipped in between, now resume the interrupted
                     // queue at its spot.
-                    if self.queue.len() == 1 && self.interrupted_queue.is_some() {
-                        if let Some((q, pos)) = self.interrupted_queue.take() {
-                            self.queue = q;
-                            self.queue_pos = pos;
+                    if self.transport.queue.len() == 1 && self.transport.interrupted_queue.is_some() {
+                        if let Some((q, pos)) = self.transport.interrupted_queue.take() {
+                            self.transport.queue = q;
+                            self.transport.queue_pos = pos;
                             self.play_current();
                         }
                     } else {
                         // A new (multi-part) playback discards a possibly
                         // remembered interruption.
-                        self.interrupted_queue = None;
+                        self.transport.interrupted_queue = None;
                         self.play_next();
                     }
                 }
@@ -3351,7 +3349,7 @@ impl Component for App {
                         self.mini.track_duration_ms = dur;
                     }
                     // Carry the close snapshot along.
-                    if let Some(entry) = self.close_resume.borrow_mut().as_mut() {
+                    if let Some(entry) = self.transport.close_resume.borrow_mut().as_mut() {
                         entry.1 = self.mini.position_ms;
                         entry.2 = self.mini.track_duration_ms;
                     }
@@ -3363,14 +3361,14 @@ impl Component for App {
                     // during "Playing"; ~1 s per tick). Backfill the duration if needed,
                     // in case it was not yet known at the start.
                     let dur = self.mini.track_duration_ms;
-                    if let Some(s) = self.play_session.as_mut() {
+                    if let Some(s) = self.transport.play_session.as_mut() {
                         s.played_ms += 1000;
                         if s.duration_ms == 0 {
                             s.duration_ms = dur;
                         }
                     }
-                    if let Some(cs) = self.close_session.borrow_mut().as_mut() {
-                        if let Some(s) = self.play_session.as_ref() {
+                    if let Some(cs) = self.transport.close_session.borrow_mut().as_mut() {
+                        if let Some(s) = self.transport.play_session.as_ref() {
                             cs.2 = s.played_ms;
                             cs.3 = s.duration_ms;
                         }
@@ -3451,10 +3449,10 @@ impl Component for App {
                         self.finalize_play_session(false);
                         self.player.stop();
                         self.mini.playing = false;
-                        self.playing_path = None;
+                        self.transport.playing_path = None;
                         self.mini.position_ms = 0;
                         self.mini.track_duration_ms = 0;
-                        *self.close_resume.borrow_mut() = None;
+                        *self.transport.close_resume.borrow_mut() = None;
                         self.mpris.set_stopped();
                         self.refresh_queue_icons();
                     }
@@ -3489,18 +3487,18 @@ impl Component for App {
                 }
             }
             Msg::ToggleShuffle => {
-                self.shuffle = !self.shuffle;
+                self.transport.shuffle = !self.transport.shuffle;
                 // When enabling, build a fresh random order of the whole
                 // queue (running track first).
-                if self.shuffle {
+                if self.transport.shuffle {
                     self.rebuild_shuffle_order();
                 }
             }
             Msg::ToggleRepeat => {
-                self.repeat = !self.repeat;
+                self.transport.repeat = !self.transport.repeat;
                 let _ = self
                     .library
-                    .set_setting("repeat", if self.repeat { "1" } else { "0" });
+                    .set_setting("repeat", if self.transport.repeat { "1" } else { "0" });
             }
             Msg::NavUp => {
                 // Remote source: one rel segment up.
@@ -3576,7 +3574,7 @@ impl Component for App {
             },
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
             Msg::OpenCurrentEq => {
-                if let Some(path) = self.queue.get(self.queue_pos).cloned() {
+                if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
                     let key = path.to_string_lossy().into_owned();
                     let name = Self::track_display_name(&path);
                     self.open_eq_editor(root, &sender, "the track", &name, None, "track", key);
@@ -3584,26 +3582,26 @@ impl Component for App {
             }
             Msg::ShowQueue => self.open_queue_dialog(root, &sender),
             Msg::QueueRemove(idx) => {
-                if idx < self.queue.len() {
-                    let was_current = idx == self.queue_pos;
-                    self.queue.remove(idx);
-                    if self.queue_pos > idx {
-                        self.queue_pos -= 1;
+                if idx < self.transport.queue.len() {
+                    let was_current = idx == self.transport.queue_pos;
+                    self.transport.queue.remove(idx);
+                    if self.transport.queue_pos > idx {
+                        self.transport.queue_pos -= 1;
                     }
                     if was_current {
                         // If the removed track was playing → play the one now
                         // at this spot (or stop if empty).
-                        if self.queue.is_empty() {
+                        if self.transport.queue.is_empty() {
                             self.player.stop();
                             self.mini.playing = false;
                             self.mini.now_playing = None;
-                            self.playing_path = None;
+                            self.transport.playing_path = None;
                             self.mini.position_ms = 0;
                             self.mini.track_duration_ms = 0;
-                            *self.close_resume.borrow_mut() = None;
+                            *self.transport.close_resume.borrow_mut() = None;
                             self.mpris.set_stopped();
                         } else {
-                            self.queue_pos = self.queue_pos.min(self.queue.len() - 1);
+                            self.transport.queue_pos = self.transport.queue_pos.min(self.transport.queue.len() - 1);
                             self.play_current();
                         }
                     }
@@ -3614,16 +3612,16 @@ impl Component for App {
             }
             Msg::QueueClear => {
                 self.player.stop();
-                self.queue.clear();
-                self.queue_pos = 0;
-                self.shuffle_order.clear();
-                self.shuffle_idx = 0;
+                self.transport.queue.clear();
+                self.transport.queue_pos = 0;
+                self.transport.shuffle_order.clear();
+                self.transport.shuffle_idx = 0;
                 self.mini.playing = false;
                 self.mini.now_playing = None;
-                self.playing_path = None;
+                self.transport.playing_path = None;
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
-                *self.close_resume.borrow_mut() = None;
+                *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
                 self.reload_queue_list(&sender);
                 self.refresh_queue_icons();
@@ -3631,13 +3629,13 @@ impl Component for App {
                 self.toast(&gettext("Queue cleared"));
             }
             Msg::QueueMove { from, to } => {
-                let len = self.queue.len();
+                let len = self.transport.queue.len();
                 if from < len && to < len && from != to {
-                    let item = self.queue.remove(from);
-                    self.queue.insert(to, item);
+                    let item = self.transport.queue.remove(from);
+                    self.transport.queue.insert(to, item);
                     // Adjust queue_pos so that the same track keeps playing.
-                    let cur = self.queue_pos;
-                    self.queue_pos = if cur == from {
+                    let cur = self.transport.queue_pos;
+                    self.transport.queue_pos = if cur == from {
                         to
                     } else {
                         let mut p = cur;
@@ -3969,6 +3967,7 @@ impl Component for App {
                     // restarting it.
                     let is_current = scope == "track"
                         && self
+                            .transport
                             .playing_path
                             .as_ref()
                             .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
@@ -3994,9 +3993,9 @@ impl Component for App {
                             .map(|(_, k, _, _)| PathBuf::from(k))
                             .collect();
                         let pos = tracks.iter().position(|p| *p == PathBuf::from(&key)).unwrap_or(0);
-                        self.shuffle = false;
-                        self.queue = tracks;
-                        self.queue_pos = pos;
+                        self.transport.shuffle = false;
+                        self.transport.queue = tracks;
+                        self.transport.queue_pos = pos;
                         self.play_current();
                         self.refresh_queue_icons();
                     } else {
@@ -4052,14 +4051,14 @@ impl Component for App {
                     self.save_resume();
                     self.player.pause();
                     self.mini.playing = false;
-                } else if self.playing_path.is_some()
+                } else if self.transport.playing_path.is_some()
                     || self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
                 {
                     // Paused (file, station or episode) → resume.
                     self.player.resume();
                     self.mini.playing = true;
-                } else if !self.queue.is_empty() {
+                } else if !self.transport.queue.is_empty() {
                     // Playback had ended → restart from the current position (rewound
                     // to 0 after the end). play_current sets
                     // playing/MPRIS/icons itself.
@@ -4075,7 +4074,7 @@ impl Component for App {
             }
             Msg::OpenNowPlaying => {
                 // Detail view of the running track (as a file entry).
-                if let Some(path) = self.queue.get(self.queue_pos).cloned() {
+                if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
                     self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
                     self.open_context_menu(root, &sender);
                 }
@@ -4098,7 +4097,7 @@ impl Component for App {
                 let opts = RowOpts {
                     show_artist: distinct.len() > 1,
                 };
-                let queue = self.queue.clone();
+                let queue = self.transport.queue.clone();
                 let mut guard = self.entries.guard();
                 guard.clear();
                 for e in entries {

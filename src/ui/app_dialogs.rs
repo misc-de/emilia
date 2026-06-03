@@ -115,7 +115,7 @@ impl App {
         // As long as exactly this track is **playing**, don't show a "Play" action;
         // once it ends, it is shown again (see `refresh_ctx_play`).
         let is_current =
-            current_path.is_some() && self.playing_path.as_deref() == current_path.as_deref();
+            current_path.is_some() && self.transport.playing_path.as_deref() == current_path.as_deref();
 
         // Artist with only **one** song: "Play artist" + order makes no sense
         // (and the order doesn't even capture single songs without an album).
@@ -277,7 +277,7 @@ impl App {
     /// or is switched.
     pub(crate) fn refresh_ctx_play(&self) {
         if let Some((row, path)) = self.nav.ctx_play.borrow().as_ref() {
-            row.set_visible(self.playing_path.as_deref() != Some(path.as_path()));
+            row.set_visible(self.transport.playing_path.as_deref() != Some(path.as_path()));
         }
     }
 

@@ -212,6 +212,7 @@ impl App {
                 // If exactly this track is currently playing, show a pause icon.
                 let is_active = scope == "track"
                     && self
+                        .transport
                         .playing_path
                         .as_ref()
                         .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
@@ -453,8 +454,8 @@ impl App {
         if files.is_empty() {
             return;
         }
-        self.queue = files;
-        self.queue_pos = 0;
+        self.transport.queue = files;
+        self.transport.queue_pos = 0;
         self.play_current();
         self.refresh_queue_icons();
     }

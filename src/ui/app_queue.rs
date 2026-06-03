@@ -17,13 +17,13 @@ impl App {
     ) {
         // The list is a model widget (rebuilt on changes); detach it from any
         // possibly old dialog before re-attaching.
-        if self.queue_list.parent().is_some() {
-            self.queue_list.unparent();
+        if self.transport.queue_list.parent().is_some() {
+            self.transport.queue_list.unparent();
         }
         self.reload_queue_list(sender);
 
-        self.queue_list.set_css_classes(&["boxed-list"]);
-        self.queue_list.set_valign(gtk::Align::Start);
+        self.transport.queue_list.set_css_classes(&["boxed-list"]);
+        self.transport.queue_list.set_valign(gtk::Align::Start);
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .margin_top(12)
@@ -31,7 +31,7 @@ impl App {
             .margin_start(12)
             .margin_end(12)
             .build();
-        content.append(&self.queue_list);
+        content.append(&self.transport.queue_list);
 
         let scroller = gtk::ScrolledWindow::builder()
             .vexpand(true)
@@ -87,17 +87,17 @@ impl App {
     /// Rebuilds the queue list: starting from the currently playing track (top),
     /// the following ones with drag handle + trash button.
     pub(crate) fn reload_queue_list(&self, sender: &ComponentSender<Self>) {
-        while let Some(child) = self.queue_list.first_child() {
-            self.queue_list.remove(&child);
+        while let Some(child) = self.transport.queue_list.first_child() {
+            self.transport.queue_list.remove(&child);
         }
-        if self.queue.is_empty() {
-            self.queue_list
+        if self.transport.queue.is_empty() {
+            self.transport.queue_list
                 .append(&adw::ActionRow::builder().title(&gettext("The queue is empty")).build());
             return;
         }
 
-        let pos = self.queue_pos;
-        for (offset, path) in self.queue.iter().skip(pos).enumerate() {
+        let pos = self.transport.queue_pos;
+        for (offset, path) in self.transport.queue.iter().skip(pos).enumerate() {
             let qidx = pos + offset;
             let is_current = offset == 0;
             let row = adw::ActionRow::builder()
@@ -150,7 +150,7 @@ impl App {
             }
             row.add_suffix(&trash);
 
-            self.queue_list.append(&row);
+            self.transport.queue_list.append(&row);
         }
     }
 }

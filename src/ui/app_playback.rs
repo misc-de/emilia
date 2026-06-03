@@ -15,9 +15,9 @@ use crate::ui::fs_row::{FsEntry, FsInput};
 impl App {
     /// Refreshes the queue marker of all visible file rows.
     pub(crate) fn refresh_queue_icons(&mut self) {
-        let queue = self.queue.clone();
+        let queue = self.transport.queue.clone();
         // Currently playing track (for the play marker).
-        let active_path = self.queue.get(self.queue_pos).cloned();
+        let active_path = self.transport.queue.get(self.transport.queue_pos).cloned();
         // Remote playback: the active entry is marked via the rel path.
         let active_rel = if self.files.playing_remote {
             self.files.remote_queue.get(self.files.remote_pos).map(|t| t.rel_path.clone())
@@ -151,16 +151,16 @@ impl App {
             Ok(()) => {
                 self.mini.now_playing = Some(track.title.clone());
                 self.mini.playing = true;
-                self.playing_path = None;
+                self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
                 self.files.playing_remote = true;
                 self.stop_recorder();
-                self.queue.clear();
-                self.queue_pos = 0;
+                self.transport.queue.clear();
+                self.transport.queue_pos = 0;
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
-                *self.close_resume.borrow_mut() = None;
+                *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, &track.title, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.set_chapters(Vec::new());
@@ -178,7 +178,7 @@ impl App {
         if self.files.remote_pos + 1 < self.files.remote_queue.len() {
             self.files.remote_pos += 1;
             self.play_remote_current();
-        } else if self.repeat && !self.files.remote_queue.is_empty() {
+        } else if self.transport.repeat && !self.files.remote_queue.is_empty() {
             self.files.remote_pos = 0;
             self.play_remote_current();
         } else {
@@ -202,60 +202,60 @@ impl App {
     /// running track in first place. This way every track of the queue plays
     /// exactly once, in random order.
     pub(crate) fn rebuild_shuffle_order(&mut self) {
-        let len = self.queue.len();
+        let len = self.transport.queue.len();
         let mut order: Vec<usize> = (0..len).collect();
         for i in (1..len).rev() {
             let j = gtk::glib::random_int_range(0, (i + 1) as i32) as usize;
             order.swap(i, j);
         }
         // Move the running track to the front so it isn't skipped immediately.
-        if let Some(p) = order.iter().position(|&x| x == self.queue_pos) {
+        if let Some(p) = order.iter().position(|&x| x == self.transport.queue_pos) {
             order.swap(0, p);
         }
-        self.shuffle_order = order;
-        self.shuffle_idx = 0;
+        self.transport.shuffle_order = order;
+        self.transport.shuffle_idx = 0;
     }
 
     /// Next track: when shuffling, the next of the shuffle order, otherwise the
     /// following one. At the end (all played) playback stops.
     pub(crate) fn play_next(&mut self) {
-        if self.queue.is_empty() {
+        if self.transport.queue.is_empty() {
             return;
         }
-        let len = self.queue.len();
-        let next = if self.shuffle {
+        let len = self.transport.queue.len();
+        let next = if self.transport.shuffle {
             // Reshuffle if the queue has changed or the running
             // track is no longer the expected one of the order (e.g. after
             // manual selection) – then keep shuffling from the current track.
-            if self.shuffle_order.len() != len
-                || self.shuffle_order.get(self.shuffle_idx) != Some(&self.queue_pos)
+            if self.transport.shuffle_order.len() != len
+                || self.transport.shuffle_order.get(self.transport.shuffle_idx) != Some(&self.transport.queue_pos)
             {
                 self.rebuild_shuffle_order();
             }
-            if self.shuffle_idx + 1 < self.shuffle_order.len() {
-                self.shuffle_idx += 1;
-                Some(self.shuffle_order[self.shuffle_idx])
+            if self.transport.shuffle_idx + 1 < self.transport.shuffle_order.len() {
+                self.transport.shuffle_idx += 1;
+                Some(self.transport.shuffle_order[self.transport.shuffle_idx])
             } else {
                 None
             }
-        } else if self.queue_pos + 1 < len {
-            Some(self.queue_pos + 1)
+        } else if self.transport.queue_pos + 1 < len {
+            Some(self.transport.queue_pos + 1)
         } else {
             None
         };
         match next {
             Some(n) => {
-                self.queue_pos = n;
+                self.transport.queue_pos = n;
                 self.play_current();
             }
-            None if self.repeat && !self.queue.is_empty() => {
+            None if self.transport.repeat && !self.transport.queue.is_empty() => {
                 // Repeat: start over at the end (single track likewise, since
                 // the queue then has only one entry). Reshuffle when shuffling.
-                if self.shuffle {
+                if self.transport.shuffle {
                     self.rebuild_shuffle_order();
-                    self.queue_pos = self.shuffle_order.first().copied().unwrap_or(0);
+                    self.transport.queue_pos = self.transport.shuffle_order.first().copied().unwrap_or(0);
                 } else {
-                    self.queue_pos = 0;
+                    self.transport.queue_pos = 0;
                 }
                 self.play_current();
             }
@@ -268,13 +268,13 @@ impl App {
                 self.finalize_play_session(false);
                 self.player.stop();
                 self.mini.playing = false;
-                self.playing_path = None;
-                self.queue_pos = 0;
+                self.transport.playing_path = None;
+                self.transport.queue_pos = 0;
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
-                self.shuffle_order.clear();
-                self.shuffle_idx = 0;
-                *self.close_resume.borrow_mut() = None;
+                self.transport.shuffle_order.clear();
+                self.transport.shuffle_idx = 0;
+                *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
                 self.refresh_queue_icons();
                 self.save_queue();
@@ -288,29 +288,30 @@ impl App {
     pub(crate) fn play_prev(&mut self) {
         let now = std::time::Instant::now();
         let double = self
+            .transport
             .last_prev
             .is_some_and(|t| now.duration_since(t) <= std::time::Duration::from_secs(1));
-        self.last_prev = Some(now);
+        self.transport.last_prev = Some(now);
 
         if double {
-            if let Some(prev) = self.play_history.pop() {
+            if let Some(prev) = self.transport.play_history.pop() {
                 // Previous song: preferably play it at its queue position,
                 // otherwise the path directly (without another history entry).
-                self.skip_history_push = true;
-                if let Some(pos) = self.queue.iter().position(|p| *p == prev) {
-                    self.queue_pos = pos;
+                self.transport.skip_history_push = true;
+                if let Some(pos) = self.transport.queue.iter().position(|p| *p == prev) {
+                    self.transport.queue_pos = pos;
                     self.play_current();
                 } else {
-                    self.queue = vec![prev];
-                    self.queue_pos = 0;
+                    self.transport.queue = vec![prev];
+                    self.transport.queue_pos = 0;
                     self.play_current();
                 }
                 return;
             }
             // No history → sequentially one song back.
-            if !self.queue.is_empty() && self.queue_pos > 0 {
-                self.skip_history_push = true;
-                self.queue_pos -= 1;
+            if !self.transport.queue.is_empty() && self.transport.queue_pos > 0 {
+                self.transport.skip_history_push = true;
+                self.transport.queue_pos -= 1;
                 self.play_current();
             }
             return;
@@ -321,11 +322,11 @@ impl App {
         // restore it **including its playlist** and keep listening to the song
         // (resume from the DB). "Back" right after an accidentally
         // started song thus returns to the previous one.
-        if !self.nav_stack.is_empty() && self.player.position_ms().unwrap_or(0) < 5000 {
-            if let Some((q, pos)) = self.nav_stack.pop() {
-                self.skip_history_push = true;
-                self.queue = q;
-                self.queue_pos = pos.min(self.queue.len().saturating_sub(1));
+        if !self.transport.nav_stack.is_empty() && self.player.position_ms().unwrap_or(0) < 5000 {
+            if let Some((q, pos)) = self.transport.nav_stack.pop() {
+                self.transport.skip_history_push = true;
+                self.transport.queue = q;
+                self.transport.queue_pos = pos.min(self.transport.queue.len().saturating_sub(1));
                 self.play_current();
                 self.refresh_queue_icons();
                 return;
@@ -333,8 +334,8 @@ impl App {
         }
 
         // Otherwise: running track from the beginning.
-        if self.playing_path.is_some() {
-            self.skip_history_push = true;
+        if self.transport.playing_path.is_some() {
+            self.transport.skip_history_push = true;
             self.play_current();
         }
     }
@@ -420,6 +421,7 @@ impl App {
     /// restoration after a restart of the app.
     pub(crate) fn save_queue(&self) {
         let paths = self
+            .transport
             .queue
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
@@ -428,14 +430,14 @@ impl App {
         let _ = self.library.set_setting("queue_paths", &paths);
         let _ = self
             .library
-            .set_setting("queue_pos", &self.queue_pos.to_string());
+            .set_setting("queue_pos", &self.transport.queue_pos.to_string());
     }
 
     /// Saves the current playback position of the loaded track as a
     /// resume point. Near the start or end it is reset to 0 so that a
     /// nearly finished track starts over from the beginning next time.
     pub(crate) fn save_resume(&self) {
-        let Some(path) = self.playing_path.clone() else {
+        let Some(path) = self.transport.playing_path.clone() else {
             return;
         };
         let path_str = path.to_string_lossy();
@@ -474,7 +476,7 @@ impl App {
     /// `play_event` into the statistics. `completed` = listened to the end (EOS).
     /// Without a session nothing happens (idempotent).
     pub(crate) fn finalize_play_session(&mut self, completed: bool) {
-        if let Some(s) = self.play_session.take() {
+        if let Some(s) = self.transport.play_session.take() {
             let dur = if s.duration_ms > 0 {
                 s.duration_ms
             } else {
@@ -489,7 +491,7 @@ impl App {
                 None, // source (queue/album/…) stays unused in v1, column reserved.
             );
         }
-        *self.close_session.borrow_mut() = None;
+        *self.transport.close_session.borrow_mut() = None;
     }
 
     pub(crate) fn play_current(&mut self) {
@@ -500,32 +502,32 @@ impl App {
         // Finalize the previous listening session as a switch/skip (if the call came
         // from an EOS, it is already finalized → no-op).
         self.finalize_play_session(false);
-        let Some(path) = self.queue.get(self.queue_pos).cloned() else {
+        let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() else {
             return;
         };
         // Detect context switch: if a new selection replaces the running
         // queue, push the old context (queue + position) onto the back
         // stack – this allows "keep listening to the previous song **including
         // its playlist**". When jumping back itself, don't stack again.
-        if !self.skip_history_push {
-            if let Some((pq, pp)) = self.prev_ctx.clone() {
-                if !pq.is_empty() && pq != self.queue {
-                    self.nav_stack.push((pq, pp));
-                    if self.nav_stack.len() > 50 {
-                        self.nav_stack.remove(0);
+        if !self.transport.skip_history_push {
+            if let Some((pq, pp)) = self.transport.prev_ctx.clone() {
+                if !pq.is_empty() && pq != self.transport.queue {
+                    self.transport.nav_stack.push((pq, pp));
+                    if self.transport.nav_stack.len() > 50 {
+                        self.transport.nav_stack.remove(0);
                     }
                 }
             }
         }
         // Maintain history: remember the previously running track (for "previous song").
         // When jumping back from the history itself, don't add it again.
-        if self.skip_history_push {
-            self.skip_history_push = false;
-        } else if let Some(prev) = self.playing_path.clone() {
+        if self.transport.skip_history_push {
+            self.transport.skip_history_push = false;
+        } else if let Some(prev) = self.transport.playing_path.clone() {
             if prev != path {
-                self.play_history.push(prev);
-                if self.play_history.len() > 200 {
-                    self.play_history.remove(0);
+                self.transport.play_history.push(prev);
+                if self.transport.play_history.len() > 200 {
+                    self.transport.play_history.remove(0);
                 }
             }
         }
@@ -538,7 +540,7 @@ impl App {
         };
         match self.start_track_playback(&path_str, resume_ms) {
             Ok(()) => {
-                self.playing_path = Some(path.clone());
+                self.transport.playing_path = Some(path.clone());
                 // Music is playing again – no podcast episode/station/
                 // remote file active anymore.
                 self.podcasts.playing_episode_url = None;
@@ -566,24 +568,24 @@ impl App {
                     .unwrap_or(0);
                 // Snapshot for saving on close (resume tracks only).
                 let resumable = matches!(&track, Some(t) if self.should_resume(t));
-                *self.close_resume.borrow_mut() = resumable
+                *self.transport.close_resume.borrow_mut() = resumable
                     .then(|| (path_str.clone(), start, self.mini.track_duration_ms));
                 // Start a new listening session for the statistics.
                 let now = crate::ui::app::unix_now();
-                self.play_session = Some(PlaySession {
+                self.transport.play_session = Some(PlaySession {
                     path: path.clone(),
                     started_at: now,
                     played_ms: 0,
                     duration_ms: self.mini.track_duration_ms,
                 });
-                *self.close_session.borrow_mut() =
+                *self.transport.close_session.borrow_mut() =
                     Some((path_str.clone(), now, 0, self.mini.track_duration_ms));
                 // Adjust the play/queue markers in the list to the new track.
                 self.refresh_queue_icons();
                 // Save the queue + position for the next start.
                 self.save_queue();
                 // Remember the current context (detection of future queue switches).
-                self.prev_ctx = Some((self.queue.clone(), self.queue_pos));
+                self.transport.prev_ctx = Some((self.transport.queue.clone(), self.transport.queue_pos));
                 // Tracks have no chapters → clear markers/hover list.
                 self.set_chapters(Vec::new());
                 // If usable tags are missing (artist/album), let the track be
@@ -618,7 +620,7 @@ impl App {
             .as_deref()
             .and_then(|al| self.library.album_cover(al).ok().flatten());
         self.mpris.set_metadata(
-            self.queue_pos,
+            self.transport.queue_pos,
             &title,
             artist.as_deref(),
             album.as_deref(),
@@ -631,7 +633,7 @@ impl App {
     /// (track→album→artist→global, then default output) and applies it live.
     /// Without any setting: neutral (all bands 0).
     pub(crate) fn apply_current_eq(&self) {
-        let Some(path) = self.queue.get(self.queue_pos) else {
+        let Some(path) = self.transport.queue.get(self.transport.queue_pos) else {
             return;
         };
         let (artist, album) = match scanner::read_track(path) {
@@ -670,8 +672,8 @@ impl App {
             vec![p]
         };
         if !files.is_empty() {
-            self.queue = files;
-            self.queue_pos = 0;
+            self.transport.queue = files;
+            self.transport.queue_pos = 0;
             self.play_current();
             self.refresh_queue_icons();
         }

@@ -839,16 +839,16 @@ impl App {
             Ok(()) => {
                 self.mini.now_playing = Some(title.to_string());
                 self.mini.playing = true;
-                self.playing_path = None;
+                self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = Some(url.to_string());
                 self.streaming.playing_stream = None;
                 self.files.playing_remote = false;
                 self.stop_recorder();
-                self.queue.clear();
-                self.queue_pos = 0;
+                self.transport.queue.clear();
+                self.transport.queue_pos = 0;
                 self.mini.position_ms = resume.max(0);
                 self.mini.track_duration_ms = 0;
-                *self.close_resume.borrow_mut() = None;
+                *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, title, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();

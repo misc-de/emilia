@@ -422,16 +422,16 @@ impl App {
             Ok(()) => {
                 self.mini.now_playing = Some(st.name.clone());
                 self.mini.playing = true;
-                self.playing_path = None;
+                self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = Some(id);
                 self.files.playing_remote = false;
                 self.streaming.stream_title = None;
-                self.queue.clear();
-                self.queue_pos = 0;
+                self.transport.queue.clear();
+                self.transport.queue_pos = 0;
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
-                *self.close_resume.borrow_mut() = None;
+                *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_metadata(0, &st.name, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
