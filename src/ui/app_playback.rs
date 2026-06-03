@@ -151,7 +151,7 @@ impl App {
                 self.now_playing = Some(track.title.clone());
                 self.playing = true;
                 self.playing_path = None;
-                self.playing_episode_url = None;
+                self.podcasts.playing_episode_url = None;
                 self.playing_stream = None;
                 self.playing_remote = true;
                 self.stop_recorder();
@@ -456,7 +456,7 @@ impl App {
     /// by the audio URL). Near the start/end it is set to 0 (counts as
     /// new or finished). No-op when no episode is currently playing.
     pub(crate) fn save_episode_progress(&self) {
-        let Some(url) = self.playing_episode_url.clone() else {
+        let Some(url) = self.podcasts.playing_episode_url.clone() else {
             return;
         };
         let Some(pos) = self.player.position_ms() else {
@@ -539,7 +539,7 @@ impl App {
                 self.playing_path = Some(path.clone());
                 // Music is playing again – no podcast episode/station/
                 // remote file active anymore.
-                self.playing_episode_url = None;
+                self.podcasts.playing_episode_url = None;
                 self.playing_stream = None;
                 self.playing_remote = false;
                 self.stop_recorder();

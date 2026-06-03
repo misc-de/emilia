@@ -68,11 +68,12 @@ impl App {
     /// subscription detail view (refresh/remove). Afterwards also refreshes
     /// the "Newest" list.
     pub(crate) fn reload_podcasts(&mut self, sender: &ComponentSender<Self>) {
-        self.podcast_items = self.library.podcasts().unwrap_or_default();
+        self.podcasts.podcast_items = self.library.podcasts().unwrap_or_default();
         if self.gallery_view {
             // Gallery variant: cover grid; tap opens the episodes,
             // double-tap the subscription detail view.
             let tiles: Vec<(Option<String>, &'static str, String)> = self
+                .podcasts
                 .podcast_items
                 .iter()
                 .map(|(_, title, image, _)| {
@@ -83,16 +84,16 @@ impl App {
                 })
                 .collect();
             self.fill_gallery(
-                &self.podcasts_gallery,
+                &self.podcasts.podcasts_gallery,
                 &tiles,
                 Msg::OpenPodcastAt,
                 Msg::ShowPodcastDetailAt,
             );
         } else {
-            while let Some(child) = self.podcasts_list.first_child() {
-                self.podcasts_list.remove(&child);
+            while let Some(child) = self.podcasts.podcasts_list.first_child() {
+                self.podcasts.podcasts_list.remove(&child);
             }
-            for (id, title, image, count) in self.podcast_items.clone() {
+            for (id, title, image, count) in self.podcasts.podcast_items.clone() {
                 // Episode count in parentheses on the heading, as with albums/songs;
                 // no separate "N episodes" line.
                 let row = adw::ActionRow::builder()
@@ -122,7 +123,7 @@ impl App {
                     });
                 }
                 row.add_controller(lp);
-                self.podcasts_list.append(&row);
+                self.podcasts.podcasts_list.append(&row);
             }
         }
         self.reload_newest(sender);
@@ -146,9 +147,9 @@ impl App {
                 .cmp(&crate::core::podcast::pubdate_key(a.published.as_deref()))
         });
         eps.truncate(150);
-        self.newest_items = eps;
-        while let Some(child) = self.newest_list.first_child() {
-            self.newest_list.remove(&child);
+        self.podcasts.newest_items = eps;
+        while let Some(child) = self.podcasts.newest_list.first_child() {
+            self.podcasts.newest_list.remove(&child);
         }
 
         // Sort by recency: Today / Yesterday / This week / This month. The
@@ -176,13 +177,13 @@ impl App {
 
         let mut cur_bucket: Option<usize> = None;
         let mut group: Option<adw::PreferencesGroup> = None;
-        for (i, ep) in self.newest_items.iter().enumerate() {
+        for (i, ep) in self.podcasts.newest_items.iter().enumerate() {
             let b = bucket_of(crate::core::podcast::pubdate_key(ep.published.as_deref()));
             // New section → new group with heading (only when there is something).
             if cur_bucket != Some(b) {
                 cur_bucket = Some(b);
                 let g = adw::PreferencesGroup::builder().title(&bucket_title(b)).build();
-                self.newest_list.append(&g);
+                self.podcasts.newest_list.append(&g);
                 group = Some(g);
             }
 
@@ -244,7 +245,7 @@ impl App {
         sender: &ComponentSender<Self>,
         index: usize,
     ) {
-        if let Some(ep) = self.newest_items.get(index).cloned() {
+        if let Some(ep) = self.podcasts.newest_items.get(index).cloned() {
             self.show_episode_detail(root, sender, ep);
         }
     }
@@ -268,6 +269,7 @@ impl App {
             return;
         };
         let (podcast_title, podcast_image) = self
+            .podcasts
             .podcast_items
             .iter()
             .find(|(pid, _, _, _)| *pid == podcast_id)
@@ -427,7 +429,7 @@ impl App {
         id: i64,
     ) {
         let Some((_, title, image, count)) =
-            self.podcast_items.iter().find(|(p, _, _, _)| *p == id).cloned()
+            self.podcasts.podcast_items.iter().find(|(p, _, _, _)| *p == id).cloned()
         else {
             return;
         };
@@ -493,6 +495,7 @@ impl App {
         let episodes = self.library.episodes(id).unwrap_or_default();
         // Determine the podcast cover once and show it in all episode rows.
         let cover = self
+            .podcasts
             .podcast_items
             .iter()
             .find(|(pid, _, _, _)| *pid == id)
@@ -657,9 +660,9 @@ impl App {
 
         // Store dialog + results list so incoming results are drawn into the
         // open list; release it again when closing.
-        *self.podcast_search.borrow_mut() = Some((dialog.clone(), results.clone()));
+        *self.podcasts.podcast_search.borrow_mut() = Some((dialog.clone(), results.clone()));
         {
-            let slot = self.podcast_search.clone();
+            let slot = self.podcasts.podcast_search.clone();
             dialog.connect_closed(move |_| {
                 *slot.borrow_mut() = None;
             });
@@ -670,12 +673,12 @@ impl App {
     }
 
     /// Redraws the results list in the open subscription search dialog (from
-    /// `self.podcast_search_results`). Does nothing if the dialog is closed.
+    /// `self.podcasts.podcast_search_results`). Does nothing if the dialog is closed.
     /// Each result is tappable: tapping subscribes via the feed address and
     /// closes the dialog. Covers come from the local cache (otherwise a
     /// microphone placeholder).
     pub(crate) fn rebuild_podcast_search_results(&self, sender: &ComponentSender<Self>) {
-        let guard = self.podcast_search.borrow();
+        let guard = self.podcasts.podcast_search.borrow();
         let Some((dialog, list)) = guard.as_ref() else {
             return;
         };
@@ -684,7 +687,7 @@ impl App {
         }
         list.set_visible(true);
 
-        if self.podcast_search_results.is_empty() {
+        if self.podcasts.podcast_search_results.is_empty() {
             let row = adw::ActionRow::builder().title(&gettext("No podcasts found")).build();
             row.set_sensitive(false);
             list.append(&row);
@@ -696,10 +699,10 @@ impl App {
         // Make the dialog as tall as the results need (capped, then the list
         // scrolls). Roughly: fixed areas (header, search, address) + ~66 px
         // per result row.
-        let rows = self.podcast_search_results.len() as i32;
+        let rows = self.podcasts.podcast_search_results.len() as i32;
         dialog.set_content_height((320 + rows * 66).min(760));
 
-        for r in &self.podcast_search_results {
+        for r in &self.podcasts.podcast_search_results {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&r.title))
                 .activatable(true)
@@ -746,7 +749,7 @@ impl App {
                 });
             });
         }
-        self.episode_play_buttons
+        self.podcasts.episode_play_buttons
             .borrow_mut()
             .push((url.to_string(), btn.clone()));
         btn
@@ -756,11 +759,11 @@ impl App {
     /// row of an open detail dialog. Detached rows (e.g. after leaving a
     /// subpage) are discarded in the process.
     pub(crate) fn refresh_episode_icons(&self) {
-        let active = self.playing_episode_url.clone();
+        let active = self.podcasts.playing_episode_url.clone();
         let playing = self.playing;
         let is_active = |url: &str| playing && active.as_deref() == Some(url);
         {
-            let mut buttons = self.episode_play_buttons.borrow_mut();
+            let mut buttons = self.podcasts.episode_play_buttons.borrow_mut();
             buttons.retain(|(_, btn)| btn.root().is_some());
             for (url, btn) in buttons.iter() {
                 btn.set_icon_name(if is_active(url) {
@@ -770,7 +773,7 @@ impl App {
                 });
             }
         }
-        if let Some((row, url)) = self.ctx_episode_play.borrow().as_ref() {
+        if let Some((row, url)) = self.podcasts.ctx_episode_play.borrow().as_ref() {
             row.set_visible(!is_active(url));
         }
     }
@@ -837,7 +840,7 @@ impl App {
                 self.now_playing = Some(title.to_string());
                 self.playing = true;
                 self.playing_path = None;
-                self.playing_episode_url = Some(url.to_string());
+                self.podcasts.playing_episode_url = Some(url.to_string());
                 self.playing_stream = None;
                 self.playing_remote = false;
                 self.stop_recorder();

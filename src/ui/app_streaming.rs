@@ -423,7 +423,7 @@ impl App {
                 self.now_playing = Some(st.name.clone());
                 self.playing = true;
                 self.playing_path = None;
-                self.playing_episode_url = None;
+                self.podcasts.playing_episode_url = None;
                 self.playing_stream = Some(id);
                 self.playing_remote = false;
                 self.stream_title = None;

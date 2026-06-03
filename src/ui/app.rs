@@ -210,6 +210,38 @@ pub(crate) struct PlaySession {
     pub(crate) duration_ms: i64,
 }
 
+/// Podcasts page state, grouped off the `App` god-object.
+pub(crate) struct PodcastsState {
+    /// (id, title, image URL, episode count) per podcast.
+    pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
+    pub(crate) podcasts_list: gtk::ListBox,
+    /// Gallery variant of the podcast overview (cover grid).
+    pub(crate) podcasts_gallery: gtk::FlowBox,
+    /// Which podcast view is visible: newest episodes or subscription overview.
+    pub(crate) podcast_view: PodcastView,
+    /// Newest episodes across all subscriptions (for the "Newest" view).
+    pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
+    /// Container of the "Newest" list (filled imperatively in `reload_newest`).
+    pub(crate) newest_list: gtk::Box,
+    /// Hits of the last podcast search (iTunes), for the subscribe dialog.
+    pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
+    /// While the subscribe search dialog is open: (dialog, hit list), so that
+    /// asynchronously arriving hits can be inserted into the shown list.
+    pub(crate) podcast_search:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    /// URL of the currently loaded podcast episode (play/pause row marker);
+    /// `None` when music is playing or no episode is running.
+    pub(crate) playing_episode_url: Option<String>,
+    /// Play/pause buttons of the visible episode rows (audio URL → button), to
+    /// refresh their icon on playback-state changes.
+    pub(crate) episode_play_buttons:
+        std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
+    /// "Play" row of an open episode detail dialog (row, audio URL) – hidden
+    /// while exactly this episode is playing.
+    pub(crate) ctx_episode_play:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
+}
+
 /// Favorites + audiobooks page state, grouped off the `App` god-object.
 pub(crate) struct FavoritesState {
     /// Favorites: (scope, key, title, is_dir).
@@ -381,29 +413,10 @@ pub struct App {
     pub(crate) favorites: FavoritesState,
     /// Playlists page state.
     pub(crate) playlists: PlaylistsState,
-    // Podcasts: (id, title, image URL, episode count)
-    pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
-    pub(crate) podcasts_list: gtk::ListBox,
-    /// Gallery variant of the podcast overview (cover grid).
-    pub(crate) podcasts_gallery: gtk::FlowBox,
-    /// Which podcast view is visible: newest episodes or subscription overview.
-    pub(crate) podcast_view: PodcastView,
+    /// Podcasts page state.
+    pub(crate) podcasts: PodcastsState,
     /// Which streaming view is visible: channels or recordings.
     pub(crate) stream_view: StreamView,
-    /// Newest episodes across all subscriptions (for the "Newest" view).
-    pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
-    /// Container of the "Newest" list: one own group per time section
-    /// (Today/Yesterday/…), filled imperatively in `reload_newest`.
-    pub(crate) newest_list: gtk::Box,
-    /// Hits of the last podcast search (iTunes), for the subscribe dialog.
-    pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
-    /// While the subscribe search dialog is open: (dialog, hit list). This lets
-    /// asynchronously arriving hits be inserted into the already shown list.
-    pub(crate) podcast_search:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    /// URL of the currently loaded podcast episode (for the play/pause marking
-    /// of the entry rows); `None` when music is playing or no episode is running.
-    pub(crate) playing_episode_url: Option<String>,
     // Streaming (internet radio): saved stations.
     pub(crate) stream_items: Vec<crate::model::StreamItem>,
     pub(crate) streams_list: gtk::ListBox,
@@ -438,15 +451,6 @@ pub struct App {
     /// Source ids that are currently **not reachable** (Nextcloud offline) –
     /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
-    /// Play/pause buttons of the visible entry rows (audio URL → button), to refresh
-    /// their icon when the playback state changes. Detached (dead)
-    /// entries are discarded on refresh.
-    pub(crate) episode_play_buttons:
-        std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
-    /// "Play" row of an open entry detail dialog (row, audio URL) –
-    /// is hidden while exactly this episode is playing.
-    pub(crate) ctx_episode_play:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
     /// List in the queue dialog (rebuilt on changes).
     pub(crate) queue_list: gtk::ListBox,
     /// Content of the statistics page (filled imperatively, like the lists above).
@@ -1252,14 +1256,14 @@ impl Component for App {
                                             set_label: &gettext("Newest"),
                                             set_hexpand: true,
                                             #[watch]
-                                            set_active: model.podcast_view == PodcastView::Newest,
+                                            set_active: model.podcasts.podcast_view == PodcastView::Newest,
                                             connect_clicked => Msg::SetPodcastView(PodcastView::Newest),
                                         },
                                         gtk::ToggleButton {
                                             set_label: &gettext("Overview"),
                                             set_hexpand: true,
                                             #[watch]
-                                            set_active: model.podcast_view == PodcastView::Overview,
+                                            set_active: model.podcasts.podcast_view == PodcastView::Overview,
                                             connect_clicked => Msg::SetPodcastView(PodcastView::Overview),
                                         },
                                         gtk::Button {
@@ -1274,7 +1278,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_view == PodcastView::Newest && !model.newest_items.is_empty(),
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Newest && !model.podcasts.newest_items.is_empty(),
                                         #[local_ref]
                                         newest_list -> gtk::Box {
                                             set_orientation: gtk::Orientation::Vertical,
@@ -1292,14 +1296,14 @@ impl Component for App {
                                         set_title: &gettext("No episodes"),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_view == PodcastView::Newest && model.newest_items.is_empty(),
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Newest && model.podcasts.newest_items.is_empty(),
                                     },
 
                                     // "Overview": subscribed podcasts.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && !model.gallery_view,
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && !model.gallery_view,
                                         #[local_ref]
                                         podcasts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1315,7 +1319,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && model.gallery_view,
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && model.gallery_view,
                                         #[local_ref]
                                         podcasts_gallery -> gtk::FlowBox {
                                             set_valign: gtk::Align::Start,
@@ -1331,7 +1335,7 @@ impl Component for App {
                                         set_description: Some(&gettext("Subscribe to a podcast via its feed address (RSS).")),
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.podcast_view == PodcastView::Overview && model.podcast_items.is_empty(),
+                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && model.podcasts.podcast_items.is_empty(),
                                     },
                                 },
                             add_titled_with_icon[Some("streaming"), &gettext("Streaming"), "audio-x-generic-symbolic"] =
@@ -2091,16 +2095,20 @@ impl Component for App {
                 playlist_items: Vec::new(),
                 playlists_list: playlists_list.clone(),
             },
-            podcast_items: Vec::new(),
-            podcasts_list: podcasts_list.clone(),
-            podcasts_gallery: gtk::FlowBox::new(),
-            podcast_view: PodcastView::Newest,
+            podcasts: PodcastsState {
+                podcast_items: Vec::new(),
+                podcasts_list: podcasts_list.clone(),
+                podcasts_gallery: gtk::FlowBox::new(),
+                podcast_view: PodcastView::Newest,
+                newest_items: Vec::new(),
+                newest_list: newest_list.clone(),
+                podcast_search_results: Vec::new(),
+                podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                playing_episode_url: None,
+                episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            },
             stream_view: StreamView::Channels,
-            newest_items: Vec::new(),
-            newest_list: newest_list.clone(),
-            podcast_search_results: Vec::new(),
-            podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
-            playing_episode_url: None,
             stream_items: Vec::new(),
             streams_list: streams_list.clone(),
             stream_search_results: Vec::new(),
@@ -2115,8 +2123,6 @@ impl Component for App {
             stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             settings_nc_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
-            episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
             queue_list: queue_list.clone(),
             stats_box: stats_box.clone(),
             stats_period: StatsPeriod::All,
@@ -2232,7 +2238,7 @@ impl Component for App {
         let artists_gallery = model.artists_gallery.clone();
         let concerts_gallery = model.concerts.concerts_gallery.clone();
         let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
-        let podcasts_gallery = model.podcasts_gallery.clone();
+        let podcasts_gallery = model.podcasts.podcasts_gallery.clone();
         let widgets = view_output!();
         model.view_stack = widgets.view_stack.clone();
         model.nav_view = widgets.nav_view.clone();
@@ -2976,18 +2982,18 @@ impl Component for App {
             }
             Msg::OpenPodcast(id) => {
                 if let Some((_, title, _, _)) =
-                    self.podcast_items.iter().find(|(pid, _, _, _)| *pid == id).cloned()
+                    self.podcasts.podcast_items.iter().find(|(pid, _, _, _)| *pid == id).cloned()
                 {
                     self.open_podcast(&sender, id, &title);
                 }
             }
             Msg::OpenPodcastAt(index) => {
-                if let Some(id) = self.podcast_items.get(index).map(|p| p.0) {
+                if let Some(id) = self.podcasts.podcast_items.get(index).map(|p| p.0) {
                     sender.input(Msg::OpenPodcast(id));
                 }
             }
             Msg::ShowPodcastDetailAt(index) => {
-                if let Some(id) = self.podcast_items.get(index).map(|p| p.0) {
+                if let Some(id) = self.podcasts.podcast_items.get(index).map(|p| p.0) {
                     sender.input(Msg::ShowPodcastDetail(id));
                 }
             }
@@ -3125,7 +3131,7 @@ impl Component for App {
                                 self.now_playing = Some(gettext("Replay"));
                                 self.playing = true;
                                 self.playing_path = Some(path);
-                                self.playing_episode_url = None;
+                                self.podcasts.playing_episode_url = None;
                                 self.playing_stream = None;
                                 self.mpris.set_playing(true);
                             }
@@ -3202,7 +3208,7 @@ impl Component for App {
                 );
             }
             Msg::ToggleEpisode { url, title } => {
-                if self.playing_episode_url.as_deref() == Some(url.as_str()) {
+                if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
                     // Already loaded episode → toggle pause/resume.
                     if self.playing {
                         self.player.pause();
@@ -3218,7 +3224,7 @@ impl Component for App {
                 }
             }
             Msg::EpisodeSeekTo { url, title, ms } => {
-                if self.playing_episode_url.as_deref() == Some(url.as_str()) {
+                if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
                     // Already running → jump directly to the spot.
                     if self.player.seek_ms(ms).is_ok() {
                         self.position_ms = ms;
@@ -3229,7 +3235,7 @@ impl Component for App {
                     self.play_episode_at(&url, &title, ms);
                 }
             }
-            Msg::SetPodcastView(view) => self.podcast_view = view,
+            Msg::SetPodcastView(view) => self.podcasts.podcast_view = view,
             Msg::SetStreamView(view) => self.stream_view = view,
             Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
             Msg::ShowPodcastEpisodeDetail { podcast_id, index } => {
@@ -3255,11 +3261,11 @@ impl Component for App {
                     // Remote queue: advance to the next track (or stop at the
                     // end). Runs separately from the local queue.
                     self.remote_next();
-                } else if self.playing_episode_url.is_some() && self.queue.is_empty() {
+                } else if self.podcasts.playing_episode_url.is_some() && self.queue.is_empty() {
                     // A streamed episode has ended (no queue
                     // behind it): reset the playback state, clear the marking.
                     self.playing = false;
-                    self.playing_episode_url = None;
+                    self.podcasts.playing_episode_url = None;
                     self.mpris.set_playing(false);
                     self.refresh_queue_icons();
                 } else {
@@ -3300,7 +3306,7 @@ impl Component for App {
                     // a hard crash loses at most ~5 s of position, while normal
                     // pause/seek/track-switch/close still save immediately.
                     self.save_resume();
-                    if self.playing_episode_url.is_some() {
+                    if self.podcasts.playing_episode_url.is_some() {
                         self.save_episode_progress();
                     }
                     if let Some(pos) = self.player.position_ms() {
@@ -4025,7 +4031,7 @@ impl Component for App {
                     self.playing = false;
                 } else if self.playing_path.is_some()
                     || self.playing_stream.is_some()
-                    || self.playing_episode_url.is_some()
+                    || self.podcasts.playing_episode_url.is_some()
                 {
                     // Paused (file, station or episode) → resume.
                     self.player.resume();
@@ -4238,7 +4244,7 @@ impl Component for App {
                 }
             }
             Cmd::PodcastSearchResults(results) => {
-                self.podcast_search_results = results;
+                self.podcasts.podcast_search_results = results;
                 self.rebuild_podcast_search_results(&sender);
             }
             Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
