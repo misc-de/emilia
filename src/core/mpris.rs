@@ -47,8 +47,8 @@ impl Mpris {
     {
         let slot: Slot = Rc::new(RefCell::new(None));
         let on_cmd: Rc<dyn Fn(MprisCommand)> = Rc::new(on_cmd);
-        // Unique bus name per process: in dev mode multiple instances run
-        // (NON_UNIQUE) that would otherwise fight over the same name.
+        // Unique bus name per process so a second manually started build or a
+        // stale instance cannot fight over the same MPRIS name.
         let suffix = format!("Emilia.instance{}", std::process::id());
 
         let slot_for_task = slot.clone();

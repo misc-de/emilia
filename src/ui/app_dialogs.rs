@@ -712,6 +712,7 @@ impl App {
         let key_row = adw::EntryRow::builder().title(&gettext("AcoustID API key")).build();
         key_row.set_text(self.enrich_state.acoustid_key.as_deref().unwrap_or(""));
         key_row.set_show_apply_button(true);
+        crate::ui::widgets::no_autofocus(&key_row);
         {
             let sender = sender.clone();
             key_row.connect_apply(move |r| {
@@ -731,6 +732,7 @@ impl App {
             .build();
         fanart_row.set_text(self.enrich_state.fanart_key.as_deref().unwrap_or(""));
         fanart_row.set_show_apply_button(true);
+        crate::ui::widgets::no_autofocus(&fanart_row);
         {
             let sender = sender.clone();
             fanart_row.connect_apply(move |r| {

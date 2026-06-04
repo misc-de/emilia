@@ -388,8 +388,9 @@ impl Library {
             -- primary directory stays the `music_dir` setting and is deliberately
             -- NOT listed here (no entry), so that scan/library are untouched.
             -- kind = 'local' (second folder, e.g. SD card) | 'webdav'
-            -- (Nextcloud share). The app password is stored -- as is usual for a
-            -- local music player -- in plain text in this local DB.
+            -- (Nextcloud share). The username and app password are stored as
+            -- Secret Service references (`secret-tool:<id>`) when available;
+            -- older/fallback rows may contain the values directly.
             CREATE TABLE IF NOT EXISTS source (
                 id         INTEGER PRIMARY KEY,
                 kind       TEXT NOT NULL CHECK(kind IN ('local','webdav')),
@@ -397,8 +398,8 @@ impl Library {
                 position   INTEGER NOT NULL DEFAULT 0,
                 path       TEXT,   -- local:  root path in the filesystem
                 base_url   TEXT,   -- webdav: e.g. https://cloud.example.com
-                username   TEXT,   -- webdav: username
-                password   TEXT,   -- webdav: app password/token
+                username   TEXT,   -- webdav: username (or secret-tool reference)
+                password   TEXT,   -- webdav: app password/token (or secret-tool ref)
                 music_path TEXT    -- webdav: subpath to the music, e.g. /Music
             );
             "#,
@@ -1060,6 +1061,37 @@ impl Library {
         Ok(())
     }
 
+    /// Reads a security-sensitive setting (API key/token). A `secret-tool:`
+    /// sentinel resolves to the Secret Service; a legacy plaintext value is
+    /// returned verbatim.
+    pub fn get_secret_setting(&self, key: &str) -> Result<Option<String>> {
+        match self.get_setting(key)? {
+            Some(v) if v == crate::core::secrets::SECRET_PREFIX => {
+                Ok(crate::core::secrets::lookup_named(key))
+            }
+            Some(v) if v.is_empty() => Ok(None),
+            other => Ok(other),
+        }
+    }
+
+    /// Stores a security-sensitive setting in the Secret Service when available
+    /// (only a `secret-tool:` sentinel is kept in the DB); otherwise falls back
+    /// to a plaintext setting. An empty value clears both.
+    pub fn set_secret_setting(&self, key: &str, value: &str) -> Result<()> {
+        let value = value.trim();
+        if value.is_empty() {
+            crate::core::secrets::clear_named(key);
+            self.conn.execute("DELETE FROM setting WHERE key = ?1", [key])?;
+            return Ok(());
+        }
+        let label = format!("Emilia {key}");
+        if crate::core::secrets::store_named(key, &label, value) {
+            self.set_setting(key, crate::core::secrets::SECRET_PREFIX)
+        } else {
+            self.set_setting(key, value)
+        }
+    }
+
     /// Lists all additional music sources (by position, then ID).
     pub fn list_sources(&self) -> Result<Vec<Source>> {
         let mut stmt = self.conn.prepare(
@@ -1108,8 +1140,76 @@ impl Library {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Replaces the stored password field of a source. Used after creating a
+    /// WebDAV source when its app password was moved to the Secret Service.
+    pub fn set_source_password(&self, id: i64, password: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE source SET password = ?1 WHERE id = ?2",
+            rusqlite::params![password, id],
+        )?;
+        Ok(())
+    }
+
+    /// Replaces the stored username field of a source. Used after creating a
+    /// WebDAV source when its username was moved to the Secret Service.
+    pub fn set_source_username(&self, id: i64, username: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE source SET username = ?1 WHERE id = ?2",
+            rusqlite::params![username, id],
+        )?;
+        Ok(())
+    }
+
+    /// Best-effort migration of existing **plaintext** secrets into the Secret
+    /// Service (run once at startup). Each value is only replaced by its
+    /// `secret-tool:` reference after a verifying lookup confirms the keyring
+    /// copy — so a missing/unavailable keyring never loses a credential, and the
+    /// app keeps working with the plaintext fallback. Once everything is
+    /// referenced this is a couple of cheap DB reads.
+    pub fn migrate_secrets(&self) {
+        use crate::core::secrets;
+        // API keys/tokens stored as settings.
+        for key in ["acoustid_key", "fanart_key"] {
+            if let Ok(Some(v)) = self.get_setting(key) {
+                if !v.is_empty()
+                    && v != secrets::SECRET_PREFIX
+                    && secrets::store_named(key, &format!("Emilia {key}"), &v)
+                    && secrets::lookup_named(key).as_deref() == Some(v.as_str())
+                {
+                    let _ = self.set_setting(key, secrets::SECRET_PREFIX);
+                }
+            }
+        }
+        // Nextcloud/WebDAV credentials (username + app password).
+        for s in self.list_sources().unwrap_or_default() {
+            if s.kind != "webdav" {
+                continue;
+            }
+            let label = format!("Emilia Nextcloud {}", s.name);
+            if let Some(pw) = s.password.as_deref() {
+                if !pw.is_empty()
+                    && !pw.starts_with(secrets::SECRET_PREFIX)
+                    && secrets::store_source_password(s.id, &label, pw)
+                    && secrets::lookup_source_password(s.id).as_deref() == Some(pw)
+                {
+                    let _ = self.set_source_password(s.id, Some(&secrets::source_password_ref(s.id)));
+                }
+            }
+            if let Some(user) = s.username.as_deref() {
+                if !user.is_empty()
+                    && !user.starts_with(secrets::SECRET_PREFIX)
+                    && secrets::store_source_username(s.id, &label, user)
+                    && secrets::lookup_source_username(s.id).as_deref() == Some(user)
+                {
+                    let _ = self.set_source_username(s.id, Some(&secrets::source_username_ref(s.id)));
+                }
+            }
+        }
+    }
+
     /// Removes a source by its ID.
     pub fn delete_source(&self, id: i64) -> Result<()> {
+        crate::core::secrets::clear_source_password(id);
         self.conn
             .execute("DELETE FROM source WHERE id = ?1", [id])?;
         // Remove indexed cloud tracks of this source (synthetic path
@@ -2401,19 +2501,18 @@ impl Library {
     /// (the stored date is only text).
     pub fn all_episodes(&self) -> Result<Vec<crate::model::EpisodeRef>> {
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, p.title, p.image_url, e.title, e.audio_url, e.published, e.duration, e.description
+            "SELECT p.title, p.image_url, e.title, e.audio_url, e.published, e.duration, e.description
              FROM episode e JOIN podcast p ON p.id = e.podcast_id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(crate::model::EpisodeRef {
-                podcast_id: r.get(0)?,
-                podcast_title: r.get(1)?,
-                podcast_image: r.get(2)?,
-                title: r.get(3)?,
-                audio_url: r.get(4)?,
-                published: r.get(5)?,
-                duration: r.get(6)?,
-                description: r.get(7)?,
+                podcast_title: r.get(0)?,
+                podcast_image: r.get(1)?,
+                title: r.get(2)?,
+                audio_url: r.get(3)?,
+                published: r.get(4)?,
+                duration: r.get(5)?,
+                description: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

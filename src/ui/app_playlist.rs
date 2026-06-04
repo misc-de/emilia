@@ -153,6 +153,7 @@ impl App {
             .placeholder_text(&gettext("Playlist name"))
             .activates_default(true)
             .build();
+        crate::ui::widgets::no_autofocus(&entry);
         dialog.set_extra_child(Some(&entry));
         dialog.add_responses(&[
             ("cancel", &gettext("Cancel")),
@@ -197,6 +198,7 @@ impl App {
         // Create a new playlist (enter a name, Enter confirms).
         let new_group = adw::PreferencesGroup::builder().title(&gettext("New playlist")).build();
         let entry = adw::EntryRow::builder().title(&gettext("Name")).build();
+        crate::ui::widgets::no_autofocus(&entry);
         new_group.add(&entry);
         content.append(&new_group);
         {
@@ -262,6 +264,7 @@ impl App {
             .text(&current)
             .activates_default(true)
             .build();
+        crate::ui::widgets::no_autofocus(&entry);
         dialog.set_extra_child(Some(&entry));
         dialog.add_responses(&[
             ("cancel", &gettext("Cancel")),

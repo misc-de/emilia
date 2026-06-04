@@ -11,6 +11,8 @@ pub mod podcast;
 pub mod player;
 pub mod recorder;
 pub mod scanner;
+pub mod secrets;
+pub mod source;
 pub mod streaming;
 pub mod sync;
 pub mod update;

@@ -248,8 +248,9 @@ src/
     app_playlist.rs  Playlists (list, subpage, dialogs)
     app_podcast.rs   Podcasts (subscribe to feeds, stream episodes)
     app_streaming.rs Internet radio (stations, timeshift recording, replay)
-    app_cloud.rs     Nextcloud connect dialog (QR camera + manual)
-    app_sync.rs      Device sync UI (QR pairing, optional webcam)
+    cloud_page.rs    Nextcloud connect dialog (QR camera + manual)
+    sync_page.rs     Device sync UI (QR pairing, optional webcam)
+    stats_page.rs    Listening statistics component
     app_eq.rs        Equalizer editor + property dialogs
     app_dialogs.rs   Context menu, share, settings
     app_concert.rs   Concerts
@@ -267,6 +268,8 @@ src/
     streaming.rs     Station search (Radio-Browser API)
     recorder.rs      Timeshift ring buffer + ICY reader for recording
     webdav.rs        Nextcloud/WebDAV: list, read tags, index, stream
+    source.rs        Add local/WebDAV sources and secret-backed credentials
+    secrets.rs       Secret Service bridge for app passwords
     sync/            LAN device sync (server, client, QR scanner)
     mpris.rs         MPRIS lock-screen / media-key control
     fingerprint.rs   Chromaprint (fpcalc) for track recognition

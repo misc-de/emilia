@@ -133,7 +133,6 @@ pub struct Episode {
 /// (newest entries from all subscriptions).
 #[derive(Debug, Clone)]
 pub struct EpisodeRef {
-    pub podcast_id: i64,
     pub podcast_title: String,
     pub podcast_image: Option<String>,
     pub title: String,

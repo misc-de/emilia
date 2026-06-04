@@ -113,6 +113,47 @@ pub fn offline_overlay(child: &impl IsA<gtk::Widget>, offline: bool) -> gtk::Wid
     overlay.upcast()
 }
 
+/// Stops a text field from being **auto-focused** when its dialog/page is shown
+/// or switched to. On mobile an auto-focused entry immediately pops the
+/// on-screen keyboard, which is disruptive when merely scrolling through the
+/// settings or paging through dialogs. The field (and its delegate `GtkText`)
+/// is made non-focusable; the first pointer press — handled in the capture
+/// phase, before the entry itself reacts — restores focusability and focuses
+/// it, so tapping a field to type still works exactly as before. Trade-off:
+/// the field can no longer be reached by Tab until it has been clicked once.
+pub fn no_autofocus<W: IsA<gtk::Widget> + IsA<gtk::Editable>>(field: &W) {
+    let outer = field.clone().upcast::<gtk::Widget>();
+    // For composite editables (gtk::Entry, adw::EntryRow, …) the real focus
+    // target is the delegated GtkText; disabling only the outer widget would
+    // leave GTK free to auto-focus the inner text.
+    let inner: Option<gtk::Widget> = field
+        .delegate()
+        .and_then(|d| d.dynamic_cast::<gtk::Widget>().ok());
+    outer.set_focusable(false);
+    if let Some(t) = &inner {
+        t.set_focusable(false);
+    }
+    let click = gtk::GestureClick::new();
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    {
+        let outer = outer.clone();
+        let inner = inner.clone();
+        click.connect_pressed(move |_, _, _, _| {
+            outer.set_focusable(true);
+            match &inner {
+                Some(t) => {
+                    t.set_focusable(true);
+                    t.grab_focus();
+                }
+                None => {
+                    outer.grab_focus();
+                }
+            }
+        });
+    }
+    outer.add_controller(click);
+}
+
 /// Sets a placeholder icon (fills the square) into the frame.
 pub fn set_cover_placeholder(frame: &gtk::AspectFrame, placeholder_icon: &str, size: i32) {
     let img = gtk::Image::from_icon_name(placeholder_icon);

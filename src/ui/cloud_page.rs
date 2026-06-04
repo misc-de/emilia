@@ -12,10 +12,10 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::db::Library;
+use crate::core::source;
 use crate::core::sync::scanner::Scanner;
 use crate::core::webdav::{self, Creds};
 use crate::i18n::gettext;
-use crate::model::Source;
 
 /// The Nextcloud-connect component (owns the dialog + camera scanner).
 #[derive(Default)]
@@ -171,6 +171,9 @@ impl CloudPage {
         let pass_row = adw::PasswordEntryRow::builder()
             .title(gettext("App password"))
             .build();
+        crate::ui::widgets::no_autofocus(&url_row);
+        crate::ui::widgets::no_autofocus(&user_row);
+        crate::ui::widgets::no_autofocus(&pass_row);
         manual.add_row(&url_row);
         manual.add_row(&user_row);
         manual.add_row(&pass_row);
@@ -190,6 +193,7 @@ impl CloudPage {
         let path_row = adw::EntryRow::builder()
             .title(gettext("Folder (e.g. /Music)"))
             .build();
+        crate::ui::widgets::no_autofocus(&path_row);
         path_group.add(&path_row);
         content.append(&path_group);
 
@@ -328,29 +332,8 @@ impl CloudPage {
             self.status(&gettext("Please fill in URL, user and app password"));
             return;
         };
-        // Display name: host of the URL.
-        let name = creds
-            .base_url
-            .split_once("://")
-            .map(|(_, rest)| rest)
-            .unwrap_or(&creds.base_url)
-            .split('/')
-            .next()
-            .unwrap_or("Nextcloud")
-            .to_string();
-        let src = Source {
-            id: 0,
-            kind: "webdav".into(),
-            name,
-            position: 0,
-            path: None,
-            base_url: Some(creds.base_url),
-            username: Some(creds.user),
-            password: Some(creds.pass),
-            music_path: Some(creds.music_path),
-        };
-        match Library::open().and_then(|lib| lib.add_source(&src)) {
-            Ok(id) => {
+        match Library::open().and_then(|lib| source::add_webdav_source(&lib, creds)) {
+            Ok(src) => {
                 let _ = sender.output(CloudOutput::SourcesChanged);
                 self.scanner = None;
                 if let Some(d) = self.dialog.take() {
@@ -358,11 +341,9 @@ impl CloudPage {
                 }
                 // Index the cloud library in the background so the tracks feel
                 // like local ones (artists/albums + covers/photos).
-                let mut indexed = src.clone();
-                indexed.id = id;
                 sender.spawn_command(move |out| {
                     if let Ok(lib) = Library::open() {
-                        match crate::core::webdav::index_into(&lib, &indexed) {
+                        match crate::core::webdav::index_into(&lib, &src) {
                             Ok(n) => tracing::info!("Indexed {n} Nextcloud tracks"),
                             Err(e) => tracing::warn!("Nextcloud indexing failed: {e}"),
                         }

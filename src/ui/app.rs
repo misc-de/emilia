@@ -1867,6 +1867,9 @@ impl Component for App {
         }
 
         let library = Library::open().expect("Failed to open the library database");
+        // Move any existing plaintext secrets (API keys, Nextcloud credentials)
+        // into the Secret Service once, before they are read below.
+        library.migrate_secrets();
         let player = Player::new().expect("Failed to initialize GStreamer");
         // Apply the color scheme (default: system) immediately.
         apply_color_scheme(
@@ -2023,8 +2026,8 @@ impl Component for App {
                 ArtistOutput::LongPress(index) => Msg::ShowArtistDetail(index.current_index()),
             });
 
-        let acoustid_key = library.get_setting("acoustid_key").ok().flatten();
-        let fanart_key = library.get_setting("fanart_key").ok().flatten();
+        let acoustid_key = library.get_secret_setting("acoustid_key").ok().flatten();
+        let fanart_key = library.get_secret_setting("fanart_key").ok().flatten();
         let active_output = crate::core::output::default_output().unwrap_or_default();
 
         // At the end of a track, automatically play the next entry of the queue;
@@ -3878,7 +3881,7 @@ impl Component for App {
             }
             Msg::SetAcoustidKey(key) => {
                 let key = key.trim().to_string();
-                let _ = self.library.set_setting("acoustid_key", &key);
+                let _ = self.library.set_secret_setting("acoustid_key", &key);
                 self.enrich_state.acoustid_key = if key.is_empty() { None } else { Some(key) };
             }
             Msg::SetAlbumCover { artist, album, path } => {
@@ -3911,7 +3914,7 @@ impl Component for App {
             Msg::UploadCover => self.open_cover_upload_dialog(root, &sender),
             Msg::SetFanartKey(key) => {
                 let key = key.trim().to_string();
-                let _ = self.library.set_setting("fanart_key", &key);
+                let _ = self.library.set_secret_setting("fanart_key", &key);
                 self.enrich_state.fanart_key = if key.is_empty() { None } else { Some(key) };
             }
             Msg::SetAutoEnrich(on) => {

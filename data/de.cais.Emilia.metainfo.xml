@@ -84,6 +84,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.1.38" date="2026-06-04">
+      <description>
+        <p>Current development release with Nextcloud library indexing, LAN device sync, streaming recordings, podcasts with resume and show notes, navigation customization, statistics, online metadata enrichment, and playback polish for narrow phone screens.</p>
+        <p xml:lang="de">Aktuelle Entwicklungsversion mit Nextcloud-Bibliotheksindex, LAN-Geraetesync, Streaming-Aufnahmen, Podcasts mit Resume und Shownotes, anpassbarer Navigation, Statistiken, Online-Metadaten und Wiedergabe-Politur fuer schmale Handy-Bildschirme.</p>
+      </description>
+    </release>
     <release version="0.1.7" date="2026-06-03">
       <description>
         <p>The player bar no longer overflows on narrow phone screens (the equalizer button moves to the track's context menu there). The "Add to favorites" and "Add to playlist" actions now only appear when those sections are enabled in the navigation.</p>

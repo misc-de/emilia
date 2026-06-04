@@ -73,10 +73,12 @@ pub struct Creds {
 impl Creds {
     /// From a `webdav` source. `None` if required fields are missing.
     pub fn from_source(s: &Source) -> Option<Self> {
+        let pass = crate::core::secrets::resolve_source_password(s.id, s.password.as_deref()?)?;
+        let user = crate::core::secrets::resolve_source_username(s.id, s.username.as_deref()?)?;
         Some(Self {
             base_url: s.base_url.clone()?.trim_end_matches('/').to_string(),
-            user: s.username.clone()?,
-            pass: s.password.clone()?,
+            user,
+            pass,
             music_path: normalize_path(s.music_path.as_deref().unwrap_or("")),
         })
     }

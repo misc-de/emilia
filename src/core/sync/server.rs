@@ -114,6 +114,37 @@ impl SyncServer {
         })
     }
 
+    /// Test server on localhost with an OS-assigned free port. This keeps the
+    /// end-to-end TLS/pinning path real without depending on the app's preferred
+    /// LAN port range being free on the test machine.
+    #[cfg(test)]
+    fn start_for_test(device_name: String, stop: Arc<AtomicBool>) -> Result<Self> {
+        let identity = crypto::generate_identity()?;
+        let tls = crypto::server_config(&identity)?;
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .map_err(|e| anyhow!("test listener bind failed: {e}"))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| anyhow!("test listener address failed: {e}"))?
+            .port();
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| anyhow!("listener setup failed: {e}"))?;
+
+        Ok(Self {
+            listener,
+            tls,
+            pairing_token: crypto::generate_token(32),
+            session_token: crypto::generate_token(32),
+            device_name,
+            host: "127.0.0.1".to_string(),
+            port,
+            expires_at: super::now_unix() + QR_TTL.as_secs(),
+            stop,
+            identity,
+        })
+    }
+
     /// QR/pairing URL for display.
     pub fn pair_url(&self) -> String {
         protocol::build_pair_url(
@@ -517,7 +548,7 @@ mod tests {
     #[test]
     fn pairing_handshake_with_pinning() {
         let stop = Arc::new(AtomicBool::new(false));
-        let server = SyncServer::start("TestServer".to_string(), stop.clone())
+        let server = SyncServer::start_for_test("TestServer".to_string(), stop.clone())
             .expect("server starts");
         let url = server.pair_url();
         let handle = std::thread::spawn(move || server.run(|_| {}));

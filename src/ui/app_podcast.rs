@@ -279,7 +279,6 @@ impl App {
             root,
             sender,
             crate::model::EpisodeRef {
-                podcast_id,
                 podcast_title,
                 podcast_image,
                 title: ep.title,
@@ -627,6 +626,7 @@ impl App {
             .placeholder_text(&gettext("Podcast name …"))
             .hexpand(true)
             .build();
+        crate::ui::widgets::no_autofocus(&search_entry);
         let search_btn = gtk::Button::builder().label(&gettext("Search")).build();
         search_btn.add_css_class("suggested-action");
         search_row.append(&search_entry);
@@ -671,6 +671,7 @@ impl App {
             .title(&gettext("Feed address (RSS)"))
             .show_apply_button(true)
             .build();
+        crate::ui::widgets::no_autofocus(&url_entry);
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
             url_entry.connect_apply(move |e| {
@@ -695,7 +696,6 @@ impl App {
         }
 
         present_detail(&dialog, &content, root);
-        search_entry.grab_focus();
     }
 
     /// Redraws the results list in the open subscription search dialog (from

@@ -24,7 +24,7 @@ use crate::core::fingerprint;
 use crate::model::{AlbumMeta, ArtistMeta, TrackMeta};
 
 /// MusicBrainz requires a meaningful User-Agent with contact info.
-const USER_AGENT: &str = "Emilia/0.1.0 ( https://cais.de )";
+const USER_AGENT: &str = "Emilia/0.1.38 ( https://cais.de )";
 
 /// MusicBrainz policy: at most one request per second.
 pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
