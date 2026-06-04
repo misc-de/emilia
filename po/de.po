@@ -1484,6 +1484,22 @@ msgstr "Diesen Code mit dem anderen Gerät scannen."
 msgid "Point the camera at the QR code."
 msgstr "Die Kamera auf den QR-Code richten."
 
+#: src/ui/app_views.rs
+msgid "Undo"
+msgstr "Rückgängig"
+
+#: src/ui/app.rs
+msgid "Removed from playlist"
+msgstr "Aus Playlist entfernt"
+
+#: src/ui/app_podcast.rs
+msgid "For offline listening"
+msgstr "Für Offline-Wiedergabe"
+
+#: src/ui/app_podcast.rs
+msgid "Remove download"
+msgstr "Download entfernen"
+
 #~ msgid "Recording saved"
 #~ msgstr "Aufnahme gespeichert"
 

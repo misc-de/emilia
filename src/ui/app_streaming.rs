@@ -44,6 +44,16 @@ fn format_date(secs: i64) -> String {
     format!("{d:02}.{m:02}.{y}")
 }
 
+/// Formats Unix seconds as "DD.MM.YYYY HH:MM" in **local** time, so a recording
+/// shows at what time the song played, not just the date. Falls back to the
+/// date-only formatter if the conversion fails.
+fn format_datetime(secs: i64) -> String {
+    gtk::glib::DateTime::from_unix_local(secs)
+        .and_then(|d| d.format("%d.%m.%Y %H:%M"))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_| format_date(secs))
+}
+
 /// Storage folder for saved recordings: `<Music>/Emilia-Aufnahmen`.
 pub(crate) fn recordings_dir() -> std::path::PathBuf {
     let mut dir = dirs::audio_dir()
@@ -533,7 +543,7 @@ impl App {
             if let Some(s) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
                 sub.push(s.to_string());
             }
-            sub.push(format_date(rec.recorded_at));
+            sub.push(format_datetime(rec.recorded_at));
             if !sub.is_empty() {
                 row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
             }
@@ -637,7 +647,7 @@ impl App {
         if let Some(st) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
             details.add(&info_row(&gettext("Station"), st));
         }
-        details.add(&info_row(&gettext("Recorded"), &format_date(rec.recorded_at)));
+        details.add(&info_row(&gettext("Recorded"), &format_datetime(rec.recorded_at)));
         if rec.incomplete {
             details.add(&info_row(
                 &gettext("Note"),
@@ -891,13 +901,29 @@ impl App {
                 return false;
             }
         };
-        let _ = self.library.add_recording(
+        match self.library.add_recording(
             &path.to_string_lossy(),
             artist.as_deref(),
             &title,
             station,
             incomplete,
-        );
+        ) {
+            // Reused an existing recording (same song detected again): drop the
+            // redundant new file, or – when it upgraded an incomplete copy –
+            // delete the superseded old file instead. Either way the existing
+            // entry already carries cover/metadata, so skip the online lookup.
+            Ok((_, false, superseded)) => {
+                let stale = superseded.unwrap_or_else(|| path.to_string_lossy().into_owned());
+                let _ = std::fs::remove_file(&stale);
+                return true;
+            }
+            Ok((_, true, _)) => {}
+            Err(e) => {
+                tracing::warn!("Could not store recording: {e}");
+                let _ = std::fs::remove_file(&path);
+                return false;
+            }
+        }
         // Look up cover + album online (trying several combinations) and embed
         // them into the file (best effort); refresh the list once cached.
         let (raw, st) = (raw_title.to_string(), station.map(str::to_string));

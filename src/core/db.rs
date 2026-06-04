@@ -2468,6 +2468,20 @@ impl Library {
     // ---- Recordings (timeshift recordings) ----
 
     /// Stores a recording entry and returns its ID.
+    /// Stores a recording, **deduplicating** against rows of the same song. A
+    /// single broadcast track can surface under slightly varying ICY titles or
+    /// be (re-)detected more than once, which previously produced one song
+    /// "spread over several recordings". When a recording with the same station
+    /// and title (case-insensitive; artist may have been unknown before) already
+    /// exists, that row is reused/updated instead of inserting a new one.
+    ///
+    /// Returns `(id, inserted, superseded_path)`:
+    /// * `inserted` is `true` when a brand-new row was created (the new file is
+    ///   the canonical copy).
+    /// * `superseded_path` is set when an existing **incomplete** row was
+    ///   upgraded to this **complete** copy: the row now points at the new file
+    ///   and the caller should delete the returned old file. Otherwise the
+    ///   caller should drop the *new* file (a matching copy already exists).
     pub fn add_recording(
         &self,
         path: &str,
@@ -2475,13 +2489,50 @@ impl Library {
         title: &str,
         station: Option<&str>,
         incomplete: bool,
-    ) -> Result<i64> {
+    ) -> Result<(i64, bool, Option<String>)> {
+        // Existing recording of the same song? Match on station + title; allow
+        // the artist to differ only when one side was still unknown (a later,
+        // better identification fills it in).
+        let existing: Option<(i64, String, Option<String>, i64)> = self
+            .conn
+            .query_row(
+                "SELECT id, path, artist, incomplete FROM recording
+                 WHERE lower(title) = lower(?1)
+                   AND IFNULL(lower(station), '') = IFNULL(lower(?2), '')
+                   AND (IFNULL(lower(artist), '') = IFNULL(lower(?3), '')
+                        OR IFNULL(TRIM(artist), '') = '' OR IFNULL(TRIM(?3), '') = '')
+                 ORDER BY recorded_at ASC, id ASC LIMIT 1",
+                rusqlite::params![title, station, artist],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+
+        if let Some((id, old_path, old_artist, old_incomplete)) = existing {
+            // Fill in the artist if it was missing before.
+            if old_artist.as_deref().unwrap_or("").trim().is_empty() {
+                if let Some(a) = artist.filter(|a| !a.trim().is_empty()) {
+                    self.conn
+                        .execute("UPDATE recording SET artist = ?1 WHERE id = ?2", rusqlite::params![a, id])?;
+                }
+            }
+            // Upgrade an incomplete copy to a complete one: repoint to the new
+            // file and let the caller delete the old (truncated) file.
+            if old_incomplete != 0 && !incomplete {
+                self.conn.execute(
+                    "UPDATE recording SET path = ?1, incomplete = 0 WHERE id = ?2",
+                    rusqlite::params![path, id],
+                )?;
+                return Ok((id, false, Some(old_path)));
+            }
+            return Ok((id, false, None));
+        }
+
         self.conn.execute(
             "INSERT INTO recording (path, artist, title, station, recorded_at, incomplete)
              VALUES (?1, ?2, ?3, ?4, strftime('%s','now'), ?5)",
             rusqlite::params![path, artist, title, station, incomplete as i64],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        Ok((self.conn.last_insert_rowid(), true, None))
     }
 
     /// All recordings, newest first.

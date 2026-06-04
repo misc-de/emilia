@@ -2035,6 +2035,36 @@ impl App {
         // deliberately a no-op (the calls remain, easily reactivatable).
     }
 
+    /// Shows a short bottom toast for a delete/remove with an "Undo" button. The
+    /// real action (`action`, the actual deletion message) is **deferred**: it
+    /// runs only when the toast is dismissed *without* the user pressing Undo
+    /// (i.e. after the 2 s timeout). Pressing Undo cancels it. This is the one
+    /// place toasts are (re)enabled – informational `toast()` stays a no-op.
+    pub(crate) fn undo_toast(&self, sender: &ComponentSender<Self>, msg: &str, action: Msg) {
+        let toast = adw::Toast::new(msg);
+        toast.set_button_label(Some(&gettext("Undo")));
+        toast.set_timeout(2);
+        let undone = std::rc::Rc::new(std::cell::Cell::new(false));
+        {
+            let undone = undone.clone();
+            toast.connect_button_clicked(move |_| undone.set(true));
+        }
+        {
+            let undone = undone.clone();
+            let sender = sender.clone();
+            let action = std::cell::RefCell::new(Some(action));
+            // Fires on timeout, on Undo, or when superseded by a newer toast.
+            toast.connect_dismissed(move |_| {
+                if !undone.get() {
+                    if let Some(m) = action.borrow_mut().take() {
+                        sender.input(m);
+                    }
+                }
+            });
+        }
+        self.toast_overlay.add_toast(toast);
+    }
+
     /// Obtains a cover as a texture. For a **folder** the folder cover
     /// (= album image); for a **single file** deliberately **no** folder image, so
     /// that a track does not inherit a foreign cover from a shared folder – instead
@@ -2058,6 +2088,16 @@ impl App {
         }
         // Cover resolution works on the local filesystem.
         let epath = entry.path()?;
+        // A single local file reuses the *list's* track-cover resolution
+        // (embedded image first, otherwise the album cover – including the
+        // album-name-only fallback – from cached DB metadata). This keeps the
+        // detail view in sync with the favorites/file list, which previously
+        // showed a cover the stricter detail lookup missed.
+        if !entry.is_dir() {
+            return self
+                .entry_cover("track", &epath.to_string_lossy(), false)
+                .and_then(|p| gtk::gdk::Texture::from_filename(&p).ok());
+        }
         if entry.is_dir() {
             if let Some(path) = cover::find_cover_file(epath) {
                 if let Ok(texture) = gtk::gdk::Texture::from_filename(&path) {

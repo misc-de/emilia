@@ -408,11 +408,11 @@ pub(crate) struct PodcastsState {
     /// while exactly this episode is playing.
     pub(crate) ctx_episode_play:
         std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
-    /// "Download" row of an open episode detail dialog: (row, icon, spinner,
-    /// audio URL). Its label/icon reflect the offline state and are refreshed
-    /// when a background download starts or finishes.
+    /// "Download" column of an open episode detail dialog: (value label, audio
+    /// URL). The label text reflects the offline state and is refreshed when a
+    /// background download starts or finishes.
     pub(crate) ctx_episode_download:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, gtk::Image, gtk::Spinner, String)>>>,
+        std::rc::Rc<std::cell::RefCell<Option<(gtk::Label, String)>>>,
     /// Audio URLs of episodes whose download is currently running (to show a
     /// spinner and ignore repeated taps).
     pub(crate) downloading_episodes: std::collections::HashSet<String>,
@@ -719,14 +719,19 @@ pub enum Msg {
     OpenPlaylist(i64),
     /// Play the whole playlist.
     PlayPlaylist(i64),
-    /// Delete a playlist.
+    /// Delete a playlist (shows an undo toast; the real delete is deferred to
+    /// `PlaylistDeleteConfirmed`).
     PlaylistDelete(i64),
+    /// Actually delete a playlist (fired when the undo toast expires).
+    PlaylistDeleteConfirmed(i64),
     /// Add the current context files to this playlist.
     PlaylistAddTo(i64),
     /// Play a track from a playlist (queue = whole playlist).
     PlaylistTrack { id: i64, path: String },
-    /// Remove a track from a playlist.
+    /// Remove a track from a playlist (undo toast; deferred to the *Confirmed).
     PlaylistRemoveTrack { id: i64, path: String },
+    /// Actually remove a track from a playlist (after the undo toast expires).
+    PlaylistRemoveTrackConfirmed { id: i64, path: String },
     /// Open the rename dialog of a playlist.
     PlaylistRenameDialog(i64),
     /// Rename a playlist.
@@ -744,8 +749,10 @@ pub enum Msg {
     OpenPodcastAt(usize),
     /// Subscription detail of a gallery podcast (index in `podcast_items`) → `ShowPodcastDetail`.
     ShowPodcastDetailAt(usize),
-    /// Remove a podcast.
+    /// Remove a podcast (undo toast; deferred to `PodcastDeleteConfirmed`).
     PodcastDelete(i64),
+    /// Actually remove a podcast (after the undo toast expires).
+    PodcastDeleteConfirmed(i64),
     /// Reload the feed of a podcast.
     PodcastRefresh(i64),
     /// Toggle an entry (episode): start or – if already the running one –
@@ -787,8 +794,10 @@ pub enum Msg {
     StreamTitle(String),
     /// Open the detail page of a station.
     OpenStream(i64),
-    /// Remove a station.
+    /// Remove a station (undo toast; deferred to `StreamDeleteConfirmed`).
     StreamDelete(i64),
+    /// Actually remove a station (after the undo toast expires).
+    StreamDeleteConfirmed(i64),
     // Recording (timeshift)
     /// Stop the running recording.
     RecordStop,
@@ -806,8 +815,10 @@ pub enum Msg {
     PlayRecording(String),
     /// Open the detail page of a recording (id) – via long press.
     OpenRecording(i64),
-    /// Delete a recording (id).
+    /// Delete a recording (id) – undo toast; deferred to `RecordingDeleteConfirmed`.
     RecordingDelete(i64),
+    /// Actually delete a recording (after the undo toast expires).
+    RecordingDeleteConfirmed(i64),
     /// Set the size of the timeshift buffer in minutes (0–60).
     SetRecordingBufferMinutes(u32),
 }
@@ -3068,11 +3079,20 @@ impl Component for App {
                 }
             }
             Msg::PlaylistDelete(id) => {
+                self.undo_toast(&sender, &gettext("Playlist deleted"), Msg::PlaylistDeleteConfirmed(id));
+            }
+            Msg::PlaylistDeleteConfirmed(id) => {
                 let _ = self.library.delete_playlist(id);
                 self.reload_playlists(&sender);
-                self.toast(&gettext("Playlist deleted"));
             }
             Msg::PlaylistRemoveTrack { id, path } => {
+                self.undo_toast(
+                    &sender,
+                    &gettext("Removed from playlist"),
+                    Msg::PlaylistRemoveTrackConfirmed { id, path },
+                );
+            }
+            Msg::PlaylistRemoveTrackConfirmed { id, path } => {
                 let _ = self.library.remove_from_playlist(id, &path);
                 self.reload_playlists(&sender);
                 // Rebuild the subpage (replace the old one).
@@ -3146,9 +3166,11 @@ impl Component for App {
                 }
             }
             Msg::PodcastDelete(id) => {
+                self.undo_toast(&sender, &gettext("Podcast removed"), Msg::PodcastDeleteConfirmed(id));
+            }
+            Msg::PodcastDeleteConfirmed(id) => {
                 let _ = self.library.delete_podcast(id);
                 self.reload_podcasts(&sender);
-                self.toast(&gettext("Podcast removed"));
             }
             // --- Streaming (internet radio) ---
             Msg::StreamAdd => self.open_add_stream_dialog(root, &sender),
@@ -3249,6 +3271,9 @@ impl Component for App {
             }
             Msg::OpenStream(id) => self.open_stream(root, &sender, id),
             Msg::StreamDelete(id) => {
+                self.undo_toast(&sender, &gettext("Station removed"), Msg::StreamDeleteConfirmed(id));
+            }
+            Msg::StreamDeleteConfirmed(id) => {
                 if self.streaming.playing_stream == Some(id) {
                     self.player.stop();
                     self.mini.playing = false;
@@ -3259,7 +3284,6 @@ impl Component for App {
                 }
                 let _ = self.library.delete_stream(id);
                 self.reload_streams(&sender);
-                self.toast(&gettext("Station removed"));
             }
             // --- Recording (timeshift) ---
             Msg::RecordStop => {
@@ -3318,11 +3342,13 @@ impl Component for App {
             }
             Msg::OpenRecording(id) => self.open_recording(root, &sender, id),
             Msg::RecordingDelete(id) => {
+                self.undo_toast(&sender, &gettext("Recording deleted"), Msg::RecordingDeleteConfirmed(id));
+            }
+            Msg::RecordingDeleteConfirmed(id) => {
                 if let Ok(Some(path)) = self.library.delete_recording(id) {
                     let _ = std::fs::remove_file(&path);
                 }
                 self.reload_recordings(&sender);
-                self.toast(&gettext("Recording deleted"));
             }
             Msg::SetRecordingBufferMinutes(n) => {
                 self.streaming.recording_buffer_minutes = n.min(60);

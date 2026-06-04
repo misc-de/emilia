@@ -215,36 +215,37 @@ impl App {
                 ));
                 if is_current {
                     row.set_subtitle(&gettext("Now playing"));
-                } else {
-                    // Drag handle (left) for reordering individual tracks.
-                    let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-                    handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
-                    row.add_prefix(&handle);
-
-                    let qidx = start_idx;
-                    let drag = gtk::DragSource::new();
-                    drag.set_actions(gtk::gdk::DragAction::MOVE);
-                    drag.connect_prepare(move |_, _, _| {
-                        Some(gtk::gdk::ContentProvider::for_value(&(qidx as i32).to_value()))
-                    });
-                    row.add_controller(drag);
-
-                    let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
-                    {
-                        let sender = sender.clone();
-                        drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
-                            Ok(from) => {
-                                sender.input(Msg::QueueMove {
-                                    from: from as usize,
-                                    to: qidx,
-                                });
-                                true
-                            }
-                            Err(_) => false,
-                        });
-                    }
-                    row.add_controller(drop);
                 }
+                // Drag handle (left) for reordering individual tracks. The
+                // now-playing track is reorderable too: `QueueMove` keeps
+                // `queue_pos` pointing at it, so playback is unaffected.
+                let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+                handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
+                row.add_prefix(&handle);
+
+                let qidx = start_idx;
+                let drag = gtk::DragSource::new();
+                drag.set_actions(gtk::gdk::DragAction::MOVE);
+                drag.connect_prepare(move |_, _, _| {
+                    Some(gtk::gdk::ContentProvider::for_value(&(qidx as i32).to_value()))
+                });
+                row.add_controller(drag);
+
+                let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
+                {
+                    let sender = sender.clone();
+                    drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
+                        Ok(from) => {
+                            sender.input(Msg::QueueMove {
+                                from: from as usize,
+                                to: qidx,
+                            });
+                            true
+                        }
+                        Err(_) => false,
+                    });
+                }
+                row.add_controller(drop);
                 add_tail(&row, start_idx, group[0].3, is_current);
                 self.transport.queue_list.append(&row);
             }

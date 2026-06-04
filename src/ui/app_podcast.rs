@@ -326,62 +326,71 @@ impl App {
             .as_deref()
             .filter(|d| !d.trim().is_empty())
             .map(|d| crate::core::podcast::format_duration(d).unwrap_or_else(|| d.trim().to_string()));
-        if pub_txt.is_some() || dur_txt.is_some() {
-            let meta = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .homogeneous(true)
-                .spacing(12)
-                .margin_top(10)
-                .margin_bottom(10)
-                .margin_start(14)
-                .margin_end(14)
-                .build();
-            let cell = |title: &str, value: &str| {
-                let b = gtk::Box::new(gtk::Orientation::Vertical, 2);
-                b.append(
-                    &gtk::Label::builder()
-                        .label(title)
-                        .xalign(0.0)
-                        .css_classes(["caption", "dim-label"])
-                        .build(),
-                );
-                b.append(&gtk::Label::builder().label(value).xalign(0.0).wrap(true).build());
-                b
-            };
-            if let Some(p) = &pub_txt {
-                meta.append(&cell(&gettext("Published"), p));
-            }
-            if let Some(d) = &dur_txt {
-                meta.append(&cell(&gettext("Duration"), d));
-            }
-            info.add(&meta);
+        // Published, duration and the offline-download action side by side,
+        // each as a "heading + value" column of roughly equal width. The
+        // download column fetches the audio for offline playback; tapping it
+        // again (once downloaded) removes the local copy. `refresh_download_row`
+        // keeps its value text in sync with the DB and a running download.
+        let meta = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .homogeneous(true)
+            .spacing(12)
+            .margin_top(10)
+            .margin_bottom(10)
+            .margin_start(14)
+            .margin_end(14)
+            .build();
+        let cell = |title: &str, value: &str| {
+            let b = gtk::Box::new(gtk::Orientation::Vertical, 2);
+            b.append(
+                &gtk::Label::builder()
+                    .label(title)
+                    .xalign(0.0)
+                    .css_classes(["caption", "dim-label"])
+                    .build(),
+            );
+            b.append(&gtk::Label::builder().label(value).xalign(0.0).wrap(true).build());
+            b
+        };
+        if let Some(p) = &pub_txt {
+            meta.append(&cell(&gettext("Published"), p));
         }
-        content.append(&info);
-
-        // Offline download: fetch the audio so the episode is playable without
-        // a connection. Tapping again (once downloaded) removes the local copy.
-        // The row's label/icon are set by `refresh_download_row` from the DB
-        // state and updated live while a background download runs.
-        let dl_group = adw::PreferencesGroup::new();
-        let dl_row = adw::ActionRow::builder().activatable(true).build();
-        let dl_icon = gtk::Image::from_icon_name("folder-download-symbolic");
-        dl_row.add_prefix(&dl_icon);
-        let dl_spinner = gtk::Spinner::new();
-        dl_spinner.set_valign(gtk::Align::Center);
-        dl_row.add_suffix(&dl_spinner);
+        if let Some(d) = &dur_txt {
+            meta.append(&cell(&gettext("Duration"), d));
+        }
+        // Download column: "Download" heading over a tappable value label.
+        let dl_cell = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        dl_cell.append(
+            &gtk::Label::builder()
+                .label(&gettext("Download"))
+                .xalign(0.0)
+                .css_classes(["caption", "dim-label"])
+                .build(),
+        );
+        let dl_value = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .css_classes(["accent"])
+            .build();
+        dl_cell.append(&dl_value);
+        dl_cell.set_cursor_from_name(Some("pointer"));
         {
             let (sender, url, title) = (sender.clone(), ep.audio_url.clone(), ep.title.clone());
-            dl_row.connect_activated(move |_| {
+            let click = gtk::GestureClick::new();
+            click.connect_released(move |g, _, _, _| {
+                g.set_state(gtk::EventSequenceState::Claimed);
                 sender.input(Msg::ToggleEpisodeDownload {
                     url: url.clone(),
                     title: title.clone(),
                 });
             });
+            dl_cell.add_controller(click);
         }
-        dl_group.add(&dl_row);
-        content.append(&dl_group);
-        *self.podcasts.ctx_episode_download.borrow_mut() =
-            Some((dl_row, dl_icon, dl_spinner, ep.audio_url.clone()));
+        meta.append(&dl_cell);
+        info.add(&meta);
+        content.append(&info);
+
+        *self.podcasts.ctx_episode_download.borrow_mut() = Some((dl_value, ep.audio_url.clone()));
         self.refresh_download_row();
 
         // Shownotes (if present) directly below "Duration", before the actions.
@@ -810,24 +819,18 @@ impl App {
     /// (with a download row) is open.
     pub(crate) fn refresh_download_row(&self) {
         let guard = self.podcasts.ctx_episode_download.borrow();
-        let Some((row, icon, spinner, url)) = guard.as_ref() else {
+        let Some((label, url)) = guard.as_ref() else {
             return;
         };
         let downloading = self.podcasts.downloading_episodes.contains(url);
         let downloaded =
             !downloading && self.library.episode_download(url).ok().flatten().is_some();
-        spinner.set_visible(downloading);
-        spinner.set_spinning(downloading);
-        row.set_sensitive(!downloading);
         if downloading {
-            row.set_title(&gettext("Downloading …"));
-            icon.set_icon_name(Some("folder-download-symbolic"));
+            label.set_label(&gettext("Downloading …"));
         } else if downloaded {
-            row.set_title(&gettext("Downloaded – tap to remove"));
-            icon.set_icon_name(Some("user-trash-symbolic"));
+            label.set_label(&gettext("Remove download"));
         } else {
-            row.set_title(&gettext("Download for offline listening"));
-            icon.set_icon_name(Some("folder-download-symbolic"));
+            label.set_label(&gettext("For offline listening"));
         }
     }
 
