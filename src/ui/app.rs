@@ -4385,6 +4385,11 @@ impl Component for App {
                 // Library is read in → update the views.
                 self.reload_albums();
                 self.reload_artists();
+                // Fill in album covers from the embedded artwork in the files —
+                // purely local, so they show even offline or with online
+                // enrichment disabled (the online sweep below only runs when
+                // connected).
+                self.run_local_covers(&sender);
                 // Then automatically fetch online – without user action,
                 // provided it is desired, no fetch is already running and there is any
                 // connection at all (on any connection, even metered). The
@@ -4992,6 +4997,20 @@ impl App {
     /// present or was attempted in this session. It needs the MBID set during the
     /// cover fetch – at the very first open this is just being created,
     /// so the gallery may only take effect on the next open.
+    /// Populates album covers from the embedded artwork in the files in the
+    /// background (purely local, no network, independent of the auto-enrich
+    /// setting) and reloads the album/artist views when done. This is why the
+    /// embedded cover the user put into the files shows up everywhere — grid,
+    /// song list and detail — not only after an online enrichment run.
+    pub(crate) fn run_local_covers(&self, sender: &ComponentSender<Self>) {
+        sender.spawn_oneshot_command(|| {
+            if let Ok(lib) = Library::open() {
+                crate::ui::enrich::populate_local_covers(&lib);
+            }
+            Cmd::ReloadViews
+        });
+    }
+
     pub(crate) fn fetch_focus_album(&self, sender: &ComponentSender<Self>, artist: &str, album: &str) {
         let artist = artist.trim().to_string();
         let album = album.trim().to_string();
@@ -5022,11 +5041,18 @@ impl App {
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = Library::open() {
                 let client = crate::core::online::OnlineClient::new();
-                // First the cover (sets the MBID), then the gallery that uses it.
+                // No cover at all → full online match (sets cover + MBID).
                 if need_cover {
                     let _ = crate::core::online::enrich_album(&client, &lib, &artist, &album);
                 }
                 if need_gallery {
+                    // The gallery needs an MBID. If the album already shows the
+                    // user's embedded cover (so `need_cover` was false), match the
+                    // MBID **without** overwriting that cover, so the online images
+                    // are offered as alternatives rather than replacing it.
+                    if !need_cover {
+                        let _ = crate::core::online::match_album_mbid(&client, &lib, &artist, &album);
+                    }
                     let _ =
                         crate::core::online::enrich_album_gallery(&client, &lib, &artist, &album);
                 }

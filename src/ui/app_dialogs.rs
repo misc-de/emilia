@@ -27,7 +27,12 @@ impl App {
         match entry {
             CtxTarget::Artist(m) => self.fetch_focus_artist(sender, &m.name),
             CtxTarget::Album(m) => self.fetch_focus_album(sender, &m.artist, &m.album),
-            CtxTarget::Fs(_) => {}
+            // A song offers its album's cover alternatives → fetch them too.
+            CtxTarget::Fs(e) => {
+                if let Some((artist, album)) = self.fs_album(e) {
+                    self.fetch_focus_album(sender, &artist, &album);
+                }
+            }
         }
 
         let dialog = adw::Dialog::builder().title(entry.heading()).build();

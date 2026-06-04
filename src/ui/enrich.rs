@@ -29,6 +29,38 @@ use crate::ui::app::Cmd;
 /// endlessly.
 pub(crate) const MAX_ATTEMPTS: i64 = 3;
 
+/// Fills album covers from the **embedded** tag image (or a folder image) for
+/// local albums that have none yet. Purely local — no network — so it runs
+/// offline and regardless of the online-enrichment setting; this is what makes
+/// the user's embedded artwork show up consistently in the album grid, the song
+/// list and the detail view (the online sweep otherwise only does this when a
+/// connection is available). Remote (Nextcloud) albums are skipped — their
+/// covers need a WebDAV fetch handled by the online sweep. Returns whether any
+/// cover was added.
+pub(crate) fn populate_local_covers(lib: &Library) -> bool {
+    let mut any = false;
+    for (artist, album, path) in lib.albums_missing_cover().unwrap_or_default() {
+        // Synthetic `nc:<id>:…` paths have no local file → leave to the online sweep.
+        if crate::core::webdav::parse_nc_path(&path).is_some() {
+            continue;
+        }
+        if let Some(cover_path) = online::local_album_cover(&artist, &album, &path) {
+            // Merge into existing meta so a known mbid/year is preserved.
+            let mut m = lib
+                .get_album_meta(&artist, &album)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| crate::model::AlbumMeta::pending(&artist, &album));
+            m.cover_path = Some(cover_path);
+            m.status = "local".to_string();
+            if lib.upsert_album_meta(&m).is_ok() {
+                any = true;
+            }
+        }
+    }
+    any
+}
+
 ///
 /// `light`: **lightweight background catch-up** (periodic timer). Loads only the
 /// well "skippable" phases – **artist photos (1)** and **online covers (3)** –

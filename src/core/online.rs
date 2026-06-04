@@ -747,6 +747,45 @@ pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &
     meta
 }
 
+/// Fetches the MusicBrainz id (and year) for an album **without** touching an
+/// existing cover. Used to enable the online cover *gallery* (alternatives) for
+/// albums that already show the user's embedded cover — so the embedded artwork
+/// stays the primary and the online images are merely offered as a choice.
+/// Returns the mbid (existing or freshly matched), or `None` if no match.
+pub fn match_album_mbid(
+    client: &OnlineClient,
+    lib: &Library,
+    artist: &str,
+    album: &str,
+) -> Option<String> {
+    let mut meta = lib
+        .get_album_meta(artist, album)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| AlbumMeta::pending(artist, album));
+    if meta.mbid.as_deref().is_some_and(|m| !m.is_empty()) {
+        return meta.mbid;
+    }
+    match client.match_release(artist, album) {
+        Ok(Some(rel)) => {
+            meta.mbid = Some(rel.mbid.clone());
+            if meta.year.is_none() {
+                meta.year = rel.year;
+            }
+            // Keep a "local" status (embedded cover) so the cover is never
+            // counted as an online match nor overwritten.
+            if meta.status != "local" {
+                meta.status = "matched".to_string();
+            }
+            if let Err(e) = lib.upsert_album_meta(&meta) {
+                tracing::error!("Failed to save album_meta (mbid): {e}");
+            }
+            Some(rel.mbid)
+        }
+        _ => None,
+    }
+}
+
 /// Stores an artist photo in the cache and returns the path.
 fn save_artist_image(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = artist_cache_dir();
@@ -861,6 +900,20 @@ pub fn store_album_gallery(
 ) -> usize {
     let key = format!("{artist}{}{album}", char::from(1u8));
     let mut stored = Vec::new();
+    // Keep the current (embedded/local) cover as the first candidate so the
+    // user can always pick the artwork they put into the files back in the
+    // detail gallery — the online images are offered as alternatives, not as a
+    // replacement.
+    if let Some(local) = lib
+        .get_album_meta(artist, album)
+        .ok()
+        .flatten()
+        .and_then(|m| m.cover_path)
+    {
+        if std::path::Path::new(&local).exists() {
+            stored.push((local, "front".to_string(), "local".to_string()));
+        }
+    }
     for (i, (bytes, kind)) in imgs.iter().enumerate() {
         match save_gallery_image("albimg", &key, i, bytes) {
             Ok(pp) => {
@@ -869,7 +922,9 @@ pub fn store_album_gallery(
             Err(e) => tracing::warn!("Failed to save gallery image: {e}"),
         }
     }
-    if !stored.is_empty() {
+    // Only worth a gallery when there is an actual choice (more than the local
+    // cover). With no online images, leave the single cover to `ctx_cover`.
+    if !imgs.is_empty() && !stored.is_empty() {
         let _ = lib.set_album_images(artist, album, &stored);
     }
     stored.len()

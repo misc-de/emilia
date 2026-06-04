@@ -1642,7 +1642,10 @@ impl App {
         let primary = match entry {
             CtxTarget::Album(m) => m.cover_path.clone(),
             CtxTarget::Artist(m) => m.image_path.clone(),
-            CtxTarget::Fs(_) => None,
+            // For a song: the cover of its album (the carousel then starts on it).
+            CtxTarget::Fs(e) => self.fs_album(e).and_then(|(ar, al)| {
+                self.library.get_album_meta(&ar, &al).ok().flatten().and_then(|m| m.cover_path)
+            }),
         };
         if let Some(pos) = primary.and_then(|p| paths.iter().position(|x| *x == p)) {
             let p = paths.remove(pos);
@@ -1671,6 +1674,8 @@ impl App {
             // in the carousel as the primary cover/photo (applies everywhere then).
             let album_id = match entry {
                 CtxTarget::Album(m) => Some((m.artist.clone(), m.album.clone())),
+                // A song adopts the chosen cover for its whole album.
+                CtxTarget::Fs(e) => self.fs_album(e),
                 _ => None,
             };
             let artist_id = match entry {
@@ -1707,6 +1712,19 @@ impl App {
         }
     }
 
+    /// (artist, album) of a local track entry. Lets a single song's detail share
+    /// its **album's** cover candidates, so picking a cover there applies to the
+    /// whole album (covers stay consistent per album). `None` for folders,
+    /// remote entries or tracks without an album.
+    pub(crate) fn fs_album(&self, e: &FsEntry) -> Option<(String, String)> {
+        if e.is_dir() || e.is_remote() {
+            return None;
+        }
+        let t = scanner::read_track(e.path()?).ok()?;
+        let album = t.album.filter(|a| !a.trim().is_empty())?;
+        Some((t.artist.unwrap_or_default(), album))
+    }
+
     /// Stored gallery image paths of a target (only existing files).
     pub(crate) fn ctx_gallery_paths(&self, entry: &CtxTarget) -> Vec<String> {
         let stored = match entry {
@@ -1714,7 +1732,11 @@ impl App {
             CtxTarget::Album(m) => {
                 self.library.album_images(&m.artist, &m.album).unwrap_or_default()
             }
-            CtxTarget::Fs(_) => Vec::new(),
+            // A song shares its album's cover candidates.
+            CtxTarget::Fs(e) => self
+                .fs_album(e)
+                .map(|(ar, al)| self.library.album_images(&ar, &al).unwrap_or_default())
+                .unwrap_or_default(),
         };
         stored
             .into_iter()
