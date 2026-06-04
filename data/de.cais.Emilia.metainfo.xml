@@ -84,6 +84,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.1.45" date="2026-06-04">
+      <description>
+        <p>The music sources are now refreshed in the background at startup, so newly added local and Nextcloud tracks appear without a manual rescan. The refresh button keeps checking every source for new content across all views.</p>
+        <p xml:lang="de">Die Musikquellen werden beim Start jetzt im Hintergrund aktualisiert, damit neu hinzugekommene lokale und Nextcloud-Titel ohne manuelles Neueinlesen erscheinen. Der Aktualisieren-Knopf prüft weiterhin in allen Bereichen jede Quelle auf Neuerungen.</p>
+      </description>
+    </release>
     <release version="0.1.38" date="2026-06-04">
       <description>
         <p>Current development release with Nextcloud library indexing, LAN device sync, streaming recordings, podcasts with resume and show notes, navigation customization, statistics, online metadata enrichment, and playback polish for narrow phone screens.</p>
