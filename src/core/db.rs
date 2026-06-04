@@ -330,6 +330,15 @@ impl Library {
                 updated_at  INTEGER NOT NULL DEFAULT 0
             );
 
+            -- Downloaded episodes (offline playback), keyed by audio URL like
+            -- `episode_progress` so a feed refresh keeps the download. The audio
+            -- file lives at `path`; playback prefers it over the network URL.
+            CREATE TABLE IF NOT EXISTS episode_download (
+                url           TEXT PRIMARY KEY,
+                path          TEXT NOT NULL,
+                downloaded_at INTEGER NOT NULL DEFAULT 0
+            );
+
             -- Saved streaming stations (internet radio). Playback directly
             -- via the stream URL; nothing is downloaded.
             CREATE TABLE IF NOT EXISTS stream (
@@ -2210,6 +2219,43 @@ impl Library {
             .prepare("SELECT url, position_ms FROM episode_progress")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Records a downloaded episode (audio URL → local file path) for offline
+    /// playback.
+    pub fn set_episode_download(&self, url: &str, path: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO episode_download (url, path, downloaded_at)
+             VALUES (?1, ?2, strftime('%s','now'))
+             ON CONFLICT(url) DO UPDATE SET
+                path = excluded.path, downloaded_at = excluded.downloaded_at",
+            rusqlite::params![url, path],
+        )?;
+        Ok(())
+    }
+
+    /// Local path of a downloaded episode (offline copy), or `None` if the
+    /// episode is not downloaded.
+    pub fn episode_download(&self, url: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT path FROM episode_download WHERE url = ?1",
+                [url],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Removes the download record for an episode and returns the stored file
+    /// path (so the caller can delete the file). `None` if it wasn't downloaded.
+    pub fn delete_episode_download(&self, url: &str) -> Result<Option<String>> {
+        let path = self.episode_download(url)?;
+        if path.is_some() {
+            self.conn
+                .execute("DELETE FROM episode_download WHERE url = ?1", [url])?;
+        }
+        Ok(path)
     }
 
     /// Show notes/description of an episode by its audio URL (for the

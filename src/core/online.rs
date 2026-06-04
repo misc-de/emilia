@@ -56,6 +56,37 @@ fn cache_subdir(name: &str) -> PathBuf {
     dir
 }
 
+/// Directory for downloaded podcast episodes (offline playback):
+/// `$XDG_DATA_HOME/emilia/podcasts`. Unlike the cover cache this lives under the
+/// **data** dir (next to the library DB), so the OS won't purge offline
+/// episodes the way it may clear `~/.cache`.
+pub fn podcast_download_dir() -> PathBuf {
+    let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("emilia");
+    dir.push("podcasts");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Destination file for an episode download (stable name derived from the audio
+/// URL, original extension preserved when recognisable so the file is also
+/// usable outside the app). The extension is cosmetic – playback uses content
+/// type detection, not the suffix.
+pub fn episode_download_dest(url: &str) -> PathBuf {
+    let ext = url
+        .split(['?', '#'])
+        .next()
+        .and_then(|p| p.rsplit('.').next())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| {
+            (1..=4).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .unwrap_or_else(|| "audio".to_string());
+    let mut p = podcast_download_dir();
+    p.push(format!("{}.{ext}", name_hash(url)));
+    p
+}
+
 /// Whether fingerprint detection is possible (Chromaprint/`fpcalc` present).
 pub fn fingerprint_available() -> bool {
     fingerprint::available()

@@ -408,6 +408,14 @@ pub(crate) struct PodcastsState {
     /// while exactly this episode is playing.
     pub(crate) ctx_episode_play:
         std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
+    /// "Download" row of an open episode detail dialog: (row, icon, spinner,
+    /// audio URL). Its label/icon reflect the offline state and are refreshed
+    /// when a background download starts or finishes.
+    pub(crate) ctx_episode_download:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, gtk::Image, gtk::Spinner, String)>>>,
+    /// Audio URLs of episodes whose download is currently running (to show a
+    /// spinner and ignore repeated taps).
+    pub(crate) downloading_episodes: std::collections::HashSet<String>,
 }
 
 /// Favorites + audiobooks page state, grouped off the `App` god-object.
@@ -760,6 +768,10 @@ pub enum Msg {
     /// Click on a time-jump mark in the show notes: jump to the spot
     /// (start the episode there if needed).
     EpisodeSeekTo { url: String, title: String, ms: i64 },
+    /// Download row in the episode detail: if not downloaded, fetch the audio
+    /// for offline playback (background); if already downloaded, delete the
+    /// local copy. `title` is only used for the toast.
+    ToggleEpisodeDownload { url: String, title: String },
     /// Detail view/management of a subscription (podcast id) – refresh/remove.
     ShowPodcastDetail(i64),
     // Streaming (internet radio)
@@ -833,6 +845,12 @@ pub enum Cmd {
     Candidates(Vec<crate::core::concert::Candidate>),
     /// Podcast feed fetched: `Some(title)` on success, otherwise `None`.
     PodcastFetched(Option<String>),
+    /// An episode download finished: the audio URL and the local path on
+    /// success, or an error message.
+    EpisodeDownloaded {
+        url: String,
+        result: Result<String, String>,
+    },
     /// Hits of the podcast search (for the open subscribe dialog).
     PodcastSearchResults(Vec<crate::core::podcast::PodcastSearchResult>),
     /// Cover thumbnails of the search hits are cached → redraw the hit list.
@@ -1543,13 +1561,21 @@ impl Component for App {
 
                         gtk::Button {
                             add_css_class: "flat",
-                            set_tooltip_text: Some(&gettext("Details of the current track")),
+                            set_tooltip_text: Some(&gettext("Long press for details of the current track")),
                             // Place song/artist a bit lower (more compact bar).
                             set_margin_top: 5,
                             // Without a selected track, hide entirely (frees up space).
                             #[watch]
                             set_visible: model.mini.now_playing.is_some(),
-                            connect_clicked => Msg::OpenNowPlaying,
+                            // Long press (not a short tap) opens the track detail view –
+                            // consistent with the album/artist/track rows and so an
+                            // accidental tap on the bar no longer pops the detail sheet.
+                            add_controller = gtk::GestureLongPress {
+                                connect_pressed[sender] => move |gesture, _, _| {
+                                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                                    sender.input(Msg::OpenNowPlaying);
+                                },
+                            },
                             #[wrap(Some)]
                             set_child = &gtk::Label {
                                 set_xalign: 0.5,
@@ -2203,6 +2229,8 @@ impl Component for App {
                 playing_episode_url: None,
                 episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                ctx_episode_download: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                downloading_episodes: std::collections::HashSet::new(),
             },
             streaming: StreamingState {
                 stream_view: StreamView::Channels,
@@ -3311,6 +3339,44 @@ impl Component for App {
                     self.play_episode_at(&url, &title, ms);
                 }
             }
+            Msg::ToggleEpisodeDownload { url, title } => {
+                // Ignore taps while a download for this episode is in flight.
+                if self.podcasts.downloading_episodes.contains(&url) {
+                    return;
+                }
+                // Already downloaded → delete the local copy to free space.
+                // Future plays then fall back to streaming; a copy currently
+                // playing keeps its open file handle until the track changes.
+                if let Some(path) = self.library.delete_episode_download(&url).unwrap_or(None) {
+                    let _ = std::fs::remove_file(&path);
+                    self.refresh_download_row();
+                    self.toast(&gettext("Download removed"));
+                    return;
+                }
+                // Not downloaded → fetch the audio in the background.
+                self.podcasts.downloading_episodes.insert(url.clone());
+                self.refresh_download_row();
+                self.toast(&gettext_f("Downloading “{title}” …", &[("title", &title)]));
+                let dl_url = url.clone();
+                sender.spawn_command(move |out| {
+                    let dest = crate::core::online::episode_download_dest(&dl_url);
+                    let result = match crate::core::podcast::download_episode(&dl_url, &dest) {
+                        Ok(_) => {
+                            let path = dest.to_string_lossy().into_owned();
+                            // Persist the offline copy (worker thread, own DB).
+                            if let Ok(lib) = Library::open() {
+                                let _ = lib.set_episode_download(&dl_url, &path);
+                            }
+                            Ok(path)
+                        }
+                        Err(e) => Err(e.to_string()),
+                    };
+                    let _ = out.send(Cmd::EpisodeDownloaded {
+                        url: dl_url.clone(),
+                        result,
+                    });
+                });
+            }
             Msg::SetPodcastView(view) => self.podcasts.podcast_view = view,
             Msg::SetStreamView(view) => self.streaming.stream_view = view,
             Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
@@ -4354,6 +4420,17 @@ impl Component for App {
                 match title {
                     Some(t) => self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)])),
                     None => self.toast(&gettext("Could not load feed")),
+                }
+            }
+            Cmd::EpisodeDownloaded { url, result } => {
+                self.podcasts.downloading_episodes.remove(&url);
+                self.refresh_download_row();
+                match result {
+                    Ok(_) => self.toast(&gettext("Episode downloaded")),
+                    Err(e) => {
+                        tracing::warn!("Episode download failed: {e}");
+                        self.toast(&gettext("Download failed"));
+                    }
                 }
             }
             Cmd::PodcastSearchResults(results) => {

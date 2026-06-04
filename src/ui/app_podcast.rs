@@ -359,6 +359,32 @@ impl App {
         }
         content.append(&info);
 
+        // Offline download: fetch the audio so the episode is playable without
+        // a connection. Tapping again (once downloaded) removes the local copy.
+        // The row's label/icon are set by `refresh_download_row` from the DB
+        // state and updated live while a background download runs.
+        let dl_group = adw::PreferencesGroup::new();
+        let dl_row = adw::ActionRow::builder().activatable(true).build();
+        let dl_icon = gtk::Image::from_icon_name("folder-download-symbolic");
+        dl_row.add_prefix(&dl_icon);
+        let dl_spinner = gtk::Spinner::new();
+        dl_spinner.set_valign(gtk::Align::Center);
+        dl_row.add_suffix(&dl_spinner);
+        {
+            let (sender, url, title) = (sender.clone(), ep.audio_url.clone(), ep.title.clone());
+            dl_row.connect_activated(move |_| {
+                sender.input(Msg::ToggleEpisodeDownload {
+                    url: url.clone(),
+                    title: title.clone(),
+                });
+            });
+        }
+        dl_group.add(&dl_row);
+        content.append(&dl_group);
+        *self.podcasts.ctx_episode_download.borrow_mut() =
+            Some((dl_row, dl_icon, dl_spinner, ep.audio_url.clone()));
+        self.refresh_download_row();
+
         // Shownotes (if present) directly below "Duration", before the actions.
         // Timestamps (e.g. "12:34") become clickable jump markers.
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
@@ -778,6 +804,33 @@ impl App {
         }
     }
 
+    /// Updates the download row of an open episode detail dialog to reflect the
+    /// offline state of its episode: a spinner while downloading, "remove" once
+    /// downloaded, otherwise the download prompt. No-op when no detail dialog
+    /// (with a download row) is open.
+    pub(crate) fn refresh_download_row(&self) {
+        let guard = self.podcasts.ctx_episode_download.borrow();
+        let Some((row, icon, spinner, url)) = guard.as_ref() else {
+            return;
+        };
+        let downloading = self.podcasts.downloading_episodes.contains(url);
+        let downloaded =
+            !downloading && self.library.episode_download(url).ok().flatten().is_some();
+        spinner.set_visible(downloading);
+        spinner.set_spinning(downloading);
+        row.set_sensitive(!downloading);
+        if downloading {
+            row.set_title(&gettext("Downloading …"));
+            icon.set_icon_name(Some("folder-download-symbolic"));
+        } else if downloaded {
+            row.set_title(&gettext("Downloaded – tap to remove"));
+            icon.set_icon_name(Some("user-trash-symbolic"));
+        } else {
+            row.set_title(&gettext("Download for offline listening"));
+            icon.set_icon_name(Some("folder-download-symbolic"));
+        }
+    }
+
     /// Streams a podcast episode (replaces the current playback). Starts at
     /// the remembered position (resume) and first saves the position of a
     /// previously playing episode.
@@ -835,7 +888,21 @@ impl App {
 
     fn play_episode_from(&mut self, url: &str, title: &str, resume: i64) {
         self.save_episode_progress();
-        match self.player.play_uri(url, resume) {
+        // Offline copy present → play the local file (works without a
+        // connection and starts instantly); otherwise stream the network URL.
+        // Playback state stays keyed by `url` (resume position, play/pause
+        // marker, chapters), only the actual source differs.
+        let local = self
+            .library
+            .episode_download(url)
+            .ok()
+            .flatten()
+            .filter(|p| std::path::Path::new(p).exists());
+        let started = match &local {
+            Some(path) => self.player.play_file(path, resume),
+            None => self.player.play_uri(url, resume),
+        };
+        match started {
             Ok(()) => {
                 self.mini.now_playing = Some(title.to_string());
                 self.mini.playing = true;

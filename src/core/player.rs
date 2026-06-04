@@ -47,6 +47,24 @@ fn build_audio_filter(
     }
 }
 
+/// Performs a pitch-preserving rate-change seek to `pos` at `rate` (scaletempo
+/// reacts to the new segment rate). Uses `KEY_UNIT` rather than `ACCURATE`: a
+/// frame-exact (`ACCURATE`) flush-seek on a slow HTTP source (a podcast
+/// episode) forces a re-download to find the precise sample and blocked the GTK
+/// main thread for seconds — the UI appeared to freeze on every speed change.
+/// Snapping to the nearest keyframe is effectively instant and the sub-second
+/// position drift is inaudible.
+fn rate_seek(playbin: &gst::Element, rate: f64, pos: gst::ClockTime) {
+    let _ = playbin.seek(
+        rate,
+        gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+        gst::SeekType::Set,
+        pos,
+        gst::SeekType::End,
+        gst::ClockTime::ZERO,
+    );
+}
+
 pub struct Player {
     playbin: gst::Element,
     /// 10-band equalizer (lives inside the `audio-filter` chain if available).
@@ -196,14 +214,7 @@ impl Player {
                         if target > 0 {
                             let pos = gst::ClockTime::from_mseconds(target.max(0) as u64);
                             if want_rate {
-                                let _ = playbin.seek(
-                                    r,
-                                    gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-                                    gst::SeekType::Set,
-                                    pos,
-                                    gst::SeekType::End,
-                                    gst::ClockTime::ZERO,
-                                );
+                                rate_seek(&playbin, r, pos);
                             } else {
                                 let _ = playbin.seek_simple(
                                     gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
@@ -215,14 +226,7 @@ impl Player {
                             let pos = playbin
                                 .query_position::<gst::ClockTime>()
                                 .unwrap_or(gst::ClockTime::ZERO);
-                            let _ = playbin.seek(
-                                r,
-                                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-                                gst::SeekType::Set,
-                                pos,
-                                gst::SeekType::End,
-                                gst::ClockTime::ZERO,
-                            );
+                            rate_seek(&playbin, r, pos);
                         }
                     }
                     gst::MessageView::Error(err) => {
@@ -298,14 +302,7 @@ impl Player {
         let rate = rate.clamp(0.25, 2.0);
         self.rate.set(rate);
         if let Some(pos) = self.playbin.query_position::<gst::ClockTime>() {
-            let _ = self.playbin.seek(
-                rate,
-                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-                gst::SeekType::Set,
-                pos,
-                gst::SeekType::End,
-                gst::ClockTime::ZERO,
-            );
+            rate_seek(&self.playbin, rate, pos);
         }
     }
 }

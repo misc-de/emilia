@@ -218,8 +218,8 @@ msgid "Reading music data"
 msgstr "Musikdaten werden eingelesen"
 
 #: src/ui/app.rs:1499
-msgid "Details of the current track"
-msgstr "Details zum laufenden Titel"
+msgid "Long press for details of the current track"
+msgstr "Lange drücken für Details zum laufenden Titel"
 
 #: src/ui/app.rs:1580
 msgid "Equalizer for this track"
@@ -1463,6 +1463,26 @@ msgstr "Erkannt (Album)"
 #: src/ui/fs_row.rs:319
 msgid "Downloaded"
 msgstr "Heruntergeladen"
+
+#: src/ui/app_podcast.rs
+msgid "Download for offline listening"
+msgstr "Für Offline-Wiedergabe herunterladen"
+
+#: src/ui/app_podcast.rs
+msgid "Downloaded – tap to remove"
+msgstr "Heruntergeladen – zum Entfernen tippen"
+
+#: src/ui/app.rs
+msgid "Downloading “{title}” …"
+msgstr "„{title}“ wird heruntergeladen …"
+
+#: src/ui/app.rs
+msgid "Download removed"
+msgstr "Download entfernt"
+
+#: src/ui/app.rs
+msgid "Episode downloaded"
+msgstr "Episode heruntergeladen"
 
 #~ msgid "Start folder"
 #~ msgstr "Startordner"
