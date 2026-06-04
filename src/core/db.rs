@@ -1424,6 +1424,19 @@ impl Library {
     /// Any existing cover for an album name (across artists) --
     /// useful for single tracks whose album is known but was stored under a
     /// different artist credit.
+    /// Distinct albums credited to exactly this artist (indexed via
+    /// `idx_track_artist_album`). Used to find a fallback cover for an artist
+    /// without a photo, without scanning the whole track table.
+    pub fn albums_of_artist(&self, artist: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT album FROM track
+             WHERE artist = ?1 AND album IS NOT NULL AND album <> ''
+             ORDER BY album",
+        )?;
+        let rows = stmt.query_map([artist], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn album_cover(&self, album: &str) -> Result<Option<String>> {
         let cover = self
             .conn

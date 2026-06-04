@@ -122,6 +122,13 @@ pub fn collect_audio_files(root: &Path) -> Vec<PathBuf> {
 /// Reads a file's metadata into a `Track` model.
 /// Falls back to the file name when tags are missing (important for audio dramas).
 pub fn read_track(path: &Path) -> Result<Track> {
+    read_track_detailed(path).map(|(track, _composer)| track)
+}
+
+/// Like [`read_track`] but also returns the composer, extracted from the **same**
+/// single tag read. Used by the detail view, which would otherwise parse the
+/// file twice (once for the track, once for genre/composer).
+pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
     let tagged = lofty::read_from_path(path)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
 
@@ -131,7 +138,7 @@ pub fn read_track(path: &Path) -> Result<Track> {
         .unwrap_or("Unknown")
         .to_string();
 
-    let (title, artist, album, genre, track_no, disc_no) = match tag {
+    let (title, artist, album, genre, track_no, disc_no, composer) = match tag {
         Some(tag) => (
             tag.title().map(|c| c.to_string()).unwrap_or(file_stem),
             tag.artist().map(|c| c.to_string()),
@@ -141,24 +148,30 @@ pub fn read_track(path: &Path) -> Result<Track> {
                 .filter(|s| !s.trim().is_empty()),
             tag.track(),
             tag.disk(),
+            tag.get_string(&lofty::tag::ItemKey::Composer)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         ),
-        None => (file_stem, None, None, None, None, None),
+        None => (file_stem, None, None, None, None, None, None),
     };
 
     let duration_ms = tagged.properties().duration().as_millis() as i64;
 
-    Ok(Track {
-        id: 0,
-        path: path.to_string_lossy().into_owned(),
-        title,
-        artist,
-        album,
-        genre,
-        track_no,
-        disc_no,
-        duration_ms: Some(duration_ms),
-        resume_ms: 0,
-    })
+    Ok((
+        Track {
+            id: 0,
+            path: path.to_string_lossy().into_owned(),
+            title,
+            artist,
+            album,
+            genre,
+            track_no,
+            disc_no,
+            duration_ms: Some(duration_ms),
+            resume_ms: 0,
+        },
+        composer,
+    ))
 }
 
 /// Scans `root` and writes all found tracks into the library, then removes

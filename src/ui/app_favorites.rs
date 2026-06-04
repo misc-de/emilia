@@ -348,9 +348,13 @@ impl App {
     /// Fallback image for an artist **without a photo**: the cover of one of
     /// their albums (the first one with a cover).
     pub(crate) fn artist_album_cover(&self, name: &str) -> Option<String> {
-        self.artist_albums(name)
+        // Indexed lookup of the artist's own albums instead of loading and
+        // grouping the whole track table (was O(tracks) per photoless artist).
+        self.library
+            .albums_of_artist(name)
+            .unwrap_or_default()
             .into_iter()
-            .find_map(|(album, _)| self.album_cover_for(name, &album))
+            .find_map(|album| self.album_cover_for(name, &album))
     }
 
     /// Album cover: first an exact match (artist, album), otherwise any of the album.

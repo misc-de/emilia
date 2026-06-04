@@ -44,13 +44,21 @@ pub fn store_thumb(path: String, texture: gtk::gdk::Texture) {
     });
 }
 
+/// Decodes an image file **downscaled** so the longer edge is at most `px`,
+/// preserving the aspect ratio. Much faster and lighter than decoding the full
+/// resolution when only a small widget shows the image. `None` on a
+/// missing/faulty file.
+pub fn decode_scaled(path: &str, px: i32) -> Option<gtk::gdk::Texture> {
+    let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, px, px, true).ok()?;
+    Some(gtk::gdk::Texture::for_pixbuf(&pixbuf))
+}
+
 /// Decodes an image file **downscaled** to thumbnail size and creates a texture
 /// from it. Intended for the background thread (no widget/UI reference);
 /// returns `None` for a missing/faulty file. Scaled decoding is faster than the
 /// full size and keeps the cache memory-friendly.
 pub fn decode_thumb(path: &str) -> Option<gtk::gdk::Texture> {
-    let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, THUMB_PX, THUMB_PX, true).ok()?;
-    Some(gtk::gdk::Texture::for_pixbuf(&pixbuf))
+    decode_scaled(path, THUMB_PX)
 }
 
 /// Empty, square and rounded image frame in card style with a placeholder icon.

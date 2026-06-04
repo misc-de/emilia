@@ -1671,7 +1671,10 @@ impl App {
             let carousel = adw::Carousel::new();
             carousel.set_halign(gtk::Align::Center);
             for path in &paths {
-                let tex = gtk::gdk::Texture::from_filename(path).ok();
+                // Decode downscaled (the carousel shows ~180 px): avoids loading
+                // several full-resolution covers synchronously on the UI thread.
+                let tex = crate::ui::widgets::decode_scaled(path, 360)
+                    .or_else(|| gtk::gdk::Texture::from_filename(path).ok());
                 let img = crate::ui::widgets::rounded_image(tex.as_ref(), placeholder, 180);
                 carousel.append(&img);
             }
@@ -2140,16 +2143,16 @@ impl App {
             }
             lines.push((gettext("Collection"), Self::files_summary(&files, !year_shown)));
         } else if let Some(p) = entry.path() {
-            match scanner::read_track(p) {
-                Ok(t) => {
+            // Single tag read for title/artist/album/genre/duration **and** the
+            // composer (was previously two parses of the same file).
+            match scanner::read_track_detailed(p) {
+                Ok((t, composer)) => {
                     lines.push((gettext("Title"), t.title));
                     // Remember artist/album for the year resolution (consumed
                     // when displaying).
                     let (artist, album) = (t.artist.clone(), t.album.clone());
-                    // Genre + composer from the file tags (display only). The
-                    // composer is always shown when it is tagged (relevant
-                    // for classical/audio dramas); the genre whenever present.
-                    let (genre, composer) = scanner::read_genre_composer(p);
+                    // Composer is always shown when tagged (relevant for
+                    // classical/audio dramas); the genre whenever present.
                     if let Some(a) = t.artist {
                         lines.push((gettext("Artist"), a));
                     }
@@ -2159,7 +2162,7 @@ impl App {
                     if let Some(al) = t.album {
                         lines.push((gettext("Album"), al));
                     }
-                    if let Some(g) = genre {
+                    if let Some(g) = t.genre {
                         lines.push((gettext("Genre"), g));
                     }
                     if let Some(d) = t.duration_ms {
