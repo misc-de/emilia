@@ -872,8 +872,10 @@ pub enum Cmd {
     ReloadRecordings,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
-    /// Cloud sources were re-indexed (refresh button) → rebuild views + covers.
-    CloudReindexed,
+    /// Cloud sources were re-indexed → rebuild views + covers. `manual` = the
+    /// user pressed refresh (force online enrichment regardless of the passive
+    /// auto-enrich setting); `false` = silent background top-up at startup.
+    CloudReindexed { manual: bool },
 }
 
 #[relm4::component(pub)]
@@ -2350,6 +2352,12 @@ impl Component for App {
         // Automatically read the library at startup and – on Wi-Fi/LAN and
         // with the switch enabled – fetch missing covers/metadata in the background.
         model.start_scan(&sender, true);
+        // Also check the remote sources for new content in the background (silent,
+        // non-manual: respects the auto-enrich setting). Skipped when offline so a
+        // launch without a connection does not spin up a pointless re-index worker.
+        if online_available() {
+            model.reindex_cloud_sources(&sender, false);
+        }
 
         let entries_box = model.libview.entries.widget();
         let albums_box = model.libview.albums.widget();
@@ -3708,7 +3716,8 @@ impl Component for App {
                 // Re-index the cloud sources too, so their structure and covers
                 // update (existing sources are only indexed when first added).
                 // On completion this rebuilds the views and fetches covers.
-                self.reindex_cloud_sources(&sender);
+                // `manual` → fetch online regardless of the auto-enrich setting.
+                self.reindex_cloud_sources(&sender, true);
                 // "Rescan" also updates the local library (artists/albums).
                 self.start_scan(&sender, false);
             }
@@ -4417,15 +4426,19 @@ impl Component for App {
                     self.run_enrich(&sender, false, false);
                 }
             }
-            Cmd::CloudReindexed => {
+            Cmd::CloudReindexed { manual } => {
                 // Freshly indexed remote tracks → rebuild the library views and
                 // favorites. Then fetch covers/photos (incl. the embedded covers
-                // of the remote tracks); a manual refresh does this regardless of
-                // the passive auto-enrich setting.
+                // of the remote tracks). A manual refresh does this regardless of
+                // the passive auto-enrich setting; the silent startup top-up only
+                // when auto-enrich is on (like the local scan's `then_enrich`).
                 self.reload_albums();
                 self.reload_artists();
                 self.load_favorites(&sender);
-                if !self.enrich_state.enriching && online_available() {
+                if (manual || self.enrich_state.auto_enrich)
+                    && !self.enrich_state.enriching
+                    && online_available()
+                {
                     self.run_enrich(&sender, false, false);
                 }
             }

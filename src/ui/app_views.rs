@@ -492,12 +492,14 @@ impl App {
         sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
     }
 
-    /// Re-indexes all Nextcloud/WebDAV sources in the background (refresh
-    /// button). Existing sources are only indexed when first added, so this is
-    /// the way to pull newly added remote tracks (and their embedded covers)
-    /// into the library afterwards. On completion [`Cmd::CloudReindexed`]
-    /// rebuilds the views and fetches covers/photos.
-    pub(crate) fn reindex_cloud_sources(&mut self, sender: &ComponentSender<Self>) {
+    /// Re-indexes all Nextcloud/WebDAV sources in the background. Existing
+    /// sources are only indexed when first added, so this is the way to pull
+    /// newly added remote tracks (and their embedded covers) into the library
+    /// afterwards. On completion [`Cmd::CloudReindexed`] rebuilds the views and
+    /// fetches covers/photos. `manual` = triggered by the refresh button (force
+    /// online enrichment); `false` = silent background top-up (e.g. at startup),
+    /// which respects the passive auto-enrich setting.
+    pub(crate) fn reindex_cloud_sources(&mut self, sender: &ComponentSender<Self>, manual: bool) {
         let sources: Vec<crate::model::Source> = self
             .files
             .sources
@@ -517,7 +519,7 @@ impl App {
                     }
                 }
             }
-            Cmd::CloudReindexed
+            Cmd::CloudReindexed { manual }
         });
     }
 
