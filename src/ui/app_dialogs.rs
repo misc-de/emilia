@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::core::db::Library;
-use crate::i18n::{gettext, gettext_f};
+use crate::i18n::gettext;
 use crate::model::Source;
 use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
@@ -750,31 +750,6 @@ impl App {
         // --- Device synchronization: hidden in the settings
         //     (the feature stays reachable via the share button). ---
 
-        // --- Software update (only in the Flatpak version) ---
-        if crate::core::update::in_flatpak() {
-            let update_group = adw::PreferencesGroup::builder()
-                .title(&gettext("App update"))
-                .description(&gettext(
-                    "Emilia is installed as a Flatpak – check for a newer version and update directly.",
-                ))
-                .build();
-            let update_row = adw::ActionRow::builder()
-                .title(&gettext("Check for updates"))
-                .subtitle(&gettext_f(
-                    "Installed version: {v}",
-                    &[("v", env!("CARGO_PKG_VERSION"))],
-                ))
-                .activatable(true)
-                .build();
-            update_row.add_prefix(&gtk::Image::from_icon_name("software-update-available-symbolic"));
-            update_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-            {
-                let sender = sender.clone();
-                update_row.connect_activated(move |_| sender.input(Msg::CheckForUpdates));
-            }
-            update_group.add(&update_row);
-            page.add(&update_group);
-        }
         let search_page = page;
 
         // --- Category: View ---
@@ -906,9 +881,9 @@ impl App {
         page.add(&sections_group);
         let menu_page = page;
 
-        // --- Category: Cache and recordings ---
+        // --- Category: Cache (incl. the recording timeshift buffer) ---
         let page = adw::PreferencesPage::builder()
-            .title(&gettext("Cache & recordings"))
+            .title(&gettext("Cache"))
             .icon_name("media-record-symbolic")
             .build();
         let streaming_group = adw::PreferencesGroup::builder()

@@ -37,10 +37,6 @@ finish-args:
   - --filesystem=xdg-music
   # Sperrbildschirm/Medientasten: eigener MPRIS-Name (pro Prozess-Suffix)
   - --own-name=org.mpris.MediaPlayer2.Emilia.*
-  # Selbst-Aktualisierung aus den App-Einstellungen über das Flatpak-Portal
-  # (Update-Monitor). Bei vielen Setups ist der Portal-Name ohnehin erreichbar;
-  # explizit erlauben schadet nicht.
-  - --talk-name=org.freedesktop.portal.Flatpak
   # Sicherheitskritische Daten (Nextcloud-Benutzername/-App-Passwort sowie API-
   # Keys/Tokens wie AcoustID/fanart.tv) werden, wenn verfügbar, über libsecret
   # im Secret Service statt in der lokalen SQLite-Datenbank gespeichert.

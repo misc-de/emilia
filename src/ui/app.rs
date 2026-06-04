@@ -601,12 +601,6 @@ pub enum Msg {
     /// Open the detail view of the currently running track (click on the bar).
     OpenNowPlaying,
     OpenSettings,
-    /// Check for a newer Flatpak version (only as Flatpak; in the background).
-    CheckForUpdates,
-    /// Apply a found update via the Flatpak portal.
-    InstallFlatpakUpdate,
-    /// Result of the Flatpak update (`Ok` = done, restart needed).
-    FlatpakUpdateFinished(Result<(), String>),
     OpenGlobalEq,
     /// Open the equalizer for the currently running track.
     OpenCurrentEq,
@@ -867,8 +861,6 @@ pub enum Cmd {
     ReloadRecordings,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
-    /// Result of the update check (determined in the background).
-    UpdateChecked(crate::core::update::CheckResult),
     /// Cloud sources were re-indexed (refresh button) → rebuild views + covers.
     CloudReindexed,
 }
@@ -2609,18 +2601,43 @@ impl Component for App {
                 });
         }
 
-        // Swipe gesture on the whole file system page: to the right = back.
-        let swipe = gtk::GestureSwipe::new();
-        swipe.set_touch_only(false);
+        // Swipe-to-go-back on the file system page: a horizontal drag to the
+        // right navigates back. Implemented as a `GestureDrag` in the **capture**
+        // phase so it recognises the horizontal intent *early* and claims the
+        // sequence — the previous velocity-based `GestureSwipe` ran in the bubble
+        // phase and only fired on release, so it lost the race against a row's
+        // tap/long-press and felt coarse and late. We only claim once the motion
+        // is clearly rightward-horizontal, leaving vertical drags to the list's
+        // scrolling and plain taps to the rows.
+        let drag = gtk::GestureDrag::new();
+        drag.set_touch_only(false);
+        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let swipe_claimed = std::rc::Rc::new(std::cell::Cell::new(false));
+        {
+            let swipe_claimed = swipe_claimed.clone();
+            drag.connect_drag_begin(move |_, _, _| swipe_claimed.set(false));
+        }
+        {
+            let swipe_claimed = swipe_claimed.clone();
+            drag.connect_drag_update(move |g, dx, dy| {
+                // Take over as soon as the drag is clearly a rightward swipe, so
+                // the gesture responds promptly instead of fighting the tap.
+                if !swipe_claimed.get() && dx > 30.0 && dx > dy.abs() * 1.2 {
+                    swipe_claimed.set(true);
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                }
+            });
+        }
         {
             let sender = sender.clone();
-            swipe.connect_swipe(move |_, vx, vy| {
-                if vx > 300.0 && vx.abs() > vy.abs() * 1.5 {
+            let swipe_claimed = swipe_claimed.clone();
+            drag.connect_drag_end(move |_, dx, dy| {
+                if swipe_claimed.get() && dx > 50.0 && dx > dy.abs() * 1.2 {
                     sender.input(Msg::NavUp);
                 }
             });
         }
-        widgets.files_page.add_controller(swipe);
+        widgets.files_page.add_controller(drag);
 
         // Restore the window size and save it on close.
         if let (Some(w), Some(h)) = (saved_w, saved_h) {
@@ -3670,36 +3687,6 @@ impl Component for App {
                 self.start_scan(&sender, false);
             }
             Msg::OpenSettings => self.open_settings(root, &sender),
-            Msg::CheckForUpdates => {
-                if crate::core::update::in_flatpak() {
-                    self.toast(&gettext("Checking for updates …"));
-                    sender.spawn_oneshot_command(|| {
-                        Cmd::UpdateChecked(crate::core::update::check())
-                    });
-                } else {
-                    self.toast(&gettext("Updates are only available in the Flatpak version."));
-                }
-            }
-            Msg::InstallFlatpakUpdate => {
-                self.toast(&gettext(
-                    "Update started – it runs in the background. Please restart Emilia afterwards.",
-                ));
-                let sender2 = sender.clone();
-                // Trigger via the Flatpak portal (main thread; progress via signal).
-                if let Err(e) =
-                    crate::core::update::install(move |res| sender2.input(Msg::FlatpakUpdateFinished(res)))
-                {
-                    tracing::warn!("Flatpak update failed to start: {e}");
-                    sender.input(Msg::FlatpakUpdateFinished(Err(e.to_string())));
-                }
-            }
-            Msg::FlatpakUpdateFinished(res) => match res {
-                Ok(()) => self.toast(&gettext("Update installed. Please restart Emilia.")),
-                Err(_) => self.toast(&gettext_f(
-                    "Update failed. You can update manually: {cmd}",
-                    &[("cmd", &crate::core::update::manual_command())],
-                )),
-            },
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
             Msg::OpenCurrentEq => {
                 if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
@@ -4470,34 +4457,6 @@ impl Component for App {
                     self.reload_artists();
                 }
             }
-            Cmd::UpdateChecked(result) => match result {
-                crate::core::update::CheckResult::UpToDate => self.toast(&gettext_f(
-                    "Emilia is up to date (version {v}).",
-                    &[("v", env!("CARGO_PKG_VERSION"))],
-                )),
-                crate::core::update::CheckResult::Unknown => {
-                    self.toast(&gettext("Could not check for updates (offline?)."))
-                }
-                crate::core::update::CheckResult::Available => {
-                    // Confirmation before applying – installs via the portal.
-                    let confirm = adw::AlertDialog::new(
-                        Some(&gettext("Update available")),
-                        Some(&gettext("A newer version of Emilia is available. Install it now?")),
-                    );
-                    confirm.add_response("cancel", &gettext("Cancel"));
-                    confirm.add_response("update", &gettext("Update"));
-                    confirm.set_response_appearance("update", adw::ResponseAppearance::Suggested);
-                    confirm.set_default_response(Some("update"));
-                    confirm.set_close_response("cancel");
-                    let sender = sender.clone();
-                    confirm.connect_response(None, move |_, resp| {
-                        if resp == "update" {
-                            sender.input(Msg::InstallFlatpakUpdate);
-                        }
-                    });
-                    confirm.present(Some(root));
-                }
-            },
         }
     }
 }

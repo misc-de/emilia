@@ -15,5 +15,4 @@ pub mod secrets;
 pub mod source;
 pub mod streaming;
 pub mod sync;
-pub mod update;
 pub mod webdav;
