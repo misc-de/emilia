@@ -944,6 +944,22 @@ msgstr "Playlist abspielen"
 msgid "Delete playlist"
 msgstr "Playlist löschen"
 
+#: src/ui/app_playlist.rs
+msgid "Add tracks via the options of a song, album or artist."
+msgstr "Titel über die Optionen eines Liedes, Albums oder Interpreten hinzufügen."
+
+#: src/ui/app_playlist.rs
+msgid "Songs"
+msgstr "Lieder"
+
+#: src/ui/app_playlist.rs
+msgid "Shuffle playlist"
+msgstr "Playlist zufällig abspielen"
+
+#: src/ui/app_playlist.rs
+msgid "Show songs"
+msgstr "Lieder anzeigen"
+
 #: src/ui/app_playlist.rs:50
 msgid "Delete this playlist?"
 msgstr "Diese Playlist löschen?"

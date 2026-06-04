@@ -5,11 +5,8 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::core::db::Library;
-use crate::i18n::gettext;
+use crate::i18n::{gettext, gettext_f};
 use crate::model::Source;
 use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 
@@ -371,35 +368,42 @@ impl App {
         dialog.present(Some(root));
     }
     /// Opens the settings dialog (among others, sets the music folder).
-    /// (New) Fills the "Connected" list of the Nextcloud settings page with the
-    /// stored WebDAV sources. Called on open **and** after a connect
-    /// (via `Msg::SourcesChanged`), so the display is correct immediately.
-    pub(crate) fn fill_nc_list(&self, list: &gtk::ListBox, sender: &ComponentSender<Self>) {
+    /// Fills the "Other sources" list with **all** configured extra sources
+    /// (second local folder + Nextcloud/WebDAV). Called on open **and** after
+    /// every add/remove or a Nextcloud connect (via `Msg::SourcesChanged`), so
+    /// the display is correct immediately – without restarting the dialog.
+    pub(crate) fn fill_src_list(&self, list: &gtk::ListBox, sender: &ComponentSender<Self>) {
         while let Some(c) = list.first_child() {
             list.remove(&c);
         }
-        let webdav_sources: Vec<Source> = Library::open()
+        let sources: Vec<Source> = Library::open()
             .ok()
             .and_then(|l| l.list_sources().ok())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|s| s.kind == "webdav")
-            .collect();
-        if webdav_sources.is_empty() {
+            .unwrap_or_default();
+        if sources.is_empty() {
             list.append(
                 &adw::ActionRow::builder()
-                    .title(&gettext("No Nextcloud connected"))
+                    .title(&gettext("No additional sources"))
                     .css_classes(["dim-label"])
                     .build(),
             );
             return;
         }
-        for s in webdav_sources {
+        for s in sources {
+            let subtitle = match s.kind.as_str() {
+                "webdav" => s.base_url.clone().unwrap_or_default(),
+                _ => s.path.clone().unwrap_or_default(),
+            };
+            let icon = if s.kind == "webdav" {
+                "network-server-symbolic"
+            } else {
+                "drive-removable-media-symbolic"
+            };
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&s.name))
-                .subtitle(gtk::glib::markup_escape_text(s.base_url.as_deref().unwrap_or("")))
+                .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("network-server-symbolic"));
+            row.add_prefix(&gtk::Image::from_icon_name(icon));
             let del = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .tooltip_text(&gettext("Remove"))
@@ -489,75 +493,14 @@ impl App {
             .build();
         src_group.add(&src_list);
 
-        // (New) Fills the source list from the DB. Self-referential, so the
-        // list refreshes after adding/removing without restarting the dialog.
-        let populate: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
-        {
-            let populate_weak = Rc::downgrade(&populate);
-            let src_list = src_list.clone();
-            let sender_pop = sender.clone();
-            *populate.borrow_mut() = Some(Box::new(move || {
-                while let Some(c) = src_list.first_child() {
-                    src_list.remove(&c);
-                }
-                let sources = Library::open()
-                    .ok()
-                    .and_then(|l| l.list_sources().ok())
-                    .unwrap_or_default();
-                if sources.is_empty() {
-                    let empty = adw::ActionRow::builder()
-                        .title(&gettext("No additional sources"))
-                        .css_classes(["dim-label"])
-                        .build();
-                    src_list.append(&empty);
-                }
-                for s in sources {
-                    let subtitle = match s.kind.as_str() {
-                        "webdav" => s.base_url.clone().unwrap_or_default(),
-                        _ => s.path.clone().unwrap_or_default(),
-                    };
-                    let icon = if s.kind == "webdav" {
-                        "network-server-symbolic"
-                    } else {
-                        "drive-removable-media-symbolic"
-                    };
-                    let row = adw::ActionRow::builder()
-                        .title(gtk::glib::markup_escape_text(&s.name))
-                        .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                        .build();
-                    row.add_prefix(&gtk::Image::from_icon_name(icon));
-                    let del = gtk::Button::builder()
-                        .icon_name("user-trash-symbolic")
-                        .tooltip_text(&gettext("Remove"))
-                        .valign(gtk::Align::Center)
-                        .css_classes(["flat"])
-                        .build();
-                    {
-                        let id = s.id;
-                        let sender = sender_pop.clone();
-                        let populate_weak = populate_weak.clone();
-                        del.connect_clicked(move |_| {
-                            if let Ok(lib) = Library::open() {
-                                let _ = lib.delete_source(id);
-                            }
-                            sender.input(Msg::SourcesChanged);
-                            if let Some(p) = populate_weak.upgrade() {
-                                if let Some(f) = p.borrow().as_ref() {
-                                    f();
-                                }
-                            }
-                        });
-                    }
-                    row.add_suffix(&del);
-                    src_list.append(&row);
-                }
-            }));
-        }
-        if let Some(f) = populate.borrow().as_ref() {
-            f();
-        }
+        // Fill from the DB and remember the list, so `Msg::SourcesChanged`
+        // (fired after add/remove **and** after a Nextcloud connect) can refresh
+        // it live while the dialog stays open.
+        self.fill_src_list(&src_list, sender);
+        *self.settings_src_list.borrow_mut() = Some(src_list.clone());
 
-        // Button row: add a local folder / Nextcloud.
+        // Button row: add a local folder. (A Nextcloud is added via the button in
+        // the "Nextcloud" group below; both kinds land in this same list.)
         let add_local = gtk::Button::builder()
             .label(&gettext("Add local folder"))
             .css_classes(["flat"])
@@ -565,13 +508,11 @@ impl App {
         {
             let win = root.clone();
             let sender = sender.clone();
-            let populate = populate.clone();
             add_local.connect_clicked(move |_| {
                 let chooser = gtk::FileDialog::builder()
                     .title(&gettext("Choose folder"))
                     .build();
                 let sender = sender.clone();
-                let populate = populate.clone();
                 chooser.select_folder(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
                     if let Ok(folder) = res {
                         if let Some(path) = folder.path() {
@@ -595,9 +536,6 @@ impl App {
                                 let _ = lib.add_source(&src);
                             }
                             sender.input(Msg::SourcesChanged);
-                            if let Some(f) = populate.borrow().as_ref() {
-                                f();
-                            }
                         }
                     }
                 });
@@ -633,20 +571,8 @@ impl App {
         }
         nc_group.add(&connect);
         page.add(&nc_group);
-
-        // Already connected Nextcloud sources (for removal). The list is
-        // remembered so it is fresh immediately after a successful connect.
-        let nc_list_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Connected"))
-            .build();
-        let nc_list = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .css_classes(["boxed-list"])
-            .build();
-        self.fill_nc_list(&nc_list, sender);
-        *self.settings_nc_list.borrow_mut() = Some(nc_list.clone());
-        nc_list_group.add(&nc_list);
-        page.add(&nc_list_group);
+        // Connected Nextcloud sources are listed (and removable) together with the
+        // local ones in the "Other sources" group above – no separate list here.
 
         let lib_page = page;
 
@@ -967,6 +893,66 @@ impl App {
         }
         page.add(&hidden_group);
         let hidden_page = page;
+
+        // YouTube (optional feature; the extractor yt-dlp is downloaded at
+        // runtime, never bundled, and the feature is off by default). Lives on
+        // the "Library" page (added to `lib_page` below).
+        let yt_group = adw::PreferencesGroup::builder()
+            .title(&gettext("YouTube"))
+            .description(&gettext(
+                "Search and play YouTube, follow channels, add videos/playlists to your music or keep them offline. May be restricted in some countries.",
+            ))
+            .build();
+        let yt_enable = adw::SwitchRow::builder()
+            .title(&gettext("Enable YouTube"))
+            .subtitle(&gettext("Adds a YouTube section. Requires downloading yt-dlp below."))
+            .active(self.youtube.enabled)
+            .build();
+        {
+            let sender = sender.clone();
+            yt_enable.connect_active_notify(move |r| {
+                sender.input(Msg::SetYoutubeEnabled(r.is_active()));
+            });
+        }
+        yt_group.add(&yt_enable);
+
+        let ytdlp_row = adw::ActionRow::builder()
+            .title("yt-dlp")
+            .subtitle(&gettext("Required tool – downloaded into the app data folder (not bundled)."))
+            .build();
+        let installed = crate::core::youtube::version();
+        let status = gtk::Label::builder().css_classes(["dim-label"]).build();
+        status.set_text(&match &installed {
+            Some(v) => gettext_f("Installed (version {v})", &[("v", v)]),
+            None => gettext("Not installed"),
+        });
+        ytdlp_row.add_suffix(&status);
+        let dl_label = if installed.is_some() {
+            gettext("Update")
+        } else {
+            gettext("Download")
+        };
+        let dl_btn = gtk::Button::builder().label(&dl_label).valign(gtk::Align::Center).build();
+        dl_btn.add_css_class("flat");
+        {
+            let sender = sender.clone();
+            let update = installed.is_some();
+            dl_btn.connect_clicked(move |_| {
+                sender.input(if update { Msg::UpdateYtDlp } else { Msg::DownloadYtDlp });
+            });
+        }
+        ytdlp_row.add_suffix(&dl_btn);
+        yt_group.add(&ytdlp_row);
+        // The YouTube group lives at the bottom of the "Library" page.
+        lib_page.add(&yt_group);
+        // Remember the status label so a finished download/update refreshes it.
+        *self.youtube.settings_status.borrow_mut() = Some(status);
+        {
+            let slot = self.youtube.settings_status.clone();
+            dialog.connect_closed(move |_| {
+                *slot.borrow_mut() = None;
+            });
+        }
 
         // Order of the settings pages: "View" first.
         dialog.add(&view_page);

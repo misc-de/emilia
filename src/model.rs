@@ -143,6 +143,48 @@ pub struct EpisodeRef {
     pub description: Option<String>,
 }
 
+/// A YouTube video belonging to a subscribed channel (cached newest list,
+/// replaced on refresh – like an [`Episode`]). Audio is streamed via a
+/// freshly-resolved URL, or played from an offline download.
+#[derive(Debug, Clone)]
+pub struct YtVideo {
+    pub video_id: String,
+    pub title: String,
+    /// Canonical watch URL.
+    pub url: String,
+    /// Duration in seconds, if known.
+    pub duration: Option<i64>,
+    /// Upload date as text from the listing (display only).
+    pub published: Option<String>,
+    pub thumbnail: Option<String>,
+}
+
+/// A recently played YouTube video (history). `artist`/`thumbnail` are filled
+/// in by the on-play online enrichment.
+#[derive(Debug, Clone)]
+pub struct YtRecent {
+    /// Video id (for `kind == "video"`) or playlist URL (for `"playlist"`).
+    pub video_id: String,
+    pub title: String,
+    pub artist: Option<String>,
+    /// `"video"` or `"playlist"`.
+    pub kind: String,
+    /// Number of songs (playlists only).
+    pub count: i64,
+}
+
+/// A video together with its channel – for the cross-channel "Newest videos"
+/// view (mirrors [`EpisodeRef`]).
+#[derive(Debug, Clone)]
+pub struct YtVideoRef {
+    pub channel_title: String,
+    pub channel_thumb: Option<String>,
+    pub video_id: String,
+    pub title: String,
+    pub duration: Option<i64>,
+    pub published: Option<String>,
+}
+
 /// A saved streaming station (internet radio). Playback directly via the stream
 /// URL – nothing is downloaded.
 #[derive(Debug, Clone)]

@@ -443,6 +443,7 @@ impl App {
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = Some(id);
+                self.youtube.playing_video_id = None;
                 self.files.playing_remote = false;
                 self.streaming.stream_title = None;
                 self.transport.queue.clear();

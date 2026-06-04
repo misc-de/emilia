@@ -5,6 +5,7 @@ pub mod app_playlist;
 pub mod app_podcast;
 pub mod app_queue;
 pub mod app_streaming;
+pub mod app_youtube;
 pub mod app_concert;
 pub mod app_favorites;
 pub mod app_eq;

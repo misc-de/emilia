@@ -16,3 +16,4 @@ pub mod source;
 pub mod streaming;
 pub mod sync;
 pub mod webdav;
+pub mod youtube;

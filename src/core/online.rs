@@ -567,6 +567,50 @@ pub fn cache_station_image(url: &str) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
 }
 
+/// Local cache path of an enriched YouTube cover (key = video id), if present.
+pub fn youtube_cover_path(video_id: &str) -> Option<String> {
+    let mut p = cover_cache_dir();
+    p.push(format!("ytcover_{}.img", name_hash(video_id)));
+    p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
+/// Stores an enriched cover (looked up online) for a video id and returns the
+/// path. Lets the recent list and a later library track show it.
+pub fn store_youtube_cover(video_id: &str, bytes: &[u8]) -> Option<String> {
+    let mut p = cover_cache_dir();
+    p.push(format!("ytcover_{}.img", name_hash(video_id)));
+    std::fs::write(&p, bytes).ok()?;
+    Some(p.to_string_lossy().into_owned())
+}
+
+/// Local cache path of a YouTube thumbnail (key = image URL), **only if the
+/// file is already present** – without network access (UI-thread safe).
+pub fn youtube_thumb_path(url: &str) -> Option<String> {
+    if url.trim().is_empty() {
+        return None;
+    }
+    let mut p = cover_cache_dir();
+    p.push(format!("yt_{}.img", name_hash(url)));
+    p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
+/// Loads a YouTube thumbnail into the cache on demand and returns the local
+/// path. **Network access** – only call from worker/background threads. Already
+/// cached thumbnails are not loaded again.
+pub fn cache_youtube_thumb(url: &str) -> Option<String> {
+    if let Some(p) = youtube_thumb_path(url) {
+        return Some(p);
+    }
+    if url.trim().is_empty() {
+        return None;
+    }
+    let bytes = OnlineClient::new().get_image(url).ok().flatten()?;
+    let mut p = cover_cache_dir();
+    p.push(format!("yt_{}.img", name_hash(url)));
+    std::fs::write(&p, &bytes).ok()?;
+    Some(p.to_string_lossy().into_owned())
+}
+
 /// Fetches the cover (and album name) for (artist, title) – **network access**,
 /// only call from worker/background threads. Best effort: `None` if nothing is
 /// found. For subsequently tagging a streaming recording.

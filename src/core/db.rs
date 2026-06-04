@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::model::{
-    AlbumMeta, ArtistMeta, Episode, Source, StatEntry, StatTotals, Track, TrackMeta,
+    AlbumMeta, ArtistMeta, Episode, Source, StatEntry, StatTotals, Track, TrackMeta, YtRecent,
+    YtVideo, YtVideoRef,
 };
 
 /// Database location: `$XDG_DATA_HOME/emilia/library.db`.
@@ -408,6 +409,56 @@ impl Library {
                 password   TEXT,   -- webdav: app password/token (or secret-tool ref)
                 music_path TEXT    -- webdav: subpath to the music, e.g. /Music
             );
+
+            -- Subscribed YouTube channels (the "bell"): newest videos are
+            -- refreshed on startup like podcast feeds. Optional feature; the
+            -- extractor (yt-dlp) is downloaded at runtime, never bundled.
+            CREATE TABLE IF NOT EXISTS yt_channel (
+                id         INTEGER PRIMARY KEY,
+                channel_id TEXT NOT NULL UNIQUE,  -- YouTube channel id/handle
+                title      TEXT NOT NULL,
+                url        TEXT NOT NULL,
+                thumbnail  TEXT,
+                added_at   INTEGER
+            );
+            -- Cached newest videos of a subscribed channel (replaced on refresh,
+            -- like `episode`; nothing is downloaded).
+            CREATE TABLE IF NOT EXISTS yt_video (
+                channel_id INTEGER NOT NULL,
+                position   INTEGER NOT NULL,
+                video_id   TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                url        TEXT NOT NULL,
+                duration   INTEGER,
+                published  TEXT,
+                thumbnail  TEXT,
+                PRIMARY KEY (channel_id, position)
+            );
+            -- Offline-downloaded YouTube audio, keyed by video id (mirror
+            -- `episode_download`). Playback prefers `path` over re-resolving.
+            CREATE TABLE IF NOT EXISTS yt_download (
+                video_id      TEXT PRIMARY KEY,
+                path          TEXT NOT NULL,
+                downloaded_at INTEGER NOT NULL DEFAULT 0
+            );
+            -- Recently played YouTube items (history). `kind` = 'video' (keyed
+            -- by video id) or 'playlist' (keyed by playlist URL, `count` = number
+            -- of songs). `artist` is filled in by the on-play enrichment.
+            CREATE TABLE IF NOT EXISTS yt_recent (
+                video_id  TEXT PRIMARY KEY,
+                title     TEXT NOT NULL,
+                artist    TEXT,
+                thumbnail TEXT,
+                played_at INTEGER NOT NULL DEFAULT 0,
+                kind      TEXT NOT NULL DEFAULT 'video',
+                count     INTEGER NOT NULL DEFAULT 0
+            );
+            -- Title cache for `yt:<id>` tracks, so playlist/queue entries show a
+            -- name instead of their id without polluting the library.
+            CREATE TABLE IF NOT EXISTS yt_title (
+                video_id TEXT PRIMARY KEY,
+                title    TEXT NOT NULL
+            );
             "#,
         )?;
 
@@ -468,6 +519,24 @@ impl Library {
         if !has_genre {
             self.conn
                 .execute_batch("ALTER TABLE track ADD COLUMN genre TEXT;")?;
+        }
+
+        // Migration: yt_recent gained `kind`/`count` columns (playlists in the
+        // YouTube "Recent" history).
+        let has_yt_kind = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('yt_recent') WHERE name = 'kind'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_yt_kind {
+            self.conn.execute_batch(
+                "ALTER TABLE yt_recent ADD COLUMN kind TEXT NOT NULL DEFAULT 'video';
+                 ALTER TABLE yt_recent ADD COLUMN count INTEGER NOT NULL DEFAULT 0;",
+            )?;
         }
 
         // Migration: add the attempts counter to the meta tables (limits the
@@ -2411,6 +2480,297 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    // ---- YouTube (subscribed channels, cached videos, offline copies) ----
+
+    /// Subscribes to a channel (or updates title/url/thumbnail for a known one)
+    /// and returns the channel's DB id.
+    pub fn subscribe_channel(
+        &self,
+        channel_id: &str,
+        title: &str,
+        url: &str,
+        thumbnail: Option<&str>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO yt_channel (channel_id, title, url, thumbnail, added_at)
+             VALUES (?1, ?2, ?3, ?4, strftime('%s','now'))
+             ON CONFLICT(channel_id) DO UPDATE SET
+                title = excluded.title, url = excluded.url, thumbnail = excluded.thumbnail",
+            rusqlite::params![channel_id, title, url, thumbnail],
+        )?;
+        Ok(self.conn.query_row(
+            "SELECT id FROM yt_channel WHERE channel_id = ?1",
+            [channel_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// All subscribed channels as (id, title, url, thumbnail, video count),
+    /// newest first.
+    pub fn channels(&self) -> Result<Vec<(i64, String, String, Option<String>, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.title, c.url, c.thumbnail, COUNT(v.video_id)
+             FROM yt_channel c LEFT JOIN yt_video v ON v.channel_id = c.id
+             GROUP BY c.id ORDER BY c.added_at DESC, c.title COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Removes a channel subscription along with its cached videos.
+    pub fn delete_channel(&self, id: i64) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM yt_video WHERE channel_id = ?1", [id])?;
+        tx.execute("DELETE FROM yt_channel WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Replaces the cached videos of a channel (order = listing order).
+    pub fn set_channel_videos(&self, channel_id: i64, videos: &[YtVideo]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM yt_video WHERE channel_id = ?1", [channel_id])?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO yt_video
+                    (channel_id, position, video_id, title, url, duration, published, thumbnail)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for (i, v) in videos.iter().enumerate() {
+                stmt.execute(rusqlite::params![
+                    channel_id,
+                    i as i64,
+                    v.video_id,
+                    v.title,
+                    v.url,
+                    v.duration,
+                    v.published,
+                    v.thumbnail
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Cached videos of a channel in listing order.
+    pub fn channel_videos(&self, channel_id: i64) -> Result<Vec<YtVideo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT video_id, title, url, duration, published, thumbnail FROM yt_video
+             WHERE channel_id = ?1 ORDER BY position",
+        )?;
+        let rows = stmt.query_map([channel_id], |r| {
+            Ok(YtVideo {
+                video_id: r.get(0)?,
+                title: r.get(1)?,
+                url: r.get(2)?,
+                duration: r.get(3)?,
+                published: r.get(4)?,
+                thumbnail: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Newest videos across all subscribed channels (for the cross-channel
+    /// "Newest videos" view). Channel order, then listing order within.
+    pub fn all_videos(&self) -> Result<Vec<YtVideoRef>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.title, c.thumbnail, v.video_id, v.title, v.duration, v.published
+             FROM yt_video v JOIN yt_channel c ON c.id = v.channel_id
+             ORDER BY c.added_at DESC, v.position",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(YtVideoRef {
+                channel_title: r.get(0)?,
+                channel_thumb: r.get(1)?,
+                video_id: r.get(2)?,
+                title: r.get(3)?,
+                duration: r.get(4)?,
+                published: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Stored info for a video that belongs to a subscribed channel:
+    /// (channel title, duration, thumbnail URL). `None` if not stored – so the
+    /// detail can show persisted data without re-fetching from the network.
+    pub fn yt_video_info(&self, video_id: &str) -> Result<Option<(String, Option<i64>, Option<String>)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT c.title, v.duration, v.thumbnail
+                 FROM yt_video v JOIN yt_channel c ON c.id = v.channel_id
+                 WHERE v.video_id = ?1 LIMIT 1",
+                [video_id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<String>>(2)?)),
+            )
+            .optional()?)
+    }
+
+
+    /// Local path of a downloaded video, or `None` if not downloaded.
+    pub fn yt_download(&self, video_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT path FROM yt_download WHERE video_id = ?1",
+                [video_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Removes the download record for a video and returns its stored file path
+    /// (so the caller can delete the file). `None` if it wasn't downloaded.
+    pub fn delete_yt_download(&self, video_id: &str) -> Result<Option<String>> {
+        let path = self.yt_download(video_id)?;
+        if path.is_some() {
+            self.conn
+                .execute("DELETE FROM yt_download WHERE video_id = ?1", [video_id])?;
+        }
+        Ok(path)
+    }
+
+    const RECENT_CAP: i64 = 100;
+
+    /// Records a video as "recently played" (moves it to the top).
+    pub fn add_recent_video(&self, video_id: &str, title: &str, thumbnail: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_recent (video_id, title, thumbnail, played_at, kind, count)
+             VALUES (?1, ?2, ?3, strftime('%s','now'), 'video', 0)
+             ON CONFLICT(video_id) DO UPDATE SET
+                title = excluded.title, thumbnail = excluded.thumbnail,
+                played_at = excluded.played_at, kind = 'video'",
+            rusqlite::params![video_id, title, thumbnail],
+        )?;
+        self.trim_recent()
+    }
+
+    /// Records a playlist as "recently played" (keyed by its URL; `count` =
+    /// number of songs). Moves it to the top.
+    pub fn add_recent_playlist(&self, url: &str, title: &str, count: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_recent (video_id, title, played_at, kind, count)
+             VALUES (?1, ?2, strftime('%s','now'), 'playlist', ?3)
+             ON CONFLICT(video_id) DO UPDATE SET
+                title = excluded.title, played_at = excluded.played_at,
+                kind = 'playlist', count = excluded.count",
+            rusqlite::params![url, title, count],
+        )?;
+        self.trim_recent()
+    }
+
+    /// Caps the history at the newest `RECENT_CAP` entries.
+    fn trim_recent(&self) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM yt_recent WHERE video_id NOT IN
+                (SELECT video_id FROM yt_recent ORDER BY played_at DESC LIMIT ?1)",
+            [Self::RECENT_CAP],
+        )?;
+        Ok(())
+    }
+
+    /// Stores the enriched artist + cover for a recent video (from the online
+    /// lookup). No-op if the video is no longer in the history.
+    pub fn set_recent_meta(&self, video_id: &str, artist: Option<&str>, cover: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE yt_recent SET artist = ?2, thumbnail = COALESCE(?3, thumbnail)
+             WHERE video_id = ?1",
+            rusqlite::params![video_id, artist, cover],
+        )?;
+        Ok(())
+    }
+
+    /// Recently played items (videos and playlists), newest first.
+    pub fn recent_videos(&self, limit: usize) -> Result<Vec<YtRecent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT video_id, title, artist, kind, count FROM yt_recent
+             ORDER BY played_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |r| {
+            Ok(YtRecent {
+                video_id: r.get(0)?,
+                title: r.get(1)?,
+                artist: r.get(2)?,
+                kind: r.get(3)?,
+                count: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Whether an item (video id or playlist URL) is in the "Recent" history.
+    pub fn is_recent(&self, key: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM yt_recent WHERE video_id = ?1", [key], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    /// Removes an item (video id or playlist URL) from the "Recent" history.
+    pub fn delete_recent(&self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM yt_recent WHERE video_id = ?1", [key])?;
+        Ok(())
+    }
+
+    /// Caches the display title of a `yt:<id>` track.
+    pub fn set_yt_title(&self, video_id: &str, title: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_title (video_id, title) VALUES (?1, ?2)
+             ON CONFLICT(video_id) DO UPDATE SET title = excluded.title",
+            rusqlite::params![video_id, title],
+        )?;
+        Ok(())
+    }
+
+    /// Cached display title of a `yt:<id>` track, if known.
+    pub fn yt_title(&self, video_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT title FROM yt_title WHERE video_id = ?1", [video_id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?)
+    }
+
+    /// Id of a playlist with the exact `name`, if any.
+    pub fn playlist_id_by_name(&self, name: &str) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .query_row("SELECT id FROM playlist WHERE name = ?1 LIMIT 1", [name], |r| {
+                r.get::<_, i64>(0)
+            })
+            .optional()?)
+    }
+
+    /// Replaces any playlists with the exact `name` by a fresh one holding
+    /// `paths` (used to mirror a played YouTube playlist into the Playlists
+    /// section). Returns the new playlist id.
+    pub fn replace_named_playlist(&self, name: &str, paths: &[String]) -> Result<i64> {
+        let existing: Vec<i64> = {
+            let mut stmt = self.conn.prepare("SELECT id FROM playlist WHERE name = ?1")?;
+            let ids = stmt.query_map([name], |r| r.get::<_, i64>(0))?;
+            ids.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for id in existing {
+            self.delete_playlist(id)?;
+        }
+        let id = self.create_playlist(name)?;
+        self.add_to_playlist(id, paths)?;
+        Ok(id)
+    }
+
     // ---- Streaming (internet radio) ----
 
     /// Stores a station (or updates its fields for a known URL)
@@ -2763,6 +3123,62 @@ mod tests {
         lib.delete_playlist(id).unwrap();
         assert!(lib.playlists().unwrap().is_empty());
         assert!(lib.playlist_paths(id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn youtube_channels_videos_downloads_and_progress() {
+        let lib = Library::open_in_memory().unwrap();
+        // Subscribe (idempotent on channel_id) and list.
+        let cid = lib.subscribe_channel("UC123", "Some Channel", "https://yt/UC123", Some("t.jpg")).unwrap();
+        assert_eq!(lib.subscribe_channel("UC123", "Renamed", "https://yt/UC123", None).unwrap(), cid);
+        let channels = lib.channels().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].1, "Renamed");
+
+        // Replace cached videos and read them back in order.
+        let videos = vec![
+            crate::model::YtVideo {
+                video_id: "v1".into(),
+                title: "First".into(),
+                url: "https://yt/watch?v=v1".into(),
+                duration: Some(200),
+                published: None,
+                thumbnail: None,
+            },
+            crate::model::YtVideo {
+                video_id: "v2".into(),
+                title: "Second".into(),
+                url: "https://yt/watch?v=v2".into(),
+                duration: None,
+                published: None,
+                thumbnail: None,
+            },
+        ];
+        lib.set_channel_videos(cid, &videos).unwrap();
+        let read = lib.channel_videos(cid).unwrap();
+        assert_eq!(read.iter().map(|v| v.video_id.as_str()).collect::<Vec<_>>(), ["v1", "v2"]);
+        assert_eq!(lib.channels().unwrap()[0].4, 2); // video count
+        assert_eq!(lib.all_videos().unwrap().len(), 2);
+
+        // Deleting the channel removes its cached videos too.
+        lib.delete_channel(cid).unwrap();
+        assert!(lib.channels().unwrap().is_empty());
+        assert!(lib.all_videos().unwrap().is_empty());
+    }
+
+    #[test]
+    fn youtube_recent_history_orders_and_enriches() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.add_recent_video("a", "First", None).unwrap();
+        lib.add_recent_video("b", "Second", Some("http://thumb/b.jpg")).unwrap();
+        // Re-playing "a" moves it back to the top.
+        lib.add_recent_video("a", "First", None).unwrap();
+        let recent = lib.recent_videos(10).unwrap();
+        assert_eq!(recent.iter().map(|r| r.video_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        // Enrichment fills the artist.
+        lib.set_recent_meta("a", Some("The Artist"), Some("/cache/a.img")).unwrap();
+        let a = lib.recent_videos(10).unwrap().into_iter().find(|r| r.video_id == "a").unwrap();
+        assert_eq!(a.artist.as_deref(), Some("The Artist"));
     }
 
     #[test]

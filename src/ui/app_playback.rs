@@ -58,6 +58,8 @@ impl App {
         self.refresh_ctx_play();
         // Play/pause icons of the podcast episodes (and the detail "Play" row).
         self.refresh_episode_icons();
+        // …and of the YouTube video rows.
+        self.refresh_yt_icons();
     }
 
     /// Credentials of the currently active WebDAV source (if one is active).
@@ -158,6 +160,7 @@ impl App {
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
+                self.youtube.playing_video_id = None;
                 self.files.playing_remote = true;
                 self.stop_recorder();
                 self.transport.queue.clear();
@@ -355,6 +358,21 @@ impl App {
     /// `play_file`; **remote** tracks (synthetic path `nc:<id>:<rel>`) are
     /// played from the local cache or streamed directly from Nextcloud.
     pub(crate) fn start_track_playback(&self, path_str: &str, resume_ms: i64) -> anyhow::Result<()> {
+        // YouTube: an offline copy plays directly; a stream must be resolved
+        // asynchronously (done in `play_current`), so reaching here without a
+        // local file is an error – we never block the UI thread on `yt-dlp -g`.
+        if let Some(video_id) = crate::core::youtube::parse_yt_path(path_str) {
+            if let Some(local) = self
+                .library
+                .yt_download(&video_id)
+                .ok()
+                .flatten()
+                .filter(|p| std::path::Path::new(p).exists())
+            {
+                return self.player.play_file(&local, resume_ms);
+            }
+            return Err(anyhow::anyhow!("YouTube stream must be resolved asynchronously"));
+        }
         if let Some((sid, rel)) = crate::core::webdav::parse_nc_path(path_str) {
             let cache = crate::core::webdav::cache_path(sid, &rel);
             if cache.exists() {
@@ -385,6 +403,12 @@ impl App {
     /// database (also works for remote tracks), otherwise from the file.
     pub(crate) fn display_name(&self, path: &std::path::Path) -> String {
         let path_str = path.to_string_lossy();
+        // YouTube tracks have no library row; use the cached title.
+        if let Some(vid) = crate::core::youtube::parse_yt_path(&path_str) {
+            if let Ok(Some(t)) = self.library.yt_title(&vid) {
+                return t;
+            }
+        }
         if let Ok(Some(t)) = self.library.track_by_path(&path_str) {
             let title = if t.title.trim().is_empty() {
                 path.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_string()
@@ -545,6 +569,61 @@ impl App {
             }
         }
         let path_str = path.to_string_lossy().to_string();
+        // YouTube tracks resolve asynchronously (yt-dlp -g takes seconds). A
+        // local offline copy plays synchronously below; otherwise resolve in a
+        // worker thread and start streaming when `YtStreamResolved` arrives.
+        let yt_video = crate::core::youtube::parse_yt_path(&path_str);
+        // Title from the current play context (single video or playlist queue),
+        // so a `yt:` track shows a name rather than its id.
+        let yt_name = yt_video
+            .as_ref()
+            .and_then(|vid| self.youtube.video_titles.get(vid).cloned())
+            .filter(|t| !t.trim().is_empty());
+        if let Some(video_id) = &yt_video {
+            let name = yt_name.clone().unwrap_or_else(|| self.display_name(&path));
+            // Log to the "Recent" history and enrich (cover/artist) in the background.
+            self.note_youtube_play(video_id, &name);
+            let has_local = self
+                .library
+                .yt_download(video_id)
+                .ok()
+                .flatten()
+                .map(|p| std::path::Path::new(&p).exists())
+                .unwrap_or(false);
+            if !has_local {
+                // A freshly selected video always starts from the beginning.
+                let resume = 0;
+                // Optimistic now-playing state; the worker resolves the stream.
+                self.transport.skip_count = 0;
+                self.transport.playing_path = Some(path.clone());
+                self.podcasts.playing_episode_url = None;
+                self.streaming.playing_stream = None;
+                self.files.playing_remote = false;
+                self.youtube.playing_video_id = Some(video_id.clone());
+                self.stop_recorder();
+                self.mini.now_playing = Some(name.clone());
+                self.mini.playing = true;
+                self.mini.position_ms = resume.max(0);
+                self.mini.track_duration_ms = 0;
+                *self.transport.close_resume.borrow_mut() = None;
+                self.set_chapters(Vec::new());
+                self.mpris.set_metadata(0, &name, None, None, None, None);
+                self.mpris.set_playing(true);
+                self.refresh_queue_icons();
+                let input = self.input.clone();
+                let vid = video_id.clone();
+                std::thread::spawn(move || {
+                    let result =
+                        crate::core::youtube::resolve_audio_url(&vid).map_err(|e| e.to_string());
+                    let _ = input.send(crate::ui::app::Msg::YtStreamResolved {
+                        video_id: vid,
+                        resume,
+                        result,
+                    });
+                });
+                return;
+            }
+        }
         // Saved resume position (for all tracks; see should_resume).
         let track = self.library.track_by_path(&path_str).ok().flatten();
         let resume_ms = match &track {
@@ -561,8 +640,13 @@ impl App {
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
                 self.files.playing_remote = false;
+                // For a YouTube track this is its id (marks the row); None resets it.
+                self.youtube.playing_video_id = yt_video.clone();
                 self.stop_recorder();
-                self.mini.now_playing = Some(self.display_name(&path));
+                self.mini.now_playing = Some(match &yt_video {
+                    Some(_) => yt_name.clone().unwrap_or_else(|| self.display_name(&path)),
+                    None => self.display_name(&path),
+                });
                 self.mini.playing = true;
                 // Refresh the active output (may have changed).
                 self.settings.active_output =

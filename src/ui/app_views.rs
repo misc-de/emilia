@@ -767,6 +767,55 @@ impl App {
         (albums, singles)
     }
 
+    /// Groups a playlist's tracks (given as paths, **order preserved**) into
+    /// **albums** – an album name shared by 2+ entries – and standalone
+    /// **songs**. Like [`Self::artist_sections`], but driven by an explicit
+    /// path list, so entries the DB does not know (e.g. remote files) still
+    /// show up as singles (with their display name).
+    pub(crate) fn playlist_sections(
+        &self,
+        paths: &[String],
+    ) -> (Vec<(String, String, Vec<Track>)>, Vec<Track>) {
+        // Resolve each path to its track (order preserved); unknown paths
+        // become a minimal single carrying just the path + a display name.
+        let mut order: Vec<String> = Vec::new();
+        let mut groups: std::collections::HashMap<String, Vec<Track>> =
+            std::collections::HashMap::new();
+        for p in paths {
+            let track = self.library.track_by_path(p).ok().flatten().unwrap_or(Track {
+                id: 0,
+                path: p.clone(),
+                title: self.display_name(std::path::Path::new(p)),
+                artist: None,
+                album: None,
+                genre: None,
+                track_no: None,
+                disc_no: None,
+                duration_ms: None,
+                resume_ms: 0,
+            });
+            let album = track.album.clone().unwrap_or_default();
+            if !groups.contains_key(&album) {
+                order.push(album.clone());
+            }
+            groups.entry(album).or_default().push(track);
+        }
+
+        let mut albums: Vec<(String, String, Vec<Track>)> = Vec::new();
+        let mut singles: Vec<Track> = Vec::new();
+        for album in order {
+            let mine = groups.remove(&album).unwrap_or_default();
+            // Untitled album, or just one track of it in the playlist → song.
+            if album.is_empty() || mine.len() < 2 {
+                singles.extend(mine);
+                continue;
+            }
+            let display_artist = most_common_artist(&mine);
+            albums.push((album, display_artist, mine));
+        }
+        (albums, singles)
+    }
+
     /// Tracks that belong to "this album by this artist": all library
     /// tracks with the album name in whose (split) artist credit `name`
     /// appears. Sorted by file structure (CD folder → disc → track number).
