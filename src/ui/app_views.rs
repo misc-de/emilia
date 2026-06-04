@@ -1612,7 +1612,22 @@ impl App {
         dialog: &adw::Dialog,
     ) {
         let (texture, placeholder) = self.ctx_cover(entry);
-        let mut paths = self.ctx_gallery_paths(entry);
+        // For a song, resolve its album once (one tag read) and reuse it for the
+        // gallery candidates, the primary cover and the close-handler below.
+        let fs_alb = match entry {
+            CtxTarget::Fs(e) => self.fs_album(e),
+            _ => None,
+        };
+        let mut paths = match entry {
+            CtxTarget::Fs(_) => fs_alb
+                .as_ref()
+                .map(|(ar, al)| self.library.album_images(ar, al).unwrap_or_default())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| std::path::Path::new(p).exists())
+                .collect(),
+            _ => self.ctx_gallery_paths(entry),
+        };
 
         // Long press or right click on the image: choose your own cover/photo.
         let attach_upload = |w: &gtk::Box| {
@@ -1643,8 +1658,8 @@ impl App {
             CtxTarget::Album(m) => m.cover_path.clone(),
             CtxTarget::Artist(m) => m.image_path.clone(),
             // For a song: the cover of its album (the carousel then starts on it).
-            CtxTarget::Fs(e) => self.fs_album(e).and_then(|(ar, al)| {
-                self.library.get_album_meta(&ar, &al).ok().flatten().and_then(|m| m.cover_path)
+            CtxTarget::Fs(_) => fs_alb.as_ref().and_then(|(ar, al)| {
+                self.library.get_album_meta(ar, al).ok().flatten().and_then(|m| m.cover_path)
             }),
         };
         if let Some(pos) = primary.and_then(|p| paths.iter().position(|x| *x == p)) {
@@ -1675,7 +1690,7 @@ impl App {
             let album_id = match entry {
                 CtxTarget::Album(m) => Some((m.artist.clone(), m.album.clone())),
                 // A song adopts the chosen cover for its whole album.
-                CtxTarget::Fs(e) => self.fs_album(e),
+                CtxTarget::Fs(_) => fs_alb.clone(),
                 _ => None,
             };
             let artist_id = match entry {
@@ -1732,11 +1747,9 @@ impl App {
             CtxTarget::Album(m) => {
                 self.library.album_images(&m.artist, &m.album).unwrap_or_default()
             }
-            // A song shares its album's cover candidates.
-            CtxTarget::Fs(e) => self
-                .fs_album(e)
-                .map(|(ar, al)| self.library.album_images(&ar, &al).unwrap_or_default())
-                .unwrap_or_default(),
+            // A song shares its album's candidates – resolved once in
+            // `append_cover_or_gallery` to avoid re-reading the file's tags.
+            CtxTarget::Fs(_) => Vec::new(),
         };
         stored
             .into_iter()

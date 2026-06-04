@@ -165,6 +165,9 @@ impl Library {
             );
             -- Fast lookup of a sample track per album (folder inheritance).
             CREATE INDEX IF NOT EXISTS idx_track_album ON track(album);
+            -- Artist-scoped lookups and the (artist, album) grouping of the
+            -- album/artist overviews.
+            CREATE INDEX IF NOT EXISTS idx_track_artist_album ON track(artist, album);
 
             CREATE TABLE IF NOT EXISTS eq_preset (
                 id     INTEGER PRIMARY KEY,
@@ -198,6 +201,9 @@ impl Library {
                 attempts   INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (artist, album)
             );
+            -- `album_cover()` looks an album cover up by album name alone (the
+            -- composite primary key can't serve that), called once per single track.
+            CREATE INDEX IF NOT EXISTS idx_album_meta_album ON album_meta(album);
 
             -- Artist photos (Deezer). Also kept separate from the files.
             CREATE TABLE IF NOT EXISTS artist_meta (
