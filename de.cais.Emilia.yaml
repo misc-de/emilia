@@ -24,7 +24,6 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
-  - --device=dri
   # Audio (PipeWire über die Pulse-Kompatibilität der Runtime)
   - --socket=pulseaudio
   # Online-Metadaten **und** Geräte-Synchronisierung im LAN (HTTPS-Server/-Client)

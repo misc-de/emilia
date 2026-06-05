@@ -13,7 +13,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::path::{Component as PathComponent, Path, PathBuf};
+use std::path::Path;
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -41,25 +41,6 @@ enum ClientCmd {
     Reject,
     /// Tear the session down.
     Cancel,
-}
-
-fn safe_sync_dest(music_dir: &str, rel_path: &str) -> Option<PathBuf> {
-    if music_dir.is_empty() || rel_path.is_empty() {
-        return None;
-    }
-    let rel = Path::new(rel_path);
-    if rel.is_absolute() {
-        return None;
-    }
-    if rel.components().any(|c| !matches!(c, PathComponent::Normal(_))) {
-        return None;
-    }
-    let base = std::fs::canonicalize(music_dir).ok()?;
-    let dest = base.join(rel);
-    let parent = dest.parent()?;
-    std::fs::create_dir_all(parent).ok()?;
-    let parent = std::fs::canonicalize(parent).ok()?;
-    parent.starts_with(&base).then_some(dest)
 }
 
 /// The device-sync component (owns the dialogs, server thread and client worker).
@@ -1076,7 +1057,7 @@ fn client_receive(
     for f in manifest.files.iter().filter(|f| decision.files.contains(&f.rel_path)) {
         done += 1;
         let _ = out.send(SyncEvent::FileProgress { done, total, name: f.rel_path.clone() });
-        if let Some(dest) = safe_sync_dest(&base, &f.rel_path) {
+        if let Some(dest) = crate::core::sync::resolve_new(&base, &f.rel_path) {
             if client.download_file(&f.rel_path, &dest).is_ok() {
                 register_track(&lib, &base, f);
             }
@@ -1115,24 +1096,21 @@ fn register_track(lib: &Library, base: &str, f: &share::ManifestFile) {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_sync_dest;
+    use crate::core::sync::resolve_new;
 
     #[test]
-    fn safe_sync_dest_accepts_only_relative_normal_paths() {
-        let base = std::env::temp_dir().join(format!(
-            "emilia-sync-test-{}",
-            std::process::id()
-        ));
+    fn resolve_new_accepts_only_relative_normal_paths() {
+        let base = std::env::temp_dir().join(format!("emilia-sync-test-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
         let base_s = base.to_string_lossy();
 
-        let ok = safe_sync_dest(&base_s, "Album/track.mp3").unwrap();
+        let ok = resolve_new(&base_s, "Album/track.mp3").unwrap();
         assert!(ok.starts_with(&base));
         assert!(ok.ends_with("Album/track.mp3"));
 
-        assert!(safe_sync_dest(&base_s, "/etc/passwd").is_none());
-        assert!(safe_sync_dest(&base_s, "../escape.mp3").is_none());
-        assert!(safe_sync_dest(&base_s, "Album/../escape.mp3").is_none());
+        assert!(resolve_new(&base_s, "/etc/passwd").is_none());
+        assert!(resolve_new(&base_s, "../escape.mp3").is_none());
+        assert!(resolve_new(&base_s, "Album/../escape.mp3").is_none());
 
         let _ = std::fs::remove_dir_all(base);
     }

@@ -27,7 +27,6 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
-  - --device=dri
   # Audio (PipeWire über die Pulse-Kompatibilität der Runtime)
   - --socket=pulseaudio
   # Online-Metadaten **und** Geräte-Synchronisierung im LAN (HTTPS-Server/-Client)
@@ -113,8 +112,8 @@ modules:
       # commit mit dem zugehörigen SHA ergänzen (von Flathub empfohlen).
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.1.49
-        # commit: <SHA des Tags v0.1.49>
+        tag: v0.2.0
+        # commit: <SHA des Tags v0.2.0>
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json

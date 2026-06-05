@@ -350,7 +350,12 @@ fn write_ring(file: &mut std::fs::File, cap: u64, total: u64, data: &[u8]) -> Re
 /// Reads the absolute byte range `[start, end)` from the ring file (with
 /// its own read handle; wraps at the capacity end).
 fn read_ring(buffer_path: &Path, cap: u64, start: u64, end: u64) -> Result<Vec<u8>> {
-    let len = (end - start) as usize;
+    // Defensive: never underflow `end - start` (would allocate a huge buffer in
+    // release builds) and never claim more than the ring can hold.
+    let len = end
+        .checked_sub(start)
+        .filter(|&l| cap > 0 && l <= cap)
+        .ok_or_else(|| anyhow!("invalid ring range"))? as usize;
     let mut out = vec![0u8; len];
     let mut file = std::fs::File::open(buffer_path)?;
     let pos = start % cap;

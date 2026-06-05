@@ -440,8 +440,17 @@ pub struct AcoustIdMatch {
 
 /// Stores the cover bytes in the cache and returns the path.
 fn save_cover(mbid: &str, bytes: &[u8]) -> Result<PathBuf> {
+    // `mbid` comes from a remote MusicBrainz response and is used as a file name,
+    // so it must never be trusted verbatim. A genuine MBID is a UUID (hex digits
+    // plus hyphens); anything else (e.g. a malicious `../../x`) is replaced by a
+    // safe hash so the write can never escape the cache directory.
+    let key = if !mbid.is_empty() && mbid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+        mbid.to_string()
+    } else {
+        name_hash(mbid)
+    };
     let mut path = cover_cache_dir();
-    path.push(format!("{mbid}.img"));
+    path.push(format!("{key}.img"));
     std::fs::write(&path, bytes)?;
     Ok(path)
 }

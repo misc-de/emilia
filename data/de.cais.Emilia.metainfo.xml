@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.2.0" date="2026-06-05">
+      <description>
+        <p>Share selected songs, playlists and favorites directly between two devices over the local network: pair by scanning a QR code and review what arrives before accepting it. YouTube is now available as a music source (via yt-dlp), and playlists show cover artwork. Plus many fixes across the gallery, detail, cover and song-row views.</p>
+        <p xml:lang="de">Ausgewählte Titel, Playlists und Favoriten direkt zwischen zwei Geräten im lokalen Netzwerk teilen: per QR-Code koppeln und vor dem Annehmen prüfen, was ankommt. YouTube steht jetzt als Musikquelle bereit (über yt-dlp), und Playlists zeigen Cover. Dazu viele Korrekturen in Galerie-, Detail-, Cover- und Titelzeilen-Ansichten.</p>
+      </description>
+    </release>
     <release version="0.1.45" date="2026-06-04">
       <description>
         <p>The music sources are now refreshed in the background at startup, so newly added local and Nextcloud tracks appear without a manual rescan. The refresh button keeps checking every source for new content across all views.</p>

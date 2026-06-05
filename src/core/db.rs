@@ -3760,12 +3760,16 @@ mod tests {
     }
 
     #[test]
-    fn albums_overview_drops_ambiguous_cover_for_compilations() {
+    fn albums_overview_uses_representative_cover_for_compilations() {
         let lib = Library::open_in_memory().unwrap();
-        // Compilation: two artists with different covers → neutral.
+        // Compilation: several artists with different covers. The card shows the
+        // cover of the dominant artist (most tracks) instead of dropping it — a
+        // representative image beats an empty placeholder and matches the cover
+        // shown on the album detail page.
         for (path, artist, cover) in [
             ("/c1.mp3", "DJ A", "/covers/a.jpg"),
-            ("/c2.mp3", "DJ B", "/covers/b.jpg"),
+            ("/c2.mp3", "DJ A", "/covers/a.jpg"),
+            ("/c3.mp3", "DJ B", "/covers/b.jpg"),
         ] {
             lib.upsert_track(&track(path, Some(artist), Some("Dancemix 2009")))
                 .unwrap();
@@ -3780,7 +3784,9 @@ mod tests {
             .into_iter()
             .find(|a| a.album == "Dancemix 2009")
             .unwrap();
-        assert_eq!(dm.cover_path, None);
+        // DJ A has the most tracks → its cover represents the compilation.
+        assert_eq!(dm.artist, "DJ A");
+        assert_eq!(dm.cover_path.as_deref(), Some("/covers/a.jpg"));
 
         // Real album by one artist → cover is retained.
         lib.upsert_track(&track("/d1.mp3", Some("Solo"), Some("Werk")))

@@ -493,6 +493,19 @@ pub fn walk(c: &Creds, rel: &str) -> Vec<String> {
     files
 }
 
+/// Upserts a batch of tracks in one transaction, falling back to per-track
+/// upserts if the batched transaction fails — so a single bad row can't drop the
+/// whole chunk. Returns how many were stored.
+fn flush_tracks(lib: &crate::core::db::Library, batch: &[crate::model::Track]) -> usize {
+    if batch.is_empty() {
+        return 0;
+    }
+    match lib.upsert_tracks(batch) {
+        Ok(c) => c,
+        Err(_) => batch.iter().filter(|t| lib.upsert_track(t).is_ok()).count(),
+    }
+}
+
 /// Recursively reads in the complete music library of a source and stores the
 /// tracks in the database (synthetic path). Afterwards they appear like
 /// local songs in artists/albums. **Blocking** – only from worker threads.
@@ -502,6 +515,11 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
         return Err(anyhow!("incomplete source credentials"));
     };
     let files = walk(&c, "");
+    // Upsert in batches: one transaction (one fsync) per chunk instead of one per
+    // file — a large cloud can hold tens of thousands of tracks. The per-file
+    // metadata read over HTTP stays the dominant cost.
+    const BATCH: usize = 256;
+    let mut batch: Vec<crate::model::Track> = Vec::with_capacity(BATCH.min(files.len()));
     let mut n = 0;
     for rel in files {
         let meta = read_meta(&c, &rel);
@@ -513,7 +531,7 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
                 .unwrap_or(name)
                 .to_string()
         });
-        let track = crate::model::Track {
+        batch.push(crate::model::Track {
             id: 0,
             path: nc_path(source.id, &rel),
             title,
@@ -524,11 +542,13 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
             disc_no: meta.disc_no,
             duration_ms: meta.duration_ms,
             resume_ms: 0,
-        };
-        if lib.upsert_track(&track).is_ok() {
-            n += 1;
+        });
+        if batch.len() >= BATCH {
+            n += flush_tracks(lib, &batch);
+            batch.clear();
         }
     }
+    n += flush_tracks(lib, &batch);
     Ok(n)
 }
 

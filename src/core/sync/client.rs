@@ -4,6 +4,7 @@
 //! accepts only the certificate fingerprint pinned from the QR code
 //! (see [`crypto::pinned_client_config`]).
 
+use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
@@ -14,6 +15,24 @@ use crate::core::sync::protocol::{
 };
 use crate::core::sync::share::{ShareDecision, ShareManifest};
 use crate::core::sync::{crypto, ImportStats};
+
+/// Upper bound for a JSON response body from the peer. The peer is pinned and
+/// authenticated, but a bug or a compromised peer must not be able to OOM us
+/// with an unbounded body — metadata exports are tiny in practice. ureq imposes
+/// no limit of its own, so we cap it here.
+const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Reads a JSON response body with a hard size cap and deserializes it.
+fn read_json_capped<T: serde::de::DeserializeOwned>(resp: ureq::Response) -> Result<T> {
+    let mut buf = Vec::new();
+    resp.into_reader()
+        .take(MAX_JSON_BYTES + 1)
+        .read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_JSON_BYTES {
+        return Err(anyhow!("peer response exceeds the {MAX_JSON_BYTES}-byte limit"));
+    }
+    Ok(serde_json::from_slice(&buf)?)
+}
 
 /// Paired client against a [`super::server::SyncServer`].
 pub struct SyncClient {
@@ -89,26 +108,24 @@ impl SyncClient {
 
     /// Fetches the peer's library export.
     pub fn fetch_export(&self) -> Result<LibraryExport> {
-        let exp: LibraryExport = self
+        let resp = self
             .agent
             .get(&format!("{}/sync/export", self.base))
             .set("Authorization", &self.bearer())
             .call()
-            .map_err(|e| anyhow!("fetch failed: {e}"))?
-            .into_json()?;
-        Ok(exp)
+            .map_err(|e| anyhow!("fetch failed: {e}"))?;
+        read_json_capped(resp)
     }
 
     /// Sends the local export to the peer and returns its import counters.
     pub fn push_export(&self, exp: &LibraryExport) -> Result<ImportStats> {
-        let stats: ImportStats = self
+        let resp = self
             .agent
             .post(&format!("{}/sync/import", self.base))
             .set("Authorization", &self.bearer())
             .send_json(serde_json::to_value(exp)?)
-            .map_err(|e| anyhow!("send failed: {e}"))?
-            .into_json()?;
-        Ok(stats)
+            .map_err(|e| anyhow!("send failed: {e}"))?;
+        read_json_capped(resp)
     }
 
     /// Downloads a file (relative path) and saves it to `dest`.
@@ -129,9 +146,14 @@ impl SyncClient {
             std::fs::create_dir_all(parent)?;
         }
         let tmp = dest.with_extension("part");
-        let mut reader = resp.into_reader();
         let mut file = std::fs::File::create(&tmp)?;
-        let n = std::io::copy(&mut reader, &mut file)?;
+        // Cap the transfer: a pinned peer is still untrusted enough that a buggy
+        // or compromised one must not be able to fill the disk.
+        let n = crate::core::net::copy_capped(
+            resp.into_reader(),
+            &mut file,
+            crate::core::net::MAX_DOWNLOAD_BYTES,
+        )?;
         file.sync_all().ok();
         if n == 0 {
             let _ = std::fs::remove_file(&tmp);

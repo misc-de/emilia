@@ -15,6 +15,7 @@ pub mod qr;
 pub mod scanner;
 pub mod server;
 
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -102,6 +103,49 @@ pub fn local_ip() -> String {
             Ok(sock.local_addr()?.ip().to_string())
         })
         .unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
+/// True if `rel` is a non-empty *relative* path whose every component is a plain
+/// segment — no `..`, no `.`, no root or drive prefix. This is the robust
+/// alternative to a `rel.contains("..")` string check, which both misses sneaky
+/// inputs and needlessly rejects legitimate names that merely contain "..".
+fn is_safe_rel(rel: &str) -> bool {
+    !rel.is_empty()
+        && Path::new(rel)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+}
+
+/// Resolve `rel` to an **existing** file strictly inside `dir`. The path is
+/// component-validated (no traversal) and both ends are canonicalized, so a
+/// symlink inside `dir` cannot be used to escape it. Returns the canonical
+/// absolute path, or `None` if invalid / outside / missing.
+pub fn resolve_existing(dir: &str, rel: &str) -> Option<PathBuf> {
+    if dir.is_empty() || !is_safe_rel(rel) {
+        return None;
+    }
+    let base = std::fs::canonicalize(dir).ok()?;
+    let abs = std::fs::canonicalize(base.join(rel)).ok()?;
+    abs.starts_with(&base).then_some(abs)
+}
+
+/// Resolve `rel` to a (possibly **new**) file strictly inside `dir`, creating its
+/// parent directory. Component-validated (no traversal); the **canonicalized
+/// parent** is verified to stay within the base, so a symlinked sub-directory
+/// cannot redirect the write outside `dir`. Returns the destination path (which
+/// may not exist yet), or `None` if invalid / outside.
+pub fn resolve_new(dir: &str, rel: &str) -> Option<PathBuf> {
+    if dir.is_empty() || !is_safe_rel(rel) {
+        return None;
+    }
+    let base = std::fs::canonicalize(dir).ok()?;
+    let dest = base.join(rel);
+    let parent = dest.parent()?;
+    std::fs::create_dir_all(parent).ok()?;
+    std::fs::canonicalize(parent)
+        .ok()?
+        .starts_with(&base)
+        .then_some(dest)
 }
 
 /// Display name of this device (hostname, otherwise "Emilia").

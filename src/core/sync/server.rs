@@ -14,7 +14,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -492,21 +492,10 @@ impl SyncServer {
             .and_then(|lib| lib.get_setting("music_dir").ok().flatten())
             .unwrap_or_default();
 
-        match self.resolve_safe(&rel, &music_dir) {
+        match crate::core::sync::resolve_existing(&music_dir, &rel) {
             Some(abs) => write_file(out, &abs),
             None => write_status(out, 403),
         }
-    }
-
-    /// Resolves a relative path against the music folder and ensures
-    /// that the result lies within the music folder.
-    fn resolve_safe(&self, rel: &str, music_dir: &str) -> Option<PathBuf> {
-        if music_dir.is_empty() || rel.is_empty() || rel.starts_with('/') || rel.contains("..") {
-            return None;
-        }
-        let base = std::fs::canonicalize(music_dir).ok()?;
-        let abs = std::fs::canonicalize(Path::new(music_dir).join(rel)).ok()?;
-        abs.starts_with(&base).then_some(abs)
     }
 
     /// Streams a `/files/put` upload body straight to a file in the music folder
@@ -527,7 +516,7 @@ impl SyncServer {
             .ok()
             .and_then(|lib| lib.get_setting("music_dir").ok().flatten())
             .unwrap_or_default();
-        let Some(dest) = safe_put_dest(&music_dir, &rel) else {
+        let Some(dest) = crate::core::sync::resolve_new(&music_dir, &rel) else {
             write_status(stream, 403);
             return Action::Continue;
         };
@@ -538,22 +527,6 @@ impl SyncServer {
         }
         Action::Continue
     }
-}
-
-/// Resolves a relative upload target inside the music folder, **allowing a new
-/// file** (unlike [`SyncServer::resolve_safe`], which requires the target to
-/// already exist). Creates the parent directory and verifies it stays within the
-/// music folder.
-fn safe_put_dest(music_dir: &str, rel: &str) -> Option<PathBuf> {
-    if music_dir.is_empty() || rel.is_empty() || rel.starts_with('/') || rel.contains("..") {
-        return None;
-    }
-    let base = std::fs::canonicalize(music_dir).ok()?;
-    let dest = base.join(rel);
-    let parent = dest.parent()?;
-    std::fs::create_dir_all(parent).ok()?;
-    let parent = std::fs::canonicalize(parent).ok()?;
-    parent.starts_with(&base).then_some(dest)
 }
 
 /// Streams up to `limit` bytes (the already-buffered `leftover` first, then more

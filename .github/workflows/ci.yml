@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: Build, test & lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # GTK4/libadwaita + GStreamer dev headers (mirror README "Debian/Ubuntu").
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libgtk-4-dev libadwaita-1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gettext desktop-file-utils appstream
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting (rustfmt)
+        run: cargo fmt --all --check
+
+      - name: Lint (clippy)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Tests
+        run: cargo test --locked
+
+  metadata:
+    name: AppStream, desktop & translations
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            appstream desktop-file-utils gettext
+
+      - name: Validate AppStream metainfo
+        run: appstreamcli validate --no-net data/de.cais.Emilia.metainfo.xml
+
+      - name: Validate desktop entry
+        run: desktop-file-validate data/de.cais.Emilia.desktop
+
+      - name: Check translation catalogs compile
+        run: |
+          for po in po/*.po; do
+            echo "msgfmt --check $po"
+            msgfmt --check "$po" -o /dev/null
+          done
