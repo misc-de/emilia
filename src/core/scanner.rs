@@ -199,13 +199,11 @@ pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
             Err(e) => tracing::warn!("Failed to read {}: {e}", path.display()),
         }
         if batch.len() >= BATCH {
-            count += lib.upsert_tracks(&batch)?;
+            count += lib.upsert_tracks_resilient(&batch);
             batch.clear();
         }
     }
-    if !batch.is_empty() {
-        count += lib.upsert_tracks(&batch)?;
-    }
+    count += lib.upsert_tracks_resilient(&batch);
 
     // Drop DB rows for files that no longer exist under `root`. Skipped when the
     // scan found nothing, so an unreadable/unmounted folder cannot wipe the DB.

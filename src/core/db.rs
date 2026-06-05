@@ -3,6 +3,7 @@
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
+use std::sync::Once;
 use std::time::Duration;
 
 use crate::model::{
@@ -124,6 +125,13 @@ fn file_name_of(path: &str) -> String {
         .to_string()
 }
 
+/// The on-disk schema only needs migrating **once per process**: later worker
+/// connections (online enrichment, sync, stats, …) reuse the already-migrated
+/// file. `Once` both skips the redundant work (each `migrate()` probes ~15
+/// columns via `pragma_table_info`) and serialises the very first migration, so
+/// concurrent first opens cannot race on the `ALTER TABLE` statements.
+static FILE_DB_MIGRATED: Once = Once::new();
+
 impl Library {
     pub fn open() -> Result<Self> {
         let conn = Connection::open(db_path())?;
@@ -137,7 +145,12 @@ impl Library {
         // `execute_batch` is used because `PRAGMA journal_mode` returns a row.
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         let lib = Self { conn };
-        lib.migrate()?;
+        // Migrate the file schema once per process (see `FILE_DB_MIGRATED`). Only
+        // the first caller runs it and observes its result; later opens reuse the
+        // migrated file. The per-connection PRAGMAs above always run.
+        let mut migrate_result: Result<()> = Ok(());
+        FILE_DB_MIGRATED.call_once(|| migrate_result = lib.migrate());
+        migrate_result?;
         Ok(lib)
     }
 
@@ -1498,6 +1511,24 @@ impl Library {
         }
         tx.commit()?;
         Ok(count)
+    }
+
+    /// Upserts a batch like [`upsert_tracks`], but if the batched transaction
+    /// fails it falls back to per-track upserts so a single bad row cannot drop
+    /// the whole chunk. Never returns an error (best effort) — used by the
+    /// library scan and cloud indexing, where one odd file must not abort the
+    /// entire run. Returns how many tracks were stored.
+    pub fn upsert_tracks_resilient(&self, tracks: &[Track]) -> usize {
+        if tracks.is_empty() {
+            return 0;
+        }
+        match self.upsert_tracks(tracks) {
+            Ok(c) => c,
+            Err(_) => tracks
+                .iter()
+                .filter(|t| self.upsert_track(t).is_ok())
+                .count(),
+        }
     }
 
     /// Library search for the title-bar search field. Matches artists, albums

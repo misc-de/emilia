@@ -799,6 +799,10 @@ impl App {
             length,
             art.as_deref(),
         );
+        // Keep the lock-screen shuffle/repeat in sync (e.g. repeat restored from
+        // settings at startup, which predates the async MPRIS player being ready).
+        self.mpris.set_shuffle(self.transport.shuffle);
+        self.mpris.set_repeat(self.transport.repeat);
     }
 
     /// Resolves the equalizer for the running track + active output

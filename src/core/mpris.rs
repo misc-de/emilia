@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::glib;
-use mpris_server::{Metadata, PlaybackStatus, Player, Time, TrackId};
+use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId};
 
 /// Command from the desktop to the app. Delivered on the main thread.
 #[derive(Debug, Clone, Copy)]
@@ -26,6 +26,11 @@ pub enum MprisCommand {
     SeekBy(i64),
     /// Jump to an absolute position in microseconds.
     SetPosition(i64),
+    /// Desktop toggled shuffle.
+    SetShuffle(bool),
+    /// Desktop changed the loop/repeat status (the app only has whole-queue
+    /// repeat, so this collapses to on/off).
+    SetRepeat(bool),
 }
 
 /// The `Player` is built up asynchronously; until then (or when no D-Bus
@@ -63,6 +68,8 @@ impl Mpris {
                 .can_seek(true)
                 .can_control(true)
                 .can_raise(true)
+                .shuffle(false)
+                .loop_status(LoopStatus::None)
                 .build()
                 .await
             {
@@ -96,6 +103,18 @@ impl Mpris {
                 let cb = on_cmd.clone();
                 player.connect_set_position(move |_, _track: &TrackId, pos: Time| {
                     cb(MprisCommand::SetPosition(pos.as_micros()))
+                });
+            }
+            {
+                let cb = on_cmd.clone();
+                player.connect_set_shuffle(move |_, shuffle: bool| {
+                    cb(MprisCommand::SetShuffle(shuffle))
+                });
+            }
+            {
+                let cb = on_cmd.clone();
+                player.connect_set_loop_status(move |_, status: LoopStatus| {
+                    cb(MprisCommand::SetRepeat(status != LoopStatus::None))
                 });
             }
 
@@ -183,6 +202,32 @@ impl Mpris {
         };
         glib::spawn_future_local(async move {
             let _ = player.seeked(Time::from_millis(pos_ms.max(0))).await;
+        });
+    }
+
+    /// Reflects the shuffle state to the desktop (lock screen toggle).
+    pub fn set_shuffle(&self, shuffle: bool) {
+        let Some(player) = self.player.borrow().clone() else {
+            return;
+        };
+        glib::spawn_future_local(async move {
+            let _ = player.set_shuffle(shuffle).await;
+        });
+    }
+
+    /// Reflects the repeat state to the desktop. The app only has whole-queue
+    /// repeat, so this maps to `Playlist`/`None`.
+    pub fn set_repeat(&self, repeat: bool) {
+        let Some(player) = self.player.borrow().clone() else {
+            return;
+        };
+        let status = if repeat {
+            LoopStatus::Playlist
+        } else {
+            LoopStatus::None
+        };
+        glib::spawn_future_local(async move {
+            let _ = player.set_loop_status(status).await;
         });
     }
 }

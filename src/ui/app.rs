@@ -4634,6 +4634,24 @@ impl Component for App {
                             self.mpris.seeked(target);
                         }
                     }
+                    M::SetShuffle(on) => {
+                        if self.transport.shuffle != on {
+                            self.transport.shuffle = on;
+                            if on {
+                                self.rebuild_shuffle_order();
+                            }
+                        }
+                        self.mpris.set_shuffle(self.transport.shuffle);
+                    }
+                    M::SetRepeat(on) => {
+                        if self.transport.repeat != on {
+                            self.transport.repeat = on;
+                            let _ = self
+                                .library
+                                .set_setting("repeat", if on { "1" } else { "0" });
+                        }
+                        self.mpris.set_repeat(self.transport.repeat);
+                    }
                 }
             }
             Msg::Next => {
@@ -4657,12 +4675,14 @@ impl Component for App {
                 if self.transport.shuffle {
                     self.rebuild_shuffle_order();
                 }
+                self.mpris.set_shuffle(self.transport.shuffle);
             }
             Msg::ToggleRepeat => {
                 self.transport.repeat = !self.transport.repeat;
                 let _ = self
                     .library
                     .set_setting("repeat", if self.transport.repeat { "1" } else { "0" });
+                self.mpris.set_repeat(self.transport.repeat);
             }
             Msg::NavUp => {
                 // Remote source: one rel segment up.
