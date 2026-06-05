@@ -494,6 +494,14 @@ pub(crate) struct YoutubeState {
     pub(crate) playing_playlist: bool,
     /// Live progress toast shown while adding video(s) to the on-disk library.
     pub(crate) progress_toast: std::rc::Rc<std::cell::RefCell<Option<adw::Toast>>>,
+    /// Session cache of fetched playlist song lists (playlist URL → its videos),
+    /// so reopening a recent playlist is instant instead of re-running yt-dlp.
+    pub(crate) playlist_songs_cache:
+        std::collections::HashMap<String, Vec<crate::core::youtube::YtResult>>,
+    /// Cover frames of the currently shown playlist-songs subpage that still need
+    /// their thumbnail (thumbnail URL → frame), filled in once pre-cached in the
+    /// background so the list shows immediately and covers fill in afterwards.
+    pub(crate) pl_cover_slots: Vec<(String, adw::Bin)>,
 }
 
 /// Favorites + audiobooks page state, grouped off the `App` god-object.
@@ -789,10 +797,6 @@ pub enum Msg {
     /// Open the detail view of an audiobook.
     ShowAudiobookDetail(usize),
     // Playlists
-    /// Open the "New playlist" dialog.
-    PlaylistNew,
-    /// Create a playlist with this name.
-    PlaylistCreate(String),
     /// Create a playlist and add the current context files.
     PlaylistCreateAddTo(String),
     /// Open the tracks subpage of a playlist (short tap: albums + songs).
@@ -899,6 +903,11 @@ pub enum Msg {
     YtShowPlaylistDetail { url: String, title: String },
     /// Start playing a whole playlist (loads its videos as the queue).
     YtStartPlaylist { url: String, title: String },
+    /// Play a cached playlist (by URL) starting at the given song index. Plays the
+    /// whole playlist as the queue (so the songs are not logged to "Recent"
+    /// individually). `close` pops the song-list subpage afterwards (row tap), a
+    /// play-button click keeps it open.
+    YtPlayPlaylistAt { url: String, title: String, index: usize, close: bool },
     /// Save a found playlist into the Playlists section (without playing it).
     YtSavePlaylist { url: String, title: String },
     /// Open a recent playlist's song list (the mirrored local playlist).
@@ -922,8 +931,11 @@ pub enum Msg {
     /// Switch the YouTube view (Newest / Channels).
     SetYtView(YtView),
     /// Add a video to the on-disk music library: download + transcode + index
-    /// in one step (background).
+    /// in one step (background). Skips (and asks) if the target already exists.
     YtAddToLibrary { video_id: String, title: String },
+    /// Like [`Msg::YtAddToLibrary`] but after the user confirmed overwriting an
+    /// existing file (from the collision dialog).
+    YtAddToLibraryConfirmed { video_id: String, title: String },
     /// Add a whole playlist to the on-disk music library (download + transcode).
     YtPlaylistToLibrary { url: String, title: String },
     // Streaming (internet radio)
@@ -1052,6 +1064,23 @@ pub enum Cmd {
         video_id: Option<String>,
         result: Result<usize, String>,
     },
+    /// A single library-add hit an existing file at `dest` → ask the user whether
+    /// to overwrite it (the add was not performed).
+    YtLibraryExists {
+        video_id: String,
+        title: String,
+        dest: String,
+    },
+    /// The videos of a (not locally mirrored) YouTube playlist were fetched → cache
+    /// and open them as a song-list subpage.
+    YtPlaylistSongs {
+        url: String,
+        title: String,
+        result: Result<Vec<crate::core::youtube::YtResult>, String>,
+    },
+    /// The thumbnails of the open playlist-songs subpage finished pre-caching in
+    /// the background → fill the pending cover frames.
+    YtPlaylistCoversReady,
     /// Hits of the station search (for the open add dialog).
     StreamSearchResults(Vec<crate::core::streaming::StationResult>),
     /// Logos of the search hits are cached → redraw the hit list.
@@ -1448,18 +1477,9 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.playlists.playlist_items.is_empty(),
                                     },
-
-                                    // Action at the very bottom.
-                                    gtk::Box {
-                                        set_halign: gtk::Align::Center,
-                                        set_margin_top: 6,
-                                        set_margin_bottom: 10,
-                                        gtk::Button {
-                                            set_label: &gettext("New playlist"),
-                                            set_css_classes: &["suggested-action", "pill"],
-                                            connect_clicked => Msg::PlaylistNew,
-                                        },
-                                    },
+                                    // The explicit "New playlist" button was removed –
+                                    // playlists are created from a track's "Add to
+                                    // playlist" options (which can create one inline).
                                 },
                             add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "microphone-symbolic"] =
                                 &gtk::Box {
@@ -2202,7 +2222,15 @@ impl Component for App {
             );
         }
 
-        let library = Library::open().expect("Failed to open the library database");
+        // The main app cannot run without its on-disk library (an in-memory
+        // fallback would silently hide the user's real data). On failure, log a
+        // diagnostic with the path and exit cleanly instead of panicking.
+        let library = Library::open().unwrap_or_else(|e| {
+            let path = crate::core::db::db_path();
+            tracing::error!("could not open the library database at {}: {e}", path.display());
+            eprintln!("Emilia: could not open the library database at {}: {e}", path.display());
+            std::process::exit(1);
+        });
         // Move any existing plaintext secrets (API keys, Nextcloud credentials)
         // into the Secret Service once, before they are read below.
         library.migrate_secrets();
@@ -2623,6 +2651,8 @@ impl Component for App {
                 video_titles: std::collections::HashMap::new(),
                 playing_playlist: false,
                 progress_toast: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                playlist_songs_cache: std::collections::HashMap::new(),
+                pl_cover_slots: Vec::new(),
             },
             settings_src_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
@@ -2938,9 +2968,14 @@ impl Component for App {
                 }
                 {
                     let stack = widgets.view_stack.clone();
+                    let nav = widgets.nav_view.clone();
                     let sender = sender.clone();
                     btn.connect_clicked(move |b| {
                         if b.is_active() {
+                            // If a subpage (artist/album/track detail) is open in the
+                            // content area, close it first – otherwise the section
+                            // switch would happen hidden behind it.
+                            nav.pop_to_tag("main");
                             stack.set_visible_child_name(name);
                             // Click on the menu item = to the start of the section.
                             if name == "files" {
@@ -3092,6 +3127,15 @@ impl Component for App {
                 win.is_maximized(),
                 section.as_deref(),
             );
+            // Explicitly quit so the process reliably exits when the main window
+            // is closed. An idle app already returns from `run()` on its own, but
+            // an active background feature (media playback, a running device-sync
+            // session, the MPRIS/zbus service) can keep the GApplication held, so
+            // the process would linger in the background. Quitting here guarantees
+            // a full shutdown in every case.
+            if let Some(app) = win.application() {
+                app.quit();
+            }
             gtk::glib::Propagation::Proceed
         });
 
@@ -3438,15 +3482,6 @@ impl Component for App {
                 }
             }
             Msg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, &sender),
-            Msg::PlaylistNew => self.open_new_playlist_dialog(root, &sender),
-            Msg::PlaylistCreate(name) => {
-                let name = name.trim();
-                if !name.is_empty() {
-                    let _ = self.library.create_playlist(name);
-                    self.reload_playlists(&sender);
-                    self.toast(&gettext("Playlist created"));
-                }
-            }
             Msg::PlaylistCreateAddTo(name) => {
                 let name = name.trim();
                 if !name.is_empty() {
@@ -4009,6 +4044,37 @@ impl Component for App {
                     self.play_current();
                 }
             }
+            Msg::YtPlayPlaylistAt { url, title, index, close } => {
+                // Play the cached playlist as the queue, starting at `index`. As a
+                // playlist context (`playing_playlist`), the individual songs are
+                // not logged to "Recent" – only the playlist entry, whose recency
+                // we refresh here.
+                let Some(videos) = self.youtube.playlist_songs_cache.get(&url).cloned() else {
+                    return;
+                };
+                if videos.is_empty() {
+                    return;
+                }
+                let index = index.min(videos.len() - 1);
+                self.youtube.video_titles.clear();
+                let mut queue = Vec::with_capacity(videos.len());
+                for v in &videos {
+                    self.youtube.video_titles.insert(v.id.clone(), v.title.clone());
+                    let _ = self.library.set_yt_title(&v.id, &v.title);
+                    queue.push(PathBuf::from(crate::core::youtube::yt_path(&v.id)));
+                }
+                self.youtube.playing_playlist = true;
+                let _ = self.library.add_recent_playlist(&url, &title, videos.len() as i64);
+                self.transport.queue = queue;
+                self.transport.queue_pos = index;
+                self.play_current();
+                self.refresh_queue_icons();
+                self.refresh_yt_icons();
+                self.reload_yt_recent(&sender);
+                if close {
+                    self.nav.nav_view.pop();
+                }
+            }
             Msg::YtStartPlaylist { url, title } => {
                 self.toast(&gettext_f("Starting playlist “{title}” …", &[("title", &title)]));
                 sender.spawn_command(move |out| {
@@ -4044,18 +4110,25 @@ impl Component for App {
                 }
             }
             Msg::YtAddToLibrary { video_id, title } => {
-                self.yt_add_video_to_library(video_id, title, &sender)
+                self.yt_add_video_to_library(video_id, title, &sender, false)
+            }
+            Msg::YtAddToLibraryConfirmed { video_id, title } => {
+                self.yt_add_video_to_library(video_id, title, &sender, true)
             }
             Msg::YtPlaylistToLibrary { url, title } => {
                 self.yt_playlist_to_library(url, title, &sender)
             }
             Msg::YtSavePlaylist { url, title } => self.yt_save_playlist(url, title, &sender),
             Msg::YtOpenRecentPlaylist { url, title } => {
-                // Show the song list of the mirrored local playlist; if it was
-                // removed, fall back to the playlist detail (actions).
-                match self.library.playlist_id_by_name(&title) {
+                // Show the song list. A locally mirrored playlist (keyed by its URL)
+                // opens instantly from the DB; a previously fetched one from the
+                // session cache; otherwise fetch the playlist's videos via yt-dlp.
+                match self.library.yt_playlist_id(&url) {
                     Ok(Some(id)) => self.open_playlist(&sender, id, &title),
-                    _ => self.show_playlist_detail(root, &sender, &url, &title),
+                    _ => match self.youtube.playlist_songs_cache.get(&url).cloned() {
+                        Some(videos) => self.show_yt_playlist_songs(&sender, &url, &title, videos),
+                        None => self.yt_open_playlist_songs(url, title, &sender),
+                    },
                 }
             }
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
@@ -5160,8 +5233,9 @@ impl Component for App {
                     // Log the playlist as one "Recent" entry (not the videos).
                     self.youtube.playing_playlist = true;
                     let _ = self.library.add_recent_playlist(&url, &title, items.len() as i64);
-                    // Mirror the playlist into the Playlists section.
-                    let _ = self.library.replace_named_playlist(&title, &paths);
+                    // Mirror the playlist into the Playlists section (keyed by
+                    // its URL, so a same-named user playlist is left untouched).
+                    let _ = self.library.replace_yt_playlist(&url, &title, &paths);
                     self.transport.queue = queue;
                     self.transport.queue_pos = 0;
                     self.play_current();
@@ -5207,6 +5281,71 @@ impl Component for App {
                         self.yt_progress_done(&gettext("Could not add to library"));
                     }
                 }
+            }
+            Cmd::YtLibraryExists { video_id, title, dest } => {
+                self.youtube.downloading_videos.remove(&video_id);
+                self.refresh_yt_download_row();
+                self.yt_progress_done(&gettext("Song already exists"));
+                // Never overwrite a different song silently – let the user decide.
+                let confirm = adw::AlertDialog::new(
+                    Some(&gettext("Overwrite existing song?")),
+                    Some(&gettext_f(
+                        "“{title}” is already saved at:\n{dest}",
+                        &[("title", &title), ("dest", &dest)],
+                    )),
+                );
+                confirm.add_response("skip", &gettext("Skip"));
+                confirm.add_response("overwrite", &gettext("Overwrite"));
+                confirm.set_response_appearance("overwrite", adw::ResponseAppearance::Destructive);
+                confirm.set_default_response(Some("skip"));
+                confirm.set_close_response("skip");
+                {
+                    let sender = sender.clone();
+                    confirm.connect_response(None, move |_, resp| {
+                        if resp == "overwrite" {
+                            sender.input(Msg::YtAddToLibraryConfirmed {
+                                video_id: video_id.clone(),
+                                title: title.clone(),
+                            });
+                        }
+                    });
+                }
+                confirm.present(Some(root));
+            }
+            Cmd::YtPlaylistSongs { url, title, result } => {
+                if let Some(t) = self.youtube.progress_toast.borrow_mut().take() {
+                    t.dismiss();
+                }
+                match result {
+                    Ok(videos) => {
+                        self.youtube.playlist_songs_cache.insert(url.clone(), videos.clone());
+                        self.show_yt_playlist_songs(&sender, &url, &title, videos);
+                    }
+                    Err(e) => {
+                        tracing::warn!("yt playlist load failed: {e}");
+                        self.toast(&gettext("Could not load playlist"));
+                    }
+                }
+            }
+            Cmd::YtPlaylistCoversReady => {
+                // Fill the pending cover frames whose thumbnails are now cached.
+                // Keep any still-uncached ones (a later batch may complete them);
+                // drop frames whose row is no longer on screen.
+                self.youtube.pl_cover_slots.retain(|(thumb_url, frame)| {
+                    if frame.root().is_none() {
+                        return false;
+                    }
+                    match crate::core::online::youtube_thumb_path(thumb_url)
+                        .as_deref()
+                        .and_then(crate::ui::widgets::thumb_cached)
+                    {
+                        Some(tex) => {
+                            crate::ui::widgets::set_cover_thumb(frame, &tex);
+                            false
+                        }
+                        None => true,
+                    }
+                });
             }
             Cmd::StreamSearchResults(results) => {
                 self.streaming.stream_search_results = results;

@@ -222,7 +222,13 @@ pub fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 3 <= bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+            // Slice the raw bytes (never the &str): a multibyte UTF-8 char right
+            // after the `%` would not sit on a char boundary and panic a str
+            // slice. `from_utf8` + `from_str_radix` reject any non-ASCII-hex pair.
+            if let Some(b) = std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            {
                 out.push(b);
                 i += 3;
                 continue;
@@ -242,6 +248,18 @@ mod tests {
     fn percent_roundtrip() {
         let s = "Künstler/Mein Lied (Live).mp3";
         assert_eq!(percent_decode(&percent_encode(s)), s);
+    }
+
+    #[test]
+    fn percent_decode_tolerates_malformed_input() {
+        // A bare `%` directly followed by a multibyte char must NOT panic
+        // (used to slice the &str off a non-char boundary). Left verbatim.
+        assert_eq!(percent_decode("%ä"), "%ä");
+        // `%` at the very end, and an incomplete/invalid escape: passed through.
+        assert_eq!(percent_decode("abc%"), "abc%");
+        assert_eq!(percent_decode("a%ZZb"), "a%ZZb");
+        // A valid escape next to a multibyte char still decodes.
+        assert_eq!(percent_decode("ä%2Fb"), "ä/b");
     }
 
     #[test]

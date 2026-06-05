@@ -25,22 +25,30 @@ pub(crate) const CHANNEL_VIDEO_LIMIT: usize = 30;
 /// Upper bound of videos indexed when adding a whole playlist to the collection.
 const PLAYLIST_INDEX_LIMIT: usize = 200;
 
+/// Outcome of a library-add attempt: the file was written, or the destination
+/// already holds a (different) file and the user must decide whether to
+/// overwrite it.
+enum AddOutcome {
+    Added,
+    Exists(std::path::PathBuf),
+}
+
 /// Downloads a video (if no local copy yet), transcodes it into the on-disk
-/// music library (`<music>/YouTube/<Artist - Title>.mp3`), tags it, gives it the
-/// enriched cover, indexes it, and removes the temporary download. Worker only.
+/// music library under `<music>/YouTube/<Artist>/<Album>/<Title>.mp3` (the album
+/// folder is dropped when none is known), tags it, gives it the enriched cover,
+/// indexes it, and removes the temporary download. With `overwrite == false` a
+/// pre-existing destination is reported back (so the caller can ask the user)
+/// instead of being clobbered. Worker only.
 fn library_add_one(
     video_id: &str,
     title_hint: &str,
     music_dir: &str,
     cover: Option<&str>,
-) -> Result<std::path::PathBuf, String> {
-    // Ensure a source audio file: reuse a previous download or fetch it now.
-    let source = match youtube::find_download(video_id) {
-        Some(p) => p,
-        None => youtube::download_audio(video_id).map_err(|e| e.to_string())?,
-    };
+    overwrite: bool,
+) -> Result<AddOutcome, String> {
     // Prefer yt-dlp's metadata (uploader = artist, clean title); fall back to
-    // the title we already have so this works offline too.
+    // the title we already have so this works offline too. Fetched first (cheap)
+    // so the destination — and thus the existence check — needs no full download.
     let meta = youtube::video_meta(video_id).ok();
     // The channel (uploader) is the artist – normalised ("… - Topic"/"…VEVO").
     let artist = meta
@@ -53,18 +61,47 @@ fn library_add_one(
         .map(|m| m.title.clone())
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| title_hint.to_string());
-    let fname = match artist.as_deref().filter(|a| !a.trim().is_empty()) {
-        Some(a) => format!("{a} - {title}"),
-        None => title.clone(),
+
+    // YouTube itself carries no album. Look it up in the external DB (Deezer) so
+    // the track can be filed under <Artist>/<Album>/; this also yields a cover we
+    // can fall back to. Best effort – no match → no album folder.
+    let (album, dz_cover) = match artist.as_deref() {
+        Some(a) => match crate::core::online::track_cover(a, &title) {
+            Some((bytes, alb)) => (alb.filter(|s| !s.trim().is_empty()), Some(bytes)),
+            None => (None, None),
+        },
+        None => (None, None),
     };
-    let dest = std::path::Path::new(music_dir)
-        .join("YouTube")
-        .join(format!("{}.mp3", youtube::sanitize_filename(&fname)));
-    youtube::transcode_to_mp3(&source, &dest, &title, artist.as_deref(), "YouTube")
+
+    // <music>/YouTube/<Artist>/[<Album>/]<Title>.mp3
+    let mut dest = std::path::PathBuf::from(music_dir);
+    dest.push("YouTube");
+    if let Some(a) = artist.as_deref().filter(|s| !s.trim().is_empty()) {
+        dest.push(youtube::sanitize_filename(a));
+    }
+    if let Some(al) = album.as_deref() {
+        dest.push(youtube::sanitize_filename(al));
+    }
+    dest.push(format!("{}.mp3", youtube::sanitize_filename(&title)));
+
+    // Never silently overwrite a different song – hand the decision back up
+    // (before downloading, so a skip wastes nothing).
+    if dest.exists() && !overwrite {
+        return Ok(AddOutcome::Exists(dest));
+    }
+
+    // Ensure a source audio file: reuse a previous download or fetch it now.
+    let source = match youtube::find_download(video_id) {
+        Some(p) => p,
+        None => youtube::download_audio(video_id).map_err(|e| e.to_string())?,
+    };
+    youtube::transcode_to_mp3(&source, &dest, &title, artist.as_deref(), album.as_deref())
         .map_err(|e| e.to_string())?;
     let dest_str = dest.to_string_lossy().into_owned();
-    // In-app cover from the online enrichment (best effort).
+    // In-app cover: the enrichment's cover if present, else Deezer's.
     if let Some(bytes) = cover.and_then(|c| std::fs::read(c).ok()) {
+        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
+    } else if let Some(bytes) = dz_cover {
         crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
     }
     if let Ok(lib) = Library::open() {
@@ -73,7 +110,7 @@ fn library_add_one(
             path: dest_str,
             title,
             artist,
-            album: Some("YouTube".to_string()),
+            album,
             genre: None,
             track_no: None,
             disc_no: None,
@@ -85,7 +122,7 @@ fn library_add_one(
     }
     // The downloaded file was only the transcode source – drop it now.
     let _ = std::fs::remove_file(&source);
-    Ok(dest)
+    Ok(AddOutcome::Added)
 }
 
 /// Content box for the detail dialogs (uniform margins; local copy of the
@@ -950,6 +987,140 @@ impl App {
         present_detail(&dialog, &content, root);
     }
 
+    /// Loads the videos of a (not locally mirrored) YouTube playlist in the
+    /// background, then opens them as a song-list subpage. Used when tapping a
+    /// recent playlist that was played but never saved to the Playlists section.
+    pub(crate) fn yt_open_playlist_songs(
+        &self,
+        url: String,
+        title: String,
+        sender: &ComponentSender<Self>,
+    ) {
+        self.yt_progress(&gettext_f("Loading “{title}” …", &[("title", &title)]));
+        sender.spawn_command(move |out| {
+            let result =
+                youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT).map_err(|e| e.to_string());
+            let _ = out.send(crate::ui::app::Cmd::YtPlaylistSongs { url, title, result });
+        });
+    }
+
+    /// Subpage listing a YouTube playlist's songs. Tapping a row plays the
+    /// playlist from there **and closes** the subpage; the ▶ button plays from
+    /// there but **keeps it open**; long press opens the video's detail. Covers
+    /// that aren't cached yet are loaded in the background and filled in.
+    pub(crate) fn show_yt_playlist_songs(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: &str,
+        title: &str,
+        videos: Vec<youtube::YtResult>,
+    ) {
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(18)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        let group = adw::PreferencesGroup::builder()
+            .title(format!("{} ({})", gtk::glib::markup_escape_text(title), videos.len()).as_str())
+            .build();
+        if videos.is_empty() {
+            group.add(&adw::ActionRow::builder().title(&gettext("No videos")).build());
+        }
+        // Cover frames whose thumbnail isn't cached yet (filled in the background).
+        let mut pending: Vec<(String, adw::Bin)> = Vec::new();
+        for (index, v) in videos.iter().enumerate() {
+            let subtitle = v.duration.map(fmt_duration).unwrap_or_default();
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&v.title))
+                .subtitle(gtk::glib::markup_escape_text(&subtitle))
+                .activatable(true)
+                .build();
+            row.add_css_class("emilia-flush");
+            // An enriched cover or an already-cached thumbnail shows at once; an
+            // uncached thumbnail is queued for background loading.
+            let thumb_url = youtube::thumbnail_url(&v.id);
+            let cover = crate::core::online::youtube_cover_path(&v.id)
+                .or_else(|| crate::core::online::youtube_thumb_path(&thumb_url));
+            let frame = crate::ui::widgets::thumb_frame("video-x-generic-symbolic", 48);
+            match cover.as_deref().and_then(crate::ui::widgets::thumb_cached) {
+                Some(tex) => crate::ui::widgets::set_cover_thumb(&frame, &tex),
+                None => pending.push((thumb_url, frame.clone())),
+            }
+            row.add_prefix(&frame);
+
+            // ▶ button: play the playlist from here, keep the list open.
+            let play = gtk::Button::builder()
+                .icon_name("media-playback-start-symbolic")
+                .valign(gtk::Align::Center)
+                .tooltip_text(&gettext("Play"))
+                .css_classes(["flat"])
+                .build();
+            {
+                let (sender, u, t) = (sender.clone(), url.to_string(), title.to_string());
+                play.connect_clicked(move |_| {
+                    sender.input(Msg::YtPlayPlaylistAt {
+                        url: u.clone(),
+                        title: t.clone(),
+                        index,
+                        close: false,
+                    });
+                });
+            }
+            row.add_suffix(&play);
+
+            // Row tap: play the playlist from here and close the subpage.
+            {
+                let (sender, u, t) = (sender.clone(), url.to_string(), title.to_string());
+                row.connect_activated(move |_| {
+                    sender.input(Msg::YtPlayPlaylistAt {
+                        url: u.clone(),
+                        title: t.clone(),
+                        index,
+                        close: true,
+                    });
+                });
+            }
+            // Long press: the video's own detail.
+            let lp = gtk::GestureLongPress::new();
+            {
+                let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
+                lp.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    sender.input(Msg::YtShowVideoDetail { video_id: vid.clone(), title: t.clone() });
+                });
+            }
+            row.add_controller(lp);
+            group.add(&row);
+        }
+        content.append(&group);
+        self.push_subpage(&gettext_f("Playlist – {title}", &[("title", title)]), &content);
+
+        // Load the missing covers in the background (a few in parallel), then fill
+        // them in place via `Cmd::YtPlaylistCoversReady`.
+        self.youtube.pl_cover_slots = pending;
+        if !self.youtube.pl_cover_slots.is_empty() {
+            let urls: Vec<String> =
+                self.youtube.pl_cover_slots.iter().map(|(u, _)| u.clone()).collect();
+            sender.spawn_command(move |out| {
+                let threads = 8.min(urls.len().max(1));
+                let chunk = (urls.len() / threads).max(1);
+                std::thread::scope(|s| {
+                    for part in urls.chunks(chunk) {
+                        s.spawn(move || {
+                            for u in part {
+                                let _ = crate::core::online::cache_youtube_thumb(u);
+                            }
+                        });
+                    }
+                });
+                let _ = out.send(crate::ui::app::Cmd::YtPlaylistCoversReady);
+            });
+        }
+    }
+
     // ---- play/pause buttons + icon refresh -------------------------------
 
     /// Play/Pause button (suffix) for a video row. Registered in
@@ -1121,6 +1292,7 @@ impl App {
         video_id: String,
         title: String,
         sender: &ComponentSender<Self>,
+        overwrite: bool,
     ) {
         if self.youtube.downloading_videos.contains(&video_id) {
             return;
@@ -1135,8 +1307,21 @@ impl App {
         let cover = crate::core::online::youtube_cover_path(&video_id);
         let vid = video_id;
         sender.spawn_command(move |out| {
-            let r = library_add_one(&vid, &title, &music, cover.as_deref()).map(|_| 1usize);
-            let _ = out.send(crate::ui::app::Cmd::YtLibraryAdded { video_id: Some(vid), result: r });
+            let cmd = match library_add_one(&vid, &title, &music, cover.as_deref(), overwrite) {
+                Ok(AddOutcome::Added) => {
+                    crate::ui::app::Cmd::YtLibraryAdded { video_id: Some(vid), result: Ok(1) }
+                }
+                // Destination taken by a different song → ask the user.
+                Ok(AddOutcome::Exists(dest)) => crate::ui::app::Cmd::YtLibraryExists {
+                    video_id: vid,
+                    title,
+                    dest: dest.to_string_lossy().into_owned(),
+                },
+                Err(e) => {
+                    crate::ui::app::Cmd::YtLibraryAdded { video_id: Some(vid), result: Err(e) }
+                }
+            };
+            let _ = out.send(cmd);
         });
     }
 
@@ -1162,7 +1347,11 @@ impl App {
                 let _ = out.send(crate::ui::app::Cmd::YtLibraryProgress { done: 0, total });
                 for (i, v) in videos.into_iter().enumerate() {
                     let cover = crate::core::online::youtube_cover_path(&v.id);
-                    if library_add_one(&v.id, &v.title, &music, cover.as_deref()).is_ok() {
+                    // overwrite = false → tracks already on disk are skipped, never
+                    // clobbered (no per-track prompt for a whole playlist).
+                    if let Ok(AddOutcome::Added) =
+                        library_add_one(&v.id, &v.title, &music, cover.as_deref(), false)
+                    {
                         n += 1;
                     }
                     let _ = out.send(crate::ui::app::Cmd::YtLibraryProgress { done: i + 1, total });
@@ -1192,7 +1381,7 @@ impl App {
                     let _ = lib.set_yt_title(&v.id, &v.title);
                     paths.push(crate::core::youtube::yt_path(&v.id));
                 }
-                lib.replace_named_playlist(&title, &paths).map_err(|e| e.to_string())?;
+                lib.replace_yt_playlist(&url, &title, &paths).map_err(|e| e.to_string())?;
                 Ok(paths.len())
             })();
             let _ = out.send(crate::ui::app::Cmd::YtPlaylistSaved(r));

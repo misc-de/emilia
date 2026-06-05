@@ -82,7 +82,9 @@ impl Component for SyncPage {
         root: Self::Root,
         _sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let library = Library::open().expect("library");
+        // A failed second connection must not crash the whole app; degrade to a
+        // temporary in-memory DB (logged) instead of panicking the UI thread.
+        let library = Library::open_or_memory();
         let model = SyncPage {
             library,
             window: None,

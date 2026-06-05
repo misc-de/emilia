@@ -23,38 +23,8 @@ impl App {
                 .activatable(true)
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name("view-list-symbolic"));
-
-            let play = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .tooltip_text(&gettext("Play playlist"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            {
-                let sender = sender.clone();
-                play.connect_clicked(move |_| sender.input(Msg::PlayPlaylist(id)));
-            }
-            row.add_suffix(&play);
-
-            let del = gtk::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .tooltip_text(&gettext("Delete playlist"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            {
-                let sender = sender.clone();
-                del.connect_clicked(move |b| {
-                    crate::ui::app::confirm_destructive(
-                        b,
-                        &gettext("Delete this playlist?"),
-                        &gettext("Delete"),
-                        sender.clone(),
-                        Msg::PlaylistDelete(id),
-                    );
-                });
-            }
-            row.add_suffix(&del);
+            // Per-row play/delete buttons were intentionally removed – those
+            // actions live in the long-press detail view. Tapping a row opens it.
 
             {
                 let sender = sender.clone();
@@ -254,7 +224,9 @@ impl App {
         }
 
         let dialog = adw::Dialog::builder().title(gtk::glib::markup_escape_text(name)).build();
-        dialog.set_content_width(360);
+        // Larger detail dialog (was 360) so the cover and actions have room.
+        dialog.set_content_width(600);
+        dialog.set_content_height(560);
         self.adapt_detail_dialog(&dialog);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());
@@ -373,35 +345,6 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Dialog: enter a name and create a new (empty) playlist.
-    pub(crate) fn open_new_playlist_dialog(
-        &self,
-        root: &adw::ApplicationWindow,
-        sender: &ComponentSender<Self>,
-    ) {
-        let dialog = adw::AlertDialog::new(Some(&gettext("New playlist")), None);
-        let entry = gtk::Entry::builder()
-            .placeholder_text(&gettext("Playlist name"))
-            .activates_default(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&entry);
-        dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[
-            ("cancel", &gettext("Cancel")),
-            ("create", &gettext("Create")),
-        ]);
-        dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("create"));
-        {
-            let sender = sender.clone();
-            dialog.connect_response(None, move |_, resp| {
-                if resp == "create" {
-                    sender.input(Msg::PlaylistCreate(entry.text().to_string()));
-                }
-            });
-        }
-        dialog.present(Some(root));
-    }
 
     /// Dialog: add the current context files to an existing playlist
     /// or create a new one.

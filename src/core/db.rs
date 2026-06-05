@@ -139,13 +139,25 @@ impl Library {
         Ok(lib)
     }
 
-    /// In-memory DB (for tests).
-    #[cfg(test)]
+    /// A throwaway in-memory DB (tests, and the [`open_or_memory`] fallback).
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let lib = Self { conn };
         lib.migrate()?;
         Ok(lib)
+    }
+
+    /// Opens the on-disk library, or—if that fails (corrupt DB, full/read-only
+    /// disk)—logs and returns a throwaway in-memory DB. For **secondary** UI
+    /// components (Stats/Sync pages) that must not panic the whole running app
+    /// just because a second connection could not be opened. The main app still
+    /// treats [`open`](Self::open) as required.
+    pub fn open_or_memory() -> Self {
+        Self::open().unwrap_or_else(|e| {
+            tracing::error!("opening the library failed ({e}); using a temporary in-memory DB");
+            // A fresh in-memory DB is deterministic and effectively infallible.
+            Self::open_in_memory().expect("in-memory fallback library")
+        })
     }
 
     fn migrate(&self) -> Result<()> {
@@ -298,7 +310,9 @@ impl Library {
             CREATE TABLE IF NOT EXISTS playlist (
                 id         INTEGER PRIMARY KEY,
                 name       TEXT NOT NULL,
-                created_at INTEGER
+                created_at INTEGER,
+                origin     TEXT    -- NULL = user playlist; else the source key
+                                   -- (e.g. a mirrored YouTube playlist URL)
             );
             CREATE TABLE IF NOT EXISTS playlist_item (
                 playlist_id INTEGER NOT NULL,
@@ -537,6 +551,23 @@ impl Library {
                 "ALTER TABLE yt_recent ADD COLUMN kind TEXT NOT NULL DEFAULT 'video';
                  ALTER TABLE yt_recent ADD COLUMN count INTEGER NOT NULL DEFAULT 0;",
             )?;
+        }
+
+        // Migration: playlists gained an `origin` marker so a mirrored YouTube
+        // playlist can be replaced/looked up by its source URL instead of by
+        // name – which used to clobber a user playlist of the same name.
+        let has_origin = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('playlist') WHERE name = 'origin'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_origin {
+            self.conn
+                .execute_batch("ALTER TABLE playlist ADD COLUMN origin TEXT;")?;
         }
 
         // Migration: add the attempts counter to the meta tables (limits the
@@ -2744,30 +2775,60 @@ impl Library {
             .optional()?)
     }
 
-    /// Id of a playlist with the exact `name`, if any.
-    pub fn playlist_id_by_name(&self, name: &str) -> Result<Option<i64>> {
+    /// Id of the mirrored playlist for a given `origin` key (e.g. a YouTube
+    /// playlist URL), if any. Never matches user playlists (`origin IS NULL`).
+    pub fn yt_playlist_id(&self, origin: &str) -> Result<Option<i64>> {
         Ok(self
             .conn
-            .query_row("SELECT id FROM playlist WHERE name = ?1 LIMIT 1", [name], |r| {
-                r.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT id FROM playlist WHERE origin = ?1 LIMIT 1",
+                [origin],
+                |r| r.get::<_, i64>(0),
+            )
             .optional()?)
     }
 
-    /// Replaces any playlists with the exact `name` by a fresh one holding
-    /// `paths` (used to mirror a played YouTube playlist into the Playlists
-    /// section). Returns the new playlist id.
-    pub fn replace_named_playlist(&self, name: &str, paths: &[String]) -> Result<i64> {
-        let existing: Vec<i64> = {
-            let mut stmt = self.conn.prepare("SELECT id FROM playlist WHERE name = ?1")?;
-            let ids = stmt.query_map([name], |r| r.get::<_, i64>(0))?;
-            ids.collect::<rusqlite::Result<Vec<_>>>()?
+    /// Mirrors a source playlist (identified by its `origin` key, e.g. a YouTube
+    /// playlist URL) into the Playlists section: refreshes the existing mirror
+    /// for that origin in place, or creates one. User playlists (`origin IS
+    /// NULL`) are never touched – even one with the same `name`. Returns the
+    /// mirror's playlist id.
+    pub fn replace_yt_playlist(&self, origin: &str, name: &str, paths: &[String]) -> Result<i64> {
+        let tx = self.conn.unchecked_transaction()?;
+        let existing: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM playlist WHERE origin = ?1 LIMIT 1",
+                [origin],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?;
+        let id = match existing {
+            Some(id) => {
+                tx.execute("DELETE FROM playlist_item WHERE playlist_id = ?1", [id])?;
+                tx.execute(
+                    "UPDATE playlist SET name = ?1 WHERE id = ?2",
+                    rusqlite::params![name, id],
+                )?;
+                id
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO playlist (name, created_at, origin)
+                     VALUES (?1, strftime('%s','now'), ?2)",
+                    rusqlite::params![name, origin],
+                )?;
+                tx.last_insert_rowid()
+            }
         };
-        for id in existing {
-            self.delete_playlist(id)?;
+        if !paths.is_empty() {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO playlist_item (playlist_id, position, path) VALUES (?1, ?2, ?3)",
+            )?;
+            for (i, path) in paths.iter().enumerate() {
+                stmt.execute(rusqlite::params![id, i as i64, path])?;
+            }
         }
-        let id = self.create_playlist(name)?;
-        self.add_to_playlist(id, paths)?;
+        tx.commit()?;
         Ok(id)
     }
 
@@ -3179,6 +3240,34 @@ mod tests {
         lib.set_recent_meta("a", Some("The Artist"), Some("/cache/a.img")).unwrap();
         let a = lib.recent_videos(10).unwrap().into_iter().find(|r| r.video_id == "a").unwrap();
         assert_eq!(a.artist.as_deref(), Some("The Artist"));
+    }
+
+    #[test]
+    fn yt_playlist_mirror_keeps_same_named_user_playlist() {
+        let lib = Library::open_in_memory().unwrap();
+        // A user's own playlist that happens to share the YouTube playlist's name.
+        let user = lib.create_playlist("Mix").unwrap();
+        lib.add_to_playlist(user, &["song/mine.mp3".to_string()]).unwrap();
+
+        // Mirror a YouTube playlist (different identity: an origin URL) under the
+        // same name. The user playlist must survive untouched.
+        let url = "https://www.youtube.com/playlist?list=PL123";
+        let mirror = lib
+            .replace_yt_playlist(url, "Mix", &["yt:v1".into(), "yt:v2".into()])
+            .unwrap();
+        assert_ne!(mirror, user, "mirror must be a distinct playlist");
+        assert_eq!(lib.playlist_paths(user).unwrap(), vec!["song/mine.mp3".to_string()]);
+        assert_eq!(lib.yt_playlist_id(url).unwrap(), Some(mirror));
+        // The user playlist has no origin, so it is never matched as a mirror.
+        assert_eq!(lib.playlists().unwrap().len(), 2);
+
+        // Re-mirroring the same URL refreshes the SAME mirror in place (no
+        // duplicate, contents replaced) and still leaves the user playlist alone.
+        let mirror2 = lib.replace_yt_playlist(url, "Mix", &["yt:v3".into()]).unwrap();
+        assert_eq!(mirror2, mirror);
+        assert_eq!(lib.playlist_paths(mirror).unwrap(), vec!["yt:v3".to_string()]);
+        assert_eq!(lib.playlist_paths(user).unwrap(), vec!["song/mine.mp3".to_string()]);
+        assert_eq!(lib.playlists().unwrap().len(), 2);
     }
 
     #[test]

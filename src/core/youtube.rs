@@ -308,7 +308,7 @@ pub fn transcode_to_mp3(
     dest: &Path,
     title: &str,
     artist: Option<&str>,
-    album: &str,
+    album: Option<&str>,
 ) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -323,7 +323,10 @@ pub fn transcode_to_mp3(
     if let Some(a) = artist.filter(|s| !s.trim().is_empty()) {
         cmd.args(["-metadata", &format!("artist={a}")]);
     }
-    cmd.args(["-metadata", &format!("album={album}")]).arg(dest);
+    if let Some(al) = album.filter(|s| !s.trim().is_empty()) {
+        cmd.args(["-metadata", &format!("album={al}")]);
+    }
+    cmd.arg(dest);
     let status = cmd.status()?;
     if !status.success() {
         return Err(anyhow!("ffmpeg transcode failed"));

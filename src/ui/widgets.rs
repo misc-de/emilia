@@ -184,16 +184,28 @@ pub fn set_cover_texture(frame: &gtk::AspectFrame, texture: &gtk::gdk::Texture) 
 /// the row is single- or two-line. The size is taken from the frame.
 pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
     let size = bin.height_request().max(1);
-    // Downscale to display size: otherwise a Paintable keeps its original size as
-    // its "natural" size, causing the frame to grow with taller (multi-line) rows
-    // and pushing the title text to the right.
+    // Downscale to a **square** display texture: cover-scale preserving the aspect
+    // ratio (smaller side → `size`), then centre-crop to `size`×`size`. This keeps
+    // non-square thumbnails (e.g. 16:9 YouTube covers) from being stretched, while
+    // the fixed-size texture still stops a Paintable's natural size from growing
+    // the frame on taller (multi-line) rows.
     // `pixbuf_get_from_texture` is deprecated since GTK 4.12; deliberately kept
     // until a deprecation-free downscale is visually verified (thumbnail size).
     #[allow(deprecated)]
-    let small = gtk::gdk::pixbuf_get_from_texture(texture)
-        .and_then(|pb| pb.scale_simple(size, size, gtk::gdk_pixbuf::InterpType::Bilinear))
-        .map(|pb| gtk::gdk::Texture::for_pixbuf(&pb));
-    let img = match &small {
+    let square = gtk::gdk::pixbuf_get_from_texture(texture).map(|pb| {
+        let (w, h) = (pb.width().max(1), pb.height().max(1));
+        let scale = (size as f64 / w as f64).max(size as f64 / h as f64);
+        let sw = ((w as f64 * scale).round() as i32).max(size);
+        let sh = ((h as f64 * scale).round() as i32).max(size);
+        let scaled = pb
+            .scale_simple(sw, sh, gtk::gdk_pixbuf::InterpType::Bilinear)
+            .unwrap_or(pb);
+        let x = (scaled.width() - size).max(0) / 2;
+        let y = (scaled.height() - size).max(0) / 2;
+        scaled.new_subpixbuf(x, y, size, size)
+    });
+    let tex = square.map(|pb| gtk::gdk::Texture::for_pixbuf(&pb));
+    let img = match &tex {
         Some(t) => gtk::Image::from_paintable(Some(t)),
         None => gtk::Image::from_paintable(Some(texture)),
     };
