@@ -219,12 +219,7 @@ pub fn search(query: &str, kind: YtKind, n: usize) -> Result<Vec<YtResult>> {
         YtKind::Channel => search_results_url(query, "EgIQAg%3D%3D"),
         YtKind::Playlist => search_results_url(query, "EgIQAw%3D%3D"),
     };
-    let entries = dump_entries(&[
-        "--flat-playlist",
-        "--playlist-end",
-        &n.to_string(),
-        &source,
-    ])?;
+    let entries = dump_entries(&["--flat-playlist", "--playlist-end", &n.to_string(), &source])?;
     Ok(entries
         .into_iter()
         .filter_map(|e| e.into_result())
@@ -260,7 +255,14 @@ pub fn list_entries(url: &str, limit: usize) -> Result<Vec<YtResult>> {
 pub fn resolve_audio_url(video_id_or_url: &str) -> Result<String> {
     let url = to_url(video_id_or_url);
     let out = ytdlp()
-        .args(["--ignore-config", "--no-warnings", "--no-playlist", "-f", "bestaudio/best", "-g"])
+        .args([
+            "--ignore-config",
+            "--no-warnings",
+            "--no-playlist",
+            "-f",
+            "bestaudio/best",
+            "-g",
+        ])
         .arg(&url)
         .output()?;
     if !out.status.success() {
@@ -289,7 +291,14 @@ pub fn download_audio(video_id: &str) -> Result<PathBuf> {
     }
     let template = dir.join(format!("{video_id}.%(ext)s"));
     let status = ytdlp()
-        .args(["--ignore-config", "--no-warnings", "--no-playlist", "-f", "bestaudio/best", "-o"])
+        .args([
+            "--ignore-config",
+            "--no-warnings",
+            "--no-playlist",
+            "-f",
+            "bestaudio/best",
+            "-o",
+        ])
         .arg(&template)
         .arg(watch_url(video_id))
         .status()?;
@@ -349,17 +358,30 @@ pub fn transcode_to_mp3(
 pub fn sanitize_filename(s: &str) -> String {
     let cleaned: String = s
         .chars()
-        .map(|c| if "/\\:*?\"<>|\0\n\r\t".contains(c) { '_' } else { c })
+        .map(|c| {
+            if "/\\:*?\"<>|\0\n\r\t".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let trimmed = cleaned.trim().trim_matches('.').trim();
-    let base = if trimmed.is_empty() { "untitled" } else { trimmed };
+    let base = if trimmed.is_empty() {
+        "untitled"
+    } else {
+        trimmed
+    };
     base.chars().take(120).collect()
 }
 
 /// The `UC…` channel id contained in a `/channel/UC…` URL, if present.
 pub fn channel_id_from_url(url: &str) -> Option<String> {
     let rest = url.split("/channel/").nth(1)?;
-    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    let id: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
     id.starts_with("UC").then_some(id)
 }
 
@@ -378,7 +400,12 @@ pub fn channel_rss_published(channel_id: &str) -> std::collections::HashMap<Stri
     let body = match agent.get(&url).call() {
         Ok(resp) => {
             let mut s = String::new();
-            if resp.into_reader().take(4 * 1024 * 1024).read_to_string(&mut s).is_err() {
+            if resp
+                .into_reader()
+                .take(4 * 1024 * 1024)
+                .read_to_string(&mut s)
+                .is_err()
+            {
                 return std::collections::HashMap::new();
             }
             s
@@ -459,8 +486,14 @@ mod tests {
         </feed>"#;
         let map = parse_atom_published(xml);
         assert_eq!(map.len(), 2);
-        assert_eq!(map.get("AAA").map(String::as_str), Some("2026-06-04T06:49:58+00:00"));
-        assert_eq!(map.get("BBB").map(String::as_str), Some("2026-06-03T22:46:30+00:00"));
+        assert_eq!(
+            map.get("AAA").map(String::as_str),
+            Some("2026-06-04T06:49:58+00:00")
+        );
+        assert_eq!(
+            map.get("BBB").map(String::as_str),
+            Some("2026-06-03T22:46:30+00:00")
+        );
         // The channel-level <published> must not leak in as an entry.
         assert!(!map.values().any(|v| v == "2015-03-18T15:36:55+00:00"));
     }
@@ -592,7 +625,12 @@ fn dump_entries(args: &[&str]) -> Result<Vec<RawEntry>> {
         return Err(anyhow!("yt-dlp is not installed"));
     }
     let out = ytdlp()
-        .args(["--ignore-config", "--no-warnings", "--ignore-errors", "--dump-json"])
+        .args([
+            "--ignore-config",
+            "--no-warnings",
+            "--ignore-errors",
+            "--dump-json",
+        ])
         .args(args)
         .output()?;
     // yt-dlp exits non-zero on partial failures (`--ignore-errors`); as long as
@@ -665,7 +703,9 @@ impl RawEntry {
                 .clone()
                 .filter(|u| u.contains("list="))
                 .unwrap_or_else(|| format!("https://www.youtube.com/playlist?list={id}")),
-            YtKind::Channel => url.clone().unwrap_or_else(|| format!("https://www.youtube.com/channel/{id}")),
+            YtKind::Channel => url
+                .clone()
+                .unwrap_or_else(|| format!("https://www.youtube.com/channel/{id}")),
         };
         // For videos use the deterministic `hqdefault` thumbnail (always exists);
         // for channels/playlists take the largest from the listing.
@@ -684,7 +724,10 @@ impl RawEntry {
             id,
             url: canonical,
             title,
-            uploader: self.uploader.or(self.channel).filter(|s| !s.trim().is_empty()),
+            uploader: self
+                .uploader
+                .or(self.channel)
+                .filter(|s| !s.trim().is_empty()),
             duration: self.duration.map(|d| d as i64),
             thumbnail,
         })
@@ -695,7 +738,10 @@ impl RawEntry {
     fn classify(&self, url: Option<&str>) -> YtKind {
         let u = url.unwrap_or("");
         let ie = self.ie_key.as_deref().unwrap_or("");
-        if u.contains("list=") || ie.eq_ignore_ascii_case("youtubeplaylist") || self.type_.as_deref() == Some("playlist") {
+        if u.contains("list=")
+            || ie.eq_ignore_ascii_case("youtubeplaylist")
+            || self.type_.as_deref() == Some("playlist")
+        {
             return YtKind::Playlist;
         }
         if u.contains("/channel/")

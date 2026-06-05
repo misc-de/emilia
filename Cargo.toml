@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -43,3 +43,14 @@ rqrr = { version = "0.10.1", default-features = false }
 opt-level = "s"
 lto = true
 strip = true
+
+# CI gates on `clippy -- -D warnings`. These few pedantic/style lints are
+# consciously allowed project-wide: GTK/relm4 closures and DB row tuples are
+# legitimately "complex", UI builders legitimately take many arguments, and the
+# markdown-rendering doc lint is too noisy for the doc style used here. Genuine
+# correctness lints stay denied.
+[lints.clippy]
+type_complexity = "allow"
+too_many_arguments = "allow"
+enum_variant_names = "allow"
+doc_lazy_continuation = "allow"

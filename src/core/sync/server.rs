@@ -321,49 +321,47 @@ impl SyncServer {
         emit: &mut F,
     ) -> Action {
         match (req.method.as_str(), req.path.as_str()) {
-            ("POST", "/pair") => {
-                match serde_json::from_slice::<PairRequest>(&req.body) {
-                    Ok(pr) if crypto::constant_eq(&pr.token, &self.pairing_token) => {
-                        *paired = true;
-                        *peer_name = pr.device_name.clone();
-                        *peer_caps = pr.caps.clone();
-                        emit(SyncEvent::PeerPaired {
-                            peer_name: pr.device_name,
-                            peer_caps: pr.caps,
-                        });
-                        write_json(
-                            out,
-                            200,
-                            &PairResponse {
-                                ok: true,
-                                session_token: self.session_token.clone(),
-                                device_name: self.device_name.clone(),
-                                caps: self.caps.clone(),
-                                error: String::new(),
-                            },
-                        );
+            ("POST", "/pair") => match serde_json::from_slice::<PairRequest>(&req.body) {
+                Ok(pr) if crypto::constant_eq(&pr.token, &self.pairing_token) => {
+                    *paired = true;
+                    *peer_name = pr.device_name.clone();
+                    *peer_caps = pr.caps.clone();
+                    emit(SyncEvent::PeerPaired {
+                        peer_name: pr.device_name,
+                        peer_caps: pr.caps,
+                    });
+                    write_json(
+                        out,
+                        200,
+                        &PairResponse {
+                            ok: true,
+                            session_token: self.session_token.clone(),
+                            device_name: self.device_name.clone(),
+                            caps: self.caps.clone(),
+                            error: String::new(),
+                        },
+                    );
+                    Action::Continue
+                }
+                _ => {
+                    *failed += 1;
+                    write_json(
+                        out,
+                        403,
+                        &PairResponse {
+                            ok: false,
+                            error: "invalid token".into(),
+                            ..Default::default()
+                        },
+                    );
+                    if *failed >= super::MAX_FAILED_PAIR {
+                        emit(SyncEvent::Error("too many pairing attempts".into()));
+                        Action::Stop
+                    } else {
                         Action::Continue
                     }
-                    _ => {
-                        *failed += 1;
-                        write_json(
-                            out,
-                            403,
-                            &PairResponse {
-                                ok: false,
-                                error: "invalid token".into(),
-                                ..Default::default()
-                            },
-                        );
-                        if *failed >= super::MAX_FAILED_PAIR {
-                            emit(SyncEvent::Error("too many pairing attempts".into()));
-                            Action::Stop
-                        } else {
-                            Action::Continue
-                        }
-                    }
                 }
-            }
+            },
 
             // From here on: bearer authentication required.
             _ if !self.bearer_ok(req) => {
@@ -379,9 +377,7 @@ impl SyncServer {
             ("GET", "/sync/export") => {
                 match Library::open().and_then(|lib| data::export_library(&lib)) {
                     Ok(exp) => write_json(out, 200, &exp),
-                    Err(e) => {
-                        write_json(out, 500, &serde_json::json!({ "error": e.to_string() }))
-                    }
+                    Err(e) => write_json(out, 500, &serde_json::json!({ "error": e.to_string() })),
                 }
                 Action::Continue
             }
@@ -408,9 +404,7 @@ impl SyncServer {
             ("GET", "/files/list") => {
                 match Library::open().and_then(|lib| data::export_library(&lib)) {
                     Ok(exp) => write_json(out, 200, &serde_json::json!({ "files": exp.files })),
-                    Err(e) => {
-                        write_json(out, 500, &serde_json::json!({ "error": e.to_string() }))
-                    }
+                    Err(e) => write_json(out, 500, &serde_json::json!({ "error": e.to_string() })),
                 }
                 Action::Continue
             }
@@ -522,7 +516,11 @@ impl SyncServer {
         };
         let limit = req.content_length.min(MAX_PUT);
         match stream_to_file(stream, &req.body, limit, &dest) {
-            Ok(n) => write_json(stream, 200, &serde_json::json!({ "ok": true, "written": n })),
+            Ok(n) => write_json(
+                stream,
+                200,
+                &serde_json::json!({ "ok": true, "written": n }),
+            ),
             Err(_) => write_json(stream, 400, &serde_json::json!({ "error": "write failed" })),
         }
         Action::Continue
@@ -531,7 +529,12 @@ impl SyncServer {
 
 /// Streams up to `limit` bytes (the already-buffered `leftover` first, then more
 /// from `reader`) into `dest`, atomically via a `.part` file.
-fn stream_to_file(reader: &mut impl Read, leftover: &[u8], limit: usize, dest: &Path) -> Result<u64> {
+fn stream_to_file(
+    reader: &mut impl Read,
+    leftover: &[u8],
+    limit: usize,
+    dest: &Path,
+) -> Result<u64> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -595,7 +598,12 @@ fn read_head(stream: &mut impl Read) -> Result<HttpReq> {
     let headers: Vec<(String, String)> = parsed
         .headers
         .iter()
-        .map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned()))
+        .map(|h| {
+            (
+                h.name.to_string(),
+                String::from_utf8_lossy(h.value).into_owned(),
+            )
+        })
         .collect();
 
     let content_length = headers
@@ -643,9 +651,7 @@ fn read_request(stream: &mut impl Read) -> Result<HttpReq> {
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 fn reason_phrase(status: u16) -> &'static str {
@@ -721,18 +727,28 @@ mod tests {
         let info = protocol::parse_pair_url(&url, super::super::now_unix()).expect("URL");
 
         // Correct fingerprint + token → pairing succeeds.
-        let client_caps = Capabilities { schema: protocol::SCHEMA_VERSION, youtube_enabled: false };
+        let client_caps = Capabilities {
+            schema: protocol::SCHEMA_VERSION,
+            youtube_enabled: false,
+        };
         let mut client = SyncClient::new(&info, "dev-1".into(), "TestClient".into(), client_caps);
         client.pair(&info.token).expect("pairing succeeds");
         assert_eq!(client.peer_name, "TestServer");
         // The server advertised its capabilities back (test server has YT on).
-        assert!(client.peer_caps.youtube_enabled, "peer caps must round-trip");
+        assert!(
+            client.peer_caps.youtube_enabled,
+            "peer caps must round-trip"
+        );
 
         // Wrong fingerprint → TLS pinning rejects (fails before the token).
         let mut bad = info.clone();
         bad.fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into();
-        let mut bad_client =
-            SyncClient::new(&bad, "dev-2".into(), "Boese".into(), Capabilities::default());
+        let mut bad_client = SyncClient::new(
+            &bad,
+            "dev-2".into(),
+            "Boese".into(),
+            Capabilities::default(),
+        );
         assert!(bad_client.pair(&bad.token).is_err(), "MITM must fail");
 
         stop.store(true, Ordering::Relaxed);
@@ -751,8 +767,7 @@ mod tests {
         let handle = std::thread::spawn(move || server.run(|_| {}));
 
         let info = protocol::parse_pair_url(&url, super::super::now_unix()).expect("URL");
-        let mut client =
-            SyncClient::new(&info, "d".into(), "Cli".into(), Capabilities::default());
+        let mut client = SyncClient::new(&info, "d".into(), "Cli".into(), Capabilities::default());
         client.pair(&info.token).expect("pair");
 
         // Nothing on offer yet.
@@ -769,7 +784,11 @@ mod tests {
 
         // Client returns a decision (server emits OfferAccepted; 200 expected).
         client
-            .send_decision(&ShareDecision { accept: true, files: vec!["a.mp3".into()], ..Default::default() })
+            .send_decision(&ShareDecision {
+                accept: true,
+                files: vec!["a.mp3".into()],
+                ..Default::default()
+            })
             .expect("decision");
 
         // Client-as-sender can post an offer; keep-alive ping works.

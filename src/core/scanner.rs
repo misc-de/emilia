@@ -186,7 +186,10 @@ pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
     let files = collect_audio_files(root);
     // Every audio file physically present under `root` (regardless of whether its
     // tags read cleanly) — the set that must survive orphan pruning.
-    let present: Vec<String> = files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let present: Vec<String> = files
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
 
     let mut count = 0;
     let mut batch: Vec<Track> = Vec::with_capacity(BATCH);

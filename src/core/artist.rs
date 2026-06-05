@@ -191,7 +191,10 @@ mod tests {
 
     #[test]
     fn mit_and_with_separators() {
-        assert_eq!(split_artists("Rammstein mit Till"), vec!["Rammstein", "Till"]);
+        assert_eq!(
+            split_artists("Rammstein mit Till"),
+            vec!["Rammstein", "Till"]
+        );
         assert_eq!(split_artists("Sting with Shaggy"), vec!["Sting", "Shaggy"]);
     }
 

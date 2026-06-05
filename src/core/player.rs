@@ -230,11 +230,7 @@ impl Player {
                         }
                     }
                     gst::MessageView::Error(err) => {
-                        tracing::error!(
-                            "GStreamer error: {} ({:?})",
-                            err.error(),
-                            err.debug()
-                        );
+                        tracing::error!("GStreamer error: {} ({:?})", err.error(), err.debug());
                         // The current track can't be played (missing file/mount,
                         // unreachable Nextcloud, decode error) → let the app skip.
                         on_error();

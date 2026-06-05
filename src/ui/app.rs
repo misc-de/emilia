@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -159,9 +159,9 @@ pub(crate) fn apply_color_scheme(code: &str) {
 }
 
 pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
-    if pos_ms < RESUME_MIN_POS_MS {
-        0
-    } else if dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS {
+    let too_early = pos_ms < RESUME_MIN_POS_MS;
+    let too_late = dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS;
+    if too_early || too_late {
         0
     } else {
         pos_ms
@@ -392,8 +392,7 @@ pub(crate) struct StreamingState {
     pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
     /// While the add dialog is open: (dialog, hit list), so that asynchronously
     /// arriving hits fit into the already shown list.
-    pub(crate) stream_search:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    pub(crate) stream_search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// ID of the currently running station; `None` when nothing/other is running.
     pub(crate) playing_stream: Option<i64>,
     /// Currently running track of the station (ICY metadata) for "Now Playing".
@@ -430,24 +429,20 @@ pub(crate) struct PodcastsState {
     pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
     /// While the subscribe search dialog is open: (dialog, hit list), so that
     /// asynchronously arriving hits can be inserted into the shown list.
-    pub(crate) podcast_search:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    pub(crate) podcast_search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// URL of the currently loaded podcast episode (play/pause row marker);
     /// `None` when music is playing or no episode is running.
     pub(crate) playing_episode_url: Option<String>,
     /// Play/pause buttons of the visible episode rows (audio URL → button), to
     /// refresh their icon on playback-state changes.
-    pub(crate) episode_play_buttons:
-        std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
+    pub(crate) episode_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
     /// "Play" row of an open episode detail dialog (row, audio URL) – hidden
     /// while exactly this episode is playing.
-    pub(crate) ctx_episode_play:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
+    pub(crate) ctx_episode_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
     /// "Download" column of an open episode detail dialog: (value label, audio
     /// URL). The label text reflects the offline state and is refreshed when a
     /// background download starts or finishes.
-    pub(crate) ctx_episode_download:
-        std::rc::Rc<std::cell::RefCell<Option<(gtk::Label, String)>>>,
+    pub(crate) ctx_episode_download: std::rc::Rc<std::cell::RefCell<Option<(gtk::Label, String)>>>,
     /// Audio URLs of episodes whose download is currently running (to show a
     /// spinner and ignore repeated taps).
     pub(crate) downloading_episodes: std::collections::HashSet<String>,
@@ -490,8 +485,7 @@ pub(crate) struct YoutubeState {
     pub(crate) search_results: Vec<crate::core::youtube::YtResult>,
     /// While the search dialog is open: (dialog, hit list), so asynchronously
     /// arriving hits can be inserted into the shown list.
-    pub(crate) search:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    pub(crate) search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// Video id currently loaded/playing (play/pause row marker); `None` when
     /// music/other is playing or nothing is running.
     pub(crate) playing_video_id: Option<String>,
@@ -500,17 +494,15 @@ pub(crate) struct YoutubeState {
     pub(crate) video_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
     /// "Play" row of an open video detail dialog (row, video id) – hidden while
     /// exactly this video is playing.
-    pub(crate) ctx_video_play:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
+    pub(crate) ctx_video_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
     /// Offline/library action row of an open video detail dialog + its video id;
     /// its title reflects the state and is refreshed on download start/finish.
     pub(crate) ctx_video_download:
         std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
     /// Open video detail dialog awaiting async metadata: (video id, cover box,
     /// channel row, duration row), filled in by `Cmd::YtVideoMeta`.
-    pub(crate) ctx_video_meta: std::rc::Rc<
-        std::cell::RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow)>>,
-    >,
+    pub(crate) ctx_video_meta:
+        std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow)>>>,
     /// Video ids whose download is currently running (spinner + dedupe taps).
     pub(crate) downloading_videos: std::collections::HashSet<String>,
     /// Titles for the videos in the current play context (video id → title), so
@@ -648,7 +640,10 @@ pub enum Msg {
     ShowArtistDetail(usize),
     ShowAlbumDetail(usize),
     /// Open the detail page of an album via (artist, album) (from subpages).
-    ShowAlbumDetailFor { artist: String, album: String },
+    ShowAlbumDetailFor {
+        artist: String,
+        album: String,
+    },
     /// Open the detail page of a single song via its path.
     ShowTrackDetail(String),
     /// Open the songs subpage of an album from the album overview (short tap).
@@ -658,23 +653,43 @@ pub enum Msg {
     OpenArtistTracks(usize),
     /// Tap on an album in the artist subpage: list its tracks as
     /// a further subpage.
-    OpenAlbumTracks { artist: String, album: String },
+    OpenAlbumTracks {
+        artist: String,
+        album: String,
+    },
     /// Play a track from the artist overview (queue = all tracks
     /// of the artist, start at the tapped one). `close` pops the subpage
     /// back to the main view (row tap) vs. keeps it open (play button).
-    PlayArtistTrack { name: String, path: String, close: bool },
+    PlayArtistTrack {
+        name: String,
+        path: String,
+        close: bool,
+    },
     /// Play a **single** selected track (from an album or playlist): only this
     /// track is enqueued, not its siblings. `close` pops the subpage back to the
     /// main view (row tap) vs. keeps it open (play button).
-    PlayOneTrack { path: String, close: bool },
+    PlayOneTrack {
+        path: String,
+        close: bool,
+    },
     /// Tap on an album/folder entry in concerts/audiobooks: list its
     /// tracks as a subpage (instead of playing directly).
-    OpenEntryTracks { scope: String, key: String },
+    OpenEntryTracks {
+        scope: String,
+        key: String,
+    },
     /// Play a track of a folder audiobook/concert (queue = folder in
     /// order, start at the tapped one).
-    PlayFolderTrack { folder: String, path: String, close: bool },
+    PlayFolderTrack {
+        folder: String,
+        path: String,
+        close: bool,
+    },
     /// Play the whole album in track order (play button of the album row).
-    PlayAlbum { artist: String, album: String },
+    PlayAlbum {
+        artist: String,
+        album: String,
+    },
     CtxPlay,
     /// Play the album in track order (shuffle off, stop at the end).
     CtxPlayAlbum,
@@ -733,7 +748,10 @@ pub enum Msg {
     OpenCurrentEq,
     /// Open the track-level equalizer for a specific path (e.g. a YouTube
     /// video from its detail view). `title` is only the header label.
-    OpenTrackEq { path: String, title: String },
+    OpenTrackEq {
+        path: String,
+        title: String,
+    },
     /// Open the queue dialog.
     ShowQueue,
     /// Start playback at a specific queue entry (queue index).
@@ -746,7 +764,10 @@ pub enum Msg {
     /// Clear the entire queue (after confirmation) and stop playback.
     QueueClear,
     /// Move a queue entry (queue indices).
-    QueueMove { from: usize, to: usize },
+    QueueMove {
+        from: usize,
+        to: usize,
+    },
     SetMusicDir(PathBuf),
     /// Switch to another source (tab) in the file view.
     SelectSource(ActiveSource),
@@ -763,9 +784,16 @@ pub enum Msg {
     CtxDownloadRemote(String),
     SetAcoustidKey(String),
     /// Set the primary cover of an album (last shown in the gallery carousel).
-    SetAlbumCover { artist: String, album: String, path: String },
+    SetAlbumCover {
+        artist: String,
+        album: String,
+        path: String,
+    },
     /// Set the primary photo of an artist (last shown in the gallery carousel).
-    SetArtistImage { name: String, path: String },
+    SetArtistImage {
+        name: String,
+        path: String,
+    },
     /// Upload a custom cover/photo for the current detail target (file dialog).
     UploadCover,
     SetFanartKey(String),
@@ -837,7 +865,10 @@ pub enum Msg {
     /// Open the detail view of a favorite.
     ShowFavoriteDetail(usize),
     /// Reorder favorites (indices in `favorite_items`).
-    MoveFavorite { from: usize, to: usize },
+    MoveFavorite {
+        from: usize,
+        to: usize,
+    },
     // Audiobooks
     /// Play an audiobook (index in `audiobook_items`).
     PlayAudiobook(usize),
@@ -864,11 +895,17 @@ pub enum Msg {
     /// Add the current context files to this playlist.
     PlaylistAddTo(i64),
     /// Set the chosen cover of a playlist (last shown in the detail carousel).
-    SetPlaylistCover { id: i64, path: String },
+    SetPlaylistCover {
+        id: i64,
+        path: String,
+    },
     /// Open the rename dialog of a playlist.
     PlaylistRenameDialog(i64),
     /// Rename a playlist.
-    PlaylistRename { id: i64, name: String },
+    PlaylistRename {
+        id: i64,
+        name: String,
+    },
     // Podcasts
     /// Open the subscribe dialog (search + feed address).
     PodcastSubscribe,
@@ -890,7 +927,10 @@ pub enum Msg {
     PodcastRefresh(i64),
     /// Toggle an entry (episode): start or – if already the running one –
     /// pause/resume. From tapping the row and from the play/pause button.
-    ToggleEpisode { url: String, title: String },
+    ToggleEpisode {
+        url: String,
+        title: String,
+    },
     /// Switch the podcast view (Newest / Overview).
     SetPodcastView(PodcastView),
     /// Switch the streaming view (channels/recordings).
@@ -898,14 +938,24 @@ pub enum Msg {
     /// Detail view of an entry (episode) from the "Newest" list (index).
     ShowEpisodeDetail(usize),
     /// Detail view of an episode from the episode list of a podcast.
-    ShowPodcastEpisodeDetail { podcast_id: i64, index: usize },
+    ShowPodcastEpisodeDetail {
+        podcast_id: i64,
+        index: usize,
+    },
     /// Click on a time-jump mark in the show notes: jump to the spot
     /// (start the episode there if needed).
-    EpisodeSeekTo { url: String, title: String, ms: i64 },
+    EpisodeSeekTo {
+        url: String,
+        title: String,
+        ms: i64,
+    },
     /// Download row in the episode detail: if not downloaded, fetch the audio
     /// for offline playback (background); if already downloaded, delete the
     /// local copy. `title` is only used for the toast.
-    ToggleEpisodeDownload { url: String, title: String },
+    ToggleEpisodeDownload {
+        url: String,
+        title: String,
+    },
     /// Detail view/management of a subscription (podcast id) – refresh/remove.
     ShowPodcastDetail(i64),
     // YouTube (optional feature)
@@ -941,25 +991,48 @@ pub enum Msg {
     /// Remove an item (video id or playlist URL) from the "Recent" history.
     YtRemoveRecent(String),
     /// Detail view of a video (play / add to collection / offline).
-    YtShowVideoDetail { video_id: String, title: String },
+    YtShowVideoDetail {
+        video_id: String,
+        title: String,
+    },
     /// Detail view of a video from the "Newest" list (index in `newest_items`).
     YtShowNewestDetail(usize),
     /// Detail/contents of a playlist (start / offline / add to library).
-    YtShowPlaylistDetail { url: String, title: String },
+    YtShowPlaylistDetail {
+        url: String,
+        title: String,
+    },
     /// Start playing a whole playlist (loads its videos as the queue).
-    YtStartPlaylist { url: String, title: String },
+    YtStartPlaylist {
+        url: String,
+        title: String,
+    },
     /// Play a cached playlist (by URL) starting at the given song index. Plays the
     /// whole playlist as the queue (so the songs are not logged to "Recent"
     /// individually). `close` pops the song-list subpage afterwards (row tap), a
     /// play-button click keeps it open.
-    YtPlayPlaylistAt { url: String, title: String, index: usize, close: bool },
+    YtPlayPlaylistAt {
+        url: String,
+        title: String,
+        index: usize,
+        close: bool,
+    },
     /// Save a found playlist into the Playlists section (without playing it).
-    YtSavePlaylist { url: String, title: String },
+    YtSavePlaylist {
+        url: String,
+        title: String,
+    },
     /// Open a recent playlist's song list (the mirrored local playlist).
-    YtOpenRecentPlaylist { url: String, title: String },
+    YtOpenRecentPlaylist {
+        url: String,
+        title: String,
+    },
     /// Play a video: resolves the stream URL asynchronously (or plays the
     /// offline copy), then starts playback.
-    YtPlayVideo { video_id: String, title: String },
+    YtPlayVideo {
+        video_id: String,
+        title: String,
+    },
     /// Internal: a video's stream URL was resolved (or failed) in a worker →
     /// start streaming. Dispatched from `play_current` for `yt:` tracks.
     YtStreamResolved {
@@ -977,12 +1050,21 @@ pub enum Msg {
     SetYtView(YtView),
     /// Add a video to the on-disk music library: download + transcode + index
     /// in one step (background). Skips (and asks) if the target already exists.
-    YtAddToLibrary { video_id: String, title: String },
+    YtAddToLibrary {
+        video_id: String,
+        title: String,
+    },
     /// Like [`Msg::YtAddToLibrary`] but after the user confirmed overwriting an
     /// existing file (from the collision dialog).
-    YtAddToLibraryConfirmed { video_id: String, title: String },
+    YtAddToLibraryConfirmed {
+        video_id: String,
+        title: String,
+    },
     /// Add a whole playlist to the on-disk music library (download + transcode).
-    YtPlaylistToLibrary { url: String, title: String },
+    YtPlaylistToLibrary {
+        url: String,
+        title: String,
+    },
     // Streaming (internet radio)
     /// Open the add dialog (search + stream address).
     StreamAdd,
@@ -1012,7 +1094,10 @@ pub enum Msg {
     /// Open the replay subpage of a station.
     OpenStreamReplay(i64),
     /// Preview a buffered song (absolute byte range).
-    ReplayPlay { start: u64, end: u64 },
+    ReplayPlay {
+        start: u64,
+        end: u64,
+    },
     /// Save a buffered song after the fact.
     ReplaySave {
         start: u64,
@@ -1049,13 +1134,18 @@ pub enum Cmd {
     RemoteDownloaded(Result<(String, PathBuf), String>),
     /// Online enrichment finished; `changed` = something new was added
     /// (controls during the quiet backfill whether the views are reloaded).
-    EnrichDone { changed: bool },
+    EnrichDone {
+        changed: bool,
+    },
     /// Intermediate state: reload albums/artists view (e.g. after a phase).
     ReloadViews,
     /// Local library scan finished; `then_enrich` = possibly fetch online
     /// afterwards. `manual` = part of a user-triggered refresh (clears one slot
     /// of the refresh spinner on completion).
-    ScanDone { then_enrich: bool, manual: bool },
+    ScanDone {
+        then_enrich: bool,
+        manual: bool,
+    },
     /// Found concert candidates (for the import dialog).
     Candidates(Vec<crate::core::concert::Candidate>),
     /// Podcast feed fetched: `Some(title)` on success, otherwise `None`.
@@ -1141,7 +1231,9 @@ pub enum Cmd {
     /// Cloud sources were re-indexed → rebuild views + covers. `manual` = the
     /// user pressed refresh (force online enrichment regardless of the passive
     /// auto-enrich setting); `false` = silent background top-up at startup.
-    CloudReindexed { manual: bool },
+    CloudReindexed {
+        manual: bool,
+    },
     /// All podcast feeds finished refreshing (manual refresh) → rebuild the
     /// overview and clear one slot of the refresh spinner.
     PodcastsRefreshed,
@@ -2303,8 +2395,14 @@ impl Component for App {
         // diagnostic with the path and exit cleanly instead of panicking.
         let library = Library::open().unwrap_or_else(|e| {
             let path = crate::core::db::db_path();
-            tracing::error!("could not open the library database at {}: {e}", path.display());
-            eprintln!("Emilia: could not open the library database at {}: {e}", path.display());
+            tracing::error!(
+                "could not open the library database at {}: {e}",
+                path.display()
+            );
+            eprintln!(
+                "Emilia: could not open the library database at {}: {e}",
+                path.display()
+            );
             std::process::exit(1);
         });
         // Move any existing plaintext secrets (API keys, Nextcloud credentials)
@@ -2347,7 +2445,11 @@ impl Component for App {
             .flatten()
             .and_then(|s| s.parse::<i32>().ok());
         let saved_max = matches!(
-            library.get_setting("win_maximized").ok().flatten().as_deref(),
+            library
+                .get_setting("win_maximized")
+                .ok()
+                .flatten()
+                .as_deref(),
             Some("1")
         );
         // Concert options.
@@ -2374,7 +2476,11 @@ impl Component for App {
             })
             .unwrap_or_default();
         if matches!(
-            library.get_setting("concerts_hidden").ok().flatten().as_deref(),
+            library
+                .get_setting("concerts_hidden")
+                .ok()
+                .flatten()
+                .as_deref(),
             Some("1")
         ) {
             hidden_sections.insert("concerts".to_string());
@@ -2383,7 +2489,11 @@ impl Component for App {
         // countries, extractor not bundled). When disabled, hide its section –
         // toggling the setting adds/removes "youtube" from `hidden_sections`.
         let youtube_enabled = matches!(
-            library.get_setting("youtube_enabled").ok().flatten().as_deref(),
+            library
+                .get_setting("youtube_enabled")
+                .ok()
+                .flatten()
+                .as_deref(),
             Some("1")
         );
         if !youtube_enabled {
@@ -2399,7 +2509,10 @@ impl Component for App {
             .map(|s| {
                 s.split(',')
                     .filter_map(|name| {
-                        SECTIONS.iter().find(|(n, _, _)| *n == name.trim()).map(|(n, _, _)| *n)
+                        SECTIONS
+                            .iter()
+                            .find(|(n, _, _)| *n == name.trim())
+                            .map(|(n, _, _)| *n)
                     })
                     .collect()
             })
@@ -2429,7 +2542,11 @@ impl Component for App {
             .unwrap_or_else(|| "system".to_string());
         // Gallery view (default: off) and tiles/row (default: 3, 2–8).
         let gallery_view = matches!(
-            library.get_setting("gallery_view").ok().flatten().as_deref(),
+            library
+                .get_setting("gallery_view")
+                .ok()
+                .flatten()
+                .as_deref(),
             Some("1")
         );
         let gallery_columns = library
@@ -2616,7 +2733,9 @@ impl Component for App {
                 root_dir,
                 browse_dir,
                 shown_dir: None,
-                fs_scroll: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
+                fs_scroll: std::rc::Rc::new(std::cell::RefCell::new(
+                    std::collections::HashMap::new(),
+                )),
                 sources,
                 active_source: ActiveSource::Primary,
                 source_tabs: gtk::Box::new(gtk::Orientation::Horizontal, 0),
@@ -2849,10 +2968,7 @@ impl Component for App {
                 };
                 let prev = lib.get_setting("yt_dlp_app_version").ok().flatten();
                 let cur = env!("CARGO_PKG_VERSION");
-                if online
-                    && crate::core::youtube::available()
-                    && prev.as_deref() != Some(cur)
-                {
+                if online && crate::core::youtube::available() && prev.as_deref() != Some(cur) {
                     let _ = crate::core::youtube::update_ytdlp();
                 }
                 let _ = lib.set_setting("yt_dlp_app_version", cur);
@@ -2926,8 +3042,12 @@ impl Component for App {
             let label = widgets.chapter_label.clone();
             let motion = gtk::EventControllerMotion::new();
             {
-                let (chapters, scale, label, hovering) =
-                    (chapters.clone(), scale.clone(), label.clone(), hovering.clone());
+                let (chapters, scale, label, hovering) = (
+                    chapters.clone(),
+                    scale.clone(),
+                    label.clone(),
+                    hovering.clone(),
+                );
                 motion.connect_motion(move |_, x, _| {
                     if chapters.borrow().is_empty() {
                         return;
@@ -3001,7 +3121,11 @@ impl Component for App {
             adw::LengthUnit::Sp,
         ));
         // The desktop spacing between title bar and content is dropped in narrow mode.
-        breakpoint.add_setter(&widgets.content_overlay, "margin-top", Some(&0i32.to_value()));
+        breakpoint.add_setter(
+            &widgets.content_overlay,
+            "margin-top",
+            Some(&0i32.to_value()),
+        );
         // The transport bar would otherwise overflow on narrow phones: hide the
         // EQ button there (still reachable via the track's context menu).
         breakpoint.add_setter(&widgets.eq_btn, "visible", Some(&false.to_value()));
@@ -3273,7 +3397,12 @@ impl Component for App {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
         match msg {
             Msg::Activate(index) => {
-                let entry = self.libview.entries.guard().get(index).map(|r| r.entry.clone());
+                let entry = self
+                    .libview
+                    .entries
+                    .guard()
+                    .get(index)
+                    .map(|r| r.entry.clone());
                 let Some(entry) = entry else {
                     return;
                 };
@@ -3421,8 +3550,7 @@ impl Component for App {
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowTrackDetail(path) => {
-                self.nav.context_target =
-                    Some(CtxTarget::Fs(FsEntry::file(PathBuf::from(path))));
+                self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(PathBuf::from(path))));
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowAlbumTracks(index) => {
@@ -3433,13 +3561,20 @@ impl Component for App {
                     .guard()
                     .get(index)
                     .map(|c| c.meta.album.clone())
-                    .or_else(|| self.libview.albums_overview.get(index).map(|m| m.album.clone()));
+                    .or_else(|| {
+                        self.libview
+                            .albums_overview
+                            .get(index)
+                            .map(|m| m.album.clone())
+                    });
                 if let Some(album) = album {
                     self.open_album_by_name(&sender, &album);
                 }
             }
             Msg::ShowConcertDetail(index) => {
-                if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.concerts.concert_items.get(index).cloned()
+                {
                     self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
@@ -3473,7 +3608,11 @@ impl Component for App {
                 "folder" => self.open_folder_tracks(&sender, &key),
                 _ => {}
             },
-            Msg::PlayFolderTrack { folder, path, close } => {
+            Msg::PlayFolderTrack {
+                folder,
+                path,
+                close,
+            } => {
                 let files: Vec<PathBuf> = self
                     .folder_tracks_ordered(&folder)
                     .into_iter()
@@ -3611,15 +3750,23 @@ impl Component for App {
             }
             Msg::PlaylistAddTo(id) => self.add_context_to_playlist(id, &sender),
             Msg::OpenPlaylist(id) => {
-                if let Some((_, name, _)) =
-                    self.playlists.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
+                if let Some((_, name, _)) = self
+                    .playlists
+                    .playlist_items
+                    .iter()
+                    .find(|(pid, _, _)| *pid == id)
+                    .cloned()
                 {
                     self.open_playlist(&sender, id, &name);
                 }
             }
             Msg::ShowPlaylistDetail(id) => {
-                if let Some((_, name, _)) =
-                    self.playlists.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
+                if let Some((_, name, _)) = self
+                    .playlists
+                    .playlist_items
+                    .iter()
+                    .find(|(pid, _, _)| *pid == id)
+                    .cloned()
                 {
                     self.open_playlist_detail(root, &sender, id, &name);
                 }
@@ -3640,8 +3787,7 @@ impl Component for App {
                     let len = paths.len();
                     self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
                     // Random start, then a fresh random order over the rest.
-                    self.transport.queue_pos =
-                        gtk::glib::random_int_range(0, len as i32) as usize;
+                    self.transport.queue_pos = gtk::glib::random_int_range(0, len as i32) as usize;
                     self.transport.shuffle = true;
                     self.rebuild_shuffle_order();
                     self.play_current();
@@ -3653,7 +3799,11 @@ impl Component for App {
                 self.reload_playlists(&sender);
             }
             Msg::PlaylistDelete(id) => {
-                self.undo_toast(&sender, &gettext("Playlist deleted"), Msg::PlaylistDeleteConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Playlist deleted"),
+                    Msg::PlaylistDeleteConfirmed(id),
+                );
             }
             Msg::PlaylistDeleteConfirmed(id) => {
                 let _ = self.library.delete_playlist(id);
@@ -3705,8 +3855,12 @@ impl Component for App {
                 }
             }
             Msg::OpenPodcast(id) => {
-                if let Some((_, title, _, _)) =
-                    self.podcasts.podcast_items.iter().find(|(pid, _, _, _)| *pid == id).cloned()
+                if let Some((_, title, _, _)) = self
+                    .podcasts
+                    .podcast_items
+                    .iter()
+                    .find(|(pid, _, _, _)| *pid == id)
+                    .cloned()
                 {
                     self.open_podcast(&sender, id, &title);
                 }
@@ -3722,7 +3876,11 @@ impl Component for App {
                 }
             }
             Msg::PodcastDelete(id) => {
-                self.undo_toast(&sender, &gettext("Podcast removed"), Msg::PodcastDeleteConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Podcast removed"),
+                    Msg::PodcastDeleteConfirmed(id),
+                );
             }
             Msg::PodcastDeleteConfirmed(id) => {
                 let _ = self.library.delete_podcast(id);
@@ -3787,7 +3945,9 @@ impl Component for App {
                     // Running → stop.
                     sender.input(Msg::RecordStop);
                 } else if self.streaming.recording_buffer_minutes == 0 {
-                    self.toast(&gettext("Enable the recording buffer in the settings first"));
+                    self.toast(&gettext(
+                        "Enable the recording buffer in the settings first",
+                    ));
                 } else {
                     // Ensure the station (with buffer), then start the continuous recording.
                     if self.streaming.playing_stream != Some(id) {
@@ -3808,7 +3968,9 @@ impl Component for App {
                 // reports the title to the lock screen/media keys.
                 let title = title.trim().to_string();
                 if let Some(id) = self.streaming.playing_stream {
-                    if !title.is_empty() && self.streaming.stream_title.as_deref() != Some(title.as_str()) {
+                    if !title.is_empty()
+                        && self.streaming.stream_title.as_deref() != Some(title.as_str())
+                    {
                         self.streaming.stream_title = Some(title.clone());
                         let station = self
                             .streaming
@@ -3827,7 +3989,11 @@ impl Component for App {
             }
             Msg::OpenStream(id) => self.open_stream(root, &sender, id),
             Msg::StreamDelete(id) => {
-                self.undo_toast(&sender, &gettext("Station removed"), Msg::StreamDeleteConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Station removed"),
+                    Msg::StreamDeleteConfirmed(id),
+                );
             }
             Msg::StreamDeleteConfirmed(id) => {
                 if self.streaming.playing_stream == Some(id) {
@@ -3853,7 +4019,11 @@ impl Component for App {
             }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::ReplayPlay { start, end } => {
-                let temp = self.streaming.recorder.as_ref().and_then(|r| r.extract_temp(start, end).ok());
+                let temp = self
+                    .streaming
+                    .recorder
+                    .as_ref()
+                    .and_then(|r| r.extract_temp(start, end).ok());
                 match temp {
                     Some(path) => {
                         let p = path.to_string_lossy().to_string();
@@ -3898,7 +4068,11 @@ impl Component for App {
             }
             Msg::OpenRecording(id) => self.open_recording(root, &sender, id),
             Msg::RecordingDelete(id) => {
-                self.undo_toast(&sender, &gettext("Recording deleted"), Msg::RecordingDeleteConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Recording deleted"),
+                    Msg::RecordingDeleteConfirmed(id),
+                );
             }
             Msg::RecordingDeleteConfirmed(id) => {
                 if let Ok(Some(path)) = self.library.delete_recording(id) {
@@ -4066,7 +4240,11 @@ impl Component for App {
                 }
             }
             Msg::YtDeleteChannel(id) => {
-                self.undo_toast(&sender, &gettext("Channel removed"), Msg::YtDeleteChannelConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Channel removed"),
+                    Msg::YtDeleteChannelConfirmed(id),
+                );
             }
             Msg::YtDeleteChannelConfirmed(id) => {
                 let _ = self.library.delete_channel(id);
@@ -4089,10 +4267,14 @@ impl Component for App {
                 self.show_playlist_detail(root, &sender, &url, &title)
             }
             Msg::SetYtView(view) => self.youtube.yt_view = view,
-            Msg::YtEnriched { video_id, artist, cover } => {
-                let _ = self
-                    .library
-                    .set_recent_meta(&video_id, artist.as_deref(), cover.as_deref());
+            Msg::YtEnriched {
+                video_id,
+                artist,
+                cover,
+            } => {
+                let _ =
+                    self.library
+                        .set_recent_meta(&video_id, artist.as_deref(), cover.as_deref());
                 // Update the lock-screen art/artist if this video is still playing.
                 if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
                     if let Some(now) = self.mini.now_playing.clone() {
@@ -4123,7 +4305,9 @@ impl Component for App {
                     // Play as a single-item queue so the bar/next/prev behave normally.
                     self.youtube.playing_playlist = false;
                     self.youtube.video_titles.clear();
-                    self.youtube.video_titles.insert(video_id.clone(), title.clone());
+                    self.youtube
+                        .video_titles
+                        .insert(video_id.clone(), title.clone());
                     let _ = self.library.set_yt_title(&video_id, &title);
                     self.transport.queue =
                         vec![PathBuf::from(crate::core::youtube::yt_path(&video_id))];
@@ -4131,7 +4315,12 @@ impl Component for App {
                     self.play_current();
                 }
             }
-            Msg::YtPlayPlaylistAt { url, title, index, close } => {
+            Msg::YtPlayPlaylistAt {
+                url,
+                title,
+                index,
+                close,
+            } => {
                 // Play the cached playlist as the queue, starting at `index`. As a
                 // playlist context (`playing_playlist`), the individual songs are
                 // not logged to "Recent" – only the playlist entry, whose recency
@@ -4146,12 +4335,16 @@ impl Component for App {
                 self.youtube.video_titles.clear();
                 let mut queue = Vec::with_capacity(videos.len());
                 for v in &videos {
-                    self.youtube.video_titles.insert(v.id.clone(), v.title.clone());
+                    self.youtube
+                        .video_titles
+                        .insert(v.id.clone(), v.title.clone());
                     let _ = self.library.set_yt_meta(&v.id, &v.title, v.duration);
                     queue.push(PathBuf::from(crate::core::youtube::yt_path(&v.id)));
                 }
                 self.youtube.playing_playlist = true;
-                let _ = self.library.add_recent_playlist(&url, &title, videos.len() as i64);
+                let _ = self
+                    .library
+                    .add_recent_playlist(&url, &title, videos.len() as i64);
                 // Recent playlist cover = its first video's thumbnail.
                 if let Some(first) = videos.first() {
                     let _ = self
@@ -4169,7 +4362,10 @@ impl Component for App {
                 }
             }
             Msg::YtStartPlaylist { url, title } => {
-                self.toast(&gettext_f("Starting playlist “{title}” …", &[("title", &title)]));
+                self.toast(&gettext_f(
+                    "Starting playlist “{title}” …",
+                    &[("title", &title)],
+                ));
                 sender.spawn_command(move |out| {
                     let items: Vec<(String, String)> =
                         crate::core::youtube::list_playlist(&url, 200)
@@ -4180,7 +4376,11 @@ impl Component for App {
                     let _ = out.send(Cmd::YtPlaylistStart { url, title, items });
                 });
             }
-            Msg::YtStreamResolved { video_id, resume, result } => {
+            Msg::YtStreamResolved {
+                video_id,
+                resume,
+                result,
+            } => {
                 // Ignore if the user switched away while resolving.
                 if self.youtube.playing_video_id.as_deref() != Some(video_id.as_str()) {
                     return;
@@ -4247,7 +4447,9 @@ impl Component for App {
                     // Remote queue: advance to the next track (or stop at the
                     // end). Runs separately from the local queue.
                     self.remote_next();
-                } else if self.podcasts.playing_episode_url.is_some() && self.transport.queue.is_empty() {
+                } else if self.podcasts.playing_episode_url.is_some()
+                    && self.transport.queue.is_empty()
+                {
                     // A streamed episode has ended (no queue
                     // behind it): reset the playback state, clear the marking.
                     self.mini.playing = false;
@@ -4267,7 +4469,8 @@ impl Component for App {
                     *self.transport.close_resume.borrow_mut() = None;
                     // If a single song was slipped in between, now resume the interrupted
                     // queue at its spot.
-                    if self.transport.queue.len() == 1 && self.transport.interrupted_queue.is_some() {
+                    if self.transport.queue.len() == 1 && self.transport.interrupted_queue.is_some()
+                    {
                         if let Some((q, pos)) = self.transport.interrupted_queue.take() {
                             self.transport.queue = q;
                             self.transport.queue_pos = pos;
@@ -4721,7 +4924,10 @@ impl Component for App {
                 // (if desired) fetch covers/photos online.
                 self.reload_albums();
                 self.reload_artists();
-                if self.enrich_state.auto_enrich && !self.enrich_state.enriching && online_available() {
+                if self.enrich_state.auto_enrich
+                    && !self.enrich_state.enriching
+                    && online_available()
+                {
                     self.run_enrich(&sender, false, false);
                 }
             }
@@ -4745,7 +4951,11 @@ impl Component for App {
                 let _ = self.library.set_secret_setting("acoustid_key", &key);
                 self.enrich_state.acoustid_key = if key.is_empty() { None } else { Some(key) };
             }
-            Msg::SetAlbumCover { artist, album, path } => {
+            Msg::SetAlbumCover {
+                artist,
+                album,
+                path,
+            } => {
                 let mut meta = self
                     .library
                     .get_album_meta(&artist, &album)
@@ -4902,14 +5112,18 @@ impl Component for App {
                 ));
             }
             Msg::PlayConcert(index) => {
-                if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.concerts.concert_items.get(index).cloned()
+                {
                     self.play_entry(&scope, &key, is_dir);
                 }
             }
             Msg::OpenConcertEntry(index) => {
                 // Gallery tap: like the list tap – album/folder opens the
                 // track list, a single track is played.
-                if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.concerts.concert_items.get(index).cloned()
+                {
                     if scope == "track" {
                         self.play_entry(&scope, &key, is_dir);
                     } else {
@@ -4921,7 +5135,10 @@ impl Component for App {
                 self.set_section_visible(section, visible);
             }
             Msg::MoveSection { from, to } => {
-                if from < self.nav.section_order.len() && to < self.nav.section_order.len() && from != to {
+                if from < self.nav.section_order.len()
+                    && to < self.nav.section_order.len()
+                    && from != to
+                {
                     let name = self.nav.section_order.remove(from);
                     self.nav.section_order.insert(to, name);
                     let value = self.nav.section_order.join(",");
@@ -4954,7 +5171,9 @@ impl Component for App {
                 }
             }
             Msg::PlayFavorite(index) => {
-                if let Some((scope, key, _, is_dir)) = self.favorites.favorite_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.favorite_items.get(index).cloned()
+                {
                     // If exactly this track is already playing, only toggle play/pause
                     // (a click on the shown pause sign pauses), instead of
                     // restarting it.
@@ -4985,7 +5204,10 @@ impl Component for App {
                             .filter(|(s, _, _, _)| s == "track")
                             .map(|(_, k, _, _)| PathBuf::from(k))
                             .collect();
-                        let pos = tracks.iter().position(|p| *p == PathBuf::from(&key)).unwrap_or(0);
+                        let pos = tracks
+                            .iter()
+                            .position(|p| p.as_path() == Path::new(&key))
+                            .unwrap_or(0);
                         self.transport.shuffle = false;
                         self.transport.queue = tracks;
                         self.transport.queue_pos = pos;
@@ -4999,13 +5221,18 @@ impl Component for App {
                 }
             }
             Msg::ShowFavoriteDetail(index) => {
-                if let Some((scope, key, _, is_dir)) = self.favorites.favorite_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.favorite_items.get(index).cloned()
+                {
                     self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
             }
             Msg::MoveFavorite { from, to } => {
-                if from < self.favorites.favorite_items.len() && to < self.favorites.favorite_items.len() && from != to {
+                if from < self.favorites.favorite_items.len()
+                    && to < self.favorites.favorite_items.len()
+                    && from != to
+                {
                     let item = self.favorites.favorite_items.remove(from);
                     self.favorites.favorite_items.insert(to, item);
                     let order: Vec<(String, String)> = self
@@ -5019,13 +5246,17 @@ impl Component for App {
                 }
             }
             Msg::PlayAudiobook(index) => {
-                if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.audiobook_items.get(index).cloned()
+                {
                     self.play_entry(&scope, &key, is_dir);
                 }
             }
             Msg::OpenAudiobookEntry(index) => {
                 // Gallery tap: album/folder opens the track list, a single track plays.
-                if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.audiobook_items.get(index).cloned()
+                {
                     if scope == "track" {
                         self.play_entry(&scope, &key, is_dir);
                     } else {
@@ -5034,7 +5265,9 @@ impl Component for App {
                 }
             }
             Msg::ShowAudiobookDetail(index) => {
-                if let Some((scope, key, _, is_dir)) = self.favorites.audiobook_items.get(index).cloned() {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.audiobook_items.get(index).cloned()
+                {
                     self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
                     self.open_context_menu(root, &sender);
                 }
@@ -5107,8 +5340,10 @@ impl Component for App {
         match msg {
             Cmd::Entries(entries) => {
                 // "Mixed album": more than one distinct artist in the folder.
-                let distinct: std::collections::HashSet<String> =
-                    entries.iter().filter_map(|e| e.effective_artist()).collect();
+                let distinct: std::collections::HashSet<String> = entries
+                    .iter()
+                    .filter_map(|e| e.effective_artist())
+                    .collect();
                 let opts = RowOpts {
                     show_artist: distinct.len() > 1,
                 };
@@ -5116,9 +5351,7 @@ impl Component for App {
                 let mut guard = self.libview.entries.guard();
                 guard.clear();
                 for e in entries {
-                    let queued = e
-                        .path()
-                        .is_some_and(|ep| queue.iter().any(|p| p == ep));
+                    let queued = e.path().is_some_and(|ep| queue.iter().any(|p| p == ep));
                     guard.push_back((e, opts, queued));
                 }
                 drop(guard);
@@ -5157,15 +5390,16 @@ impl Component for App {
                         use crate::ui::app_views::natural_key;
                         let (mut dirs, mut files): (Vec<_>, Vec<_>) =
                             list.into_iter().partition(|e| e.is_dir);
-                        dirs.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
-                        files.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
+                        dirs.sort_by_key(|a| natural_key(&a.name));
+                        files.sort_by_key(|a| natural_key(&a.name));
                         // Source id, to read already-indexed track metadata
                         // (title/artist/duration) straight from the DB.
                         let source_id = match &source {
                             ActiveSource::Source(id) => Some(*id),
                             _ => None,
                         };
-                        let mut entries: Vec<FsEntry> = Vec::with_capacity(dirs.len() + files.len());
+                        let mut entries: Vec<FsEntry> =
+                            Vec::with_capacity(dirs.len() + files.len());
                         for d in dirs {
                             entries.push(FsEntry::remote_dir(d.rel_path, d.name));
                         }
@@ -5193,8 +5427,10 @@ impl Component for App {
                                 duration_ms,
                             ));
                         }
-                        let distinct: std::collections::HashSet<String> =
-                            entries.iter().filter_map(|e| e.effective_artist()).collect();
+                        let distinct: std::collections::HashSet<String> = entries
+                            .iter()
+                            .filter_map(|e| e.effective_artist())
+                            .collect();
                         let opts = RowOpts {
                             show_artist: distinct.len() > 1,
                         };
@@ -5273,7 +5509,10 @@ impl Component for App {
                 self.reload_albums();
                 self.reload_artists();
             }
-            Cmd::ScanDone { then_enrich, manual } => {
+            Cmd::ScanDone {
+                then_enrich,
+                manual,
+            } => {
                 if manual {
                     self.refresh_done();
                 }
@@ -5384,9 +5623,12 @@ impl Component for App {
                 self.refresh_done();
                 self.reload_channels(&sender);
             }
-            Cmd::YtVideoMeta { video_id, uploader, duration, cover } => {
-                self.apply_video_meta(&video_id, uploader, duration, cover)
-            }
+            Cmd::YtVideoMeta {
+                video_id,
+                uploader,
+                duration,
+                cover,
+            } => self.apply_video_meta(&video_id, uploader, duration, cover),
             Cmd::YtPlaylistStart { url, title, items } => {
                 if items.is_empty() {
                     self.toast(&gettext("Playlist is empty"));
@@ -5404,7 +5646,9 @@ impl Component for App {
                     }
                     // Log the playlist as one "Recent" entry (not the videos).
                     self.youtube.playing_playlist = true;
-                    let _ = self.library.add_recent_playlist(&url, &title, items.len() as i64);
+                    let _ = self
+                        .library
+                        .add_recent_playlist(&url, &title, items.len() as i64);
                     // Recent playlist cover = its first video's thumbnail.
                     if let Some((id, _)) = items.first() {
                         let _ = self
@@ -5460,7 +5704,11 @@ impl Component for App {
                     }
                 }
             }
-            Cmd::YtLibraryExists { video_id, title, dest } => {
+            Cmd::YtLibraryExists {
+                video_id,
+                title,
+                dest,
+            } => {
                 self.youtube.downloading_videos.remove(&video_id);
                 self.refresh_yt_download_row();
                 self.yt_progress_done(&gettext("Song already exists"));
@@ -5496,7 +5744,9 @@ impl Component for App {
                 self.libview.loading_label = None;
                 match result {
                     Ok(videos) => {
-                        self.youtube.playlist_songs_cache.insert(url.clone(), videos.clone());
+                        self.youtube
+                            .playlist_songs_cache
+                            .insert(url.clone(), videos.clone());
                         self.show_yt_playlist_songs(&sender, &url, &title, videos);
                     }
                     Err(e) => {
@@ -6020,7 +6270,12 @@ impl App {
         // we re-measure and couple (once) to the `page-size` of the
         // enclosing ScrolledWindow, so that the tiles scale along in desktop mode on
         // a window width change.
-        if self.libview.gallery_hooked.borrow_mut().insert(fb.as_ptr() as usize) {
+        if self
+            .libview
+            .gallery_hooked
+            .borrow_mut()
+            .insert(fb.as_ptr() as usize)
+        {
             let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
             fb.connect_map(move |fb| {
                 size_gallery_tiles_when_ready(fb);
@@ -6085,14 +6340,22 @@ impl App {
             !matched && self.library.artist_attempts(&name) < crate::ui::enrich::MAX_ATTEMPTS;
         // (b) Gallery (fanart.tv): only with a key, if none is present yet and not yet
         // attempted in this session (galleries have no attempt limit).
-        let fkey = self.enrich_state.fanart_key.clone().filter(|k| !k.is_empty());
+        let fkey = self
+            .enrich_state
+            .fanart_key
+            .clone()
+            .filter(|k| !k.is_empty());
         let need_gallery = fkey.is_some()
             && self
                 .library
                 .artist_images(&name)
                 .map(|imgs| imgs.is_empty())
                 .unwrap_or(false)
-            && self.libview.gallery_tried.borrow_mut().insert(format!("a\u{1}{name}"));
+            && self
+                .libview
+                .gallery_tried
+                .borrow_mut()
+                .insert(format!("a\u{1}{name}"));
         if !need_image && !need_gallery {
             return;
         }
@@ -6137,7 +6400,12 @@ impl App {
         });
     }
 
-    pub(crate) fn fetch_focus_album(&self, sender: &ComponentSender<Self>, artist: &str, album: &str) {
+    pub(crate) fn fetch_focus_album(
+        &self,
+        sender: &ComponentSender<Self>,
+        artist: &str,
+        album: &str,
+    ) {
         let artist = artist.trim().to_string();
         let album = album.trim().to_string();
         if artist.is_empty() || album.is_empty() || !online_available() {
@@ -6148,7 +6416,11 @@ impl App {
             .get_album_meta(&artist, &album)
             .ok()
             .flatten()
-            .is_some_and(|m| m.cover_path.as_deref().is_some_and(|p| !p.trim().is_empty()));
+            .is_some_and(|m| {
+                m.cover_path
+                    .as_deref()
+                    .is_some_and(|p| !p.trim().is_empty())
+            });
         let need_cover = !has_cover
             && self.library.album_attempts(&artist, &album) < crate::ui::enrich::MAX_ATTEMPTS;
         let need_gallery = self
@@ -6177,7 +6449,8 @@ impl App {
                     // MBID **without** overwriting that cover, so the online images
                     // are offered as alternatives rather than replacing it.
                     if !need_cover {
-                        let _ = crate::core::online::match_album_mbid(&client, &lib, &artist, &album);
+                        let _ =
+                            crate::core::online::match_album_mbid(&client, &lib, &artist, &album);
                     }
                     let _ =
                         crate::core::online::enrich_album_gallery(&client, &lib, &artist, &album);
@@ -6195,7 +6468,12 @@ impl App {
         if !online_available() {
             return;
         }
-        let Some(key) = self.enrich_state.acoustid_key.clone().filter(|k| !k.is_empty()) else {
+        let Some(key) = self
+            .enrich_state
+            .acoustid_key
+            .clone()
+            .filter(|k| !k.is_empty())
+        else {
             return;
         };
         if !crate::core::online::fingerprint_available() {
@@ -6338,7 +6616,11 @@ impl App {
     /// spacer + "Settings", which stay untouched at the end).
     pub(crate) fn apply_section_order(&self) {
         for sidebar in [true, false] {
-            let container = if sidebar { &self.nav.sidebar_nav } else { &self.nav.top_nav };
+            let container = if sidebar {
+                &self.nav.sidebar_nav
+            } else {
+                &self.nav.top_nav
+            };
             let mut prev: Option<gtk::Widget> = None;
             for &name in &self.nav.section_order {
                 if let Some((_, _, btn)) = self
@@ -6362,7 +6644,7 @@ mod tests {
     #[test]
     fn guarded_resume_clamps_start_and_end() {
         let dur = 3_600_000; // 1 h
-        // In the middle → unchanged.
+                             // In the middle → unchanged.
         assert_eq!(guarded_resume(1_000_000, dur), 1_000_000);
         // Near the start (< 5 s) → 0.
         assert_eq!(guarded_resume(3_000, dur), 0);

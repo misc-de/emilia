@@ -6,9 +6,7 @@
 
 use std::path::PathBuf;
 
-use gettextrs::{
-    bind_textdomain_codeset, bindtextdomain, setlocale, textdomain, LocaleCategory,
-};
+use gettextrs::{bind_textdomain_codeset, bindtextdomain, setlocale, textdomain, LocaleCategory};
 
 pub use gettextrs::{gettext, ngettext};
 

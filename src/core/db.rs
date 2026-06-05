@@ -58,7 +58,9 @@ macro_rules! track_upsert_params {
 /// Escapes the LIKE metacharacters `\ % _` so an arbitrary (user-chosen) path
 /// can be used as a literal prefix in a `LIKE … ESCAPE '\'` pattern.
 fn like_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// In-memory snapshot of the `category` table (+ one sample track path per
@@ -520,8 +522,9 @@ impl Library {
             .unwrap_or(0)
             > 0;
         if !has_eq_enabled {
-            self.conn
-                .execute_batch("ALTER TABLE eq_setting ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;")?;
+            self.conn.execute_batch(
+                "ALTER TABLE eq_setting ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;",
+            )?;
         }
 
         // Migration: add disc_no (disc number for multi-CD albums).
@@ -911,7 +914,11 @@ impl Library {
                 }
                 "album" => {
                     // key = "artist\1album" → title = album name.
-                    let album = key.splitn(2, '\u{1}').nth(1).unwrap_or("").to_string();
+                    let album = key
+                        .split_once('\u{1}')
+                        .map(|x| x.1)
+                        .unwrap_or("")
+                        .to_string();
                     Some(("album", album, false))
                 }
                 "folder" if include_folders => Some(("folder", file_name_of(&key), true)),
@@ -924,7 +931,7 @@ impl Library {
                 }
             }
         }
-        out.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        out.sort_by_key(|a| a.2.to_lowercase());
         out
     }
 
@@ -966,7 +973,11 @@ impl Library {
             .conn
             .prepare("SELECT scope, key, value FROM category")?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
@@ -984,7 +995,8 @@ impl Library {
             return parse_areas(&v);
         }
         if let Some(album) = album {
-            if let Ok(Some(v)) = self.get_category("album", &album_key(artist.unwrap_or(""), album)) {
+            if let Ok(Some(v)) = self.get_category("album", &album_key(artist.unwrap_or(""), album))
+            {
                 return parse_areas(&v);
             }
         }
@@ -1074,9 +1086,15 @@ impl Library {
 
         let mut map: HashMap<(String, String), Vec<crate::core::category::Area>> = HashMap::new();
         {
-            let mut stmt = self.conn.prepare("SELECT scope, key, value FROM category")?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT scope, key, value FROM category")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
             })?;
             for (scope, key, value) in rows.flatten() {
                 map.insert((scope, key), parse_areas(&value));
@@ -1091,7 +1109,11 @@ impl Library {
                  GROUP BY COALESCE(artist, ''), album",
             )?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
             })?;
             for (artist, album, path) in rows.flatten() {
                 sample.insert((artist, album), path);
@@ -1137,13 +1159,19 @@ impl Library {
                 |r| r.get::<_, i64>(0),
             )
             .optional()?;
-        Ok(enabled.map_or(true, |v| v != 0))
+        Ok(enabled != Some(0))
     }
 
     /// Enables/disables one EQ setting without changing its saved band values.
     /// If the setting does not exist yet, create a neutral one so disabled means
     /// "flat override" rather than "inherit from a broader level".
-    pub fn set_eq_enabled(&self, output: &str, scope: &str, key: &str, enabled: bool) -> Result<()> {
+    pub fn set_eq_enabled(
+        &self,
+        output: &str,
+        scope: &str,
+        key: &str,
+        enabled: bool,
+    ) -> Result<()> {
         let neutral = serde_json::to_string(&[0.0; 10])?;
         self.conn.execute(
             "INSERT INTO eq_setting (output, scope, key, bands, enabled)
@@ -1276,7 +1304,8 @@ impl Library {
         let value = value.trim();
         if value.is_empty() {
             crate::core::secrets::clear_named(key);
-            self.conn.execute("DELETE FROM setting WHERE key = ?1", [key])?;
+            self.conn
+                .execute("DELETE FROM setting WHERE key = ?1", [key])?;
             return Ok(());
         }
         let label = format!("Emilia {key}");
@@ -1314,9 +1343,11 @@ impl Library {
     pub fn add_source(&self, s: &Source) -> Result<i64> {
         let position: i64 = self
             .conn
-            .query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM source", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM source",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
         self.conn.execute(
             "INSERT INTO source (kind, name, position, path, base_url, username, password, music_path)
@@ -1387,7 +1418,8 @@ impl Library {
                     && secrets::store_source_password(s.id, &label, pw)
                     && secrets::lookup_source_password(s.id).as_deref() == Some(pw)
                 {
-                    let _ = self.set_source_password(s.id, Some(&secrets::source_password_ref(s.id)));
+                    let _ =
+                        self.set_source_password(s.id, Some(&secrets::source_password_ref(s.id)));
                 }
             }
             if let Some(user) = s.username.as_deref() {
@@ -1396,7 +1428,8 @@ impl Library {
                     && secrets::store_source_username(s.id, &label, user)
                     && secrets::lookup_source_username(s.id).as_deref() == Some(user)
                 {
-                    let _ = self.set_source_username(s.id, Some(&secrets::source_username_ref(s.id)));
+                    let _ =
+                        self.set_source_username(s.id, Some(&secrets::source_username_ref(s.id)));
                 }
             }
         }
@@ -1409,8 +1442,10 @@ impl Library {
             .execute("DELETE FROM source WHERE id = ?1", [id])?;
         // Remove indexed cloud tracks of this source (synthetic path
         // `nc:<id>:…`). For local sources the pattern matches nothing.
-        self.conn
-            .execute("DELETE FROM track WHERE path LIKE ?1", [format!("nc:{id}:%")])?;
+        self.conn.execute(
+            "DELETE FROM track WHERE path LIKE ?1",
+            [format!("nc:{id}:%")],
+        )?;
         Ok(())
     }
 
@@ -1422,8 +1457,9 @@ impl Library {
             "SELECT DISTINCT COALESCE(artist,''), COALESCE(album,'') FROM track \
              WHERE path LIKE ?1 AND album IS NOT NULL AND album <> ''",
         )?;
-        let rows =
-            stmt.query_map([like], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map([like], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -1441,7 +1477,8 @@ impl Library {
 
     /// Inserts a track or updates its metadata (key: path).
     pub fn upsert_track(&self, t: &Track) -> Result<()> {
-        self.conn.execute(UPSERT_TRACK_SQL, track_upsert_params!(t))?;
+        self.conn
+            .execute(UPSERT_TRACK_SQL, track_upsert_params!(t))?;
         Ok(())
     }
 
@@ -1582,7 +1619,10 @@ impl Library {
         )?;
         tx.commit()?;
         if removed > 0 {
-            tracing::info!("Scan: pruned {removed} orphaned track(s) under {}", root.display());
+            tracing::info!(
+                "Scan: pruned {removed} orphaned track(s) under {}",
+                root.display()
+            );
         }
         Ok(removed)
     }
@@ -1858,7 +1898,9 @@ impl Library {
         // Display artist = the one with the most tracks; prefer its
         // cover/year/MBID, fill missing fields from the remaining artists.
         for (key, meta) in map.iter_mut() {
-            let Some(per) = by_artist.get(key) else { continue };
+            let Some(per) = by_artist.get(key) else {
+                continue;
+            };
             let mut artists: Vec<(&String, &ArtistInfo)> = per.iter().collect();
             artists.sort_by(|a, b| {
                 b.1 .0
@@ -1893,7 +1935,7 @@ impl Library {
             cats.album_areas(&a.artist, &a.album)
                 .contains(&crate::core::category::Area::Albums)
         });
-        out.sort_by(|a, b| a.album.to_lowercase().cmp(&b.album.to_lowercase()));
+        out.sort_by_key(|a| a.album.to_lowercase());
         Ok(out)
     }
 
@@ -2088,7 +2130,14 @@ impl Library {
                 fetched_at     = excluded.fetched_at,
                 attempts       = CASE WHEN excluded.status = 'matched' THEN 0
                                       ELSE track_meta.attempts + 1 END",
-            rusqlite::params![m.path, m.recording_mbid, m.title, m.artist, m.album, m.status],
+            rusqlite::params![
+                m.path,
+                m.recording_mbid,
+                m.title,
+                m.artist,
+                m.album,
+                m.status
+            ],
         )?;
         Ok(())
     }
@@ -2261,7 +2310,10 @@ impl Library {
             *votes.entry(key).or_default().entry(primary).or_insert(0) += plays;
         }
         for (key, e) in map.iter_mut() {
-            if let Some((name, _)) = votes.get(key).and_then(|v| v.iter().max_by_key(|(_, c)| **c)) {
+            if let Some((name, _)) = votes
+                .get(key)
+                .and_then(|v| v.iter().max_by_key(|(_, c)| **c))
+            {
                 e.detail = name.clone();
             }
         }
@@ -2283,7 +2335,11 @@ impl Library {
         ))?;
         let raw = stmt
             .query_map([since], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect::<Vec<_>>();
@@ -2404,7 +2460,9 @@ impl Library {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for (i, (path, kind, source)) in images.iter().enumerate() {
-                stmt.execute(rusqlite::params![artist, album, i as i64, path, kind, source])?;
+                stmt.execute(rusqlite::params![
+                    artist, album, i as i64, path, kind, source
+                ])?;
             }
         }
         tx.commit()?;
@@ -2416,17 +2474,12 @@ impl Library {
         let mut stmt = self.conn.prepare(
             "SELECT path FROM album_image WHERE artist = ?1 AND album = ?2 ORDER BY idx",
         )?;
-        let rows =
-            stmt.query_map(rusqlite::params![artist, album], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(rusqlite::params![artist, album], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Replaces the stored artist images (order = idx).
-    pub fn set_artist_images(
-        &self,
-        name: &str,
-        images: &[(String, String, String)],
-    ) -> Result<()> {
+    pub fn set_artist_images(&self, name: &str, images: &[(String, String, String)]) -> Result<()> {
         // One transaction so the gallery is never seen half-deleted/half-filled.
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM artist_image WHERE name = ?1", [name])?;
@@ -2541,8 +2594,10 @@ impl Library {
     /// Stores the chosen cover of a playlist (clears it when `path` is empty).
     pub fn set_playlist_cover(&self, id: i64, path: &str) -> Result<()> {
         let value = (!path.is_empty()).then_some(path);
-        self.conn
-            .execute("UPDATE playlist SET cover_path = ?2 WHERE id = ?1", rusqlite::params![id, value])?;
+        self.conn.execute(
+            "UPDATE playlist SET cover_path = ?2 WHERE id = ?1",
+            rusqlite::params![id, value],
+        )?;
         Ok(())
     }
 
@@ -2684,11 +2739,11 @@ impl Library {
                 title = excluded.title, image_url = excluded.image_url",
             rusqlite::params![title, feed_url, image_url],
         )?;
-        Ok(self
-            .conn
-            .query_row("SELECT id FROM podcast WHERE feed_url = ?1", [feed_url], |r| {
-                r.get(0)
-            })?)
+        Ok(self.conn.query_row(
+            "SELECT id FROM podcast WHERE feed_url = ?1",
+            [feed_url],
+            |r| r.get(0),
+        )?)
     }
 
     /// All podcasts as (id, title, image URL, episode count), newest first.
@@ -2999,7 +3054,10 @@ impl Library {
     /// Stored info for a video that belongs to a subscribed channel:
     /// (channel title, duration, thumbnail URL). `None` if not stored – so the
     /// detail can show persisted data without re-fetching from the network.
-    pub fn yt_video_info(&self, video_id: &str) -> Result<Option<(String, Option<i64>, Option<String>)>> {
+    pub fn yt_video_info(
+        &self,
+        video_id: &str,
+    ) -> Result<Option<(String, Option<i64>, Option<String>)>> {
         Ok(self
             .conn
             .query_row(
@@ -3007,11 +3065,16 @@ impl Library {
                  FROM yt_video v JOIN yt_channel c ON c.id = v.channel_id
                  WHERE v.video_id = ?1 LIMIT 1",
                 [video_id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<String>>(2)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
             )
             .optional()?)
     }
-
 
     /// Local path of a downloaded video, or `None` if not downloaded.
     pub fn yt_download(&self, video_id: &str) -> Result<Option<String>> {
@@ -3039,7 +3102,12 @@ impl Library {
     const RECENT_CAP: i64 = 100;
 
     /// Records a video as "recently played" (moves it to the top).
-    pub fn add_recent_video(&self, video_id: &str, title: &str, thumbnail: Option<&str>) -> Result<()> {
+    pub fn add_recent_video(
+        &self,
+        video_id: &str,
+        title: &str,
+        thumbnail: Option<&str>,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO yt_recent (video_id, title, thumbnail, played_at, kind, count)
              VALUES (?1, ?2, ?3, strftime('%s','now'), 'video', 0)
@@ -3077,7 +3145,12 @@ impl Library {
 
     /// Stores the enriched artist + cover for a recent video (from the online
     /// lookup). No-op if the video is no longer in the history.
-    pub fn set_recent_meta(&self, video_id: &str, artist: Option<&str>, cover: Option<&str>) -> Result<()> {
+    pub fn set_recent_meta(
+        &self,
+        video_id: &str,
+        artist: Option<&str>,
+        cover: Option<&str>,
+    ) -> Result<()> {
         self.conn.execute(
             "UPDATE yt_recent SET artist = ?2, thumbnail = COALESCE(?3, thumbnail)
              WHERE video_id = ?1",
@@ -3120,14 +3193,17 @@ impl Library {
     pub fn is_recent(&self, key: &str) -> Result<bool> {
         Ok(self
             .conn
-            .query_row("SELECT 1 FROM yt_recent WHERE video_id = ?1", [key], |_| Ok(()))
+            .query_row("SELECT 1 FROM yt_recent WHERE video_id = ?1", [key], |_| {
+                Ok(())
+            })
             .optional()?
             .is_some())
     }
 
     /// Removes an item (video id or playlist URL) from the "Recent" history.
     pub fn delete_recent(&self, key: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM yt_recent WHERE video_id = ?1", [key])?;
+        self.conn
+            .execute("DELETE FROM yt_recent WHERE video_id = ?1", [key])?;
         Ok(())
     }
 
@@ -3136,7 +3212,11 @@ impl Library {
     pub fn is_podcast_episode(&self, url: &str) -> Result<bool> {
         Ok(self
             .conn
-            .query_row("SELECT 1 FROM episode WHERE audio_url = ?1 LIMIT 1", [url], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM episode WHERE audio_url = ?1 LIMIT 1",
+                [url],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some())
     }
@@ -3169,9 +3249,11 @@ impl Library {
     pub fn yt_duration(&self, video_id: &str) -> Result<Option<i64>> {
         Ok(self
             .conn
-            .query_row("SELECT duration FROM yt_title WHERE video_id = ?1", [video_id], |r| {
-                r.get::<_, Option<i64>>(0)
-            })
+            .query_row(
+                "SELECT duration FROM yt_title WHERE video_id = ?1",
+                [video_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
             .optional()?
             .flatten())
     }
@@ -3180,9 +3262,11 @@ impl Library {
     pub fn yt_title(&self, video_id: &str) -> Result<Option<String>> {
         Ok(self
             .conn
-            .query_row("SELECT title FROM yt_title WHERE video_id = ?1", [video_id], |r| {
-                r.get::<_, String>(0)
-            })
+            .query_row(
+                "SELECT title FROM yt_title WHERE video_id = ?1",
+                [video_id],
+                |r| r.get::<_, String>(0),
+            )
             .optional()?)
     }
 
@@ -3293,7 +3377,8 @@ impl Library {
 
     /// Removes a station.
     pub fn delete_stream(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM stream WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM stream WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -3343,8 +3428,10 @@ impl Library {
             // Fill in the artist if it was missing before.
             if old_artist.as_deref().unwrap_or("").trim().is_empty() {
                 if let Some(a) = artist.filter(|a| !a.trim().is_empty()) {
-                    self.conn
-                        .execute("UPDATE recording SET artist = ?1 WHERE id = ?2", rusqlite::params![a, id])?;
+                    self.conn.execute(
+                        "UPDATE recording SET artist = ?1 WHERE id = ?2",
+                        rusqlite::params![a, id],
+                    )?;
                 }
             }
             // Upgrade an incomplete copy to a complete one: repoint to the new
@@ -3392,9 +3479,12 @@ impl Library {
     pub fn delete_recording(&self, id: i64) -> Result<Option<String>> {
         let path: Option<String> = self
             .conn
-            .query_row("SELECT path FROM recording WHERE id = ?1", [id], |r| r.get(0))
+            .query_row("SELECT path FROM recording WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
             .optional()?;
-        self.conn.execute("DELETE FROM recording WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM recording WHERE id = ?1", [id])?;
         Ok(path)
     }
 
@@ -3445,17 +3535,25 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         lib.upsert_track(&track("/m/a1.mp3", Some("Alice"), Some("Album X")))
             .unwrap();
-        lib.upsert_track(&track("/m/a2.mp3", Some("Alice feat. Bob"), Some("Album X")))
-            .unwrap();
+        lib.upsert_track(&track(
+            "/m/a2.mp3",
+            Some("Alice feat. Bob"),
+            Some("Album X"),
+        ))
+        .unwrap();
         lib.upsert_track(&track("/m/c1.mp3", Some("Carol"), Some("Album Y")))
             .unwrap();
 
         // Duration of the test tracks is 60 s → threshold effectively 30 s.
         let t0: i64 = 1_700_000_000;
-        lib.log_play("/m/a1.mp3", t0, 45_000, 60_000, true, Some("queue")).unwrap();
-        lib.log_play("/m/a1.mp3", t0 + 100, 50_000, 60_000, true, None).unwrap();
-        lib.log_play("/m/a2.mp3", t0 + 200, 40_000, 60_000, false, None).unwrap();
-        lib.log_play("/m/c1.mp3", t0 + 300, 5_000, 60_000, false, None).unwrap(); // skip
+        lib.log_play("/m/a1.mp3", t0, 45_000, 60_000, true, Some("queue"))
+            .unwrap();
+        lib.log_play("/m/a1.mp3", t0 + 100, 50_000, 60_000, true, None)
+            .unwrap();
+        lib.log_play("/m/a2.mp3", t0 + 200, 40_000, 60_000, false, None)
+            .unwrap();
+        lib.log_play("/m/c1.mp3", t0 + 300, 5_000, 60_000, false, None)
+            .unwrap(); // skip
 
         let tot = lib.stats_totals(0).unwrap();
         assert_eq!(tot.plays, 3);
@@ -3484,13 +3582,23 @@ mod tests {
         // last_played is tracked (forward: the later event wins).
         let lp: Option<i64> = lib
             .conn
-            .query_row("SELECT last_played FROM track WHERE path = ?1", ["/m/a1.mp3"], |r| r.get(0))
+            .query_row(
+                "SELECT last_played FROM track WHERE path = ?1",
+                ["/m/a1.mp3"],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(lp, Some(t0 + 100));
 
         // Distributions preserve the total time (checked timezone-independently).
-        assert_eq!(lib.stats_by_hour(0).unwrap().iter().sum::<i64>(), tot.total_played_ms);
-        assert_eq!(lib.stats_by_weekday(0).unwrap().iter().sum::<i64>(), tot.total_played_ms);
+        assert_eq!(
+            lib.stats_by_hour(0).unwrap().iter().sum::<i64>(),
+            tot.total_played_ms
+        );
+        assert_eq!(
+            lib.stats_by_weekday(0).unwrap().iter().sum::<i64>(),
+            tot.total_played_ms
+        );
 
         // since filter: from t0+250 only the skip (c1) remains.
         let recent = lib.stats_totals(t0 + 250).unwrap();
@@ -3540,7 +3648,11 @@ mod tests {
     fn podcast_subscribe_and_episodes() {
         let lib = Library::open_in_memory().unwrap();
         let id = lib
-            .subscribe_podcast("Mein Podcast", "https://feed.example/rss", Some("https://img"))
+            .subscribe_podcast(
+                "Mein Podcast",
+                "https://feed.example/rss",
+                Some("https://img"),
+            )
             .unwrap();
         // Re-subscribing to the same feed → same ID (upsert), no duplicate.
         let id2 = lib
@@ -3576,7 +3688,10 @@ mod tests {
 
         let list = lib.podcasts().unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!((list[0].0, list[0].1.as_str(), list[0].3), (id, "Mein Podcast (neu)", 2));
+        assert_eq!(
+            (list[0].0, list[0].1.as_str(), list[0].3),
+            (id, "Mein Podcast (neu)", 2)
+        );
 
         lib.delete_podcast(id).unwrap();
         assert!(lib.podcasts().unwrap().is_empty());
@@ -3587,7 +3702,10 @@ mod tests {
     fn playlist_crud_and_items() {
         let lib = Library::open_in_memory().unwrap();
         let id = lib.create_playlist("Roadtrip").unwrap();
-        assert_eq!(lib.playlists().unwrap(), vec![(id, "Roadtrip".to_string(), 0)]);
+        assert_eq!(
+            lib.playlists().unwrap(),
+            vec![(id, "Roadtrip".to_string(), 0)]
+        );
 
         // Appending preserves the order (across two calls).
         lib.add_to_playlist(id, &["/a.mp3".into(), "/b.mp3".into()])
@@ -3614,8 +3732,14 @@ mod tests {
     fn youtube_channels_videos_downloads_and_progress() {
         let lib = Library::open_in_memory().unwrap();
         // Subscribe (idempotent on channel_id) and list.
-        let cid = lib.subscribe_channel("UC123", "Some Channel", "https://yt/UC123", Some("t.jpg")).unwrap();
-        assert_eq!(lib.subscribe_channel("UC123", "Renamed", "https://yt/UC123", None).unwrap(), cid);
+        let cid = lib
+            .subscribe_channel("UC123", "Some Channel", "https://yt/UC123", Some("t.jpg"))
+            .unwrap();
+        assert_eq!(
+            lib.subscribe_channel("UC123", "Renamed", "https://yt/UC123", None)
+                .unwrap(),
+            cid
+        );
         let channels = lib.channels().unwrap();
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0].1, "Renamed");
@@ -3641,7 +3765,10 @@ mod tests {
         ];
         lib.set_channel_videos(cid, &videos).unwrap();
         let read = lib.channel_videos(cid).unwrap();
-        assert_eq!(read.iter().map(|v| v.video_id.as_str()).collect::<Vec<_>>(), ["v1", "v2"]);
+        assert_eq!(
+            read.iter().map(|v| v.video_id.as_str()).collect::<Vec<_>>(),
+            ["v1", "v2"]
+        );
         assert_eq!(lib.channels().unwrap()[0].4, 2); // video count
         assert_eq!(lib.all_videos().unwrap().len(), 2);
 
@@ -3655,14 +3782,27 @@ mod tests {
     fn youtube_recent_history_orders_and_enriches() {
         let lib = Library::open_in_memory().unwrap();
         lib.add_recent_video("a", "First", None).unwrap();
-        lib.add_recent_video("b", "Second", Some("http://thumb/b.jpg")).unwrap();
+        lib.add_recent_video("b", "Second", Some("http://thumb/b.jpg"))
+            .unwrap();
         // Re-playing "a" moves it back to the top.
         lib.add_recent_video("a", "First", None).unwrap();
         let recent = lib.recent_videos(10).unwrap();
-        assert_eq!(recent.iter().map(|r| r.video_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(
+            recent
+                .iter()
+                .map(|r| r.video_id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
         // Enrichment fills the artist.
-        lib.set_recent_meta("a", Some("The Artist"), Some("/cache/a.img")).unwrap();
-        let a = lib.recent_videos(10).unwrap().into_iter().find(|r| r.video_id == "a").unwrap();
+        lib.set_recent_meta("a", Some("The Artist"), Some("/cache/a.img"))
+            .unwrap();
+        let a = lib
+            .recent_videos(10)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.video_id == "a")
+            .unwrap();
         assert_eq!(a.artist.as_deref(), Some("The Artist"));
     }
 
@@ -3671,7 +3811,8 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         // A user's own playlist that happens to share the YouTube playlist's name.
         let user = lib.create_playlist("Mix").unwrap();
-        lib.add_to_playlist(user, &["song/mine.mp3".to_string()]).unwrap();
+        lib.add_to_playlist(user, &["song/mine.mp3".to_string()])
+            .unwrap();
 
         // Mirror a YouTube playlist (different identity: an origin URL) under the
         // same name. The user playlist must survive untouched.
@@ -3680,17 +3821,28 @@ mod tests {
             .replace_yt_playlist(url, "Mix", &["yt:v1".into(), "yt:v2".into()])
             .unwrap();
         assert_ne!(mirror, user, "mirror must be a distinct playlist");
-        assert_eq!(lib.playlist_paths(user).unwrap(), vec!["song/mine.mp3".to_string()]);
+        assert_eq!(
+            lib.playlist_paths(user).unwrap(),
+            vec!["song/mine.mp3".to_string()]
+        );
         assert_eq!(lib.yt_playlist_id(url).unwrap(), Some(mirror));
         // The user playlist has no origin, so it is never matched as a mirror.
         assert_eq!(lib.playlists().unwrap().len(), 2);
 
         // Re-mirroring the same URL refreshes the SAME mirror in place (no
         // duplicate, contents replaced) and still leaves the user playlist alone.
-        let mirror2 = lib.replace_yt_playlist(url, "Mix", &["yt:v3".into()]).unwrap();
+        let mirror2 = lib
+            .replace_yt_playlist(url, "Mix", &["yt:v3".into()])
+            .unwrap();
         assert_eq!(mirror2, mirror);
-        assert_eq!(lib.playlist_paths(mirror).unwrap(), vec!["yt:v3".to_string()]);
-        assert_eq!(lib.playlist_paths(user).unwrap(), vec!["song/mine.mp3".to_string()]);
+        assert_eq!(
+            lib.playlist_paths(mirror).unwrap(),
+            vec!["yt:v3".to_string()]
+        );
+        assert_eq!(
+            lib.playlist_paths(user).unwrap(),
+            vec!["song/mine.mp3".to_string()]
+        );
         assert_eq!(lib.playlists().unwrap().len(), 2);
     }
 
@@ -3732,8 +3884,12 @@ mod tests {
         // The album without its own setting now inherits the folder → hidden.
         assert!(lib.album_areas("X", "Konzert").is_empty());
         // Its own album setting still wins (non-destructive).
-        lib.set_category("album", &crate::core::category::album_key("X", "Konzert"), Some("albums"))
-            .unwrap();
+        lib.set_category(
+            "album",
+            &crate::core::category::album_key("X", "Konzert"),
+            Some("albums"),
+        )
+        .unwrap();
         assert!(lib.album_areas("X", "Konzert").contains(&Area::Albums));
     }
 
@@ -3912,7 +4068,13 @@ mod tests {
 
         // Reset (track listened to the end).
         lib.set_resume_path("/a/hoerspiel.mp3", 0).unwrap();
-        assert_eq!(lib.track_by_path("/a/hoerspiel.mp3").unwrap().unwrap().resume_ms, 0);
+        assert_eq!(
+            lib.track_by_path("/a/hoerspiel.mp3")
+                .unwrap()
+                .unwrap()
+                .resume_ms,
+            0
+        );
     }
 
     #[test]
@@ -3961,7 +4123,10 @@ mod tests {
     fn eq_none_when_unset() {
         let lib = Library::open_in_memory().unwrap();
         assert_eq!(lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"), None);
-        assert_eq!(lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"), None);
+        assert_eq!(
+            lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"),
+            None
+        );
     }
 
     #[test]
@@ -3992,7 +4157,10 @@ mod tests {
         lib.set_eq("", "track", "/a/1.mp3", &bands(4.0)).unwrap();
 
         lib.set_eq_enabled("", "track", "/a/1.mp3", false).unwrap();
-        assert_eq!(lib.get_eq("", "track", "/a/1.mp3").unwrap(), Some(bands(4.0)));
+        assert_eq!(
+            lib.get_eq("", "track", "/a/1.mp3").unwrap(),
+            Some(bands(4.0))
+        );
         assert_eq!(
             lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(0.0))
@@ -4053,11 +4221,15 @@ mod tests {
     #[test]
     fn prune_removes_only_missing_files_under_root() {
         let lib = Library::open_in_memory().unwrap();
-        lib.upsert_track(&track("/music/a.mp3", Some("A"), Some("X"))).unwrap();
-        lib.upsert_track(&track("/music/gone.mp3", Some("A"), Some("X"))).unwrap();
+        lib.upsert_track(&track("/music/a.mp3", Some("A"), Some("X")))
+            .unwrap();
+        lib.upsert_track(&track("/music/gone.mp3", Some("A"), Some("X")))
+            .unwrap();
         // A remote (Nextcloud) track and a track from another folder must survive.
-        lib.upsert_track(&track("nc:7:Album/r.mp3", Some("A"), Some("X"))).unwrap();
-        lib.upsert_track(&track("/other/b.mp3", Some("B"), Some("Y"))).unwrap();
+        lib.upsert_track(&track("nc:7:Album/r.mp3", Some("A"), Some("X")))
+            .unwrap();
+        lib.upsert_track(&track("/other/b.mp3", Some("B"), Some("Y")))
+            .unwrap();
 
         // Scan of /music found only a.mp3 (gone.mp3 was deleted on disk).
         let present = vec!["/music/a.mp3".to_string()];
@@ -4075,7 +4247,8 @@ mod tests {
     fn prune_with_empty_scan_keeps_everything() {
         // Guards against a transiently unreadable/unmounted folder wiping the DB.
         let lib = Library::open_in_memory().unwrap();
-        lib.upsert_track(&track("/music/a.mp3", Some("A"), Some("X"))).unwrap();
+        lib.upsert_track(&track("/music/a.mp3", Some("A"), Some("X")))
+            .unwrap();
         let removed = lib
             .prune_tracks_under(std::path::Path::new("/music"), &[])
             .unwrap();
@@ -4087,8 +4260,10 @@ mod tests {
     fn prune_escapes_like_metacharacters_in_root() {
         // A root containing `%`/`_` must match literally, not as LIKE wildcards.
         let lib = Library::open_in_memory().unwrap();
-        lib.upsert_track(&track("/m%/keep.mp3", Some("A"), Some("X"))).unwrap();
-        lib.upsert_track(&track("/mX/other.mp3", Some("A"), Some("X"))).unwrap();
+        lib.upsert_track(&track("/m%/keep.mp3", Some("A"), Some("X")))
+            .unwrap();
+        lib.upsert_track(&track("/mX/other.mp3", Some("A"), Some("X")))
+            .unwrap();
         // Scan of "/m%" found nothing under it → keep.mp3 is an orphan there,
         // but "/mX/other.mp3" must NOT be touched (would match if `%` were a
         // wildcard).

@@ -100,7 +100,9 @@ impl Scanner {
 
         // Log fatal pipeline errors (no camera, permission denied) so a black
         // preview has a trace; start-time failures surface via the Err below.
-        let bus = pipeline.bus().ok_or_else(|| anyhow!("GStreamer bus missing"))?;
+        let bus = pipeline
+            .bus()
+            .ok_or_else(|| anyhow!("GStreamer bus missing"))?;
         let guard = bus
             .add_watch_local(move |_, msg| {
                 if let gst::MessageView::Error(err) = msg.view() {

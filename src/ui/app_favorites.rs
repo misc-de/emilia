@@ -170,7 +170,7 @@ impl App {
             if let Some(remove) = remove {
                 let btn = gtk::Button::builder()
                     .icon_name("user-trash-symbolic")
-                    .tooltip_text(&gettext("Remove"))
+                    .tooltip_text(gettext("Remove"))
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
                     .build();
@@ -199,7 +199,7 @@ impl App {
                 }
                 let play_btn = gtk::Button::builder()
                     .icon_name("media-playback-start-symbolic")
-                    .tooltip_text(&gettext("Play"))
+                    .tooltip_text(gettext("Play"))
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
                     .build();

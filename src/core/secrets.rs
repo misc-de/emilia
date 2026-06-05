@@ -75,11 +75,19 @@ fn source_id_text(source_id: i64) -> String {
 }
 
 fn password_attrs(id: &str) -> [(&str, &str); 3] {
-    [("application", "emilia"), ("kind", "webdav-password"), ("source-id", id)]
+    [
+        ("application", "emilia"),
+        ("kind", "webdav-password"),
+        ("source-id", id),
+    ]
 }
 
 fn username_attrs(id: &str) -> [(&str, &str); 3] {
-    [("application", "emilia"), ("kind", "webdav-username"), ("source-id", id)]
+    [
+        ("application", "emilia"),
+        ("kind", "webdav-username"),
+        ("source-id", id),
+    ]
 }
 
 /// DB reference stored in place of a per-source secret (`secret-tool:<id>`).
@@ -140,7 +148,11 @@ pub fn clear_source_password(source_id: i64) {
 // --- Named secrets (API keys/tokens kept as settings) ----------------------
 
 fn named_attrs(name: &str) -> [(&str, &str); 3] {
-    [("application", "emilia"), ("kind", "app-secret"), ("name", name)]
+    [
+        ("application", "emilia"),
+        ("kind", "app-secret"),
+        ("name", name),
+    ]
 }
 
 pub fn store_named(name: &str, label: &str, value: &str) -> bool {

@@ -35,7 +35,12 @@ pub(crate) const MAX_ATTEMPTS: i64 = 20;
 /// the same album does (this is exactly why an album card stays blank while its
 /// songs show covers). So if the sample yields nothing, walk the album's
 /// remaining **local** tracks and use the first embedded/folder image found.
-fn local_album_cover_scan(lib: &Library, artist: &str, album: &str, sample: &str) -> Option<String> {
+fn local_album_cover_scan(
+    lib: &Library,
+    artist: &str,
+    album: &str,
+    sample: &str,
+) -> Option<String> {
     if let Some(c) = online::local_album_cover(artist, album, sample) {
         return Some(c);
     }
@@ -211,7 +216,7 @@ pub(crate) fn enrich_worker(
                 //    cover to fall back to, so fetch one online by artist+title
                 //    (like other players do for e.g. converted downloads).
                 if let Ok(Some(t)) = lib.track_by_path(&key) {
-                    let album_less = t.album.as_deref().map_or(true, |a| a.trim().is_empty());
+                    let album_less = t.album.as_deref().is_none_or(|a| a.trim().is_empty());
                     if album_less {
                         if let Some((bytes, _)) =
                             online::track_cover(t.artist.as_deref().unwrap_or(""), &t.title)
@@ -237,7 +242,9 @@ pub(crate) fn enrich_worker(
             let exhausted = lib.album_attempts(artist, album) >= MAX_ATTEMPTS;
             if !exhausted {
                 if !artist.is_empty()
-                    && online::enrich_album(&client, &lib, artist, album).cover_path.is_some()
+                    && online::enrich_album(&client, &lib, artist, album)
+                        .cover_path
+                        .is_some()
                 {
                     new_covers += 1;
                     any_change = true;
@@ -259,7 +266,9 @@ pub(crate) fn enrich_worker(
     // Full run: always reload (as before – this shows, among other things, the
     // results of the fingerprint phase). Lightweight run: only if something was
     // actually added.
-    let _ = out.send(Cmd::EnrichDone { changed: !light || any_change });
+    let _ = out.send(Cmd::EnrichDone {
+        changed: !light || any_change,
+    });
 }
 
 /// Loads artist photos **in parallel** (multiple network threads), but writes the
@@ -320,7 +329,7 @@ fn fetch_artists_parallel(
         }
         let _ = lib.upsert_artist_meta(&meta);
         done += 1;
-        if done % 16 == 0 {
+        if done.is_multiple_of(16) {
             let _ = out.send(Cmd::ReloadViews);
         }
     }

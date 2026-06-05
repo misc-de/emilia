@@ -46,7 +46,10 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
     agent
         .get(&url)
         // The API asks for a meaningful User-Agent.
-        .set("User-Agent", &format!("Emilia/{}", env!("CARGO_PKG_VERSION")))
+        .set(
+            "User-Agent",
+            &format!("Emilia/{}", env!("CARGO_PKG_VERSION")),
+        )
         .call()?
         .into_reader()
         .take(8 * 1024 * 1024) // Cap against unexpectedly large responses.

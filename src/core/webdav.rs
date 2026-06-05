@@ -149,7 +149,10 @@ pub fn stream_uri(c: &Creds, rel: &str) -> String {
     let (scheme, rest) = scheme_rest(&c.base_url);
     let enc_user = utf8_percent_encode(&c.user, USERINFO);
     let enc_pass = utf8_percent_encode(&c.pass, USERINFO);
-    format!("{scheme}://{enc_user}:{enc_pass}@{rest}{}", dav_suffix(c, rel))
+    format!(
+        "{scheme}://{enc_user}:{enc_pass}@{rest}{}",
+        dav_suffix(c, rel)
+    )
 }
 
 /// Expected (decoded) path of the PROPFIND request – prefix of the child hrefs.
@@ -299,7 +302,10 @@ pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
         }
         // With Depth:1 only one level – take the first component to be safe.
         let child_name = child.split('/').next().unwrap_or(child).to_string();
-        let name = raw.display_name.clone().unwrap_or_else(|| child_name.clone());
+        let name = raw
+            .display_name
+            .clone()
+            .unwrap_or_else(|| child_name.clone());
         if !raw.is_dir && !scanner::is_audio(Path::new(&name)) {
             continue; // hide non-audio files
         }
@@ -364,8 +370,12 @@ pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Optio
     };
     let (title, artist) = match tagged.primary_tag().or_else(|| tagged.first_tag()) {
         Some(tag) => (
-            tag.title().map(|c| c.trim().to_string()).filter(|s| !s.is_empty()),
-            tag.artist().map(|c| c.trim().to_string()).filter(|s| !s.is_empty()),
+            tag.title()
+                .map(|c| c.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            tag.artist()
+                .map(|c| c.trim().to_string())
+                .filter(|s| !s.is_empty()),
         ),
         None => (None, None),
     };
@@ -451,8 +461,15 @@ pub fn fetch_cover(c: &Creds, rel: &str) -> Option<Vec<u8>> {
         .call()
         .ok()?;
     let mut buf = Vec::new();
-    resp.into_reader().take(4_400_000).read_to_end(&mut buf).ok()?;
-    let tagged = lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type().ok()?.read().ok()?;
+    resp.into_reader()
+        .take(4_400_000)
+        .read_to_end(&mut buf)
+        .ok()?;
+    let tagged = lofty::probe::Probe::new(Cursor::new(buf))
+        .guess_file_type()
+        .ok()?
+        .read()
+        .ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
     Some(tag.pictures().first()?.data().to_vec())
 }

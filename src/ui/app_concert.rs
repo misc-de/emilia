@@ -56,7 +56,7 @@ impl App {
         use std::rc::Rc;
 
         let dialog = adw::Dialog::builder()
-            .title(&gettext("Import concerts"))
+            .title(gettext("Import concerts"))
             .content_width(440)
             .content_height(560)
             .build();
@@ -73,7 +73,7 @@ impl App {
         // Select-all switch
         let all_group = adw::PreferencesGroup::new();
         let all = adw::SwitchRow::builder()
-            .title(&gettext("Select all"))
+            .title(gettext("Select all"))
             .active(true)
             .build();
         all_group.add(&all);
@@ -111,7 +111,7 @@ impl App {
         }
 
         let add = gtk::Button::builder()
-            .label(&gettext("Add"))
+            .label(gettext("Add"))
             .css_classes(["suggested-action", "pill"])
             .hexpand(true)
             .build();

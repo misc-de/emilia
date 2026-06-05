@@ -111,7 +111,10 @@ mod tests {
     #[test]
     fn parse_and_serialize_roundtrip() {
         assert_eq!(parse_areas(""), vec![]); // hidden
-        assert_eq!(parse_areas("filesystem,albums"), vec![Area::Filesystem, Area::Albums]);
+        assert_eq!(
+            parse_areas("filesystem,albums"),
+            vec![Area::Filesystem, Area::Albums]
+        );
         // Serialization in stable ALL order.
         assert_eq!(
             areas_value(&[Area::Albums, Area::Filesystem]),

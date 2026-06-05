@@ -28,9 +28,7 @@ fn main() {
     };
     i18n::init(lang);
 
-    let gtk_app = adw::Application::builder()
-        .application_id(APP_ID)
-        .build();
+    let gtk_app = adw::Application::builder().application_id(APP_ID).build();
 
     let app = RelmApp::from_app(gtk_app);
     app.run::<ui::app::App>(());

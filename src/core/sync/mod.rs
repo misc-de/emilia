@@ -10,10 +10,10 @@ pub mod crypto;
 pub mod data;
 pub mod hash;
 pub mod protocol;
-pub mod share;
 pub mod qr;
 pub mod scanner;
 pub mod server;
+pub mod share;
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -59,11 +59,18 @@ pub enum SyncEvent {
     /// An incoming metadata import was applied (server side).
     ImportReceived { stats: ImportStats },
     /// Metadata was sent to the peer.
+    /// Not emitted yet (sender-side metadata export/import is unwired); the UI
+    /// already handles it.
+    #[allow(dead_code)]
     ExportSent,
     /// The peer offered a selective share → show the review screen (receiver).
     ShareOffered { manifest: ShareManifest },
     /// The peer responded to our offer with its decision (sender).
-    OfferAccepted { decision: ShareDecision },
+    OfferAccepted {
+        // The transfer is driven elsewhere; the UI only reacts to the event.
+        #[allow(dead_code)]
+        decision: ShareDecision,
+    },
     /// Our selection was resolved to a manifest → show the size confirmation.
     /// Carries the full manifest so the sender side can park/send it on confirm.
     ManifestReady { manifest: ShareManifest },

@@ -3,7 +3,7 @@
 use adw::prelude::*;
 use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
 use relm4::{adw, gtk};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Escapes special characters (`&`, `<`, …) for display in Pango markup.
 fn esc(s: &str) -> String {
@@ -13,7 +13,7 @@ fn esc(s: &str) -> String {
 /// Splits a file name (without extension) at the last "-": before it the artist,
 /// after it the track name. Without a "-" there is no artist and the whole
 /// name is the title.
-fn split_stem(path: &PathBuf) -> (Option<String>, String) {
+fn split_stem(path: &Path) -> (Option<String>, String) {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
     split_stem_str(stem)
 }
@@ -211,7 +211,9 @@ impl FsEntry {
     pub fn display_title(&self) -> String {
         match self {
             FsEntry::Dir { name, .. } | FsEntry::RemoteDir { name, .. } => name.clone(),
-            FsEntry::File { path, title, .. } => title.clone().unwrap_or_else(|| split_stem(path).1),
+            FsEntry::File { path, title, .. } => {
+                title.clone().unwrap_or_else(|| split_stem(path).1)
+            }
             FsEntry::RemoteFile { name, title, .. } => {
                 title.clone().unwrap_or_else(|| split_filename(name).1)
             }
@@ -237,7 +239,6 @@ impl FsEntry {
             "audio-x-generic-symbolic"
         }
     }
-
 }
 
 /// Display options for a file row.

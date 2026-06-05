@@ -12,7 +12,10 @@ use crate::core::sync::ImportStats;
 
 /// Reads the configured music folder (empty if not set).
 pub(crate) fn music_dir(lib: &Library) -> String {
-    lib.get_setting("music_dir").ok().flatten().unwrap_or_default()
+    lib.get_setting("music_dir")
+        .ok()
+        .flatten()
+        .unwrap_or_default()
 }
 
 /// For which scopes is the `key` a file path (instead of an artist/album name)?
@@ -47,8 +50,17 @@ pub(crate) fn export_favorites(lib: &Library, base: &str) -> Result<Vec<Favorite
         .favorites()?
         .into_iter()
         .map(|(scope, key, title, is_dir)| {
-            let key = if key_is_path(&scope) { relativize(&key, base) } else { key };
-            FavoriteRec { scope, key, title, is_dir }
+            let key = if key_is_path(&scope) {
+                relativize(&key, base)
+            } else {
+                key
+            };
+            FavoriteRec {
+                scope,
+                key,
+                title,
+                is_dir,
+            }
         })
         .collect())
 }
@@ -94,7 +106,12 @@ pub(crate) fn export_podcasts(lib: &Library) -> Result<Vec<PodcastRec>> {
                     description: e.description,
                 })
                 .collect();
-            podcasts.push(PodcastRec { title, feed_url, image_url, episodes });
+            podcasts.push(PodcastRec {
+                title,
+                feed_url,
+                image_url,
+                episodes,
+            });
         }
     }
     Ok(podcasts)
@@ -105,7 +122,11 @@ pub(crate) fn export_categories(lib: &Library, base: &str) -> Result<Vec<Categor
         .all_categories()?
         .into_iter()
         .map(|(scope, key, value)| {
-            let key = if key_is_path(&scope) { relativize(&key, base) } else { key };
+            let key = if key_is_path(&scope) {
+                relativize(&key, base)
+            } else {
+                key
+            };
             CategoryRec { scope, key, value }
         })
         .collect())
@@ -116,8 +137,17 @@ pub(crate) fn export_eq(lib: &Library, base: &str) -> Result<Vec<EqRec>> {
         .all_eq_settings()?
         .into_iter()
         .map(|(output, scope, key, bands)| {
-            let key = if scope == "track" { relativize(&key, base) } else { key };
-            EqRec { output, scope, key, bands }
+            let key = if scope == "track" {
+                relativize(&key, base)
+            } else {
+                key
+            };
+            EqRec {
+                output,
+                scope,
+                key,
+                bands,
+            }
         })
         .collect())
 }
@@ -127,8 +157,15 @@ pub(crate) fn export_eq(lib: &Library, base: &str) -> Result<Vec<EqRec>> {
 pub(crate) fn import_favorites(lib: &Library, base: &str, favs: &[FavoriteRec]) -> usize {
     let mut n = 0;
     for f in favs {
-        let key = if key_is_path(&f.scope) { resolve(&f.key, base) } else { f.key.clone() };
-        if lib.set_favorite(&f.scope, &key, &f.title, f.is_dir, true).is_ok() {
+        let key = if key_is_path(&f.scope) {
+            resolve(&f.key, base)
+        } else {
+            f.key.clone()
+        };
+        if lib
+            .set_favorite(&f.scope, &key, &f.title, f.is_dir, true)
+            .is_ok()
+        {
             n += 1;
         }
     }
@@ -195,7 +232,11 @@ pub(crate) fn import_podcasts(lib: &Library, pcs: &[PodcastRec]) -> usize {
 pub(crate) fn import_categories(lib: &Library, base: &str, cats: &[CategoryRec]) -> usize {
     let mut n = 0;
     for c in cats {
-        let key = if key_is_path(&c.scope) { resolve(&c.key, base) } else { c.key.clone() };
+        let key = if key_is_path(&c.scope) {
+            resolve(&c.key, base)
+        } else {
+            c.key.clone()
+        };
         if lib.set_category(&c.scope, &key, Some(&c.value)).is_ok() {
             n += 1;
         }
@@ -206,7 +247,11 @@ pub(crate) fn import_categories(lib: &Library, base: &str, cats: &[CategoryRec])
 pub(crate) fn import_eq(lib: &Library, base: &str, eqs: &[EqRec]) -> usize {
     let mut n = 0;
     for e in eqs {
-        let key = if e.scope == "track" { resolve(&e.key, base) } else { e.key.clone() };
+        let key = if e.scope == "track" {
+            resolve(&e.key, base)
+        } else {
+            e.key.clone()
+        };
         if lib.set_eq(&e.output, &e.scope, &key, &e.bands).is_ok() {
             n += 1;
         }

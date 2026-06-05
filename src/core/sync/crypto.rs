@@ -60,8 +60,8 @@ pub fn server_config(identity: &ServerIdentity) -> Result<Arc<rustls::ServerConf
 /// exactly.
 pub fn spki_fingerprint(cert_der: &[u8]) -> Result<String> {
     use x509_parser::prelude::*;
-    let (_, cert) =
-        X509Certificate::from_der(cert_der).map_err(|e| anyhow!("certificate not readable: {e}"))?;
+    let (_, cert) = X509Certificate::from_der(cert_der)
+        .map_err(|e| anyhow!("certificate not readable: {e}"))?;
     let spki = cert.public_key().raw;
     Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(spki)))
 }
@@ -193,7 +193,10 @@ mod tests {
                 .as_ref(),
         )
         .unwrap();
-        assert_ne!(id.fingerprint, again, "different certificates → different fingerprints");
+        assert_ne!(
+            id.fingerprint, again,
+            "different certificates → different fingerprints"
+        );
     }
 
     #[test]

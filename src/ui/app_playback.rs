@@ -21,7 +21,10 @@ impl App {
         let active_path = self.transport.queue.get(self.transport.queue_pos).cloned();
         // Remote playback: the active entry is marked via the rel path.
         let active_rel = if self.files.playing_remote {
-            self.files.remote_queue.get(self.files.remote_pos).map(|t| t.rel_path.clone())
+            self.files
+                .remote_queue
+                .get(self.files.remote_pos)
+                .map(|t| t.rel_path.clone())
         } else {
             None
         };
@@ -34,8 +37,7 @@ impl App {
                         match r.entry.path() {
                             Some(p) => {
                                 let q = is_file && queued.contains(p);
-                                let a = is_file
-                                    && active_path.as_deref() == Some(p.as_path());
+                                let a = is_file && active_path.as_deref() == Some(p.as_path());
                                 (i, q, a)
                             }
                             None => {
@@ -53,7 +55,9 @@ impl App {
         let playing = self.mini.playing;
         for (i, q, a) in states {
             self.libview.entries.send(i, FsInput::SetQueued(q));
-            self.libview.entries.send(i, FsInput::SetActive { active: a, playing });
+            self.libview
+                .entries
+                .send(i, FsInput::SetActive { active: a, playing });
         }
         // Sync the play row of an open detail dialog with the playback state.
         self.refresh_ctx_play();
@@ -151,7 +155,9 @@ impl App {
         let cached = self.remote_cache_path(&track.rel_path);
         let result = match &cached {
             Some(p) if p.exists() => self.player.play_file(&p.to_string_lossy(), 0),
-            _ => self.player.play_uri(&webdav::stream_uri(&creds, &track.rel_path), 0),
+            _ => self
+                .player
+                .play_uri(&webdav::stream_uri(&creds, &track.rel_path), 0),
         };
         match result {
             Ok(()) => {
@@ -169,7 +175,8 @@ impl App {
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
-                self.mpris.set_metadata(0, &track.title, None, None, None, None);
+                self.mpris
+                    .set_metadata(0, &track.title, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.set_chapters(Vec::new());
                 self.refresh_queue_icons();
@@ -239,7 +246,8 @@ impl App {
             // track is no longer the expected one of the order (e.g. after
             // manual selection) – then keep shuffling from the current track.
             if self.transport.shuffle_order.len() != len
-                || self.transport.shuffle_order.get(self.transport.shuffle_idx) != Some(&self.transport.queue_pos)
+                || self.transport.shuffle_order.get(self.transport.shuffle_idx)
+                    != Some(&self.transport.queue_pos)
             {
                 self.rebuild_shuffle_order();
             }
@@ -264,7 +272,8 @@ impl App {
                 // the queue then has only one entry). Reshuffle when shuffling.
                 if self.transport.shuffle {
                     self.rebuild_shuffle_order();
-                    self.transport.queue_pos = self.transport.shuffle_order.first().copied().unwrap_or(0);
+                    self.transport.queue_pos =
+                        self.transport.shuffle_order.first().copied().unwrap_or(0);
                 } else {
                     self.transport.queue_pos = 0;
                 }
@@ -358,7 +367,11 @@ impl App {
     /// Starts playback of a track path. Local paths go through
     /// `play_file`; **remote** tracks (synthetic path `nc:<id>:<rel>`) are
     /// played from the local cache or streamed directly from Nextcloud.
-    pub(crate) fn start_track_playback(&self, path_str: &str, resume_ms: i64) -> anyhow::Result<()> {
+    pub(crate) fn start_track_playback(
+        &self,
+        path_str: &str,
+        resume_ms: i64,
+    ) -> anyhow::Result<()> {
         // YouTube: an offline copy plays directly; a stream must be resolved
         // asynchronously (done in `play_current`), so reaching here without a
         // local file is an error – we never block the UI thread on `yt-dlp -g`.
@@ -372,7 +385,9 @@ impl App {
             {
                 return self.player.play_file(&local, resume_ms);
             }
-            return Err(anyhow::anyhow!("YouTube stream must be resolved asynchronously"));
+            return Err(anyhow::anyhow!(
+                "YouTube stream must be resolved asynchronously"
+            ));
         }
         if let Some((sid, rel)) = crate::core::webdav::parse_nc_path(path_str) {
             let cache = crate::core::webdav::cache_path(sid, &rel);
@@ -395,7 +410,9 @@ impl App {
         // Local file: a missing path usually means an unmounted SD card / mount
         // point. Fail fast so the caller skips it (instead of a GStreamer round-trip).
         if !std::path::Path::new(path_str).exists() {
-            return Err(anyhow::anyhow!("file unavailable (mount missing?): {path_str}"));
+            return Err(anyhow::anyhow!(
+                "file unavailable (mount missing?): {path_str}"
+            ));
         }
         self.player.play_file(path_str, resume_ms)
     }
@@ -412,7 +429,10 @@ impl App {
         }
         if let Ok(Some(t)) = self.library.track_by_path(&path_str) {
             let title = if t.title.trim().is_empty() {
-                path.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_string()
+                path.file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string()
             } else {
                 t.title
             };
@@ -504,7 +524,10 @@ impl App {
         let Some(pos) = self.player.position_ms() else {
             return;
         };
-        let dur = self.player.duration_ms().unwrap_or(self.mini.track_duration_ms);
+        let dur = self
+            .player
+            .duration_ms()
+            .unwrap_or(self.mini.track_duration_ms);
         let _ = self
             .library
             .set_episode_progress(&url, guarded_resume(pos, dur));
@@ -668,8 +691,8 @@ impl App {
                     .unwrap_or(0);
                 // Snapshot for saving on close (resume tracks only).
                 let resumable = matches!(&track, Some(t) if self.should_resume(t));
-                *self.transport.close_resume.borrow_mut() = resumable
-                    .then(|| (path_str.clone(), start, self.mini.track_duration_ms));
+                *self.transport.close_resume.borrow_mut() =
+                    resumable.then(|| (path_str.clone(), start, self.mini.track_duration_ms));
                 // Start a new listening session for the statistics.
                 let now = crate::ui::app::unix_now();
                 self.transport.play_session = Some(PlaySession {
@@ -685,18 +708,25 @@ impl App {
                 // Save the queue + position for the next start.
                 self.save_queue();
                 // Remember the current context (detection of future queue switches).
-                self.transport.prev_ctx = Some((self.transport.queue.clone(), self.transport.queue_pos));
+                self.transport.prev_ctx =
+                    Some((self.transport.queue.clone(), self.transport.queue_pos));
                 // Tracks have no chapters → clear markers/hover list.
                 self.set_chapters(Vec::new());
                 // If usable tags are missing (artist/album), let the track be
                 // identified in the background via fingerprint – instead of a bulk
                 // run, only what is actually played. The actual gating checks (key,
                 // fpcalc, network, attempt limit) are done by fetch_focus_track.
-                let needs_id = track.as_ref().map_or(true, |t| {
+                let needs_id = track.as_ref().is_none_or(|t| {
                     t.artist.as_deref().unwrap_or("").trim().is_empty()
                         || t.album.as_deref().unwrap_or("").trim().is_empty()
                 });
-                if needs_id && self.enrich_state.acoustid_key.as_deref().is_some_and(|k| !k.is_empty()) {
+                if needs_id
+                    && self
+                        .enrich_state
+                        .acoustid_key
+                        .as_deref()
+                        .is_some_and(|k| !k.is_empty())
+                {
                     let _ = self.input.send(Msg::FingerprintCurrent(path.clone()));
                 }
             }
@@ -813,9 +843,7 @@ impl App {
             // sorting so that playback and display order match
             // (CD folders + file names dictate the order, robust against
             // wrong/missing disc/track tags).
-            fs.sort_by_cached_key(|f| {
-                crate::ui::app_views::natural_key(&f.to_string_lossy())
-            });
+            fs.sort_by_cached_key(|f| crate::ui::app_views::natural_key(&f.to_string_lossy()));
             fs
         } else {
             vec![p]

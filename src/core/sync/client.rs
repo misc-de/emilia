@@ -20,16 +20,22 @@ use crate::core::sync::{crypto, ImportStats};
 /// authenticated, but a bug or a compromised peer must not be able to OOM us
 /// with an unbounded body — metadata exports are tiny in practice. ureq imposes
 /// no limit of its own, so we cap it here.
+// Part of the metadata export/import direction (see `fetch_export`/`push_export`):
+// the server endpoints exist but the client side is not wired into the UI yet.
+#[allow(dead_code)]
 const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Reads a JSON response body with a hard size cap and deserializes it.
+#[allow(dead_code)]
 fn read_json_capped<T: serde::de::DeserializeOwned>(resp: ureq::Response) -> Result<T> {
     let mut buf = Vec::new();
     resp.into_reader()
         .take(MAX_JSON_BYTES + 1)
         .read_to_end(&mut buf)?;
     if buf.len() as u64 > MAX_JSON_BYTES {
-        return Err(anyhow!("peer response exceeds the {MAX_JSON_BYTES}-byte limit"));
+        return Err(anyhow!(
+            "peer response exceeds the {MAX_JSON_BYTES}-byte limit"
+        ));
     }
     Ok(serde_json::from_slice(&buf)?)
 }
@@ -51,7 +57,12 @@ pub struct SyncClient {
 
 impl SyncClient {
     /// Builds the client together with the fingerprint-pinned TLS configuration.
-    pub fn new(info: &PairingInfo, device_id: String, device_name: String, caps: Capabilities) -> Self {
+    pub fn new(
+        info: &PairingInfo,
+        device_id: String,
+        device_name: String,
+        caps: Capabilities,
+    ) -> Self {
         let config = crypto::pinned_client_config(info.fingerprint.clone());
         let agent = ureq::AgentBuilder::new()
             .tls_config(config)
@@ -107,6 +118,8 @@ impl SyncClient {
     }
 
     /// Fetches the peer's library export.
+    /// Not yet wired into the UI (the server endpoint already exists).
+    #[allow(dead_code)]
     pub fn fetch_export(&self) -> Result<LibraryExport> {
         let resp = self
             .agent
@@ -118,6 +131,8 @@ impl SyncClient {
     }
 
     /// Sends the local export to the peer and returns its import counters.
+    /// Not yet wired into the UI (the server endpoint already exists).
+    #[allow(dead_code)]
     pub fn push_export(&self, exp: &LibraryExport) -> Result<ImportStats> {
         let resp = self
             .agent

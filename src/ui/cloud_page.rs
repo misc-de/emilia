@@ -36,7 +36,10 @@ pub(crate) struct CloudPage {
 #[derive(Debug)]
 pub(crate) enum CloudInput {
     /// Open the dialog on `window`; `mobile` → present as a bottom sheet.
-    Open { window: adw::ApplicationWindow, mobile: bool },
+    Open {
+        window: adw::ApplicationWindow,
+        mobile: bool,
+    },
     ManualToggle(bool),
     QrDecoded(String),
     Test,
@@ -154,7 +157,7 @@ impl CloudPage {
         cam.add_css_class("card");
         content.append(&cam);
         let hint = gtk::Label::builder()
-            .label(&gettext("Point the camera at the Nextcloud login QR code"))
+            .label(gettext("Point the camera at the Nextcloud login QR code"))
             .wrap(true)
             .xalign(0.5)
             .css_classes(["dim-label"])
@@ -164,9 +167,11 @@ impl CloudPage {
         // Manual entry as an expandable area. Expanding hides the camera.
         let manual_group = adw::PreferencesGroup::new();
         let manual = adw::ExpanderRow::builder()
-            .title(&gettext("Enter the details manually"))
+            .title(gettext("Enter the details manually"))
             .build();
-        let url_row = adw::EntryRow::builder().title(gettext("Server URL")).build();
+        let url_row = adw::EntryRow::builder()
+            .title(gettext("Server URL"))
+            .build();
         let user_row = adw::EntryRow::builder().title(gettext("User name")).build();
         let pass_row = adw::PasswordEntryRow::builder()
             .title(gettext("App password"))
@@ -188,7 +193,7 @@ impl CloudPage {
 
         // Music folder to index – always visible (given when connecting).
         let path_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Music folder to index"))
+            .title(gettext("Music folder to index"))
             .build();
         let path_row = adw::EntryRow::builder()
             .title(gettext("Folder (e.g. /Music)"))
@@ -210,13 +215,15 @@ impl CloudPage {
             .spacing(6)
             .halign(gtk::Align::End)
             .build();
-        let test_btn = gtk::Button::builder().label(&gettext("Test connection")).build();
+        let test_btn = gtk::Button::builder()
+            .label(gettext("Test connection"))
+            .build();
         {
             let sender = sender.clone();
             test_btn.connect_clicked(move |_| sender.input(CloudInput::Test));
         }
         let save_btn = gtk::Button::builder()
-            .label(&gettext("Save"))
+            .label(gettext("Save"))
             .css_classes(["suggested-action"])
             .build();
         {

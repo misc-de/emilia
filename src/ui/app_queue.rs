@@ -44,7 +44,7 @@ impl App {
         // Height follows the content (natural height of the scroller); only the
         // width is fixed. Long queues grow to the window height, then scroll.
         let dialog = adw::Dialog::builder()
-            .title(&gettext("Queue"))
+            .title(gettext("Queue"))
             .content_width(400)
             .build();
 
@@ -53,7 +53,7 @@ impl App {
         let header = adw::HeaderBar::new();
         let clear = gtk::Button::builder()
             .icon_name("user-trash-symbolic")
-            .tooltip_text(&gettext("Clear queue"))
+            .tooltip_text(gettext("Clear queue"))
             .css_classes(["flat"])
             .build();
         {
@@ -97,8 +97,11 @@ impl App {
             self.transport.queue_list.remove(&child);
         }
         if self.transport.queue.is_empty() {
-            self.transport.queue_list
-                .append(&adw::ActionRow::builder().title(&gettext("The queue is empty")).build());
+            self.transport.queue_list.append(
+                &adw::ActionRow::builder()
+                    .title(gettext("The queue is empty"))
+                    .build(),
+            );
             return;
         }
 
@@ -113,8 +116,14 @@ impl App {
             .map(|(idx, path)| {
                 let ps = path.to_string_lossy();
                 let t = self.library.track_by_path(&ps).ok().flatten();
-                let album = t.as_ref().and_then(|t| t.album.clone()).filter(|a| !a.trim().is_empty());
-                let artist = t.as_ref().and_then(|t| t.artist.clone()).filter(|a| !a.trim().is_empty());
+                let album = t
+                    .as_ref()
+                    .and_then(|t| t.album.clone())
+                    .filter(|a| !a.trim().is_empty());
+                let artist = t
+                    .as_ref()
+                    .and_then(|t| t.artist.clone())
+                    .filter(|a| !a.trim().is_empty());
                 let dur = t
                     .as_ref()
                     .and_then(|t| t.duration_ms)
@@ -134,9 +143,11 @@ impl App {
         // Shared trailing widgets: runtime + play/pause button (far right, like
         // single-song rows). `idx` is the queue index playback should start at.
         let add_tail = |row: &adw::ActionRow, idx: usize, total_ms: i64, is_current: bool| {
-            let dur = (total_ms > 0)
-                .then(|| crate::ui::app::fmt_duration(total_ms))
-                .unwrap_or_default();
+            let dur = if total_ms > 0 {
+                crate::ui::app::fmt_duration(total_ms)
+            } else {
+                Default::default()
+            };
             row.add_suffix(
                 &gtk::Label::builder()
                     .label(&dur)
@@ -150,7 +161,7 @@ impl App {
                 } else {
                     "media-playback-start-symbolic"
                 })
-                .tooltip_text(&gettext("Play/Pause"))
+                .tooltip_text(gettext("Play/Pause"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
@@ -241,7 +252,9 @@ impl App {
                 let drag = gtk::DragSource::new();
                 drag.set_actions(gtk::gdk::DragAction::MOVE);
                 drag.connect_prepare(move |_, _, _| {
-                    Some(gtk::gdk::ContentProvider::for_value(&(qidx as i32).to_value()))
+                    Some(gtk::gdk::ContentProvider::for_value(
+                        &(qidx as i32).to_value(),
+                    ))
                 });
                 row.add_controller(drag);
 

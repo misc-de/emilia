@@ -114,7 +114,9 @@ fn library_add_one(
             genre: None,
             track_no: None,
             disc_no: None,
-            duration_ms: meta.and_then(|m| m.duration).map(|s| s.saturating_mul(1000)),
+            duration_ms: meta
+                .and_then(|m| m.duration)
+                .map(|s| s.saturating_mul(1000)),
             resume_ms: 0,
         };
         let _ = lib.upsert_track(&track);
@@ -197,7 +199,9 @@ pub(crate) fn fetch_and_store_channel(
     thumbnail: Option<&str>,
 ) -> Option<String> {
     let lib = Library::open().ok()?;
-    let cid = lib.subscribe_channel(channel_id, title, url, thumbnail).ok()?;
+    let cid = lib
+        .subscribe_channel(channel_id, title, url, thumbnail)
+        .ok()?;
     let videos = list_channel_videos(url, Some(channel_id));
     let _ = lib.set_channel_videos(cid, &videos);
     if let Some(t) = thumbnail {
@@ -259,7 +263,9 @@ impl App {
                 .channel_items
                 .iter()
                 .map(|(_, title, _, thumb, _)| {
-                    let cover = thumb.as_deref().and_then(crate::core::online::youtube_thumb_path);
+                    let cover = thumb
+                        .as_deref()
+                        .and_then(crate::core::online::youtube_thumb_path);
                     (cover, "video-x-generic-symbolic", title.clone())
                 })
                 .collect();
@@ -279,8 +285,13 @@ impl App {
                     .activatable(true)
                     .build();
                 row.add_css_class("emilia-flush");
-                let cover = thumb.as_deref().and_then(crate::core::online::youtube_thumb_path);
-                row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+                let cover = thumb
+                    .as_deref()
+                    .and_then(crate::core::online::youtube_thumb_path);
+                row.add_prefix(&crate::ui::app::cover_widget(
+                    cover.as_deref(),
+                    "video-x-generic-symbolic",
+                ));
                 {
                     let sender = sender.clone();
                     row.connect_activated(move |_| sender.input(Msg::YtOpenChannel(id)));
@@ -361,14 +372,22 @@ impl App {
                     crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
                 })
                 .or_else(|| {
-                    v.channel_thumb.as_deref().and_then(crate::core::online::youtube_thumb_path)
+                    v.channel_thumb
+                        .as_deref()
+                        .and_then(crate::core::online::youtube_thumb_path)
                 });
-            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "video-x-generic-symbolic",
+            ));
             row.add_suffix(&self.video_play_button(sender, &v.video_id, &v.title));
             {
                 let (sender, vid, title) = (sender.clone(), v.video_id.clone(), v.title.clone());
                 row.connect_activated(move |_| {
-                    sender.input(Msg::YtPlayVideo { video_id: vid.clone(), title: title.clone() });
+                    sender.input(Msg::YtPlayVideo {
+                        video_id: vid.clone(),
+                        title: title.clone(),
+                    });
                 });
             }
             let lp = gtk::GestureLongPress::new();
@@ -406,12 +425,10 @@ impl App {
             if r.kind == "playlist" {
                 // A played playlist: "Playlist · N songs"; tap/▶ replays it,
                 // long press opens its detail.
-                row.set_subtitle(
-                    &gettext_f(
-                        "Playlist · {n}",
-                        &[("n", &ngettext_n("{n} song", "{n} songs", r.count as u32))],
-                    ),
-                );
+                row.set_subtitle(&gettext_f(
+                    "Playlist · {n}",
+                    &[("n", &ngettext_n("{n} song", "{n} songs", r.count as u32))],
+                ));
                 // Cover derived from the playlist's first song (stored on
                 // play/open); resolves the cached thumbnail from its URL.
                 let cover = r.thumbnail.as_deref().and_then(|t| {
@@ -421,17 +438,23 @@ impl App {
                         crate::core::online::youtube_thumb_path(t)
                     }
                 });
-                row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "view-list-symbolic"));
+                row.add_prefix(&crate::ui::app::cover_widget(
+                    cover.as_deref(),
+                    "view-list-symbolic",
+                ));
                 let btn = gtk::Button::builder()
                     .icon_name("media-playback-start-symbolic")
                     .valign(gtk::Align::Center)
-                    .tooltip_text(&gettext("Start Playlist"))
+                    .tooltip_text(gettext("Start Playlist"))
                     .build();
                 btn.add_css_class("flat");
                 {
                     let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
                     btn.connect_clicked(move |_| {
-                        sender.input(Msg::YtStartPlaylist { url: url.clone(), title: t.clone() });
+                        sender.input(Msg::YtStartPlaylist {
+                            url: url.clone(),
+                            title: t.clone(),
+                        });
                     });
                 }
                 row.add_suffix(&btn);
@@ -439,7 +462,10 @@ impl App {
                     // Simple click: show the playlist's song list (▶ button plays it).
                     let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
                     row.connect_activated(move |_| {
-                        sender.input(Msg::YtOpenRecentPlaylist { url: url.clone(), title: t.clone() });
+                        sender.input(Msg::YtOpenRecentPlaylist {
+                            url: url.clone(),
+                            title: t.clone(),
+                        });
                     });
                 }
                 let lp = gtk::GestureLongPress::new();
@@ -447,7 +473,10 @@ impl App {
                     let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
                     lp.connect_pressed(move |g, _, _| {
                         g.set_state(gtk::EventSequenceState::Claimed);
-                        sender.input(Msg::YtShowPlaylistDetail { url: url.clone(), title: t.clone() });
+                        sender.input(Msg::YtShowPlaylistDetail {
+                            url: url.clone(),
+                            title: t.clone(),
+                        });
                     });
                 }
                 row.add_controller(lp);
@@ -459,16 +488,21 @@ impl App {
             }
             // Resolve the cover the same way as the Newest list (by video id):
             // an enriched cover, else the cached hqdefault thumbnail.
-            let cover = crate::core::online::youtube_cover_path(&r.video_id)
-                .or_else(|| {
-                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&r.video_id))
-                });
-            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+            let cover = crate::core::online::youtube_cover_path(&r.video_id).or_else(|| {
+                crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&r.video_id))
+            });
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "video-x-generic-symbolic",
+            ));
             row.add_suffix(&self.video_play_button(sender, &r.video_id, &r.title));
             {
                 let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
                 row.connect_activated(move |_| {
-                    sender.input(Msg::YtPlayVideo { video_id: vid.clone(), title: t.clone() });
+                    sender.input(Msg::YtPlayVideo {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
                 });
             }
             let lp = gtk::GestureLongPress::new();
@@ -476,7 +510,10 @@ impl App {
                 let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
                 lp.connect_pressed(move |g, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::YtShowVideoDetail { video_id: vid.clone(), title: t.clone() });
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
                 });
             }
             row.add_controller(lp);
@@ -499,7 +536,9 @@ impl App {
             self.toast(&gettext("Download yt-dlp in the settings first"));
             return;
         }
-        let dialog = adw::Dialog::builder().title(&gettext("Search YouTube")).build();
+        let dialog = adw::Dialog::builder()
+            .title(gettext("Search YouTube"))
+            .build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -511,9 +550,16 @@ impl App {
             .halign(gtk::Align::Center)
             .margin_bottom(6)
             .build();
-        let b_video = gtk::ToggleButton::builder().label(&gettext("Videos")).active(true).build();
-        let b_playlist = gtk::ToggleButton::builder().label(&gettext("Playlists")).build();
-        let b_channel = gtk::ToggleButton::builder().label(&gettext("Channels")).build();
+        let b_video = gtk::ToggleButton::builder()
+            .label(gettext("Videos"))
+            .active(true)
+            .build();
+        let b_playlist = gtk::ToggleButton::builder()
+            .label(gettext("Playlists"))
+            .build();
+        let b_channel = gtk::ToggleButton::builder()
+            .label(gettext("Channels"))
+            .build();
         b_playlist.set_group(Some(&b_video));
         b_channel.set_group(Some(&b_video));
         for (btn, k) in [
@@ -532,17 +578,19 @@ impl App {
         content.append(&kind_box);
 
         // Search field + button.
-        let search_group = adw::PreferencesGroup::builder().title(&gettext("Search")).build();
+        let search_group = adw::PreferencesGroup::builder()
+            .title(gettext("Search"))
+            .build();
         let search_row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
             .build();
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text(&gettext("Search term …"))
+            .placeholder_text(gettext("Search term …"))
             .hexpand(true)
             .build();
         crate::ui::widgets::no_autofocus(&search_entry);
-        let search_btn = gtk::Button::builder().label(&gettext("Search")).build();
+        let search_btn = gtk::Button::builder().label(gettext("Search")).build();
         search_btn.add_css_class("suggested-action");
         search_row.append(&search_entry);
         search_row.append(&search_btn);
@@ -564,7 +612,9 @@ impl App {
         }
         search_btn.connect_clicked(move |_| trigger());
 
-        let results = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
+        let results = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .build();
         results.add_css_class("boxed-list");
         results.set_visible(false);
         content.append(&results);
@@ -592,7 +642,9 @@ impl App {
         list.set_visible(true);
 
         if self.youtube.search_results.is_empty() {
-            let row = adw::ActionRow::builder().title(&gettext("Nothing found")).build();
+            let row = adw::ActionRow::builder()
+                .title(gettext("Nothing found"))
+                .build();
             row.set_sensitive(false);
             list.append(&row);
             dialog.set_content_height(320);
@@ -620,7 +672,10 @@ impl App {
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .activatable(true)
                 .build();
-            let cover = r.thumbnail.as_deref().and_then(crate::core::online::youtube_thumb_path);
+            let cover = r
+                .thumbnail
+                .as_deref()
+                .and_then(crate::core::online::youtube_thumb_path);
             let icon = match r.kind {
                 YtKind::Channel => "avatar-default-symbolic",
                 _ => "video-x-generic-symbolic",
@@ -677,10 +732,21 @@ impl App {
             .margin_end(12)
             .build();
         let group = adw::PreferencesGroup::builder()
-            .title(format!("{} ({})", gtk::glib::markup_escape_text(title), videos.len()).as_str())
+            .title(
+                format!(
+                    "{} ({})",
+                    gtk::glib::markup_escape_text(title),
+                    videos.len()
+                )
+                .as_str(),
+            )
             .build();
         if videos.is_empty() {
-            group.add(&adw::ActionRow::builder().title(&gettext("No videos")).build());
+            group.add(
+                &adw::ActionRow::builder()
+                    .title(gettext("No videos"))
+                    .build(),
+            );
         }
         for v in &videos {
             let subtitle = v.duration.map(fmt_duration).unwrap_or_default();
@@ -695,12 +761,18 @@ impl App {
                     crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
                 })
                 .or_else(|| channel_thumb.clone());
-            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "video-x-generic-symbolic",
+            ));
             row.add_suffix(&self.video_play_button(sender, &v.video_id, &v.title));
             {
                 let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
                 row.connect_activated(move |_| {
-                    sender.input(Msg::YtPlayVideo { video_id: vid.clone(), title: t.clone() });
+                    sender.input(Msg::YtPlayVideo {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
                 });
             }
             let lp = gtk::GestureLongPress::new();
@@ -718,7 +790,10 @@ impl App {
             group.add(&row);
         }
         content.append(&group);
-        self.push_subpage(&gettext_f("Channel – {title}", &[("title", title)]), &content);
+        self.push_subpage(
+            &gettext_f("Channel – {title}", &[("title", title)]),
+            &content,
+        );
         self.refresh_yt_icons();
     }
 
@@ -749,8 +824,13 @@ impl App {
             .title(gtk::glib::markup_escape_text(&title))
             .subtitle(ngettext_n("{n} video", "{n} videos", count as u32))
             .build();
-        let cover = thumb.as_deref().and_then(crate::core::online::youtube_thumb_path);
-        head.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+        let cover = thumb
+            .as_deref()
+            .and_then(crate::core::online::youtube_thumb_path);
+        head.add_prefix(&crate::ui::app::cover_widget(
+            cover.as_deref(),
+            "video-x-generic-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 
@@ -776,7 +856,7 @@ impl App {
         // The bell: on → subscribed; turning it off unsubscribes. (Reached from
         // the subscription list, so it is always on here.)
         let bell = adw::SwitchRow::builder()
-            .title(&gettext("Notify of newest publications"))
+            .title(gettext("Notify of newest publications"))
             .active(true)
             .build();
         {
@@ -831,9 +911,8 @@ impl App {
         let stored_channel = stored.as_ref().map(|(c, _, _)| c.clone());
         let stored_duration = stored.as_ref().and_then(|(_, d, _)| *d);
         // Cover: an already-enriched cover, else the (pre-cached) thumbnail.
-        let cover_path = crate::core::online::youtube_cover_path(video_id).or_else(|| {
-            crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(video_id))
-        });
+        let cover_path = crate::core::online::youtube_cover_path(video_id)
+            .or_else(|| crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(video_id)));
 
         // Large cover header (centered); updated by the async fetch if needed.
         let cover_box = gtk::Box::builder()
@@ -855,19 +934,23 @@ impl App {
         // Info: title / channel / duration (from storage; gaps filled async).
         let info = adw::PreferencesGroup::new();
         let title_row = adw::ActionRow::builder()
-            .title(&gettext("Title"))
+            .title(gettext("Title"))
             .subtitle(gtk::glib::markup_escape_text(title))
             .build();
         title_row.set_subtitle_lines(3);
         info.add(&title_row);
         let channel_row = adw::ActionRow::builder()
-            .title(&gettext("Channel"))
+            .title(gettext("Channel"))
             .subtitle(stored_channel.as_deref().unwrap_or("…"))
             .build();
         info.add(&channel_row);
         let duration_row = adw::ActionRow::builder()
-            .title(&gettext("Duration"))
-            .subtitle(&stored_duration.map(fmt_duration).unwrap_or_else(|| "…".into()))
+            .title(gettext("Duration"))
+            .subtitle(
+                stored_duration
+                    .map(fmt_duration)
+                    .unwrap_or_else(|| "…".into()),
+            )
             .build();
         info.add(&duration_row);
         content.append(&info);
@@ -876,10 +959,17 @@ impl App {
         let actions = adw::PreferencesGroup::new();
         let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
         {
-            let (sender, dialog, vid, t) =
-                (sender.clone(), dialog.clone(), video_id.to_string(), title.to_string());
+            let (sender, dialog, vid, t) = (
+                sender.clone(),
+                dialog.clone(),
+                video_id.to_string(),
+                title.to_string(),
+            );
             play.connect_activated(move |_| {
-                sender.input(Msg::YtPlayVideo { video_id: vid.clone(), title: t.clone() });
+                sender.input(Msg::YtPlayVideo {
+                    video_id: vid.clone(),
+                    title: t.clone(),
+                });
                 dialog.close();
             });
         }
@@ -892,7 +982,10 @@ impl App {
         {
             let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
             off.connect_activated(move |_| {
-                sender.input(Msg::YtAddToLibrary { video_id: vid.clone(), title: t.clone() });
+                sender.input(Msg::YtAddToLibrary {
+                    video_id: vid.clone(),
+                    title: t.clone(),
+                });
             });
         }
         actions.add(&off);
@@ -906,7 +999,10 @@ impl App {
                 title.to_string(),
             );
             eq.connect_activated(move |_| {
-                sender.input(Msg::OpenTrackEq { path: path.clone(), title: t.clone() });
+                sender.input(Msg::OpenTrackEq {
+                    path: path.clone(),
+                    title: t.clone(),
+                });
                 dialog.close();
             });
         }
@@ -986,37 +1082,58 @@ impl App {
         info.add(
             &adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(title))
-                .subtitle(&gettext("Playlist"))
+                .subtitle(gettext("Playlist"))
                 .build(),
         );
         content.append(&info);
         let actions = adw::PreferencesGroup::new();
         let start = action_row(&gettext("Start Playlist"), "media-playback-start-symbolic");
         {
-            let (sender, dialog, u, t) =
-                (sender.clone(), dialog.clone(), url.to_string(), title.to_string());
+            let (sender, dialog, u, t) = (
+                sender.clone(),
+                dialog.clone(),
+                url.to_string(),
+                title.to_string(),
+            );
             start.connect_activated(move |_| {
-                sender.input(Msg::YtStartPlaylist { url: u.clone(), title: t.clone() });
+                sender.input(Msg::YtStartPlaylist {
+                    url: u.clone(),
+                    title: t.clone(),
+                });
                 dialog.close();
             });
         }
         actions.add(&start);
         let save = action_row(&gettext("Add to Playlists"), "view-list-symbolic");
         {
-            let (sender, dialog, u, t) =
-                (sender.clone(), dialog.clone(), url.to_string(), title.to_string());
+            let (sender, dialog, u, t) = (
+                sender.clone(),
+                dialog.clone(),
+                url.to_string(),
+                title.to_string(),
+            );
             save.connect_activated(move |_| {
-                sender.input(Msg::YtSavePlaylist { url: u.clone(), title: t.clone() });
+                sender.input(Msg::YtSavePlaylist {
+                    url: u.clone(),
+                    title: t.clone(),
+                });
                 dialog.close();
             });
         }
         actions.add(&save);
         let add = action_row(&gettext("Add to library"), "list-add-symbolic");
         {
-            let (sender, dialog, u, t) =
-                (sender.clone(), dialog.clone(), url.to_string(), title.to_string());
+            let (sender, dialog, u, t) = (
+                sender.clone(),
+                dialog.clone(),
+                url.to_string(),
+                title.to_string(),
+            );
             add.connect_activated(move |_| {
-                sender.input(Msg::YtPlaylistToLibrary { url: u.clone(), title: t.clone() });
+                sender.input(Msg::YtPlaylistToLibrary {
+                    url: u.clone(),
+                    title: t.clone(),
+                });
                 dialog.close();
             });
         }
@@ -1047,8 +1164,7 @@ impl App {
     ) {
         // Central loading overlay (same spinner as the local/Nextcloud library)
         // while yt-dlp fetches the playlist; cleared in `Cmd::YtPlaylistSongs`.
-        self.libview.loading_label =
-            Some(gettext_f("Loading “{title}” …", &[("title", &title)]));
+        self.libview.loading_label = Some(gettext_f("Loading “{title}” …", &[("title", &title)]));
         self.libview.loading = true;
         sender.spawn_command(move |out| {
             let result =
@@ -1077,10 +1193,21 @@ impl App {
             .margin_end(12)
             .build();
         let group = adw::PreferencesGroup::builder()
-            .title(format!("{} ({})", gtk::glib::markup_escape_text(title), videos.len()).as_str())
+            .title(
+                format!(
+                    "{} ({})",
+                    gtk::glib::markup_escape_text(title),
+                    videos.len()
+                )
+                .as_str(),
+            )
             .build();
         if videos.is_empty() {
-            group.add(&adw::ActionRow::builder().title(&gettext("No videos")).build());
+            group.add(
+                &adw::ActionRow::builder()
+                    .title(gettext("No videos"))
+                    .build(),
+            );
         }
         // Cover frames whose thumbnail isn't cached yet (filled in the background).
         let mut pending: Vec<(String, adw::Bin)> = Vec::new();
@@ -1108,7 +1235,7 @@ impl App {
             let play = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
                 .valign(gtk::Align::Center)
-                .tooltip_text(&gettext("Play"))
+                .tooltip_text(gettext("Play"))
                 .css_classes(["flat"])
                 .build();
             {
@@ -1142,7 +1269,10 @@ impl App {
                 let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
                 lp.connect_pressed(move |g, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::YtShowVideoDetail { video_id: vid.clone(), title: t.clone() });
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
                 });
             }
             row.add_controller(lp);
@@ -1152,16 +1282,25 @@ impl App {
         // Keep the recent playlist's cover in sync with its first video (no-op
         // if this playlist is not in the recent history).
         if let Some(first) = videos.first() {
-            let _ = self.library.set_recent_thumb(url, &youtube::thumbnail_url(&first.id));
+            let _ = self
+                .library
+                .set_recent_thumb(url, &youtube::thumbnail_url(&first.id));
         }
-        self.push_subpage(&gettext_f("Playlist – {title}", &[("title", title)]), &content);
+        self.push_subpage(
+            &gettext_f("Playlist – {title}", &[("title", title)]),
+            &content,
+        );
 
         // Load the missing covers in the background (a few in parallel), then fill
         // them in place via `Cmd::YtPlaylistCoversReady`.
         self.youtube.pl_cover_slots = pending;
         if !self.youtube.pl_cover_slots.is_empty() {
-            let urls: Vec<String> =
-                self.youtube.pl_cover_slots.iter().map(|(u, _)| u.clone()).collect();
+            let urls: Vec<String> = self
+                .youtube
+                .pl_cover_slots
+                .iter()
+                .map(|(u, _)| u.clone())
+                .collect();
             sender.spawn_command(move |out| {
                 let threads = 8.min(urls.len().max(1));
                 let chunk = (urls.len() / threads).max(1);
@@ -1192,13 +1331,16 @@ impl App {
         let btn = gtk::Button::builder()
             .icon_name("media-playback-start-symbolic")
             .valign(gtk::Align::Center)
-            .tooltip_text(&gettext("Play/Pause"))
+            .tooltip_text(gettext("Play/Pause"))
             .build();
         btn.add_css_class("flat");
         {
             let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
             btn.connect_clicked(move |_| {
-                sender.input(Msg::YtPlayVideo { video_id: vid.clone(), title: t.clone() });
+                sender.input(Msg::YtPlayVideo {
+                    video_id: vid.clone(),
+                    title: t.clone(),
+                });
             });
         }
         self.youtube
@@ -1263,7 +1405,10 @@ impl App {
             return;
         }
         channel_row.set_subtitle(
-            uploader.as_deref().filter(|s| !s.trim().is_empty()).unwrap_or("—"),
+            uploader
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("—"),
         );
         duration_row.set_subtitle(&duration.map(fmt_duration).unwrap_or_else(|| "—".into()));
         if let Some(tex) = cover
@@ -1313,7 +1458,11 @@ impl App {
                 .or_else(|| {
                     crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid))
                 });
-            let _ = input.send(Msg::YtEnriched { video_id: vid, artist, cover });
+            let _ = input.send(Msg::YtEnriched {
+                video_id: vid,
+                artist,
+                cover,
+            });
         });
     }
 
@@ -1361,23 +1510,28 @@ impl App {
         };
         self.youtube.downloading_videos.insert(video_id.clone());
         self.refresh_yt_download_row();
-        self.yt_progress(&gettext_f("Adding “{title}” to library …", &[("title", &title)]));
+        self.yt_progress(&gettext_f(
+            "Adding “{title}” to library …",
+            &[("title", &title)],
+        ));
         let cover = crate::core::online::youtube_cover_path(&video_id);
         let vid = video_id;
         sender.spawn_command(move |out| {
             let cmd = match library_add_one(&vid, &title, &music, cover.as_deref(), overwrite) {
-                Ok(AddOutcome::Added) => {
-                    crate::ui::app::Cmd::YtLibraryAdded { video_id: Some(vid), result: Ok(1) }
-                }
+                Ok(AddOutcome::Added) => crate::ui::app::Cmd::YtLibraryAdded {
+                    video_id: Some(vid),
+                    result: Ok(1),
+                },
                 // Destination taken by a different song → ask the user.
                 Ok(AddOutcome::Exists(dest)) => crate::ui::app::Cmd::YtLibraryExists {
                     video_id: vid,
                     title,
                     dest: dest.to_string_lossy().into_owned(),
                 },
-                Err(e) => {
-                    crate::ui::app::Cmd::YtLibraryAdded { video_id: Some(vid), result: Err(e) }
-                }
+                Err(e) => crate::ui::app::Cmd::YtLibraryAdded {
+                    video_id: Some(vid),
+                    result: Err(e),
+                },
             };
             let _ = out.send(cmd);
         });
@@ -1395,7 +1549,10 @@ impl App {
             self.toast(&gettext("Set a music folder in settings first"));
             return;
         };
-        self.yt_progress(&gettext_f("Adding playlist “{title}” to library …", &[("title", &title)]));
+        self.yt_progress(&gettext_f(
+            "Adding playlist “{title}” to library …",
+            &[("title", &title)],
+        ));
         sender.spawn_command(move |out| {
             let r = (|| -> Result<usize, String> {
                 let videos = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
@@ -1416,7 +1573,10 @@ impl App {
                 }
                 Ok(n)
             })();
-            let _ = out.send(crate::ui::app::Cmd::YtLibraryAdded { video_id: None, result: r });
+            let _ = out.send(crate::ui::app::Cmd::YtLibraryAdded {
+                video_id: None,
+                result: r,
+            });
         });
     }
 
@@ -1428,7 +1588,10 @@ impl App {
         title: String,
         sender: &ComponentSender<Self>,
     ) {
-        self.yt_progress(&gettext_f("Saving “{title}” to Playlists …", &[("title", &title)]));
+        self.yt_progress(&gettext_f(
+            "Saving “{title}” to Playlists …",
+            &[("title", &title)],
+        ));
         sender.spawn_command(move |out| {
             let r = (|| -> Result<usize, String> {
                 let videos = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
@@ -1439,7 +1602,8 @@ impl App {
                     let _ = lib.set_yt_meta(&v.id, &v.title, v.duration);
                     paths.push(crate::core::youtube::yt_path(&v.id));
                 }
-                lib.replace_yt_playlist(&url, &title, &paths).map_err(|e| e.to_string())?;
+                lib.replace_yt_playlist(&url, &title, &paths)
+                    .map_err(|e| e.to_string())?;
                 Ok(paths.len())
             })();
             let _ = out.send(crate::ui::app::Cmd::YtPlaylistSaved(r));
@@ -1459,8 +1623,12 @@ impl App {
         let mut queue = Vec::with_capacity(videos.len());
         for v in videos {
             let _ = self.library.set_yt_title(&v.video_id, &v.title);
-            self.youtube.video_titles.insert(v.video_id.clone(), v.title);
-            queue.push(std::path::PathBuf::from(crate::core::youtube::yt_path(&v.video_id)));
+            self.youtube
+                .video_titles
+                .insert(v.video_id.clone(), v.title);
+            queue.push(std::path::PathBuf::from(crate::core::youtube::yt_path(
+                &v.video_id,
+            )));
         }
         self.transport.queue = queue;
         self.transport.queue_pos = 0;
@@ -1545,7 +1713,10 @@ impl App {
 /// Activatable action row with an icon prefix (local copy of the podcast
 /// module's private helper).
 fn action_row(title: &str, icon: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder().title(title).activatable(true).build();
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .activatable(true)
+        .build();
     row.add_prefix(&gtk::Image::from_icon_name(icon));
     row
 }

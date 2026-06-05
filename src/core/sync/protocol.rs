@@ -164,7 +164,13 @@ pub struct PairingInfo {
 
 /// Builds the QR/pairing URL. All values are URL-safe (IP, number,
 /// base64url token without padding) – so no percent encoding is needed.
-pub fn build_pair_url(host: &str, port: u16, fingerprint: &str, token: &str, expiry: u64) -> String {
+pub fn build_pair_url(
+    host: &str,
+    port: u16,
+    fingerprint: &str,
+    token: &str,
+    expiry: u64,
+) -> String {
     format!(
         "emilia://pair?v={PROTOCOL_VERSION}&h={host}&p={port}&fp={fingerprint}&t={token}&exp={expiry}"
     )
@@ -282,7 +288,13 @@ mod tests {
 
     #[test]
     fn url_roundtrip() {
-        let url = build_pair_url("192.168.1.42", 8765, "abc-DEF_123", "tok-EN_xyz", 2_000_000_000);
+        let url = build_pair_url(
+            "192.168.1.42",
+            8765,
+            "abc-DEF_123",
+            "tok-EN_xyz",
+            2_000_000_000,
+        );
         let info = parse_pair_url(&url, 1_000_000_000).expect("parses");
         assert_eq!(info.host, "192.168.1.42");
         assert_eq!(info.port, 8765);

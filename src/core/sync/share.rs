@@ -102,6 +102,7 @@ pub struct ShareManifest {
 
 impl ShareManifest {
     /// Whether the offer carries nothing at all.
+    #[allow(dead_code)] // kept as part of the manifest API; not called yet
     pub fn is_empty(&self) -> bool {
         self.files.is_empty()
             && self.yt.is_empty()
@@ -164,7 +165,11 @@ pub struct Selection {
 
 /// Resolves a [`Selection`] against the local library into a [`ShareManifest`].
 /// `peer_yt_enabled` gates whether YouTube items are included at all.
-pub fn build_manifest(lib: &Library, sel: &Selection, peer_yt_enabled: bool) -> Result<ShareManifest> {
+pub fn build_manifest(
+    lib: &Library,
+    sel: &Selection,
+    peer_yt_enabled: bool,
+) -> Result<ShareManifest> {
     let base = data::music_dir(lib);
     let tracks = lib.all_tracks()?;
     let by_path: HashMap<String, &crate::model::Track> =
@@ -224,12 +229,19 @@ pub fn build_manifest(lib: &Library, sel: &Selection, peer_yt_enabled: bool) -> 
                     .map(yt_video_to_rec)
                     .collect();
                 let id = youtube::channel_id_from_url(url).unwrap_or_else(|| url.clone());
-                yt.push(ManifestYt { kind: YtKind::Channel, id, url: url.clone(), title: title.clone(), items });
+                yt.push(ManifestYt {
+                    kind: YtKind::Channel,
+                    id,
+                    url: url.clone(),
+                    title: title.clone(),
+                    items,
+                });
             }
         }
         let pls = lib.playlists_with_origin().unwrap_or_default();
         for origin in &sel.yt_playlists {
-            if let Some((id, name, _count, _)) = pls.iter().find(|p| p.3.as_deref() == Some(origin)) {
+            if let Some((id, name, _count, _)) = pls.iter().find(|p| p.3.as_deref() == Some(origin))
+            {
                 let items = lib
                     .playlist_paths(*id)
                     .unwrap_or_default()
@@ -260,11 +272,21 @@ pub fn build_manifest(lib: &Library, sel: &Selection, peer_yt_enabled: bool) -> 
 
     // Library-data blobs.
     let library = LibraryBlobs {
-        favorites: sel.include_favorites.then(|| data::export_favorites(lib, &base).unwrap_or_default()),
-        playlists: sel.include_playlists.then(|| data::export_playlists_user(lib, &base).unwrap_or_default()),
-        podcasts: sel.include_podcasts.then(|| data::export_podcasts(lib).unwrap_or_default()),
-        categories: sel.include_categories.then(|| data::export_categories(lib, &base).unwrap_or_default()),
-        eq: sel.include_eq.then(|| data::export_eq(lib, &base).unwrap_or_default()),
+        favorites: sel
+            .include_favorites
+            .then(|| data::export_favorites(lib, &base).unwrap_or_default()),
+        playlists: sel
+            .include_playlists
+            .then(|| data::export_playlists_user(lib, &base).unwrap_or_default()),
+        podcasts: sel
+            .include_podcasts
+            .then(|| data::export_podcasts(lib).unwrap_or_default()),
+        categories: sel
+            .include_categories
+            .then(|| data::export_categories(lib, &base).unwrap_or_default()),
+        eq: sel
+            .include_eq
+            .then(|| data::export_eq(lib, &base).unwrap_or_default()),
     };
 
     Ok(ShareManifest {
@@ -317,11 +339,20 @@ fn area_track_paths(lib: &Library, area: Area, tracks: &[crate::model::Track]) -
 }
 
 fn yt_video_to_rec(v: YtVideo) -> YtVideoRec {
-    YtVideoRec { video_id: v.video_id, title: v.title, url: v.url, duration: v.duration }
+    YtVideoRec {
+        video_id: v.video_id,
+        title: v.title,
+        url: v.url,
+        duration: v.duration,
+    }
 }
 
 fn yt_song_rec(lib: &Library, video_id: &str) -> YtVideoRec {
-    let title = lib.yt_title(video_id).ok().flatten().unwrap_or_else(|| video_id.to_string());
+    let title = lib
+        .yt_title(video_id)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| video_id.to_string());
     YtVideoRec {
         video_id: video_id.to_string(),
         title,
@@ -364,7 +395,7 @@ pub fn review_files(lib: &Library, manifest: &ShareManifest) -> Vec<FileReview> 
             let status = match quick_hash(Path::new(&local)) {
                 Ok((_, h)) if h == f.quick_hash => FileStatus::AlreadyHave,
                 Ok(_) => FileStatus::Collision, // exists, different content
-                Err(_) => FileStatus::New,       // no local file
+                Err(_) => FileStatus::New,      // no local file
             };
             FileReview {
                 file: f.clone(),
@@ -383,7 +414,11 @@ pub fn review_files(lib: &Library, manifest: &ShareManifest) -> Vec<FileReview> 
 /// transferred to the music folder by the worker; this applies the library-data
 /// blobs (gated per facet by `decision`) and the YouTube items (only when local
 /// YouTube is enabled). `decision.files` is honoured by the worker, not here.
-pub fn apply_manifest(lib: &Library, manifest: &ShareManifest, decision: &ShareDecision) -> Result<ImportStats> {
+pub fn apply_manifest(
+    lib: &Library,
+    manifest: &ShareManifest,
+    decision: &ShareDecision,
+) -> Result<ImportStats> {
     let base = data::music_dir(lib);
     let mut stats = ImportStats::default();
 
@@ -447,7 +482,11 @@ fn apply_yt_item(lib: &Library, item: &ManifestYt) {
             }
         }
         YtKind::Playlist => {
-            let paths: Vec<String> = item.items.iter().map(|v| youtube::yt_path(&v.video_id)).collect();
+            let paths: Vec<String> = item
+                .items
+                .iter()
+                .map(|v| youtube::yt_path(&v.video_id))
+                .collect();
             let _ = lib.replace_yt_playlist(&item.id, &item.title, &paths);
             for v in &item.items {
                 let _ = lib.set_yt_meta(&v.video_id, &v.title, v.duration);
@@ -515,7 +554,10 @@ mod tests {
         lib.set_setting("music_dir", &base).unwrap();
         for name in ["x", "y"] {
             let t = crate::model::Track {
-                path: dir.join(format!("a/{name}.mp3")).to_string_lossy().into_owned(),
+                path: dir
+                    .join(format!("a/{name}.mp3"))
+                    .to_string_lossy()
+                    .into_owned(),
                 title: name.to_string(),
                 artist: Some("Artist".into()),
                 album: Some("Album".into()),
@@ -541,35 +583,63 @@ mod tests {
     #[test]
     fn review_marks_new_have_and_collision() {
         // Sender side files.
-        let sdir = music_dir_with("snd", &[("song.mp3", b"the-same-bytes"), ("only.mp3", b"only-on-sender")]);
+        let sdir = music_dir_with(
+            "snd",
+            &[
+                ("song.mp3", b"the-same-bytes"),
+                ("only.mp3", b"only-on-sender"),
+            ],
+        );
         let slib = Library::open_in_memory().unwrap();
-        slib.set_setting("music_dir", &sdir.to_string_lossy()).unwrap();
+        slib.set_setting("music_dir", &sdir.to_string_lossy())
+            .unwrap();
         for name in ["song", "only"] {
             slib.upsert_track(&crate::model::Track {
-                path: sdir.join(format!("{name}.mp3")).to_string_lossy().into_owned(),
+                path: sdir
+                    .join(format!("{name}.mp3"))
+                    .to_string_lossy()
+                    .into_owned(),
                 title: name.into(),
                 ..Default::default()
             })
             .unwrap();
         }
-        let m = build_manifest(&slib, &Selection { whole_library: true, ..Default::default() }, false).unwrap();
+        let m = build_manifest(
+            &slib,
+            &Selection {
+                whole_library: true,
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
 
         // Receiver: has an identical song.mp3 (AlreadyHave) but a *different* file
         // would have to exist at only.mp3 to be a collision; here only.mp3 is new.
         let rdir = music_dir_with("rcv", &[("song.mp3", b"the-same-bytes")]);
         let rlib = Library::open_in_memory().unwrap();
-        rlib.set_setting("music_dir", &rdir.to_string_lossy()).unwrap();
+        rlib.set_setting("music_dir", &rdir.to_string_lossy())
+            .unwrap();
         let reviews = review_files(&rlib, &m);
-        let by: HashMap<_, _> = reviews.iter().map(|r| (r.file.rel_path.clone(), r)).collect();
+        let by: HashMap<_, _> = reviews
+            .iter()
+            .map(|r| (r.file.rel_path.clone(), r))
+            .collect();
         assert_eq!(by["song.mp3"].status, FileStatus::AlreadyHave);
         assert!(!by["song.mp3"].selected);
         assert_eq!(by["only.mp3"].status, FileStatus::New);
         assert!(by["only.mp3"].selected);
 
         // Now place a *different* file at song.mp3 → collision, unselected.
-        std::fs::File::create(rdir.join("song.mp3")).unwrap().write_all(b"DIFFERENT").unwrap();
+        std::fs::File::create(rdir.join("song.mp3"))
+            .unwrap()
+            .write_all(b"DIFFERENT")
+            .unwrap();
         let reviews = review_files(&rlib, &m);
-        let song = reviews.iter().find(|r| r.file.rel_path == "song.mp3").unwrap();
+        let song = reviews
+            .iter()
+            .find(|r| r.file.rel_path == "song.mp3")
+            .unwrap();
         assert_eq!(song.status, FileStatus::Collision);
         assert!(!song.selected, "collisions are not selected by default");
 

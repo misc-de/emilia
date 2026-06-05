@@ -78,9 +78,7 @@ pub fn episode_download_dest(url: &str) -> PathBuf {
         .next()
         .and_then(|p| p.rsplit('.').next())
         .map(|e| e.to_ascii_lowercase())
-        .filter(|e| {
-            (1..=4).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric())
-        })
+        .filter(|e| (1..=4).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric()))
         .unwrap_or_else(|| "audio".to_string());
     let mut p = podcast_download_dir();
     p.push(format!("{}.{ext}", name_hash(url)));
@@ -207,10 +205,7 @@ impl OnlineClient {
     /// release first, then falls back to the release group.
     /// `Ok(None)` = no cover exists.
     pub fn fetch_cover(&self, m: &ReleaseMatch) -> Result<Option<Vec<u8>>> {
-        let release_url = format!(
-            "https://coverartarchive.org/release/{}/front-500",
-            m.mbid
-        );
+        let release_url = format!("https://coverartarchive.org/release/{}/front-500", m.mbid);
         if let Some(bytes) = self.get_image(&release_url)? {
             return Ok(Some(bytes));
         }
@@ -337,7 +332,11 @@ impl OnlineClient {
         let mut out = Vec::new();
         for img in list.images.into_iter().take(MAX_GALLERY) {
             // Prefer the 500 px variant; otherwise large; otherwise the original.
-            let u = img.thumbnails.n500.or(img.thumbnails.large).unwrap_or(img.image);
+            let u = img
+                .thumbnails
+                .n500
+                .or(img.thumbnails.large)
+                .unwrap_or(img.image);
             if u.is_empty() {
                 continue;
             }
@@ -359,7 +358,11 @@ impl OnlineClient {
             Some(resp) => resp.into_json()?,
             None => return Ok(None),
         };
-        Ok(search.artists.into_iter().find(|a| a.score >= 90).map(|a| a.id))
+        Ok(search
+            .artists
+            .into_iter()
+            .find(|a| a.score >= 90)
+            .map(|a| a.id))
     }
 
     /// Loads several artist images from fanart.tv (thumbs + backgrounds).
@@ -375,7 +378,7 @@ impl OnlineClient {
             None => return Ok(Vec::new()),
         };
         let mut out = Vec::new();
-        for t in fa.artistthumb.into_iter().chain(fa.artistbackground.into_iter()) {
+        for t in fa.artistthumb.into_iter().chain(fa.artistbackground) {
             if out.len() >= MAX_GALLERY {
                 break;
             }
@@ -629,10 +632,16 @@ pub fn track_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>
     if title.trim().is_empty() {
         return None;
     }
-    OnlineClient::new().fetch_track_cover(artist, title).ok().flatten()
+    OnlineClient::new()
+        .fetch_track_cover(artist, title)
+        .ok()
+        .flatten()
 }
 
-pub fn recording_cover(raw_title: &str, station: Option<&str>) -> Option<(Vec<u8>, Option<String>)> {
+pub fn recording_cover(
+    raw_title: &str,
+    station: Option<&str>,
+) -> Option<(Vec<u8>, Option<String>)> {
     let client = OnlineClient::new();
     let candidates = recording_query_candidates(raw_title, station);
     // The first candidate is also the best guess for storage/display – the cover
@@ -641,7 +650,10 @@ pub fn recording_cover(raw_title: &str, station: Option<&str>) -> Option<(Vec<u8
     for (artist, title) in &candidates {
         if let Ok(Some(hit)) = client.search_track_cover(artist.as_deref().unwrap_or(""), title) {
             if let Some((ka, kt)) = &key {
-                let _ = std::fs::write(recording_cover_file(ka.as_deref().unwrap_or(""), kt), &hit.0);
+                let _ = std::fs::write(
+                    recording_cover_file(ka.as_deref().unwrap_or(""), kt),
+                    &hit.0,
+                );
             }
             return Some(hit);
         }
@@ -656,7 +668,10 @@ pub fn recording_cover(raw_title: &str, station: Option<&str>) -> Option<(Vec<u8
 /// Strategy: strip the station name and "now playing" noise, split on the common
 /// separators, then offer the plausible pairings – including the swapped order
 /// ("Title - Artist") and a title-only fallback.
-pub fn recording_query_candidates(raw: &str, station: Option<&str>) -> Vec<(Option<String>, String)> {
+pub fn recording_query_candidates(
+    raw: &str,
+    station: Option<&str>,
+) -> Vec<(Option<String>, String)> {
     let cleaned = clean_stream_title(raw, station);
     let parts = split_title_parts(&cleaned, station);
     let mut out: Vec<(Option<String>, String)> = Vec::new();
@@ -666,7 +681,9 @@ pub fn recording_query_candidates(raw: &str, station: Option<&str>) -> Vec<(Opti
             return;
         }
         let cand = (
-            a.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+            a.map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             t.to_string(),
         );
         if !out.contains(&cand) {
@@ -696,7 +713,14 @@ pub fn recording_query_candidates(raw: &str, station: Option<&str>) -> Vec<(Opti
 /// Removes "now playing" noise and the station name from a raw stream title.
 fn clean_stream_title(raw: &str, station: Option<&str>) -> String {
     let mut s = raw.trim().to_string();
-    for p in ["now playing:", "now playing", "playing:", "live:", "on air:", "▶"] {
+    for p in [
+        "now playing:",
+        "now playing",
+        "playing:",
+        "live:",
+        "on air:",
+        "▶",
+    ] {
         if s.to_ascii_lowercase().starts_with(p) {
             s = s[p.len()..].trim().to_string();
         }
@@ -707,7 +731,10 @@ fn clean_stream_title(raw: &str, station: Option<&str>) -> String {
         }
         s = remove_ci(&s, st);
     }
-    s.trim().trim_matches(|c| "-–—|/ ".contains(c)).trim().to_string()
+    s.trim()
+        .trim_matches(|c| "-–—|/ ".contains(c))
+        .trim()
+        .to_string()
 }
 
 /// Splits a cleaned title on the common separators (dash variants, pipe, slash),
@@ -718,7 +745,7 @@ fn split_title_parts(s: &str, station: Option<&str>) -> Vec<String> {
         .split(" - ")
         .map(str::trim)
         .filter(|p| !p.is_empty())
-        .filter(|p| station.map_or(true, |st| !p.eq_ignore_ascii_case(st.trim())))
+        .filter(|p| station.is_none_or(|st| !p.eq_ignore_ascii_case(st.trim())))
         .map(str::to_string)
         .collect()
 }
@@ -742,7 +769,10 @@ fn remove_ci(haystack: &str, needle: &str) -> String {
 /// Cache file of a recording cover (key = artist+title).
 fn recording_cover_file(artist: &str, title: &str) -> PathBuf {
     let mut p = cover_cache_dir();
-    p.push(format!("rec_{}.img", name_hash(&format!("{artist}\u{1}{title}"))));
+    p.push(format!(
+        "rec_{}.img",
+        name_hash(&format!("{artist}\u{1}{title}"))
+    ));
     p
 }
 
@@ -759,7 +789,10 @@ pub fn recording_cover_path(artist: &str, title: &str) -> Option<String> {
 /// Cache path for a locally extracted album cover (key: artist+album).
 fn save_local_cover(artist: &str, album: &str, bytes: &[u8]) -> Result<PathBuf> {
     let mut path = cover_cache_dir();
-    path.push(format!("local_{}.img", name_hash(&format!("{artist}\u{1}{album}"))));
+    path.push(format!(
+        "local_{}.img",
+        name_hash(&format!("{artist}\u{1}{album}"))
+    ));
     std::fs::write(&path, bytes)?;
     Ok(path)
 }
@@ -969,9 +1002,11 @@ pub fn store_album_gallery(
     }
     for (i, (bytes, kind)) in imgs.iter().enumerate() {
         match save_gallery_image("albimg", &key, i, bytes) {
-            Ok(pp) => {
-                stored.push((pp.to_string_lossy().into_owned(), kind.clone(), "caa".to_string()))
-            }
+            Ok(pp) => stored.push((
+                pp.to_string_lossy().into_owned(),
+                kind.clone(),
+                "caa".to_string(),
+            )),
             Err(e) => tracing::warn!("Failed to save gallery image: {e}"),
         }
     }
@@ -1008,9 +1043,11 @@ pub fn enrich_artist_gallery(
     let mut stored = Vec::new();
     for (i, (bytes, kind)) in imgs.iter().enumerate() {
         match save_gallery_image("artimg", name, i, bytes) {
-            Ok(pp) => {
-                stored.push((pp.to_string_lossy().into_owned(), kind.clone(), "fanart".to_string()))
-            }
+            Ok(pp) => stored.push((
+                pp.to_string_lossy().into_owned(),
+                kind.clone(),
+                "fanart".to_string(),
+            )),
             Err(e) => tracing::warn!("Failed to save artist image: {e}"),
         }
     }
@@ -1024,7 +1061,12 @@ pub fn enrich_artist_gallery(
 /// Requires the MBID already found in the album metadata (it is created during
 /// the single-cover fetch [`enrich_album`]); without an MBID nothing happens. For
 /// the on-demand fetch when opening the album detail view.
-pub fn enrich_album_gallery(client: &OnlineClient, lib: &Library, artist: &str, album: &str) -> usize {
+pub fn enrich_album_gallery(
+    client: &OnlineClient,
+    lib: &Library,
+    artist: &str,
+    album: &str,
+) -> usize {
     let Some(mbid) = lib
         .get_album_meta(artist, album)
         .ok()

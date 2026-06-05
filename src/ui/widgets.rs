@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use adw::prelude::*;
 use relm4::{adw, gtk};
 
-
 /// Edge length of the cached list thumbnails. The cards show 48 px; 128 px
 /// covers HiDPI and keeps the cache small (≈64 KB instead of ≈1 MB per full-size cover).
 const THUMB_PX: i32 = 128;

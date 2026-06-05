@@ -25,7 +25,9 @@ pub fn pubdate_key(s: Option<&str>) -> i64 {
     };
     // Find the month name; before it is the day, after it the year and time.
     let mi = tokens.iter().position(|t| month_num(t).is_some());
-    let Some(mi) = mi.filter(|&i| i >= 1) else { return 0 };
+    let Some(mi) = mi.filter(|&i| i >= 1) else {
+        return 0;
+    };
     let month = month_num(tokens[mi]).unwrap_or(0);
     let day: i64 = tokens[mi - 1].trim_matches(',').parse().unwrap_or(0);
     let year: i64 = tokens.get(mi + 1).and_then(|y| y.parse().ok()).unwrap_or(0);
@@ -168,15 +170,14 @@ pub(crate) fn decode_entities(s: &str) -> String {
         // Entity name up to the ';' (keep it short, otherwise not a real entity).
         if let Some(semi) = after.find(';').filter(|&p| p > 0 && p <= 12) {
             let ent = &after[..semi];
-            let decoded = if let Some(hex) =
-                ent.strip_prefix("#x").or_else(|| ent.strip_prefix("#X"))
-            {
-                u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
-            } else if let Some(dec) = ent.strip_prefix('#') {
-                dec.parse::<u32>().ok().and_then(char::from_u32)
-            } else {
-                named(ent)
-            };
+            let decoded =
+                if let Some(hex) = ent.strip_prefix("#x").or_else(|| ent.strip_prefix("#X")) {
+                    u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+                } else if let Some(dec) = ent.strip_prefix('#') {
+                    dec.parse::<u32>().ok().and_then(char::from_u32)
+                } else {
+                    named(ent)
+                };
             if let Some(c) = decoded {
                 out.push(c);
                 rest = &after[semi + 1..];
@@ -250,8 +251,19 @@ pub(crate) fn html_to_text(s: &str) -> String {
                     .to_ascii_lowercase();
                 if matches!(
                     name.as_str(),
-                    "br" | "p" | "div" | "li" | "tr" | "ul" | "ol" | "blockquote"
-                        | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+                    "br" | "p"
+                        | "div"
+                        | "li"
+                        | "tr"
+                        | "ul"
+                        | "ol"
+                        | "blockquote"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "h6"
                 ) && !out.ends_with('\n')
                 {
                     out.push('\n');
@@ -297,10 +309,11 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
             t.to_string()
         }
     };
-    let image_url = channel
-        .image()
-        .map(|i| i.url().to_string())
-        .or_else(|| channel.itunes_ext().and_then(|e| e.image().map(String::from)));
+    let image_url = channel.image().map(|i| i.url().to_string()).or_else(|| {
+        channel
+            .itunes_ext()
+            .and_then(|e| e.image().map(String::from))
+    });
 
     let mut episodes = Vec::new();
     for item in channel.items() {
@@ -330,7 +343,9 @@ pub fn parse_feed(xml: &[u8]) -> Result<PodcastFeed> {
             title,
             audio_url,
             published: item.pub_date().map(String::from),
-            duration: item.itunes_ext().and_then(|e| e.duration().map(String::from)),
+            duration: item
+                .itunes_ext()
+                .and_then(|e| e.duration().map(String::from)),
             description,
         });
     }
@@ -663,7 +678,10 @@ mod tests {
     fn parses_channel_and_audio_episodes() {
         let feed = parse_feed(SAMPLE.as_bytes()).unwrap();
         assert_eq!(feed.title, "Test Podcast");
-        assert_eq!(feed.image_url.as_deref(), Some("https://example.com/cover.jpg"));
+        assert_eq!(
+            feed.image_url.as_deref(),
+            Some("https://example.com/cover.jpg")
+        );
         // The entry without <enclosure> is skipped → 2 episodes.
         assert_eq!(feed.episodes.len(), 2);
 
@@ -694,7 +712,8 @@ mod tests {
 
     #[test]
     fn strips_html_to_plain_text() {
-        let html = "<p>Erste Zeile</p><p>Zweite &amp; Zeile</p><br>Dritte<ul><li>A</li><li>B</li></ul>";
+        let html =
+            "<p>Erste Zeile</p><p>Zweite &amp; Zeile</p><br>Dritte<ul><li>A</li><li>B</li></ul>";
         assert_eq!(
             html_to_text(html),
             "Erste Zeile\nZweite & Zeile\nDritte\nA\nB"
@@ -704,9 +723,18 @@ mod tests {
     #[test]
     fn linkifies_timestamps_and_escapes_rest() {
         let md = linkify_timestamps("Intro 0:30, Thema 12:34 & 1:02:03 Ende");
-        assert!(md.contains("<a href=\"emilia-seek:30000\">0:30</a>"), "{md}");
-        assert!(md.contains("<a href=\"emilia-seek:754000\">12:34</a>"), "{md}");
-        assert!(md.contains("<a href=\"emilia-seek:3723000\">1:02:03</a>"), "{md}");
+        assert!(
+            md.contains("<a href=\"emilia-seek:30000\">0:30</a>"),
+            "{md}"
+        );
+        assert!(
+            md.contains("<a href=\"emilia-seek:754000\">12:34</a>"),
+            "{md}"
+        );
+        assert!(
+            md.contains("<a href=\"emilia-seek:3723000\">1:02:03</a>"),
+            "{md}"
+        );
         assert!(md.contains("&amp;"), "{md}");
         // No false matches in longer numbers.
         let none = linkify_timestamps("Jahr 2024:01 und 12:345 sind keine Marke");
@@ -715,7 +743,8 @@ mod tests {
 
     #[test]
     fn parse_chapters_extracts_time_and_label() {
-        let notes = "00:00 Intro\n07:13 - Markt-Update\nThema XY 1:02:03\n00:00 Dublette\nohne Zeit";
+        let notes =
+            "00:00 Intro\n07:13 - Markt-Update\nThema XY 1:02:03\n00:00 Dublette\nohne Zeit";
         let ch = super::parse_chapters(notes);
         assert_eq!(
             ch,
@@ -751,6 +780,9 @@ mod tests {
         assert_eq!(r[0].author.as_deref(), Some("Alice"));
         assert_eq!(r[0].feed_url, "https://example.com/feed.xml");
         // The small artwork is preferred.
-        assert_eq!(r[0].image_url.as_deref(), Some("https://example.com/100.jpg"));
+        assert_eq!(
+            r[0].image_url.as_deref(),
+            Some("https://example.com/100.jpg")
+        );
     }
 }

@@ -78,7 +78,10 @@ mod tests {
         base[(QUICK_HASH_PREFIX as usize) + 10] = 9; // beyond the prefix
         let beyond = tmp("beyond", &base);
         let (_, h_beyond) = quick_hash(&beyond).unwrap();
-        assert_eq!(h_base, h_beyond, "change beyond 1 MiB is intentionally invisible");
+        assert_eq!(
+            h_base, h_beyond,
+            "change beyond 1 MiB is intentionally invisible"
+        );
 
         base[100] = 9; // inside the prefix
         let within = tmp("within", &base);

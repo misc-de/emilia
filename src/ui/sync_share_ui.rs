@@ -41,13 +41,33 @@ impl PickerHandles {
         let on = |r: &Option<adw::SwitchRow>| r.as_ref().is_some_and(|s| s.is_active());
         Selection {
             whole_library: on(&self.whole),
-            artists: self.artists.iter().filter(|(c, _)| c.is_active()).map(|(_, a)| a.clone()).collect(),
-            albums: self.albums.iter().filter(|(c, _)| c.is_active()).map(|(_, a)| a.clone()).collect(),
+            artists: self
+                .artists
+                .iter()
+                .filter(|(c, _)| c.is_active())
+                .map(|(_, a)| a.clone())
+                .collect(),
+            albums: self
+                .albums
+                .iter()
+                .filter(|(c, _)| c.is_active())
+                .map(|(_, a)| a.clone())
+                .collect(),
             song_paths: Vec::new(),
             audiobooks: on(&self.audiobooks),
             concerts: on(&self.concerts),
-            yt_channels: self.yt_channels.iter().filter(|(c, _)| c.is_active()).map(|(_, i)| *i).collect(),
-            yt_playlists: self.yt_playlists.iter().filter(|(c, _)| c.is_active()).map(|(_, u)| u.clone()).collect(),
+            yt_channels: self
+                .yt_channels
+                .iter()
+                .filter(|(c, _)| c.is_active())
+                .map(|(_, i)| *i)
+                .collect(),
+            yt_playlists: self
+                .yt_playlists
+                .iter()
+                .filter(|(c, _)| c.is_active())
+                .map(|(_, u)| u.clone())
+                .collect(),
             yt_songs: Vec::new(),
             include_favorites: on(&self.favorites),
             include_playlists: on(&self.playlists),
@@ -70,20 +90,24 @@ pub(crate) fn build_picker(
 
     // Whole library.
     let g0 = adw::PreferencesGroup::builder()
-        .title(&gettext_f("Share with {peer}", &[("peer", peer)]))
+        .title(gettext_f("Share with {peer}", &[("peer", peer)]))
         .build();
-    let whole = adw::SwitchRow::builder().title(&gettext("Entire library")).build();
+    let whole = adw::SwitchRow::builder()
+        .title(gettext("Entire library"))
+        .build();
     g0.add(&whole);
     h.whole = Some(whole);
     page.add(&g0);
 
     // Music: artists + albums (each in an expander of check rows).
-    let music = adw::PreferencesGroup::builder().title(&gettext("Music")).build();
+    let music = adw::PreferencesGroup::builder()
+        .title(gettext("Music"))
+        .build();
     let artists = lib.distinct_artists().unwrap_or_default();
     if !artists.is_empty() {
         let exp = adw::ExpanderRow::builder()
-            .title(&gettext("Artists"))
-            .subtitle(&format!("{}", artists.len()))
+            .title(gettext("Artists"))
+            .subtitle(format!("{}", artists.len()))
             .build();
         for a in &artists {
             let (row, check) = check_row(a, None);
@@ -101,8 +125,8 @@ pub(crate) fn build_picker(
     }
     if !albums.is_empty() {
         let exp = adw::ExpanderRow::builder()
-            .title(&gettext("Albums"))
-            .subtitle(&format!("{}", albums.len()))
+            .title(gettext("Albums"))
+            .subtitle(format!("{}", albums.len()))
             .build();
         for (artist, album) in &albums {
             let (row, check) = check_row(album, Some(artist));
@@ -114,9 +138,13 @@ pub(crate) fn build_picker(
     page.add(&music);
 
     // Audiobooks / concerts (whole-area toggles).
-    let areas = adw::PreferencesGroup::builder().title(&gettext("Collections")).build();
-    let ab = adw::SwitchRow::builder().title(&gettext("Audiobooks")).build();
-    let co = adw::SwitchRow::builder().title(&gettext("Concerts")).build();
+    let areas = adw::PreferencesGroup::builder()
+        .title(gettext("Collections"))
+        .build();
+    let ab = adw::SwitchRow::builder()
+        .title(gettext("Audiobooks"))
+        .build();
+    let co = adw::SwitchRow::builder().title(gettext("Concerts")).build();
     areas.add(&ab);
     areas.add(&co);
     h.audiobooks = Some(ab);
@@ -125,10 +153,14 @@ pub(crate) fn build_picker(
 
     // YouTube — only if the peer can accept it.
     if peer_caps.youtube_enabled {
-        let yt = adw::PreferencesGroup::builder().title(&gettext("YouTube")).build();
+        let yt = adw::PreferencesGroup::builder()
+            .title(gettext("YouTube"))
+            .build();
         let channels = lib.channels().unwrap_or_default();
         if !channels.is_empty() {
-            let exp = adw::ExpanderRow::builder().title(&gettext("Channels")).build();
+            let exp = adw::ExpanderRow::builder()
+                .title(gettext("Channels"))
+                .build();
             for (id, title, _url, _thumb, _n) in &channels {
                 let (row, check) = check_row(title, None);
                 exp.add_row(&row);
@@ -143,7 +175,9 @@ pub(crate) fn build_picker(
             .filter_map(|(_, name, _c, origin)| origin.map(|o| (name, o)))
             .collect();
         if !pls.is_empty() {
-            let exp = adw::ExpanderRow::builder().title(&gettext("Playlists")).build();
+            let exp = adw::ExpanderRow::builder()
+                .title(gettext("Playlists"))
+                .build();
             for (name, origin) in &pls {
                 let (row, check) = check_row(name, None);
                 exp.add_row(&row);
@@ -155,12 +189,22 @@ pub(crate) fn build_picker(
     }
 
     // Library data.
-    let libdata = adw::PreferencesGroup::builder().title(&gettext("Library data")).build();
-    let fav = adw::SwitchRow::builder().title(&gettext("Favorites")).build();
-    let pl = adw::SwitchRow::builder().title(&gettext("Playlists")).build();
-    let pod = adw::SwitchRow::builder().title(&gettext("Podcasts")).build();
-    let eq = adw::SwitchRow::builder().title(&gettext("Equalizer")).build();
-    let cat = adw::SwitchRow::builder().title(&gettext("Categories")).build();
+    let libdata = adw::PreferencesGroup::builder()
+        .title(gettext("Library data"))
+        .build();
+    let fav = adw::SwitchRow::builder()
+        .title(gettext("Favorites"))
+        .build();
+    let pl = adw::SwitchRow::builder()
+        .title(gettext("Playlists"))
+        .build();
+    let pod = adw::SwitchRow::builder().title(gettext("Podcasts")).build();
+    let eq = adw::SwitchRow::builder()
+        .title(gettext("Equalizer"))
+        .build();
+    let cat = adw::SwitchRow::builder()
+        .title(gettext("Categories"))
+        .build();
     for r in [&fav, &pl, &pod, &eq, &cat] {
         libdata.add(r);
     }
@@ -173,7 +217,7 @@ pub(crate) fn build_picker(
 
     // Bottom action.
     let btn = gtk::Button::builder()
-        .label(&gettext("Continue"))
+        .label(gettext("Continue"))
         .css_classes(["suggested-action", "pill"])
         .halign(gtk::Align::Center)
         .margin_top(12)
@@ -201,14 +245,16 @@ pub(crate) fn build_confirm(
     sender: &ComponentSender<SyncPage>,
 ) -> gtk::Widget {
     let page = adw::PreferencesPage::new();
-    let g = adw::PreferencesGroup::builder().title(&gettext("Transfer summary")).build();
+    let g = adw::PreferencesGroup::builder()
+        .title(gettext("Transfer summary"))
+        .build();
     let files_row = adw::ActionRow::builder()
-        .title(&gettext_f("{n} files", &[("n", &file_count.to_string())]))
-        .subtitle(&names.iter().take(4).cloned().collect::<Vec<_>>().join(", "))
+        .title(gettext_f("{n} files", &[("n", &file_count.to_string())]))
+        .subtitle(names.iter().take(4).cloned().collect::<Vec<_>>().join(", "))
         .build();
     let size_row = adw::ActionRow::builder()
-        .title(&gettext("Total size"))
-        .subtitle(&human_size(total_size))
+        .title(gettext("Total size"))
+        .subtitle(human_size(total_size))
         .build();
     g.add(&files_row);
     g.add(&size_row);
@@ -219,7 +265,10 @@ pub(crate) fn build_confirm(
     row.set_halign(gtk::Align::Center);
     row.set_margin_top(12);
     let cancel = gtk::Button::with_label(&gettext("Cancel"));
-    let send = gtk::Button::builder().label(&gettext("Send")).css_classes(["suggested-action"]).build();
+    let send = gtk::Button::builder()
+        .label(gettext("Send"))
+        .css_classes(["suggested-action"])
+        .build();
     {
         let sender = sender.clone();
         cancel.connect_clicked(move |_| sender.input(SyncInput::CancelShare));
@@ -257,8 +306,18 @@ impl ReviewHandles {
         let on = |r: &Option<adw::SwitchRow>| r.as_ref().is_some_and(|s| s.is_active());
         ShareDecision {
             accept: true,
-            files: self.files.iter().filter(|(c, _)| c.is_active()).map(|(_, p)| p.clone()).collect(),
-            yt: self.yt.iter().filter(|(c, _)| c.is_active()).map(|(_, i)| i.clone()).collect(),
+            files: self
+                .files
+                .iter()
+                .filter(|(c, _)| c.is_active())
+                .map(|(_, p)| p.clone())
+                .collect(),
+            yt: self
+                .yt
+                .iter()
+                .filter(|(c, _)| c.is_active())
+                .map(|(_, i)| i.clone())
+                .collect(),
             favorites: on(&self.favorites),
             playlists: on(&self.playlists),
             podcasts: on(&self.podcasts),
@@ -280,14 +339,19 @@ pub(crate) fn build_review(
     let mut h = ReviewHandles::default();
     let page = adw::PreferencesPage::new();
 
-    let (new_n, have_n, coll_n) = reviews.iter().fold((0, 0, 0), |(n, h, c), r| match r.status {
-        FileStatus::New => (n + 1, h, c),
-        FileStatus::AlreadyHave => (n, h + 1, c),
-        FileStatus::Collision => (n, h, c + 1),
-    });
+    let (new_n, have_n, coll_n) = reviews
+        .iter()
+        .fold((0, 0, 0), |(n, h, c), r| match r.status {
+            FileStatus::New => (n + 1, h, c),
+            FileStatus::AlreadyHave => (n, h + 1, c),
+            FileStatus::Collision => (n, h, c + 1),
+        });
     let head = adw::PreferencesGroup::builder()
-        .title(&gettext_f("{name} wants to share", &[("name", &manifest.device_name)]))
-        .description(&gettext_f(
+        .title(gettext_f(
+            "{name} wants to share",
+            &[("name", &manifest.device_name)],
+        ))
+        .description(gettext_f(
             "{n} files · {size} · {new} new, {have} already here, {coll} would overwrite",
             &[
                 ("n", &reviews.len().to_string()),
@@ -301,7 +365,9 @@ pub(crate) fn build_review(
     page.add(&head);
 
     if !reviews.is_empty() {
-        let files = adw::PreferencesGroup::builder().title(&gettext("Files")).build();
+        let files = adw::PreferencesGroup::builder()
+            .title(gettext("Files"))
+            .build();
         for r in reviews {
             let (row, check) = review_row(r);
             files.add(&row);
@@ -311,7 +377,9 @@ pub(crate) fn build_review(
     }
 
     if yt_enabled && !manifest.yt.is_empty() {
-        let yt = adw::PreferencesGroup::builder().title(&gettext("YouTube")).build();
+        let yt = adw::PreferencesGroup::builder()
+            .title(gettext("YouTube"))
+            .build();
         for item in &manifest.yt {
             let (row, check) = check_row(&item.title, None);
             check.set_active(true);
@@ -323,10 +391,15 @@ pub(crate) fn build_review(
 
     // Library-data switches, only for facets actually present in the offer.
     let lb = &manifest.library;
-    if lb.favorites.is_some() || lb.playlists.is_some() || lb.podcasts.is_some()
-        || lb.eq.is_some() || lb.categories.is_some()
+    if lb.favorites.is_some()
+        || lb.playlists.is_some()
+        || lb.podcasts.is_some()
+        || lb.eq.is_some()
+        || lb.categories.is_some()
     {
-        let g = adw::PreferencesGroup::builder().title(&gettext("Library data")).build();
+        let g = adw::PreferencesGroup::builder()
+            .title(gettext("Library data"))
+            .build();
         let add = |present: bool, title: String| -> Option<adw::SwitchRow> {
             present.then(|| {
                 let s = adw::SwitchRow::builder().title(&title).active(true).build();
@@ -347,8 +420,14 @@ pub(crate) fn build_review(
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row.set_halign(gtk::Align::Center);
     row.set_margin_top(12);
-    let reject = gtk::Button::builder().label(&gettext("Reject all")).css_classes(["destructive-action"]).build();
-    let accept = gtk::Button::builder().label(&gettext("Accept")).css_classes(["suggested-action"]).build();
+    let reject = gtk::Button::builder()
+        .label(gettext("Reject all"))
+        .css_classes(["destructive-action"])
+        .build();
+    let accept = gtk::Button::builder()
+        .label(gettext("Accept"))
+        .css_classes(["suggested-action"])
+        .build();
     {
         let sender = sender.clone();
         reject.connect_clicked(move |_| sender.input(SyncInput::RejectOffer));
@@ -372,7 +451,10 @@ pub(crate) fn build_review(
 /// A check row: a leading `CheckButton` plus a title (and optional subtitle).
 fn check_row(title: &str, subtitle: Option<&str>) -> (adw::ActionRow, gtk::CheckButton) {
     let check = gtk::CheckButton::new();
-    let row = adw::ActionRow::builder().title(title).activatable(true).build();
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .activatable(true)
+        .build();
     if let Some(s) = subtitle {
         row.set_subtitle(s);
     }
@@ -384,7 +466,11 @@ fn check_row(title: &str, subtitle: Option<&str>) -> (adw::ActionRow, gtk::Check
 
 /// A file review row with a status marker (collision = warning, already-have = dim).
 fn review_row(r: &FileReview) -> (adw::ActionRow, gtk::CheckButton) {
-    let name = if r.file.rel_path.is_empty() { r.file.title.clone() } else { r.file.rel_path.clone() };
+    let name = if r.file.rel_path.is_empty() {
+        r.file.title.clone()
+    } else {
+        r.file.rel_path.clone()
+    };
     let (row, check) = check_row(&name, Some(&human_size(r.file.size)));
     check.set_active(r.selected);
     match r.status {

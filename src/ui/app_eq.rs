@@ -16,7 +16,11 @@ impl App {
     /// Changes take effect immediately and are saved per output+level; during
     /// playback the inheritance applies (track→album→artist→global, then the
     /// default output as the base).
-    pub(crate) fn open_eq_dialog(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_eq_dialog(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
         let Some(entry) = self.nav.context_target.as_ref() else {
             return;
         };
@@ -68,7 +72,11 @@ impl App {
 
     /// Global equalizer (from the settings): the base for everything without its
     /// own setting at the artist, album or track level.
-    pub(crate) fn open_global_eq(&self, root: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+    pub(crate) fn open_global_eq(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
         self.open_eq_editor(
             root,
             sender,
@@ -109,7 +117,13 @@ impl App {
         // Preload the bands per output (no DB access in the closures).
         let preloaded: Vec<[f64; 10]> = outputs
             .iter()
-            .map(|(_, oid)| self.library.get_eq(oid, scope, &key).ok().flatten().unwrap_or([0.0; 10]))
+            .map(|(_, oid)| {
+                self.library
+                    .get_eq(oid, scope, &key)
+                    .ok()
+                    .flatten()
+                    .unwrap_or([0.0; 10])
+            })
             .collect();
         let preloaded_enabled: Vec<bool> = outputs
             .iter()
@@ -124,7 +138,7 @@ impl App {
         let loading = Rc::new(Cell::new(false));
 
         let dialog = adw::Dialog::builder()
-            .title(&gettext("Equalizer"))
+            .title(gettext("Equalizer"))
             .content_width(440)
             .content_height(620)
             .build();
@@ -188,8 +202,8 @@ impl App {
 
         let out_labels: Vec<&str> = outputs.iter().map(|(l, _)| l.as_str()).collect();
         let out_combo = adw::ComboRow::builder()
-            .title(&gettext("Output"))
-            .subtitle(&gettext("Device / Bluetooth"))
+            .title(gettext("Output"))
+            .subtitle(gettext("Device / Bluetooth"))
             .model(&gtk::StringList::new(&out_labels))
             .build();
         out_combo.set_selected(out_default as u32);
@@ -365,7 +379,11 @@ impl App {
             let bands_box = bands_box.clone();
             out_combo.connect_selected_notify(move |_| {
                 let on = enabled.borrow()[cur_out.get()];
-                off.set_label(&if on { gettext("Turn off") } else { gettext("Turn on") });
+                off.set_label(&if on {
+                    gettext("Turn off")
+                } else {
+                    gettext("Turn on")
+                });
                 bands_box.set_sensitive(on);
             });
         }

@@ -77,7 +77,10 @@ fn detail_box() -> gtk::Box {
 
 /// Activatable action row with an icon prefix (for the detail page).
 fn action_row(title: &str, icon: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder().title(title).activatable(true).build();
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .activatable(true)
+        .build();
     row.add_prefix(&gtk::Image::from_icon_name(icon));
     row
 }
@@ -103,7 +106,12 @@ fn stream_subtitle(st: &StreamItem) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(t) = st.tags.as_deref().filter(|s| !s.trim().is_empty()) {
         // Show only the first few tags (comma-separated → "·").
-        let tags: Vec<&str> = t.split(',').map(str::trim).filter(|s| !s.is_empty()).take(3).collect();
+        let tags: Vec<&str> = t
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .take(3)
+            .collect();
         if !tags.is_empty() {
             parts.push(tags.join(" · "));
         }
@@ -147,14 +155,17 @@ impl App {
             let pp = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
                 .valign(gtk::Align::Center)
-                .tooltip_text(&gettext("Play/Pause"))
+                .tooltip_text(gettext("Play/Pause"))
                 .build();
             pp.add_css_class("flat");
             {
                 let sender = sender.clone();
                 pp.connect_clicked(move |_| sender.input(Msg::ToggleStream(id)));
             }
-            self.streaming.stream_play_buttons.borrow_mut().push((id, pp.clone()));
+            self.streaming
+                .stream_play_buttons
+                .borrow_mut()
+                .push((id, pp.clone()));
             row.add_suffix(&pp);
 
             // Tapping the row = toggle Play/Pause.
@@ -185,7 +196,13 @@ impl App {
         sender: &ComponentSender<Self>,
         id: i64,
     ) {
-        let Some(st) = self.streaming.stream_items.iter().find(|s| s.id == id).cloned() else {
+        let Some(st) = self
+            .streaming
+            .stream_items
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+        else {
             return;
         };
         let dialog = adw::Dialog::builder()
@@ -280,25 +297,25 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let dialog = adw::Dialog::builder().title(&gettext("Add station")).build();
+        let dialog = adw::Dialog::builder().title(gettext("Add station")).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
         // --- Worldwide search (Radio-Browser) ---
         let search_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Search"))
-            .description(&gettext("Find a station worldwide by name"))
+            .title(gettext("Search"))
+            .description(gettext("Find a station worldwide by name"))
             .build();
         let search_row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
             .build();
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text(&gettext("Station name …"))
+            .placeholder_text(gettext("Station name …"))
             .hexpand(true)
             .build();
         crate::ui::widgets::no_autofocus(&search_entry);
-        let search_btn = gtk::Button::builder().label(&gettext("Search")).build();
+        let search_btn = gtk::Button::builder().label(gettext("Search")).build();
         search_btn.add_css_class("suggested-action");
         search_row.append(&search_entry);
         search_row.append(&search_btn);
@@ -334,10 +351,10 @@ impl App {
 
         // --- Manual: stream address ---
         let url_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Or enter a stream address"))
+            .title(gettext("Or enter a stream address"))
             .build();
         let url_entry = adw::EntryRow::builder()
-            .title(&gettext("Stream address (URL)"))
+            .title(gettext("Stream address (URL)"))
             .show_apply_button(true)
             .build();
         crate::ui::widgets::no_autofocus(&url_entry);
@@ -380,7 +397,7 @@ impl App {
 
         if self.streaming.stream_search_results.is_empty() {
             let row = adw::ActionRow::builder()
-                .title(&gettext("No stations found"))
+                .title(gettext("No stations found"))
                 .build();
             row.set_sensitive(false);
             list.append(&row);
@@ -401,7 +418,12 @@ impl App {
                 sub.push(c.to_string());
             }
             if let Some(t) = r.tags.as_deref().filter(|s| !s.trim().is_empty()) {
-                let tags: Vec<&str> = t.split(',').map(str::trim).filter(|s| !s.is_empty()).take(2).collect();
+                let tags: Vec<&str> = t
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .take(2)
+                    .collect();
                 if !tags.is_empty() {
                     sub.push(tags.join(" · "));
                 }
@@ -429,7 +451,13 @@ impl App {
     /// Starts a saved station (replaces the current playback).
     /// Live stream → no resume, no duration.
     pub(crate) fn play_stream(&mut self, id: i64) {
-        let Some(st) = self.streaming.stream_items.iter().find(|s| s.id == id).cloned() else {
+        let Some(st) = self
+            .streaming
+            .stream_items
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+        else {
             return;
         };
         // Save the position/session of a previously playing track.
@@ -565,7 +593,7 @@ impl App {
             let del = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .valign(gtk::Align::Center)
-                .tooltip_text(&gettext("Delete"))
+                .tooltip_text(gettext("Delete"))
                 .build();
             del.add_css_class("flat");
             {
@@ -603,7 +631,13 @@ impl App {
         sender: &ComponentSender<Self>,
         id: i64,
     ) {
-        let Some(rec) = self.streaming.recording_items.iter().find(|r| r.id == id).cloned() else {
+        let Some(rec) = self
+            .streaming
+            .recording_items
+            .iter()
+            .find(|r| r.id == id)
+            .cloned()
+        else {
             return;
         };
         // Album/artist come from the embedded tag (written during enrichment);
@@ -635,11 +669,12 @@ impl App {
         if let Some(a) = artist.as_deref() {
             head.set_subtitle(&gtk::glib::markup_escape_text(a));
         }
-        let cover = crate::core::online::recording_cover_path(
-            artist.as_deref().unwrap_or(""),
-            &rec.title,
-        );
-        head.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
+        let cover =
+            crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &rec.title);
+        head.add_prefix(&crate::ui::app::cover_widget(
+            cover.as_deref(),
+            "audio-x-generic-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 
@@ -660,7 +695,10 @@ impl App {
         if let Some(st) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
             details.add(&info_row(&gettext("Station"), st));
         }
-        details.add(&info_row(&gettext("Recorded"), &format_datetime(rec.recorded_at)));
+        details.add(&info_row(
+            &gettext("Recorded"),
+            &format_datetime(rec.recorded_at),
+        ));
         if rec.incomplete {
             details.add(&info_row(
                 &gettext("Note"),
@@ -828,7 +866,7 @@ impl App {
             let song = match snap
                 .songs
                 .iter()
-                .find(|s| s.start <= next_start && s.end.map_or(true, |e| e > next_start))
+                .find(|s| s.start <= next_start && s.end.is_none_or(|e| e > next_start))
             {
                 Some(s) => s,
                 // … otherwise advance to the next known song start (skipping an
@@ -851,7 +889,14 @@ impl App {
 
         let mut saved = 0;
         for (start, end, raw_title, incomplete) in &segs {
-            if self.store_segment(sender, *start, *end, raw_title, station.as_deref(), *incomplete) {
+            if self.store_segment(
+                sender,
+                *start,
+                *end,
+                raw_title,
+                station.as_deref(),
+                *incomplete,
+            ) {
                 saved += 1;
             }
         }
@@ -867,7 +912,7 @@ impl App {
             .streaming
             .record_state
             .as_ref()
-            .map_or(false, |rs| rs.current_title != live_title);
+            .is_some_and(|rs| rs.current_title != live_title);
         if let Some(rs) = self.streaming.record_state.as_mut() {
             rs.next_start = next_start;
             if title_changed {
@@ -941,7 +986,8 @@ impl App {
         // them into the file (best effort); refresh the list once cached.
         let (raw, st) = (raw_title.to_string(), station.map(str::to_string));
         sender.spawn_command(move |out| {
-            if let Some((bytes, album)) = crate::core::online::recording_cover(&raw, st.as_deref()) {
+            if let Some((bytes, album)) = crate::core::online::recording_cover(&raw, st.as_deref())
+            {
                 crate::core::recorder::embed_cover(
                     &path,
                     artist.as_deref(),
@@ -980,20 +1026,33 @@ impl App {
         let Some(raw_title) = live_title.or_else(|| song.map(|s| s.title.clone())) else {
             return; // nothing identified yet → don't save an untitled blob
         };
-        let incomplete = song.map_or(true, |s| !s.complete || next_start > s.start);
+        let incomplete = song.is_none_or(|s| !s.complete || next_start > s.start);
         let station = self
             .streaming
             .stream_items
             .iter()
             .find(|s| s.id == stream_id)
             .map(|s| s.name.clone());
-        self.store_segment(sender, next_start, end, &raw_title, station.as_deref(), incomplete);
+        self.store_segment(
+            sender,
+            next_start,
+            end,
+            &raw_title,
+            station.as_deref(),
+            incomplete,
+        );
     }
 
     /// Replay subpage of a station: the songs detected in the buffer for
     /// previewing or saving after the fact. Reachable from the detail page.
     pub(crate) fn open_stream_replay(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(st) = self.streaming.stream_items.iter().find(|s| s.id == id).cloned() else {
+        let Some(st) = self
+            .streaming
+            .stream_items
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+        else {
             return;
         };
         let content = gtk::Box::builder()
@@ -1016,12 +1075,12 @@ impl App {
         songs.reverse();
 
         let group = adw::PreferencesGroup::builder()
-            .title(&gettext("Recently detected"))
+            .title(gettext("Recently detected"))
             .build();
         if songs.is_empty() {
             group.add(
                 &adw::ActionRow::builder()
-                    .title(&gettext("Nothing buffered yet"))
+                    .title(gettext("Nothing buffered yet"))
                     .build(),
             );
         }
@@ -1036,7 +1095,7 @@ impl App {
             let save = gtk::Button::builder()
                 .icon_name("document-save-symbolic")
                 .valign(gtk::Align::Center)
-                .tooltip_text(&gettext("Save"))
+                .tooltip_text(gettext("Save"))
                 .build();
             save.add_css_class("flat");
             {
@@ -1053,7 +1112,7 @@ impl App {
             let play = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
                 .valign(gtk::Align::Center)
-                .tooltip_text(&gettext("Play"))
+                .tooltip_text(gettext("Play"))
                 .build();
             play.add_css_class("flat");
             {

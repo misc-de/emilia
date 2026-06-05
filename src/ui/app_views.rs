@@ -44,12 +44,16 @@ fn album_base(name: &str) -> String {
             .trim_matches(|c: char| !c.is_alphanumeric())
             .to_string()
     };
-    const MARKERS: [&str; 8] = ["disc", "disk", "cd", "teil", "part", "folge", "vol", "volume"];
+    const MARKERS: [&str; 8] = [
+        "disc", "disk", "cd", "teil", "part", "folge", "vol", "volume",
+    ];
     let is_marker = |w: &str| {
         let c = clean(w);
         MARKERS.iter().any(|m| {
             c == *m
-                || (c.starts_with(m) && c.len() > m.len() && c[m.len()..].chars().all(|d| d.is_ascii_digit()))
+                || (c.starts_with(m)
+                    && c.len() > m.len()
+                    && c[m.len()..].chars().all(|d| d.is_ascii_digit()))
         })
     };
     const CONNECTORS: [&str; 6] = ["v", "von", "of", "x", "u", "und"];
@@ -61,7 +65,8 @@ fn album_base(name: &str) -> String {
             || is_marker(w)
     };
     // First marker position from which on, until the end, only suffix tokens remain.
-    let cut = (0..words.len()).find(|&i| is_marker(words[i]) && words[i..].iter().all(|w| is_suffix_tok(w)));
+    let cut = (0..words.len())
+        .find(|&i| is_marker(words[i]) && words[i..].iter().all(|w| is_suffix_tok(w)));
     let base = match cut {
         Some(i) => words[..i].join(" "),
         None => name.trim().to_string(),
@@ -92,7 +97,7 @@ fn disc_from_segment(seg: &str) -> Option<u32> {
             let boundary = pos == 0 || !bytes[pos - 1].is_ascii_alphabetic();
             if boundary {
                 let digits: String = s[pos + kw.len()..]
-                    .trim_start_matches(|c: char| matches!(c, ' ' | '_' | '.' | '#' | '-'))
+                    .trim_start_matches([' ', '_', '.', '#', '-'])
                     .chars()
                     .take_while(char::is_ascii_digit)
                     .collect();
@@ -118,7 +123,7 @@ pub(crate) fn track_disc(t: &Track) -> u32 {
         .flat_map(|d| d.components())
         .filter_map(|c| c.as_os_str().to_str())
         .filter_map(disc_from_segment)
-        .last()
+        .next_back()
     {
         return d;
     }
@@ -193,7 +198,8 @@ fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
 impl App {
     /// Scroller of the file list (ancestor of the entries `ListBox`).
     pub(crate) fn fs_scroller(&self) -> Option<gtk::ScrolledWindow> {
-        self.libview.entries
+        self.libview
+            .entries
             .widget()
             .ancestor(gtk::ScrolledWindow::static_type())
             .and_downcast::<gtk::ScrolledWindow>()
@@ -208,14 +214,17 @@ impl App {
         }
         // Remember the scroll position of the currently shown folder before it is replaced.
         if let (Some(dir), Some(sc)) = (self.files.shown_dir.clone(), self.fs_scroller()) {
-            self.files.fs_scroll
+            self.files
+                .fs_scroll
                 .borrow_mut()
                 .insert(dir, sc.vadjustment().value());
         }
         match self.files.browse_dir.clone() {
             Some(dir) => {
                 // Remember the current folder (for "continue where you left off").
-                let _ = self.library.set_setting("browse_dir", &dir.to_string_lossy());
+                let _ = self
+                    .library
+                    .set_setting("browse_dir", &dir.to_string_lossy());
                 self.libview.loading = true;
                 sender.spawn_oneshot_command(move || Cmd::Entries(read_entries(dir)));
             }
@@ -350,7 +359,8 @@ impl App {
         let ActiveSource::Source(id) = self.files.active_source else {
             return None;
         };
-        self.files.sources
+        self.files
+            .sources
             .iter()
             .find(|s| s.id == id && s.kind == "webdav")
             .cloned()
@@ -476,7 +486,13 @@ impl App {
         if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = albums
                 .iter()
-                .map(|a| (a.cover_path.clone(), "media-optical-symbolic", a.album.clone()))
+                .map(|a| {
+                    (
+                        a.cover_path.clone(),
+                        "media-optical-symbolic",
+                        a.album.clone(),
+                    )
+                })
                 .collect();
             self.fill_gallery(
                 &self.libview.albums_gallery,
@@ -520,7 +536,10 @@ impl App {
                 }
                 Err(e) => tracing::error!("Database unavailable for scan: {e}"),
             }
-            Cmd::ScanDone { then_enrich, manual }
+            Cmd::ScanDone {
+                then_enrich,
+                manual,
+            }
         });
         true
     }
@@ -543,14 +562,18 @@ impl App {
         // regardless of which source is currently active in the file view.
         let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
             if !light {
-                self.toast(&gettext("No music folder set – please choose one in the settings"));
+                self.toast(&gettext(
+                    "No music folder set – please choose one in the settings",
+                ));
             }
             return;
         };
         if self.enrich_state.enriching {
             return;
         }
-        self.enrich_state.enrich_cancel.store(false, Ordering::Relaxed);
+        self.enrich_state
+            .enrich_cancel
+            .store(false, Ordering::Relaxed);
         let cancel = self.enrich_state.enrich_cancel.clone();
         self.enrich_state.enriching = true;
         sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
@@ -604,7 +627,7 @@ impl App {
         // (O(artists×tracks); dominated startup noticeably).
         if artists
             .iter()
-            .any(|a| a.image_path.as_deref().map_or(true, |p| p.trim().is_empty()))
+            .any(|a| a.image_path.as_deref().is_none_or(|p| p.trim().is_empty()))
         {
             use crate::core::artist::{norm_key, split_artists};
             let mut first_album: std::collections::HashMap<String, String> =
@@ -623,7 +646,7 @@ impl App {
                 }
             }
             for a in &mut artists {
-                if a.image_path.as_deref().map_or(true, |p| p.trim().is_empty()) {
+                if a.image_path.as_deref().is_none_or(|p| p.trim().is_empty()) {
                     if let Some(album) = first_album.get(&norm_key(&a.name)) {
                         a.image_path = self.album_cover_for(&a.name, album);
                     }
@@ -635,7 +658,13 @@ impl App {
         if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = artists
                 .iter()
-                .map(|a| (a.image_path.clone(), "avatar-default-symbolic", a.name.clone()))
+                .map(|a| {
+                    (
+                        a.image_path.clone(),
+                        "avatar-default-symbolic",
+                        a.name.clone(),
+                    )
+                })
                 .collect();
             self.fill_gallery(
                 &self.libview.artists_gallery,
@@ -669,8 +698,10 @@ impl App {
             };
             if entry.is_dir() {
                 // All indexed tracks below this folder, in path (≈ track) order.
-                let prefix =
-                    format!("{}/", crate::core::webdav::nc_path(*id, rel).trim_end_matches('/'));
+                let prefix = format!(
+                    "{}/",
+                    crate::core::webdav::nc_path(*id, rel).trim_end_matches('/')
+                );
                 let mut paths: Vec<PathBuf> = self
                     .library
                     .all_tracks()
@@ -782,7 +813,10 @@ impl App {
     /// * Tracks with no album at all are also singles.
     ///
     /// Albums in the order from `all_tracks`; tracks per album by track number.
-    pub(crate) fn artist_sections(&self, name: &str) -> (Vec<(String, String, Vec<Track>)>, Vec<Track>) {
+    pub(crate) fn artist_sections(
+        &self,
+        name: &str,
+    ) -> (Vec<(String, String, Vec<Track>)>, Vec<Track>) {
         let target = crate::core::artist::norm_key(name);
         let all = self.library.all_tracks().unwrap_or_default();
 
@@ -852,18 +886,23 @@ impl App {
         let mut groups: std::collections::HashMap<String, Vec<Track>> =
             std::collections::HashMap::new();
         for p in paths {
-            let track = self.library.track_by_path(p).ok().flatten().unwrap_or(Track {
-                id: 0,
-                path: p.clone(),
-                title: self.display_name(std::path::Path::new(p)),
-                artist: None,
-                album: None,
-                genre: None,
-                track_no: None,
-                disc_no: None,
-                duration_ms: None,
-                resume_ms: 0,
-            });
+            let track = self
+                .library
+                .track_by_path(p)
+                .ok()
+                .flatten()
+                .unwrap_or(Track {
+                    id: 0,
+                    path: p.clone(),
+                    title: self.display_name(std::path::Path::new(p)),
+                    artist: None,
+                    album: None,
+                    genre: None,
+                    track_no: None,
+                    disc_no: None,
+                    duration_ms: None,
+                    resume_ms: 0,
+                });
             let album = track.album.clone().unwrap_or_default();
             if !groups.contains_key(&album) {
                 order.push(album.clone());
@@ -914,10 +953,7 @@ impl App {
     /// the albums overview, which groups purely by album name). Sorted by
     /// disc/track number, then path.
     pub(crate) fn album_tracks_by_name(&self, album: &str) -> Vec<Track> {
-        let mut tracks: Vec<Track> = self
-            .library
-            .tracks_by_album_name(album)
-            .unwrap_or_default();
+        let mut tracks: Vec<Track> = self.library.tracks_by_album_name(album).unwrap_or_default();
         sort_by_structure(&mut tracks);
         tracks
     }
@@ -982,8 +1018,10 @@ impl App {
             content.append(
                 &adw::StatusPage::builder()
                     .icon_name("avatar-default-symbolic")
-                    .title(&gettext("No tracks"))
-                    .description(&gettext("There are no songs for this artist in the library."))
+                    .title(gettext("No tracks"))
+                    .description(gettext(
+                        "There are no songs for this artist in the library.",
+                    ))
                     .build(),
             );
         }
@@ -992,7 +1030,7 @@ impl App {
         if !album_groups.is_empty() {
             let n = album_groups.len();
             let group = adw::PreferencesGroup::builder()
-                .title(&format!("{} ({n})", gettext("Albums")))
+                .title(format!("{} ({n})", gettext("Albums")))
                 .build();
             for (album, display_artist, tracks) in &album_groups {
                 let album_meta = self
@@ -1009,7 +1047,10 @@ impl App {
                     .activatable(true)
                     .build();
                 row.add_css_class("emilia-flush");
-                row.add_prefix(&cover_widget(cover_path.as_deref(), "media-optical-symbolic"));
+                row.add_prefix(&cover_widget(
+                    cover_path.as_deref(),
+                    "media-optical-symbolic",
+                ));
 
                 // Total runtime of all album tracks + play button (layout as for
                 // the singles). The button plays the whole album; a
@@ -1071,7 +1112,7 @@ impl App {
         if !singles.is_empty() {
             let n = singles.len();
             let group = adw::PreferencesGroup::builder()
-                .title(&format!("{} ({n})", gettext("Singles")))
+                .title(format!("{} ({n})", gettext("Singles")))
                 .build();
             for t in &singles {
                 // Cover order (never a foreign folder image):
@@ -1092,8 +1133,9 @@ impl App {
                     })
                     .or_else(|| {
                         let artist = t.artist.as_deref().filter(|a| !a.trim().is_empty())?;
-                        let primary =
-                            crate::core::artist::split_artists(artist).into_iter().next()?;
+                        let primary = crate::core::artist::split_artists(artist)
+                            .into_iter()
+                            .next()?;
                         self.library
                             .get_artist_meta(&primary)
                             .ok()
@@ -1109,7 +1151,10 @@ impl App {
                     row.set_subtitle(&gtk::glib::markup_escape_text(al));
                 }
                 row.add_css_class("emilia-flush");
-                row.add_prefix(&cover_widget(cover_path.as_deref(), "audio-x-generic-symbolic"));
+                row.add_prefix(&cover_widget(
+                    cover_path.as_deref(),
+                    "audio-x-generic-symbolic",
+                ));
                 if let Some(ms) = t.duration_ms {
                     if ms > 0 {
                         row.add_suffix(&duration_label(ms));
@@ -1119,7 +1164,7 @@ impl App {
                 // Play button: plays this track but keeps the list open.
                 let play_btn = gtk::Button::builder()
                     .icon_name("media-playback-start-symbolic")
-                    .tooltip_text(&gettext("Play"))
+                    .tooltip_text(gettext("Play"))
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
                     .build();
@@ -1170,7 +1215,12 @@ impl App {
     /// Tapping an album in the artist subpage: lists its tracks
     /// (with album cover) as a further subpage. Tapping a track
     /// plays the entire album from that track on.
-    pub(crate) fn open_album_tracks(&self, sender: &ComponentSender<Self>, name: &str, album: &str) {
+    pub(crate) fn open_album_tracks(
+        &self,
+        sender: &ComponentSender<Self>,
+        name: &str,
+        album: &str,
+    ) {
         // Tracks of the album – `all_tracks` already returns them sorted by track number.
         let tracks = self.album_tracks_for_artist(name, album);
         self.render_album_tracks(sender, tracks, name, album, AlbumPlay::Artist);
@@ -1214,7 +1264,13 @@ impl App {
                 .unwrap_or_default()
         });
         let name = most_common_artist(&tracks);
-        self.render_album_tracks(sender, tracks, &name, &album, AlbumPlay::Folder(folder.to_string()));
+        self.render_album_tracks(
+            sender,
+            tracks,
+            &name,
+            &album,
+            AlbumPlay::Folder(folder.to_string()),
+        );
     }
 
     /// Shared rendering of an album track list. `play` determines how a
@@ -1345,7 +1401,7 @@ impl App {
             // Play button: plays from this track but keeps the list open.
             let play_btn = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
-                .tooltip_text(&gettext("Play"))
+                .tooltip_text(gettext("Play"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
@@ -1398,7 +1454,14 @@ impl App {
                 adw::PreferencesGroup::new()
             } else {
                 adw::PreferencesGroup::builder()
-                    .title(format!("{} ({})", gtk::glib::markup_escape_text(album), tracks.len()).as_str())
+                    .title(
+                        format!(
+                            "{} ({})",
+                            gtk::glib::markup_escape_text(album),
+                            tracks.len()
+                        )
+                        .as_str(),
+                    )
                     .build()
             };
             for t in &tracks {
@@ -1455,7 +1518,7 @@ impl App {
                 }
             }
         }
-        out.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        out.sort_by_key(|a| a.2.to_lowercase());
         out
     }
 
@@ -1467,7 +1530,10 @@ impl App {
     ///   **album tag** (deduplicated with concerts already marked as albums);
     ///   **no** individual files from an album.
     /// * Only files **without** an album tag are loose **individual pieces**.
-    pub(crate) fn folder_albums_and_tracks(&self, dir: &str) -> Vec<(String, String, String, bool)> {
+    pub(crate) fn folder_albums_and_tracks(
+        &self,
+        dir: &str,
+    ) -> Vec<(String, String, String, bool)> {
         use crate::core::category::album_key;
         use std::collections::BTreeMap;
 
@@ -1522,7 +1588,8 @@ impl App {
             }
         }
         for (al, grp) in &by_album {
-            let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for t in grp {
                 *counts
                     .entry(primary_artist(t.artist.as_deref().unwrap_or("")))
@@ -1533,7 +1600,12 @@ impl App {
                 .max_by_key(|(_, n)| *n)
                 .map(|(a, _)| a)
                 .unwrap_or_default();
-            out.push(("album".to_string(), album_key(&artist, al), al.clone(), false));
+            out.push((
+                "album".to_string(),
+                album_key(&artist, al),
+                al.clone(),
+                false,
+            ));
         }
         out
     }
@@ -1558,9 +1630,7 @@ impl App {
             return Some(FsKind::Artist(meta.name));
         }
         // Otherwise: does the folder contain tracks of exactly one album? → album.
-        let Some(dir) = entry.path() else {
-            return None;
-        };
+        let dir = entry.path()?;
         let tracks: Vec<Track> = self
             .library
             .all_tracks()
@@ -1589,7 +1659,13 @@ impl App {
     pub(crate) fn fs_eq_level(
         &self,
         entry: &FsEntry,
-    ) -> Option<(&'static str, String, Option<&'static str>, &'static str, String)> {
+    ) -> Option<(
+        &'static str,
+        String,
+        Option<&'static str>,
+        &'static str,
+        String,
+    )> {
         match self.fs_music_kind(entry)? {
             FsKind::Artist(name) => Some((
                 "the artist",
@@ -1701,11 +1777,17 @@ impl App {
         match years.as_slice() {
             [] => None,
             [y] => Some(("Year", y.to_string())),
-            _ => Some(("Years", format!("{} – {}", years[0], years[years.len() - 1]))),
+            _ => Some((
+                "Years",
+                format!("{} – {}", years[0], years[years.len() - 1]),
+            )),
         }
     }
 
-    pub(crate) fn ctx_cover(&self, target: &CtxTarget) -> (Option<gtk::gdk::Texture>, &'static str) {
+    pub(crate) fn ctx_cover(
+        &self,
+        target: &CtxTarget,
+    ) -> (Option<gtk::gdk::Texture>, &'static str) {
         match target {
             CtxTarget::Fs(e) => {
                 // First an (album) cover: cover file, embedded, or online
@@ -1735,7 +1817,10 @@ impl App {
             }
             CtxTarget::Artist(m) => {
                 // Photo, otherwise an album cover of the artist as a substitute.
-                let img = m.image_path.clone().or_else(|| self.artist_album_cover(&m.name));
+                let img = m
+                    .image_path
+                    .clone()
+                    .or_else(|| self.artist_album_cover(&m.name));
                 let tex = img.and_then(|p| gtk::gdk::Texture::from_filename(&p).ok());
                 (tex, "avatar-default-symbolic")
             }
@@ -1751,7 +1836,6 @@ impl App {
             }
         }
     }
-
 
     /// Appends the cover/photo: with multiple images a carousel with dots,
     /// otherwise the single (primary) image as before.
@@ -1810,7 +1894,11 @@ impl App {
             CtxTarget::Artist(m) => m.image_path.clone(),
             // For a song: the cover of its album (the carousel then starts on it).
             CtxTarget::Fs(_) => fs_alb.as_ref().and_then(|(ar, al)| {
-                self.library.get_album_meta(ar, al).ok().flatten().and_then(|m| m.cover_path)
+                self.library
+                    .get_album_meta(ar, al)
+                    .ok()
+                    .flatten()
+                    .and_then(|m| m.cover_path)
             }),
         };
         if let Some(pos) = primary.and_then(|p| paths.iter().position(|x| *x == p)) {
@@ -1898,9 +1986,10 @@ impl App {
     pub(crate) fn ctx_gallery_paths(&self, entry: &CtxTarget) -> Vec<String> {
         let stored = match entry {
             CtxTarget::Artist(m) => self.library.artist_images(&m.name).unwrap_or_default(),
-            CtxTarget::Album(m) => {
-                self.library.album_images(&m.artist, &m.album).unwrap_or_default()
-            }
+            CtxTarget::Album(m) => self
+                .library
+                .album_images(&m.artist, &m.album)
+                .unwrap_or_default(),
             // A song shares its album's candidates – resolved once in
             // `append_cover_or_gallery` to avoid re-reading the file's tags.
             CtxTarget::Fs(_) => Vec::new(),
@@ -1924,7 +2013,10 @@ impl App {
                 if let Some((label, value)) = year {
                     lines.push((gettext(label), value));
                 }
-                lines.push((gettext("Collection"), Self::files_summary(&files, !year_shown)));
+                lines.push((
+                    gettext("Collection"),
+                    Self::files_summary(&files, !year_shown),
+                ));
                 lines
             }
             CtxTarget::Album(m) => {
@@ -1940,7 +2032,10 @@ impl App {
                 if let Some(y) = m.year {
                     lines.push((gettext("Year"), y.to_string()));
                 }
-                lines.push((gettext("Collection"), Self::files_summary(&files, m.year.is_none())));
+                lines.push((
+                    gettext("Collection"),
+                    Self::files_summary(&files, m.year.is_none()),
+                ));
                 lines
             }
         }
@@ -1967,13 +2062,15 @@ impl App {
                 let p = e.path()?;
                 let track = scanner::read_track(p).ok()?;
                 let path = p.to_string_lossy().into_owned();
-                let mut eff =
-                    self.library
-                        .resolve_areas(track.artist.as_deref(), track.album.as_deref(), &path);
+                let mut eff = self.library.resolve_areas(
+                    track.artist.as_deref(),
+                    track.album.as_deref(),
+                    &path,
+                );
                 // A song without an album never appears in the Albums overview
                 // (its query skips album-less tracks), so leave the "Albums"
                 // switch off for it initially instead of showing it ticked.
-                if track.album.as_deref().map_or(true, |a| a.trim().is_empty()) {
+                if track.album.as_deref().is_none_or(|a| a.trim().is_empty()) {
                     eff.retain(|a| *a != Area::Albums);
                 }
                 ("track", path, eff)
@@ -2019,11 +2116,16 @@ impl App {
             Area::ALL
                 .iter()
                 .copied()
-                .filter(|a| a.section().map_or(true, |s| !self.nav.hidden_sections.contains(s)))
+                .filter(|a| {
+                    a.section()
+                        .is_none_or(|s| !self.nav.hidden_sections.contains(s))
+                })
                 .collect(),
         );
         let group = adw::PreferencesGroup::builder().build();
-        let expander = adw::ExpanderRow::builder().title(&gettext("Properties")).build();
+        let expander = adw::ExpanderRow::builder()
+            .title(gettext("Properties"))
+            .build();
         let active: Vec<String> = visible_areas
             .iter()
             .filter(|a| effective.contains(a))
@@ -2041,7 +2143,7 @@ impl App {
 
         // "Hide": all visible areas off → invisible everywhere.
         let hide_row = adw::SwitchRow::builder()
-            .title(&gettext("Hide"))
+            .title(gettext("Hide"))
             .active(!visible_areas.iter().any(|a| effective.contains(a)))
             .build();
         expander.add_row(&hide_row);
@@ -2052,7 +2154,7 @@ impl App {
                 .iter()
                 .map(|&area| {
                     let row = adw::SwitchRow::builder()
-                        .title(&gettext(area.label()))
+                        .title(gettext(area.label()))
                         .active(effective.contains(&area))
                         .build();
                     expander.add_row(&row);
@@ -2165,7 +2267,10 @@ impl App {
         let mut value = String::new();
         let n = albums.len();
         if n > 0 {
-            value.push_str(&format!("{} - ", ngettext_n("{n} album", "{n} albums", n as u32)));
+            value.push_str(&format!(
+                "{} - ",
+                ngettext_n("{n} album", "{n} albums", n as u32)
+            ));
         }
         value.push_str(&ngettext_n("{n} song", "{n} songs", songs as u32));
         if with_year {
@@ -2283,7 +2388,11 @@ impl App {
         // Last: online-loaded cover from the cache (assigned via the tags).
         let track = scanner::read_track(audio.as_ref()?).ok()?;
         let (artist, album) = (track.artist?, track.album?);
-        let meta = self.library.get_album_meta(&artist, &album).ok().flatten()?;
+        let meta = self
+            .library
+            .get_album_meta(&artist, &album)
+            .ok()
+            .flatten()?;
         let path = meta.cover_path?;
         gtk::gdk::Texture::from_filename(&path).ok()
     }
@@ -2291,9 +2400,7 @@ impl App {
     /// First set genre of a set of files (for the album display). Albums
     /// are usually genre-uniform, so the first match suffices.
     fn first_genre(files: &[PathBuf]) -> Option<String> {
-        files
-            .iter()
-            .find_map(|f| scanner::read_genre_composer(f).0)
+        files.iter().find_map(|f| scanner::read_genre_composer(f).0)
     }
 
     /// Detail lines for the "More info" expander.
@@ -2332,47 +2439,47 @@ impl App {
                 }
                 None => {}
             }
-            lines.push((gettext("Collection"), Self::files_summary(&files, !year_shown)));
+            lines.push((
+                gettext("Collection"),
+                Self::files_summary(&files, !year_shown),
+            ));
         } else if let Some(p) = entry.path() {
             // Single tag read for title/artist/album/genre/duration **and** the
             // composer (was previously two parses of the same file).
-            match scanner::read_track_detailed(p) {
-                Ok((t, composer)) => {
-                    lines.push((gettext("Title"), t.title));
-                    // Remember artist/album for the year resolution (consumed
-                    // when displaying).
-                    let (artist, album) = (t.artist.clone(), t.album.clone());
-                    // Composer is always shown when tagged (relevant for
-                    // classical/audio dramas); the genre whenever present.
-                    if let Some(a) = t.artist {
-                        lines.push((gettext("Artist"), a));
-                    }
-                    if let Some(c) = composer {
-                        lines.push((gettext("Composer"), c));
-                    }
-                    if let Some(al) = t.album {
-                        lines.push((gettext("Album"), al));
-                    }
-                    if let Some(g) = t.genre {
-                        lines.push((gettext("Genre"), g));
-                    }
-                    if let Some(d) = t.duration_ms {
-                        lines.push((gettext("Duration"), fmt_duration(d)));
-                    }
-                    // Year (from the album metadata) directly under the duration.
-                    if let (Some(artist), Some(album)) = (artist, album) {
-                        if let Some(y) = self
-                            .library
-                            .get_album_meta(&artist, &album)
-                            .ok()
-                            .flatten()
-                            .and_then(|m| m.year)
-                        {
-                            lines.push((gettext("Year"), y.to_string()));
-                        }
+            if let Ok((t, composer)) = scanner::read_track_detailed(p) {
+                lines.push((gettext("Title"), t.title));
+                // Remember artist/album for the year resolution (consumed
+                // when displaying).
+                let (artist, album) = (t.artist.clone(), t.album.clone());
+                // Composer is always shown when tagged (relevant for
+                // classical/audio dramas); the genre whenever present.
+                if let Some(a) = t.artist {
+                    lines.push((gettext("Artist"), a));
+                }
+                if let Some(c) = composer {
+                    lines.push((gettext("Composer"), c));
+                }
+                if let Some(al) = t.album {
+                    lines.push((gettext("Album"), al));
+                }
+                if let Some(g) = t.genre {
+                    lines.push((gettext("Genre"), g));
+                }
+                if let Some(d) = t.duration_ms {
+                    lines.push((gettext("Duration"), fmt_duration(d)));
+                }
+                // Year (from the album metadata) directly under the duration.
+                if let (Some(artist), Some(album)) = (artist, album) {
+                    if let Some(y) = self
+                        .library
+                        .get_album_meta(&artist, &album)
+                        .ok()
+                        .flatten()
+                        .and_then(|m| m.year)
+                    {
+                        lines.push((gettext("Year"), y.to_string()));
                     }
                 }
-                Err(_) => {}
             }
 
             // Suggestions detected via fingerprint (AcoustID) – display only,

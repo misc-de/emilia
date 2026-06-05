@@ -207,7 +207,10 @@ fn run(
     let resp = agent
         .get(url)
         .set("Icy-MetaData", "1")
-        .set("User-Agent", &format!("Emilia/{}", env!("CARGO_PKG_VERSION")))
+        .set(
+            "User-Agent",
+            &format!("Emilia/{}", env!("CARGO_PKG_VERSION")),
+        )
         .call()?;
 
     let metaint: usize = resp
@@ -376,7 +379,10 @@ fn parse_stream_title(meta: &[u8]) -> Option<String> {
     let rest = &text[start..];
     // Value is in single quotes: 'Artist - Title';
     let rest = rest.strip_prefix('\'').unwrap_or(rest);
-    let endq = rest.find("';").or_else(|| rest.find('\'')).unwrap_or(rest.len());
+    let endq = rest
+        .find("';")
+        .or_else(|| rest.find('\''))
+        .unwrap_or(rest.len());
     let value = rest[..endq].trim_matches(char::from(0)).trim();
     if value.is_empty() {
         None

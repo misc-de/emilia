@@ -46,7 +46,10 @@ impl App {
             // generic playlist icon.
             let paths = self.library.playlist_paths(id).unwrap_or_default();
             let cover = self.playlist_display_cover(id, &paths);
-            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "view-list-symbolic"));
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "view-list-symbolic",
+            ));
             // Total runtime, then a play button on the far right (plays the whole
             // playlist). A normal tap on the row still opens it; long press →
             // detail view.
@@ -56,7 +59,7 @@ impl App {
             }
             let play_btn = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
-                .tooltip_text(&gettext("Play playlist"))
+                .tooltip_text(gettext("Play playlist"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
@@ -108,8 +111,10 @@ impl App {
             content.append(
                 &adw::StatusPage::builder()
                     .icon_name("view-list-symbolic")
-                    .title(&gettext("No tracks yet"))
-                    .description(&gettext("Add tracks via the options of a song, album or artist."))
+                    .title(gettext("No tracks yet"))
+                    .description(gettext(
+                        "Add tracks via the options of a song, album or artist.",
+                    ))
                     .build(),
             );
         }
@@ -117,10 +122,14 @@ impl App {
         // --- Albums first (like the artist view) ---
         if !albums.is_empty() {
             let group = adw::PreferencesGroup::builder()
-                .title(&format!("{} ({})", gettext("Albums"), albums.len()))
+                .title(format!("{} ({})", gettext("Albums"), albums.len()))
                 .build();
             for (album, display_artist, tracks) in &albums {
-                let album_meta = self.library.get_album_meta(display_artist, album).ok().flatten();
+                let album_meta = self
+                    .library
+                    .get_album_meta(display_artist, album)
+                    .ok()
+                    .flatten();
                 let year = album_meta.as_ref().and_then(|m| m.year);
                 let cover_path = album_meta
                     .as_ref()
@@ -139,19 +148,26 @@ impl App {
                 if let Some(first) = tracks.first() {
                     let play = gtk::Button::builder()
                         .icon_name("media-playback-start-symbolic")
-                        .tooltip_text(&gettext("Play"))
+                        .tooltip_text(gettext("Play"))
                         .valign(gtk::Align::Center)
                         .css_classes(["flat"])
                         .build();
                     let sender = sender.clone();
                     let path = first.path.clone();
                     play.connect_clicked(move |_| {
-                        sender.input(Msg::PlayOneTrack { path: path.clone(), close: false });
+                        sender.input(Msg::PlayOneTrack {
+                            path: path.clone(),
+                            close: false,
+                        });
                     });
                     exp.add_suffix(&play);
                 }
                 for t in tracks {
-                    exp.add_row(&self.playlist_track_row(sender, &t.path, "audio-x-generic-symbolic"));
+                    exp.add_row(&self.playlist_track_row(
+                        sender,
+                        &t.path,
+                        "audio-x-generic-symbolic",
+                    ));
                 }
                 group.add(&exp);
             }
@@ -161,7 +177,7 @@ impl App {
         // --- Standalone songs ---
         if !singles.is_empty() {
             let group = adw::PreferencesGroup::builder()
-                .title(&format!("{} ({})", gettext("Songs"), singles.len()))
+                .title(format!("{} ({})", gettext("Songs"), singles.len()))
                 .build();
             for t in &singles {
                 group.add(&self.playlist_track_row(sender, &t.path, "audio-x-generic-symbolic"));
@@ -208,7 +224,9 @@ impl App {
             if out.len() >= 24 {
                 break;
             }
-            let Some(c) = self.playlist_track_cover(p) else { continue };
+            let Some(c) = self.playlist_track_cover(p) else {
+                continue;
+            };
             if !seen_paths.insert(c.clone()) || !std::path::Path::new(&c).exists() {
                 continue;
             }
@@ -232,9 +250,10 @@ impl App {
                 return Some(c);
             }
         }
-        paths
-            .iter()
-            .find_map(|p| self.playlist_track_cover(p).filter(|c| std::path::Path::new(c).exists()))
+        paths.iter().find_map(|p| {
+            self.playlist_track_cover(p)
+                .filter(|c| std::path::Path::new(c).exists())
+        })
     }
 
     /// Human label of a playlist entry's source ("Source: YouTube", "… Files" …),
@@ -268,7 +287,7 @@ impl App {
         let display = self.display_name(std::path::Path::new(path));
         let row = adw::ActionRow::builder()
             .title(gtk::glib::markup_escape_text(&display))
-            .subtitle(&self.playlist_source_label(path))
+            .subtitle(self.playlist_source_label(path))
             .activatable(true)
             .build();
         // Cover flush to the far left (like the album/artist track lists).
@@ -286,7 +305,10 @@ impl App {
             gesture.connect_pressed(move |g, _, _| {
                 g.set_state(gtk::EventSequenceState::Claimed);
                 if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
-                    sender.input(Msg::YtShowVideoDetail { video_id, title: title.clone() });
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id,
+                        title: title.clone(),
+                    });
                 } else {
                     sender.input(Msg::ShowTrackDetail(path.clone()));
                 }
@@ -296,7 +318,7 @@ impl App {
         // Play button: plays only this track, keeps the list open.
         let play_btn = gtk::Button::builder()
             .icon_name("media-playback-start-symbolic")
-            .tooltip_text(&gettext("Play"))
+            .tooltip_text(gettext("Play"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
@@ -304,7 +326,10 @@ impl App {
             let sender = sender.clone();
             let path = path.to_string();
             play_btn.connect_clicked(move |_| {
-                sender.input(Msg::PlayOneTrack { path: path.clone(), close: false });
+                sender.input(Msg::PlayOneTrack {
+                    path: path.clone(),
+                    close: false,
+                });
             });
         }
         row.add_suffix(&play_btn);
@@ -313,7 +338,10 @@ impl App {
             let sender = sender.clone();
             let path = path.to_string();
             row.connect_activated(move |_| {
-                sender.input(Msg::PlayOneTrack { path: path.clone(), close: true });
+                sender.input(Msg::PlayOneTrack {
+                    path: path.clone(),
+                    close: true,
+                });
             });
         }
         row
@@ -340,12 +368,17 @@ impl App {
         // detail opens on the current cover.
         let mut covers = self.playlist_cover_candidates(&paths);
         let chosen = self.playlist_display_cover(id, &paths);
-        if let Some(pos) = chosen.as_ref().and_then(|c| covers.iter().position(|x| x == c)) {
+        if let Some(pos) = chosen
+            .as_ref()
+            .and_then(|c| covers.iter().position(|x| x == c))
+        {
             let c = covers.remove(pos);
             covers.insert(0, c);
         }
 
-        let dialog = adw::Dialog::builder().title(gtk::glib::markup_escape_text(name)).build();
+        let dialog = adw::Dialog::builder()
+            .title(gtk::glib::markup_escape_text(name))
+            .build();
         // Wider detail dialog (was 360) so the cover and actions have room; the
         // height follows the content (scroller uses its natural height below).
         dialog.set_content_width(600);
@@ -374,7 +407,8 @@ impl App {
             carousel.set_halign(gtk::Align::Center);
             for path in &covers {
                 let tex = decode(path);
-                let img = crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
+                let img =
+                    crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
                 carousel.append(&img);
             }
             let dots = adw::CarouselIndicatorDots::new();
@@ -390,13 +424,15 @@ impl App {
             dialog.connect_closed(move |_| {
                 let idx = carousel.position().round().max(0.0) as usize;
                 if let Some(path) = covers.get(idx) {
-                    sender.input(Msg::SetPlaylistCover { id, path: path.clone() });
+                    sender.input(Msg::SetPlaylistCover {
+                        id,
+                        path: path.clone(),
+                    });
                 }
             });
         } else {
             let tex = covers.first().and_then(|p| decode(p));
-            let cover =
-                crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
+            let cover = crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
             cover.set_halign(gtk::Align::Center);
             content.append(&cover);
         }
@@ -415,7 +451,7 @@ impl App {
         }
         content.append(
             &gtk::Label::builder()
-                .label(&meta.join(" · "))
+                .label(meta.join(" · "))
                 .css_classes(["dim-label"])
                 .build(),
         );
@@ -424,7 +460,10 @@ impl App {
         let group = adw::PreferencesGroup::builder().margin_top(6).build();
         let empty = paths.is_empty();
         let row = |icon: &str, label: &str| -> adw::ActionRow {
-            let r = adw::ActionRow::builder().title(label).activatable(true).build();
+            let r = adw::ActionRow::builder()
+                .title(label)
+                .activatable(true)
+                .build();
             r.add_prefix(&gtk::Image::from_icon_name(icon));
             r
         };
@@ -441,7 +480,10 @@ impl App {
         }
         group.add(&play);
 
-        let shuffle = row("media-playlist-shuffle-symbolic", &gettext("Shuffle playlist"));
+        let shuffle = row(
+            "media-playlist-shuffle-symbolic",
+            &gettext("Shuffle playlist"),
+        );
         shuffle.set_sensitive(!empty);
         {
             let sender = sender.clone();
@@ -500,7 +542,6 @@ impl App {
         dialog.present(Some(root));
     }
 
-
     /// Dialog: add the current context files to an existing playlist
     /// or create a new one.
     pub(crate) fn open_add_to_playlist_dialog(
@@ -511,7 +552,7 @@ impl App {
         let playlists = self.library.playlists().unwrap_or_default();
 
         let dialog = adw::Dialog::builder()
-            .title(&gettext("Add to playlist"))
+            .title(gettext("Add to playlist"))
             .build();
         // Roomier window, like the detail view (bottom sheet on the phone).
         dialog.set_content_width(400);
@@ -529,8 +570,10 @@ impl App {
             .build();
 
         // Create a new playlist (enter a name, Enter confirms).
-        let new_group = adw::PreferencesGroup::builder().title(&gettext("New playlist")).build();
-        let entry = adw::EntryRow::builder().title(&gettext("Name")).build();
+        let new_group = adw::PreferencesGroup::builder()
+            .title(gettext("New playlist"))
+            .build();
+        let entry = adw::EntryRow::builder().title(gettext("Name")).build();
         crate::ui::widgets::no_autofocus(&entry);
         new_group.add(&entry);
         content.append(&new_group);
@@ -548,7 +591,9 @@ impl App {
 
         // Existing playlists (tap = add).
         if !playlists.is_empty() {
-            let group = adw::PreferencesGroup::builder().title(&gettext("Existing")).build();
+            let group = adw::PreferencesGroup::builder()
+                .title(gettext("Existing"))
+                .build();
             for (id, name, count) in playlists {
                 let row = adw::ActionRow::builder()
                     .title(gtk::glib::markup_escape_text(&name))
@@ -632,6 +677,9 @@ impl App {
         let n = files.len();
         let _ = self.library.add_to_playlist(id, &files);
         self.reload_playlists(sender);
-        self.toast(&gettext_f("Added {n} to the playlist", &[("n", &n.to_string())]));
+        self.toast(&gettext_f(
+            "Added {n} to the playlist",
+            &[("n", &n.to_string())],
+        ));
     }
 }

@@ -26,7 +26,11 @@ fn name_matches(name: &str) -> bool {
 
 fn count_audio(dir: &Path) -> usize {
     std::fs::read_dir(dir)
-        .map(|rd| rd.flatten().filter(|e| scanner::is_audio(&e.path())).count())
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| scanner::is_audio(&e.path()))
+                .count()
+        })
         .unwrap_or(0)
 }
 
@@ -108,6 +112,6 @@ pub fn scan_candidates(root: &Path, existing: &HashSet<String>) -> Vec<Candidate
         }
     }
 
-    out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    out.sort_by_key(|a| a.title.to_lowercase());
     out
 }

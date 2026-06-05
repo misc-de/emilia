@@ -10,10 +10,10 @@
 //! green header icon) and that an import happened (so the parent reloads the
 //! affected library views).
 
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::path::Path;
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -27,7 +27,9 @@ use crate::core::sync::server::{ShareChannel, SyncServer};
 use crate::core::sync::share::{self, ShareDecision, ShareManifest};
 use crate::core::sync::{self, crypto, data, SyncEvent};
 use crate::i18n::{gettext, gettext_f};
-use crate::ui::sync_share_ui::{build_confirm, build_picker, build_review, PickerHandles, ReviewHandles};
+use crate::ui::sync_share_ui::{
+    build_confirm, build_picker, build_review, PickerHandles, ReviewHandles,
+};
 
 /// Commands from the UI to the persistent client-session worker.
 enum ClientCmd {
@@ -40,6 +42,7 @@ enum ClientCmd {
     /// Reject an incoming offer.
     Reject,
     /// Tear the session down.
+    #[allow(dead_code)] // not yet wired to a UI control
     Cancel,
 }
 
@@ -242,7 +245,12 @@ impl SyncPage {
 
     /// Whether YouTube is enabled locally (gates YT sharing in both directions).
     fn youtube_enabled(&self) -> bool {
-        self.library.get_setting("youtube_enabled").ok().flatten().as_deref() == Some("1")
+        self.library
+            .get_setting("youtube_enabled")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("1")
     }
 
     /// Opens the mode-selection dialog (offer a connection / scan a code).
@@ -254,7 +262,7 @@ impl SyncPage {
         };
 
         let dialog = adw::Dialog::builder()
-            .title(&gettext("Device sync"))
+            .title(gettext("Device sync"))
             .content_width(420)
             .content_height(420)
             .build();
@@ -275,7 +283,7 @@ impl SyncPage {
     /// The mode-selection content (two rows: offer / scan).
     fn mode_content(&self, sender: &ComponentSender<Self>) -> gtk::Box {
         let group = adw::PreferencesGroup::builder()
-            .description(&gettext("Connect two devices on the same network."))
+            .description(gettext("Connect two devices on the same network."))
             .build();
 
         let rows: [(String, String, &str, fn() -> SyncInput); 2] = [
@@ -352,7 +360,10 @@ impl SyncPage {
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
-        let progress = gtk::ProgressBar::builder().show_text(true).visible(false).build();
+        let progress = gtk::ProgressBar::builder()
+            .show_text(true)
+            .visible(false)
+            .build();
         let (success, success_detail) = build_success();
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
@@ -372,7 +383,7 @@ impl SyncPage {
     fn show_paired_panel(&mut self, sender: &ComponentSender<Self>) {
         let panel = self.progress_panel();
         let share_btn = gtk::Button::builder()
-            .label(&gettext_f("Share with {peer}", &[("peer", &self.peer_name)]))
+            .label(gettext_f("Share with {peer}", &[("peer", &self.peer_name)]))
             .css_classes(["suggested-action", "pill"])
             .halign(gtk::Align::Center)
             .build();
@@ -381,7 +392,7 @@ impl SyncPage {
             share_btn.connect_clicked(move |_| sender.input(SyncInput::OpenSharePicker));
         }
         let hint = gtk::Label::builder()
-            .label(&gettext("…or wait for the other device to share."))
+            .label(gettext("…or wait for the other device to share."))
             .css_classes(["dim-label"])
             .wrap(true)
             .justify(gtk::Justification::Center)
@@ -417,7 +428,7 @@ impl SyncPage {
             .justify(gtk::Justification::Center)
             .build();
         let hint = gtk::Label::builder()
-            .label(&gettext("Scan this code on the other device."))
+            .label(gettext("Scan this code on the other device."))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
@@ -431,7 +442,10 @@ impl SyncPage {
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
-        let progress = gtk::ProgressBar::builder().show_text(true).visible(false).build();
+        let progress = gtk::ProgressBar::builder()
+            .show_text(true)
+            .visible(false)
+            .build();
         let (success, success_detail) = build_success();
 
         let content = padded_vbox();
@@ -462,7 +476,10 @@ impl SyncPage {
             Ok(s) => s,
             Err(e) => {
                 if let Some(st) = &self.status {
-                    st.set_text(&gettext_f("Cannot start: {err}", &[("err", &e.to_string())]));
+                    st.set_text(&gettext_f(
+                        "Cannot start: {err}",
+                        &[("err", &e.to_string())],
+                    ));
                 }
                 return;
             }
@@ -471,7 +488,11 @@ impl SyncPage {
         self.stop = Some(stop);
         let (pair_url, host, port) = (server.pair_url(), server.host().to_string(), server.port());
         sender.spawn_command(move |out| {
-            let _ = out.send(SyncEvent::ServerReady { pair_url, host, port });
+            let _ = out.send(SyncEvent::ServerReady {
+                pair_url,
+                host,
+                port,
+            });
             server.run(|ev| {
                 let _ = out.send(ev);
             });
@@ -498,7 +519,7 @@ impl SyncPage {
             .halign(gtk::Align::Center)
             .build();
         let hint = gtk::Label::builder()
-            .label(&gettext("Point the camera at the QR code."))
+            .label(gettext("Point the camera at the QR code."))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
@@ -511,7 +532,10 @@ impl SyncPage {
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
-        let progress = gtk::ProgressBar::builder().show_text(true).visible(false).build();
+        let progress = gtk::ProgressBar::builder()
+            .show_text(true)
+            .visible(false)
+            .build();
         let (success, success_detail) = build_success();
 
         let content = padded_vbox();
@@ -535,9 +559,9 @@ impl SyncPage {
         let sender_dec = sender.clone();
         match Scanner::start(move |url| sender_dec.input(SyncInput::QrDecoded(url))) {
             Ok((scanner, paintable)) => {
-                match (&self.cam, &paintable) {
-                    (Some(cam), Some(p)) => cam.set_paintable(Some(p)),
-                    _ => {} // preview unavailable – the code is still detected
+                // preview unavailable → the code is still detected
+                if let (Some(cam), Some(p)) = (&self.cam, &paintable) {
+                    cam.set_paintable(Some(p));
                 }
                 self.scanner = Some(scanner);
             }
@@ -602,7 +626,10 @@ impl SyncPage {
                     ));
                 }
             }
-            SyncEvent::PeerPaired { peer_name, peer_caps } => {
+            SyncEvent::PeerPaired {
+                peer_name,
+                peer_caps,
+            } => {
                 self.peer_caps = peer_caps;
                 self.peer_name = peer_name;
                 // Paired → tint the sync icon at the top green.
@@ -611,7 +638,10 @@ impl SyncPage {
                 // status/progress/success).
                 self.show_paired_panel(sender);
                 if let Some(st) = &self.status {
-                    st.set_text(&gettext_f("Connected with {name}", &[("name", &self.peer_name)]));
+                    st.set_text(&gettext_f(
+                        "Connected with {name}",
+                        &[("name", &self.peer_name)],
+                    ));
                 }
             }
             SyncEvent::ImportReceived { stats } => {
@@ -649,8 +679,7 @@ impl SyncPage {
             SyncEvent::TransferDone { files } => {
                 // Client side: files done → success now (with a combined summary).
                 self.synced_ok = true;
-                let files_line =
-                    gettext_f("{n} files transferred.", &[("n", &files.to_string())]);
+                let files_line = gettext_f("{n} files transferred.", &[("n", &files.to_string())]);
                 self.sync_summary = if self.sync_summary.is_empty() {
                     files_line
                 } else {
@@ -718,7 +747,9 @@ impl SyncPage {
 
     /// Picker "Continue" → resolve the selection to a manifest off the UI thread.
     fn prepare_picked(&mut self, sender: &ComponentSender<Self>) {
-        let Some(picker) = self.picker.take() else { return };
+        let Some(picker) = self.picker.take() else {
+            return;
+        };
         let sel = picker.to_selection();
         // Brief feedback while hashing runs.
         let panel = self.progress_panel();
@@ -746,7 +777,13 @@ impl SyncPage {
             .files
             .iter()
             .take(8)
-            .map(|f| if f.rel_path.is_empty() { f.title.clone() } else { f.rel_path.clone() })
+            .map(|f| {
+                if f.rel_path.is_empty() {
+                    f.title.clone()
+                } else {
+                    f.rel_path.clone()
+                }
+            })
             .collect();
         let total = manifest.total_size;
         let count = manifest.files.len();
@@ -790,7 +827,9 @@ impl SyncPage {
 
     /// Review "Accept" → apply the (selectively) accepted offer.
     fn accept_offer(&mut self, sender: &ComponentSender<Self>) {
-        let Some(review) = self.review.take() else { return };
+        let Some(review) = self.review.take() else {
+            return;
+        };
         let decision = review.to_decision();
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
@@ -909,7 +948,7 @@ fn build_success() -> (gtk::Box, gtk::Label) {
     icon.add_css_class("success");
 
     let title = gtk::Label::builder()
-        .label(&gettext("Sync successful"))
+        .label(gettext("Sync successful"))
         .css_classes(["title-2", "success"])
         .build();
     let detail = gtk::Label::builder()
@@ -936,7 +975,10 @@ fn run_client_session(
     cmd_rx: mpsc::Receiver<ClientCmd>,
     out: &relm4::Sender<SyncEvent>,
 ) {
-    let caps = Capabilities { schema: protocol::SCHEMA_VERSION, youtube_enabled: yt_enabled };
+    let caps = Capabilities {
+        schema: protocol::SCHEMA_VERSION,
+        youtube_enabled: yt_enabled,
+    };
     let mut client = SyncClient::new(&info, device_id, device_name, caps);
     if let Err(e) = client.pair(&info.token) {
         let _ = out.send(SyncEvent::Error(e.to_string()));
@@ -966,7 +1008,9 @@ fn run_client_session(
             Ok(ClientCmd::Prepare(sel)) => {
                 let m = Library::open()
                     .ok()
-                    .and_then(|lib| share::build_manifest(&lib, &sel, client.peer_caps.youtube_enabled).ok())
+                    .and_then(|lib| {
+                        share::build_manifest(&lib, &sel, client.peer_caps.youtube_enabled).ok()
+                    })
                     .unwrap_or_default();
                 prepared = Some(m.clone());
                 let _ = out.send(SyncEvent::ManifestReady { manifest: m });
@@ -1027,13 +1071,27 @@ fn client_upload(
     decision: &ShareDecision,
     out: &relm4::Sender<SyncEvent>,
 ) -> usize {
-    let base = Library::open().ok().and_then(|l| l.get_setting("music_dir").ok().flatten()).unwrap_or_default();
-    let total = manifest.files.iter().filter(|f| decision.files.contains(&f.rel_path)).count() as u64;
-    let mut done = 0u64;
+    let base = Library::open()
+        .ok()
+        .and_then(|l| l.get_setting("music_dir").ok().flatten())
+        .unwrap_or_default();
+    let total = manifest
+        .files
+        .iter()
+        .filter(|f| decision.files.contains(&f.rel_path))
+        .count() as u64;
     let mut n = 0usize;
-    for f in manifest.files.iter().filter(|f| decision.files.contains(&f.rel_path)) {
-        done += 1;
-        let _ = out.send(SyncEvent::FileProgress { done, total, name: f.rel_path.clone() });
+    for (i, f) in manifest
+        .files
+        .iter()
+        .filter(|f| decision.files.contains(&f.rel_path))
+        .enumerate()
+    {
+        let _ = out.send(SyncEvent::FileProgress {
+            done: i as u64 + 1,
+            total,
+            name: f.rel_path.clone(),
+        });
         let abs = data::resolve(&f.rel_path, &base);
         if client.upload_file(&f.rel_path, Path::new(&abs)).is_ok() {
             n += 1;
@@ -1051,12 +1109,27 @@ fn client_receive(
     out: &relm4::Sender<SyncEvent>,
 ) {
     let Ok(lib) = Library::open() else { return };
-    let base = lib.get_setting("music_dir").ok().flatten().unwrap_or_default();
-    let total = manifest.files.iter().filter(|f| decision.files.contains(&f.rel_path)).count() as u64;
-    let mut done = 0u64;
-    for f in manifest.files.iter().filter(|f| decision.files.contains(&f.rel_path)) {
-        done += 1;
-        let _ = out.send(SyncEvent::FileProgress { done, total, name: f.rel_path.clone() });
+    let base = lib
+        .get_setting("music_dir")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let total = manifest
+        .files
+        .iter()
+        .filter(|f| decision.files.contains(&f.rel_path))
+        .count() as u64;
+    for (i, f) in manifest
+        .files
+        .iter()
+        .filter(|f| decision.files.contains(&f.rel_path))
+        .enumerate()
+    {
+        let _ = out.send(SyncEvent::FileProgress {
+            done: i as u64 + 1,
+            total,
+            name: f.rel_path.clone(),
+        });
         if let Some(dest) = crate::core::sync::resolve_new(&base, &f.rel_path) {
             if client.download_file(&f.rel_path, &dest).is_ok() {
                 register_track(&lib, &base, f);
@@ -1065,16 +1138,30 @@ fn client_receive(
     }
     let stats = apply_received(&lib, manifest, decision);
     let _ = out.send(SyncEvent::ImportReceived { stats });
-    let _ = out.send(SyncEvent::TransferDone { files: total as usize });
+    let _ = out.send(SyncEvent::TransferDone {
+        files: total as usize,
+    });
 }
 
 /// Applies library/YT blobs and registers the accepted files in the `track`
 /// table so they are immediately playable (no rescan needed).
-fn apply_received(lib: &Library, manifest: &ShareManifest, decision: &ShareDecision) -> sync::ImportStats {
+fn apply_received(
+    lib: &Library,
+    manifest: &ShareManifest,
+    decision: &ShareDecision,
+) -> sync::ImportStats {
     let mut stats = share::apply_manifest(lib, manifest, decision).unwrap_or_default();
-    let base = lib.get_setting("music_dir").ok().flatten().unwrap_or_default();
+    let base = lib
+        .get_setting("music_dir")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let mut n = 0;
-    for f in manifest.files.iter().filter(|f| decision.files.contains(&f.rel_path)) {
+    for f in manifest
+        .files
+        .iter()
+        .filter(|f| decision.files.contains(&f.rel_path))
+    {
         register_track(lib, &base, f);
         n += 1;
     }

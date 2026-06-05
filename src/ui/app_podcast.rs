@@ -39,7 +39,10 @@ fn detail_box() -> gtk::Box {
 
 /// Activatable action row with an icon prefix (for the detail dialogs).
 fn action_row(title: &str, icon: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder().title(title).activatable(true).build();
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .activatable(true)
+        .build();
     row.add_prefix(&gtk::Image::from_icon_name(icon));
     row
 }
@@ -201,7 +204,9 @@ impl App {
             // New section → new group with heading (only when there is something).
             if cur_bucket != Some(b) {
                 cur_bucket = Some(b);
-                let g = adw::PreferencesGroup::builder().title(&bucket_title(b)).build();
+                let g = adw::PreferencesGroup::builder()
+                    .title(bucket_title(b))
+                    .build();
                 self.podcasts.newest_list.append(&g);
                 group = Some(g);
             }
@@ -325,14 +330,17 @@ impl App {
 
         let info = adw::PreferencesGroup::new();
         let pod = adw::ActionRow::builder()
-            .title(&gettext("Podcast"))
+            .title(gettext("Podcast"))
             .subtitle(gtk::glib::markup_escape_text(&ep.podcast_title))
             .build();
         let cover = ep
             .podcast_image
             .as_deref()
             .and_then(crate::core::online::podcast_image_path);
-        pod.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "microphone-symbolic"));
+        pod.add_prefix(&crate::ui::app::cover_widget(
+            cover.as_deref(),
+            "microphone-symbolic",
+        ));
         info.add(&pod);
         // Published and duration **side by side**, each about 50 % width.
         let pub_txt = ep
@@ -344,7 +352,9 @@ impl App {
             .duration
             .as_deref()
             .filter(|d| !d.trim().is_empty())
-            .map(|d| crate::core::podcast::format_duration(d).unwrap_or_else(|| d.trim().to_string()));
+            .map(|d| {
+                crate::core::podcast::format_duration(d).unwrap_or_else(|| d.trim().to_string())
+            });
         // Published, duration and the offline-download action side by side,
         // each as a "heading + value" column of roughly equal width. The
         // download column fetches the audio for offline playback; tapping it
@@ -368,7 +378,13 @@ impl App {
                     .css_classes(["caption", "dim-label"])
                     .build(),
             );
-            b.append(&gtk::Label::builder().label(value).xalign(0.0).wrap(true).build());
+            b.append(
+                &gtk::Label::builder()
+                    .label(value)
+                    .xalign(0.0)
+                    .wrap(true)
+                    .build(),
+            );
             b
         };
         if let Some(p) = &pub_txt {
@@ -381,7 +397,7 @@ impl App {
         let dl_cell = gtk::Box::new(gtk::Orientation::Vertical, 2);
         dl_cell.append(
             &gtk::Label::builder()
-                .label(&gettext("Download"))
+                .label(gettext("Download"))
                 .xalign(0.0)
                 .css_classes(["caption", "dim-label"])
                 .build(),
@@ -419,7 +435,7 @@ impl App {
             // indentation as the shownotes text (not to the left of it).
             let notes_group = adw::PreferencesGroup::new();
             let label = gtk::Label::builder()
-                .label(&crate::core::podcast::linkify_timestamps(notes.trim()))
+                .label(crate::core::podcast::linkify_timestamps(notes.trim()))
                 .use_markup(true)
                 .wrap(true)
                 .xalign(0.0)
@@ -460,7 +476,7 @@ impl App {
                 .build();
             // Heading at the same indentation as the text (in the same box).
             let heading = gtk::Label::builder()
-                .label(&gettext("Shownotes"))
+                .label(gettext("Shownotes"))
                 .xalign(0.0)
                 .css_classes(["heading"])
                 .build();
@@ -481,8 +497,12 @@ impl App {
         sender: &ComponentSender<Self>,
         id: i64,
     ) {
-        let Some((_, title, image, count)) =
-            self.podcasts.podcast_items.iter().find(|(p, _, _, _)| *p == id).cloned()
+        let Some((_, title, image, count)) = self
+            .podcasts
+            .podcast_items
+            .iter()
+            .find(|(p, _, _, _)| *p == id)
+            .cloned()
         else {
             return;
         };
@@ -500,7 +520,10 @@ impl App {
         let cover = image
             .as_deref()
             .and_then(crate::core::online::podcast_image_path);
-        head.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "microphone-symbolic"));
+        head.add_prefix(&crate::ui::app::cover_widget(
+            cover.as_deref(),
+            "microphone-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 
@@ -566,11 +589,22 @@ impl App {
         // Count directly in the heading (in parentheses); the separate
         // "N episodes" line would then be a duplication and is dropped.
         let group = adw::PreferencesGroup::builder()
-            .title(format!("{} ({})", gtk::glib::markup_escape_text(title), episodes.len()).as_str())
+            .title(
+                format!(
+                    "{} ({})",
+                    gtk::glib::markup_escape_text(title),
+                    episodes.len()
+                )
+                .as_str(),
+            )
             .build();
 
         if episodes.is_empty() {
-            group.add(&adw::ActionRow::builder().title(&gettext("No episodes")).build());
+            group.add(
+                &adw::ActionRow::builder()
+                    .title(gettext("No episodes"))
+                    .build(),
+            );
         }
         for (i, ep) in episodes.iter().enumerate() {
             let mut subtitle = String::new();
@@ -621,7 +655,10 @@ impl App {
             group.add(&row);
         }
         content.append(&group);
-        self.push_subpage(&gettext_f("Podcast – {title}", &[("title", title)]), &content);
+        self.push_subpage(
+            &gettext_f("Podcast – {title}", &[("title", title)]),
+            &content,
+        );
         // Set the icons to the current playback state.
         self.refresh_episode_icons();
     }
@@ -636,26 +673,26 @@ impl App {
         sender: &ComponentSender<Self>,
     ) {
         let dialog = adw::Dialog::builder()
-            .title(&gettext("Subscribe to podcast"))
+            .title(gettext("Subscribe to podcast"))
             .build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
         // --- Search (iTunes directory) ---
         let search_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Search"))
-            .description(&gettext("Find a podcast by name"))
+            .title(gettext("Search"))
+            .description(gettext("Find a podcast by name"))
             .build();
         let search_row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
             .build();
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text(&gettext("Podcast name …"))
+            .placeholder_text(gettext("Podcast name …"))
             .hexpand(true)
             .build();
         crate::ui::widgets::no_autofocus(&search_entry);
-        let search_btn = gtk::Button::builder().label(&gettext("Search")).build();
+        let search_btn = gtk::Button::builder().label(gettext("Search")).build();
         search_btn.add_css_class("suggested-action");
         search_row.append(&search_entry);
         search_row.append(&search_btn);
@@ -693,10 +730,10 @@ impl App {
 
         // --- Manual: feed address (RSS) ---
         let url_group = adw::PreferencesGroup::builder()
-            .title(&gettext("Or enter feed address"))
+            .title(gettext("Or enter feed address"))
             .build();
         let url_entry = adw::EntryRow::builder()
-            .title(&gettext("Feed address (RSS)"))
+            .title(gettext("Feed address (RSS)"))
             .show_apply_button(true)
             .build();
         crate::ui::widgets::no_autofocus(&url_entry);
@@ -742,7 +779,9 @@ impl App {
         list.set_visible(true);
 
         if self.podcasts.podcast_search_results.is_empty() {
-            let row = adw::ActionRow::builder().title(&gettext("No podcasts found")).build();
+            let row = adw::ActionRow::builder()
+                .title(gettext("No podcasts found"))
+                .build();
             row.set_sensitive(false);
             list.append(&row);
             // Compact height – only the search and address field plus a hint row.
@@ -764,12 +803,17 @@ impl App {
             if let Some(a) = r.author.as_deref().filter(|a| !a.trim().is_empty()) {
                 row.set_subtitle(&gtk::glib::markup_escape_text(a));
             }
-            let cover = r.image_url.as_deref().and_then(crate::core::online::podcast_image_path);
-            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "microphone-symbolic"));
+            let cover = r
+                .image_url
+                .as_deref()
+                .and_then(crate::core::online::podcast_image_path);
+            row.add_prefix(&crate::ui::app::cover_widget(
+                cover.as_deref(),
+                "microphone-symbolic",
+            ));
             row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
             {
-                let (sender, dialog, feed) =
-                    (sender.clone(), dialog.clone(), r.feed_url.clone());
+                let (sender, dialog, feed) = (sender.clone(), dialog.clone(), r.feed_url.clone());
                 row.connect_activated(move |_| {
                     sender.input(Msg::PodcastSubscribeUrl(feed.clone()));
                     dialog.close();
@@ -791,7 +835,7 @@ impl App {
         let btn = gtk::Button::builder()
             .icon_name("media-playback-start-symbolic")
             .valign(gtk::Align::Center)
-            .tooltip_text(&gettext("Play/Pause"))
+            .tooltip_text(gettext("Play/Pause"))
             .build();
         btn.add_css_class("flat");
         {
@@ -803,7 +847,8 @@ impl App {
                 });
             });
         }
-        self.podcasts.episode_play_buttons
+        self.podcasts
+            .episode_play_buttons
             .borrow_mut()
             .push((url.to_string(), btn.clone()));
         btn
@@ -875,7 +920,8 @@ impl App {
         self.mini.seek_scale.clear_marks();
         for (ms, _) in &chapters {
             if *ms > 0 {
-                self.mini.seek_scale
+                self.mini
+                    .seek_scale
                     .add_mark(*ms as f64, gtk::PositionType::Top, None);
             }
         }

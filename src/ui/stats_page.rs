@@ -131,8 +131,10 @@ impl StatsPage {
         if totals.plays == 0 && totals.total_played_ms == 0 {
             let empty = adw::StatusPage::builder()
                 .icon_name("emilia-stats-symbolic")
-                .title(&gettext("No listening data yet"))
-                .description(&gettext("Play some music — your listening statistics will appear here."))
+                .title(gettext("No listening data yet"))
+                .description(gettext(
+                    "Play some music — your listening statistics will appear here.",
+                ))
                 .vexpand(true)
                 .build();
             content.append(&empty);
@@ -142,19 +144,31 @@ impl StatsPage {
         content.append(&summary_group(&totals));
         content.append(&diversity_group(&totals));
 
-        let artists = self.library.stats_top_artists(since, TOP_N).unwrap_or_default();
+        let artists = self
+            .library
+            .stats_top_artists(since, TOP_N)
+            .unwrap_or_default();
         if !artists.is_empty() {
             content.append(&top_group(&gettext("Top artists"), &artists, true));
         }
-        let albums = self.library.stats_top_albums(since, TOP_N).unwrap_or_default();
+        let albums = self
+            .library
+            .stats_top_albums(since, TOP_N)
+            .unwrap_or_default();
         if !albums.is_empty() {
             content.append(&top_group(&gettext("Top albums"), &albums, false));
         }
-        let tracks = self.library.stats_top_tracks(since, TOP_N).unwrap_or_default();
+        let tracks = self
+            .library
+            .stats_top_tracks(since, TOP_N)
+            .unwrap_or_default();
         if !tracks.is_empty() {
             content.append(&top_group(&gettext("Top tracks"), &tracks, false));
         }
-        let genres = self.library.stats_top_genres(since, TOP_N).unwrap_or_default();
+        let genres = self
+            .library
+            .stats_top_genres(since, TOP_N)
+            .unwrap_or_default();
         if !genres.is_empty() {
             content.append(&top_group(&gettext("Top genres"), &genres, true));
         }
@@ -204,8 +218,13 @@ impl StatsPage {
 
 /// Overall metrics: listening time, plays, skip rate.
 fn summary_group(t: &StatTotals) -> adw::PreferencesGroup {
-    let g = adw::PreferencesGroup::builder().title(&gettext("Overview")).build();
-    g.add(&stat_row(&gettext("Listening time"), &fmt_listen(t.total_played_ms)));
+    let g = adw::PreferencesGroup::builder()
+        .title(gettext("Overview"))
+        .build();
+    g.add(&stat_row(
+        &gettext("Listening time"),
+        &fmt_listen(t.total_played_ms),
+    ));
     g.add(&stat_row(&gettext("Plays"), &t.plays.to_string()));
     let events = t.plays + t.skips;
     let skip_pct = if events > 0 {
@@ -219,10 +238,21 @@ fn summary_group(t: &StatTotals) -> adw::PreferencesGroup {
 
 /// Variety: distinct artists, albums, tracks.
 fn diversity_group(t: &StatTotals) -> adw::PreferencesGroup {
-    let g = adw::PreferencesGroup::builder().title(&gettext("Variety")).build();
-    g.add(&stat_row(&gettext("Artists"), &t.distinct_artists.to_string()));
-    g.add(&stat_row(&gettext("Albums"), &t.distinct_albums.to_string()));
-    g.add(&stat_row(&gettext("Tracks"), &t.distinct_tracks.to_string()));
+    let g = adw::PreferencesGroup::builder()
+        .title(gettext("Variety"))
+        .build();
+    g.add(&stat_row(
+        &gettext("Artists"),
+        &t.distinct_artists.to_string(),
+    ));
+    g.add(&stat_row(
+        &gettext("Albums"),
+        &t.distinct_albums.to_string(),
+    ));
+    g.add(&stat_row(
+        &gettext("Tracks"),
+        &t.distinct_tracks.to_string(),
+    ));
     g
 }
 
@@ -268,7 +298,9 @@ fn top_group(title: &str, entries: &[StatEntry], time_subtitle: bool) -> adw::Pr
 
 /// Listening time per weekday (Monday first; DB index 0 = Sunday).
 fn weekday_group(by_weekday: &[i64; 7]) -> adw::PreferencesGroup {
-    let g = adw::PreferencesGroup::builder().title(&gettext("By weekday")).build();
+    let g = adw::PreferencesGroup::builder()
+        .title(gettext("By weekday"))
+        .build();
     let max = by_weekday.iter().copied().max().unwrap_or(0).max(1);
     let list = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -318,7 +350,7 @@ fn hbar_row(label: &str, value: i64, max: i64) -> gtk::Box {
 /// Cairo (a single `DrawingArea`) — robust even on narrow displays.
 fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder()
-        .title(&gettext("By time of day"))
+        .title(gettext("By time of day"))
         .build();
     let data = *by_hour;
     let area = gtk::DrawingArea::builder()
@@ -344,7 +376,11 @@ fn clock_group(by_hour: &[i64; 24]) -> adw::PreferencesGroup {
         cr.set_source_rgba(r, gc, b, 0.85);
         for (i, &v) in data.iter().enumerate() {
             let frac = (v as f64 / max).clamp(0.0, 1.0);
-            let bh = if v > 0 { (chart_h * frac).max(2.0) } else { 0.0 };
+            let bh = if v > 0 {
+                (chart_h * frac).max(2.0)
+            } else {
+                0.0
+            };
             if bh > 0.0 {
                 let x = i as f64 * (bar_w + gap);
                 cr.rectangle(x, chart_h - bh, bar_w, bh);
@@ -369,7 +405,10 @@ fn fmt_listen(ms: i64) -> String {
     let mins = ms.max(0) / 60_000;
     let (h, m) = (mins / 60, mins % 60);
     if h > 0 {
-        gettext_f("{h} h {m} min", &[("h", &h.to_string()), ("m", &m.to_string())])
+        gettext_f(
+            "{h} h {m} min",
+            &[("h", &h.to_string()), ("m", &m.to_string())],
+        )
     } else {
         gettext_f("{m} min", &[("m", &m.to_string())])
     }
