@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.3.2" date="2026-06-05">
+      <description>
+        <p>Fixes the phone layout running off the screen edge: the navigation icon strip is properly clamped and scrolls smoothly with a swipe (no visible scrollbar), and its icons are more compact, so the navigation and player controls stay within the screen.</p>
+        <p xml:lang="de">Behebt das Überlaufen des Layouts am Bildschirmrand auf dem Handy: Die Navigations-Leiste wird sauber begrenzt und lässt sich flüssig per Wisch scrollen (ohne sichtbaren Scrollbalken), und ihre Icons sind kompakter – so bleiben Navigation und Player-Steuerung im Bildschirm.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-06-05">
       <description>
         <p>On phones the top navigation strip now scrolls and swipes sideways instead of overflowing when many sections are enabled, without showing a scrollbar.</p>

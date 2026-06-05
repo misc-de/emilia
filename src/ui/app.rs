@@ -1377,17 +1377,20 @@ impl Component for App {
                     // would otherwise overflow the narrow width.
                     #[name = "top_nav_scroller"]
                     add_top_bar = &gtk::ScrolledWindow {
-                        // `External`: no built-in scrollbar is drawn, but kinetic
-                        // swipe / wheel scrolling still works → a clean icon strip.
-                        set_hscrollbar_policy: gtk::PolicyType::External,
+                        // Standard kinetic-scrolling path for a smooth swipe; the
+                        // scrollbar itself is hidden via CSS (`emilia-nav-scroller`)
+                        // so the icon strip stays clean but swipes properly.
+                        set_hscrollbar_policy: gtk::PolicyType::Automatic,
                         set_vscrollbar_policy: gtk::PolicyType::Never,
+                        set_kinetic_scrolling: true,
                         set_propagate_natural_height: true,
+                        set_css_classes: &["emilia-nav-scroller"],
                         set_visible: false,
                         #[wrap(Some)]
                         #[name = "top_nav"]
                         set_child = &gtk::Box {
                             set_halign: gtk::Align::Center,
-                            set_spacing: 6,
+                            set_spacing: 3,
                             set_margin_top: 2,
                             set_margin_bottom: 2,
                         },
@@ -2408,6 +2411,8 @@ impl Component for App {
                  button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  button.emilia-nav-btn:checked image { color: @accent_color; }\
+                 scrolledwindow.emilia-nav-scroller scrollbar { opacity: 0; min-width: 0px; min-height: 0px; }\
+                 scrolledwindow.emilia-nav-scroller button.emilia-nav-btn { padding-left: 6px; padding-right: 6px; min-width: 0px; }\
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
                  progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
