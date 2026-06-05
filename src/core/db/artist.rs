@@ -1,0 +1,161 @@
+//! Artist & track metadata queries for [`Library`] (split out of db.rs).
+
+use anyhow::Result;
+use rusqlite::OptionalExtension;
+
+use super::Library;
+use crate::model::*;
+
+impl Library {
+    // ---- Artists ----
+
+    /// Unique **individual** artists from the library. Composite
+    /// entries ("A feat. B & C") are split into their artists
+    /// (see [`crate::core::artist::split_artists`]) and deduplicated
+    /// case-insensitively. Sorted alphabetically.
+    pub fn distinct_artists(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT artist FROM track
+             WHERE artist IS NOT NULL AND artist <> ''",
+        )?;
+        let raws = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for raw in &raws {
+            for name in crate::core::artist::split_artists(raw) {
+                if seen.insert(crate::core::artist::norm_key(&name)) {
+                    out.push(name);
+                }
+            }
+        }
+        out.sort_by_key(|s| s.to_lowercase());
+        Ok(out)
+    }
+
+    pub fn get_artist_meta(&self, name: &str) -> Result<Option<ArtistMeta>> {
+        let meta = self
+            .conn
+            .query_row(
+                "SELECT name, image_path, status FROM artist_meta WHERE name = ?1",
+                [name],
+                Self::map_artist_meta,
+            )
+            .optional()?;
+        Ok(meta)
+    }
+
+    pub fn upsert_artist_meta(&self, m: &ArtistMeta) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO artist_meta (name, image_path, status, fetched_at, attempts)
+             VALUES (?1, ?2, ?3, strftime('%s','now'),
+                     CASE WHEN ?3 = 'matched' THEN 0 ELSE 1 END)
+             ON CONFLICT(name) DO UPDATE SET
+                image_path = excluded.image_path,
+                status     = excluded.status,
+                fetched_at = excluded.fetched_at,
+                attempts   = CASE WHEN excluded.status = 'matched' THEN 0
+                                  ELSE artist_meta.attempts + 1 END",
+            rusqlite::params![m.name, m.image_path, m.status],
+        )?;
+        Ok(())
+    }
+
+    /// Artist overview for the UI: every individual artist -- including from
+    /// "feat." entries -- with (any available) photo.
+    pub fn artists_overview(&self) -> Result<Vec<ArtistMeta>> {
+        let names = self.distinct_artists()?;
+        // Resolve areas from one snapshot and pull all artist metadata in one
+        // query, instead of two queries per artist (was a clear N+1).
+        let cats = self.category_snapshot()?;
+        let mut meta_by_name: std::collections::HashMap<String, ArtistMeta> =
+            std::collections::HashMap::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT name, image_path, status FROM artist_meta")?;
+            let rows = stmt.query_map([], Self::map_artist_meta)?;
+            for m in rows.flatten() {
+                meta_by_name.insert(m.name.clone(), m);
+            }
+        }
+        let mut out = Vec::with_capacity(names.len());
+        for name in names {
+            // Properties: only show those visible in the "Artists" area.
+            if !cats
+                .artist_areas(&name)
+                .contains(&crate::core::category::Area::Artists)
+            {
+                continue;
+            }
+            let meta = meta_by_name
+                .remove(&name)
+                .unwrap_or_else(|| ArtistMeta::pending(&name));
+            out.push(meta);
+        }
+        Ok(out)
+    }
+
+    fn map_artist_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistMeta> {
+        Ok(ArtistMeta {
+            name: r.get(0)?,
+            image_path: r.get(1)?,
+            status: r.get(2)?,
+        })
+    }
+
+    // ---- Fingerprint recognition (AcoustID) ----
+
+    pub fn get_track_meta(&self, path: &str) -> Result<Option<TrackMeta>> {
+        let meta = self
+            .conn
+            .query_row(
+                "SELECT path, recording_mbid, title, artist, album, status
+                 FROM track_meta WHERE path = ?1",
+                [path],
+                Self::map_track_meta,
+            )
+            .optional()?;
+        Ok(meta)
+    }
+
+    pub fn upsert_track_meta(&self, m: &TrackMeta) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO track_meta
+                (path, recording_mbid, title, artist, album, status, fetched_at, attempts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'),
+                     CASE WHEN ?6 = 'matched' THEN 0 ELSE 1 END)
+             ON CONFLICT(path) DO UPDATE SET
+                recording_mbid = excluded.recording_mbid,
+                title          = excluded.title,
+                artist         = excluded.artist,
+                album          = excluded.album,
+                status         = excluded.status,
+                fetched_at     = excluded.fetched_at,
+                attempts       = CASE WHEN excluded.status = 'matched' THEN 0
+                                      ELSE track_meta.attempts + 1 END",
+            rusqlite::params![
+                m.path,
+                m.recording_mbid,
+                m.title,
+                m.artist,
+                m.album,
+                m.status
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn map_track_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<TrackMeta> {
+        Ok(TrackMeta {
+            path: r.get(0)?,
+            recording_mbid: r.get(1)?,
+            title: r.get(2)?,
+            artist: r.get(3)?,
+            album: r.get(4)?,
+            status: r.get(5)?,
+        })
+    }
+}
