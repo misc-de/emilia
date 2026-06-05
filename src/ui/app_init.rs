@@ -263,6 +263,51 @@ impl App {
             }
         }
         self.nav.nav_buttons = nav_buttons.clone();
+        // DIAG-0.3.3: log innermost widgets whose minimum width exceeds the phone
+        // logical width (so the real overflow culprit shows up in the journal on
+        // the device, where the layout is actually narrow). Remove next release.
+        {
+            let split = widgets.split.clone();
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_secs(3), move || {
+                fn describe(w: &gtk::Widget) -> String {
+                    if let Some(l) = w.downcast_ref::<gtk::Label>() {
+                        return format!("Label('{}')", l.text());
+                    }
+                    let mut c = w.first_child();
+                    while let Some(ch) = c {
+                        if let Some(l) = ch.downcast_ref::<gtk::Label>() {
+                            let t = l.text();
+                            if !t.is_empty() {
+                                return format!("{}>Label('{t}')", w.type_().name());
+                            }
+                        }
+                        c = ch.next_sibling();
+                    }
+                    w.type_().name().to_string()
+                }
+                fn walk(w: &gtk::Widget) {
+                    let (min, _, _, _) = w.measure(gtk::Orientation::Horizontal, -1);
+                    let mut child_over = false;
+                    let mut c = w.first_child();
+                    while let Some(ch) = c {
+                        let (cm, _, _, _) = ch.measure(gtk::Orientation::Horizontal, -1);
+                        if cm > 340 {
+                            child_over = true;
+                        }
+                        walk(&ch);
+                        c = ch.next_sibling();
+                    }
+                    if min > 340 && !child_over {
+                        tracing::warn!("DIAGWIDE {} min={min}", describe(w));
+                    }
+                }
+                let mut top = split.clone().upcast::<gtk::Widget>();
+                while let Some(p) = top.parent() {
+                    top = p;
+                }
+                walk(&top);
+            });
+        }
         // Apply the initial navigation visibility (hidden sections + the
         // single-item suppression with Settings moved to the title bar).
         self.refresh_nav_visibility();

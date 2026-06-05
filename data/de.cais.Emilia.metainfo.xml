@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.3.3" date="2026-06-05">
+      <description>
+        <p>More narrow-screen layout fixes: the album/artist galleries can shrink to a single column, and long extra-source names (e.g. a Nextcloud URL) no longer force the window wider than a phone screen.</p>
+        <p xml:lang="de">Weitere Layout-Korrekturen für schmale Bildschirme: Die Alben-/Interpreten-Galerien können auf eine einzelne Spalte schrumpfen, und lange Namen zusätzlicher Quellen (z. B. eine Nextcloud-URL) machen das Fenster nicht mehr breiter als ein Handy-Bildschirm.</p>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-06-05">
       <description>
         <p>Fixes the phone layout running off the screen edge: the navigation icon strip is properly clamped and scrolls smoothly with a swipe (no visible scrollbar), and its icons are more compact, so the navigation and player controls stay within the screen.</p>

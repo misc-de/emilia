@@ -263,7 +263,13 @@ impl App {
         }
         let mut group: Option<gtk::ToggleButton> = None;
         for (sel, label) in tabs {
-            let btn = gtk::ToggleButton::with_label(&label);
+            // An ellipsizing label (long source names like "cloud.cais.de" would
+            // otherwise force the whole window wider than a phone screen).
+            let lbl = gtk::Label::new(Some(&label));
+            lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            lbl.set_max_width_chars(10);
+            let btn = gtk::ToggleButton::new();
+            btn.set_child(Some(&lbl));
             // Full width like the Podcast/Streaming tab switchers.
             btn.set_hexpand(true);
             match &group {

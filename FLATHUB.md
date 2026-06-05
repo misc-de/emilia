@@ -28,10 +28,9 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
    - `data/de.cais.Emilia.metainfo.xml` (mit `<screenshots>`)
    - `de.cais.Emilia.flathub.yaml`
 
-   > Hinweis: Der pre-commit-Hook erhöht bei jedem Commit die Patch-Version in
-   > `Cargo.toml`. Die Tag-Version (Schritt 3) muss zur **finalen** Version nach
-   > dem letzten Commit passen. Idealerweise auch ein `<release>` mit dieser
-   > Version oben in der MetaInfo ergänzen (aktuell jüngstes: 0.1.45).
+   > Hinweis: Die Tag-Version (Schritt 3) muss zur **finalen** Version in
+   > `Cargo.toml` passen. Die MetaInfo sollte denselben Stand als obersten
+   > `<release>`-Eintrag enthalten (aktuell: 0.3.2).
 
 2. **Pushen** nach `main` (sonst sind die Screenshot-Raw-URLs und der Tag für
    Flathub nicht erreichbar):
@@ -43,12 +42,12 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
 3. **Tag setzen und pushen** (Version an die finale `Cargo.toml` anpassen):
 
    ```sh
-   git tag v0.1.49        # = Version aus Cargo.toml
-   git push origin v0.1.49
+   git tag v0.3.2        # = Version aus Cargo.toml
+   git push origin v0.3.2
    ```
 
    Dann in `de.cais.Emilia.flathub.yaml` `tag:` auf denselben Wert setzen und
-   optional `commit:` mit dem SHA (`git rev-parse v0.1.49`) ergänzen.
+   optional `commit:` mit dem SHA (`git rev-parse v0.3.2`) ergänzen.
 
 4. **Lokal gegen den getaggten Stand testen** (baut jetzt wirklich aus Git):
 
@@ -127,8 +126,8 @@ und was nicht:
   dorthin; ggf. genügt ein Link von cais.de aufs Repo oder umgekehrt). ⚠️
 - `metadata_license: CC0-1.0`, `project_license: GPL-3.0-or-later`, OARS-
   `content_rating`, Screenshots, `<developer>`, Release-Notes — alle vorhanden. ✅
-  **Noch ergänzen:** ein `<release>`-Eintrag für die getaggte Version (v0.1.49)
-  ganz oben in der MetaInfo (aktuell jüngstes: 0.1.45).
+  Der oberste `<release>`-Eintrag in der MetaInfo ist aktuell `0.3.2` und muss
+  bei der Einreichung zum finalen Git-Tag passen.
 - Alte Release-Note 0.1.4 nennt „in-app self-update / Selbst-Aktualisierung".
   Im Code gibt es **keinen** Binary-Updater — gemeint ist der App-Neustart nach
   Sprachwechsel (`current_exe().spawn()` in `src/ui/app.rs`). Formulierung

@@ -9,7 +9,7 @@
 #
 # Voraussetzungen, bevor das hier baut (siehe FLATHUB.md):
 #   1. generated-sources.json, data/screenshots/ und alle Daten sind committet.
-#   2. Ein Tag (z. B. v0.1.49) zeigt auf genau diesen Commit und ist gepusht.
+#   2. Ein Tag (z. B. v0.3.2) zeigt auf genau diesen Commit und ist gepusht.
 #   3. `tag:` unten (und idealerweise `commit:`) auf diesen Tag gesetzt.
 #
 # Lokal testen (nachdem Tag gepusht ist):
@@ -118,8 +118,8 @@ modules:
       # commit mit dem zugehörigen SHA ergänzen (von Flathub empfohlen).
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.2.0
-        # commit: <SHA des Tags v0.2.0>
+        tag: v0.3.2
+        # commit: <SHA des Tags v0.3.2>
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json

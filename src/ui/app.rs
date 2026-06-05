@@ -5320,7 +5320,11 @@ impl App {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
         }
-        fb.set_min_children_per_line(self.libview.gallery_columns);
+        // `min = 1` (not the column count) so the gallery can shrink to a single
+        // column on a narrow phone screen; otherwise its minimum width
+        // (columns × tile) forces the whole window wider than the screen and the
+        // layout runs off the right edge. `max` still caps the columns on wide views.
+        fb.set_min_children_per_line(1);
         fb.set_max_children_per_line(self.libview.gallery_columns);
         // `homogeneous(true)` gives **all** tiles exactly the size set via `size_request`
         // ([`size_gallery_tiles`]) (= 1/column count of the width) and
