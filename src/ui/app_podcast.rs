@@ -1004,4 +1004,81 @@ impl App {
             Err(e) => tracing::error!("Failed to play episode: {e}"),
         }
     }
+
+    /// Toggle pause/resume on the running episode, or start this one.
+    pub(crate) fn toggle_episode(&mut self, url: String, title: String) {
+        if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
+            // Already loaded episode → toggle pause/resume.
+            if self.mini.playing {
+                self.player.pause();
+            } else {
+                self.player.resume();
+            }
+            self.mini.playing = !self.mini.playing;
+            self.mpris.set_playing(self.mini.playing);
+            self.refresh_queue_icons();
+        } else {
+            // Other/no episode → start this one.
+            self.play_episode(&url, &title);
+        }
+    }
+
+    /// Seek the running episode to `ms`, or start it at that mark.
+    pub(crate) fn episode_seek_to(&mut self, url: String, title: String, ms: i64) {
+        if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
+            // Already running → jump directly to the spot.
+            if self.player.seek_ms(ms).is_ok() {
+                self.mini.position_ms = ms;
+                self.save_episode_progress();
+            }
+        } else {
+            // Otherwise start the episode at the jump mark.
+            self.play_episode_at(&url, &title, ms);
+        }
+    }
+
+    /// Download the episode for offline playback, or delete an existing copy.
+    pub(crate) fn toggle_episode_download(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+    ) {
+        // Ignore taps while a download for this episode is in flight.
+        if self.podcasts.downloading_episodes.contains(&url) {
+            return;
+        }
+        // Already downloaded → delete the local copy to free space. Future plays
+        // then fall back to streaming; a copy currently playing keeps its open
+        // file handle until the track changes.
+        if let Some(path) = self.library.delete_episode_download(&url).unwrap_or(None) {
+            let _ = std::fs::remove_file(&path);
+            self.refresh_download_row();
+            self.toast(&gettext("Download removed"));
+            return;
+        }
+        // Not downloaded → fetch the audio in the background.
+        self.podcasts.downloading_episodes.insert(url.clone());
+        self.refresh_download_row();
+        self.toast(&gettext_f("Downloading “{title}” …", &[("title", &title)]));
+        let dl_url = url.clone();
+        sender.spawn_command(move |out| {
+            let dest = crate::core::online::episode_download_dest(&dl_url);
+            let result = match crate::core::podcast::download_episode(&dl_url, &dest) {
+                Ok(_) => {
+                    let path = dest.to_string_lossy().into_owned();
+                    // Persist the offline copy (worker thread, own DB).
+                    if let Ok(lib) = Library::open() {
+                        let _ = lib.set_episode_download(&dl_url, &path);
+                    }
+                    Ok(path)
+                }
+                Err(e) => Err(e.to_string()),
+            };
+            let _ = out.send(crate::ui::app::Cmd::EpisodeDownloaded {
+                url: dl_url.clone(),
+                result,
+            });
+        });
+    }
 }
