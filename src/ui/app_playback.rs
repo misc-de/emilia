@@ -649,11 +649,15 @@ impl App {
                 return;
             }
         }
-        // Saved resume position (for all tracks; see should_resume).
+        // Saved resume position (for all tracks; see should_resume). A one-shot
+        // forced start (recording editor preview) overrides it for this start.
         let track = self.library.track_by_path(&path_str).ok().flatten();
-        let resume_ms = match &track {
-            Some(t) if self.should_resume(t) => t.resume_ms,
-            _ => 0,
+        let resume_ms = match self.transport.forced_start_ms.take() {
+            Some(ms) => ms.max(0),
+            None => match &track {
+                Some(t) if self.should_resume(t) => t.resume_ms,
+                _ => 0,
+            },
         };
         match self.start_track_playback(&path_str, resume_ms) {
             Ok(()) => {

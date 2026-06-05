@@ -1945,6 +1945,28 @@ impl App {
             }
             let dots = adw::CarouselIndicatorDots::new();
             dots.set_carousel(Some(&carousel));
+            // Make the dots clickable: a tap jumps straight to that image.
+            // The dots are laid out evenly, so map the click x onto an even
+            // split of the indicator's width to pick the target page.
+            {
+                let carousel = carousel.clone();
+                let dots_weak = dots.downgrade();
+                let click = gtk::GestureClick::new();
+                click.connect_released(move |_, _, x, _| {
+                    let n = carousel.n_pages();
+                    let Some(dots) = dots_weak.upgrade() else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    let w = f64::from(dots.width().max(1));
+                    let idx = ((x / w) * f64::from(n)).floor().clamp(0.0, f64::from(n - 1)) as u32;
+                    carousel.scroll_to(&carousel.nth_page(idx), true);
+                });
+                dots.add_controller(click);
+                dots.set_cursor_from_name(Some("pointer"));
+            }
 
             let gallery = gtk::Box::new(gtk::Orientation::Vertical, 6);
             gallery.set_halign(gtk::Align::Center);
@@ -2011,7 +2033,15 @@ impl App {
     /// Stored gallery image paths of a target (only existing files).
     pub(crate) fn ctx_gallery_paths(&self, entry: &CtxTarget) -> Vec<String> {
         let stored = match entry {
-            CtxTarget::Artist(m) => self.library.artist_images(&m.name).unwrap_or_default(),
+            // Offer the artist's current photo (e.g. from Deezer) as the first
+            // candidate next to the fanart.tv gallery images, mirroring how an
+            // album merges its primary cover into its gallery. Choosing one only
+            // updates the artist photo and never touches the albums' covers.
+            CtxTarget::Artist(m) => {
+                let mut imgs: Vec<String> = m.image_path.clone().into_iter().collect();
+                imgs.extend(self.library.artist_images(&m.name).unwrap_or_default());
+                imgs
+            }
             CtxTarget::Album(m) => self
                 .library
                 .album_images(&m.artist, &m.album)
@@ -2020,9 +2050,11 @@ impl App {
             // `append_cover_or_gallery` to avoid re-reading the file's tags.
             CtxTarget::Fs(_) => Vec::new(),
         };
+        let mut seen = std::collections::HashSet::new();
         stored
             .into_iter()
             .filter(|p| std::path::Path::new(p).exists())
+            .filter(|p| seen.insert(p.clone()))
             .collect()
     }
 

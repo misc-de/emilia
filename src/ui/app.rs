@@ -81,10 +81,10 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 11] = [
     ("files", "Files", "folder-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
-    ("concerts", "Concerts", "emilia-concert-symbolic"),
+    ("concerts", "Concerts", "ticket-special-symbolic"),
     ("podcasts", "Podcasts", "microphone-symbolic"),
     ("streaming", "Streaming", "audio-x-generic-symbolic"),
-    ("youtube", "YouTube", "video-x-generic-symbolic"),
+    ("youtube", "YouTube", "im-youtube-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
     ("stats", "Statistics", "emilia-stats-symbolic"),
@@ -298,6 +298,10 @@ pub(crate) struct TransportState {
     /// Bounds auto-skipping so an entirely unplayable queue stops instead of
     /// looping (see [`App::skip_current_track`]).
     pub(crate) skip_count: u32,
+    /// One-shot start position (ms) for the next `play_current`, overriding the
+    /// saved resume position. Used by the recording editor's "play from the
+    /// playhead" preview. Consumed (reset to `None`) on use.
+    pub(crate) forced_start_ms: Option<i64>,
 }
 
 /// Mini-player / now-playing strip state, grouped off the `App` god-object.
@@ -1112,6 +1116,20 @@ pub enum Msg {
     RecordingDelete(i64),
     /// Actually delete a recording (after the undo toast expires).
     RecordingDeleteConfirmed(i64),
+    /// Copy a recording (id) into the music library so it appears as a track.
+    AddRecordingToLibrary(i64),
+    /// Open the waveform editor subpage for a recording (id).
+    EditRecording(i64),
+    /// Preview a recording file from a chosen position (ms) – editor playhead.
+    RecordingPlayFrom { path: String, ms: i64 },
+    /// Apply the editor's cut ranges (seconds) to a recording and overwrite it.
+    RecordingApplyCut { id: i64, cuts: Vec<(f64, f64)> },
+    /// Result of the background cut: new path (`None` = failed) + new duration.
+    RecordingCutDone {
+        id: i64,
+        path: Option<String>,
+        duration_ms: i64,
+    },
     /// Set the size of the timeshift buffer in minutes (0–60).
     SetRecordingBufferMinutes(u32),
 }
@@ -1308,11 +1326,20 @@ impl Component for App {
                         #[wrap(Some)]
                         #[name = "win_title"]
                         set_title_widget = &adw::WindowTitle::new("Emilia", ""),
+                        // Library search: opens a dialog that searches artists,
+                        // albums, songs and the file date and lists the hits. Kept
+                        // as the leftmost item of the title bar.
+                        pack_start = &gtk::Button {
+                            set_icon_name: "system-search-symbolic",
+                            set_tooltip_text: Some(&gettext("Search")),
+                            connect_clicked => Msg::OpenSearch,
+                        },
                         // Settings at the top only in narrow (mobile) mode – in
                         // desktop mode the item sits at the bottom of the sidebar.
+                        // On mobile it sits on the right of the title bar.
                         #[name = "settings_top_btn"]
-                        pack_start = &gtk::Button {
-                            set_icon_name: "emblem-system-symbolic",
+                        pack_end = &gtk::Button {
+                            set_icon_name: "xsi-view-more-symbolic",
                             set_tooltip_text: Some(&gettext("Settings")),
                             set_visible: false,
                             connect_clicked => Msg::OpenSettings,
@@ -1341,13 +1368,6 @@ impl Component for App {
                             } else {
                                 &[]
                             },
-                        },
-                        // Library search: opens a dialog that searches artists,
-                        // albums, songs and the file date and lists the hits.
-                        pack_end = &gtk::Button {
-                            set_icon_name: "system-search-symbolic",
-                            set_tooltip_text: Some(&gettext("Search")),
-                            connect_clicked => Msg::OpenSearch,
                         },
                     },
 
@@ -1529,7 +1549,7 @@ impl Component for App {
                                         },
                                     },
                                 },
-                            add_titled_with_icon[Some("concerts"), &gettext("Concerts"), "emilia-concert-symbolic"] =
+                            add_titled_with_icon[Some("concerts"), &gettext("Concerts"), "ticket-special-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -1565,7 +1585,7 @@ impl Component for App {
 
                                     // Hint + actions (empty & hint active)
                                     adw::StatusPage {
-                                        set_icon_name: Some("emilia-concert-symbolic"),
+                                        set_icon_name: Some("ticket-special-symbolic"),
                                         set_title: &gettext("Concerts"),
                                         set_description: Some(&gettext("Here you can list your collected concerts. Via Import concerts you get an overview of likely concerts: albums with live, unplugged or concert in the name, plus single files of 30 minutes or more. Mark them as a concert and they'll appear here. You can also add concerts later at any time via the options.")),
                                         set_vexpand: true,
@@ -1598,7 +1618,7 @@ impl Component for App {
                                     // user chose "I'll do it myself" – therefore
                                     // deliberately NO import button anymore.
                                     adw::StatusPage {
-                                        set_icon_name: Some("emilia-concert-symbolic"),
+                                        set_icon_name: Some("ticket-special-symbolic"),
                                         set_title: &gettext("No concerts"),
                                         set_description: Some(&gettext("Mark an album or a track as a concert via the options.")),
                                         set_vexpand: true,
@@ -1853,7 +1873,7 @@ impl Component for App {
                                         set_visible: model.favorites.favorite_items.is_empty(),
                                     },
                                 },
-                            add_titled_with_icon[Some("youtube"), &gettext("YouTube"), "video-x-generic-symbolic"] =
+                            add_titled_with_icon[Some("youtube"), &gettext("YouTube"), "im-youtube-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -2764,6 +2784,7 @@ impl Component for App {
                 close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 queue_list: queue_list.clone(),
                 skip_count: 0,
+                forced_start_ms: None,
             },
             mini: MiniState {
                 now_playing: None,
@@ -3556,6 +3577,26 @@ impl Component for App {
                 }
                 self.reload_recordings(&sender);
             }
+            Msg::AddRecordingToLibrary(id) => self.add_recording_to_library(id),
+            Msg::EditRecording(id) => self.open_recording_edit(&sender, id),
+            Msg::RecordingPlayFrom { path, ms } => {
+                self.transport.forced_start_ms = Some(ms);
+                self.play_recording(path);
+            }
+            Msg::RecordingApplyCut { id, cuts } => self.apply_recording_cut(&sender, id, cuts),
+            Msg::RecordingCutDone {
+                id,
+                path,
+                duration_ms,
+            } => match path {
+                Some(p) => {
+                    let _ = self.library.update_recording_file(id, &p, duration_ms);
+                    self.nav.nav_view.pop();
+                    self.reload_recordings(&sender);
+                    self.toast(&gettext("Recording edited"));
+                }
+                None => self.toast(&gettext("Editing the recording failed")),
+            },
             Msg::SetRecordingBufferMinutes(n) => {
                 self.streaming.recording_buffer_minutes = n.min(60);
                 let _ = self.library.set_setting(

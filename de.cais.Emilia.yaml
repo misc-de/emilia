@@ -103,6 +103,12 @@ modules:
         /app/share/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/im-youtube-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/im-youtube-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/ticket-special-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/ticket-special-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/xsi-view-more-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/xsi-view-more-symbolic.svg
     sources:
       - type: dir
         path: .

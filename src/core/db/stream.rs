@@ -167,6 +167,17 @@ impl Library {
         Ok(path)
     }
 
+    /// Updates a recording's file path and duration after the editor re-encoded
+    /// it (the cut changes the length, and an unencodable container such as AAC
+    /// is rewritten as MP3, which changes the extension).
+    pub fn update_recording_file(&self, id: i64, path: &str, duration_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE recording SET path = ?2, duration_ms = ?3 WHERE id = ?1",
+            rusqlite::params![id, path, duration_ms],
+        )?;
+        Ok(())
+    }
+
     /// All episodes along with podcast info (for the "Newest" view). The
     /// chronological sorting by publication date is handled by the UI
     /// (the stored date is only text).

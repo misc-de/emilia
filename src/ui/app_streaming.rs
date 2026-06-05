@@ -718,6 +718,24 @@ impl App {
             });
         }
         actions.add(&play);
+        let add_lib = action_row(&gettext("Add to library"), "list-add-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            add_lib.connect_activated(move |_| {
+                sender.input(Msg::AddRecordingToLibrary(id));
+                dialog.close();
+            });
+        }
+        actions.add(&add_lib);
+        let edit = action_row(&gettext("Edit"), "document-edit-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            edit.connect_activated(move |_| {
+                sender.input(Msg::EditRecording(id));
+                dialog.close();
+            });
+        }
+        actions.add(&edit);
         let remove = action_row(&gettext("Delete recording"), "user-trash-symbolic");
         {
             let sender = sender.clone();
@@ -1301,6 +1319,105 @@ impl App {
             self.play_current();
         } else {
             self.toast(&gettext("File not found"));
+        }
+    }
+
+    /// Copies a recording into the primary music library (`<music>/<Artist>/…`),
+    /// keeping its original format, then registers it as a regular track so it
+    /// shows up in the library views. Best effort with a toast on each outcome.
+    pub(crate) fn add_recording_to_library(&mut self, id: i64) {
+        let Some(rec) = self
+            .streaming
+            .recording_items
+            .iter()
+            .find(|r| r.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(music_dir) = self.files.music_dir.clone().filter(|s| !s.trim().is_empty()) else {
+            self.toast(&gettext("Set a music folder first"));
+            return;
+        };
+        let src = std::path::PathBuf::from(&rec.path);
+        if !src.exists() {
+            self.toast(&gettext("File not found"));
+            return;
+        }
+
+        // Metadata from the embedded tag, with the DB row as the fallback.
+        let mut track = crate::core::scanner::read_track(&src).unwrap_or(crate::model::Track {
+            id: 0,
+            path: rec.path.clone(),
+            title: rec.title.clone(),
+            artist: rec.artist.clone(),
+            album: None,
+            genre: None,
+            track_no: None,
+            disc_no: None,
+            duration_ms: None,
+            resume_ms: 0,
+        });
+        let artist = track
+            .artist
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| rec.artist.clone())
+            .filter(|s| !s.trim().is_empty());
+        let title = if track.title.trim().is_empty() {
+            rec.title.clone()
+        } else {
+            track.title.clone()
+        };
+
+        // <music>/<Artist|"Recordings">/[<Album>/]<Title>.<ext> – keep the format.
+        use crate::core::youtube::sanitize_filename;
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("mp3");
+        let mut dest = std::path::PathBuf::from(&music_dir);
+        match artist.as_deref().filter(|s| !s.trim().is_empty()) {
+            Some(a) => dest.push(sanitize_filename(a)),
+            None => dest.push("Recordings"),
+        }
+        if let Some(al) = track.album.as_deref().filter(|s| !s.trim().is_empty()) {
+            dest.push(sanitize_filename(al));
+        }
+        dest.push(format!("{}.{ext}", sanitize_filename(&title)));
+
+        if dest.exists() {
+            self.toast(&gettext("Already in the library"));
+            return;
+        }
+        if dest
+            .parent()
+            .is_some_and(|p| std::fs::create_dir_all(p).is_err())
+            || std::fs::copy(&src, &dest).is_err()
+        {
+            self.toast(&gettext("Could not add to the library"));
+            return;
+        }
+
+        let dest_str = dest.to_string_lossy().into_owned();
+        // Carry over the recording's cached cover, if one was fetched.
+        if let Some(cover) = crate::core::online::recording_cover_path(
+            artist.as_deref().unwrap_or(""),
+            &title,
+        ) {
+            if let Ok(bytes) = std::fs::read(&cover) {
+                crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
+            }
+        }
+
+        track.id = 0;
+        track.path = dest_str;
+        track.title = title;
+        track.artist = artist;
+        track.resume_ms = 0;
+        if self.library.upsert_track(&track).is_ok() {
+            self.reload_library_overviews();
+            self.toast(&gettext("Added to the library"));
+        } else {
+            let _ = std::fs::remove_file(&dest);
+            self.toast(&gettext("Could not add to the library"));
         }
     }
 }

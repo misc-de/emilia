@@ -9,6 +9,7 @@ pub mod app_playback;
 pub mod app_playlist;
 pub mod app_podcast;
 pub mod app_queue;
+pub mod app_rec_edit;
 pub mod app_streaming;
 pub mod app_views;
 pub mod app_youtube;

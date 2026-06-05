@@ -9,6 +9,17 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
 
 ---
 
+## Screenshots
+
+| | |
+|:-:|:-:|
+| <img src="data/screenshots/desktop_artists.png" width="420"><br>*Library by artist (with photos)* | <img src="data/screenshots/desktop_streaming.png" width="420"><br>*Internet radio &amp; recordings* |
+| <img src="data/screenshots/desktop_podcast.png" width="420"><br>*Podcasts with show notes* | <img src="data/screenshots/desktop_youtube.png" width="420"><br>*YouTube as a music source* |
+| <img src="data/screenshots/desktop_equalizer.png" width="420"><br>*10-band equalizer with cascade* | <img src="data/screenshots/desktop_statistics.png" width="420"><br>*Listening statistics* |
+| <img src="data/screenshots/desktop_preferences.png" width="420"><br>*Preferences* | <img src="data/screenshots/mobile_artists.png" width="210"><br>*Adaptive phone layout (portrait)* |
+
+---
+
 ## What Emilia can do
 
 - **Adaptive interface** – works in narrow portrait (phone) and on the desktop;
@@ -17,7 +28,8 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
   `lofty`. Audio files are only ever **read**, never modified.
 - **Several views** of the library:
   - **File system** – reliable navigation even with patchy tags (important for
-    audio dramas).
+    audio dramas). Additional music sources (a second local folder or a
+    Nextcloud/WebDAV remote) appear here as their own **tabs**.
   - **Artists** – a single tap opens a subpage with the artist's **albums** (with
     covers) and, below them, the **single tracks** (guest/feature tracks and
     tracks without an album). An album opens its track list.
@@ -25,6 +37,10 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
   - **Concerts** – mark and collect live/unplugged recordings; an import suggests
     likely candidates.
   - **Favorites**, **Audiobooks**, **Statistics**.
+- **Cover & photo galleries** – open an album's or artist's detail view to pick
+  among several cover/photo candidates (swipe the carousel or **tap the dots** to
+  jump straight to one), or upload your own image. Choosing an artist photo never
+  changes the album covers.
 - **Playback** – play/pause, next/previous, shuffle, repeat, a queue, and a
   bottom mini-player with a **seek bar** (scrub through long tracks).
 - **Resume for audio dramas** – long tracks (15 min+ or classified as
@@ -45,7 +61,15 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
     song is saved;
   - automatic split at song boundaries, online cover/metadata embedded into the
     saved file;
-  - saved songs live in a dedicated **Recordings** section.
+  - saved songs live in a dedicated **Recordings** section. From there you can
+    **edit** a recording in a built-in **waveform editor** – mark a region, cut it
+    out with the scissors, zoom (+/− or scroll) and pan, scrub a timeline and play
+    from the playhead (*Save re-encodes and overwrites the file*) – or **add a
+    recording to your music library** as a regular track.
+- **YouTube** – search for tracks and play them in-app, or **add a track to your
+  library**: it is downloaded via `yt-dlp` and transcoded to MP3 with cover and
+  metadata, filed under `Artist/Album`. The section can be hidden in the
+  navigation if you don't need it.
 - **Nextcloud** – connect a Nextcloud (login QR code or manual), then **index its
   music into the library** so the tracks behave 1:1 like local songs (Artists,
   Albums, queue, resume). Audio streams on demand (cached on play); duration,
@@ -108,6 +132,8 @@ embedded in the `.flatpakrepo` file – nothing needs to be imported separately.
 - Tap a station to play; the player bar shows a red **record** button next to
   play/pause. Set the recording buffer under **Settings → Cache & recordings**
   (0 turns it off). Recorded songs appear under **Recordings**.
+- Long-press a recording for its detail page: **Play**, **Add to library**,
+  **Edit** (open the waveform editor to trim it) or delete it.
 
 ### Nextcloud
 
@@ -153,7 +179,8 @@ All settings (music folder, API keys, window state …) live in the SQLite datab
   *bad*, *ugly* and *libav* (for `playbin3`, the equalizer and common codecs)
 - **PipeWire** for audio output (present on Phosh / recent distros)
 - a **C compiler** + `pkg-config` (SQLite is bundled and built from source)
-- *optional:* **`fpcalc`** (Chromaprint) for fingerprint track recognition
+- *optional:* **`fpcalc`** (Chromaprint) for fingerprint track recognition, and
+  **`yt-dlp`** for the YouTube source
 
 ### 1. Install dependencies
 
@@ -163,7 +190,7 @@ All settings (music folder, API keys, window state …) live in the SQLite datab
 sudo pacman -S --needed rustup base-devel pkgconf \
   gtk4 libadwaita \
   gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav \
-  chromaprint        # optional, provides fpcalc
+  chromaprint yt-dlp        # optional: fpcalc + the YouTube source
 rustup default stable
 ```
 
@@ -176,7 +203,7 @@ sudo apt install build-essential pkg-config curl \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
   gstreamer1.0-pipewire \
-  libchromaprint-tools   # optional, provides fpcalc
+  libchromaprint-tools yt-dlp   # optional: fpcalc + the YouTube source
 # Rust via rustup if not already present:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
@@ -188,7 +215,7 @@ sudo dnf install cargo rust gcc pkgconf-pkg-config \
   gtk4-devel libadwaita-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
   gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-libav \
-  chromaprint-tools     # optional, provides fpcalc
+  chromaprint-tools yt-dlp     # optional: fpcalc + the YouTube source
 # gstreamer1-plugins-ugly is in RPM Fusion
 ```
 
@@ -248,6 +275,8 @@ src/
     app_playlist.rs  Playlists (list, subpage, dialogs)
     app_podcast.rs   Podcasts (subscribe to feeds, stream episodes)
     app_streaming.rs Internet radio (stations, timeshift recording, replay)
+    app_rec_edit.rs  Recording waveform editor (mark/cut, zoom/pan, overwrite)
+    app_youtube.rs   YouTube source (search, play, add to library)
     cloud_page.rs    Nextcloud connect dialog (QR camera + manual)
     sync_page.rs     Device sync UI (QR pairing, optional webcam)
     stats_page.rs    Listening statistics component
@@ -261,8 +290,9 @@ src/
     widgets.rs       Shared UI helpers (cover frames, thumbnails)
   core/
     scanner.rs       Directory scan + lofty metadata → DB (background worker)
-    db.rs            SQLite (rusqlite, bundled) + queries
+    db/              SQLite (rusqlite, bundled) + queries (split into submodules)
     player.rs        GStreamer wrapper (playbin3 + equalizer-10bands)
+    waveform.rs      Recording waveform decode + region cut/re-encode
     online.rs        Online enrichment (MusicBrainz/CAA/Deezer/AcoustID/fanart)
     podcast.rs       Read podcast feeds (RSS), provide episodes
     streaming.rs     Station search (Radio-Browser API)
@@ -278,7 +308,8 @@ src/
     output.rs        Audio outputs (PipeWire sinks) for EQ profiles
     concert.rs       Detect concert candidates
     artist.rs        "feat." splitting of artist credits
-    update.rs        Flatpak update check
+    youtube.rs       YouTube resolve/download/transcode (yt-dlp)
+    net.rs           Shared download helpers (size-capped streaming)
 ```
 
 ---

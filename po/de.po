@@ -1730,6 +1730,62 @@ msgstr "Synchronisierung erfolgreich"
 msgid "Downloaded"
 msgstr "Heruntergeladen"
 
+#: src/ui/app_streaming.rs:0
+msgid "Already in the library"
+msgstr "Bereits in der Bibliothek"
+
+#: src/ui/app_streaming.rs:0
+msgid "Could not add to the library"
+msgstr "Konnte nicht zur Bibliothek hinzugefügt werden"
+
+#: src/ui/app_streaming.rs:0
+msgid "Added to the library"
+msgstr "Zur Bibliothek hinzugefügt"
+
+#: src/ui/app_streaming.rs:0
+msgid "Set a music folder first"
+msgstr "Erst einen Musikordner festlegen"
+
+#: src/ui/app_streaming.rs:0
+msgid "Edit"
+msgstr "Bearbeiten"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Edit recording"
+msgstr "Aufnahme bearbeiten"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Delete the marked part"
+msgstr "Markierten Teil löschen"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Play from the playhead"
+msgstr "Ab der Abspielposition wiedergeben"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Mark a part to cut first"
+msgstr "Erst einen Bereich zum Schneiden markieren"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Editing the recording …"
+msgstr "Aufnahme wird bearbeitet …"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Recording edited"
+msgstr "Aufnahme bearbeitet"
+
+#: src/ui/app_rec_edit.rs:0
+msgid "Editing the recording failed"
+msgstr "Bearbeiten der Aufnahme fehlgeschlagen"
+
 #~ msgid "Playlist created"
 #~ msgstr "Playlist erstellt"
 
