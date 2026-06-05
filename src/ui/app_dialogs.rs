@@ -33,6 +33,12 @@ impl App {
         }
 
         let dialog = adw::Dialog::builder().title(entry.heading()).build();
+        // Fixed content width like every other detail dialog (playlist, podcast,
+        // streaming, YouTube). Without it the floating dialog adopts the natural
+        // width of its content – which collapses to a narrow sliver depending on
+        // what is loaded. On the phone the bottom sheet ignores this and uses the
+        // full width anyway.
+        dialog.set_content_width(600);
         // On the phone use the full width (bottom sheet) instead of floating.
         self.adapt_detail_dialog(&dialog);
 

@@ -628,20 +628,21 @@ pub enum Msg {
     /// a further subpage.
     OpenAlbumTracks { artist: String, album: String },
     /// Play a track from the artist overview (queue = all tracks
-    /// of the artist, start at the tapped one).
-    PlayArtistTrack { name: String, path: String },
+    /// of the artist, start at the tapped one). `close` pops the subpage
+    /// back to the main view (row tap) vs. keeps it open (play button).
+    PlayArtistTrack { name: String, path: String, close: bool },
     /// Play a track from the album subpage (queue = whole album in
     /// track order, start at the tapped one).
-    PlayAlbumTrack { artist: String, album: String, path: String },
+    PlayAlbumTrack { artist: String, album: String, path: String, close: bool },
     /// Like `PlayAlbumTrack`, but across artists (album overview):
     /// queue = all tracks of the album name.
-    PlayAlbumByNameTrack { album: String, path: String },
+    PlayAlbumByNameTrack { album: String, path: String, close: bool },
     /// Tap on an album/folder entry in concerts/audiobooks: list its
     /// tracks as a subpage (instead of playing directly).
     OpenEntryTracks { scope: String, key: String },
     /// Play a track of a folder audiobook/concert (queue = folder in
     /// order, start at the tapped one).
-    PlayFolderTrack { folder: String, path: String },
+    PlayFolderTrack { folder: String, path: String, close: bool },
     /// Play the whole album in track order (play button of the album row).
     PlayAlbum { artist: String, album: String },
     CtxPlay,
@@ -814,8 +815,11 @@ pub enum Msg {
     PlaylistDeleteConfirmed(i64),
     /// Add the current context files to this playlist.
     PlaylistAddTo(i64),
-    /// Play a track from a playlist (queue = whole playlist).
-    PlaylistTrack { id: i64, path: String },
+    /// Play a track from a playlist (queue = whole playlist). `close` pops the
+    /// playlist subpage (row tap) vs. keeps it open (play button).
+    PlaylistTrack { id: i64, path: String, close: bool },
+    /// Set the chosen cover of a playlist (last shown in the detail carousel).
+    SetPlaylistCover { id: i64, path: String },
     /// Remove a track from a playlist (undo toast; deferred to the *Confirmed).
     PlaylistRemoveTrack { id: i64, path: String },
     /// Actually remove a track from a playlist (after the undo toast expires).
@@ -3337,7 +3341,7 @@ impl Component for App {
                 "folder" => self.open_folder_tracks(&sender, &key),
                 _ => {}
             },
-            Msg::PlayFolderTrack { folder, path } => {
+            Msg::PlayFolderTrack { folder, path, close } => {
                 let files: Vec<PathBuf> = self
                     .folder_tracks_ordered(&folder)
                     .into_iter()
@@ -3349,10 +3353,12 @@ impl Component for App {
                     self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav.nav_view.pop_to_tag("main");
+                    if close {
+                        self.nav.nav_view.pop_to_tag("main");
+                    }
                 }
             }
-            Msg::PlayArtistTrack { name, path } => {
+            Msg::PlayArtistTrack { name, path, close } => {
                 // Queue = all tracks of the artist (across albums),
                 // start at the tapped track.
                 let files: Vec<PathBuf> = self
@@ -3368,10 +3374,12 @@ impl Component for App {
                     self.play_current();
                     self.refresh_queue_icons();
                     // Back to the main page, so that the mini player is visible.
-                    self.nav.nav_view.pop_to_tag("main");
+                    if close {
+                        self.nav.nav_view.pop_to_tag("main");
+                    }
                 }
             }
-            Msg::PlayAlbumTrack { artist, album, path } => {
+            Msg::PlayAlbumTrack { artist, album, path, close } => {
                 // Queue = whole album in track order, start at the tapped one.
                 // `artist` here is the (page) artist – the same set of tracks
                 // as on the album subpage.
@@ -3386,10 +3394,12 @@ impl Component for App {
                     self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav.nav_view.pop_to_tag("main");
+                    if close {
+                        self.nav.nav_view.pop_to_tag("main");
+                    }
                 }
             }
-            Msg::PlayAlbumByNameTrack { album, path } => {
+            Msg::PlayAlbumByNameTrack { album, path, close } => {
                 // Queue = all tracks of the album name (across artists),
                 // start at the tapped one – matching the album overview.
                 let files: Vec<PathBuf> = self
@@ -3403,7 +3413,9 @@ impl Component for App {
                     self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
-                    self.nav.nav_view.pop_to_tag("main");
+                    if close {
+                        self.nav.nav_view.pop_to_tag("main");
+                    }
                 }
             }
             Msg::PlayAlbum { artist, album } => {
@@ -3529,7 +3541,7 @@ impl Component for App {
                     self.refresh_queue_icons();
                 }
             }
-            Msg::PlaylistTrack { id, path } => {
+            Msg::PlaylistTrack { id, path, close } => {
                 let queue: Vec<PathBuf> = self
                     .library
                     .playlist_paths(id)
@@ -3545,7 +3557,14 @@ impl Component for App {
                     self.transport.queue_pos = pos;
                     self.play_current();
                     self.refresh_queue_icons();
+                    if close {
+                        self.nav.nav_view.pop_to_tag("main");
+                    }
                 }
+            }
+            Msg::SetPlaylistCover { id, path } => {
+                let _ = self.library.set_playlist_cover(id, &path);
+                self.reload_playlists(&sender);
             }
             Msg::PlaylistDelete(id) => {
                 self.undo_toast(&sender, &gettext("Playlist deleted"), Msg::PlaylistDeleteConfirmed(id));
@@ -4065,6 +4084,12 @@ impl Component for App {
                 }
                 self.youtube.playing_playlist = true;
                 let _ = self.library.add_recent_playlist(&url, &title, videos.len() as i64);
+                // Recent playlist cover = its first video's thumbnail.
+                if let Some(first) = videos.first() {
+                    let _ = self
+                        .library
+                        .set_recent_thumb(&url, &crate::core::youtube::thumbnail_url(&first.id));
+                }
                 self.transport.queue = queue;
                 self.transport.queue_pos = index;
                 self.play_current();
@@ -5233,6 +5258,12 @@ impl Component for App {
                     // Log the playlist as one "Recent" entry (not the videos).
                     self.youtube.playing_playlist = true;
                     let _ = self.library.add_recent_playlist(&url, &title, items.len() as i64);
+                    // Recent playlist cover = its first video's thumbnail.
+                    if let Some((id, _)) = items.first() {
+                        let _ = self
+                            .library
+                            .set_recent_thumb(&url, &crate::core::youtube::thumbnail_url(id));
+                    }
                     // Mirror the playlist into the Playlists section (keyed by
                     // its URL, so a same-named user playlist is left untouched).
                     let _ = self.library.replace_yt_playlist(&url, &title, &paths);
@@ -5625,6 +5656,36 @@ pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
     }
 }
 
+/// Like [`size_gallery_tiles`], but tolerant of being called *before* the
+/// FlowBox has a real allocation. GTK assigns the width only **after** map, so a
+/// direct call during init (or right after a refill on a not-yet-shown page)
+/// sees `width()==0` and bails out – the tiles then keep their square default
+/// edge and only snap to the correct column width on the next relayout (e.g.
+/// when the user scrolls or resizes). To square them from the very first paint
+/// we wait, via a tick callback that runs once the widget is on a frame clock,
+/// for the first frame with a real width and then size exactly once.
+pub(crate) fn size_gallery_tiles_when_ready(fb: &gtk::FlowBox) {
+    if fb.width() > 1 {
+        size_gallery_tiles(fb);
+        return;
+    }
+    let tries = std::cell::Cell::new(0u32);
+    fb.add_tick_callback(move |fb, _| {
+        if fb.width() > 1 {
+            size_gallery_tiles(fb);
+            return gtk::glib::ControlFlow::Break;
+        }
+        tries.set(tries.get() + 1);
+        // Give up after a few seconds of frames so a never-shown gallery does
+        // not keep a callback alive forever.
+        if tries.get() > 240 {
+            gtk::glib::ControlFlow::Break
+        } else {
+            gtk::glib::ControlFlow::Continue
+        }
+    });
+}
+
 /// Reads subfolders and audio files of a folder (folders first, sorted).
 /// Runs in a background thread – may therefore block.
 pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
@@ -5760,9 +5821,11 @@ impl App {
         }
         // Fetch the covers of the not-yet-cached tiles in the background.
         spawn_gallery_decode(to_decode);
-        // Bring the tiles immediately to a square at column width (takes effect as soon as the
-        // FlowBox is allocated; at the first fill in init still w=0).
-        size_gallery_tiles(fb);
+        // Bring the tiles to a square at column width. At the first fill (init /
+        // not-yet-shown page) the FlowBox has no width yet, so this defers via a
+        // tick callback until the first frame with a real allocation – squaring
+        // them on the first paint instead of only after a scroll.
+        size_gallery_tiles_when_ready(fb);
         // Couple to size changes once per FlowBox. `connect_map` fires
         // only when the FlowBox is visible **and allocated in the tree** – there
         // we re-measure and couple (once) to the `page-size` of the
@@ -5771,7 +5834,7 @@ impl App {
         if self.libview.gallery_hooked.borrow_mut().insert(fb.as_ptr() as usize) {
             let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
             fb.connect_map(move |fb| {
-                size_gallery_tiles(fb);
+                size_gallery_tiles_when_ready(fb);
                 if pagesize_done.get() {
                     return;
                 }

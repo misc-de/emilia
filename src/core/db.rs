@@ -629,6 +629,22 @@ impl Library {
                 .execute_batch("ALTER TABLE episode ADD COLUMN description TEXT;")?;
         }
 
+        // Migration: playlists gained a chosen cover (derived from their songs;
+        // the user can pick one in the detail view when several covers exist).
+        let has_pl_cover = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('playlist') WHERE name = 'cover_path'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_pl_cover {
+            self.conn
+                .execute_batch("ALTER TABLE playlist ADD COLUMN cover_path TEXT;")?;
+        }
+
         // Migration: map the old single attributes (music/concert/…) onto the new
         // area list (properties). Idempotent.
         self.conn.execute_batch(
@@ -1557,14 +1573,20 @@ impl Library {
             r#"
             INSERT INTO album_meta (artist, album, mbid, cover_path, year, status, fetched_at, attempts)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'),
-                    CASE WHEN ?6 IN ('matched','local') THEN 0 ELSE 1 END)
+                    CASE WHEN ?4 IS NOT NULL AND ?4 <> '' THEN 0 ELSE 1 END)
             ON CONFLICT(artist, album) DO UPDATE SET
                 mbid       = excluded.mbid,
                 cover_path = excluded.cover_path,
                 year       = excluded.year,
                 status     = excluded.status,
                 fetched_at = excluded.fetched_at,
-                attempts   = CASE WHEN excluded.status IN ('matched','local') THEN 0
+                -- Reset the retry counter only when a cover was actually obtained.
+                -- A bare "matched" *without* artwork (no front cover in the Cover
+                -- Art Archive, or a failed/timed-out cover fetch) must still count
+                -- as an attempt -- otherwise the album stays in
+                -- `albums_missing_cover` and is re-queried every sweep forever,
+                -- never reaching MAX_ATTEMPTS.
+                attempts   = CASE WHEN excluded.cover_path IS NOT NULL AND excluded.cover_path <> '' THEN 0
                                   ELSE album_meta.attempts + 1 END
             "#,
             rusqlite::params![m.artist, m.album, m.mbid, m.cover_path, m.year, m.status],
@@ -1669,18 +1691,13 @@ impl Library {
                     meta.mbid = info.3.clone();
                 }
             }
-            // Cover ONLY if all (primary) artists provide the same cover.
-            // For compilations / pseudo-albums ("[non-album tracks]",
-            // "Dancemix 2009" …) a single member's cover would otherwise have
-            // given a misleading image for the whole card → then neutral.
-            let mut covers: Vec<&String> =
-                artists.iter().filter_map(|(_, i)| i.1.as_ref()).collect();
-            covers.sort();
-            covers.dedup();
-            meta.cover_path = match covers.as_slice() {
-                [one] => Some((*one).clone()),
-                _ => None,
-            };
+            // Cover = the cover of the most representative artist (the list is
+            // already sorted by track count, so the display artist comes first),
+            // falling back to any member that has one. A representative image is
+            // better than an empty placeholder — and the album detail shows the
+            // same dominant artist's cover anyway, so the card matching it is
+            // exactly what the user expects.
+            meta.cover_path = artists.iter().find_map(|(_, i)| i.1.clone());
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
         // Properties: only show albums that are visible in the "Albums" area.
@@ -1726,6 +1743,20 @@ impl Library {
                 r.get::<_, String>(2)?,
             ))
         })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// All track paths of an (artist, album) pair, ordered by path. Used by the
+    /// local cover extraction: the `albums_missing_cover` sample is just
+    /// `MIN(path)`, which may lack embedded art even though a sibling track on
+    /// the same album carries one – then the whole list is scanned.
+    pub fn album_track_paths(&self, artist: &str, album: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path FROM track
+             WHERE COALESCE(artist, '') = ?1 AND album = ?2
+             ORDER BY path",
+        )?;
+        let rows = stmt.query_map([artist, album], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -2270,6 +2301,29 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// The user-chosen cover of a playlist (a path), or `None` if none was
+    /// picked yet (the UI then derives one from the songs).
+    pub fn playlist_cover(&self, id: i64) -> Result<Option<String>> {
+        let cover = self
+            .conn
+            .query_row(
+                "SELECT cover_path FROM playlist
+                 WHERE id = ?1 AND cover_path IS NOT NULL AND cover_path <> ''",
+                [id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(cover)
+    }
+
+    /// Stores the chosen cover of a playlist (clears it when `path` is empty).
+    pub fn set_playlist_cover(&self, id: i64, path: &str) -> Result<()> {
+        let value = (!path.is_empty()).then_some(path);
+        self.conn
+            .execute("UPDATE playlist SET cover_path = ?2 WHERE id = ?1", rusqlite::params![id, value])?;
+        Ok(())
+    }
+
     /// Appends paths to the end of a playlist (duplicates allowed).
     pub fn add_to_playlist(&self, id: i64, paths: &[String]) -> Result<()> {
         // Compute the start position and insert in one transaction so two
@@ -2725,7 +2779,7 @@ impl Library {
     /// Recently played items (videos and playlists), newest first.
     pub fn recent_videos(&self, limit: usize) -> Result<Vec<YtRecent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT video_id, title, artist, kind, count FROM yt_recent
+            "SELECT video_id, title, artist, kind, count, thumbnail FROM yt_recent
              ORDER BY played_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit as i64], |r| {
@@ -2735,9 +2789,21 @@ impl Library {
                 artist: r.get(2)?,
                 kind: r.get(3)?,
                 count: r.get(4)?,
+                thumbnail: r.get(5)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Sets the representative thumbnail of a recent item (used for playlists,
+    /// whose cover is derived from their first song). No-op if the item is not
+    /// in the history.
+    pub fn set_recent_thumb(&self, key: &str, thumb: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE yt_recent SET thumbnail = ?2 WHERE video_id = ?1",
+            rusqlite::params![key, thumb],
+        )?;
+        Ok(())
     }
 
     /// Whether an item (video id or playlist URL) is in the "Recent" history.
@@ -3088,7 +3154,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_attempts_count_failures_and_reset_on_success() {
+    fn meta_attempts_count_failures_and_reset_on_cover() {
         let lib = Library::open_in_memory().unwrap();
         let mut m = AlbumMeta::pending("A", "B");
 
@@ -3100,14 +3166,27 @@ mod tests {
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 2);
 
-        // Success ('matched' or a locally found cover) resets it.
+        // A bare "matched" *without* a cover is still an unsuccessful cover
+        // attempt – otherwise the cover-less album would be re-queried on every
+        // sweep forever and never reach MAX_ATTEMPTS.
         m.status = "matched".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+        assert_eq!(lib.album_attempts("A", "B"), 3);
+
+        // Only an actual cover (matched online or extracted locally) resets it.
+        m.cover_path = Some("/cache/cover.img".to_string());
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 0);
 
+        // A fresh failure starts counting again.
         m.status = "notfound".to_string();
+        m.cover_path = None;
         lib.upsert_album_meta(&m).unwrap();
+        assert_eq!(lib.album_attempts("A", "B"), 1);
+
+        // A locally found cover resets as well.
         m.status = "local".to_string();
+        m.cover_path = Some("/cache/local.img".to_string());
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 0);
     }

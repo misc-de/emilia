@@ -22,7 +22,11 @@ impl App {
                 .subtitle(ngettext_n("{n} track", "{n} tracks", count as u32))
                 .activatable(true)
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("view-list-symbolic"));
+            // Cover derived from the songs (chosen or first available), else the
+            // generic playlist icon.
+            let paths = self.library.playlist_paths(id).unwrap_or_default();
+            let cover = self.playlist_display_cover(id, &paths);
+            row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "view-list-symbolic"));
             // Per-row play/delete buttons were intentionally removed – those
             // actions live in the long-press detail view. Tapping a row opens it.
 
@@ -99,7 +103,7 @@ impl App {
                     let sender = sender.clone();
                     let path = first.path.clone();
                     play.connect_clicked(move |_| {
-                        sender.input(Msg::PlaylistTrack { id, path: path.clone() });
+                        sender.input(Msg::PlaylistTrack { id, path: path.clone(), close: false });
                     });
                     exp.add_suffix(&play);
                 }
@@ -145,6 +149,38 @@ impl App {
             .and_then(|m| m.cover_path)
     }
 
+    /// Distinct cover paths of a playlist's songs – embedded tag, album cover or
+    /// YouTube thumbnail, whatever is available – in playlist order, only
+    /// existing files. Bounded so a huge playlist does not read hundreds of tags.
+    fn playlist_cover_candidates(&self, paths: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in paths {
+            if out.len() >= 30 {
+                break;
+            }
+            if let Some(c) = self.playlist_track_cover(p) {
+                if !out.contains(&c) && std::path::Path::new(&c).exists() {
+                    out.push(c);
+                }
+            }
+        }
+        out
+    }
+
+    /// The cover to show for a playlist: the user's chosen one (if it still
+    /// exists), otherwise the first song cover available – `None` if the songs
+    /// carry no covers at all.
+    pub(crate) fn playlist_display_cover(&self, id: i64, paths: &[String]) -> Option<String> {
+        if let Some(c) = self.library.playlist_cover(id).ok().flatten() {
+            if std::path::Path::new(&c).exists() {
+                return Some(c);
+            }
+        }
+        paths
+            .iter()
+            .find_map(|p| self.playlist_track_cover(p).filter(|c| std::path::Path::new(c).exists()))
+    }
+
     /// A single track row inside a playlist subpage: tap plays the playlist
     /// from this track, the trash button removes it (with an undo toast).
     fn playlist_track_row(
@@ -182,12 +218,27 @@ impl App {
             });
         }
         row.add_suffix(&remove);
-        row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+        // Play button: plays the playlist from here but keeps the list open.
+        let play_btn = gtk::Button::builder()
+            .icon_name("media-playback-start-symbolic")
+            .tooltip_text(&gettext("Play"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        {
+            let sender = sender.clone();
+            let path = path.to_string();
+            play_btn.connect_clicked(move |_| {
+                sender.input(Msg::PlaylistTrack { id, path: path.clone(), close: false });
+            });
+        }
+        row.add_suffix(&play_btn);
+        // Short tap on the row: play and return to the main page.
         {
             let sender = sender.clone();
             let path = path.to_string();
             row.connect_activated(move |_| {
-                sender.input(Msg::PlaylistTrack { id, path: path.clone() });
+                sender.input(Msg::PlaylistTrack { id, path: path.clone(), close: true });
             });
         }
         row
@@ -204,23 +255,20 @@ impl App {
         name: &str,
     ) {
         let paths = self.library.playlist_paths(id).unwrap_or_default();
-        // Total runtime + a representative cover (first track with an album cover).
-        let mut total_ms: i64 = 0;
-        let mut cover_path: Option<String> = None;
-        for p in &paths {
-            if let Some(t) = self.library.track_by_path(p).ok().flatten() {
-                total_ms += t.duration_ms.unwrap_or(0);
-                if cover_path.is_none() {
-                    if let (Some(artist), Some(album)) = (t.artist.as_deref(), t.album.as_deref()) {
-                        cover_path = self
-                            .library
-                            .get_album_meta(artist, album)
-                            .ok()
-                            .flatten()
-                            .and_then(|m| m.cover_path);
-                    }
-                }
-            }
+        // Total runtime.
+        let total_ms: i64 = paths
+            .iter()
+            .filter_map(|p| self.library.track_by_path(p).ok().flatten())
+            .filter_map(|t| t.duration_ms)
+            .sum();
+        // Cover candidates from the songs (embedded / album / YouTube – whatever
+        // is available). The chosen (or first) cover leads the carousel so the
+        // detail opens on the current cover.
+        let mut covers = self.playlist_cover_candidates(&paths);
+        let chosen = self.playlist_display_cover(id, &paths);
+        if let Some(pos) = chosen.as_ref().and_then(|c| covers.iter().position(|x| x == c)) {
+            let c = covers.remove(pos);
+            covers.insert(0, c);
         }
 
         let dialog = adw::Dialog::builder().title(gtk::glib::markup_escape_text(name)).build();
@@ -240,12 +288,44 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Cover (or a generic playlist icon).
-        let texture = cover_path.as_deref().and_then(crate::ui::widgets::thumb_cached);
-        let cover =
-            crate::ui::widgets::rounded_image(texture.as_ref(), "view-list-symbolic", 160);
-        cover.set_halign(gtk::Align::Center);
-        content.append(&cover);
+        // Cover: several distinct song covers → a swipe carousel with dots; the
+        // one left showing when the dialog closes becomes the playlist cover.
+        // One or none → a single image / the generic playlist icon.
+        let decode = |p: &str| {
+            crate::ui::widgets::decode_scaled(p, 360)
+                .or_else(|| gtk::gdk::Texture::from_filename(p).ok())
+        };
+        if covers.len() > 1 {
+            let carousel = adw::Carousel::new();
+            carousel.set_halign(gtk::Align::Center);
+            for path in &covers {
+                let tex = decode(path);
+                let img = crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
+                carousel.append(&img);
+            }
+            let dots = adw::CarouselIndicatorDots::new();
+            dots.set_carousel(Some(&carousel));
+            let gallery = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            gallery.set_halign(gtk::Align::Center);
+            gallery.append(&carousel);
+            gallery.append(&dots);
+            content.append(&gallery);
+            // Adopt the cover shown last in the carousel as the playlist cover.
+            let sender = sender.clone();
+            let covers = covers.clone();
+            dialog.connect_closed(move |_| {
+                let idx = carousel.position().round().max(0.0) as usize;
+                if let Some(path) = covers.get(idx) {
+                    sender.input(Msg::SetPlaylistCover { id, path: path.clone() });
+                }
+            });
+        } else {
+            let tex = covers.first().and_then(|p| decode(p));
+            let cover =
+                crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
+            cover.set_halign(gtk::Align::Center);
+            content.append(&cover);
+        }
 
         let title = gtk::Label::builder()
             .label(name)

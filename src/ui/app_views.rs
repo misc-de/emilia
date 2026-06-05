@@ -1054,10 +1054,28 @@ impl App {
                         row.add_suffix(&duration_label(ms));
                     }
                 }
-                row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-
                 let path = t.path.clone();
-                // Short tap: play track.
+                // Play button: plays this track but keeps the list open.
+                let play_btn = gtk::Button::builder()
+                    .icon_name("media-playback-start-symbolic")
+                    .tooltip_text(&gettext("Play"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                {
+                    let sender = sender.clone();
+                    let name = meta.name.clone();
+                    let path = path.clone();
+                    play_btn.connect_clicked(move |_| {
+                        sender.input(Msg::PlayArtistTrack {
+                            name: name.clone(),
+                            path: path.clone(),
+                            close: false,
+                        });
+                    });
+                }
+                row.add_suffix(&play_btn);
+                // Short tap on the row: play track and return to the main page.
                 {
                     let sender = sender.clone();
                     let name = meta.name.clone();
@@ -1066,6 +1084,7 @@ impl App {
                         sender.input(Msg::PlayArtistTrack {
                             name: name.clone(),
                             path: path.clone(),
+                            close: true,
                         });
                     });
                 }
@@ -1240,32 +1259,53 @@ impl App {
                 badge.set_valign(gtk::Align::Center);
                 row.add_suffix(&badge);
             }
-            row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-
             let path = t.path.clone();
-            // Short tap: play track (whole album from here).
-            {
-                let sender = sender.clone();
+            // Builds the play message for this track. `close` separates a tap on
+            // the row (play + back to the main page) from a tap on the play
+            // button (play, but stay in the list).
+            let build_msg = {
                 let play = play.clone();
                 let album = album.to_string();
+                move |path: String, close: bool| match &play {
+                    AlbumPlay::Artist(a) => Msg::PlayAlbumTrack {
+                        artist: a.clone(),
+                        album: album.clone(),
+                        path,
+                        close,
+                    },
+                    AlbumPlay::Name(al) => Msg::PlayAlbumByNameTrack {
+                        album: al.clone(),
+                        path,
+                        close,
+                    },
+                    AlbumPlay::Folder(f) => Msg::PlayFolderTrack {
+                        folder: f.clone(),
+                        path,
+                        close,
+                    },
+                }
+            };
+            // Play button: plays from this track but keeps the list open.
+            let play_btn = gtk::Button::builder()
+                .icon_name("media-playback-start-symbolic")
+                .tooltip_text(&gettext("Play"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            {
+                let sender = sender.clone();
+                let build_msg = build_msg.clone();
                 let path = path.clone();
-                row.connect_activated(move |_| {
-                    sender.input(match &play {
-                        AlbumPlay::Artist(a) => Msg::PlayAlbumTrack {
-                            artist: a.clone(),
-                            album: album.clone(),
-                            path: path.clone(),
-                        },
-                        AlbumPlay::Name(al) => Msg::PlayAlbumByNameTrack {
-                            album: al.clone(),
-                            path: path.clone(),
-                        },
-                        AlbumPlay::Folder(f) => Msg::PlayFolderTrack {
-                            folder: f.clone(),
-                            path: path.clone(),
-                        },
-                    });
-                });
+                play_btn.connect_clicked(move |_| sender.input(build_msg(path.clone(), false)));
+            }
+            row.add_suffix(&play_btn);
+            // Short tap on the row: play track (whole album from here) and
+            // return to the main page.
+            {
+                let sender = sender.clone();
+                let build_msg = build_msg.clone();
+                let path = path.clone();
+                row.connect_activated(move |_| sender.input(build_msg(path.clone(), true)));
             }
             // Long press: detail view of the song.
             {

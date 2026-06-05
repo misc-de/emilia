@@ -23,11 +23,32 @@ use crate::ui::app::Cmd;
 /// [`fetch_focus_track`](crate::ui::app::App::fetch_focus_track).
 /// Between network requests there is a pause (rate limit); a temporary server
 /// limit (HTTP 429/503) is caught in [`online`] (backoff + retry) and does **not**
-/// count as a failed attempt. Only after this many *real* unsuccessful attempts
-/// is an entry no longer queried again – neither during the automatic sync nor
-/// on manual fetch –, so that persistently unsuccessful items are not retried
-/// endlessly.
-pub(crate) const MAX_ATTEMPTS: i64 = 3;
+/// count as a failed attempt. A timeout / network error **does** count, though,
+/// so transient outages are retried a fair number of times before we give up.
+/// Only after this many *real* unsuccessful attempts is an entry no longer
+/// queried again – neither during the automatic sync nor on manual fetch –, so
+/// that persistently unsuccessful items are not retried endlessly.
+pub(crate) const MAX_ATTEMPTS: i64 = 20;
+
+/// Local album cover with a fallback **scan**: the `albums_missing_cover` sample
+/// is `MIN(path)`, which may have no embedded art even though another track of
+/// the same album does (this is exactly why an album card stays blank while its
+/// songs show covers). So if the sample yields nothing, walk the album's
+/// remaining **local** tracks and use the first embedded/folder image found.
+fn local_album_cover_scan(lib: &Library, artist: &str, album: &str, sample: &str) -> Option<String> {
+    if let Some(c) = online::local_album_cover(artist, album, sample) {
+        return Some(c);
+    }
+    for p in lib.album_track_paths(artist, album).unwrap_or_default() {
+        if p == sample || crate::core::webdav::parse_nc_path(&p).is_some() {
+            continue;
+        }
+        if let Some(c) = online::local_album_cover(artist, album, &p) {
+            return Some(c);
+        }
+    }
+    None
+}
 
 /// Fills album covers from the **embedded** tag image (or a folder image) for
 /// local albums that have none yet. Purely local — no network — so it runs
@@ -44,7 +65,7 @@ pub(crate) fn populate_local_covers(lib: &Library) -> bool {
         if crate::core::webdav::parse_nc_path(&path).is_some() {
             continue;
         }
-        if let Some(cover_path) = online::local_album_cover(&artist, &album, &path) {
+        if let Some(cover_path) = local_album_cover_scan(lib, &artist, &album, &path) {
             // Merge into existing meta so a known mbid/year is preserved.
             let mut m = lib
                 .get_album_meta(&artist, &album)
@@ -154,7 +175,7 @@ pub(crate) fn enrich_worker(
                 let cover_path = match remote(path) {
                     Some((creds, rel)) => crate::core::webdav::fetch_cover(&creds, &rel)
                         .and_then(|b| online::store_album_cover_bytes(artist, album, &b)),
-                    None => online::local_album_cover(artist, album, path),
+                    None => local_album_cover_scan(&lib, artist, album, path),
                 };
                 if let Some(cover_path) = cover_path {
                     let mut m = crate::model::AlbumMeta::pending(artist, album);

@@ -171,6 +171,10 @@ pub struct YtRecent {
     pub kind: String,
     /// Number of songs (playlists only).
     pub count: i64,
+    /// Representative thumbnail (a cached path or thumbnail URL). For playlists
+    /// this is the cover derived from the first song; videos resolve their own
+    /// cover from the id.
+    pub thumbnail: Option<String>,
 }
 
 /// A video together with its channel – for the cross-channel "Newest videos"

@@ -387,7 +387,16 @@ impl App {
                         &[("n", &ngettext_n("{n} song", "{n} songs", r.count as u32))],
                     ),
                 );
-                row.add_prefix(&crate::ui::app::cover_widget(None, "view-list-symbolic"));
+                // Cover derived from the playlist's first song (stored on
+                // play/open); resolves the cached thumbnail from its URL.
+                let cover = r.thumbnail.as_deref().and_then(|t| {
+                    if std::path::Path::new(t).exists() {
+                        Some(t.to_string())
+                    } else {
+                        crate::core::online::youtube_thumb_path(t)
+                    }
+                });
+                row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "view-list-symbolic"));
                 let btn = gtk::Button::builder()
                     .icon_name("media-playback-start-symbolic")
                     .valign(gtk::Align::Center)
@@ -1096,6 +1105,11 @@ impl App {
             group.add(&row);
         }
         content.append(&group);
+        // Keep the recent playlist's cover in sync with its first video (no-op
+        // if this playlist is not in the recent history).
+        if let Some(first) = videos.first() {
+            let _ = self.library.set_recent_thumb(url, &youtube::thumbnail_url(&first.id));
+        }
         self.push_subpage(&gettext_f("Playlist – {title}", &[("title", title)]), &content);
 
         // Load the missing covers in the background (a few in parallel), then fill
