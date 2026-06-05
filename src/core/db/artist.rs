@@ -3,7 +3,7 @@
 use anyhow::Result;
 use rusqlite::OptionalExtension;
 
-use super::Library;
+use super::{CategorySnapshot, Library};
 use crate::model::*;
 
 impl Library {
@@ -65,11 +65,23 @@ impl Library {
 
     /// Artist overview for the UI: every individual artist -- including from
     /// "feat." entries -- with (any available) photo.
-    pub fn artists_overview(&self) -> Result<Vec<ArtistMeta>> {
+    /// Reuses a pre-built category snapshot when one is passed (so a combined
+    /// album+artist reload builds it only once), otherwise builds its own.
+    pub(crate) fn artists_overview_with(
+        &self,
+        snap: Option<&CategorySnapshot>,
+    ) -> Result<Vec<ArtistMeta>> {
         let names = self.distinct_artists()?;
         // Resolve areas from one snapshot and pull all artist metadata in one
         // query, instead of two queries per artist (was a clear N+1).
-        let cats = self.category_snapshot()?;
+        let owned_snap;
+        let cats = match snap {
+            Some(s) => s,
+            None => {
+                owned_snap = self.category_snapshot()?;
+                &owned_snap
+            }
+        };
         let mut meta_by_name: std::collections::HashMap<String, ArtistMeta> =
             std::collections::HashMap::new();
         {

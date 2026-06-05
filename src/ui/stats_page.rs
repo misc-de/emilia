@@ -106,7 +106,7 @@ impl StatsPage {
         container.append(&self.period_selector(sender));
 
         let since = self.period.since(unix_now());
-        let totals = self.library.stats_totals(since).unwrap_or_default();
+        let mut totals = self.library.stats_totals(since).unwrap_or_default();
 
         let scroller = gtk::ScrolledWindow::builder()
             .vexpand(true)
@@ -141,22 +141,37 @@ impl StatsPage {
             return;
         }
 
+        // Fetch the full artist/album rankings once: the distinct counts are
+        // their lengths, the display takes the top N. Avoids running these
+        // (feat./album-name-folded) aggregations twice — they used to run once
+        // inside stats_totals and once again here.
+        let artists = self
+            .library
+            .stats_top_artists(since, usize::MAX)
+            .unwrap_or_default();
+        let albums = self
+            .library
+            .stats_top_albums(since, usize::MAX)
+            .unwrap_or_default();
+        totals.distinct_artists = artists.len() as i64;
+        totals.distinct_albums = albums.len() as i64;
+
         content.append(&summary_group(&totals));
         content.append(&diversity_group(&totals));
 
-        let artists = self
-            .library
-            .stats_top_artists(since, TOP_N)
-            .unwrap_or_default();
         if !artists.is_empty() {
-            content.append(&top_group(&gettext("Top artists"), &artists, true));
+            content.append(&top_group(
+                &gettext("Top artists"),
+                &artists[..artists.len().min(TOP_N)],
+                true,
+            ));
         }
-        let albums = self
-            .library
-            .stats_top_albums(since, TOP_N)
-            .unwrap_or_default();
         if !albums.is_empty() {
-            content.append(&top_group(&gettext("Top albums"), &albums, false));
+            content.append(&top_group(
+                &gettext("Top albums"),
+                &albums[..albums.len().min(TOP_N)],
+                false,
+            ));
         }
         let tracks = self
             .library

@@ -2922,8 +2922,7 @@ impl Component for App {
             Some(s) => model.apply_source(s, &sender),
             None => model.load_dir(&sender),
         }
-        model.reload_albums();
-        model.reload_artists();
+        model.reload_library_overviews();
         model.load_concerts(&sender);
         model.load_favorites(&sender);
         model.load_audiobooks(&sender);
@@ -4093,8 +4092,7 @@ impl Component for App {
                 }
                 self.rebuild_source_tabs();
                 // Indexed cloud tracks may have been added/removed.
-                self.reload_albums();
-                self.reload_artists();
+                self.reload_library_overviews();
                 // Refresh the "Other sources" list of the settings page, in case
                 // the settings dialog is currently open (e.g. right after a
                 // Nextcloud connect, which lands the source in that same list).
@@ -4140,8 +4138,7 @@ impl Component for App {
             Msg::CloudIndexed => {
                 // Cloud tracks are in the DB → rebuild albums/artists and
                 // (if desired) fetch covers/photos online.
-                self.reload_albums();
-                self.reload_artists();
+                self.reload_library_overviews();
                 if self.enrich_state.auto_enrich
                     && !self.enrich_state.enriching
                     && online_available()
@@ -4293,8 +4290,7 @@ impl Component for App {
             Msg::UnhideEntry { scope, key } => {
                 // Delete the override → back to default (visible again).
                 let _ = self.library.set_category(&scope, &key, None);
-                self.reload_albums();
-                self.reload_artists();
+                self.reload_library_overviews();
                 self.load_concerts(&sender);
                 self.load_audiobooks(&sender);
                 self.load_dir(&sender);
@@ -4567,13 +4563,11 @@ impl Component for App {
                 // per-minute backfill otherwise runs empty and would re-render the
                 // lists for no reason.
                 if changed {
-                    self.reload_albums();
-                    self.reload_artists();
+                    self.reload_library_overviews();
                 }
             }
             Cmd::ReloadViews => {
-                self.reload_albums();
-                self.reload_artists();
+                self.reload_library_overviews();
             }
             Cmd::ScanDone {
                 then_enrich,
@@ -4583,8 +4577,7 @@ impl Component for App {
                     self.refresh_done();
                 }
                 // Library is read in → update the views.
-                self.reload_albums();
-                self.reload_artists();
+                self.reload_library_overviews();
                 // Fill in album covers from the embedded artwork in the files —
                 // purely local, so they show even offline or with online
                 // enrichment disabled (the online sweep below only runs when
@@ -4613,8 +4606,7 @@ impl Component for App {
                 // of the remote tracks). A manual refresh does this regardless of
                 // the passive auto-enrich setting; the silent startup top-up only
                 // when auto-enrich is on (like the local scan's `then_enrich`).
-                self.reload_albums();
-                self.reload_artists();
+                self.reload_library_overviews();
                 self.load_favorites(&sender);
                 if (manual || self.enrich_state.auto_enrich)
                     && !self.enrich_state.enriching
@@ -4757,8 +4749,7 @@ impl Component for App {
                 }
                 match result {
                     Ok(n) => {
-                        self.reload_albums();
-                        self.reload_artists();
+                        self.reload_library_overviews();
                         self.yt_progress_done(&gettext_f(
                             "Added {n} track(s) to your library",
                             &[("n", &n.to_string())],
@@ -4860,8 +4851,7 @@ impl Component for App {
                 // Changed connection state → rebuild the views, so that the
                 // red "Disconnected" hint appears/disappears.
                 if changed {
-                    self.reload_albums();
-                    self.reload_artists();
+                    self.reload_library_overviews();
                 }
             }
         }
@@ -5249,8 +5239,7 @@ impl App {
     /// column count). Each reload function fills – depending on `gallery_view` – the
     /// list or the gallery variant.
     pub(crate) fn rebuild_all_lists(&mut self, sender: &ComponentSender<Self>) {
-        self.reload_albums();
-        self.reload_artists();
+        self.reload_library_overviews();
         self.load_dir(sender);
         self.load_favorites(sender);
         self.load_audiobooks(sender);

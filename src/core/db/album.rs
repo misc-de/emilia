@@ -3,7 +3,7 @@
 use anyhow::Result;
 use rusqlite::OptionalExtension;
 
-use super::Library;
+use super::{CategorySnapshot, Library};
 use crate::model::*;
 
 impl Library {
@@ -81,7 +81,12 @@ impl Library {
     /// Album overview for the UI: all unique albums from the library,
     /// enriched with (any available) online metadata and the track count.
     /// Sorted by album name (like the file view -- without artist groups).
-    pub fn albums_overview(&self) -> Result<Vec<AlbumMeta>> {
+    /// Reuses a pre-built category snapshot when one is passed (so a combined
+    /// album+artist reload builds it only once), otherwise builds its own.
+    pub(crate) fn albums_overview_with(
+        &self,
+        snap: Option<&CategorySnapshot>,
+    ) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
                     COALESCE(m.status, 'pending'), COUNT(*)
@@ -188,7 +193,14 @@ impl Library {
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
         // Properties: only show albums that are visible in the "Albums" area.
         // Resolve from one in-memory snapshot instead of querying per album.
-        let cats = self.category_snapshot()?;
+        let owned_snap;
+        let cats = match snap {
+            Some(s) => s,
+            None => {
+                owned_snap = self.category_snapshot()?;
+                &owned_snap
+            }
+        };
         out.retain(|a| {
             cats.album_areas(&a.artist, &a.album)
                 .contains(&crate::core::category::Area::Albums)

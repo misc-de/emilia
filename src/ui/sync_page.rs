@@ -1162,6 +1162,14 @@ fn apply_received(
         .iter()
         .filter(|f| decision.files.contains(&f.rel_path))
     {
+        // Never trust the sender's rel_path: only register a track row for files
+        // that resolve to a safe location inside the music dir (the same check
+        // the transfer itself used). Otherwise a malicious paired peer could
+        // inject a row pointing at an arbitrary absolute path (e.g. /etc/passwd)
+        // or escape via `..` straight from its manifest.
+        if crate::core::sync::resolve_new(&base, &f.rel_path).is_none() {
+            continue;
+        }
         register_track(lib, &base, f);
         n += 1;
     }

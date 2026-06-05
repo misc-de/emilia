@@ -468,7 +468,21 @@ impl App {
     }
 
     pub(crate) fn reload_albums(&mut self) {
-        let mut albums = self.library.albums_overview().unwrap_or_default();
+        let snap = self.library.category_snapshot().ok();
+        self.reload_albums_with(snap.as_ref());
+    }
+
+    /// Reloads both the album and artist overviews, building the shared category
+    /// snapshot only once instead of once per overview (they're almost always
+    /// reloaded together).
+    pub(crate) fn reload_library_overviews(&mut self) {
+        let snap = self.library.category_snapshot().ok();
+        self.reload_albums_with(snap.as_ref());
+        self.reload_artists_with(snap.as_ref());
+    }
+
+    pub(crate) fn reload_albums_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {
+        let mut albums = self.library.albums_overview_with(snap).unwrap_or_default();
         for album in &mut albums {
             if album
                 .cover_path
@@ -619,7 +633,12 @@ impl App {
     /// Loads the artists overview from the DB into the factory (incl. photo).
     /// If the artist photo is missing, an album cover is used as a substitute.
     pub(crate) fn reload_artists(&mut self) {
-        let mut artists = self.library.artists_overview().unwrap_or_default();
+        let snap = self.library.category_snapshot().ok();
+        self.reload_artists_with(snap.as_ref());
+    }
+
+    pub(crate) fn reload_artists_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {
+        let mut artists = self.library.artists_overview_with(snap).unwrap_or_default();
         self.libview.artist_count = artists.len();
         // Fallback cover (an album cover) for artists **without** their own photo.
         // Build the album assignment in ONE pass over `all_tracks` –

@@ -1312,8 +1312,7 @@ impl App {
         if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
             tracing::error!("Failed to save properties: {e}");
         }
-        self.reload_albums();
-        self.reload_artists();
+        self.reload_library_overviews();
         self.load_concerts(sender);
         self.load_audiobooks(sender);
         self.load_dir(sender);

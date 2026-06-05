@@ -106,6 +106,16 @@ impl App {
         }
 
         let pos = self.transport.queue_pos;
+        // Fetch the metadata of the whole visible slice in one batch query
+        // instead of one `track_by_path` per entry (queues can be hundreds long).
+        let paths: Vec<String> = self
+            .transport
+            .queue
+            .iter()
+            .skip(pos)
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let by_path = self.library.tracks_by_paths(&paths).unwrap_or_default();
         // Metadata for the visible slice (current track onward): album/artist/runtime.
         let items: Vec<(usize, Option<String>, Option<String>, i64)> = self
             .transport
@@ -115,17 +125,14 @@ impl App {
             .skip(pos)
             .map(|(idx, path)| {
                 let ps = path.to_string_lossy();
-                let t = self.library.track_by_path(&ps).ok().flatten();
+                let t = by_path.get(ps.as_ref());
                 let album = t
-                    .as_ref()
                     .and_then(|t| t.album.clone())
                     .filter(|a| !a.trim().is_empty());
                 let artist = t
-                    .as_ref()
                     .and_then(|t| t.artist.clone())
                     .filter(|a| !a.trim().is_empty());
                 let dur = t
-                    .as_ref()
                     .and_then(|t| t.duration_ms)
                     .or_else(|| {
                         // YouTube tracks aren't in `track`; use the cached

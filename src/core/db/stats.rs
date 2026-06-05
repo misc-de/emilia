@@ -49,9 +49,11 @@ impl Library {
         Ok(())
     }
 
-    /// Overall metrics from `since` (Unix seconds; 0 = since the beginning). The
-    /// `distinct_*` numbers count only what actually counts as a play, and
-    /// are -- like the rankings -- folded over feat./album names.
+    /// Overall metrics from `since` (Unix seconds; 0 = since the beginning).
+    /// `distinct_tracks` counts only what actually counts as a play.
+    /// `distinct_artists`/`distinct_albums` are left at 0 here and filled by the
+    /// caller from the full top lists (which it fetches anyway), so the feat./
+    /// album-name folding isn't computed twice.
     pub fn stats_totals(&self, since: i64) -> Result<StatTotals> {
         let (total_played_ms, plays, skips): (i64, i64, i64) = self.conn.query_row(
             &format!(
@@ -80,8 +82,9 @@ impl Library {
             plays,
             skips,
             distinct_tracks,
-            distinct_artists: self.stats_top_artists(since, usize::MAX)?.len() as i64,
-            distinct_albums: self.stats_top_albums(since, usize::MAX)?.len() as i64,
+            // Filled by the caller from the full top lists (see doc).
+            distinct_artists: 0,
+            distinct_albums: 0,
         })
     }
 

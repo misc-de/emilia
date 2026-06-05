@@ -1205,6 +1205,44 @@ impl Library {
         Ok(track)
     }
 
+    /// Looks up many tracks by path in one (chunked) query, returning a
+    /// `path -> Track` map. Avoids an N+1 of [`track_by_path`] when resolving a
+    /// whole queue's or playlist's metadata at once.
+    pub fn tracks_by_paths(
+        &self,
+        paths: &[String],
+    ) -> Result<std::collections::HashMap<String, Track>> {
+        let mut map = std::collections::HashMap::with_capacity(paths.len());
+        // SQLite caps the number of bound parameters; chunk well under the limit.
+        for chunk in paths.chunks(900) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!(
+                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
+                 FROM track WHERE path IN ({placeholders})"
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+                Ok(Track {
+                    id: r.get(0)?,
+                    path: r.get(1)?,
+                    title: r.get(2)?,
+                    artist: r.get(3)?,
+                    album: r.get(4)?,
+                    genre: None,
+                    track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+                    duration_ms: r.get(6)?,
+                    resume_ms: r.get(7)?,
+                    disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+                })
+            })?;
+            for t in rows {
+                let t = t?;
+                map.insert(t.path.clone(), t);
+            }
+        }
+        Ok(map)
+    }
+
     /// All tracks, sorted by album and track number.
     pub fn all_tracks(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
@@ -1342,8 +1380,11 @@ mod tests {
         assert_eq!(tot.skips, 1);
         assert_eq!(tot.total_played_ms, 45_000 + 50_000 + 40_000 + 5_000);
         assert_eq!(tot.distinct_tracks, 2); // a1, a2 (c1 only a skip)
-        assert_eq!(tot.distinct_artists, 1); // Alice (a2 falls onto Alice via primary)
-        assert_eq!(tot.distinct_albums, 1); // Album X (Album Y only a skip)
+                                            // stats_totals leaves distinct_artists/albums at 0 — the caller fills
+                                            // them from the full top lists, whose lengths (1 and 1) are asserted
+                                            // below: 1 artist (Alice, a2 folds onto her) and 1 album (Album X).
+        assert_eq!(tot.distinct_artists, 0);
+        assert_eq!(tot.distinct_albums, 0);
 
         let tracks = lib.stats_top_tracks(0, 10).unwrap();
         assert_eq!(tracks.len(), 2);
@@ -1635,8 +1676,8 @@ mod tests {
         lib.upsert_track(&track("/x/1.mp3", Some("X"), Some("Y")))
             .unwrap();
         // Default: visible in albums and artists.
-        assert_eq!(lib.albums_overview().unwrap().len(), 1);
-        assert_eq!(lib.artists_overview().unwrap().len(), 1);
+        assert_eq!(lib.albums_overview_with(None).unwrap().len(), 1);
+        assert_eq!(lib.artists_overview_with(None).unwrap().len(), 1);
 
         // Take the album out of "Albums" (now only filesystem + artists).
         lib.set_category(
@@ -1645,12 +1686,12 @@ mod tests {
             Some(&areas_value(&[Area::Filesystem, Area::Artists])),
         )
         .unwrap();
-        assert!(lib.albums_overview().unwrap().is_empty());
-        assert_eq!(lib.artists_overview().unwrap().len(), 1);
+        assert!(lib.albums_overview_with(None).unwrap().is_empty());
+        assert_eq!(lib.artists_overview_with(None).unwrap().len(), 1);
 
         // Hide the artist completely.
         lib.set_category("artist", "X", Some("")).unwrap();
-        assert!(lib.artists_overview().unwrap().is_empty());
+        assert!(lib.artists_overview_with(None).unwrap().is_empty());
     }
 
     #[test]
@@ -1686,7 +1727,7 @@ mod tests {
             lib.upsert_track(&track(path, Some(artist), Some("Advanced Chemistry")))
                 .unwrap();
         }
-        let albums = lib.albums_overview().unwrap();
+        let albums = lib.albums_overview_with(None).unwrap();
         let ac: Vec<_> = albums
             .iter()
             .filter(|a| a.album == "Advanced Chemistry")
@@ -1717,7 +1758,7 @@ mod tests {
             lib.upsert_album_meta(&m).unwrap();
         }
         let dm = lib
-            .albums_overview()
+            .albums_overview_with(None)
             .unwrap()
             .into_iter()
             .find(|a| a.album == "Dancemix 2009")
@@ -1734,7 +1775,7 @@ mod tests {
         m.status = "local".to_string();
         lib.upsert_album_meta(&m).unwrap();
         let werk = lib
-            .albums_overview()
+            .albums_overview_with(None)
             .unwrap()
             .into_iter()
             .find(|a| a.album == "Werk")
@@ -1755,7 +1796,7 @@ mod tests {
                 .unwrap();
         }
         let live: Vec<_> = lib
-            .albums_overview()
+            .albums_overview_with(None)
             .unwrap()
             .into_iter()
             .filter(|a| a.album == "Live")
