@@ -3,7 +3,7 @@
 //! (with album/artist cover), toggles the favorite status and resolves
 //! playback/detail/cover uniformly.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -476,6 +476,92 @@ impl App {
         self.transport.queue_pos = 0;
         self.play_current();
         self.refresh_queue_icons();
+    }
+
+    /// Toggle the favorite flag on the current context target.
+    pub(crate) fn toggle_favorite(&mut self, sender: &ComponentSender<Self>) {
+        if let Some(target) = self.nav.context_target.clone() {
+            let (scope, key, title, is_dir) = self.favorite_ref(&target);
+            let on = !self.library.is_favorite(scope, &key);
+            let _ = self.library.set_favorite(scope, &key, &title, is_dir, on);
+            self.load_favorites(sender);
+            self.toast(&if on {
+                gettext("Added to favorites")
+            } else {
+                gettext("Removed from favorites")
+            });
+        }
+    }
+
+    /// Play (or toggle) the favorite at `index`. A track plays the whole
+    /// favorites track list as the queue, starting at that track.
+    pub(crate) fn play_favorite(&mut self, sender: &ComponentSender<Self>, index: usize) {
+        let Some((scope, key, _, is_dir)) = self.favorites.favorite_items.get(index).cloned()
+        else {
+            return;
+        };
+        // If exactly this track is already playing, only toggle play/pause (a
+        // click on the shown pause sign pauses), instead of restarting it.
+        let is_current = scope == "track"
+            && self
+                .transport
+                .playing_path
+                .as_ref()
+                .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
+        if is_current {
+            if self.mini.playing {
+                self.save_resume();
+                self.player.pause();
+                self.mini.playing = false;
+            } else {
+                self.player.resume();
+                self.mini.playing = true;
+            }
+            self.mpris.set_playing(self.mini.playing);
+            self.refresh_queue_icons();
+        } else if scope == "track" {
+            // Whole favorites track list as the queue (clear the previous one),
+            // from the clicked track.
+            let tracks: Vec<PathBuf> = self
+                .favorites
+                .favorite_items
+                .iter()
+                .filter(|(s, _, _, _)| s == "track")
+                .map(|(_, k, _, _)| PathBuf::from(k))
+                .collect();
+            let pos = tracks
+                .iter()
+                .position(|p| p.as_path() == Path::new(&key))
+                .unwrap_or(0);
+            self.transport.shuffle = false;
+            self.transport.queue = tracks;
+            self.transport.queue_pos = pos;
+            self.play_current();
+            self.refresh_queue_icons();
+        } else {
+            self.play_entry(&scope, &key, is_dir);
+        }
+        // Update the active marking (play/pause icon) in the favorites list.
+        self.load_favorites(sender);
+    }
+
+    /// Reorder favorites (drag handle): move item `from` → `to` and persist.
+    pub(crate) fn move_favorite(&mut self, sender: &ComponentSender<Self>, from: usize, to: usize) {
+        if from < self.favorites.favorite_items.len()
+            && to < self.favorites.favorite_items.len()
+            && from != to
+        {
+            let item = self.favorites.favorite_items.remove(from);
+            self.favorites.favorite_items.insert(to, item);
+            let order: Vec<(String, String)> = self
+                .favorites
+                .favorite_items
+                .iter()
+                .map(|(s, k, _, _)| (s.clone(), k.clone()))
+                .collect();
+            let _ = self.library.set_favorite_order(&order);
+            self.load_favorites(sender);
+        }
     }
 }
 

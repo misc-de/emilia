@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -4846,69 +4846,8 @@ impl Component for App {
                 self.load_dir(&sender);
                 self.toast(&gettext("Shown again"));
             }
-            Msg::ToggleFavorite => {
-                if let Some(target) = self.nav.context_target.clone() {
-                    let (scope, key, title, is_dir) = self.favorite_ref(&target);
-                    let on = !self.library.is_favorite(scope, &key);
-                    let _ = self.library.set_favorite(scope, &key, &title, is_dir, on);
-                    self.load_favorites(&sender);
-                    self.toast(&if on {
-                        gettext("Added to favorites")
-                    } else {
-                        gettext("Removed from favorites")
-                    });
-                }
-            }
-            Msg::PlayFavorite(index) => {
-                if let Some((scope, key, _, is_dir)) =
-                    self.favorites.favorite_items.get(index).cloned()
-                {
-                    // If exactly this track is already playing, only toggle play/pause
-                    // (a click on the shown pause sign pauses), instead of
-                    // restarting it.
-                    let is_current = scope == "track"
-                        && self
-                            .transport
-                            .playing_path
-                            .as_ref()
-                            .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
-                    if is_current {
-                        if self.mini.playing {
-                            self.save_resume();
-                            self.player.pause();
-                            self.mini.playing = false;
-                        } else {
-                            self.player.resume();
-                            self.mini.playing = true;
-                        }
-                        self.mpris.set_playing(self.mini.playing);
-                        self.refresh_queue_icons();
-                    } else if scope == "track" {
-                        // Whole favorites track list as the queue (clear the previous one),
-                        // from the clicked track.
-                        let tracks: Vec<PathBuf> = self
-                            .favorites
-                            .favorite_items
-                            .iter()
-                            .filter(|(s, _, _, _)| s == "track")
-                            .map(|(_, k, _, _)| PathBuf::from(k))
-                            .collect();
-                        let pos = tracks
-                            .iter()
-                            .position(|p| p.as_path() == Path::new(&key))
-                            .unwrap_or(0);
-                        self.transport.shuffle = false;
-                        self.transport.queue = tracks;
-                        self.transport.queue_pos = pos;
-                        self.play_current();
-                        self.refresh_queue_icons();
-                    } else {
-                        self.play_entry(&scope, &key, is_dir);
-                    }
-                    // Update the active marking (play/pause icon) in the favorites list.
-                    self.load_favorites(&sender);
-                }
-            }
+            Msg::ToggleFavorite => self.toggle_favorite(&sender),
+            Msg::PlayFavorite(index) => self.play_favorite(&sender, index),
             Msg::ShowFavoriteDetail(index) => {
                 if let Some((scope, key, _, is_dir)) =
                     self.favorites.favorite_items.get(index).cloned()
@@ -4917,23 +4856,7 @@ impl Component for App {
                     self.open_context_menu(root, &sender);
                 }
             }
-            Msg::MoveFavorite { from, to } => {
-                if from < self.favorites.favorite_items.len()
-                    && to < self.favorites.favorite_items.len()
-                    && from != to
-                {
-                    let item = self.favorites.favorite_items.remove(from);
-                    self.favorites.favorite_items.insert(to, item);
-                    let order: Vec<(String, String)> = self
-                        .favorites
-                        .favorite_items
-                        .iter()
-                        .map(|(s, k, _, _)| (s.clone(), k.clone()))
-                        .collect();
-                    let _ = self.library.set_favorite_order(&order);
-                    self.load_favorites(&sender);
-                }
-            }
+            Msg::MoveFavorite { from, to } => self.move_favorite(&sender, from, to),
             Msg::PlayAudiobook(index) => {
                 if let Some((scope, key, _, is_dir)) =
                     self.favorites.audiobook_items.get(index).cloned()
