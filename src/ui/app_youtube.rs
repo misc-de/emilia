@@ -1708,6 +1708,172 @@ impl App {
             }
         }
     }
+
+    /// Online enrichment (artist + cover) for a played video finished.
+    pub(crate) fn yt_enriched(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        video_id: String,
+        artist: Option<String>,
+        cover: Option<String>,
+    ) {
+        let _ = self
+            .library
+            .set_recent_meta(&video_id, artist.as_deref(), cover.as_deref());
+        // Update the lock-screen art/artist if this video is still playing.
+        if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
+            if let Some(now) = self.mini.now_playing.clone() {
+                self.mpris
+                    .set_metadata(0, &now, artist.as_deref(), None, None, cover.as_deref());
+            }
+        }
+        self.reload_yt_recent(sender);
+    }
+
+    /// Play a single video (toggles if it is already the running one).
+    pub(crate) fn yt_play_video(&mut self, video_id: String, title: String) {
+        if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
+            if self.mini.playing {
+                self.player.pause();
+            } else {
+                self.player.resume();
+            }
+            self.mini.playing = !self.mini.playing;
+            self.mpris.set_playing(self.mini.playing);
+            self.refresh_queue_icons();
+            self.refresh_yt_icons();
+        } else {
+            // Play as a single-item queue so the bar/next/prev behave normally.
+            self.youtube.playing_playlist = false;
+            self.youtube.video_titles.clear();
+            self.youtube
+                .video_titles
+                .insert(video_id.clone(), title.clone());
+            let _ = self.library.set_yt_title(&video_id, &title);
+            self.transport.queue = vec![std::path::PathBuf::from(crate::core::youtube::yt_path(
+                &video_id,
+            ))];
+            self.transport.queue_pos = 0;
+            self.play_current();
+        }
+    }
+
+    /// Play the cached playlist as the queue, starting at `index`. As a playlist
+    /// context the individual songs are not logged to "Recent" – only the
+    /// playlist entry, whose recency we refresh here.
+    pub(crate) fn yt_play_playlist_at(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+        index: usize,
+        close: bool,
+    ) {
+        let Some(videos) = self.youtube.playlist_songs_cache.get(&url).cloned() else {
+            return;
+        };
+        if videos.is_empty() {
+            return;
+        }
+        let index = index.min(videos.len() - 1);
+        self.youtube.video_titles.clear();
+        let mut queue = Vec::with_capacity(videos.len());
+        for v in &videos {
+            self.youtube
+                .video_titles
+                .insert(v.id.clone(), v.title.clone());
+            let _ = self.library.set_yt_meta(&v.id, &v.title, v.duration);
+            queue.push(std::path::PathBuf::from(crate::core::youtube::yt_path(
+                &v.id,
+            )));
+        }
+        self.youtube.playing_playlist = true;
+        let _ = self
+            .library
+            .add_recent_playlist(&url, &title, videos.len() as i64);
+        // Recent playlist cover = its first video's thumbnail.
+        if let Some(first) = videos.first() {
+            let _ = self
+                .library
+                .set_recent_thumb(&url, &crate::core::youtube::thumbnail_url(&first.id));
+        }
+        self.transport.queue = queue;
+        self.transport.queue_pos = index;
+        self.play_current();
+        self.refresh_queue_icons();
+        self.refresh_yt_icons();
+        self.reload_yt_recent(sender);
+        if close {
+            self.nav.nav_view.pop();
+        }
+    }
+
+    /// Resolve a playlist URL to its videos (yt-dlp) and start playing it.
+    pub(crate) fn yt_start_playlist(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+    ) {
+        self.toast(&gettext_f(
+            "Starting playlist “{title}” …",
+            &[("title", &title)],
+        ));
+        sender.spawn_command(move |out| {
+            let items: Vec<(String, String)> = crate::core::youtube::list_playlist(&url, 200)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|v| (v.id, v.title))
+                .collect();
+            let _ = out.send(crate::ui::app::Cmd::YtPlaylistStart { url, title, items });
+        });
+    }
+
+    /// A resolved YouTube audio stream URL came back → start playback at `resume`.
+    pub(crate) fn yt_stream_resolved(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        video_id: String,
+        resume: i64,
+        result: Result<String, String>,
+    ) {
+        // Ignore if the user switched away while resolving.
+        if self.youtube.playing_video_id.as_deref() != Some(video_id.as_str()) {
+            return;
+        }
+        match result {
+            Ok(url) => match self.player.play_uri(&url, resume) {
+                Ok(()) => {
+                    let start = self.player.position_ms().unwrap_or(resume.max(0));
+                    self.mpris.set_position(start);
+                }
+                Err(e) => {
+                    tracing::error!("yt play_uri failed: {e}");
+                    self.youtube_playback_failed(sender);
+                }
+            },
+            Err(e) => {
+                tracing::warn!("yt resolve failed: {e}");
+                self.youtube_playback_failed(sender);
+            }
+        }
+    }
+
+    /// Open a recent playlist's song list (DB mirror → session cache → fetch).
+    pub(crate) fn yt_open_recent_playlist(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+    ) {
+        match self.library.yt_playlist_id(&url) {
+            Ok(Some(id)) => self.open_playlist(sender, id, &title),
+            _ => match self.youtube.playlist_songs_cache.get(&url).cloned() {
+                Some(videos) => self.show_yt_playlist_songs(sender, &url, &title, videos),
+                None => self.yt_open_playlist_songs(url, title, sender),
+            },
+        }
+    }
 }
 
 /// Activatable action row with an icon prefix (local copy of the podcast

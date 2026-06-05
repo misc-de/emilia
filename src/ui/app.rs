@@ -4271,137 +4271,20 @@ impl Component for App {
                 video_id,
                 artist,
                 cover,
-            } => {
-                let _ =
-                    self.library
-                        .set_recent_meta(&video_id, artist.as_deref(), cover.as_deref());
-                // Update the lock-screen art/artist if this video is still playing.
-                if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
-                    if let Some(now) = self.mini.now_playing.clone() {
-                        self.mpris.set_metadata(
-                            0,
-                            &now,
-                            artist.as_deref(),
-                            None,
-                            None,
-                            cover.as_deref(),
-                        );
-                    }
-                }
-                self.reload_yt_recent(&sender);
-            }
-            Msg::YtPlayVideo { video_id, title } => {
-                if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
-                    if self.mini.playing {
-                        self.player.pause();
-                    } else {
-                        self.player.resume();
-                    }
-                    self.mini.playing = !self.mini.playing;
-                    self.mpris.set_playing(self.mini.playing);
-                    self.refresh_queue_icons();
-                    self.refresh_yt_icons();
-                } else {
-                    // Play as a single-item queue so the bar/next/prev behave normally.
-                    self.youtube.playing_playlist = false;
-                    self.youtube.video_titles.clear();
-                    self.youtube
-                        .video_titles
-                        .insert(video_id.clone(), title.clone());
-                    let _ = self.library.set_yt_title(&video_id, &title);
-                    self.transport.queue =
-                        vec![PathBuf::from(crate::core::youtube::yt_path(&video_id))];
-                    self.transport.queue_pos = 0;
-                    self.play_current();
-                }
-            }
+            } => self.yt_enriched(&sender, video_id, artist, cover),
+            Msg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
             Msg::YtPlayPlaylistAt {
                 url,
                 title,
                 index,
                 close,
-            } => {
-                // Play the cached playlist as the queue, starting at `index`. As a
-                // playlist context (`playing_playlist`), the individual songs are
-                // not logged to "Recent" – only the playlist entry, whose recency
-                // we refresh here.
-                let Some(videos) = self.youtube.playlist_songs_cache.get(&url).cloned() else {
-                    return;
-                };
-                if videos.is_empty() {
-                    return;
-                }
-                let index = index.min(videos.len() - 1);
-                self.youtube.video_titles.clear();
-                let mut queue = Vec::with_capacity(videos.len());
-                for v in &videos {
-                    self.youtube
-                        .video_titles
-                        .insert(v.id.clone(), v.title.clone());
-                    let _ = self.library.set_yt_meta(&v.id, &v.title, v.duration);
-                    queue.push(PathBuf::from(crate::core::youtube::yt_path(&v.id)));
-                }
-                self.youtube.playing_playlist = true;
-                let _ = self
-                    .library
-                    .add_recent_playlist(&url, &title, videos.len() as i64);
-                // Recent playlist cover = its first video's thumbnail.
-                if let Some(first) = videos.first() {
-                    let _ = self
-                        .library
-                        .set_recent_thumb(&url, &crate::core::youtube::thumbnail_url(&first.id));
-                }
-                self.transport.queue = queue;
-                self.transport.queue_pos = index;
-                self.play_current();
-                self.refresh_queue_icons();
-                self.refresh_yt_icons();
-                self.reload_yt_recent(&sender);
-                if close {
-                    self.nav.nav_view.pop();
-                }
-            }
-            Msg::YtStartPlaylist { url, title } => {
-                self.toast(&gettext_f(
-                    "Starting playlist “{title}” …",
-                    &[("title", &title)],
-                ));
-                sender.spawn_command(move |out| {
-                    let items: Vec<(String, String)> =
-                        crate::core::youtube::list_playlist(&url, 200)
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|v| (v.id, v.title))
-                            .collect();
-                    let _ = out.send(Cmd::YtPlaylistStart { url, title, items });
-                });
-            }
+            } => self.yt_play_playlist_at(&sender, url, title, index, close),
+            Msg::YtStartPlaylist { url, title } => self.yt_start_playlist(&sender, url, title),
             Msg::YtStreamResolved {
                 video_id,
                 resume,
                 result,
-            } => {
-                // Ignore if the user switched away while resolving.
-                if self.youtube.playing_video_id.as_deref() != Some(video_id.as_str()) {
-                    return;
-                }
-                match result {
-                    Ok(url) => match self.player.play_uri(&url, resume) {
-                        Ok(()) => {
-                            let start = self.player.position_ms().unwrap_or(resume.max(0));
-                            self.mpris.set_position(start);
-                        }
-                        Err(e) => {
-                            tracing::error!("yt play_uri failed: {e}");
-                            self.youtube_playback_failed(&sender);
-                        }
-                    },
-                    Err(e) => {
-                        tracing::warn!("yt resolve failed: {e}");
-                        self.youtube_playback_failed(&sender);
-                    }
-                }
-            }
+            } => self.yt_stream_resolved(&sender, video_id, resume, result),
             Msg::YtAddToLibrary { video_id, title } => {
                 self.yt_add_video_to_library(video_id, title, &sender, false)
             }
@@ -4413,16 +4296,7 @@ impl Component for App {
             }
             Msg::YtSavePlaylist { url, title } => self.yt_save_playlist(url, title, &sender),
             Msg::YtOpenRecentPlaylist { url, title } => {
-                // Show the song list. A locally mirrored playlist (keyed by its URL)
-                // opens instantly from the DB; a previously fetched one from the
-                // session cache; otherwise fetch the playlist's videos via yt-dlp.
-                match self.library.yt_playlist_id(&url) {
-                    Ok(Some(id)) => self.open_playlist(&sender, id, &title),
-                    _ => match self.youtube.playlist_songs_cache.get(&url).cloned() {
-                        Some(videos) => self.show_yt_playlist_songs(&sender, &url, &title, videos),
-                        None => self.yt_open_playlist_songs(url, title, &sender),
-                    },
-                }
+                self.yt_open_recent_playlist(&sender, url, title)
             }
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.open_share_dialog(root, &sender),
