@@ -6,6 +6,7 @@ src/ui/app_playlist.rs
 src/ui/app_podcast.rs
 src/ui/app_queue.rs
 src/ui/app_streaming.rs
+src/ui/app_youtube.rs
 src/ui/app_eq.rs
 src/ui/app_favorites.rs
 src/ui/app_concert.rs

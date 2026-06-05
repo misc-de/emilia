@@ -363,9 +363,11 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
 /// Downloads an episode's audio file to `dest` for offline playback (blocking –
 /// use in the worker thread). Writes to a temporary `*.part` file first and
 /// renames on success, so a cancelled/failed download never leaves a truncated
-/// file that would later be treated as a complete offline copy. Returns the
-/// number of bytes written.
+/// file that would later be treated as a complete offline copy. The transfer is
+/// capped at [`crate::core::net::MAX_DOWNLOAD_BYTES`] so a hostile or broken
+/// feed cannot fill the disk. Returns the number of bytes written.
 pub fn download_episode(url: &str, dest: &std::path::Path) -> Result<u64> {
+    use crate::core::net;
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         // No read timeout: a large episode over a slow link may legitimately
@@ -374,13 +376,24 @@ pub fn download_episode(url: &str, dest: &std::path::Path) -> Result<u64> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let resp = agent.get(url).call()?;
+    net::check_content_length(&resp, net::MAX_DOWNLOAD_BYTES)?;
     let tmp = dest.with_extension("part");
     let written = {
-        let mut reader = agent.get(url).call()?.into_reader();
         let mut file = std::fs::File::create(&tmp)?;
-        let n = std::io::copy(&mut reader, &mut file)?;
-        file.sync_all()?;
-        n
+        match net::copy_capped(resp.into_reader(), &mut file, net::MAX_DOWNLOAD_BYTES) {
+            Ok(n) => {
+                file.sync_all()?;
+                n
+            }
+            // Over the size cap (or an I/O error): drop the partial file so it
+            // is never mistaken for a complete offline copy.
+            Err(e) => {
+                drop(file);
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
     };
     if written == 0 {
         let _ = std::fs::remove_file(&tmp);

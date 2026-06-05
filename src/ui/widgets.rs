@@ -238,3 +238,51 @@ pub fn rounded_image(
         frame.upcast()
     }
 }
+
+/// Wraps a cover carousel between two flat navigation arrows for mouse/keyboard
+/// use (the swipe gesture keeps working). Returns a horizontal box
+/// `[◀ carousel ▶]`; the arrows scroll one page and grey out at the start/end.
+/// Indicator dots, if any, are added by the caller below this box. The carousel
+/// is assumed to start on page 0 and to have more than one page.
+pub(crate) fn carousel_with_arrows(carousel: &adw::Carousel) -> gtk::Box {
+    let prev = gtk::Button::from_icon_name("go-previous-symbolic");
+    let next = gtk::Button::from_icon_name("go-next-symbolic");
+    for b in [&prev, &next] {
+        b.add_css_class("flat");
+        b.add_css_class("circular");
+        b.set_valign(gtk::Align::Center);
+    }
+    {
+        let carousel = carousel.clone();
+        prev.connect_clicked(move |_| {
+            let target = (carousel.position().round() as i32 - 1).max(0);
+            carousel.scroll_to(&carousel.nth_page(target as u32), true);
+        });
+    }
+    {
+        let carousel = carousel.clone();
+        next.connect_clicked(move |_| {
+            let last = carousel.n_pages() as i32 - 1;
+            let target = (carousel.position().round() as i32 + 1).min(last);
+            carousel.scroll_to(&carousel.nth_page(target as u32), true);
+        });
+    }
+    // Disable the arrow at the respective end; starts on page 0.
+    prev.set_sensitive(false);
+    next.set_sensitive(carousel.n_pages() > 1);
+    {
+        let (prev, next) = (prev.clone(), next.clone());
+        carousel.connect_position_notify(move |c| {
+            let pos = c.position().round() as i32;
+            let last = c.n_pages() as i32 - 1;
+            prev.set_sensitive(pos > 0);
+            next.set_sensitive(pos < last);
+        });
+    }
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.set_halign(gtk::Align::Center);
+    row.append(&prev);
+    row.append(carousel);
+    row.append(&next);
+    row
+}

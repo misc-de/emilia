@@ -16,5 +16,6 @@ pub mod enrich;
 pub mod cloud_page;
 pub mod stats_page;
 pub mod sync_page;
+pub mod sync_share_ui;
 pub mod fs_row;
 pub mod widgets;

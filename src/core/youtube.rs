@@ -1,10 +1,13 @@
-//! YouTube integration via a **runtime-downloaded** `yt-dlp` zipapp.
+//! YouTube integration via the `yt-dlp` zipapp.
 //!
-//! For legal reasons (the feature is not permitted in some countries) and
-//! because Flathub does not allow bundling the extractor, `yt-dlp` is **not**
-//! shipped with Emilia. The user enables YouTube in the settings and the small
-//! `yt-dlp` zipapp (~3 MB) is fetched on demand into the app data dir. The GNOME
-//! runtime ships `python3`, so the zipapp is run via `python3 <zipapp>`.
+//! The Flatpak ships a **pinned, checksum-verified** `yt-dlp` in `/app/bin` (see
+//! the manifest), so the feature works out of the box once the user enables
+//! YouTube — no unverified runtime download. Because YouTube frequently breaks
+//! older `yt-dlp` versions, a newer copy can be fetched on demand into the app
+//! data dir ([`download_ytdlp`]); that copy then **takes precedence** over the
+//! bundled baseline. Outside the Flatpak a `yt-dlp` on `PATH` is used (or the
+//! on-demand download). The managed zipapp is run via `python3` (provided by the
+//! GNOME runtime); a `PATH` binary runs via its own shebang.
 //!
 //! Nothing here ever reads or writes the user's audio files. Streaming hands a
 //! direct `https` audio URL (resolved via `yt-dlp -g -f bestaudio`) to
@@ -48,26 +51,32 @@ pub fn yt_download_dir() -> PathBuf {
     dir
 }
 
-/// A `Command` invoking the managed zipapp via `python3`, with a clean,
-/// config-independent environment (`--ignore-config`/`--no-warnings` are added
-/// by the callers that parse output).
+/// A `Command` invoking `yt-dlp`. Prefers the user-updated copy in the data dir
+/// (written by [`download_ytdlp`]); when that is absent it falls back to a
+/// `yt-dlp` on `PATH` — in the Flatpak the bundled `/app/bin/yt-dlp`, natively a
+/// system install. The managed zipapp is run via `python3`; the `PATH` variant
+/// is self-executable via its shebang. Callers that parse output add
+/// `--ignore-config`/`--no-warnings`.
 fn ytdlp() -> Command {
-    let mut c = Command::new("python3");
-    c.arg(ytdlp_path());
-    c
+    let managed = ytdlp_path();
+    if managed.exists() {
+        let mut c = Command::new("python3");
+        c.arg(managed);
+        c
+    } else {
+        Command::new("yt-dlp")
+    }
 }
 
-/// Whether the managed `yt-dlp` is present and runnable.
+/// Whether a usable `yt-dlp` is present — the user-updated copy, or one on
+/// `PATH` (e.g. the bundled `/app/bin/yt-dlp` in the Flatpak).
 pub fn available() -> bool {
-    ytdlp_path().exists() && version().is_some()
+    version().is_some()
 }
 
 /// The installed `yt-dlp` version string (e.g. `2026.03.17`), or `None` if it is
 /// not installed/runnable. Spawns the binary – cheap, but prefer a worker thread.
 pub fn version() -> Option<String> {
-    if !ytdlp_path().exists() {
-        return None;
-    }
     let out = ytdlp().arg("--version").output().ok()?;
     if !out.status.success() {
         return None;
@@ -256,8 +265,10 @@ pub fn resolve_audio_url(video_id_or_url: &str) -> Result<String> {
         .output()?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
+        note_extraction(false, &err);
         return Err(anyhow!("yt-dlp -g failed: {}", err.trim()));
     }
+    note_extraction(true, "");
     let stdout = String::from_utf8_lossy(&out.stdout);
     stdout
         .lines()
@@ -535,8 +546,49 @@ fn channel_videos_url(url: &str) -> String {
 
 /// Runs `yt-dlp --dump-json <extra args>` and parses one JSON object per line.
 /// Lines that fail to parse are skipped (yt-dlp may interleave non-JSON notes).
+/// Process-wide flag: the last extraction attempt failed in a way that looks
+/// like YouTube changed and the installed yt-dlp can no longer parse it (the
+/// recurring "cat and mouse" breakage), as opposed to a plain network error.
+/// Set from the worker threads, read by the UI to show a banner.
+static EXTRACTION_BROKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether YouTube extraction currently looks broken (see [`EXTRACTION_BROKEN`]).
+pub fn extraction_broken() -> bool {
+    EXTRACTION_BROKEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Heuristic: does this yt-dlp stderr indicate YouTube changed and yt-dlp needs
+/// updating (vs. a transient network/availability error)? These are the typical
+/// messages when the extractor breaks.
+fn is_extraction_failure(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    [
+        "unable to extract",
+        "nsig extraction failed",
+        "failed to extract any player response",
+        "unable to download api page",
+        "sign in to confirm",
+        "precondition check failed",
+        "requested format is not available",
+        "http error 403",
+    ]
+    .iter()
+    .any(|p| s.contains(p))
+}
+
+/// Records the outcome of an extraction attempt: a success clears the broken
+/// flag, an extractor-style failure sets it. Transient errors leave it as is.
+fn note_extraction(success: bool, stderr: &str) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if success {
+        EXTRACTION_BROKEN.store(false, Relaxed);
+    } else if is_extraction_failure(stderr) {
+        EXTRACTION_BROKEN.store(true, Relaxed);
+    }
+}
+
 fn dump_entries(args: &[&str]) -> Result<Vec<RawEntry>> {
-    if !ytdlp_path().exists() {
+    if !available() {
         return Err(anyhow!("yt-dlp is not installed"));
     }
     let out = ytdlp()
@@ -551,6 +603,8 @@ fn dump_entries(args: &[&str]) -> Result<Vec<RawEntry>> {
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<RawEntry>(l).ok())
         .collect();
+    // Any parseable entry means extraction still works; otherwise inspect stderr.
+    note_extraction(!entries.is_empty(), &String::from_utf8_lossy(&out.stderr));
     if entries.is_empty() && !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(anyhow!("yt-dlp failed: {}", err.trim()));

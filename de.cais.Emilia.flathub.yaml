@@ -1,17 +1,20 @@
-# Flatpak-Manifest für Emilia.
+# Flathub-EINREICHUNGS-Manifest für Emilia.
 #
-# Lokal bauen & installieren:
-#   flatpak install flathub org.gnome.Platform//49 org.gnome.Sdk//49 \
-#       org.freedesktop.Sdk.Extension.rust-stable//25.08
-#   flatpak-builder --user --install --force-clean build-dir de.cais.Emilia.yaml
-#   flatpak run de.cais.Emilia
+# Unterschied zum lokalen de.cais.Emilia.yaml: Die App-Quelle ist `type: git`
+# (fester Tag/Commit) statt `type: dir`. Flathub baut ausschließlich aus dem
+# gepushten, getaggten Stand des Repos — niemals aus dem Arbeitsverzeichnis.
 #
-# Der Build läuft offline (Flathub-Anforderung): Die Cargo-Abhängigkeiten sind in
-# generated-sources.json gevendort (erzeugt mit flatpak-cargo-generator aus
-# Cargo.lock) und werden mit `cargo build --offline` verwendet. Nach Änderungen an
-# den Abhängigkeiten (Cargo.lock) muss generated-sources.json neu erzeugt werden:
-#   .flathub-tools/venv/bin/python .flathub-tools/flatpak-cargo-generator.py \
-#       Cargo.lock -o generated-sources.json
+# Für die Einreichung wird diese Datei nach `de.cais.Emilia.yaml` umbenannt ins
+# Repo `flathub/de.cais.Emilia` gelegt, ZUSAMMEN mit generated-sources.json.
+#
+# Voraussetzungen, bevor das hier baut (siehe FLATHUB.md):
+#   1. generated-sources.json, data/screenshots/ und alle Daten sind committet.
+#   2. Ein Tag (z. B. v0.1.49) zeigt auf genau diesen Commit und ist gepusht.
+#   3. `tag:` unten (und idealerweise `commit:`) auf diesen Tag gesetzt.
+#
+# Lokal testen (nachdem Tag gepusht ist):
+#   flatpak-builder --user --install --force-clean build-dir \
+#       de.cais.Emilia.flathub.yaml
 id: de.cais.Emilia
 runtime: org.gnome.Platform
 runtime-version: '49'
@@ -56,12 +59,12 @@ build-options:
 
 modules:
   # yt-dlp als gepinnte, sha256-verifizierte Binary mitliefern (statt sie zur
-  # Laufzeit ungeprüft von GitHub zu laden). Identisch zum Flathub-Manifest, damit
-  # beide Flatpak-Builds dieselbe Baseline haben. flatpak-builder lädt diese
-  # Source in der Download-Phase (nicht im Offline-Build-Schritt). `x-checker-data`
-  # erlaubt automatisches Bumpen via flatpak-external-data-checker. Die App
-  # aktualisiert bei Bedarf eine neuere Version in den Datenordner (Vorrang vor
-  # dieser Baseline), siehe `src/core/youtube.rs`.
+  # Laufzeit ungeprüft von GitHub zu laden → das spricht der Flathub-Reviewer an).
+  # Flathubs `flatpak-external-data-checker` hält die Version über `x-checker-data`
+  # automatisch aktuell und öffnet dafür selbständig Update-PRs — wir müssen den
+  # Pin also NICHT bei jedem Commit von Hand nachziehen. Zusätzlich aktualisiert
+  # die App eine neuere Version bei Bedarf in den Datenordner (Vorrang vor dieser
+  # Baseline), siehe `src/core/youtube.rs`.
   - name: yt-dlp
     buildsystem: simple
     build-commands:
@@ -105,7 +108,13 @@ modules:
       - install -Dm644 data/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
     sources:
-      - type: dir
-        path: .
-      # Gevendorte Cargo-Abhängigkeiten (offline-Build). Aus Cargo.lock erzeugt.
+      # App-Quelle aus dem getaggten Git-Stand (Flathub baut nur hieraus).
+      # TODO vor Einreichung: tag auf den gepushten Release-Tag setzen; optional
+      # commit mit dem zugehörigen SHA ergänzen (von Flathub empfohlen).
+      - type: git
+        url: https://github.com/misc-de/emilia.git
+        tag: v0.1.49
+        # commit: <SHA des Tags v0.1.49>
+      # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
+      # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json

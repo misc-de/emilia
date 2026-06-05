@@ -16,16 +16,42 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::core::db::Library;
-use crate::core::sync::protocol::{self, PairRequest, PairResponse};
+use crate::core::sync::protocol::{self, Capabilities, PairRequest, PairResponse};
+use crate::core::sync::share::{ShareDecision, ShareManifest};
 use crate::core::sync::{crypto, data, SyncEvent};
 use crate::core::sync::{ACCEPT_POLL, PORT, PORT_ATTEMPTS, QR_TTL, SESSION_TIMEOUT};
+
+/// Shared UI→server channel for the selective-share handshake. The server-side
+/// UI parks an outgoing offer (server-as-sender) or its decision on an incoming
+/// offer (client-as-sender) here; the running server thread serves them to the
+/// polling client.
+#[derive(Default)]
+pub struct ShareChannel {
+    /// Server-side user's outgoing offer (server-as-sender) — `GET /share/offer`.
+    pub outgoing: Option<ShareManifest>,
+    /// Server-side user's decision on an incoming offer — `GET /share/decision`.
+    pub decision: Option<ShareDecision>,
+}
+
+/// Local capabilities advertised to a peer (read from the settings DB).
+pub(crate) fn local_caps() -> Capabilities {
+    let youtube_enabled = Library::open()
+        .ok()
+        .and_then(|lib| lib.get_setting("youtube_enabled").ok().flatten())
+        .as_deref()
+        == Some("1");
+    Capabilities {
+        schema: protocol::SCHEMA_VERSION,
+        youtube_enabled,
+    }
+}
 
 /// Hard cap for request bodies (pairing + library import). A library export is
 /// only paths/metadata, so this is generous; it exists purely to stop a peer
@@ -37,6 +63,9 @@ const MAX_BODY: usize = 64 * 1024 * 1024;
 const MAX_HEADER: usize = 64 * 1024;
 /// Per-connection read/write timeout, so a slow/stuck peer cannot pin a worker.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
+/// Upper bound for a single streamed `/files/put` upload (sanity cap, not memory:
+/// the body is streamed straight to disk).
+const MAX_PUT: usize = 16 * 1024 * 1024 * 1024;
 
 /// Running sync server with a fresh TLS identity and session token.
 pub struct SyncServer {
@@ -46,10 +75,14 @@ pub struct SyncServer {
     pairing_token: String,
     session_token: String,
     device_name: String,
+    /// Capabilities advertised to the peer in the pair response.
+    caps: Capabilities,
     host: String,
     port: u16,
     expires_at: u64,
     stop: Arc<AtomicBool>,
+    /// UI→server share handshake state (offer / decision the UI parks).
+    share: Arc<Mutex<ShareChannel>>,
 }
 
 enum Action {
@@ -65,7 +98,11 @@ struct HttpReq {
     /// Raw query string (after `?`), empty if none.
     query: String,
     headers: Vec<(String, String)>,
+    /// Body bytes read so far (for non-streamed endpoints: the full body).
     body: Vec<u8>,
+    /// `Content-Length` as advertised (not yet clamped). For the streamed
+    /// `/files/put` path the body is read directly off the stream up to this.
+    content_length: usize,
 }
 
 impl HttpReq {
@@ -106,11 +143,13 @@ impl SyncServer {
             pairing_token: crypto::generate_token(32),
             session_token: crypto::generate_token(32),
             device_name,
+            caps: local_caps(),
             host: super::local_ip(),
             port,
             expires_at: super::now_unix() + QR_TTL.as_secs(),
             stop,
             identity,
+            share: Arc::new(Mutex::new(ShareChannel::default())),
         })
     }
 
@@ -137,11 +176,16 @@ impl SyncServer {
             pairing_token: crypto::generate_token(32),
             session_token: crypto::generate_token(32),
             device_name,
+            caps: Capabilities {
+                schema: protocol::SCHEMA_VERSION,
+                youtube_enabled: true,
+            },
             host: "127.0.0.1".to_string(),
             port,
             expires_at: super::now_unix() + QR_TTL.as_secs(),
             stop,
             identity,
+            share: Arc::new(Mutex::new(ShareChannel::default())),
         })
     }
 
@@ -163,6 +207,12 @@ impl SyncServer {
         self.port
     }
 
+    /// Handle to the UI→server share channel, so the server-side user can park an
+    /// outgoing offer or a decision that the polling client picks up.
+    pub fn share_channel(&self) -> Arc<Mutex<ShareChannel>> {
+        self.share.clone()
+    }
+
     /// Blocking accept loop. Reports events via `emit`. Returns
     /// when the stop flag is set, a timeout fires or the
     /// peer drops the connection.
@@ -172,6 +222,7 @@ impl SyncServer {
         let mut session_deadline: Option<Instant> = None;
         let mut failed: u32 = 0;
         let mut peer_name = String::new();
+        let mut peer_caps = Capabilities::default();
 
         loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -194,6 +245,7 @@ impl SyncServer {
                         &mut paired,
                         &mut failed,
                         &mut peer_name,
+                        &mut peer_caps,
                         &mut emit,
                     );
                     match action {
@@ -223,6 +275,7 @@ impl SyncServer {
         paired: &mut bool,
         failed: &mut u32,
         peer_name: &mut String,
+        peer_caps: &mut Capabilities,
         emit: &mut F,
     ) -> Action {
         // The listener is non-blocking; the accepted socket must block for the
@@ -237,11 +290,20 @@ impl SyncServer {
         };
         let mut tls = rustls::Stream::new(&mut conn, &mut sock);
 
-        let req = match read_request(&mut tls) {
+        // Read only the head first: a `/files/put` body may be gigabytes and must
+        // be streamed to disk, never buffered (unlike the small JSON bodies).
+        let mut req = match read_head(&mut tls) {
             Ok(req) => req,
             Err(_) => return Action::Continue,
         };
-        let action = self.dispatch(&req, &mut tls, paired, failed, peer_name, emit);
+        let action = if req.method == "POST" && req.path == "/files/put" {
+            self.handle_put(&req, &mut tls)
+        } else {
+            if read_body_fully(&mut tls, &mut req).is_err() {
+                return Action::Continue;
+            }
+            self.dispatch(&req, &mut tls, paired, failed, peer_name, peer_caps, emit)
+        };
         // Best-effort clean TLS shutdown.
         conn.send_close_notify();
         let _ = conn.complete_io(&mut sock);
@@ -255,6 +317,7 @@ impl SyncServer {
         paired: &mut bool,
         failed: &mut u32,
         peer_name: &mut String,
+        peer_caps: &mut Capabilities,
         emit: &mut F,
     ) -> Action {
         match (req.method.as_str(), req.path.as_str()) {
@@ -263,8 +326,10 @@ impl SyncServer {
                     Ok(pr) if crypto::constant_eq(&pr.token, &self.pairing_token) => {
                         *paired = true;
                         *peer_name = pr.device_name.clone();
+                        *peer_caps = pr.caps.clone();
                         emit(SyncEvent::PeerPaired {
                             peer_name: pr.device_name,
+                            peer_caps: pr.caps,
                         });
                         write_json(
                             out,
@@ -273,6 +338,7 @@ impl SyncServer {
                                 ok: true,
                                 session_token: self.session_token.clone(),
                                 device_name: self.device_name.clone(),
+                                caps: self.caps.clone(),
                                 error: String::new(),
                             },
                         );
@@ -354,6 +420,46 @@ impl SyncServer {
                 Action::Continue
             }
 
+            // --- Selective share handshake ---
+            // Client polls for an offer the server-side user parked (server=sender).
+            ("GET", "/share/offer") => {
+                match self.share.lock().ok().and_then(|c| c.outgoing.clone()) {
+                    Some(m) => write_json(out, 200, &m),
+                    None => write_status(out, 204),
+                }
+                Action::Continue
+            }
+            // Client offers a share to the server-side user (client=sender).
+            ("POST", "/share/offer") => {
+                match serde_json::from_slice::<ShareManifest>(&req.body) {
+                    Ok(m) => {
+                        emit(SyncEvent::ShareOffered { manifest: m });
+                        write_json(out, 200, &serde_json::json!({ "ok": true }));
+                    }
+                    Err(e) => write_json(out, 400, &serde_json::json!({ "error": e.to_string() })),
+                }
+                Action::Continue
+            }
+            // Client polls for the server-side user's decision on its offer.
+            ("GET", "/share/decision") => {
+                match self.share.lock().ok().and_then(|c| c.decision.clone()) {
+                    Some(d) => write_json(out, 200, &d),
+                    None => write_status(out, 204),
+                }
+                Action::Continue
+            }
+            // Client sends its decision on the server's offer (server=sender).
+            ("POST", "/share/decision") => {
+                match serde_json::from_slice::<ShareDecision>(&req.body) {
+                    Ok(d) => {
+                        emit(SyncEvent::OfferAccepted { decision: d });
+                        write_json(out, 200, &serde_json::json!({ "ok": true }));
+                    }
+                    Err(e) => write_json(out, 400, &serde_json::json!({ "error": e.to_string() })),
+                }
+                Action::Continue
+            }
+
             ("POST", "/disconnect") => {
                 write_json(out, 200, &serde_json::json!({ "ok": true }));
                 emit(SyncEvent::PeerDisconnected);
@@ -402,15 +508,92 @@ impl SyncServer {
         let abs = std::fs::canonicalize(Path::new(music_dir).join(rel)).ok()?;
         abs.starts_with(&base).then_some(abs)
     }
+
+    /// Streams a `/files/put` upload body straight to a file in the music folder
+    /// (bearer-checked, path-traversal protected, atomic via `.part` → rename).
+    /// The body is never buffered in memory.
+    fn handle_put<S: Read + Write>(&self, req: &HttpReq, stream: &mut S) -> Action {
+        if !self.bearer_ok(req) {
+            write_status(stream, 401);
+            return Action::Continue;
+        }
+        let rel = req
+            .query
+            .split('&')
+            .find_map(|p| p.strip_prefix("path="))
+            .map(protocol::percent_decode)
+            .unwrap_or_default();
+        let music_dir = Library::open()
+            .ok()
+            .and_then(|lib| lib.get_setting("music_dir").ok().flatten())
+            .unwrap_or_default();
+        let Some(dest) = safe_put_dest(&music_dir, &rel) else {
+            write_status(stream, 403);
+            return Action::Continue;
+        };
+        let limit = req.content_length.min(MAX_PUT);
+        match stream_to_file(stream, &req.body, limit, &dest) {
+            Ok(n) => write_json(stream, 200, &serde_json::json!({ "ok": true, "written": n })),
+            Err(_) => write_json(stream, 400, &serde_json::json!({ "error": "write failed" })),
+        }
+        Action::Continue
+    }
 }
 
-/// Reads and parses one HTTP/1.1 request from `stream` (drives the TLS handshake
-/// on first read). The head is bounded by `MAX_HEADER`, the body by its
-/// `Content-Length` clamped to `MAX_BODY`.
-fn read_request(stream: &mut impl Read) -> Result<HttpReq> {
+/// Resolves a relative upload target inside the music folder, **allowing a new
+/// file** (unlike [`SyncServer::resolve_safe`], which requires the target to
+/// already exist). Creates the parent directory and verifies it stays within the
+/// music folder.
+fn safe_put_dest(music_dir: &str, rel: &str) -> Option<PathBuf> {
+    if music_dir.is_empty() || rel.is_empty() || rel.starts_with('/') || rel.contains("..") {
+        return None;
+    }
+    let base = std::fs::canonicalize(music_dir).ok()?;
+    let dest = base.join(rel);
+    let parent = dest.parent()?;
+    std::fs::create_dir_all(parent).ok()?;
+    let parent = std::fs::canonicalize(parent).ok()?;
+    parent.starts_with(&base).then_some(dest)
+}
+
+/// Streams up to `limit` bytes (the already-buffered `leftover` first, then more
+/// from `reader`) into `dest`, atomically via a `.part` file.
+fn stream_to_file(reader: &mut impl Read, leftover: &[u8], limit: usize, dest: &Path) -> Result<u64> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = dest.with_extension("part");
+    let mut file = std::fs::File::create(&tmp)?;
+    let mut written = 0usize;
+    let take = leftover.len().min(limit);
+    file.write_all(&leftover[..take])?;
+    written += take;
+    let mut buf = [0u8; 64 * 1024];
+    while written < limit {
+        let want = (limit - written).min(buf.len());
+        let n = reader.read(&mut buf[..want])?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        written += n;
+    }
+    file.sync_all().ok();
+    if written == 0 {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(anyhow!("empty upload"));
+    }
+    std::fs::rename(&tmp, dest)?;
+    Ok(written as u64)
+}
+
+/// Reads the request **head** (request line + headers) from `stream` (drives the
+/// TLS handshake on first read). `body` holds only the bytes already buffered
+/// past the header block; `content_length` is the advertised length (unclamped).
+/// The caller fills the body ([`read_body_fully`]) or streams it (`/files/put`).
+fn read_head(stream: &mut impl Read) -> Result<HttpReq> {
     let mut buf: Vec<u8> = Vec::with_capacity(2048);
     let mut tmp = [0u8; 4096];
-    // Read until the end of the header block (CRLFCRLF).
     let head_end = loop {
         if let Some(pos) = find_subsequence(&buf, b"\r\n\r\n") {
             break pos + 4;
@@ -439,42 +622,51 @@ fn read_request(stream: &mut impl Read) -> Result<HttpReq> {
     let headers: Vec<(String, String)> = parsed
         .headers
         .iter()
-        .map(|h| {
-            (
-                h.name.to_string(),
-                String::from_utf8_lossy(h.value).into_owned(),
-            )
-        })
+        .map(|h| (h.name.to_string(), String::from_utf8_lossy(h.value).into_owned()))
         .collect();
 
-    // Body, bounded by Content-Length (clamped to MAX_BODY).
-    let content_len = headers
+    let content_length = headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("Content-Length"))
         .and_then(|(_, v)| v.trim().parse::<usize>().ok())
-        .unwrap_or(0)
-        .min(MAX_BODY);
-
-    let mut body = buf[head_end..].to_vec();
-    if body.len() > content_len {
-        body.truncate(content_len);
-    }
-    while body.len() < content_len {
-        let n = stream.read(&mut tmp)?;
-        if n == 0 {
-            break;
-        }
-        let take = (content_len - body.len()).min(n);
-        body.extend_from_slice(&tmp[..take]);
-    }
+        .unwrap_or(0);
 
     Ok(HttpReq {
         method,
         path,
         query,
         headers,
-        body,
+        body: buf[head_end..].to_vec(),
+        content_length,
     })
+}
+
+/// Fills `req.body` up to `Content-Length`, clamped to `MAX_BODY` (small JSON
+/// bodies). For the streamed `/files/put` path this is **not** called.
+fn read_body_fully(stream: &mut impl Read, req: &mut HttpReq) -> Result<()> {
+    let target = req.content_length.min(MAX_BODY);
+    if req.body.len() > target {
+        req.body.truncate(target);
+    }
+    let mut tmp = [0u8; 4096];
+    while req.body.len() < target {
+        let n = stream.read(&mut tmp)?;
+        if n == 0 {
+            break;
+        }
+        let take = (target - req.body.len()).min(n);
+        req.body.extend_from_slice(&tmp[..take]);
+    }
+    Ok(())
+}
+
+/// Full read of a request (head + body) — used by the tests and any caller that
+/// wants the whole body in memory.
+#[cfg(test)]
+fn read_request(stream: &mut impl Read) -> Result<HttpReq> {
+    let mut req = read_head(stream)?;
+    read_body_fully(stream, &mut req)?;
+    Ok(req)
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -556,15 +748,60 @@ mod tests {
         let info = protocol::parse_pair_url(&url, super::super::now_unix()).expect("URL");
 
         // Correct fingerprint + token → pairing succeeds.
-        let mut client = SyncClient::new(&info, "dev-1".into(), "TestClient".into());
+        let client_caps = Capabilities { schema: protocol::SCHEMA_VERSION, youtube_enabled: false };
+        let mut client = SyncClient::new(&info, "dev-1".into(), "TestClient".into(), client_caps);
         client.pair(&info.token).expect("pairing succeeds");
         assert_eq!(client.peer_name, "TestServer");
+        // The server advertised its capabilities back (test server has YT on).
+        assert!(client.peer_caps.youtube_enabled, "peer caps must round-trip");
 
         // Wrong fingerprint → TLS pinning rejects (fails before the token).
         let mut bad = info.clone();
         bad.fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into();
-        let mut bad_client = SyncClient::new(&bad, "dev-2".into(), "Boese".into());
+        let mut bad_client =
+            SyncClient::new(&bad, "dev-2".into(), "Boese".into(), Capabilities::default());
         assert!(bad_client.pair(&bad.token).is_err(), "MITM must fail");
+
+        stop.store(true, Ordering::Relaxed);
+        client.disconnect();
+        let _ = handle.join();
+    }
+
+    /// Offer/decision handshake over real TLS (file bytes themselves need a
+    /// configured music_dir and are covered by manual end-to-end testing).
+    #[test]
+    fn share_offer_decision_roundtrip() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = SyncServer::start_for_test("Srv".to_string(), stop.clone()).expect("server");
+        let url = server.pair_url();
+        let share = server.share_channel();
+        let handle = std::thread::spawn(move || server.run(|_| {}));
+
+        let info = protocol::parse_pair_url(&url, super::super::now_unix()).expect("URL");
+        let mut client =
+            SyncClient::new(&info, "d".into(), "Cli".into(), Capabilities::default());
+        client.pair(&info.token).expect("pair");
+
+        // Nothing on offer yet.
+        assert!(client.fetch_offer().expect("fetch").is_none());
+
+        // Server-side user parks an outgoing offer → client picks it up.
+        share.lock().unwrap().outgoing = Some(ShareManifest {
+            device_name: "Srv".into(),
+            total_size: 42,
+            ..Default::default()
+        });
+        let got = client.fetch_offer().expect("fetch").expect("offer");
+        assert_eq!(got.total_size, 42);
+
+        // Client returns a decision (server emits OfferAccepted; 200 expected).
+        client
+            .send_decision(&ShareDecision { accept: true, files: vec!["a.mp3".into()], ..Default::default() })
+            .expect("decision");
+
+        // Client-as-sender can post an offer; keep-alive ping works.
+        client.send_offer(&ShareManifest::default()).expect("offer");
+        client.ping().expect("ping");
 
         stop.store(true, Ordering::Relaxed);
         client.disconnect();

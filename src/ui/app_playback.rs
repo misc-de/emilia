@@ -16,6 +16,7 @@ impl App {
     /// Refreshes the queue marker of all visible file rows.
     pub(crate) fn refresh_queue_icons(&mut self) {
         let queue = self.transport.queue.clone();
+        let queued: std::collections::HashSet<PathBuf> = queue.iter().cloned().collect();
         // Currently playing track (for the play marker).
         let active_path = self.transport.queue.get(self.transport.queue_pos).cloned();
         // Remote playback: the active entry is marked via the rel path.
@@ -32,7 +33,7 @@ impl App {
                         let is_file = !r.entry.is_dir();
                         match r.entry.path() {
                             Some(p) => {
-                                let q = is_file && queue.iter().any(|x| x == p);
+                                let q = is_file && queued.contains(p);
                                 let a = is_file
                                     && active_path.as_deref() == Some(p.as_path());
                                 (i, q, a)
@@ -777,9 +778,16 @@ impl App {
         let Some(path) = self.transport.queue.get(self.transport.queue_pos) else {
             return;
         };
-        let (artist, album) = match scanner::read_track(path) {
-            Ok(t) => (t.artist, t.album),
-            Err(_) => (None, None),
+        let path_str = path.to_string_lossy();
+        let track = self
+            .library
+            .track_by_path(&path_str)
+            .ok()
+            .flatten()
+            .or_else(|| scanner::read_track(path).ok());
+        let (artist, album) = match track {
+            Some(t) => (t.artist, t.album),
+            None => (None, None),
         };
         let bands = self
             .library
@@ -787,7 +795,7 @@ impl App {
                 &self.settings.active_output,
                 artist.as_deref(),
                 album.as_deref(),
-                &path.to_string_lossy(),
+                &path_str,
             )
             .unwrap_or([0.0; 10]);
         self.player.set_eq_bands(&bands);

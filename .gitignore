@@ -4,9 +4,14 @@
 # Flatpak: lokale Build-Verzeichnisse und das gehostete OSTree-Repo
 /.flatpak-builder
 /.flatpak-build
+/build-dir
 /repo
 /repo-*
 /*.flatpak
+
+# Flathub-Hilfswerkzeuge (Generator-Skript + venv); generated-sources.json wird
+# bewusst eingecheckt (Offline-Build), .flathub-tools nicht.
+/.flathub-tools
 
 # Kompilierte Übersetzungskataloge (werden aus po/<lang>.po via msgfmt gebaut)
 po/*/LC_MESSAGES/*.mo

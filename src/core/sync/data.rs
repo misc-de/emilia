@@ -11,17 +11,17 @@ use crate::core::sync::protocol::*;
 use crate::core::sync::ImportStats;
 
 /// Reads the configured music folder (empty if not set).
-fn music_dir(lib: &Library) -> String {
+pub(crate) fn music_dir(lib: &Library) -> String {
     lib.get_setting("music_dir").ok().flatten().unwrap_or_default()
 }
 
 /// For which scopes is the `key` a file path (instead of an artist/album name)?
-fn key_is_path(scope: &str) -> bool {
+pub(crate) fn key_is_path(scope: &str) -> bool {
     matches!(scope, "track" | "folder")
 }
 
 /// Make an absolute path relative to the music folder (otherwise leave unchanged).
-fn relativize(path: &str, base: &str) -> String {
+pub(crate) fn relativize(path: &str, base: &str) -> String {
     if base.is_empty() {
         return path.to_string();
     }
@@ -33,50 +33,45 @@ fn relativize(path: &str, base: &str) -> String {
 }
 
 /// Resolve a relative path against the local music folder.
-fn resolve(rel: &str, base: &str) -> String {
+pub(crate) fn resolve(rel: &str, base: &str) -> String {
     if rel.starts_with('/') || base.is_empty() {
         return rel.to_string();
     }
     format!("{}/{}", base.trim_end_matches('/'), rel)
 }
 
-/// Assembles the full library export.
-pub fn export_library(lib: &Library) -> Result<LibraryExport> {
-    let base = music_dir(lib);
-    let device_name = lib
-        .get_setting("sync_device_name")
-        .ok()
-        .flatten()
-        .unwrap_or_else(super::default_device_name);
+// --- Per-facet export helpers (reused by `export_library` and `share`) -------
 
-    let favorites = lib
+pub(crate) fn export_favorites(lib: &Library, base: &str) -> Result<Vec<FavoriteRec>> {
+    Ok(lib
         .favorites()?
         .into_iter()
         .map(|(scope, key, title, is_dir)| {
-            let key = if key_is_path(&scope) {
-                relativize(&key, &base)
-            } else {
-                key
-            };
-            FavoriteRec {
-                scope,
-                key,
-                title,
-                is_dir,
-            }
+            let key = if key_is_path(&scope) { relativize(&key, base) } else { key };
+            FavoriteRec { scope, key, title, is_dir }
         })
-        .collect();
+        .collect())
+}
 
+/// User playlists only (origin IS NULL) — YT-mirror playlists are conveyed as YT
+/// items, never as plain path playlists.
+pub(crate) fn export_playlists_user(lib: &Library, base: &str) -> Result<Vec<PlaylistRec>> {
     let mut playlists = Vec::new();
-    for (id, name, _count) in lib.playlists()? {
+    for (id, name, _count, origin) in lib.playlists_with_origin()? {
+        if origin.is_some() {
+            continue;
+        }
         let paths = lib
             .playlist_paths(id)?
             .into_iter()
-            .map(|p| relativize(&p, &base))
+            .map(|p| relativize(&p, base))
             .collect();
         playlists.push(PlaylistRec { name, paths });
     }
+    Ok(playlists)
+}
 
+pub(crate) fn export_podcasts(lib: &Library) -> Result<Vec<PodcastRec>> {
     let progress: std::collections::HashMap<String, i64> = lib
         .all_episode_progress()
         .unwrap_or_default()
@@ -99,45 +94,134 @@ pub fn export_library(lib: &Library) -> Result<LibraryExport> {
                     description: e.description,
                 })
                 .collect();
-            podcasts.push(PodcastRec {
-                title,
-                feed_url,
-                image_url,
-                episodes,
-            });
+            podcasts.push(PodcastRec { title, feed_url, image_url, episodes });
         }
     }
+    Ok(podcasts)
+}
 
-    let categories = lib
+pub(crate) fn export_categories(lib: &Library, base: &str) -> Result<Vec<CategoryRec>> {
+    Ok(lib
         .all_categories()?
         .into_iter()
         .map(|(scope, key, value)| {
-            let key = if key_is_path(&scope) {
-                relativize(&key, &base)
-            } else {
-                key
-            };
+            let key = if key_is_path(&scope) { relativize(&key, base) } else { key };
             CategoryRec { scope, key, value }
         })
-        .collect();
+        .collect())
+}
 
-    let eq = lib
+pub(crate) fn export_eq(lib: &Library, base: &str) -> Result<Vec<EqRec>> {
+    Ok(lib
         .all_eq_settings()?
         .into_iter()
         .map(|(output, scope, key, bands)| {
-            let key = if scope == "track" {
-                relativize(&key, &base)
-            } else {
-                key
-            };
-            EqRec {
-                output,
-                scope,
-                key,
-                bands,
-            }
+            let key = if scope == "track" { relativize(&key, base) } else { key };
+            EqRec { output, scope, key, bands }
         })
+        .collect())
+}
+
+// --- Per-facet import helpers (reused by `import_library` and `share::apply`) -
+
+pub(crate) fn import_favorites(lib: &Library, base: &str, favs: &[FavoriteRec]) -> usize {
+    let mut n = 0;
+    for f in favs {
+        let key = if key_is_path(&f.scope) { resolve(&f.key, base) } else { f.key.clone() };
+        if lib.set_favorite(&f.scope, &key, &f.title, f.is_dir, true).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+pub(crate) fn import_playlists(lib: &Library, base: &str, pls: &[PlaylistRec]) -> usize {
+    let existing: Vec<String> = lib
+        .playlists()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(_, name, _)| name)
         .collect();
+    let mut n = 0;
+    for pl in pls {
+        if existing.contains(&pl.name) {
+            continue; // don't duplicate a playlist with the same name
+        }
+        if let Ok(id) = lib.create_playlist(&pl.name) {
+            let paths: Vec<String> = pl.paths.iter().map(|p| resolve(p, base)).collect();
+            if lib.add_to_playlist(id, &paths).is_ok() {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+pub(crate) fn import_podcasts(lib: &Library, pcs: &[PodcastRec]) -> usize {
+    let mut n = 0;
+    for pc in pcs {
+        if let Ok(id) = lib.subscribe_podcast(&pc.title, &pc.feed_url, pc.image_url.as_deref()) {
+            n += 1;
+            // Take over episodes incl. show notes – only if none exist locally yet,
+            // so existing/more recent episodes (own feed fetch) aren't overwritten.
+            if !pc.episodes.is_empty() && lib.episodes(id).map(|e| e.is_empty()).unwrap_or(false) {
+                let eps: Vec<crate::model::Episode> = pc
+                    .episodes
+                    .iter()
+                    .map(|e| crate::model::Episode {
+                        guid: e.guid.clone(),
+                        title: e.title.clone(),
+                        audio_url: e.audio_url.clone(),
+                        published: e.published.clone(),
+                        duration: e.duration.clone(),
+                        description: e.description.clone(),
+                    })
+                    .collect();
+                let _ = lib.set_episodes(id, &eps);
+            }
+            // Merge episode positions: the furthest position wins.
+            for ep in &pc.episodes {
+                if ep.position_ms > 0
+                    && ep.position_ms > lib.episode_progress(&ep.audio_url).unwrap_or(0)
+                {
+                    let _ = lib.set_episode_progress(&ep.audio_url, ep.position_ms);
+                }
+            }
+        }
+    }
+    n
+}
+
+pub(crate) fn import_categories(lib: &Library, base: &str, cats: &[CategoryRec]) -> usize {
+    let mut n = 0;
+    for c in cats {
+        let key = if key_is_path(&c.scope) { resolve(&c.key, base) } else { c.key.clone() };
+        if lib.set_category(&c.scope, &key, Some(&c.value)).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+pub(crate) fn import_eq(lib: &Library, base: &str, eqs: &[EqRec]) -> usize {
+    let mut n = 0;
+    for e in eqs {
+        let key = if e.scope == "track" { resolve(&e.key, base) } else { e.key.clone() };
+        if lib.set_eq(&e.output, &e.scope, &key, &e.bands).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Assembles the full library export (legacy whole-library path).
+pub fn export_library(lib: &Library) -> Result<LibraryExport> {
+    let base = music_dir(lib);
+    let device_name = lib
+        .get_setting("sync_device_name")
+        .ok()
+        .flatten()
+        .unwrap_or_else(super::default_device_name);
 
     let files = lib
         .all_tracks()?
@@ -158,11 +242,11 @@ pub fn export_library(lib: &Library) -> Result<LibraryExport> {
     Ok(LibraryExport {
         schema: SCHEMA_VERSION,
         device_name,
-        favorites,
-        playlists,
-        podcasts,
-        categories,
-        eq,
+        favorites: export_favorites(lib, &base)?,
+        playlists: export_playlists_user(lib, &base)?,
+        podcasts: export_podcasts(lib)?,
+        categories: export_categories(lib, &base)?,
+        eq: export_eq(lib, &base)?,
         files,
     })
 }
@@ -172,88 +256,14 @@ pub fn export_library(lib: &Library) -> Result<LibraryExport> {
 /// themselves are transferred separately – only the metadata import counts here.
 pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats> {
     let base = music_dir(lib);
-    let mut stats = ImportStats::default();
-
-    for f in &exp.favorites {
-        let key = if key_is_path(&f.scope) {
-            resolve(&f.key, &base)
-        } else {
-            f.key.clone()
-        };
-        if lib.set_favorite(&f.scope, &key, &f.title, f.is_dir, true).is_ok() {
-            stats.favorites += 1;
-        }
-    }
-
-    let existing: Vec<String> = lib.playlists()?.into_iter().map(|(_, n, _)| n).collect();
-    for pl in &exp.playlists {
-        if existing.contains(&pl.name) {
-            continue; // don't duplicate a playlist with the same name
-        }
-        let id = lib.create_playlist(&pl.name)?;
-        let paths: Vec<String> = pl.paths.iter().map(|p| resolve(p, &base)).collect();
-        lib.add_to_playlist(id, &paths)?;
-        stats.playlists += 1;
-    }
-
-    for pc in &exp.podcasts {
-        if let Ok(id) = lib.subscribe_podcast(&pc.title, &pc.feed_url, pc.image_url.as_deref()) {
-            stats.podcasts += 1;
-            // Take over episodes incl. show notes – but only if none exist
-            // locally yet, so that existing/more recent episodes (from one's own
-            // feed fetch) are not overwritten.
-            if !pc.episodes.is_empty()
-                && lib.episodes(id).map(|e| e.is_empty()).unwrap_or(false)
-            {
-                let eps: Vec<crate::model::Episode> = pc
-                    .episodes
-                    .iter()
-                    .map(|e| crate::model::Episode {
-                        guid: e.guid.clone(),
-                        title: e.title.clone(),
-                        audio_url: e.audio_url.clone(),
-                        published: e.published.clone(),
-                        duration: e.duration.clone(),
-                        description: e.description.clone(),
-                    })
-                    .collect();
-                let _ = lib.set_episodes(id, &eps);
-            }
-            // Merge episode positions: the furthest position wins, so that on
-            // every device you continue listening from where you were furthest along.
-            for ep in &pc.episodes {
-                if ep.position_ms > 0
-                    && ep.position_ms > lib.episode_progress(&ep.audio_url).unwrap_or(0)
-                {
-                    let _ = lib.set_episode_progress(&ep.audio_url, ep.position_ms);
-                }
-            }
-        }
-    }
-
-    for c in &exp.categories {
-        let key = if key_is_path(&c.scope) {
-            resolve(&c.key, &base)
-        } else {
-            c.key.clone()
-        };
-        if lib.set_category(&c.scope, &key, Some(&c.value)).is_ok() {
-            stats.categories += 1;
-        }
-    }
-
-    for e in &exp.eq {
-        let key = if e.scope == "track" {
-            resolve(&e.key, &base)
-        } else {
-            e.key.clone()
-        };
-        if lib.set_eq(&e.output, &e.scope, &key, &e.bands).is_ok() {
-            stats.eq += 1;
-        }
-    }
-
-    Ok(stats)
+    Ok(ImportStats {
+        favorites: import_favorites(lib, &base, &exp.favorites),
+        playlists: import_playlists(lib, &base, &exp.playlists),
+        podcasts: import_podcasts(lib, &exp.podcasts),
+        categories: import_categories(lib, &base, &exp.categories),
+        eq: import_eq(lib, &base, &exp.eq),
+        files: 0,
+    })
 }
 
 #[cfg(test)]

@@ -1,88 +1,90 @@
-# German translation for Emilia.
-# Quellsprache (msgid) ist Englisch; dies ist die deutsche Übersetzung.
-# Copyright (C) 2026 the Emilia authors.
+# Russian translations for Emilia package.
+# Copyright (C) 2026 cais.de
 # This file is distributed under the same license as the Emilia package.
+# Automatically generated, 2026.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Emilia 0.1.38\n"
+"Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-05 13:09+0000\n"
-"PO-Revision-Date: 2026-05-31 12:00+0000\n"
-"Last-Translator: Emilia authors\n"
-"Language-Team: German\n"
-"Language: de\n"
+"PO-Revision-Date: 2026-06-05 11:00+0000\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 #: src/ui/album_row.rs:29 src/ui/app.rs:5618 src/ui/app_youtube.rs:412
 #: src/ui/app_views.rs:2170
 msgid "{n} song"
 msgid_plural "{n} songs"
-msgstr[0] "{n} Lied"
-msgstr[1] "{n} Lieder"
+msgstr[0] "{n} песня"
+msgstr[1] "{n} песни"
+msgstr[2] "{n} песен"
 
 #: src/ui/app.rs:114 src/ui/app_playlist.rs:603 src/ui/app_queue.rs:68
 msgid "Cancel"
-msgstr "Abbrechen"
+msgstr "Отмена"
 
 #: src/ui/app.rs:260
 msgid "Reading music data"
-msgstr "Musikdaten werden eingelesen"
+msgstr "Чтение музыкальных данных"
 
 #: src/ui/app.rs:1224 src/ui/app.rs:1775 src/ui/app.rs:3132
 msgid "Settings"
-msgstr "Einstellungen"
+msgstr "Настройки"
 
 #: src/ui/app.rs:1230
 msgid "Rescan folder"
-msgstr "Ordner neu einlesen"
+msgstr "Пересканировать папку"
 
 #: src/ui/app.rs:1244 src/ui/app_dialogs.rs:268 src/ui/app_dialogs.rs:321
 msgid "Share"
-msgstr "Teilen"
+msgstr "Поделиться"
 
 #: src/ui/app.rs:1257 src/ui/app_podcast.rs:646 src/ui/app_podcast.rs:658
 #: src/ui/app_streaming.rs:289 src/ui/app_streaming.rs:301
 #: src/ui/app_youtube.rs:535 src/ui/app_youtube.rs:545
 #: src/ui/app_dialogs.rs:448 src/ui/app_dialogs.rs:794
 msgid "Search"
-msgstr "Suchen"
+msgstr "Поиск"
 
 #: src/ui/app.rs:1282
 msgid "Files"
-msgstr "Dateisystem"
+msgstr "Файлы"
 
 #: src/ui/app.rs:1318 src/ui/app.rs:2165
 msgid "Back"
-msgstr "Zurück"
+msgstr "Назад"
 
 #: src/ui/app.rs:1352 src/ui/app_dialogs.rs:521 src/ui/stats_page.rs:223
 msgid "Artists"
-msgstr "Interpreten"
+msgstr "Исполнители"
 
 #: src/ui/app.rs:1358
 msgid "No artists"
-msgstr "Keine Interpreten"
+msgstr "Нет исполнителей"
 
 #: src/ui/app.rs:1360 src/ui/app.rs:1404
 msgid "Scan a music folder and fetch online metadata"
-msgstr "Musikordner einlesen und „Online-Metadaten“ abrufen"
+msgstr "Просканируйте папку с музыкой и получите метаданные из интернета"
 
 #: src/ui/app.rs:1395 src/ui/app_playlist.rs:120 src/ui/app_dialogs.rs:544
 #: src/ui/app_views.rs:995 src/ui/stats_page.rs:224
 msgid "Albums"
-msgstr "Alben"
+msgstr "Альбомы"
 
 #: src/ui/app.rs:1402
 msgid "No albums"
-msgstr "Keine Alben"
+msgstr "Нет альбомов"
 
 #: src/ui/app.rs:1440 src/ui/app.rs:1477
 msgid "Concerts"
-msgstr "Konzerte"
+msgstr "Концерты"
 
 #: src/ui/app.rs:1478
 msgid ""
@@ -92,115 +94,115 @@ msgid ""
 "they'll appear here. You can also add concerts later at any time via the "
 "options."
 msgstr ""
-"Hier kannst du deine gesammelten Konzerte auflisten. Über Konzerte "
-"importieren bekommst du eine Übersicht vermuteter Konzerte: Alben mit live, "
-"unplugged oder concert im Namen sowie Einzeldateien ab 30 Minuten. Markiere "
-"sie als Konzert, dann erscheinen sie hier. Du kannst Konzerte auch jederzeit"
-" später über die Optionen hinzufügen."
+"Здесь можно собрать свои концерты. Через «Импорт концертов» вы получите "
+"обзор вероятных концертов: альбомы со словами live, unplugged или concert в "
+"названии, а также отдельные файлы длительностью 30 минут и более. Отметьте "
+"их как концерт, и они появятся здесь. Концерты также можно добавить в любой "
+"момент через параметры."
 
 #: src/ui/app.rs:1488 src/ui/app_concert.rs:59
 msgid "Import concerts"
-msgstr "Konzerte importieren"
+msgstr "Импорт концертов"
 
 #: src/ui/app.rs:1493
 msgid "I'll do it myself"
-msgstr "Das mache ich selber"
+msgstr "Я сделаю это сам"
 
 #: src/ui/app.rs:1498
 msgid "Hide menu item"
-msgstr "Menüpunkt ausblenden"
+msgstr "Скрыть пункт меню"
 
 #: src/ui/app.rs:1510
 msgid "No concerts"
-msgstr "Keine Konzerte"
+msgstr "Нет концертов"
 
 #: src/ui/app.rs:1511
 msgid "Mark an album or a track as a concert via the options."
-msgstr "Markiere ein Album oder einen Titel über die Optionen als Konzert."
+msgstr "Отметьте альбом или трек как концерт через параметры."
 
 #: src/ui/app.rs:1517 src/ui/app_youtube.rs:515
 msgid "Playlists"
-msgstr "Playlisten"
+msgstr "Плейлисты"
 
 #: src/ui/app.rs:1538
 msgid "No playlists"
-msgstr "Keine Playlisten"
+msgstr "Нет плейлистов"
 
 #: src/ui/app.rs:1539
 msgid "Create a playlist or add tracks via the options."
-msgstr "Erstelle eine Playlist oder füge Titel über die Optionen hinzu."
+msgstr "Создайте плейлист или добавьте треки через параметры."
 
 #: src/ui/app.rs:1548
 msgid "Podcasts"
-msgstr "Podcasts"
+msgstr "Подкасты"
 
 #: src/ui/app.rs:1566 src/ui/app.rs:1797
 msgid "Newest"
-msgstr "Neuste"
+msgstr "Новейшие"
 
 #: src/ui/app.rs:1573 src/ui/stats_page.rs:207
 msgid "Overview"
-msgstr "Übersicht"
+msgstr "Обзор"
 
 #: src/ui/app.rs:1581 src/ui/app_podcast.rs:639
 msgid "Subscribe to podcast"
-msgstr "Podcast abonnieren"
+msgstr "Подписаться на подкаст"
 
 #: src/ui/app.rs:1606 src/ui/app_podcast.rs:573
 msgid "No episodes"
-msgstr "Keine Episoden"
+msgstr "Нет выпусков"
 
 #: src/ui/app.rs:1644
 msgid "No podcasts"
-msgstr "Keine Podcasts"
+msgstr "Нет подкастов"
 
 #: src/ui/app.rs:1645
 msgid "Subscribe to a podcast via its feed address (RSS)."
-msgstr "Abonniere einen Podcast über seine Feed-Adresse (RSS)."
+msgstr "Подпишитесь на подкаст по адресу ленты (RSS)."
 
 #: src/ui/app.rs:1651 src/ui/app_dialogs.rs:1010
 msgid "Streaming"
-msgstr "Streaming"
+msgstr "Потоковое вещание"
 
 #: src/ui/app.rs:1665
 msgid "Stations"
-msgstr "Stationen"
+msgstr "Станции"
 
 #: src/ui/app.rs:1672
 msgid "Recordings"
-msgstr "Aufnahmen"
+msgstr "Записи"
 
 #: src/ui/app.rs:1680 src/ui/app_streaming.rs:283
 msgid "Add station"
-msgstr "Sender hinzufügen"
+msgstr "Добавить станцию"
 
 #: src/ui/app.rs:1704
 msgid "No stations"
-msgstr "Keine Sender"
+msgstr "Нет станций"
 
 #: src/ui/app.rs:1705
 msgid "Add a stream address or search for a station worldwide."
-msgstr "Stream-Adresse hinzufügen oder weltweit nach einem Sender suchen."
+msgstr "Добавьте адрес потока или найдите станцию по всему миру."
 
 #: src/ui/app.rs:1729
 msgid "No recordings"
-msgstr "Keine Aufnahmen"
+msgstr "Нет записей"
 
 #: src/ui/app.rs:1730
 msgid "Record the current song while a station plays."
-msgstr "Nimm den aktuellen Titel auf, während ein Sender läuft."
+msgstr "Записывайте текущую песню во время вещания станции."
 
 #: src/ui/app.rs:1736
 msgid "Favorites"
-msgstr "Favoriten"
+msgstr "Избранное"
 
 #: src/ui/app.rs:1757
 msgid "No favorites"
-msgstr "Keine Favoriten"
+msgstr "Нет избранного"
 
 #: src/ui/app.rs:1758
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
-msgstr "Markiere Titel, Alben oder Interpreten mit dem Stern unter „Infos“."
+msgstr "Отмечайте треки, альбомы или исполнителей звёздочкой в «Подробнее»."
 
 #: src/ui/app.rs:1764 src/ui/app_dialogs.rs:1095
 msgid "YouTube"
@@ -212,362 +214,361 @@ msgid ""
 "read it. Look for a newer version of the app or update yt-dlp in the "
 "settings. If neither helps, please wait for a new yt-dlp release."
 msgstr ""
-"YouTube funktioniert gerade nicht – es hat sich geändert und das "
-"installierte yt-dlp kann es nicht lesen. Schau nach einer neueren Version "
-"der App oder aktualisiere yt-dlp in den Einstellungen. Hilft beides nicht, "
-"warte bitte auf eine neue yt-dlp-Version."
+"YouTube сейчас не работает: он изменился, и установленный yt-dlp не может "
+"его прочитать. Поищите более новую версию приложения или обновите yt-dlp в "
+"настройках. Если ничто не помогает, дождитесь нового выпуска yt-dlp."
 
 #: src/ui/app.rs:1790
 msgid "Recent"
-msgstr "Zuletzt"
+msgstr "Недавние"
 
 #: src/ui/app.rs:1804
 msgid "Subscriptions"
-msgstr "Abos"
+msgstr "Подписки"
 
 #: src/ui/app.rs:1812 src/ui/app_youtube.rs:502
 msgid "Search YouTube"
-msgstr "YouTube durchsuchen"
+msgstr "Поиск на YouTube"
 
 #: src/ui/app.rs:1837
 msgid "No videos yet"
-msgstr "Noch keine Videos"
+msgstr "Пока нет видео"
 
 #: src/ui/app.rs:1838
 msgid "Subscribe to a channel to follow its newest videos."
-msgstr "Abonniere einen Kanal, um seine neuesten Videos zu verfolgen."
+msgstr "Подпишитесь на канал, чтобы следить за его новыми видео."
 
 #: src/ui/app.rs:1863
 msgid "Nothing played yet"
-msgstr "Noch nichts abgespielt"
+msgstr "Пока ничего не воспроизводилось"
 
 #: src/ui/app.rs:1864
 msgid "Videos you play appear here."
-msgstr "Abgespielte Videos erscheinen hier."
+msgstr "Воспроизводимые вами видео появятся здесь."
 
 #: src/ui/app.rs:1900
 msgid "No subscriptions"
-msgstr "Keine Abos"
+msgstr "Нет подписок"
 
 #: src/ui/app.rs:1901
 msgid "Search YouTube and subscribe to a channel."
-msgstr "Durchsuche YouTube und abonniere einen Kanal."
+msgstr "Найдите на YouTube и подпишитесь на канал."
 
 #: src/ui/app.rs:1907
 msgid "Audiobooks"
-msgstr "Hörbücher"
+msgstr "Аудиокниги"
 
 #: src/ui/app.rs:1942
 msgid "No audiobooks"
-msgstr "Keine Hörbücher"
+msgstr "Нет аудиокниг"
 
 #: src/ui/app.rs:1943
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
-msgstr ""
-"Markiere Alben, Ordner oder Titel über die Eigenschaften als „Hörbücher“."
+msgstr "Отмечайте альбомы, папки или треки как аудиокниги через свойства."
 
 #: src/ui/app.rs:1949
 msgid "Statistics"
-msgstr "Statistik"
+msgstr "Статистика"
 
 #: src/ui/app.rs:1996
 msgid "Long press for details of the current track"
-msgstr "Lange drücken für Details zum laufenden Titel"
+msgstr "Удерживайте для просмотра сведений о текущем треке"
 
 #: src/ui/app.rs:2088
 msgid "Equalizer for this track"
-msgstr "Equalizer für diesen Titel"
+msgstr "Эквалайзер для этого трека"
 
 #: src/ui/app.rs:2101 src/ui/app.rs:2118
 msgid "Playback speed"
-msgstr "Abspielgeschwindigkeit"
+msgstr "Скорость воспроизведения"
 
 #: src/ui/app.rs:2146
 msgid "Shuffle"
-msgstr "Zufall"
+msgstr "Перемешать"
 
 #: src/ui/app.rs:2179 src/ui/app_podcast.rs:794 src/ui/app_queue.rs:153
 #: src/ui/app_streaming.rs:150 src/ui/app_youtube.rs:1195
 msgid "Play/Pause"
-msgstr "Wiedergabe/Pause"
+msgstr "Воспроизвести/Пауза"
 
 #: src/ui/app.rs:2197
 msgid "Record"
-msgstr "Aufnehmen"
+msgstr "Запись"
 
 #: src/ui/app.rs:2212
 msgid "Forward"
-msgstr "Vorwärts"
+msgstr "Вперёд"
 
 #: src/ui/app.rs:2229
 msgid "Repeat"
-msgstr "Wiederholen"
+msgstr "Повтор"
 
 #: src/ui/app.rs:2242 src/ui/app_queue.rs:47
 msgid "Queue"
-msgstr "Warteschlange"
+msgstr "Очередь"
 
 #: src/ui/app.rs:3352
 msgid "Removed from queue"
-msgstr "Aus der Warteschlange entfernt"
+msgstr "Удалено из очереди"
 
 #: src/ui/app.rs:3355
 msgid "Will play next"
-msgstr "Zum nächsten Abspielen vorgemerkt"
+msgstr "Будет воспроизведено следующим"
 
 #: src/ui/app.rs:3598
 msgid "Added {n} tracks to the queue"
-msgstr "{n} Titel zur Queue hinzugefügt"
+msgstr "В очередь добавлено треков: {n}"
 
 #: src/ui/app.rs:3656
 msgid "Playlist deleted"
-msgstr "Playlist gelöscht"
+msgstr "Плейлист удалён"
 
 #: src/ui/app.rs:3674 src/ui/app.rs:3736 src/ui/app.rs:3997
 msgid "Searching …"
-msgstr "Suche läuft …"
+msgstr "Поиск …"
 
 #: src/ui/app.rs:3693
 msgid "Loading feed …"
-msgstr "Feed wird geladen …"
+msgstr "Загрузка ленты …"
 
 #: src/ui/app.rs:3701
 msgid "Updating feed …"
-msgstr "Feed wird aktualisiert …"
+msgstr "Обновление ленты …"
 
 #: src/ui/app.rs:3725
 msgid "Podcast removed"
-msgstr "Podcast entfernt"
+msgstr "Подкаст удалён"
 
 #: src/ui/app.rs:3763
 msgid "Station added"
-msgstr "Sender hinzugefügt"
+msgstr "Станция добавлена"
 
 #: src/ui/app.rs:3765 src/ui/app_streaming.rs:729
 msgid "Could not add station"
-msgstr "Sender konnte nicht hinzugefügt werden"
+msgstr "Не удалось добавить станцию"
 
 #: src/ui/app.rs:3790
 msgid "Enable the recording buffer in the settings first"
-msgstr "Aktiviere zuerst den Aufnahmepuffer in den Einstellungen"
+msgstr "Сначала включите буфер записи в настройках"
 
 #: src/ui/app.rs:3830
 msgid "Station removed"
-msgstr "Sender entfernt"
+msgstr "Станция удалена"
 
 #: src/ui/app.rs:3850
 msgid "Recording stopped"
-msgstr "Aufnahme gestoppt"
+msgstr "Запись остановлена"
 
 #: src/ui/app.rs:3863
 msgid "Replay"
-msgstr "Wiedergabe"
+msgstr "Воспроизвести снова"
 
 #: src/ui/app.rs:3873 src/ui/app.rs:3885
 msgid "Could not extract from buffer"
-msgstr "Konnte nicht aus dem Puffer extrahieren"
+msgstr "Не удалось извлечь из буфера"
 
 #: src/ui/app.rs:3896
 msgid "File not found"
-msgstr "Datei nicht gefunden"
+msgstr "Файл не найден"
 
 #: src/ui/app.rs:3901
 msgid "Recording deleted"
-msgstr "Aufnahme gelöscht"
+msgstr "Запись удалена"
 
 #: src/ui/app.rs:3955
 msgid "Download removed"
-msgstr "Download entfernt"
+msgstr "Загрузка удалена"
 
 #: src/ui/app.rs:3961
 msgid "Downloading “{title}” …"
-msgstr "„{title}“ wird heruntergeladen …"
+msgstr "Загрузка «{title}» …"
 
 #: src/ui/app.rs:4019
 msgid "Subscribing to {t} …"
-msgstr "{t} wird abonniert …"
+msgstr "Подписка на {t} …"
 
 #: src/ui/app.rs:4061
 msgid "Refreshing …"
-msgstr "Wird aktualisiert …"
+msgstr "Обновление …"
 
 #: src/ui/app.rs:4069
 msgid "Channel removed"
-msgstr "Kanal entfernt"
+msgstr "Канал удалён"
 
 #: src/ui/app.rs:4172
 msgid "Starting playlist “{title}” …"
-msgstr "Playlist „{title}“ wird gestartet …"
+msgstr "Запуск плейлиста «{title}» …"
 
 #: src/ui/app.rs:4618
 msgid "Queue cleared"
-msgstr "Warteschlange geleert"
+msgstr "Очередь очищена"
 
 #: src/ui/app.rs:4735 src/ui/app_podcast.rs:848
 msgid "Downloading …"
-msgstr "Wird heruntergeladen …"
+msgstr "Загрузка …"
 
 #: src/ui/app.rs:4859
 msgid "No music folder set"
-msgstr "Kein Musikordner festgelegt"
+msgstr "Папка с музыкой не задана"
 
 #: src/ui/app.rs:4863
 msgid "Searching for concerts …"
-msgstr "Suche nach Konzerten läuft …"
+msgstr "Поиск концертов …"
 
 #: src/ui/app.rs:4874
 msgid "Hid the Concerts menu item"
-msgstr "Menüpunkt Konzerte ausgeblendet"
+msgstr "Пункт меню «Концерты» скрыт"
 
 #: src/ui/app.rs:4899
 msgid "Added {n} concert"
 msgid_plural "Added {n} concerts"
-msgstr[0] "{n} Konzert hinzugefügt"
-msgstr[1] "{n} Konzerte hinzugefügt"
+msgstr[0] "Добавлен {n} концерт"
+msgstr[1] "Добавлено {n} концерта"
+msgstr[2] "Добавлено {n} концертов"
 
 #: src/ui/app.rs:4941
 msgid "Shown again"
-msgstr "Wieder eingeblendet"
+msgstr "Показано снова"
 
 #: src/ui/app.rs:4950
 msgid "Added to favorites"
-msgstr "Zu Favoriten hinzugefügt"
+msgstr "Добавлено в избранное"
 
 #: src/ui/app.rs:4952
 msgid "Removed from favorites"
-msgstr "Aus Favoriten entfernt"
+msgstr "Удалено из избранного"
 
 #: src/ui/app.rs:5154
 msgid "Could not load this folder"
-msgstr "Ordner konnte nicht geladen werden"
+msgstr "Не удалось загрузить эту папку"
 
 #: src/ui/app.rs:5255
 msgid "Download complete"
-msgstr "Download abgeschlossen"
+msgstr "Загрузка завершена"
 
 #: src/ui/app.rs:5259 src/ui/app.rs:5342
 msgid "Download failed"
-msgstr "Download fehlgeschlagen"
+msgstr "Не удалось загрузить"
 
 #: src/ui/app.rs:5323
 msgid "No new concert candidates found"
-msgstr "Keine neuen Konzert-Kandidaten gefunden"
+msgstr "Новых вероятных концертов не найдено"
 
 #: src/ui/app.rs:5331 src/ui/app.rs:5378
 msgid "Subscribed: {t}"
-msgstr "Abonniert: {t}"
+msgstr "Подписка оформлена: {t}"
 
 #: src/ui/app.rs:5332
 msgid "Could not load feed"
-msgstr "Feed konnte nicht geladen werden"
+msgstr "Не удалось загрузить ленту"
 
 #: src/ui/app.rs:5339
 msgid "Episode downloaded"
-msgstr "Episode heruntergeladen"
+msgstr "Выпуск загружен"
 
 #: src/ui/app.rs:5361
 msgid "yt-dlp ready (version {v})"
-msgstr "yt-dlp bereit (Version {v})"
+msgstr "yt-dlp готов (версия {v})"
 
 #: src/ui/app.rs:5365
 msgid "yt-dlp download failed"
-msgstr "yt-dlp-Download fehlgeschlagen"
+msgstr "Не удалось загрузить yt-dlp"
 
 #: src/ui/app.rs:5379
 msgid "Could not load channel"
-msgstr "Kanal konnte nicht geladen werden"
+msgstr "Не удалось загрузить канал"
 
 #: src/ui/app.rs:5392
 msgid "Playlist is empty"
-msgstr "Playlist ist leer"
+msgstr "Плейлист пуст"
 
 #: src/ui/app.rs:5428
 msgid "Saved {n} track(s) to Playlists"
-msgstr "{n} Titel zu den Playlists gespeichert"
+msgstr "В плейлисты сохранено треков: {n}"
 
 #: src/ui/app.rs:5434
 msgid "Could not save playlist"
-msgstr "Playlist konnte nicht gespeichert werden"
+msgstr "Не удалось сохранить плейлист"
 
 #: src/ui/app.rs:5439
 msgid "Adding to library {done}/{total} …"
-msgstr "Wird zur Bibliothek hinzugefügt {done}/{total} …"
+msgstr "Добавление в библиотеку {done}/{total} …"
 
 #: src/ui/app.rs:5453
 msgid "Added {n} track(s) to your library"
-msgstr "{n} Titel zu deiner Bibliothek hinzugefügt"
+msgstr "В библиотеку добавлено треков: {n}"
 
 #: src/ui/app.rs:5459
 msgid "Could not add to library"
-msgstr "Konnte nicht zur Bibliothek hinzugefügt werden"
+msgstr "Не удалось добавить в библиотеку"
 
 #: src/ui/app.rs:5466
 msgid "Song already exists"
-msgstr "Titel existiert bereits"
+msgstr "Песня уже существует"
 
 #: src/ui/app.rs:5469
 msgid "Overwrite existing song?"
-msgstr "Vorhandenen Titel überschreiben?"
+msgstr "Перезаписать существующую песню?"
 
 #: src/ui/app.rs:5471
 msgid ""
 "“{title}” is already saved at:\n"
 "{dest}"
 msgstr ""
-"„{title}“ ist bereits gespeichert unter:\n"
+"«{title}» уже сохранён в:\n"
 "{dest}"
 
 #: src/ui/app.rs:5475
 msgid "Skip"
-msgstr "Überspringen"
+msgstr "Пропустить"
 
 #: src/ui/app.rs:5476
 msgid "Overwrite"
-msgstr "Überschreiben"
+msgstr "Перезаписать"
 
 #: src/ui/app.rs:5504
 msgid "Could not load playlist"
-msgstr "Playlist konnte nicht geladen werden"
+msgstr "Не удалось загрузить плейлист"
 
 #: src/ui/app.rs:5926
 msgid "Updating …"
-msgstr "Wird aktualisiert …"
+msgstr "Обновление …"
 
 #: src/ui/app.rs:6239 src/ui/app_views.rs:246
 msgid "Music"
-msgstr "Musik"
+msgstr "Музыка"
 
 #: src/ui/app.rs:6265
 msgid "No music folder – please set one in settings"
-msgstr "Kein Musikordner – bitte in den Einstellungen festlegen"
+msgstr "Нет папки с музыкой — задайте её в настройках"
 
 #: src/ui/app_playback.rs:735
 msgid "No playable tracks"
-msgstr "Keine abspielbaren Titel"
+msgstr "Нет воспроизводимых треков"
 
 #: src/ui/app_playback.rs:740
 msgid "Skipping unavailable track"
-msgstr "Nicht verfügbar – übersprungen"
+msgstr "Пропуск недоступного трека"
 
 #: src/ui/app_playlist.rs:40 src/ui/app_playlist.rs:412
 #: src/ui/app_playlist.rs:555 src/ui/app_queue.rs:189
 msgid "{n} track"
 msgid_plural "{n} tracks"
-msgstr[0] "{n} Titel"
-msgstr[1] "{n} Titel"
+msgstr[0] "{n} трек"
+msgstr[1] "{n} трека"
+msgstr[2] "{n} треков"
 
 #: src/ui/app_playlist.rs:59 src/ui/app_playlist.rs:432
 msgid "Play playlist"
-msgstr "Playlist abspielen"
+msgstr "Воспроизвести плейлист"
 
 #: src/ui/app_playlist.rs:111
 msgid "No tracks yet"
-msgstr "Noch keine Titel"
+msgstr "Пока нет треков"
 
 #: src/ui/app_playlist.rs:112
 msgid "Add tracks via the options of a song, album or artist."
-msgstr ""
-"Titel über die Optionen eines Liedes, Albums oder Interpreten hinzufügen."
+msgstr "Добавляйте треки через параметры песни, альбома или исполнителя."
 
 #: src/ui/app_playlist.rs:142 src/ui/app_playlist.rs:299
 #: src/ui/app_streaming.rs:674 src/ui/app_streaming.rs:1056
@@ -575,627 +576,629 @@ msgstr ""
 #: src/ui/app_youtube.rs:1111 src/ui/app_favorites.rs:202
 #: src/ui/app_dialogs.rs:164 src/ui/app_views.rs:1122 src/ui/app_views.rs:1348
 msgid "Play"
-msgstr "Abspielen"
+msgstr "Воспроизвести"
 
 #: src/ui/app_playlist.rs:164 src/ui/app_dialogs.rs:576
 msgid "Songs"
-msgstr "Lieder"
+msgstr "Песни"
 
 #: src/ui/app_playlist.rs:172
 msgid "Playlist – {name}"
-msgstr "Playlist – {name}"
+msgstr "Плейлист — {name}"
 
 #: src/ui/app_playlist.rs:257
 msgid "Source: {source}"
-msgstr "Quelle: {source}"
+msgstr "Источник: {source}"
 
 #: src/ui/app_playlist.rs:444
 msgid "Shuffle playlist"
-msgstr "Playlist zufällig abspielen"
+msgstr "Воспроизвести плейлист вперемешку"
 
 #: src/ui/app_playlist.rs:456
 msgid "Show songs"
-msgstr "Lieder anzeigen"
+msgstr "Показать песни"
 
 #: src/ui/app_playlist.rs:467 src/ui/app_playlist.rs:604
 msgid "Rename"
-msgstr "Umbenennen"
+msgstr "Переименовать"
 
 #: src/ui/app_playlist.rs:478
 msgid "Delete playlist"
-msgstr "Playlist löschen"
+msgstr "Удалить плейлист"
 
 #: src/ui/app_playlist.rs:514 src/ui/app_dialogs.rs:259
 msgid "Add to playlist"
-msgstr "Zur Playlist hinzufügen"
+msgstr "Добавить в плейлист"
 
 #. Create a new playlist (enter a name, Enter confirms).
 #: src/ui/app_playlist.rs:532
 msgid "New playlist"
-msgstr "Neue Playlist"
+msgstr "Новый плейлист"
 
 #: src/ui/app_playlist.rs:533
 msgid "Name"
-msgstr "Name"
+msgstr "Название"
 
 #: src/ui/app_playlist.rs:551
 msgid "Existing"
-msgstr "Bestehende"
+msgstr "Существующие"
 
 #: src/ui/app_playlist.rs:595
 msgid "Rename playlist"
-msgstr "Playlist umbenennen"
+msgstr "Переименовать плейлист"
 
 #: src/ui/app_playlist.rs:635
 msgid "Added {n} to the playlist"
-msgstr "{n} zur Playlist hinzugefügt"
+msgstr "В плейлист добавлено: {n}"
 
-# --- Podcast-Zeitabschnitte („Neuste"-Liste) ---
 #: src/ui/app_podcast.rs:191
 msgid "Today"
-msgstr "Heute"
+msgstr "Сегодня"
 
 #: src/ui/app_podcast.rs:192
 msgid "Yesterday"
-msgstr "Gestern"
+msgstr "Вчера"
 
 #: src/ui/app_podcast.rs:193
 msgid "This week"
-msgstr "Diese Woche"
+msgstr "На этой неделе"
 
 #: src/ui/app_podcast.rs:194
 msgid "This month"
-msgstr "Diesen Monat"
+msgstr "В этом месяце"
 
 #: src/ui/app_podcast.rs:328
 msgid "Podcast"
-msgstr "Podcast"
+msgstr "Подкаст"
 
 #: src/ui/app_podcast.rs:375
 msgid "Published"
-msgstr "Veröffentlicht"
+msgstr "Опубликовано"
 
-#: src/ui/app_podcast.rs:378 src/ui/app_youtube.rs:869
-#: src/ui/app_views.rs:2360
+#: src/ui/app_podcast.rs:378 src/ui/app_youtube.rs:869 src/ui/app_views.rs:2360
 msgid "Duration"
-msgstr "Dauer"
+msgstr "Длительность"
 
 #: src/ui/app_podcast.rs:384 src/ui/app_dialogs.rs:216
 #: src/ui/app_dialogs.rs:1127
 msgid "Download"
-msgstr "Herunterladen"
+msgstr "Загрузить"
 
 #: src/ui/app_podcast.rs:463
 msgid "Shownotes"
-msgstr "Shownotes"
+msgstr "Заметки к выпуску"
 
 #: src/ui/app_podcast.rs:498
 msgid "{n} episode"
 msgid_plural "{n} episodes"
-msgstr[0] "{n} Episode"
-msgstr[1] "{n} Episoden"
+msgstr[0] "{n} выпуск"
+msgstr[1] "{n} выпуска"
+msgstr[2] "{n} выпусков"
 
 #: src/ui/app_podcast.rs:508
 msgid "Open episodes"
-msgstr "Episoden öffnen"
+msgstr "Открыть выпуски"
 
 #: src/ui/app_podcast.rs:517
 msgid "Refresh feed"
-msgstr "Feed aktualisieren"
+msgstr "Обновить ленту"
 
 #: src/ui/app_podcast.rs:526
 msgid "Remove podcast"
-msgstr "Podcast entfernen"
+msgstr "Удалить подкаст"
 
 #: src/ui/app_podcast.rs:533
 msgid "Remove this podcast?"
-msgstr "Diesen Podcast entfernen?"
+msgstr "Удалить этот подкаст?"
 
 #: src/ui/app_podcast.rs:534 src/ui/app_streaming.rs:245
 #: src/ui/app_youtube.rs:792 src/ui/app_favorites.rs:173
 #: src/ui/app_favorites.rs:182 src/ui/app_dialogs.rs:425
 msgid "Remove"
-msgstr "Entfernen"
+msgstr "Удалить"
 
 #: src/ui/app_podcast.rs:624
 msgid "Podcast – {title}"
-msgstr "Podcast – {title}"
+msgstr "Подкаст — {title}"
 
 #: src/ui/app_podcast.rs:647
 msgid "Find a podcast by name"
-msgstr "Podcast nach Namen finden"
+msgstr "Найти подкаст по названию"
 
 #: src/ui/app_podcast.rs:654
 msgid "Podcast name …"
-msgstr "Podcast-Name …"
+msgstr "Название подкаста …"
 
 #: src/ui/app_podcast.rs:696
 msgid "Or enter feed address"
-msgstr "Oder Feed-Adresse eingeben"
+msgstr "Или введите адрес ленты"
 
 #: src/ui/app_podcast.rs:699
 msgid "Feed address (RSS)"
-msgstr "Feed-Adresse (RSS)"
+msgstr "Адрес ленты (RSS)"
 
 #: src/ui/app_podcast.rs:745
 msgid "No podcasts found"
-msgstr "Keine Podcasts gefunden"
+msgstr "Подкасты не найдены"
 
 #: src/ui/app_podcast.rs:850
 msgid "Remove download"
-msgstr "Download entfernen"
+msgstr "Удалить загрузку"
 
 #: src/ui/app_podcast.rs:852
 msgid "For offline listening"
-msgstr "Für Offline-Wiedergabe"
+msgstr "Для прослушивания офлайн"
 
 #: src/ui/app_queue.rs:56
 msgid "Clear queue"
-msgstr "Warteschlange leeren"
+msgstr "Очистить очередь"
 
 #: src/ui/app_queue.rs:65
 msgid "Clear queue?"
-msgstr "Warteschlange leeren?"
+msgstr "Очистить очередь?"
 
 #: src/ui/app_queue.rs:66
 msgid "All tracks will be removed from the queue."
-msgstr "Alle Titel werden aus der Warteschlange entfernt."
+msgstr "Все треки будут удалены из очереди."
 
 #: src/ui/app_queue.rs:69
 msgid "Clear"
-msgstr "Leeren"
+msgstr "Очистить"
 
 #: src/ui/app_queue.rs:101
 msgid "The queue is empty"
-msgstr "Die Warteschlange ist leer"
+msgstr "Очередь пуста"
 
 #: src/ui/app_queue.rs:194
 msgid "Various artists"
-msgstr "Verschiedene Künstler"
+msgstr "Разные исполнители"
 
 #: src/ui/app_queue.rs:197 src/ui/app_queue.rs:231
 msgid "Now playing"
-msgstr "Läuft gerade"
+msgstr "Сейчас играет"
 
 #: src/ui/app_queue.rs:237 src/ui/app_favorites.rs:232
 #: src/ui/app_dialogs.rs:1266
 msgid "Drag to reorder"
-msgstr "Zum Umsortieren ziehen"
+msgstr "Перетащите для изменения порядка"
 
 #: src/ui/app_streaming.rs:231
 msgid "Replay (buffer)"
-msgstr "Wiedergabe (Puffer)"
+msgstr "Воспроизвести снова (буфер)"
 
 #: src/ui/app_streaming.rs:236
 msgid "Remove station"
-msgstr "Sender entfernen"
+msgstr "Удалить станцию"
 
 #: src/ui/app_streaming.rs:244
 msgid "Remove this station?"
-msgstr "Diesen Sender entfernen?"
+msgstr "Удалить эту станцию?"
 
 #: src/ui/app_streaming.rs:290
 msgid "Find a station worldwide by name"
-msgstr "Sender weltweit nach Namen finden"
+msgstr "Найти станцию по всему миру по названию"
 
 #: src/ui/app_streaming.rs:297
 msgid "Station name …"
-msgstr "Sendername …"
+msgstr "Название станции …"
 
 #: src/ui/app_streaming.rs:337
 msgid "Or enter a stream address"
-msgstr "Oder Stream-Adresse eingeben"
+msgstr "Или введите адрес потока"
 
 #: src/ui/app_streaming.rs:340
 msgid "Stream address (URL)"
-msgstr "Stream-Adresse (URL)"
+msgstr "Адрес потока (URL)"
 
 #: src/ui/app_streaming.rs:383
 msgid "No stations found"
-msgstr "Keine Sender gefunden"
+msgstr "Станции не найдены"
 
 #: src/ui/app_streaming.rs:505
 msgid "Current recording"
-msgstr "Aktuelle Aufnahme"
+msgstr "Текущая запись"
 
 #: src/ui/app_streaming.rs:518 src/ui/app_streaming.rs:752
 msgid "Recording …"
-msgstr "Aufnahme läuft …"
+msgstr "Запись …"
 
 #: src/ui/app_streaming.rs:563 src/ui/app_streaming.rs:667
 msgid "Incomplete (beginning was missing)"
-msgstr "Unvollständig (Anfang fehlte)"
+msgstr "Неполная (начало отсутствовало)"
 
 #: src/ui/app_streaming.rs:568 src/ui/app_streaming.rs:692
 msgid "Delete"
-msgstr "Löschen"
+msgstr "Удалить"
 
 #: src/ui/app_streaming.rs:655 src/ui/app_favorites.rs:496
-#: src/ui/app_dialogs.rs:1364 src/ui/app_views.rs:1920
-#: src/ui/app_views.rs:1933 src/ui/app_views.rs:2309 src/ui/app_views.rs:2327
-#: src/ui/app_views.rs:2348 src/ui/app_views.rs:2397
+#: src/ui/app_dialogs.rs:1364 src/ui/app_views.rs:1920 src/ui/app_views.rs:1933
+#: src/ui/app_views.rs:2309 src/ui/app_views.rs:2327 src/ui/app_views.rs:2348
+#: src/ui/app_views.rs:2397
 msgid "Artist"
-msgstr "Interpret"
+msgstr "Исполнитель"
 
 #: src/ui/app_streaming.rs:658 src/ui/app_favorites.rs:149
 #: src/ui/app_favorites.rs:495 src/ui/app_dialogs.rs:1363
 #: src/ui/app_views.rs:1935 src/ui/app_views.rs:2311 src/ui/app_views.rs:2354
 msgid "Album"
-msgstr "Album"
+msgstr "Альбом"
 
 #: src/ui/app_streaming.rs:661
 msgid "Station"
-msgstr "Sender"
+msgstr "Станция"
 
 #: src/ui/app_streaming.rs:663
 msgid "Recorded"
-msgstr "Aufgenommen"
+msgstr "Записано"
 
 #: src/ui/app_streaming.rs:666
 msgid "Note"
-msgstr "Hinweis"
+msgstr "Заметка"
 
 #: src/ui/app_streaming.rs:683
 msgid "Delete recording"
-msgstr "Aufnahme löschen"
+msgstr "Удалить запись"
 
 #: src/ui/app_streaming.rs:691
 msgid "Delete this recording?"
-msgstr "Diese Aufnahme löschen?"
+msgstr "Удалить эту запись?"
 
 #: src/ui/app_streaming.rs:721
 msgid "Added: {n}"
-msgstr "Hinzugefügt: {n}"
+msgstr "Добавлено: {n}"
 
 #: src/ui/app_streaming.rs:812
 msgid "Recording stopped (stream ended)"
-msgstr "Aufnahme gestoppt (Stream endete)"
+msgstr "Запись остановлена (поток завершился)"
 
 #: src/ui/app_streaming.rs:905
 msgid "Recording"
-msgstr "Aufnahme"
+msgstr "Запись"
 
 #: src/ui/app_streaming.rs:1019
 msgid "Recently detected"
-msgstr "Kürzlich erkannt"
+msgstr "Недавно обнаружено"
 
 #: src/ui/app_streaming.rs:1024
 msgid "Nothing buffered yet"
-msgstr "Noch nichts gepuffert"
+msgstr "Пока ничего нет в буфере"
 
 #: src/ui/app_streaming.rs:1034
 msgid "Beginning missing"
-msgstr "Anfang fehlt"
+msgstr "Отсутствует начало"
 
 #: src/ui/app_streaming.rs:1039 src/ui/cloud_page.rs:219
 msgid "Save"
-msgstr "Speichern"
+msgstr "Сохранить"
 
 #: src/ui/app_streaming.rs:1072
 msgid "Replay – {name}"
-msgstr "Wiedergabe – {name}"
+msgstr "Воспроизвести снова — {name}"
 
 #: src/ui/app_youtube.rs:411
 msgid "Playlist · {n}"
-msgstr "Playlist · {n}"
+msgstr "Плейлист · {n}"
 
 #: src/ui/app_youtube.rs:428 src/ui/app_youtube.rs:994
 msgid "Start Playlist"
-msgstr "Playlist starten"
+msgstr "Запустить плейлист"
 
 #: src/ui/app_youtube.rs:499
 msgid "Download yt-dlp in the settings first"
-msgstr "Lade zuerst yt-dlp in den Einstellungen herunter"
+msgstr "Сначала загрузите yt-dlp в настройках"
 
 #: src/ui/app_youtube.rs:514
 msgid "Videos"
-msgstr "Videos"
+msgstr "Видео"
 
 #: src/ui/app_youtube.rs:516
 msgid "Channels"
-msgstr "Kanäle"
+msgstr "Каналы"
 
 #: src/ui/app_youtube.rs:541
 msgid "Search term …"
-msgstr "Suchbegriff …"
+msgstr "Поисковый запрос …"
 
 #: src/ui/app_youtube.rs:595
 msgid "Nothing found"
-msgstr "Nichts gefunden"
+msgstr "Ничего не найдено"
 
 #: src/ui/app_youtube.rs:606
 msgid "Video"
-msgstr "Video"
+msgstr "Видео"
 
 #: src/ui/app_youtube.rs:607 src/ui/app_youtube.rs:989
 msgid "Playlist"
-msgstr "Playlist"
+msgstr "Плейлист"
 
 #: src/ui/app_youtube.rs:608 src/ui/app_youtube.rs:864
 msgid "Channel"
-msgstr "Kanal"
+msgstr "Канал"
 
 #: src/ui/app_youtube.rs:683 src/ui/app_youtube.rs:1083
 #: src/ui/app_youtube.rs:1453
 msgid "No videos"
-msgstr "Keine Videos"
+msgstr "Нет видео"
 
 #: src/ui/app_youtube.rs:721
 msgid "Channel – {title}"
-msgstr "Kanal – {title}"
+msgstr "Канал — {title}"
 
 #: src/ui/app_youtube.rs:750
 msgid "{n} video"
 msgid_plural "{n} videos"
-msgstr[0] "{n} Video"
-msgstr[1] "{n} Videos"
+msgstr[0] "{n} видео"
+msgstr[1] "{n} видео"
+msgstr[2] "{n} видео"
 
 #: src/ui/app_youtube.rs:767
 msgid "Refresh"
-msgstr "Aktualisieren"
+msgstr "Обновить"
 
 #: src/ui/app_youtube.rs:779
 msgid "Notify of newest publications"
-msgstr "Über neueste Veröffentlichungen benachrichtigen"
+msgstr "Уведомлять о новейших публикациях"
 
 #. Remote file: only the (possibly fetched) display values.
 #: src/ui/app_youtube.rs:858 src/ui/app_views.rs:2341 src/ui/app_views.rs:2395
 msgid "Title"
-msgstr "Titel"
+msgstr "Название"
 
 #: src/ui/app_youtube.rs:891 src/ui/app_youtube.rs:1014
 #: src/ui/app_youtube.rs:1243
 msgid "Add to library"
-msgstr "Zur Bibliothek hinzufügen"
+msgstr "Добавить в библиотеку"
 
 #: src/ui/app_youtube.rs:900 src/ui/app_dialogs.rs:264
 msgid "Equalizer settings"
-msgstr "Equalizer-Einstellungen"
+msgstr "Настройки эквалайзера"
 
 #: src/ui/app_youtube.rs:916 src/ui/app_youtube.rs:1026
 msgid "Remove from recent"
-msgstr "Aus „Zuletzt“ entfernen"
+msgstr "Удалить из недавних"
 
 #: src/ui/app_youtube.rs:1004
 msgid "Add to Playlists"
-msgstr "Zu Playlists hinzufügen"
+msgstr "Добавить в плейлисты"
 
 #: src/ui/app_youtube.rs:1051
 msgid "Loading “{title}” …"
-msgstr "„{title}“ wird geladen …"
+msgstr "Загрузка «{title}» …"
 
 #: src/ui/app_youtube.rs:1157
 msgid "Playlist – {title}"
-msgstr "Playlist – {title}"
+msgstr "Плейлист — {title}"
 
 #: src/ui/app_youtube.rs:1241
 msgid "Adding to library …"
-msgstr "Wird zur Bibliothek hinzugefügt …"
+msgstr "Добавление в библиотеку …"
 
 #: src/ui/app_youtube.rs:1359 src/ui/app_youtube.rs:1395
 msgid "Set a music folder in settings first"
-msgstr "Lege zuerst einen Musikordner in den Einstellungen fest"
+msgstr "Сначала задайте папку с музыкой в настройках"
 
 #: src/ui/app_youtube.rs:1364
 msgid "Adding “{title}” to library …"
-msgstr "„{title}“ wird zur Bibliothek hinzugefügt …"
+msgstr "Добавление «{title}» в библиотеку …"
 
 #: src/ui/app_youtube.rs:1398
 msgid "Adding playlist “{title}” to library …"
-msgstr "Playlist „{title}“ wird zur Bibliothek hinzugefügt …"
+msgstr "Добавление плейлиста «{title}» в библиотеку …"
 
 #: src/ui/app_youtube.rs:1431
 msgid "Saving “{title}” to Playlists …"
-msgstr "„{title}“ wird zu den Playlists gespeichert …"
+msgstr "Сохранение «{title}» в плейлисты …"
 
 #: src/ui/app_youtube.rs:1477
 msgid "Could not play video"
-msgstr "Video konnte nicht abgespielt werden"
+msgstr "Не удалось воспроизвести видео"
 
 #: src/ui/app_youtube.rs:1490
 msgid "Updating yt-dlp …"
-msgstr "yt-dlp wird aktualisiert …"
+msgstr "Обновление yt-dlp …"
 
 #: src/ui/app_youtube.rs:1492
 msgid "Downloading yt-dlp …"
-msgstr "yt-dlp wird heruntergeladen …"
+msgstr "Загрузка yt-dlp …"
 
 #: src/ui/app_youtube.rs:1514
 msgid "Working …"
-msgstr "Läuft …"
+msgstr "Выполняется …"
 
 #: src/ui/app_youtube.rs:1517 src/ui/app_dialogs.rs:1120
 msgid "Installed (version {v})"
-msgstr "Installiert (Version {v})"
+msgstr "Установлено (версия {v})"
 
 #: src/ui/app_youtube.rs:1518 src/ui/app_dialogs.rs:1121
 msgid "Not installed"
-msgstr "Nicht installiert"
+msgstr "Не установлено"
 
 #: src/ui/app_youtube.rs:1539
 msgid "Download yt-dlp in the settings to use YouTube"
-msgstr "Lade yt-dlp in den Einstellungen herunter, um YouTube zu nutzen"
+msgstr "Загрузите yt-dlp в настройках, чтобы использовать YouTube"
 
 #: src/ui/app_concert.rs:76
 msgid "Select all"
-msgstr "Alle auswählen"
+msgstr "Выбрать всё"
 
 #: src/ui/app_concert.rs:85
 msgid "{n} candidate"
 msgid_plural "{n} candidates"
-msgstr[0] "{n} Kandidat"
-msgstr[1] "{n} Kandidaten"
+msgstr[0] "{n} кандидат"
+msgstr[1] "{n} кандидата"
+msgstr[2] "{n} кандидатов"
 
 #: src/ui/app_concert.rs:114
 msgid "Add"
-msgstr "Hinzufügen"
+msgstr "Добавить"
 
 #: src/ui/app_favorites.rs:181
 msgid "Remove this entry?"
-msgstr "Diesen Eintrag entfernen?"
+msgstr "Удалить эту запись?"
 
 #: src/ui/app_favorites.rs:497 src/ui/app_dialogs.rs:1365
 msgid "Folder"
-msgstr "Ordner"
+msgstr "Папка"
 
 #: src/ui/app_favorites.rs:498 src/ui/app_dialogs.rs:1366
 msgid "Track"
-msgstr "Titel"
+msgstr "Трек"
 
 #: src/ui/app_eq.rs:60
 msgid "Equalizer is not available here"
-msgstr "Equalizer ist hier nicht verfügbar"
+msgstr "Эквалайзер здесь недоступен"
 
 #: src/ui/app_eq.rs:100
 msgid "Default (all outputs)"
-msgstr "Standard (alle Ausgänge)"
+msgstr "По умолчанию (все выходы)"
 
 #: src/ui/app_eq.rs:127 src/ui/app_dialogs.rs:771
 msgid "Equalizer"
-msgstr "Equalizer"
+msgstr "Эквалайзер"
 
 #: src/ui/app_eq.rs:155
 msgid "Settings for {subject}"
-msgstr "Einstellungen für {subject}"
+msgstr "Настройки для {subject}"
 
 #: src/ui/app_eq.rs:191
 msgid "Output"
-msgstr "Ausgang"
+msgstr "Выход"
 
 #: src/ui/app_eq.rs:192
 msgid "Device / Bluetooth"
-msgstr "Gerät / Bluetooth"
+msgstr "Устройство / Bluetooth"
 
 #: src/ui/app_eq.rs:284
 msgid "Reset"
-msgstr "Zurücksetzen"
+msgstr "Сбросить"
 
 #: src/ui/app_eq.rs:305 src/ui/app_eq.rs:326 src/ui/app_eq.rs:346
 #: src/ui/app_eq.rs:368
 msgid "Turn off"
-msgstr "Ausschalten"
+msgstr "Выключить"
 
 #: src/ui/app_eq.rs:328 src/ui/app_eq.rs:348 src/ui/app_eq.rs:368
 msgid "Turn on"
-msgstr "Einschalten"
+msgstr "Включить"
 
 #: src/ui/app_dialogs.rs:17
+#, fuzzy
 msgid "Search the library"
-msgstr "Bibliothek durchsuchen"
+msgstr "Добавить в библиотеку"
 
 #: src/ui/app_dialogs.rs:18
 msgid "Find by artist, album, song or date."
-msgstr "Nach Interpret, Album, Lied oder Datum suchen."
+msgstr ""
 
 #: src/ui/app_dialogs.rs:73
 msgid "Lyrics"
-msgstr "Liedtext"
+msgstr "Текст песни"
 
 #: src/ui/app_dialogs.rs:93
 msgid "Info"
-msgstr "Infos"
+msgstr "Сведения"
 
 #: src/ui/app_dialogs.rs:162 src/ui/app_views.rs:1024
 msgid "Play album"
-msgstr "Album abspielen"
+msgstr "Воспроизвести альбом"
 
 #: src/ui/app_dialogs.rs:163
 msgid "Play artist"
-msgstr "Interpreten abspielen"
+msgstr "Воспроизвести исполнителя"
 
 #. Album order selectable, on the same line as the action.
 #: src/ui/app_dialogs.rs:172
 msgid "Oldest first"
-msgstr "Älteste zuerst"
+msgstr "Сначала старые"
 
 #. Album order selectable, on the same line as the action.
 #: src/ui/app_dialogs.rs:172
 msgid "Newest first"
-msgstr "Neueste zuerst"
+msgstr "Сначала новые"
 
 #: src/ui/app_dialogs.rs:174
 msgid "Album order"
-msgstr "Reihenfolge der Alben"
+msgstr "Порядок альбомов"
 
 #: src/ui/app_dialogs.rs:235
 msgid "Remove from favorites"
-msgstr "Aus Favoriten entfernen"
+msgstr "Удалить из избранного"
 
 #: src/ui/app_dialogs.rs:237
 msgid "Add to favorites"
-msgstr "Zu Favoriten"
+msgstr "Добавить в избранное"
 
 #: src/ui/app_dialogs.rs:255
 msgid "Add to queue"
-msgstr "Zur Queue hinzufügen"
+msgstr "Добавить в очередь"
 
 #: src/ui/app_dialogs.rs:333
 msgid "Connect to another device to sync content."
-msgstr "Mit einem anderen Gerät verbinden, um Inhalte zu synchronisieren."
+msgstr "Подключитесь к другому устройству для синхронизации содержимого."
 
 #: src/ui/app_dialogs.rs:338 src/ui/sync_page.rs:239 src/ui/sync_page.rs:346
 msgid "Offer connection"
-msgstr "Verbindung anbieten"
+msgstr "Предложить подключение"
 
 #: src/ui/app_dialogs.rs:339
 msgid "Start the service and wait for another device"
-msgstr "Dienst starten und auf ein anderes Gerät warten"
+msgstr "Запустить службу и ждать другое устройство"
 
 #: src/ui/app_dialogs.rs:344 src/ui/sync_page.rs:245 src/ui/sync_page.rs:423
 msgid "Scan QR code"
-msgstr "QR-Code einlesen"
+msgstr "Сканировать QR-код"
 
 #: src/ui/app_dialogs.rs:345
 msgid "Scan another device's code"
-msgstr "Den Code eines anderen Geräts scannen"
+msgstr "Сканировать код другого устройства"
 
 #: src/ui/app_dialogs.rs:402
 msgid "No additional sources"
-msgstr "Keine weiteren Quellen"
+msgstr "Нет дополнительных источников"
 
 #: src/ui/app_dialogs.rs:463
 msgid "Artist, album, song, date …"
-msgstr "Interpret, Album, Lied, Datum …"
+msgstr ""
 
 #: src/ui/app_dialogs.rs:511
 msgid "No results"
-msgstr "Keine Ergebnisse"
+msgstr ""
 
 #: src/ui/app_dialogs.rs:616
 msgid "Library"
-msgstr "Bibliothek"
+msgstr "Библиотека"
 
 #: src/ui/app_dialogs.rs:620
 msgid "Music folder"
-msgstr "Musikordner"
+msgstr "Папка с музыкой"
 
 #: src/ui/app_dialogs.rs:621
 msgid "Folder for the file system view"
-msgstr "Ordner für die Dateisystem-Ansicht"
+msgstr "Папка для просмотра файловой системы"
 
 #: src/ui/app_dialogs.rs:624
 msgid "Not set"
-msgstr "Nicht festgelegt"
+msgstr "Не задано"
 
 #: src/ui/app_dialogs.rs:634 src/ui/app_dialogs.rs:698
 msgid "Choose folder"
-msgstr "Ordner wählen"
+msgstr "Выбрать папку"
 
 #: src/ui/app_dialogs.rs:645
 msgid "Choose music folder"
-msgstr "Musikordner wählen"
+msgstr "Выбрать папку с музыкой"
 
 #: src/ui/app_dialogs.rs:672
 msgid "Other sources"
-msgstr "Weitere Quellen"
+msgstr "Другие источники"
 
 #: src/ui/app_dialogs.rs:673
 msgid "Shown as tabs in the file view"
-msgstr "Wird als Tabs in der Dateiansicht angezeigt"
+msgstr "Отображаются как вкладки в просмотре файлов"
 
 #: src/ui/app_dialogs.rs:690
 msgid "Add local folder"
-msgstr "Lokalen Ordner hinzufügen"
+msgstr "Добавить локальную папку"
 
 #: src/ui/app_dialogs.rs:741
 msgid "Nextcloud"
@@ -1204,53 +1207,54 @@ msgstr "Nextcloud"
 #: src/ui/app_dialogs.rs:743
 msgid "Connect a Nextcloud and index its music folder like a local library."
 msgstr ""
-"Verbinde eine Nextcloud und indiziere ihren Musikordner wie eine lokale "
-"Bibliothek."
+"Подключите Nextcloud и проиндексируйте его папку с музыкой как локальную "
+"библиотеку."
 
 #: src/ui/app_dialogs.rs:747 src/ui/cloud_page.rs:130
 msgid "Connect to Nextcloud"
-msgstr "Mit Nextcloud verbinden"
+msgstr "Подключиться к Nextcloud"
 
 #: src/ui/app_dialogs.rs:748
 msgid "Scan the login QR code or enter the details manually."
-msgstr "Scanne den Login-QR-Code oder gib die Daten manuell ein."
+msgstr "Отсканируйте QR-код входа или введите данные вручную."
 
 #: src/ui/app_dialogs.rs:766
 msgid "Sound"
-msgstr "Klang"
+msgstr "Звук"
 
 #: src/ui/app_dialogs.rs:773
 msgid ""
 "Global sound control. It applies everywhere unless a custom setting is set "
 "for an artist, an album or a track."
 msgstr ""
-"Globale Klangregelung. Sie gilt überall, sofern nicht für einen Interpreten,"
-" ein Album oder einen Titel eine eigene Einstellung gesetzt ist."
+"Глобальная регулировка звука. Применяется везде, если для исполнителя, "
+"альбома или трека не задана отдельная настройка."
 
 #: src/ui/app_dialogs.rs:778
 msgid "Global equalizer"
-msgstr "Globaler Equalizer"
+msgstr "Глобальный эквалайзер"
 
 #: src/ui/app_dialogs.rs:779
 msgid "Ten bands, per output"
-msgstr "Zehn Bänder, je Ausgang"
+msgstr "Десять полос, на выход"
 
 #: src/ui/app_dialogs.rs:800
 msgid "Read music data"
-msgstr "Musikdaten einlesen"
+msgstr "Читать музыкальные данные"
 
 #: src/ui/app_dialogs.rs:802
-msgid ""
-"Complete missing cover art, photos and tracks from open online sources."
-msgstr "Fehlende Cover, Fotos und Titel aus offenen Online-Quellen ergänzen."
+msgid "Complete missing cover art, photos and tracks from open online sources."
+msgstr ""
+"Дополняйте недостающие обложки, фото и треки из открытых интернет-источников."
 
 #: src/ui/app_dialogs.rs:806
 msgid "Fetch automatically"
-msgstr "Automatisch abrufen"
+msgstr "Получать автоматически"
 
 #: src/ui/app_dialogs.rs:808
 msgid "Loads missing data in the background at startup – on any connection."
-msgstr "Lädt fehlende Daten beim Start im Hintergrund – auf jeder Verbindung."
+msgstr ""
+"Загружает недостающие данные в фоне при запуске, при любом подключении."
 
 #: src/ui/app_dialogs.rs:823
 msgid "AcoustID"
@@ -1258,15 +1262,15 @@ msgstr "AcoustID"
 
 #: src/ui/app_dialogs.rs:825
 msgid ""
-"Optional key for fingerprint-based track detection (free at "
-"acoustid.org/new-application)."
+"Optional key for fingerprint-based track detection (free at acoustid.org/new-"
+"application)."
 msgstr ""
-"Optionaler Key für die Fingerprint-basierte Titel-Erkennung (kostenlos unter"
-" acoustid.org/new-application)."
+"Необязательный ключ для распознавания треков по отпечатку (бесплатно на "
+"acoustid.org/new-application)."
 
 #: src/ui/app_dialogs.rs:828
 msgid "AcoustID API key"
-msgstr "AcoustID API-Key"
+msgstr "Ключ API AcoustID"
 
 #: src/ui/app_dialogs.rs:843
 msgid "fanart.tv"
@@ -1274,675 +1278,460 @@ msgstr "fanart.tv"
 
 #: src/ui/app_dialogs.rs:844
 msgid "Optional key for showing several artist photos."
-msgstr "Optionaler Key, um mehrere Künstlerfotos anzuzeigen."
+msgstr "Необязательный ключ для показа нескольких фото исполнителя."
 
 #: src/ui/app_dialogs.rs:847
 msgid "fanart.tv API key"
-msgstr "fanart.tv API-Key"
+msgstr "Ключ API fanart.tv"
 
 #: src/ui/app_dialogs.rs:868
 msgid "View"
-msgstr "Ansicht"
+msgstr "Вид"
 
 #: src/ui/app_dialogs.rs:874
 msgid "Language"
-msgstr "Sprache"
+msgstr "Язык"
 
 #: src/ui/app_dialogs.rs:884
 msgid "System default"
-msgstr "Systemstandard"
+msgstr "Язык системы"
 
 #: src/ui/app_dialogs.rs:891
 msgid "Display language"
-msgstr "Anzeigesprache"
+msgstr "Язык интерфейса"
 
 #: src/ui/app_dialogs.rs:892
 msgid "Takes effect after a restart"
-msgstr "Wird nach einem Neustart wirksam"
+msgstr "Вступает в силу после перезапуска"
 
 #: src/ui/app_dialogs.rs:914
 msgid "Appearance"
-msgstr "Erscheinungsbild"
+msgstr "Внешний вид"
 
 #: src/ui/app_dialogs.rs:917
 msgid "Automatic"
-msgstr "Automatisch"
+msgstr "Автоматически"
 
 #: src/ui/app_dialogs.rs:917
 msgid "Dark"
-msgstr "Dunkel"
+msgstr "Тёмная"
 
 #: src/ui/app_dialogs.rs:917
 msgid "Light"
-msgstr "Hell"
+msgstr "Светлая"
 
 #: src/ui/app_dialogs.rs:920
 msgid "Theme"
-msgstr "Farbschema"
+msgstr "Тема"
 
 #: src/ui/app_dialogs.rs:945
 msgid "List display"
-msgstr "Listendarstellung"
+msgstr "Отображение списком"
 
 #: src/ui/app_dialogs.rs:948
 msgid "Gallery view"
-msgstr "Galerie-Ansicht"
+msgstr "Вид галереи"
 
 #: src/ui/app_dialogs.rs:949
 msgid "Show lists as a grid of cover thumbnails"
-msgstr "Listen als Gitter aus Cover-Miniaturen anzeigen"
+msgstr "Показывать списки сеткой миниатюр обложек"
 
 #: src/ui/app_dialogs.rs:960
 msgid "Tiles per row"
-msgstr "Kacheln pro Reihe"
+msgstr "Плиток в ряду"
 
 #: src/ui/app_dialogs.rs:983
 msgid "Menu"
-msgstr "Menü"
+msgstr "Меню"
 
 #: src/ui/app_dialogs.rs:987
 msgid "Menu items"
-msgstr "Menüpunkte"
+msgstr "Пункты меню"
 
 #: src/ui/app_dialogs.rs:989
 msgid "Drag handle to reorder; the switch hides a menu item."
 msgstr ""
-"Zum Umsortieren am Griff ziehen; der Schalter blendet einen Menüpunkt aus."
+"Перетащите маркер для изменения порядка; переключатель скрывает пункт меню."
 
 #: src/ui/app_dialogs.rs:1006
 msgid "Cache"
-msgstr "Cache"
+msgstr "Кэш"
 
 #: src/ui/app_dialogs.rs:1012
 msgid "Timeshift buffer for recording the currently playing station."
-msgstr "Timeshift-Puffer zum Aufnehmen des aktuell laufenden Senders."
+msgstr "Буфер таймшифта для записи воспроизводимой станции."
 
 #: src/ui/app_dialogs.rs:1016
 msgid "Recording buffer (minutes)"
-msgstr "Aufnahme-Puffer (Minuten)"
+msgstr "Буфер записи (минуты)"
 
 #: src/ui/app_dialogs.rs:1018
 msgid ""
-"Keep the last minutes of a station so you can record a song after it played."
-" 0 turns it off."
+"Keep the last minutes of a station so you can record a song after it played. "
+"0 turns it off."
 msgstr ""
-"Behält die letzten Minuten eines Senders, damit du einen Titel auch nach dem"
-" Abspielen aufnehmen kannst. 0 schaltet es aus."
+"Сохраняет последние минуты станции, чтобы можно было записать песню после её "
+"проигрывания. 0 отключает."
 
 #: src/ui/app_dialogs.rs:1041 src/ui/app_views.rs:2033
 msgid "Hidden"
-msgstr "Ausgeblendet"
+msgstr "Скрытое"
 
 #: src/ui/app_dialogs.rs:1045
 msgid "Hidden content"
-msgstr "Ausgeblendete Inhalte"
+msgstr "Скрытое содержимое"
 
 #: src/ui/app_dialogs.rs:1047
 msgid ""
 "Artists, albums and tracks whose properties are visible nowhere – each the "
 "object that carries the setting. Use the eye to show them again."
 msgstr ""
-"Interpreten, Alben und Titel, deren Eigenschaften nirgends sichtbar sind – "
-"jeweils das Objekt, das die Festlegung trägt. Über das Auge wieder "
-"einblenden."
+"Исполнители, альбомы и треки, чьи свойства нигде не видны — каждый объект "
+"несёт эту настройку. Используйте глаз, чтобы показать их снова."
 
 #: src/ui/app_dialogs.rs:1054
 msgid "Nothing hidden"
-msgstr "Nichts ausgeblendet"
+msgstr "Ничего не скрыто"
 
 #: src/ui/app_dialogs.rs:1069
 msgid "Show again"
-msgstr "Wieder einblenden"
+msgstr "Показать снова"
 
 #: src/ui/app_dialogs.rs:1097
 msgid ""
-"Search and play YouTube, follow channels, add videos/playlists to your music"
-" or keep them offline. May be restricted in some countries."
+"Search and play YouTube, follow channels, add videos/playlists to your music "
+"or keep them offline. May be restricted in some countries."
 msgstr ""
-"YouTube durchsuchen und abspielen, Kanälen folgen, Videos/Playlists zur "
-"Musik hinzufügen oder offline behalten. Kann in manchen Ländern "
-"eingeschränkt sein."
+"Ищите и воспроизводите YouTube, следите за каналами, добавляйте видео/"
+"плейлисты в свою музыку или храните их офлайн. Может быть ограничено в "
+"некоторых странах."
 
 #: src/ui/app_dialogs.rs:1101
 msgid "Enable YouTube"
-msgstr "YouTube aktivieren"
+msgstr "Включить YouTube"
 
 #: src/ui/app_dialogs.rs:1102
 msgid "Adds a YouTube section. Requires downloading yt-dlp below."
-msgstr ""
-"Fügt einen YouTube-Bereich hinzu. Erfordert den yt-dlp-Download unten."
+msgstr "Добавляет раздел YouTube. Требует загрузки yt-dlp ниже."
 
 #: src/ui/app_dialogs.rs:1115
 msgid "Required tool – downloaded into the app data folder (not bundled)."
 msgstr ""
-"Benötigtes Werkzeug – wird in den App-Datenordner geladen (nicht "
-"mitgeliefert)."
+"Необходимый инструмент — загружается в папку данных приложения (не входит в "
+"комплект)."
 
 #: src/ui/app_dialogs.rs:1125
 msgid "Update"
-msgstr "Aktualisieren"
+msgstr "Обновить"
 
 #: src/ui/app_dialogs.rs:1185
 msgid "No custom image can be set here"
-msgstr "Hier lässt sich kein eigenes Bild setzen"
+msgstr "Здесь нельзя задать собственное изображение"
 
 #: src/ui/app_dialogs.rs:1191
 msgid "Images"
-msgstr "Bilder"
+msgstr "Изображения"
 
 #: src/ui/app_dialogs.rs:1193
 msgid "Choose a custom image"
-msgstr "Eigenes Bild auswählen"
+msgstr "Выбрать собственное изображение"
 
 #: src/ui/app_views.rs:365
 msgid "This source is not configured correctly"
-msgstr "Diese Quelle ist nicht korrekt eingerichtet"
+msgstr "Этот источник настроен неправильно"
 
 #: src/ui/app_views.rs:546
 msgid "No music folder set – please choose one in the settings"
-msgstr "Kein Musikordner festgelegt – bitte in den Einstellungen wählen"
+msgstr "Папка с музыкой не задана — выберите её в настройках"
 
 #: src/ui/app_views.rs:985
 msgid "No tracks"
-msgstr "Keine Titel"
+msgstr "Нет треков"
 
 #: src/ui/app_views.rs:986
 msgid "There are no songs for this artist in the library."
-msgstr "Für diesen Interpreten sind keine Lieder in der Bibliothek."
+msgstr "В библиотеке нет песен этого исполнителя."
 
 #: src/ui/app_views.rs:1074
 msgid "Singles"
-msgstr "Einzellieder"
+msgstr "Синглы"
 
 #: src/ui/app_views.rs:1927 src/ui/app_views.rs:1943 src/ui/app_views.rs:2335
 msgid "Collection"
-msgstr "Sammlung"
+msgstr "Коллекция"
 
 #: src/ui/app_views.rs:1938 src/ui/app_views.rs:2313 src/ui/app_views.rs:2357
 msgid "Genre"
-msgstr "Genre"
+msgstr "Жанр"
 
 #: src/ui/app_views.rs:1941 src/ui/app_views.rs:2322 src/ui/app_views.rs:2371
 msgid "Year"
-msgstr "Jahr"
+msgstr "Год"
 
 #: src/ui/app_views.rs:2026
 msgid "Properties"
-msgstr "Eigenschaften"
+msgstr "Свойства"
 
 #: src/ui/app_views.rs:2044
 msgid "Hide"
-msgstr "Ausblenden"
+msgstr "Скрыть"
 
 #: src/ui/app_views.rs:2168
 msgid "{n} album"
 msgid_plural "{n} albums"
-msgstr[0] "{n} Album"
-msgstr[1] "{n} Alben"
+msgstr[0] "{n} альбом"
+msgstr[1] "{n} альбома"
+msgstr[2] "{n} альбомов"
 
 #: src/ui/app_views.rs:2196
 msgid "Undo"
-msgstr "Rückgängig"
+msgstr "Отменить"
 
 #: src/ui/app_views.rs:2351
 msgid "Composer"
-msgstr "Komponist"
+msgstr "Композитор"
 
 #: src/ui/app_views.rs:2383
 msgid "Detected (title)"
-msgstr "Erkannt (Titel)"
+msgstr "Распознано (название)"
 
 #: src/ui/app_views.rs:2386
 msgid "Detected (artist)"
-msgstr "Erkannt (Interpret)"
+msgstr "Распознано (исполнитель)"
 
 #: src/ui/app_views.rs:2389
 msgid "Detected (album)"
-msgstr "Erkannt (Album)"
+msgstr "Распознано (альбом)"
 
 #: src/ui/cloud_page.rs:110
 msgid "Connection works"
-msgstr "Verbindung funktioniert"
+msgstr "Подключение работает"
 
 #: src/ui/cloud_page.rs:112
 msgid "Connection failed – check the details"
-msgstr "Verbindung fehlgeschlagen – Angaben prüfen"
+msgstr "Не удалось подключиться — проверьте данные"
 
 #: src/ui/cloud_page.rs:157
 msgid "Point the camera at the Nextcloud login QR code"
-msgstr "Richte die Kamera auf den Nextcloud-Login-QR-Code"
+msgstr "Наведите камеру на QR-код входа Nextcloud"
 
 #: src/ui/cloud_page.rs:167
 msgid "Enter the details manually"
-msgstr "Daten manuell eingeben"
+msgstr "Ввести данные вручную"
 
 #: src/ui/cloud_page.rs:169
 msgid "Server URL"
-msgstr "Server-URL"
+msgstr "URL сервера"
 
 #: src/ui/cloud_page.rs:170
 msgid "User name"
-msgstr "Benutzername"
+msgstr "Имя пользователя"
 
 #: src/ui/cloud_page.rs:172
 msgid "App password"
-msgstr "App-Passwort"
+msgstr "Пароль приложения"
 
 #: src/ui/cloud_page.rs:191
 msgid "Music folder to index"
-msgstr "Zu indizierender Musikordner"
+msgstr "Папка с музыкой для индексации"
 
 #: src/ui/cloud_page.rs:194
 msgid "Folder (e.g. /Music)"
-msgstr "Ordner (z. B. /Music)"
+msgstr "Папка (напр. /Music)"
 
 #: src/ui/cloud_page.rs:213
 msgid "Test connection"
-msgstr "Verbindung testen"
+msgstr "Проверить подключение"
 
 #: src/ui/cloud_page.rs:264
 msgid "Point the camera at the login QR code"
-msgstr "Kamera auf den Login-QR-Code richten"
+msgstr "Наведите камеру на QR-код входа"
 
 #: src/ui/cloud_page.rs:297
 msgid "Login data scanned – set the music path and save"
-msgstr "Zugangsdaten gescannt – Musikpfad angeben und speichern"
+msgstr "Данные входа отсканированы — задайте путь к музыке и сохраните"
 
 #: src/ui/cloud_page.rs:320 src/ui/cloud_page.rs:332
 msgid "Please fill in URL, user and app password"
-msgstr "Bitte URL, Benutzer und App-Passwort ausfüllen"
+msgstr "Заполните URL, пользователя и пароль приложения"
 
 #: src/ui/cloud_page.rs:323
 msgid "Testing …"
-msgstr "Test läuft …"
+msgstr "Проверка …"
 
 #: src/ui/cloud_page.rs:356
 msgid "Could not save this source"
-msgstr "Quelle konnte nicht gespeichert werden"
+msgstr "Не удалось сохранить этот источник"
 
 #: src/ui/stats_page.rs:33
 msgid "Last 4 weeks"
-msgstr "Letzte 4 Wochen"
+msgstr "Последние 4 недели"
 
 #: src/ui/stats_page.rs:34
 msgid "Last 12 months"
-msgstr "Letzte 12 Monate"
+msgstr "Последние 12 месяцев"
 
 #: src/ui/stats_page.rs:35
 msgid "All time"
-msgstr "Gesamt"
+msgstr "За всё время"
 
 #: src/ui/stats_page.rs:134
 msgid "No listening data yet"
-msgstr "Noch keine Hördaten"
+msgstr "Пока нет данных о прослушивании"
 
 #: src/ui/stats_page.rs:135
 msgid "Play some music — your listening statistics will appear here."
-msgstr "Spiele etwas Musik – deine Hörstatistik erscheint dann hier."
+msgstr "Послушайте музыку — здесь появится статистика прослушивания."
 
 #: src/ui/stats_page.rs:147
 msgid "Top artists"
-msgstr "Top-Interpreten"
+msgstr "Топ исполнителей"
 
 #: src/ui/stats_page.rs:151
 msgid "Top albums"
-msgstr "Top-Alben"
+msgstr "Топ альбомов"
 
 #: src/ui/stats_page.rs:155
 msgid "Top tracks"
-msgstr "Top-Titel"
+msgstr "Топ треков"
 
 #: src/ui/stats_page.rs:159
 msgid "Top genres"
-msgstr "Top-Genres"
+msgstr "Топ жанров"
 
 #: src/ui/stats_page.rs:208
 msgid "Listening time"
-msgstr "Hörzeit"
+msgstr "Время прослушивания"
 
 #: src/ui/stats_page.rs:209
 msgid "Plays"
-msgstr "Wiedergaben"
+msgstr "Прослушивания"
 
 #: src/ui/stats_page.rs:216
 msgid "Skip rate"
-msgstr "Übersprungen"
+msgstr "Доля пропусков"
 
 #: src/ui/stats_page.rs:222
 msgid "Variety"
-msgstr "Vielfalt"
+msgstr "Разнообразие"
 
 #: src/ui/stats_page.rs:225
 msgid "Tracks"
-msgstr "Titel"
+msgstr "Треки"
 
 #: src/ui/stats_page.rs:260
 msgid "{n} play"
 msgid_plural "{n} plays"
-msgstr[0] "{n} Wiedergabe"
-msgstr[1] "{n} Wiedergaben"
+msgstr[0] "{n} прослушивание"
+msgstr[1] "{n} прослушивания"
+msgstr[2] "{n} прослушиваний"
 
 #: src/ui/stats_page.rs:271
 msgid "By weekday"
-msgstr "Nach Wochentag"
+msgstr "По дням недели"
 
 #: src/ui/stats_page.rs:282
 msgid "Mon"
-msgstr "Mo"
+msgstr "Пн"
 
 #: src/ui/stats_page.rs:283
 msgid "Tue"
-msgstr "Di"
+msgstr "Вт"
 
 #: src/ui/stats_page.rs:284
 msgid "Wed"
-msgstr "Mi"
+msgstr "Ср"
 
 #: src/ui/stats_page.rs:285
 msgid "Thu"
-msgstr "Do"
+msgstr "Чт"
 
 #: src/ui/stats_page.rs:286
 msgid "Fri"
-msgstr "Fr"
+msgstr "Пт"
 
 #: src/ui/stats_page.rs:287
 msgid "Sat"
-msgstr "Sa"
+msgstr "Сб"
 
 #: src/ui/stats_page.rs:288
 msgid "Sun"
-msgstr "So"
+msgstr "Вс"
 
 #: src/ui/stats_page.rs:321
 msgid "By time of day"
-msgstr "Nach Tageszeit"
+msgstr "По времени суток"
 
 #: src/ui/stats_page.rs:372
 msgid "{h} h {m} min"
-msgstr "{h} Std. {m} Min."
+msgstr "{h} ч {m} мин"
 
 #: src/ui/stats_page.rs:374
 msgid "{m} min"
-msgstr "{m} Min."
+msgstr "{m} мин"
 
 #: src/ui/sync_page.rs:213
 msgid "Device sync"
-msgstr "Geräte-Synchronisierung"
+msgstr "Синхронизация устройств"
 
 #: src/ui/sync_page.rs:234
 msgid "Connect two devices on the same network."
-msgstr "Zwei Geräte im selben Netzwerk verbinden."
+msgstr "Соедините два устройства в одной сети."
 
 #: src/ui/sync_page.rs:240
 msgid "Start a server and show a QR code"
-msgstr "Server starten und einen QR-Code anzeigen"
+msgstr "Запустить сервер и показать QR-код"
 
 #: src/ui/sync_page.rs:246
 msgid "Point the camera at the other device's code"
-msgstr "Die Kamera auf den Code des anderen Geräts richten"
+msgstr "Наведите камеру на код другого устройства"
 
 #: src/ui/sync_page.rs:322
 msgid "Scan this code on the other device."
-msgstr "Diesen Code mit dem anderen Gerät scannen."
+msgstr "Отсканируйте этот код на другом устройстве."
 
 #: src/ui/sync_page.rs:400
 msgid "Point the camera at the QR code."
-msgstr "Die Kamera auf den QR-Code richten."
+msgstr "Наведите камеру на QR-код."
 
 #: src/ui/sync_page.rs:451
+#, fuzzy
 msgid "Camera unavailable: {err}"
-msgstr "Kamera nicht verfügbar: {err}"
+msgstr "Эквалайзер здесь недоступен"
 
 #: src/ui/sync_page.rs:471
 msgid "Connecting …"
-msgstr "Verbinde …"
+msgstr "Подключение …"
 
 #: src/ui/sync_page.rs:497
 msgid "Waiting for another device … ({addr})"
-msgstr "Warte auf ein anderes Gerät … ({addr})"
+msgstr "Ожидание другого устройства … ({addr})"
 
 #: src/ui/sync_page.rs:512
 msgid "Connected with {name}"
-msgstr "Verbunden mit {name}"
+msgstr "Подключено к {name}"
 
 #: src/ui/sync_page.rs:519
 msgid "Received {fav} favorites, {pl} playlists, {pod} podcasts."
-msgstr "{fav} Favoriten, {pl} Playlists, {pod} Podcasts empfangen."
+msgstr "Получено: избранного — {fav}, плейлистов — {pl}, подкастов — {pod}."
 
 #: src/ui/sync_page.rs:534
 msgid "Metadata synced. Transferring files …"
-msgstr "Metadaten abgeglichen. Übertrage Dateien …"
+msgstr "Метаданные синхронизированы. Передача файлов …"
 
 #: src/ui/sync_page.rs:551
+#, fuzzy
 msgid "{n} files transferred."
-msgstr "{n} Dateien übertragen."
+msgstr "Готово — передано файлов: {n}."
 
 #: src/ui/sync_page.rs:566
 msgid "Disconnected."
-msgstr "Verbindung getrennt."
+msgstr "Отключено."
 
 #: src/ui/sync_page.rs:665
 msgid "Sync successful"
-msgstr "Synchronisierung erfolgreich"
+msgstr ""
 
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
-msgstr "Heruntergeladen"
-
-#~ msgid "Playlist created"
-#~ msgstr "Playlist erstellt"
-
-#~ msgid "Checking for updates …"
-#~ msgstr "Suche nach Updates …"
-
-#~ msgid "Updates are only available in the Flatpak version."
-#~ msgstr "Updates sind nur in der Flatpak-Version verfügbar."
-
-#~ msgid ""
-#~ "Update started – it runs in the background. Please restart Emilia "
-#~ "afterwards."
-#~ msgstr ""
-#~ "Aktualisierung gestartet – sie läuft im Hintergrund. Bitte Emilia danach neu"
-#~ " starten."
-
-#~ msgid "Update installed. Please restart Emilia."
-#~ msgstr "Aktualisierung installiert. Bitte Emilia neu starten."
-
-#~ msgid "Update failed. You can update manually: {cmd}"
-#~ msgstr "Aktualisierung fehlgeschlagen. Manuell aktualisieren: {cmd}"
-
-#~ msgid "Emilia is up to date (version {v})."
-#~ msgstr "Emilia ist aktuell (Version {v})."
-
-#~ msgid "Could not check for updates (offline?)."
-#~ msgstr "Aktualisierung konnte nicht geprüft werden (offline?)."
-
-#~ msgid "Update available"
-#~ msgstr "Update verfügbar"
-
-#~ msgid "A newer version of Emilia is available. Install it now?"
-#~ msgstr "Eine neuere Version von Emilia ist verfügbar. Jetzt installieren?"
-
-#, fuzzy
-#~ msgid "No Nextcloud connected"
-#~ msgstr "Nextcloud hinzugefügt"
-
-#~ msgid "Connected"
-#~ msgstr "Verbunden"
-
-#~ msgid "App update"
-#~ msgstr "App-Aktualisierung"
-
-#~ msgid ""
-#~ "Emilia is installed as a Flatpak – check for a newer version and update "
-#~ "directly."
-#~ msgstr ""
-#~ "Emilia ist als Flatpak installiert – auf eine neuere Version prüfen und "
-#~ "direkt aktualisieren."
-
-# --- Selbst-Aktualisierung (Flatpak) ---
-#~ msgid "Check for updates"
-#~ msgstr "Auf Updates prüfen"
-
-#, fuzzy
-#~ msgid "Cache & recordings"
-#~ msgstr "Keine Aufnahmen"
-
-#~ msgid "Delete this playlist?"
-#~ msgstr "Diese Playlist löschen?"
-
-#~ msgid "Remove from playlist"
-#~ msgstr "Aus Playlist entfernen"
-
-#~ msgid "Remove this track from the playlist?"
-#~ msgstr "Diesen Titel aus der Playlist entfernen?"
-
-#~ msgid "Playlist name"
-#~ msgstr "Name der Playlist"
-
-#~ msgid "Create"
-#~ msgstr "Erstellen"
-
-#~ msgid "Downloaded – tap to remove"
-#~ msgstr "Heruntergeladen – zum Entfernen tippen"
-
-#~ msgid "Download for offline listening"
-#~ msgstr "Für Offline-Wiedergabe herunterladen"
-
-#~ msgid "Removed from playlist"
-#~ msgstr "Aus Playlist entfernt"
-
-#~ msgid "Recording saved"
-#~ msgstr "Aufnahme gespeichert"
-
-#~ msgid "Could not save recording"
-#~ msgstr "Aufnahme konnte nicht gespeichert werden"
-
-#~ msgid "Stop"
-#~ msgstr "Stopp"
-
-#~ msgid "Stop recording"
-#~ msgstr "Aufnahme stoppen"
-
-#~ msgid ""
-#~ "The beginning of the current song is not in the buffer yet — the recording "
-#~ "would be incomplete. Record anyway?"
-#~ msgstr ""
-#~ "Der Anfang des aktuellen Titels ist noch nicht im Puffer — die Aufnahme wäre"
-#~ " unvollständig. Trotzdem aufnehmen?"
-
-#~ msgid "Record just the current song, or keep recording until you stop?"
-#~ msgstr ""
-#~ "Nur den aktuellen Titel aufnehmen oder weiter aufnehmen, bis du stoppst?"
-
-#~ msgid "This song"
-#~ msgstr "Dieser Titel"
-
-#~ msgid "Keep recording"
-#~ msgstr "Weiter aufnehmen"
-
-#~ msgid "Scan login QR code"
-#~ msgstr "Login-QR-Code scannen"
-
-#~ msgid "Online"
-#~ msgstr "Online"
-
-#~ msgid "Online detection"
-#~ msgstr "Online-Erkennung"
-
-#~ msgid "fanart.tv API key (optional, for multiple artist photos)"
-#~ msgstr "fanart.tv API-Key (optional, für mehrere Interpreten-Fotos)"
-
-#~ msgid "Camera preview unavailable – the code is still detected"
-#~ msgstr "Kamera-Vorschau nicht verfügbar – der Code wird trotzdem erkannt"
-
-#~ msgid "Sync complete"
-#~ msgstr "Synchronisierung abgeschlossen"
-
-#~ msgid "Start folder"
-#~ msgstr "Startordner"
-
-#~ msgid "Devices"
-#~ msgstr "Geräte"
-
-#~ msgid ""
-#~ "Transfer favorites, playlists, podcasts and music between two"
-#~ "                  devices on the same network."
-#~ msgstr ""
-#~ "Favoriten, Playlists, Podcasts und Musik zwischen zwei Geräten im selben "
-#~ "Netzwerk übertragen."
-
-#~ msgid "Create a server or scan another device's code"
-#~ msgstr "Server erstellen oder den Code eines anderen Geräts scannen"
-
-#~ msgid ""
-#~ "Drag handle to reorder; the switch hides a menu item. Both take effect "
-#~ "immediately in the navigation and the properties selection."
-#~ msgstr ""
-#~ "Ziehgriff zum Umsortieren; der Schalter blendet einen Menüpunkt aus. Beides "
-#~ "wirkt sofort in der Navigation und der Eigenschaften-Auswahl."
-
-#~ msgid "Searching for cover & metadata …"
-#~ msgstr "Cover & Metadaten werden gesucht …"
-
-#~ msgid "Open podcast"
-#~ msgstr "Podcast öffnen"
-
-#~ msgid "Enter the feed address (RSS):"
-#~ msgstr "Feed-Adresse (RSS) eingeben:"
-
-#~ msgid "Cover"
-#~ msgstr "Cover"
-
-#~ msgid "Artist photos"
-#~ msgstr "Interpreten-Bilder"
-
-#~ msgid "Album art"
-#~ msgstr "Album-Bilder"
-
-#~ msgid "Cancel fetch"
-#~ msgstr "Abruf abbrechen"
-
-#~ msgid "Fetch cover & metadata online"
-#~ msgstr "Cover & Metadaten online abrufen"
-
-#~ msgid "Cancelling …"
-#~ msgstr "Wird abgebrochen …"
-
-#~ msgid "More info"
-#~ msgstr "Infos"
-
-#~ msgid "Connection service – coming soon"
-#~ msgstr "Verbindungsdienst – kommt bald"
-
-#~ msgid "Scan QR code – coming soon"
-#~ msgstr "QR-Code einlesen – kommt bald"
-
-# Dynamisch zusammengesetzte Strings (EQ-Subjekt/-Hinweis, Jahresspanne),
-# die xtr nicht automatisch findet – hier von Hand gepflegt.
-# 
-#~ msgid "Years"
-#~ msgstr "Jahre"
-
-#~ msgid "the artist"
-#~ msgstr "den Interpreten"
-
-#~ msgid "the album"
-#~ msgstr "das Album"
-
-#~ msgid "the track"
-#~ msgstr "den Titel"
-
-#~ msgid "the global equalizer"
-#~ msgstr "den globalen Equalizer"
-
-#~ msgid "Also applies to this artist's albums and tracks."
-#~ msgstr "Gilt auch für die Alben und Lieder dieses Interpreten."
-
-#~ msgid "Also applies to this album's tracks."
-#~ msgstr "Gilt auch für die Lieder dieses Albums."
-
-#~ msgid "Applies to everything without its own artist, album or track setting."
-#~ msgstr ""
-#~ "Gilt für alles ohne eigene Einstellung für Interpret, Album oder Titel."
+msgstr "Загружено"

@@ -8,7 +8,9 @@
 pub mod client;
 pub mod crypto;
 pub mod data;
+pub mod hash;
 pub mod protocol;
+pub mod share;
 pub mod qr;
 pub mod scanner;
 pub mod server;
@@ -16,6 +18,9 @@ pub mod server;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use crate::core::sync::protocol::Capabilities;
+use crate::core::sync::share::{ShareDecision, ShareManifest};
 
 /// Preferred TCP port of the sync server (falls back if taken).
 pub const PORT: u16 = 8765;
@@ -43,14 +48,24 @@ pub enum SyncEvent {
     },
     /// Server was stopped (timeout, stop or error after start).
     ServerStopped,
-    /// Another device paired successfully.
-    PeerPaired { peer_name: String },
+    /// Another device paired successfully (with its advertised capabilities).
+    PeerPaired {
+        peer_name: String,
+        peer_caps: Capabilities,
+    },
     /// Connection was dropped (by the peer or by timeout).
     PeerDisconnected,
     /// An incoming metadata import was applied (server side).
     ImportReceived { stats: ImportStats },
     /// Metadata was sent to the peer.
     ExportSent,
+    /// The peer offered a selective share → show the review screen (receiver).
+    ShareOffered { manifest: ShareManifest },
+    /// The peer responded to our offer with its decision (sender).
+    OfferAccepted { decision: ShareDecision },
+    /// Our selection was resolved to a manifest → show the size confirmation.
+    /// Carries the full manifest so the sender side can park/send it on confirm.
+    ManifestReady { manifest: ShareManifest },
     /// Progress of a file transfer.
     FileProgress { done: u64, total: u64, name: String },
     /// File transfer finished.

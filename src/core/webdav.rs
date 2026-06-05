@@ -532,20 +532,28 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
     Ok(n)
 }
 
-/// Downloads a file completely to `dest` (atomically via a `.part` file).
+/// Downloads a file completely to `dest` (atomically via a `.part` file). The
+/// transfer is capped at [`crate::core::net::MAX_DOWNLOAD_BYTES`] so a broken or
+/// hostile server cannot fill the disk.
 pub fn download(c: &Creds, rel: &str, dest: &Path) -> Result<()> {
+    use crate::core::net;
     let url = url_for(c, rel);
     let resp = agent()
         .get(&url)
         .set("Authorization", &auth_header(c))
         .call()
         .map_err(|e| anyhow!("Download failed: {e}"))?;
+    net::check_content_length(&resp, net::MAX_DOWNLOAD_BYTES)?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = dest.with_extension("part");
     let mut file = std::fs::File::create(&tmp)?;
-    std::io::copy(&mut resp.into_reader(), &mut file)?;
+    if let Err(e) = net::copy_capped(resp.into_reader(), &mut file, net::MAX_DOWNLOAD_BYTES) {
+        drop(file);
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     file.sync_all().ok();
     std::fs::rename(&tmp, dest)?;
     Ok(())

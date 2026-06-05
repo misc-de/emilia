@@ -70,11 +70,16 @@ uninstall:
 	done
 
 # Vorlage (.pot) aus den Quelltexten extrahieren (benötigt xgettext).
+# Strings extrahieren mit `xtr` (Rust-nativer gettext-Extraktor; `cargo install xtr`).
+# xtr folgt der crate-root (src/main.rs) durch alle `mod` – im Gegensatz zu
+# xgettext braucht es daher KEINE POTFILES.in und verschluckt keine Strings an
+# Rust-Apostrophen (xgettext --language=C interpretierte ' als Zeichenkonstante
+# und ließ ganze Dateien wie app_youtube.rs aus). --keywords ERSETZT die
+# Default-Keywords, deshalb müssen gettext/ngettext hier mit aufgeführt werden.
 pot:
-	xgettext --from-code=UTF-8 --language=C --keyword=gettext \
-		--keyword=ngettext:1,2 --keyword=gettext_f --keyword=ngettext_n:1,2 \
-		--add-comments=TRANSLATORS --files-from=po/POTFILES.in \
-		--package-name=Emilia -o po/emilia.pot
+	xtr --keywords=gettext --keywords=ngettext:1,2 --keywords=gettext_f \
+		--keywords=ngettext_n:1,2 --package-name=Emilia \
+		-o po/emilia.pot src/main.rs
 	@echo "po/emilia.pot aktualisiert. Kataloge angleichen: msgmerge -U po/de.po po/emilia.pot"
 
 # Entwicklung: Kataloge bauen und mit lokalem Katalogpfad starten.

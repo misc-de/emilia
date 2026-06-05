@@ -8,10 +8,28 @@ use relm4::{adw, gtk};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
 
+/// Content fingerprint of a cover file (length + first 64 KB), to de-duplicate
+/// visually identical covers that live under different paths (e.g. per-track
+/// embedded-art caches). Bounds the read so large folder images stay cheap.
+/// `None` if the file cannot be read.
+fn cover_content_hash(path: &str) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    use std::io::Read;
+    let f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let mut head = Vec::new();
+    f.take(64 * 1024).read_to_end(&mut head).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    len.hash(&mut hasher);
+    head.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
 impl App {
     /// Rebuilds the playlist list (name, track count, play, delete).
     pub(crate) fn reload_playlists(&mut self, sender: &ComponentSender<Self>) {
         self.playlists.playlist_items = self.library.playlists().unwrap_or_default();
+        let durations = self.library.playlist_durations_ms().unwrap_or_default();
 
         while let Some(child) = self.playlists.playlists_list.first_child() {
             self.playlists.playlists_list.remove(&child);
@@ -22,13 +40,31 @@ impl App {
                 .subtitle(ngettext_n("{n} track", "{n} tracks", count as u32))
                 .activatable(true)
                 .build();
+            // Cover flush to the far left.
+            row.add_css_class("emilia-flush");
             // Cover derived from the songs (chosen or first available), else the
             // generic playlist icon.
             let paths = self.library.playlist_paths(id).unwrap_or_default();
             let cover = self.playlist_display_cover(id, &paths);
             row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "view-list-symbolic"));
-            // Per-row play/delete buttons were intentionally removed – those
-            // actions live in the long-press detail view. Tapping a row opens it.
+            // Total runtime, then a play button on the far right (plays the whole
+            // playlist). A normal tap on the row still opens it; long press →
+            // detail view.
+            let total_ms = durations.get(&id).copied().unwrap_or(0);
+            if total_ms > 0 {
+                row.add_suffix(&crate::ui::app::duration_label(total_ms));
+            }
+            let play_btn = gtk::Button::builder()
+                .icon_name("media-playback-start-symbolic")
+                .tooltip_text(&gettext("Play playlist"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            {
+                let sender = sender.clone();
+                play_btn.connect_clicked(move |_| sender.input(Msg::PlayPlaylist(id)));
+            }
+            row.add_suffix(&play_btn);
 
             {
                 let sender = sender.clone();
@@ -52,6 +88,10 @@ impl App {
     /// **albums** (2+ tracks of the same album, expandable) and then the
     /// standalone **songs**. Tapping a track plays the playlist from there.
     pub(crate) fn open_playlist(&self, sender: &ComponentSender<Self>, id: i64, name: &str) {
+        // Stream recordings whose song now also exists locally are repointed to
+        // the local file (keeps the recording), so the playlist plays the better
+        // copy. No-op once everything is already local.
+        let _ = self.library.relink_recordings_in_playlist(id);
         let paths = self.library.playlist_paths(id).unwrap_or_default();
         let (albums, singles) = self.playlist_sections(&paths);
 
@@ -82,7 +122,10 @@ impl App {
             for (album, display_artist, tracks) in &albums {
                 let album_meta = self.library.get_album_meta(display_artist, album).ok().flatten();
                 let year = album_meta.as_ref().and_then(|m| m.year);
-                let cover_path = album_meta.as_ref().and_then(|m| m.cover_path.clone());
+                let cover_path = album_meta
+                    .as_ref()
+                    .and_then(|m| m.cover_path.clone())
+                    .or_else(|| self.album_cover_for(display_artist, album));
 
                 let exp = adw::ExpanderRow::builder()
                     .title(gtk::glib::markup_escape_text(album))
@@ -103,12 +146,12 @@ impl App {
                     let sender = sender.clone();
                     let path = first.path.clone();
                     play.connect_clicked(move |_| {
-                        sender.input(Msg::PlaylistTrack { id, path: path.clone(), close: false });
+                        sender.input(Msg::PlayOneTrack { path: path.clone(), close: false });
                     });
                     exp.add_suffix(&play);
                 }
                 for t in tracks {
-                    exp.add_row(&self.playlist_track_row(sender, id, &t.path, "audio-x-generic-symbolic"));
+                    exp.add_row(&self.playlist_track_row(sender, &t.path, "audio-x-generic-symbolic"));
                 }
                 group.add(&exp);
             }
@@ -121,7 +164,7 @@ impl App {
                 .title(&format!("{} ({})", gettext("Songs"), singles.len()))
                 .build();
             for t in &singles {
-                group.add(&self.playlist_track_row(sender, id, &t.path, "audio-x-generic-symbolic"));
+                group.add(&self.playlist_track_row(sender, &t.path, "audio-x-generic-symbolic"));
             }
             content.append(&group);
         }
@@ -151,18 +194,31 @@ impl App {
 
     /// Distinct cover paths of a playlist's songs – embedded tag, album cover or
     /// YouTube thumbnail, whatever is available – in playlist order, only
-    /// existing files. Bounded so a huge playlist does not read hundreds of tags.
+    /// existing files. De-duplicated **by image content**, not just by path:
+    /// per-track embedded covers are cached under one path per track, so several
+    /// songs of the same album would otherwise yield the identical picture many
+    /// times. Bounded (scan + result count) so a huge playlist does not read
+    /// hundreds of files.
     fn playlist_cover_candidates(&self, paths: &[String]) -> Vec<String> {
+        use std::collections::HashSet;
+        let mut seen_paths: HashSet<String> = HashSet::new();
+        let mut seen_content: HashSet<u64> = HashSet::new();
         let mut out: Vec<String> = Vec::new();
-        for p in paths {
-            if out.len() >= 30 {
+        for p in paths.iter().take(120) {
+            if out.len() >= 24 {
                 break;
             }
-            if let Some(c) = self.playlist_track_cover(p) {
-                if !out.contains(&c) && std::path::Path::new(&c).exists() {
-                    out.push(c);
+            let Some(c) = self.playlist_track_cover(p) else { continue };
+            if !seen_paths.insert(c.clone()) || !std::path::Path::new(&c).exists() {
+                continue;
+            }
+            // Skip a cover whose bytes we have already seen under another path.
+            if let Some(h) = cover_content_hash(&c) {
+                if !seen_content.insert(h) {
+                    continue;
                 }
             }
+            out.push(c);
         }
         out
     }
@@ -181,44 +237,63 @@ impl App {
             .find_map(|p| self.playlist_track_cover(p).filter(|c| std::path::Path::new(c).exists()))
     }
 
-    /// A single track row inside a playlist subpage: tap plays the playlist
-    /// from this track, the trash button removes it (with an undo toast).
+    /// Human label of a playlist entry's source ("Source: YouTube", "… Files" …),
+    /// derived from the path scheme: `yt:` → YouTube, `nc:` → Nextcloud, an
+    /// http(s) URL → a podcast episode or otherwise a stream, else a local file.
+    fn playlist_source_label(&self, path: &str) -> String {
+        let source = if crate::core::youtube::parse_yt_path(path).is_some() {
+            "YouTube"
+        } else if crate::core::webdav::parse_nc_path(path).is_some() {
+            "Nextcloud"
+        } else if path.starts_with("http://") || path.starts_with("https://") {
+            if self.library.is_podcast_episode(path).unwrap_or(false) {
+                "Podcasts"
+            } else {
+                "Streaming"
+            }
+        } else {
+            "Files"
+        };
+        gettext_f("Source: {source}", &[("source", source)])
+    }
+
+    /// A single track row inside a playlist subpage: tap plays this track; a
+    /// long press opens the song's detail view (like the album/artist lists).
     fn playlist_track_row(
         &self,
         sender: &ComponentSender<Self>,
-        id: i64,
         path: &str,
         icon: &str,
     ) -> adw::ActionRow {
         let display = self.display_name(std::path::Path::new(path));
         let row = adw::ActionRow::builder()
             .title(gtk::glib::markup_escape_text(&display))
+            .subtitle(&self.playlist_source_label(path))
             .activatable(true)
             .build();
+        // Cover flush to the far left (like the album/artist track lists).
+        row.add_css_class("emilia-flush");
         let cover = self.playlist_track_cover(path);
         row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), icon));
 
-        let remove = gtk::Button::builder()
-            .icon_name("user-trash-symbolic")
-            .tooltip_text(&gettext("Remove from playlist"))
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
+        // Long press: open the song's detail view (YouTube tracks get the
+        // YouTube video detail, everything else the file detail).
         {
             let sender = sender.clone();
             let path = path.to_string();
-            remove.connect_clicked(move |b| {
-                crate::ui::app::confirm_destructive(
-                    b,
-                    &gettext("Remove this track from the playlist?"),
-                    &gettext("Remove"),
-                    sender.clone(),
-                    Msg::PlaylistRemoveTrack { id, path: path.clone() },
-                );
+            let title = display.clone();
+            let gesture = gtk::GestureLongPress::new();
+            gesture.connect_pressed(move |g, _, _| {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
+                    sender.input(Msg::YtShowVideoDetail { video_id, title: title.clone() });
+                } else {
+                    sender.input(Msg::ShowTrackDetail(path.clone()));
+                }
             });
+            row.add_controller(gesture);
         }
-        row.add_suffix(&remove);
-        // Play button: plays the playlist from here but keeps the list open.
+        // Play button: plays only this track, keeps the list open.
         let play_btn = gtk::Button::builder()
             .icon_name("media-playback-start-symbolic")
             .tooltip_text(&gettext("Play"))
@@ -229,16 +304,16 @@ impl App {
             let sender = sender.clone();
             let path = path.to_string();
             play_btn.connect_clicked(move |_| {
-                sender.input(Msg::PlaylistTrack { id, path: path.clone(), close: false });
+                sender.input(Msg::PlayOneTrack { path: path.clone(), close: false });
             });
         }
         row.add_suffix(&play_btn);
-        // Short tap on the row: play and return to the main page.
+        // Short tap on the row: play this track and return to the main page.
         {
             let sender = sender.clone();
             let path = path.to_string();
             row.connect_activated(move |_| {
-                sender.input(Msg::PlaylistTrack { id, path: path.clone(), close: true });
+                sender.input(Msg::PlayOneTrack { path: path.clone(), close: true });
             });
         }
         row
@@ -254,13 +329,12 @@ impl App {
         id: i64,
         name: &str,
     ) {
+        // Repoint stream recordings to a local copy of the same song if one now
+        // exists (see [`Library::relink_recordings_in_playlist`]).
+        let _ = self.library.relink_recordings_in_playlist(id);
         let paths = self.library.playlist_paths(id).unwrap_or_default();
         // Total runtime.
-        let total_ms: i64 = paths
-            .iter()
-            .filter_map(|p| self.library.track_by_path(p).ok().flatten())
-            .filter_map(|t| t.duration_ms)
-            .sum();
+        let total_ms = self.library.playlist_duration_ms(id).unwrap_or(0);
         // Cover candidates from the songs (embedded / album / YouTube – whatever
         // is available). The chosen (or first) cover leads the carousel so the
         // detail opens on the current cover.
@@ -272,9 +346,9 @@ impl App {
         }
 
         let dialog = adw::Dialog::builder().title(gtk::glib::markup_escape_text(name)).build();
-        // Larger detail dialog (was 360) so the cover and actions have room.
+        // Wider detail dialog (was 360) so the cover and actions have room; the
+        // height follows the content (scroller uses its natural height below).
         dialog.set_content_width(600);
-        dialog.set_content_height(560);
         self.adapt_detail_dialog(&dialog);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());
@@ -307,7 +381,7 @@ impl App {
             dots.set_carousel(Some(&carousel));
             let gallery = gtk::Box::new(gtk::Orientation::Vertical, 6);
             gallery.set_halign(gtk::Align::Center);
-            gallery.append(&carousel);
+            gallery.append(&crate::ui::widgets::carousel_with_arrows(&carousel));
             gallery.append(&dots);
             content.append(&gallery);
             // Adopt the cover shown last in the carousel as the playlist cover.
@@ -417,6 +491,7 @@ impl App {
 
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
             .vexpand(true)
             .child(&content)
             .build();

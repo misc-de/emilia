@@ -16,12 +16,17 @@ fn main() {
         .init();
 
     // Initialize i18n before any UI construction. The saved language takes
-    // precedence over the system locale; "system"/no entry follows the locale.
-    let lang = core::db::Library::open()
+    // precedence; an explicit "system" follows the locale, while no entry at all
+    // (first run) defaults to English – the source language.
+    let saved = core::db::Library::open()
         .ok()
-        .and_then(|lib| lib.get_setting("ui_language").ok().flatten())
-        .filter(|code| code == "de" || code == "en");
-    i18n::init(lang.as_deref());
+        .and_then(|lib| lib.get_setting("ui_language").ok().flatten());
+    let lang: Option<&str> = match saved.as_deref() {
+        None => Some("en"),       // first run → default to English
+        Some("system") => None,   // explicitly follow the system locale
+        Some(code) => Some(code), // a chosen language (any of the 24 EU languages)
+    };
+    i18n::init(lang);
 
     let gtk_app = adw::Application::builder()
         .application_id(APP_ID)

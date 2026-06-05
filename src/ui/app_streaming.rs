@@ -606,10 +606,19 @@ impl App {
         let Some(rec) = self.streaming.recording_items.iter().find(|r| r.id == id).cloned() else {
             return;
         };
-        // Album comes from the embedded tag (written during enrichment); best effort.
-        let album = crate::core::scanner::read_track(std::path::Path::new(&rec.path))
-            .ok()
-            .and_then(|t| t.album)
+        // Album/artist come from the embedded tag (written during enrichment);
+        // best effort. The artist falls back to the tag when the DB column is
+        // empty, so it is shown reliably in the detail view.
+        let tag = crate::core::scanner::read_track(std::path::Path::new(&rec.path)).ok();
+        let album = tag
+            .as_ref()
+            .and_then(|t| t.album.clone())
+            .filter(|a| !a.trim().is_empty());
+        let artist = rec
+            .artist
+            .clone()
+            .filter(|a| !a.trim().is_empty())
+            .or_else(|| tag.as_ref().and_then(|t| t.artist.clone()))
             .filter(|a| !a.trim().is_empty());
 
         let dialog = adw::Dialog::builder()
@@ -623,11 +632,11 @@ impl App {
         let head = adw::ActionRow::builder()
             .title(gtk::glib::markup_escape_text(&rec.title))
             .build();
-        if let Some(a) = rec.artist.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(a) = artist.as_deref() {
             head.set_subtitle(&gtk::glib::markup_escape_text(a));
         }
         let cover = crate::core::online::recording_cover_path(
-            rec.artist.as_deref().unwrap_or(""),
+            artist.as_deref().unwrap_or(""),
             &rec.title,
         );
         head.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
@@ -642,6 +651,9 @@ impl App {
             r.add_css_class("property");
             r
         };
+        if let Some(ar) = artist.as_deref() {
+            details.add(&info_row(&gettext("Artist"), ar));
+        }
         if let Some(al) = album.as_deref() {
             details.add(&info_row(&gettext("Album"), al));
         }

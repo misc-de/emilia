@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.1.49"
+version = "0.2.1"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -34,6 +34,10 @@ qrcode = { version = "0.14.1", default-features = false }
 async-channel = "2.5"
 quick-xml = "0.36"
 percent-encoding = "2"
+gstreamer-app = "0.23"
+# QR *decoding* (camera scanner). default-features off → drop the heavy `image`
+# integration; we feed a raw grayscale buffer via `prepare_from_greyscale`.
+rqrr = { version = "0.10.1", default-features = false }
 
 [profile.release]
 opt-level = "s"

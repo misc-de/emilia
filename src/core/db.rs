@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::model::{
-    AlbumMeta, ArtistMeta, Episode, Source, StatEntry, StatTotals, Track, TrackMeta, YtRecent,
-    YtVideo, YtVideoRef,
+    AlbumHit, AlbumMeta, ArtistMeta, Episode, SearchResults, SongHit, Source, StatEntry,
+    StatTotals, Track, TrackMeta, YtRecent, YtVideo, YtVideoRef,
 };
 
 /// Database location: `$XDG_DATA_HOME/emilia/library.db`.
@@ -280,6 +280,7 @@ impl Library {
                 scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track')),
                 key    TEXT NOT NULL,
                 bands  TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (output, scope, key)
             );
 
@@ -468,10 +469,13 @@ impl Library {
                 count     INTEGER NOT NULL DEFAULT 0
             );
             -- Title cache for `yt:<id>` tracks, so playlist/queue entries show a
-            -- name instead of their id without polluting the library.
+            -- name instead of their id without polluting the library. `duration`
+            -- (seconds) lets those rows show a runtime even though `yt:` tracks
+            -- are not stored in `track`.
             CREATE TABLE IF NOT EXISTS yt_title (
                 video_id TEXT PRIMARY KEY,
-                title    TEXT NOT NULL
+                title    TEXT NOT NULL,
+                duration INTEGER
             );
             "#,
         )?;
@@ -502,6 +506,22 @@ impl Library {
                 DROP TABLE eq_setting_old;
                 "#,
             )?;
+        }
+
+        // Migration: EQ bypass flag. Existing settings stay active; "Turn off"
+        // only flips this flag and keeps the saved bands intact.
+        let has_eq_enabled = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('eq_setting') WHERE name = 'enabled'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_eq_enabled {
+            self.conn
+                .execute_batch("ALTER TABLE eq_setting ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;")?;
         }
 
         // Migration: add disc_no (disc number for multi-CD albums).
@@ -568,6 +588,22 @@ impl Library {
         if !has_origin {
             self.conn
                 .execute_batch("ALTER TABLE playlist ADD COLUMN origin TEXT;")?;
+        }
+
+        // Migration: yt_title gained a `duration` (seconds) so queue/playlist
+        // rows can show the runtime of `yt:` tracks (which are not in `track`).
+        let has_yt_duration = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('yt_title') WHERE name = 'duration'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_yt_duration {
+            self.conn
+                .execute_batch("ALTER TABLE yt_title ADD COLUMN duration INTEGER;")?;
         }
 
         // Migration: add the attempts counter to the meta tables (limits the
@@ -1090,6 +1126,34 @@ impl Library {
         Ok(json.and_then(|j| serde_json::from_str::<[f64; 10]>(&j).ok()))
     }
 
+    /// Whether a single output/level EQ setting is active. Missing settings are
+    /// treated as active so a newly edited EQ takes effect immediately.
+    pub fn eq_enabled(&self, output: &str, scope: &str, key: &str) -> Result<bool> {
+        let enabled = self
+            .conn
+            .query_row(
+                "SELECT enabled FROM eq_setting WHERE output = ?1 AND scope = ?2 AND key = ?3",
+                rusqlite::params![output, scope, key],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?;
+        Ok(enabled.map_or(true, |v| v != 0))
+    }
+
+    /// Enables/disables one EQ setting without changing its saved band values.
+    /// If the setting does not exist yet, create a neutral one so disabled means
+    /// "flat override" rather than "inherit from a broader level".
+    pub fn set_eq_enabled(&self, output: &str, scope: &str, key: &str, enabled: bool) -> Result<()> {
+        let neutral = serde_json::to_string(&[0.0; 10])?;
+        self.conn.execute(
+            "INSERT INTO eq_setting (output, scope, key, bands, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(output, scope, key) DO UPDATE SET enabled = excluded.enabled",
+            rusqlite::params![output, scope, key, neutral, if enabled { 1 } else { 0 }],
+        )?;
+        Ok(())
+    }
+
     /// All stored equalizer settings (for the device synchronization).
     pub fn all_eq_settings(&self) -> Result<Vec<(String, String, String, [f64; 10])>> {
         let mut stmt = self
@@ -1142,24 +1206,33 @@ impl Library {
         outputs.push("");
 
         for out in outputs {
-            if let Ok(Some(b)) = self.get_eq(out, "track", path) {
+            if let Some(b) = self.resolve_eq_setting(out, "track", path) {
                 return Some(b);
             }
             if let Some(key) = &album_key {
-                if let Ok(Some(b)) = self.get_eq(out, "album", key) {
+                if let Some(b) = self.resolve_eq_setting(out, "album", key) {
                     return Some(b);
                 }
             }
             if let Some(artist) = artist {
-                if let Ok(Some(b)) = self.get_eq(out, "artist", artist) {
+                if let Some(b) = self.resolve_eq_setting(out, "artist", artist) {
                     return Some(b);
                 }
             }
-            if let Ok(Some(b)) = self.get_eq(out, "global", "") {
+            if let Some(b) = self.resolve_eq_setting(out, "global", "") {
                 return Some(b);
             }
         }
         None
+    }
+
+    fn resolve_eq_setting(&self, output: &str, scope: &str, key: &str) -> Option<[f64; 10]> {
+        let bands = self.get_eq(output, scope, key).ok().flatten()?;
+        if self.eq_enabled(output, scope, key).unwrap_or(true) {
+            Some(bands)
+        } else {
+            Some([0.0; 10])
+        }
     }
 
     /// Reads a setting value (e.g. the music folder).
@@ -1390,6 +1463,93 @@ impl Library {
         Ok(count)
     }
 
+    /// Library search for the title-bar search field. Matches artists, albums
+    /// and songs against `query` (case-insensitive substring); a numeric query
+    /// additionally matches an album's release year (from the online metadata,
+    /// `album_meta` – the "date" dimension lives at album/meta level, not on the
+    /// files). Each group is capped at `limit` rows.
+    pub fn search_library(&self, query: &str, limit: usize) -> Result<SearchResults> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(SearchResults::default());
+        }
+        let like = format!("%{}%", like_escape(q));
+        // A purely numeric query is also treated as a year for the album match.
+        let year: Option<i64> = q.parse::<i64>().ok().filter(|y| (1000..=9999).contains(y));
+        let lim = limit as i64;
+
+        // --- Artists (Interpreten) ---
+        let mut artists = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT artist FROM track
+                 WHERE artist IS NOT NULL AND TRIM(artist) <> ''
+                   AND artist LIKE ?1 ESCAPE '\\'
+                 ORDER BY artist COLLATE NOCASE
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![like, lim], |r| r.get::<_, String>(0))?;
+            for a in rows {
+                artists.push(a?);
+            }
+        }
+
+        // --- Albums (name match, or year match for a numeric query) ---
+        let mut albums = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT t.album, MIN(t.artist), MAX(m.year)
+                 FROM track t
+                 LEFT JOIN album_meta m ON m.album = t.album
+                 WHERE t.album IS NOT NULL AND TRIM(t.album) <> ''
+                   AND (t.album LIKE ?1 ESCAPE '\\'
+                        OR (?2 IS NOT NULL AND m.year = ?2))
+                 GROUP BY t.album COLLATE NOCASE
+                 ORDER BY t.album COLLATE NOCASE
+                 LIMIT ?3",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![like, year, lim], |r| {
+                Ok(AlbumHit {
+                    album: r.get(0)?,
+                    artist: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    year: r.get::<_, Option<i64>>(2)?.map(|y| y as i32),
+                })
+            })?;
+            for a in rows {
+                albums.push(a?);
+            }
+        }
+
+        // --- Songs (title match) ---
+        let mut songs = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT path, title, artist, album
+                 FROM track
+                 WHERE title LIKE ?1 ESCAPE '\\'
+                 ORDER BY title COLLATE NOCASE
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![like, lim], |r| {
+                Ok(SongHit {
+                    path: r.get(0)?,
+                    title: r.get(1)?,
+                    artist: r.get(2)?,
+                    album: r.get(3)?,
+                })
+            })?;
+            for s in rows {
+                songs.push(s?);
+            }
+        }
+
+        Ok(SearchResults {
+            artists,
+            albums,
+            songs,
+        })
+    }
+
     /// Removes tracks under `root` whose files no longer exist on disk (orphans
     /// left behind by deletions/moves). Strictly scoped to `root`: remote
     /// (`nc:…`) tracks and other sources keep their own path prefixes and are
@@ -1472,6 +1632,32 @@ impl Library {
              ORDER BY album, COALESCE(disc_no, 1), track_no, title",
         )?;
         let rows = stmt.query_map([], |r| {
+            Ok(Track {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                title: r.get(2)?,
+                artist: r.get(3)?,
+                album: r.get(4)?,
+                genre: None,
+                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+                duration_ms: r.get(6)?,
+                resume_ms: r.get(7)?,
+                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Tracks of one album name only, sorted for album playback/subpages. This
+    /// avoids loading the whole library when opening a single album.
+    pub fn tracks_by_album_name(&self, album: &str) -> Result<Vec<Track>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
+             FROM track
+             WHERE album = ?1 COLLATE NOCASE
+             ORDER BY COALESCE(disc_no, 1), track_no, path",
+        )?;
+        let rows = stmt.query_map([album], |r| {
             Ok(Track {
                 id: r.get(0)?,
                 path: r.get(1)?,
@@ -1757,6 +1943,19 @@ impl Library {
              ORDER BY path",
         )?;
         let rows = stmt.query_map([artist, album], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// All track paths of an album name, regardless of artist credit. Used as a
+    /// UI cover fallback for the merged album overview, where same-named albums
+    /// appear as one card.
+    pub fn album_track_paths_by_name(&self, album: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path FROM track
+             WHERE album = ?1
+             ORDER BY path",
+        )?;
+        let rows = stmt.query_map([album], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -2301,6 +2500,29 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Playlists with their origin marker: `(id, name, count, origin)`.
+    /// `origin == None` ⇒ user playlist; `Some(url)` ⇒ YouTube/source mirror.
+    /// Lets sync distinguish user playlists (shared as paths) from YT mirrors
+    /// (shared as YouTube items).
+    pub fn playlists_with_origin(&self) -> Result<Vec<(i64, String, i64, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, COUNT(i.path), p.origin
+             FROM playlist p
+             LEFT JOIN playlist_item i ON i.playlist_id = p.id
+             GROUP BY p.id
+             ORDER BY p.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// The user-chosen cover of a playlist (a path), or `None` if none was
     /// picked yet (the UI then derives one from the songs).
     pub fn playlist_cover(&self, id: i64) -> Result<Option<String>> {
@@ -2322,6 +2544,34 @@ impl Library {
         self.conn
             .execute("UPDATE playlist SET cover_path = ?2 WHERE id = ?1", rusqlite::params![id, value])?;
         Ok(())
+    }
+
+    /// Total runtime of a playlist in milliseconds, summed over the tracks that
+    /// the library knows a duration for (YouTube/stream entries without one
+    /// simply contribute 0).
+    pub fn playlist_duration_ms(&self, id: i64) -> Result<i64> {
+        let ms: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(t.duration_ms), 0)
+             FROM playlist_item i JOIN track t ON t.path = i.path
+             WHERE i.playlist_id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        Ok(ms)
+    }
+
+    /// Total runtime per playlist in one pass, for rebuilding the playlist
+    /// overview without one aggregate query per row.
+    pub fn playlist_durations_ms(&self) -> Result<std::collections::HashMap<i64, i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, COALESCE(SUM(t.duration_ms), 0)
+             FROM playlist p
+             LEFT JOIN playlist_item i ON i.playlist_id = p.id
+             LEFT JOIN track t ON t.path = i.path
+             GROUP BY p.id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?)
     }
 
     /// Appends paths to the end of a playlist (duplicates allowed).
@@ -2355,7 +2605,60 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Removes all occurrences of a path from a playlist.
+    /// Repoints playlist items that are stream recordings to a regular local
+    /// library file of the same song, where one now exists. A match needs the
+    /// same artist + title (case-insensitive) **and** a duration within a few
+    /// seconds; the candidate must itself not be a recording. The recording file
+    /// is left untouched – only the playlist reference is updated. Returns the
+    /// number of relinked items. Meant to be called when opening a playlist.
+    pub fn relink_recordings_in_playlist(&self, playlist_id: i64) -> Result<usize> {
+        // Duration tolerance: a recording rarely matches the released file to the
+        // millisecond (lead-in/out, trimming), so allow a few seconds of slack.
+        const TOLERANCE_MS: i64 = 5000;
+        let tx = self.conn.unchecked_transaction()?;
+        // Items in this playlist whose path is a known stream recording.
+        let items: Vec<(i64, Option<String>, String, i64)> = {
+            let mut stmt = tx.prepare(
+                "SELECT pi.position, r.artist, r.title, r.duration_ms
+                 FROM playlist_item pi
+                 JOIN recording r ON r.path = pi.path
+                 WHERE pi.playlist_id = ?1",
+            )?;
+            let rows = stmt.query_map([playlist_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut relinked = 0;
+        for (position, artist, title, dur_ms) in items {
+            let local: Option<String> = tx
+                .query_row(
+                    "SELECT t.path FROM track t
+                     WHERE lower(t.title) = lower(?1)
+                       AND lower(IFNULL(t.artist, '')) = lower(IFNULL(?2, ''))
+                       AND abs(IFNULL(t.duration_ms, 0) - ?3) <= ?4
+                       AND t.path NOT IN (SELECT path FROM recording)
+                     LIMIT 1",
+                    rusqlite::params![title, artist, dur_ms, TOLERANCE_MS],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(local_path) = local {
+                tx.execute(
+                    "UPDATE playlist_item SET path = ?1 WHERE playlist_id = ?2 AND position = ?3",
+                    rusqlite::params![local_path, playlist_id, position],
+                )?;
+                relinked += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(relinked)
+    }
+
+    /// Removes all occurrences of a path from a playlist. Currently no UI path
+    /// triggers this (track removal was dropped from the playlist list), but it
+    /// is kept as a library operation (and covered by a test).
+    #[allow(dead_code)]
     pub fn remove_from_playlist(&self, id: i64, path: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM playlist_item WHERE playlist_id = ?1 AND path = ?2",
@@ -2403,6 +2706,13 @@ impl Library {
                 r.get::<_, i64>(3)?,
             ))
         })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Feed URLs of all subscribed podcasts (for refreshing every feed at once).
+    pub fn podcast_feed_urls(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT feed_url FROM podcast")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -2821,6 +3131,16 @@ impl Library {
         Ok(())
     }
 
+    /// Whether a path/URL is a known podcast episode (its audio enclosure URL).
+    /// Used to label a playlist entry's source.
+    pub fn is_podcast_episode(&self, url: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM episode WHERE audio_url = ?1 LIMIT 1", [url], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
     /// Caches the display title of a `yt:<id>` track.
     pub fn set_yt_title(&self, video_id: &str, title: &str) -> Result<()> {
         self.conn.execute(
@@ -2829,6 +3149,31 @@ impl Library {
             rusqlite::params![video_id, title],
         )?;
         Ok(())
+    }
+
+    /// Like [`set_yt_title`] but also caches the duration (seconds) when known,
+    /// so queue/playlist rows can show a runtime for `yt:` tracks. A `None`
+    /// duration keeps any previously cached value.
+    pub fn set_yt_meta(&self, video_id: &str, title: &str, duration: Option<i64>) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_title (video_id, title, duration) VALUES (?1, ?2, ?3)
+             ON CONFLICT(video_id) DO UPDATE SET
+                 title = excluded.title,
+                 duration = COALESCE(excluded.duration, yt_title.duration)",
+            rusqlite::params![video_id, title, duration],
+        )?;
+        Ok(())
+    }
+
+    /// Cached duration (seconds) of a `yt:` video, if known.
+    pub fn yt_duration(&self, video_id: &str) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .query_row("SELECT duration FROM yt_title WHERE video_id = ?1", [video_id], |r| {
+                r.get::<_, Option<i64>>(0)
+            })
+            .optional()?
+            .flatten())
     }
 
     /// Cached display title of a `yt:<id>` track, if known.
@@ -3478,6 +3823,39 @@ mod tests {
     }
 
     #[test]
+    fn tracks_by_album_name_loads_only_that_album_case_insensitive() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/a/1.mp3", Some("A"), Some("Live")))
+            .unwrap();
+        lib.upsert_track(&track("/a/2.mp3", Some("A"), Some("Other")))
+            .unwrap();
+
+        let paths: Vec<String> = lib
+            .tracks_by_album_name("live")
+            .unwrap()
+            .into_iter()
+            .map(|t| t.path)
+            .collect();
+        assert_eq!(paths, vec!["/a/1.mp3".to_string()]);
+    }
+
+    #[test]
+    fn album_track_paths_by_name_ignores_artist_credit() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_track(&track("/b.mp3", Some("B"), Some("Shared")))
+            .unwrap();
+        lib.upsert_track(&track("/a.mp3", Some("A"), Some("Shared")))
+            .unwrap();
+        lib.upsert_track(&track("/x.mp3", Some("A"), Some("Other")))
+            .unwrap();
+
+        assert_eq!(
+            lib.album_track_paths_by_name("Shared").unwrap(),
+            vec!["/a.mp3".to_string(), "/b.mp3".to_string()]
+        );
+    }
+
+    #[test]
     fn multi_disc_tracks_ordered_by_disc_then_track() {
         let lib = Library::open_in_memory().unwrap();
         // Two CDs, deliberately inserted "the wrong way round".
@@ -3600,6 +3978,25 @@ mod tests {
         assert_eq!(r(&lib), Some(bands(1.0)));
         lib.clear_eq("", "global", "").unwrap();
         assert_eq!(r(&lib), None);
+    }
+
+    #[test]
+    fn eq_bypass_preserves_bands_and_resolves_flat() {
+        let lib = Library::open_in_memory().unwrap();
+        lib.set_eq("", "track", "/a/1.mp3", &bands(4.0)).unwrap();
+
+        lib.set_eq_enabled("", "track", "/a/1.mp3", false).unwrap();
+        assert_eq!(lib.get_eq("", "track", "/a/1.mp3").unwrap(), Some(bands(4.0)));
+        assert_eq!(
+            lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
+            Some(bands(0.0))
+        );
+
+        lib.set_eq_enabled("", "track", "/a/1.mp3", true).unwrap();
+        assert_eq!(
+            lib.resolve_eq("", Some("X"), Some("Y"), "/a/1.mp3"),
+            Some(bands(4.0))
+        );
     }
 
     #[test]

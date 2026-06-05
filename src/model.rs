@@ -1,6 +1,6 @@
 //! Data models of the library.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Track {
     /// DB primary key. Currently everything is addressed internally via the
     /// (unique) path; the field remains for future use (e.g. playlists).
@@ -257,5 +257,38 @@ impl TrackMeta {
             album: None,
             status: "pending".to_string(),
         }
+    }
+}
+
+/// One song hit of the library search (title match).
+#[derive(Debug, Clone)]
+pub struct SongHit {
+    pub path: String,
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+}
+
+/// One album hit of the library search (album name or year match).
+#[derive(Debug, Clone)]
+pub struct AlbumHit {
+    pub album: String,
+    /// A representative artist of that album (display only).
+    pub artist: String,
+    pub year: Option<i32>,
+}
+
+/// Grouped result of the title-bar library search: matching artists, albums and
+/// songs (each capped). See [`crate::core::db::Library::search_library`].
+#[derive(Debug, Clone, Default)]
+pub struct SearchResults {
+    pub artists: Vec<String>,
+    pub albums: Vec<AlbumHit>,
+    pub songs: Vec<SongHit>,
+}
+
+impl SearchResults {
+    pub fn is_empty(&self) -> bool {
+        self.artists.is_empty() && self.albums.is_empty() && self.songs.is_empty()
     }
 }

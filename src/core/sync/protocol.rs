@@ -6,10 +6,22 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-/// Protocol version of the QR/pairing URL.
-pub const PROTOCOL_VERSION: u32 = 1;
-/// Version stamp of the library export (for future migrations).
-pub const SCHEMA_VERSION: u32 = 1;
+/// Protocol version of the QR/pairing URL. Bumped to 2 for the selective-share
+/// redesign (offer/review/accept) — a hard cutover, since both ends are the same
+/// app build and [`parse_pair_url`] rejects a mismatched `v`.
+pub const PROTOCOL_VERSION: u32 = 2;
+/// Version stamp of the share manifest / library payloads.
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// Capabilities a device advertises at pair time, so the peer can tailor what it
+/// offers (e.g. only offer YouTube items if the receiver has YouTube enabled).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Capabilities {
+    #[serde(default)]
+    pub schema: u32,
+    #[serde(default)]
+    pub youtube_enabled: bool,
+}
 
 // --- Pairing handshake (`POST /pair`) ---
 
@@ -18,6 +30,9 @@ pub struct PairRequest {
     pub token: String,
     pub device_id: String,
     pub device_name: String,
+    /// What the pairing (client) device can accept.
+    #[serde(default)]
+    pub caps: Capabilities,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -27,6 +42,9 @@ pub struct PairResponse {
     pub session_token: String,
     #[serde(default)]
     pub device_name: String,
+    /// What the answering (server) device can accept.
+    #[serde(default)]
+    pub caps: Capabilities,
     #[serde(default)]
     pub error: String,
 }

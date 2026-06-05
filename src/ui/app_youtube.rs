@@ -301,6 +301,31 @@ impl App {
         self.reload_yt_recent(sender);
     }
 
+    /// Refreshes the newest videos of **every** subscribed channel in the
+    /// background (the global refresh button). Per-channel errors are ignored;
+    /// on completion the overview is rebuilt once. Skips quietly when YouTube
+    /// is disabled, there are no subscriptions, or yt-dlp is unavailable.
+    /// Returns `true` if a worker was actually spawned (drives the refresh spinner).
+    pub(crate) fn refresh_all_channels(&self, sender: &ComponentSender<Self>) -> bool {
+        if !self.youtube.enabled || self.youtube.channel_items.is_empty() {
+            return false;
+        }
+        sender.spawn_oneshot_command(move || {
+            if let Ok(lib) = Library::open() {
+                if crate::core::youtube::available() {
+                    for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
+                        if let Some(t) = thumb.as_deref() {
+                            crate::core::online::cache_youtube_thumb(t);
+                        }
+                        let _ = refresh_channel_videos(id, &title, &url);
+                    }
+                }
+            }
+            crate::ui::app::Cmd::ChannelsRefreshed
+        });
+        true
+    }
+
     /// Builds the "Newest videos" list across all subscribed channels.
     pub(crate) fn reload_yt_newest(&mut self, sender: &ComponentSender<Self>) {
         let mut videos = self.library.all_videos().unwrap_or_default();
@@ -871,6 +896,21 @@ impl App {
             });
         }
         actions.add(&off);
+        // Equalizer for this track (keyed by its yt:<id> path, like during playback).
+        let eq = action_row(&gettext("Equalizer settings"), "preferences-other-symbolic");
+        {
+            let (sender, dialog, path, t) = (
+                sender.clone(),
+                dialog.clone(),
+                youtube::yt_path(video_id),
+                title.to_string(),
+            );
+            eq.connect_activated(move |_| {
+                sender.input(Msg::OpenTrackEq { path: path.clone(), title: t.clone() });
+                dialog.close();
+            });
+        }
+        actions.add(&eq);
         // For a video in the "Recent" history: offer removing it from there.
         if self.library.is_recent(video_id).unwrap_or(false) {
             let remove = action_row(&gettext("Remove from recent"), "user-trash-symbolic");
@@ -1000,12 +1040,16 @@ impl App {
     /// background, then opens them as a song-list subpage. Used when tapping a
     /// recent playlist that was played but never saved to the Playlists section.
     pub(crate) fn yt_open_playlist_songs(
-        &self,
+        &mut self,
         url: String,
         title: String,
         sender: &ComponentSender<Self>,
     ) {
-        self.yt_progress(&gettext_f("Loading “{title}” …", &[("title", &title)]));
+        // Central loading overlay (same spinner as the local/Nextcloud library)
+        // while yt-dlp fetches the playlist; cleared in `Cmd::YtPlaylistSongs`.
+        self.libview.loading_label =
+            Some(gettext_f("Loading “{title}” …", &[("title", &title)]));
+        self.libview.loading = true;
         sender.spawn_command(move |out| {
             let result =
                 youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT).map_err(|e| e.to_string());
@@ -1392,7 +1436,7 @@ impl App {
                 let lib = Library::open().map_err(|e| e.to_string())?;
                 let mut paths = Vec::with_capacity(videos.len());
                 for v in &videos {
-                    let _ = lib.set_yt_title(&v.id, &v.title);
+                    let _ = lib.set_yt_meta(&v.id, &v.title, v.duration);
                     paths.push(crate::core::youtube::yt_path(&v.id));
                 }
                 lib.replace_yt_playlist(&url, &title, &paths).map_err(|e| e.to_string())?;

@@ -22,13 +22,15 @@ use crate::ui::app::{
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::FsEntry;
 
-/// How a track tapped in an album track list is played back.
+/// How a track tapped in an album track list is played back. Album contexts
+/// (`Artist`/`Name`) play only the tapped track; a `Folder` (audiobook/concert)
+/// keeps playing the whole folder so chapters continue.
 #[derive(Clone)]
 enum AlbumPlay {
-    /// Artist context (artist → album): only that artist's album tracks.
-    Artist(String),
-    /// Albums overview: all tracks of the album name (artist irrelevant).
-    Name(String),
+    /// Artist context (artist → album).
+    Artist,
+    /// Albums overview (album name across artists).
+    Name,
     /// Folder content (audiobook/concert): exactly the files in this folder.
     Folder(String),
 }
@@ -232,12 +234,23 @@ impl App {
             self.files.source_tabs.remove(&c);
         }
         self.files.source_tab_buttons.clear();
-        if self.files.sources.is_empty() {
-            return;
+        // The primary "Music" tab only exists when a music folder is configured;
+        // without it a single extra source is the only folder there is.
+        let primary_ok = self
+            .files
+            .music_dir
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty());
+        let mut tabs: Vec<(ActiveSource, String)> = Vec::new();
+        if primary_ok {
+            tabs.push((ActiveSource::Primary, gettext("Music")));
         }
-        let mut tabs: Vec<(ActiveSource, String)> = vec![(ActiveSource::Primary, gettext("Music"))];
         for s in &self.files.sources {
             tabs.push((ActiveSource::Source(s.id), s.name.clone()));
+        }
+        // Only one folder → no tab bar (nothing to switch between).
+        if tabs.len() <= 1 {
+            return;
         }
         let mut group: Option<gtk::ToggleButton> = None;
         for (sel, label) in tabs {
@@ -260,6 +273,40 @@ impl App {
             });
             self.files.source_tabs.append(&btn);
             self.files.source_tab_buttons.push((sel, btn));
+        }
+    }
+
+    /// Whether the source tab bar should be shown: only when there is more than
+    /// one folder (primary + sources) to switch between.
+    pub(crate) fn source_tabs_visible(&self) -> bool {
+        self.files.source_tab_buttons.len() > 1
+    }
+
+    /// The source to switch to when the current `active_source` is no longer
+    /// valid (its tab was dropped or the source was removed): the primary
+    /// "Music" folder if configured, otherwise the first extra source. Returns
+    /// `None` when the current selection is still fine.
+    pub(crate) fn active_source_fallback(&self) -> Option<ActiveSource> {
+        let primary_ok = self
+            .files
+            .music_dir
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty());
+        let valid = match &self.files.active_source {
+            ActiveSource::Primary => primary_ok,
+            ActiveSource::Source(id) => self.files.sources.iter().any(|s| s.id == *id),
+        };
+        if valid {
+            return None;
+        }
+        if primary_ok {
+            Some(ActiveSource::Primary)
+        } else {
+            self.files
+                .sources
+                .first()
+                .map(|s| ActiveSource::Source(s.id))
+                .or(Some(ActiveSource::Primary))
         }
     }
 
@@ -411,7 +458,16 @@ impl App {
     }
 
     pub(crate) fn reload_albums(&mut self) {
-        let albums = self.library.albums_overview().unwrap_or_default();
+        let mut albums = self.library.albums_overview().unwrap_or_default();
+        for album in &mut albums {
+            if album
+                .cover_path
+                .as_deref()
+                .is_none_or(|p| p.trim().is_empty())
+            {
+                album.cover_path = self.album_cover_for(&album.artist, &album.album);
+            }
+        }
         self.libview.album_count = albums.len();
         // Mirror the overview so that gallery clicks (the factory is empty then) can
         // resolve the entry by index.
@@ -440,13 +496,20 @@ impl App {
 
     /// Reads the library (tags → DB) **in the background** – purely local, without
     /// network. `then_enrich`: afterwards optionally auto-fetch online (the
-    /// `ScanDone` handler decides based on the switch + connection).
-    pub(crate) fn start_scan(&self, sender: &ComponentSender<Self>, then_enrich: bool) {
+    /// `ScanDone` handler decides based on the switch + connection). `manual`:
+    /// the scan is part of a user-triggered refresh (drives the refresh spinner).
+    /// Returns `true` if a worker was actually spawned (i.e. a music folder is set).
+    pub(crate) fn start_scan(
+        &self,
+        sender: &ComponentSender<Self>,
+        then_enrich: bool,
+        manual: bool,
+    ) -> bool {
         // Deliberately the **primary** music directory (not `root_dir`, which
         // switches when changing to an additional source) – library/scan stay on
         // the main folder.
         let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
-            return;
+            return false;
         };
         sender.spawn_oneshot_command(move || {
             match Library::open() {
@@ -457,8 +520,9 @@ impl App {
                 }
                 Err(e) => tracing::error!("Database unavailable for scan: {e}"),
             }
-            Cmd::ScanDone { then_enrich }
+            Cmd::ScanDone { then_enrich, manual }
         });
+        true
     }
 
     /// Starts online enrichment in the background. `scan_first`: read the tags
@@ -498,8 +562,13 @@ impl App {
     /// afterwards. On completion [`Cmd::CloudReindexed`] rebuilds the views and
     /// fetches covers/photos. `manual` = triggered by the refresh button (force
     /// online enrichment); `false` = silent background top-up (e.g. at startup),
-    /// which respects the passive auto-enrich setting.
-    pub(crate) fn reindex_cloud_sources(&mut self, sender: &ComponentSender<Self>, manual: bool) {
+    /// which respects the passive auto-enrich setting. Returns `true` if a worker
+    /// was actually spawned (i.e. at least one WebDAV source exists).
+    pub(crate) fn reindex_cloud_sources(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        manual: bool,
+    ) -> bool {
         let sources: Vec<crate::model::Source> = self
             .files
             .sources
@@ -508,7 +577,7 @@ impl App {
             .cloned()
             .collect();
         if sources.is_empty() {
-            return;
+            return false;
         }
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = crate::core::db::Library::open() {
@@ -521,6 +590,7 @@ impl App {
             }
             Cmd::CloudReindexed { manual }
         });
+        true
     }
 
     /// Loads the artists overview from the DB into the factory (incl. photo).
@@ -823,18 +893,17 @@ impl App {
         let target = crate::core::artist::norm_key(name);
         let mut tracks: Vec<Track> = self
             .library
-            .all_tracks()
+            .tracks_by_album_name(album)
             .unwrap_or_default()
             .into_iter()
             .filter(|t| {
                 // Album membership via the main artist (like the
                 // albums overview): "A feat. B" belongs to "A"'s album.
-                t.album.as_deref() == Some(album)
-                    && t.artist.as_deref().is_some_and(|a| {
-                        crate::core::artist::split_artists(a)
-                            .first()
-                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
-                    })
+                t.artist.as_deref().is_some_and(|a| {
+                    crate::core::artist::split_artists(a)
+                        .first()
+                        .is_some_and(|p| crate::core::artist::norm_key(p) == target)
+                })
             })
             .collect();
         sort_by_structure(&mut tracks);
@@ -845,18 +914,10 @@ impl App {
     /// the albums overview, which groups purely by album name). Sorted by
     /// disc/track number, then path.
     pub(crate) fn album_tracks_by_name(&self, album: &str) -> Vec<Track> {
-        let target = album.to_lowercase();
         let mut tracks: Vec<Track> = self
             .library
-            .all_tracks()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| {
-                t.album
-                    .as_deref()
-                    .is_some_and(|a| a.to_lowercase() == target)
-            })
-            .collect();
+            .tracks_by_album_name(album)
+            .unwrap_or_default();
         sort_by_structure(&mut tracks);
         tracks
     }
@@ -1112,14 +1173,14 @@ impl App {
     pub(crate) fn open_album_tracks(&self, sender: &ComponentSender<Self>, name: &str, album: &str) {
         // Tracks of the album – `all_tracks` already returns them sorted by track number.
         let tracks = self.album_tracks_for_artist(name, album);
-        self.render_album_tracks(sender, tracks, name, album, AlbumPlay::Artist(name.to_string()));
+        self.render_album_tracks(sender, tracks, name, album, AlbumPlay::Artist);
     }
 
     /// Album from the albums overview: **all** tracks of this album name
     /// (artist irrelevant). Tapping a track plays the whole album from here.
     pub(crate) fn open_album_by_name(&self, sender: &ComponentSender<Self>, album: &str) {
         let tracks = self.album_tracks_by_name(album);
-        self.render_album_tracks(sender, tracks, "", album, AlbumPlay::Name(album.to_string()));
+        self.render_album_tracks(sender, tracks, "", album, AlbumPlay::Name);
     }
 
     /// Tracks of a folder in playback order (CD/disc, track number, path).
@@ -1173,7 +1234,10 @@ impl App {
             .get_album_meta(&display_artist, album)
             .ok()
             .flatten();
-        let cover_path = album_meta.as_ref().and_then(|m| m.cover_path.clone());
+        let cover_path = album_meta
+            .as_ref()
+            .and_then(|m| m.cover_path.clone())
+            .or_else(|| self.album_cover_for(&display_artist, album));
         // Decode the album cover once and reuse it in all track rows.
         let cover = cover_path
             .as_deref()
@@ -1265,19 +1329,12 @@ impl App {
             // button (play, but stay in the list).
             let build_msg = {
                 let play = play.clone();
-                let album = album.to_string();
                 move |path: String, close: bool| match &play {
-                    AlbumPlay::Artist(a) => Msg::PlayAlbumTrack {
-                        artist: a.clone(),
-                        album: album.clone(),
-                        path,
-                        close,
-                    },
-                    AlbumPlay::Name(al) => Msg::PlayAlbumByNameTrack {
-                        album: al.clone(),
-                        path,
-                        close,
-                    },
+                    // Album tracks (artist page or album overview): play only the
+                    // selected track, never enqueue its siblings.
+                    AlbumPlay::Artist | AlbumPlay::Name => Msg::PlayOneTrack { path, close },
+                    // A folder (audiobook/concert) keeps playing the whole folder
+                    // from here, so the next chapters continue.
                     AlbumPlay::Folder(f) => Msg::PlayFolderTrack {
                         folder: f.clone(),
                         path,
@@ -1683,8 +1740,11 @@ impl App {
                 (tex, "avatar-default-symbolic")
             }
             CtxTarget::Album(m) => {
-                let tex = m
+                let img = m
                     .cover_path
+                    .clone()
+                    .or_else(|| self.album_cover_for(&m.artist, &m.album));
+                let tex = img
                     .as_deref()
                     .and_then(|p| gtk::gdk::Texture::from_filename(p).ok());
                 (tex, "media-optical-symbolic")
@@ -1774,7 +1834,7 @@ impl App {
 
             let gallery = gtk::Box::new(gtk::Orientation::Vertical, 6);
             gallery.set_halign(gtk::Align::Center);
-            gallery.append(&carousel);
+            gallery.append(&crate::ui::widgets::carousel_with_arrows(&carousel));
             gallery.append(&dots);
             content.append(&gallery);
             attach_upload(&gallery);

@@ -242,10 +242,23 @@ pub(crate) struct LibView {
     /// Number of tiles per row in the gallery view (2–8).
     pub(crate) gallery_columns: u32,
     pub(crate) loading: bool,
+    /// Custom text for the loading overlay (e.g. while a YouTube playlist loads);
+    /// `None` falls back to the default "Reading music data".
+    pub(crate) loading_label: Option<String>,
     /// Galleries (artist/album) for which an on-demand fetch already ran this session.
     pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
     /// Gallery FlowBoxes whose resize hook has already been connected once.
     pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
+}
+
+impl LibView {
+    /// Text shown beneath the loading spinner: the custom label if set, else the
+    /// default. Used by the overlay both for the local library and remote loads.
+    pub(crate) fn loading_text(&self) -> String {
+        self.loading_label
+            .clone()
+            .unwrap_or_else(|| gettext("Reading music data"))
+    }
 }
 
 /// Playback transport: queue, shuffle order, history, resume/stats sessions.
@@ -330,6 +343,16 @@ pub(crate) struct NavState {
     pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
     /// Remembered scroll position of the most recently left overview page.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
+    /// Narrow/mobile layout active (driven by the width breakpoint). The source
+    /// of truth for [`App::is_narrow`]; the split's `collapsed` is derived from
+    /// this **and** `nav_hidden`, so it can't be used to detect narrowness.
+    pub(crate) narrow: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Only one menu item is visible → the whole navigation is suppressed
+    /// (sidebar collapsed, top bar hidden, Settings moved to the title bar).
+    pub(crate) nav_hidden: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Reconciles the layout chrome (sidebar/top-nav/Settings visibility) with
+    /// the current `narrow` + `nav_hidden` state. Set up in `init`.
+    pub(crate) apply_chrome: std::rc::Rc<dyn Fn()>,
 }
 
 /// File browser + extra music sources (2nd local folder / Nextcloud) state.
@@ -444,6 +467,11 @@ pub(crate) struct YoutubeState {
     pub(crate) settings_status: std::rc::Rc<std::cell::RefCell<Option<gtk::Label>>>,
     /// Whether a yt-dlp download/update is currently running (ignore repeat taps).
     pub(crate) ytdlp_busy: bool,
+    /// Whether the last YouTube extraction looked broken (yt-dlp can't parse
+    /// YouTube anymore). Mirrors [`crate::core::youtube::extraction_broken`] into
+    /// the model so a warning banner can `#[watch]` it. Refreshed when entering
+    /// the YouTube view and after each extraction result.
+    pub(crate) ytdlp_broken: bool,
     /// Which YouTube view is visible: newest videos or channel overview.
     pub(crate) yt_view: YtView,
     /// (id, title, url, thumbnail, video count) per subscribed channel.
@@ -566,6 +594,10 @@ pub struct App {
     pub(crate) input: relm4::Sender<Msg>,
     /// Album/artist overviews + file-list factory + gallery rendering state.
     pub(crate) libview: LibView,
+    /// Number of background workers still running for a **manual** refresh
+    /// (rescan/cloud/podcasts/YouTube). While > 0 the loading overlay shows a
+    /// spinner; each worker's completion decrements it back toward zero.
+    pub(crate) refresh_pending: u32,
     /// Online-enrichment state (covers/artist photos/fingerprint fetching).
     pub(crate) enrich_state: EnrichState,
     /// App-wide preferences (display language, active audio output).
@@ -631,12 +663,10 @@ pub enum Msg {
     /// of the artist, start at the tapped one). `close` pops the subpage
     /// back to the main view (row tap) vs. keeps it open (play button).
     PlayArtistTrack { name: String, path: String, close: bool },
-    /// Play a track from the album subpage (queue = whole album in
-    /// track order, start at the tapped one).
-    PlayAlbumTrack { artist: String, album: String, path: String, close: bool },
-    /// Like `PlayAlbumTrack`, but across artists (album overview):
-    /// queue = all tracks of the album name.
-    PlayAlbumByNameTrack { album: String, path: String, close: bool },
+    /// Play a **single** selected track (from an album or playlist): only this
+    /// track is enqueued, not its siblings. `close` pops the subpage back to the
+    /// main view (row tap) vs. keeps it open (play button).
+    PlayOneTrack { path: String, close: bool },
     /// Tap on an album/folder entry in concerts/audiobooks: list its
     /// tracks as a subpage (instead of playing directly).
     OpenEntryTracks { scope: String, key: String },
@@ -690,9 +720,20 @@ pub enum Msg {
     /// Open the detail view of the currently running track (click on the bar).
     OpenNowPlaying,
     OpenSettings,
+    /// Open the library search dialog (title-bar search icon).
+    OpenSearch,
+    /// A song hit of the search was activated → play it (close the dialog).
+    SearchPlayTrack(String),
+    /// An album hit of the search was activated → open its track list.
+    SearchOpenAlbum(String),
+    /// An artist hit of the search was activated → open the artist subpage.
+    SearchOpenArtist(String),
     OpenGlobalEq,
     /// Open the equalizer for the currently running track.
     OpenCurrentEq,
+    /// Open the track-level equalizer for a specific path (e.g. a YouTube
+    /// video from its detail view). `title` is only the header label.
+    OpenTrackEq { path: String, title: String },
     /// Open the queue dialog.
     ShowQueue,
     /// Start playback at a specific queue entry (queue index).
@@ -751,6 +792,13 @@ pub enum Msg {
         scope: &'static str,
         key: String,
         bands: [f64; 10],
+    },
+    /// Enable/disable one equalizer setting without changing its saved bands.
+    SetEqEnabled {
+        output: String,
+        scope: &'static str,
+        key: String,
+        enabled: bool,
     },
     /// Reset the equalizer of an output + a level (inherits again).
     ClearEq {
@@ -815,15 +863,8 @@ pub enum Msg {
     PlaylistDeleteConfirmed(i64),
     /// Add the current context files to this playlist.
     PlaylistAddTo(i64),
-    /// Play a track from a playlist (queue = whole playlist). `close` pops the
-    /// playlist subpage (row tap) vs. keeps it open (play button).
-    PlaylistTrack { id: i64, path: String, close: bool },
     /// Set the chosen cover of a playlist (last shown in the detail carousel).
     SetPlaylistCover { id: i64, path: String },
-    /// Remove a track from a playlist (undo toast; deferred to the *Confirmed).
-    PlaylistRemoveTrack { id: i64, path: String },
-    /// Actually remove a track from a playlist (after the undo toast expires).
-    PlaylistRemoveTrackConfirmed { id: i64, path: String },
     /// Open the rename dialog of a playlist.
     PlaylistRenameDialog(i64),
     /// Rename a playlist.
@@ -1011,8 +1052,10 @@ pub enum Cmd {
     EnrichDone { changed: bool },
     /// Intermediate state: reload albums/artists view (e.g. after a phase).
     ReloadViews,
-    /// Local library scan finished; `then_enrich` = possibly fetch online afterwards.
-    ScanDone { then_enrich: bool },
+    /// Local library scan finished; `then_enrich` = possibly fetch online
+    /// afterwards. `manual` = part of a user-triggered refresh (clears one slot
+    /// of the refresh spinner on completion).
+    ScanDone { then_enrich: bool, manual: bool },
     /// Found concert candidates (for the import dialog).
     Candidates(Vec<crate::core::concert::Candidate>),
     /// Podcast feed fetched: `Some(title)` on success, otherwise `None`.
@@ -1099,6 +1142,12 @@ pub enum Cmd {
     /// user pressed refresh (force online enrichment regardless of the passive
     /// auto-enrich setting); `false` = silent background top-up at startup.
     CloudReindexed { manual: bool },
+    /// All podcast feeds finished refreshing (manual refresh) → rebuild the
+    /// overview and clear one slot of the refresh spinner.
+    PodcastsRefreshed,
+    /// All YouTube subscriptions finished refreshing (manual refresh) → rebuild
+    /// the overview and clear one slot of the refresh spinner.
+    ChannelsRefreshed,
 }
 
 #[relm4::component(pub)]
@@ -1180,6 +1229,10 @@ impl Component for App {
                             set_icon_name: "view-refresh-symbolic",
                             set_tooltip_text: Some(&gettext("Rescan folder")),
                             connect_clicked => Msg::Refresh,
+                            // Disabled while a manual refresh is still running, so
+                            // a second click can't reset the spinner counter.
+                            #[watch]
+                            set_sensitive: model.refresh_pending == 0,
                         },
                         // Device synchronization: opens the same "Share" dialog
                         // as the action in the detail menu (no separate popover). With
@@ -1196,6 +1249,13 @@ impl Component for App {
                             } else {
                                 &[]
                             },
+                        },
+                        // Library search: opens a dialog that searches artists,
+                        // albums, songs and the file date and lists the hits.
+                        pack_end = &gtk::Button {
+                            set_icon_name: "system-search-symbolic",
+                            set_tooltip_text: Some(&gettext("Search")),
+                            connect_clicked => Msg::OpenSearch,
                         },
                     },
 
@@ -1244,7 +1304,7 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             #[watch]
-                                            set_visible: !model.files.sources.is_empty(),
+                                            set_visible: model.source_tabs_visible(),
                                         },
 
                                         // Path/back bar – only in subfolders
@@ -1280,7 +1340,7 @@ impl Component for App {
                                                 // gap below it as the YouTube/Channels lists; flush
                                                 // to the top otherwise (like Artists/Albums).
                                                 #[watch]
-                                                set_margin_top: if model.files.sources.is_empty() { 0 } else { 10 },
+                                                set_margin_top: if model.source_tabs_visible() { 10 } else { 0 },
                                                 set_margin_bottom: 0,
                                                 set_margin_start: 12,
                                                 set_margin_end: 12,
@@ -1705,6 +1765,17 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
+                                    // Warning when yt-dlp can no longer parse YouTube (the recurring
+                                    // "cat and mouse" breakage); refreshed on entering the section and
+                                    // after each extraction. The button opens the settings (yt-dlp update).
+                                    adw::Banner {
+                                        #[watch]
+                                        set_revealed: model.youtube.ytdlp_broken,
+                                        set_title: &gettext("YouTube isn't working right now – it changed and the installed yt-dlp can't read it. Look for a newer version of the app or update yt-dlp in the settings. If neither helps, please wait for a new yt-dlp release."),
+                                        set_button_label: Some(&gettext("Settings")),
+                                        connect_button_clicked => Msg::OpenSettings,
+                                    },
+
                                     // Header: "Newest videos" / "Channels" switcher + "+" to search/subscribe.
                                     gtk::Box {
                                         set_orientation: gtk::Orientation::Horizontal,
@@ -1894,14 +1965,15 @@ impl Component for App {
                             set_can_target: false,
                             add_css_class: "emilia-loading",
                             #[watch]
-                            set_visible: model.libview.loading,
+                            set_visible: model.overlay_visible(),
 
                             gtk::Spinner {
                                 set_spinning: true,
                                 set_size_request: (48, 48),
                             },
                             gtk::Label {
-                                set_label: &gettext("Reading music data"),
+                                #[watch]
+                                set_label: &model.overlay_text(),
                                 add_css_class: "dim-label",
                             },
                         },
@@ -2523,9 +2595,11 @@ impl Component for App {
                 gallery_view,
                 gallery_columns,
                 loading: false,
+                loading_label: None,
                 gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
                 gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
             },
+            refresh_pending: 0,
             enrich_state: EnrichState {
                 enriching: false,
                 auto_enrich,
@@ -2636,6 +2710,7 @@ impl Component for App {
                 ytdlp_version: None,
                 settings_status: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ytdlp_busy: false,
+                ytdlp_broken: false,
                 yt_view: YtView::Recent,
                 channel_items: Vec::new(),
                 channels_list: yt_channels_list.clone(),
@@ -2673,6 +2748,9 @@ impl Component for App {
                 context_target: None,
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                narrow: std::rc::Rc::new(std::cell::Cell::new(false)),
+                nav_hidden: std::rc::Rc::new(std::cell::Cell::new(false)),
+                apply_chrome: std::rc::Rc::new(|| {}),
             },
             sync_page,
             sync_connected: false,
@@ -2718,7 +2796,13 @@ impl Component for App {
             model.transport.queue_pos = q_pos;
         }
 
-        model.load_dir(&sender);
+        // With no primary music folder configured the "Music" tab is dropped, so
+        // a stale Primary selection is moved to the first real source (which then
+        // becomes the lone, tab-less folder). `apply_source` re-roots and loads.
+        match model.active_source_fallback() {
+            Some(s) => model.apply_source(s, &sender),
+            None => model.load_dir(&sender),
+        }
         model.reload_albums();
         model.reload_artists();
         model.load_concerts(&sender);
@@ -2785,7 +2869,7 @@ impl Component for App {
         }
         // Automatically read the library at startup and – on Wi-Fi/LAN and
         // with the switch enabled – fetch missing covers/metadata in the background.
-        model.start_scan(&sender, true);
+        model.start_scan(&sender, true, false);
         // Also check the remote sources for new content in the background (silent,
         // non-manual: respects the auto-enrich setting). Skipped when offline so a
         // launch without a connection does not spin up a pointless re-index worker.
@@ -2916,16 +3000,53 @@ impl Component for App {
             550.0,
             adw::LengthUnit::Sp,
         ));
-        let yes = true.to_value();
-        breakpoint.add_setter(&widgets.split, "collapsed", Some(&yes));
-        breakpoint.add_setter(&widgets.top_nav, "visible", Some(&yes));
-        // Show settings at the top only in narrow mode (desktop: sidebar).
-        breakpoint.add_setter(&widgets.settings_top_btn, "visible", Some(&yes));
         // The desktop spacing between title bar and content is dropped in narrow mode.
         breakpoint.add_setter(&widgets.content_overlay, "margin-top", Some(&0i32.to_value()));
         // The transport bar would otherwise overflow on narrow phones: hide the
         // EQ button there (still reachable via the track's context menu).
         breakpoint.add_setter(&widgets.eq_btn, "visible", Some(&false.to_value()));
+
+        // The sidebar / top-nav / Settings visibility is reconciled in one place
+        // from the narrow **and** the nav-hidden state, instead of plain
+        // breakpoint setters: when only one menu item is visible the whole
+        // navigation is suppressed even on the desktop, and Settings then moves
+        // to the title bar. The breakpoint itself only flips the `narrow` flag.
+        let apply_chrome: std::rc::Rc<dyn Fn()> = {
+            let split = widgets.split.clone();
+            let top_nav = widgets.top_nav.clone();
+            let settings_top = widgets.settings_top_btn.clone();
+            let narrow = model.nav.narrow.clone();
+            let nav_hidden = model.nav.nav_hidden.clone();
+            std::rc::Rc::new(move || {
+                let single = nav_hidden.get();
+                let narrow = narrow.get();
+                // Sidebar gone in narrow mode or when the nav is suppressed.
+                let collapsed = narrow || single;
+                split.set_collapsed(collapsed);
+                split.set_show_sidebar(!collapsed);
+                // Top nav only in narrow mode, and never when the nav is hidden.
+                top_nav.set_visible(narrow && !single);
+                // Settings sits in the title bar whenever the sidebar is gone.
+                settings_top.set_visible(collapsed);
+            })
+        };
+        model.nav.apply_chrome = apply_chrome.clone();
+        {
+            let narrow = model.nav.narrow.clone();
+            let apply = apply_chrome.clone();
+            breakpoint.connect_apply(move |_| {
+                narrow.set(true);
+                apply();
+            });
+        }
+        {
+            let narrow = model.nav.narrow.clone();
+            let apply = apply_chrome.clone();
+            breakpoint.connect_unapply(move |_| {
+                narrow.set(false);
+                apply();
+            });
+        }
         root.add_breakpoint(breakpoint);
 
         // Create the icon-only navigation (sidebar + top) in the **saved
@@ -2993,6 +3114,9 @@ impl Component for App {
             }
         }
         model.nav.nav_buttons = nav_buttons.clone();
+        // Apply the initial navigation visibility (hidden sections + the
+        // single-item suppression with Settings moved to the title bar).
+        model.refresh_nav_visibility();
 
         // Desktop sidebar: "Settings" at the very bottom – layout/design like
         // the menu items above (icon + label). A stretchable spacer
@@ -3285,6 +3409,14 @@ impl Component for App {
                     .ok()
                     .flatten()
                     .unwrap_or_else(|| crate::model::AlbumMeta::pending(artist, album));
+                let mut meta = meta;
+                if meta
+                    .cover_path
+                    .as_deref()
+                    .is_none_or(|p| p.trim().is_empty())
+                {
+                    meta.cover_path = self.album_cover_for(&meta.artist, &meta.album);
+                }
                 self.nav.context_target = Some(CtxTarget::Album(meta));
                 self.open_context_menu(root, &sender);
             }
@@ -3379,43 +3511,18 @@ impl Component for App {
                     }
                 }
             }
-            Msg::PlayAlbumTrack { artist, album, path, close } => {
-                // Queue = whole album in track order, start at the tapped one.
-                // `artist` here is the (page) artist – the same set of tracks
-                // as on the album subpage.
-                let files: Vec<PathBuf> = self
-                    .album_tracks_for_artist(&artist, &album)
-                    .into_iter()
-                    .map(|t| PathBuf::from(t.path))
-                    .collect();
-                let target = PathBuf::from(&path);
-                if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.transport.queue = files;
-                    self.transport.queue_pos = pos;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                    if close {
-                        self.nav.nav_view.pop_to_tag("main");
-                    }
-                }
-            }
-            Msg::PlayAlbumByNameTrack { album, path, close } => {
-                // Queue = all tracks of the album name (across artists),
-                // start at the tapped one – matching the album overview.
-                let files: Vec<PathBuf> = self
-                    .album_tracks_by_name(&album)
-                    .into_iter()
-                    .map(|t| PathBuf::from(t.path))
-                    .collect();
-                let target = PathBuf::from(&path);
-                if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.transport.queue = files;
-                    self.transport.queue_pos = pos;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                    if close {
-                        self.nav.nav_view.pop_to_tag("main");
-                    }
+            Msg::PlayOneTrack { path, close } => {
+                // Selecting a single track (album or playlist) plays *only* that
+                // track – its siblings are not enqueued. Use the album/playlist
+                // play button for the whole thing. A single play is logged to
+                // "Recent" like any other standalone track.
+                self.youtube.playing_playlist = false;
+                self.transport.queue = vec![PathBuf::from(&path)];
+                self.transport.queue_pos = 0;
+                self.play_current();
+                self.refresh_queue_icons();
+                if close {
+                    self.nav.nav_view.pop_to_tag("main");
                 }
             }
             Msg::PlayAlbum { artist, album } => {
@@ -3541,27 +3648,6 @@ impl Component for App {
                     self.refresh_queue_icons();
                 }
             }
-            Msg::PlaylistTrack { id, path, close } => {
-                let queue: Vec<PathBuf> = self
-                    .library
-                    .playlist_paths(id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(PathBuf::from)
-                    .collect();
-                if let Some(pos) = queue.iter().position(|p| p.to_string_lossy() == path) {
-                    // Playing within a playlist: YouTube tracks are part of the
-                    // playlist context and are not logged to "Recent" individually.
-                    self.youtube.playing_playlist = true;
-                    self.transport.queue = queue;
-                    self.transport.queue_pos = pos;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                    if close {
-                        self.nav.nav_view.pop_to_tag("main");
-                    }
-                }
-            }
             Msg::SetPlaylistCover { id, path } => {
                 let _ = self.library.set_playlist_cover(id, &path);
                 self.reload_playlists(&sender);
@@ -3572,24 +3658,6 @@ impl Component for App {
             Msg::PlaylistDeleteConfirmed(id) => {
                 let _ = self.library.delete_playlist(id);
                 self.reload_playlists(&sender);
-            }
-            Msg::PlaylistRemoveTrack { id, path } => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Removed from playlist"),
-                    Msg::PlaylistRemoveTrackConfirmed { id, path },
-                );
-            }
-            Msg::PlaylistRemoveTrackConfirmed { id, path } => {
-                let _ = self.library.remove_from_playlist(id, &path);
-                self.reload_playlists(&sender);
-                // Rebuild the subpage (replace the old one).
-                self.nav.nav_view.pop();
-                if let Some((_, name, _)) =
-                    self.playlists.playlist_items.iter().find(|(pid, _, _)| *pid == id).cloned()
-                {
-                    self.open_playlist(&sender, id, &name);
-                }
             }
             Msg::PlaylistRenameDialog(id) => self.open_rename_playlist_dialog(root, &sender, id),
             Msg::PlaylistRename { id, name } => {
@@ -4079,7 +4147,7 @@ impl Component for App {
                 let mut queue = Vec::with_capacity(videos.len());
                 for v in &videos {
                     self.youtube.video_titles.insert(v.id.clone(), v.title.clone());
-                    let _ = self.library.set_yt_title(&v.id, &v.title);
+                    let _ = self.library.set_yt_meta(&v.id, &v.title, v.duration);
                     queue.push(PathBuf::from(crate::core::youtube::yt_path(&v.id)));
                 }
                 self.youtube.playing_playlist = true;
@@ -4431,22 +4499,76 @@ impl Component for App {
             }
             Msg::Refresh => {
                 self.load_dir(&sender);
+                // Each helper reports whether it actually spawned a background
+                // worker; we count those so the loading spinner stays up until
+                // the last one reports back (see the matching `Cmd::*` arms).
+                let mut pending = 0u32;
                 // Re-index the cloud sources too, so their structure and covers
                 // update (existing sources are only indexed when first added).
                 // On completion this rebuilds the views and fetches covers.
                 // `manual` → fetch online regardless of the auto-enrich setting.
-                self.reindex_cloud_sources(&sender, true);
+                if self.reindex_cloud_sources(&sender, true) {
+                    pending += 1;
+                }
                 // "Rescan" also updates the local library (artists/albums).
-                self.start_scan(&sender, false);
+                if self.start_scan(&sender, false, true) {
+                    pending += 1;
+                }
+                // Also pull new content for the media subscriptions: every
+                // podcast feed and every YouTube channel (background workers;
+                // both need a connection, so skip them when offline).
+                if online_available() {
+                    if self.refresh_all_podcasts(&sender) {
+                        pending += 1;
+                    }
+                    if self.refresh_all_channels(&sender) {
+                        pending += 1;
+                    }
+                }
+                self.refresh_pending = pending;
             }
             Msg::OpenSettings => self.open_settings(root, &sender),
+            Msg::OpenSearch => self.open_search_dialog(root, &sender),
+            Msg::SearchPlayTrack(path) => {
+                // A real local file is played directly; remote (`nc:`) hits can't
+                // be played as a file, so fall back to opening their album.
+                if std::path::Path::new(&path).is_file() {
+                    self.play_path(&path, false);
+                } else if let Some(album) = self
+                    .library
+                    .track_by_path(&path)
+                    .ok()
+                    .flatten()
+                    .and_then(|t| t.album)
+                    .filter(|a| !a.trim().is_empty())
+                {
+                    self.open_album_by_name(&sender, &album);
+                }
+            }
+            Msg::SearchOpenAlbum(album) => self.open_album_by_name(&sender, &album),
+            Msg::SearchOpenArtist(name) => {
+                self.fetch_focus_artist(&sender, &name);
+                let meta = self
+                    .library
+                    .get_artist_meta(&name)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| crate::model::ArtistMeta::pending(name.clone()));
+                self.open_artist_tracks(&sender, &meta);
+            }
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
             Msg::OpenCurrentEq => {
                 if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
                     let key = path.to_string_lossy().into_owned();
-                    let name = Self::track_display_name(&path);
+                    // `display_name` resolves YouTube titles (yt:<id>) and the
+                    // "artist - title" of library tracks; the static helper would
+                    // show the raw path for YouTube.
+                    let name = self.display_name(&path);
                     self.open_eq_editor(root, &sender, "the track", &name, None, "track", key);
                 }
+            }
+            Msg::OpenTrackEq { path, title } => {
+                self.open_eq_editor(root, &sender, "the track", &title, None, "track", path);
             }
             Msg::ShowQueue => self.open_queue_dialog(root, &sender),
             Msg::PlayQueueAt(idx) => {
@@ -4533,7 +4655,7 @@ impl Component for App {
                     self.load_dir(&sender);
                 }
                 // Read the new folder and (Wi-Fi + switch) fetch automatically.
-                self.start_scan(&sender, true);
+                self.start_scan(&sender, true, false);
             }
             Msg::SelectSource(sel) => {
                 if self.files.active_source != sel {
@@ -4542,13 +4664,11 @@ impl Component for App {
             }
             Msg::SourcesChanged => {
                 self.files.sources = self.library.list_sources().unwrap_or_default();
-                // If the active source was removed, back to the primary tab.
-                let gone = match &self.files.active_source {
-                    ActiveSource::Primary => false,
-                    ActiveSource::Source(id) => !self.files.sources.iter().any(|s| s.id == *id),
-                };
-                if gone {
-                    self.apply_source(ActiveSource::Primary, &sender);
+                // If the active source is no longer valid (removed, or the
+                // primary "Music" tab dropped because no music folder is set),
+                // fall back to the first available folder.
+                if let Some(s) = self.active_source_fallback() {
+                    self.apply_source(s, &sender);
                 }
                 self.rebuild_source_tabs();
                 // Indexed cloud tracks may have been added/removed.
@@ -4718,6 +4838,15 @@ impl Component for App {
                 let _ = self.library.set_eq(&output, scope, &key, &bands);
                 // Re-resolve and apply the effective EQ of the active output
                 // (audible, provided the edited level currently applies).
+                self.apply_current_eq();
+            }
+            Msg::SetEqEnabled {
+                output,
+                scope,
+                key,
+                enabled,
+            } => {
+                let _ = self.library.set_eq_enabled(&output, scope, &key, enabled);
                 self.apply_current_eq();
             }
             Msg::ClearEq { output, scope, key } => {
@@ -4971,6 +5100,10 @@ impl Component for App {
         sender: ComponentSender<Self>,
         root: &Self::Root,
     ) {
+        // Mirror the (worker-thread) extraction-broken flag into the model after
+        // every command, so the YouTube warning banner reflects the latest
+        // yt-dlp result (and is correct when the section is next opened).
+        self.youtube.ytdlp_broken = crate::core::youtube::extraction_broken();
         match msg {
             Cmd::Entries(entries) => {
                 // "Mixed album": more than one distinct artist in the folder.
@@ -5140,7 +5273,10 @@ impl Component for App {
                 self.reload_albums();
                 self.reload_artists();
             }
-            Cmd::ScanDone { then_enrich } => {
+            Cmd::ScanDone { then_enrich, manual } => {
+                if manual {
+                    self.refresh_done();
+                }
                 // Library is read in → update the views.
                 self.reload_albums();
                 self.reload_artists();
@@ -5164,6 +5300,9 @@ impl Component for App {
                 }
             }
             Cmd::CloudReindexed { manual } => {
+                if manual {
+                    self.refresh_done();
+                }
                 // Freshly indexed remote tracks → rebuild the library views and
                 // favorites. Then fetch covers/photos (incl. the embedded covers
                 // of the remote tracks). A manual refresh does this regardless of
@@ -5210,6 +5349,10 @@ impl Component for App {
             }
             Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
             Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
+            Cmd::PodcastsRefreshed => {
+                self.refresh_done();
+                self.reload_podcasts(&sender);
+            }
             Cmd::YtDlpReady(result) => {
                 self.youtube.ytdlp_busy = false;
                 match result {
@@ -5237,6 +5380,10 @@ impl Component for App {
                 }
             }
             Cmd::ReloadChannels => self.reload_channels(&sender),
+            Cmd::ChannelsRefreshed => {
+                self.refresh_done();
+                self.reload_channels(&sender);
+            }
             Cmd::YtVideoMeta { video_id, uploader, duration, cover } => {
                 self.apply_video_meta(&video_id, uploader, duration, cover)
             }
@@ -5344,9 +5491,9 @@ impl Component for App {
                 confirm.present(Some(root));
             }
             Cmd::YtPlaylistSongs { url, title, result } => {
-                if let Some(t) = self.youtube.progress_toast.borrow_mut().take() {
-                    t.dismiss();
-                }
+                // Hide the loading overlay (covers both success and failure).
+                self.libview.loading = false;
+                self.libview.loading_label = None;
                 match result {
                     Ok(videos) => {
                         self.youtube.playlist_songs_cache.insert(url.clone(), videos.clone());
@@ -5561,6 +5708,7 @@ pub(crate) fn gallery_cell(
             // cover is delivered in the background.
             let pic = gtk::Picture::new();
             pic.set_content_fit(gtk::ContentFit::Cover);
+            pic.set_can_shrink(true);
             pic.set_hexpand(true);
             pic.set_vexpand(true);
             pic.set_halign(gtk::Align::Fill);
@@ -5622,6 +5770,21 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     });
 }
 
+fn gallery_width_hint(fb: &gtk::FlowBox) -> i32 {
+    if fb.width() > 1 {
+        return fb.width();
+    }
+    let mut ancestor = fb.parent();
+    while let Some(w) = ancestor {
+        if w.width() > 1 {
+            let margins = fb.margin_start() + fb.margin_end();
+            return (w.width() - margins).max(1);
+        }
+        ancestor = w.parent();
+    }
+    0
+}
+
 /// Sets each gallery tile to a **square in column width**. Necessary because
 /// the `FlowBox` does not stretch children beyond their natural size: without a fixed
 /// `size_request` the thumbnails would stay small in wide desktop mode (the image
@@ -5629,7 +5792,7 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
 /// and on every width change of the window.
 pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
     let cols = fb.min_children_per_line().max(1) as i32;
-    let w = fb.width();
+    let w = gallery_width_hint(fb);
     if w <= 1 {
         return; // not yet assigned – the resize hook catches up
     }
@@ -5740,6 +5903,32 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
 }
 
 impl App {
+    /// One background worker of a manual refresh reported back → decrement the
+    /// pending counter (saturating, so a stray completion can never wrap it).
+    /// When it hits zero the loading overlay hides itself again (see the view).
+    pub(crate) fn refresh_done(&mut self) {
+        self.refresh_pending = self.refresh_pending.saturating_sub(1);
+    }
+
+    /// Whether the loading overlay should be shown: either a folder/list load is
+    /// in progress or a manual refresh still has background workers running.
+    pub(crate) fn overlay_visible(&self) -> bool {
+        self.libview.loading || self.refresh_pending > 0
+    }
+
+    /// Text beneath the overlay spinner. A specific load label (e.g. a YouTube
+    /// playlist) wins; otherwise a manual refresh shows "Updating …", and
+    /// finally the default "reading data" of a plain folder/list load.
+    pub(crate) fn overlay_text(&self) -> String {
+        if let Some(label) = &self.libview.loading_label {
+            label.clone()
+        } else if self.refresh_pending > 0 {
+            gettext("Updating …")
+        } else {
+            self.libview.loading_text()
+        }
+    }
+
     /// Rebuilds **all** lists (after switching gallery/list or the
     /// column count). Each reload function fills – depending on `gallery_view` – the
     /// list or the gallery variant.
@@ -5856,10 +6045,12 @@ impl App {
         }
     }
 
-    /// Narrow (mobile) mode? Identical to the collapsed sidebar that
-    /// the breakpoint sets at low window width.
+    /// Narrow (mobile) mode? Driven purely by the width breakpoint – not by the
+    /// split's `collapsed`, which is also forced when the navigation is hidden
+    /// (single visible menu item) and would otherwise misreport desktop as
+    /// mobile.
     pub(crate) fn is_mobile(&self) -> bool {
-        self.nav.split.is_collapsed()
+        self.nav.narrow.get()
     }
 
     /// Show detail dialogs on the phone over the **full width**
@@ -6103,11 +6294,9 @@ impl App {
             .join(",");
         let _ = self.library.set_setting("hidden_sections", &value);
 
-        for (name, _is_sidebar, btn) in &self.nav.nav_buttons {
-            if *name == section {
-                btn.set_visible(visible);
-            }
-        }
+        // Re-apply button visibility and, when only one menu item is left,
+        // suppress the navigation entirely (Settings then sits in the title bar).
+        self.refresh_nav_visibility();
 
         // If the currently visible section is hidden, switch to the first
         // visible menu item (in the chosen order).
@@ -6125,6 +6314,23 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Re-applies the navigation visibility: hides the buttons of hidden
+    /// sections, and when only a single menu item remains visible suppresses the
+    /// whole navigation (sidebar + top bar) and moves Settings into the title
+    /// bar (via [`NavState::apply_chrome`]).
+    pub(crate) fn refresh_nav_visibility(&self) {
+        let visible_count = SECTIONS
+            .iter()
+            .filter(|(n, _, _)| !self.nav.hidden_sections.contains(*n))
+            .count();
+        let single = visible_count <= 1;
+        self.nav.nav_hidden.set(single);
+        for (name, _is_sidebar, btn) in &self.nav.nav_buttons {
+            btn.set_visible(!self.nav.hidden_sections.contains(*name) && !single);
+        }
+        (self.nav.apply_chrome)();
     }
 
     /// Applies `section_order` to the navigation containers by reordering the

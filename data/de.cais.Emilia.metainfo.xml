@@ -47,6 +47,19 @@
     </p>
   </description>
 
+  <screenshots>
+    <screenshot type="default">
+      <caption>Browsing the library by artist on the desktop</caption>
+      <caption xml:lang="de">Bibliothek nach Interpret durchstöbern (Desktop)</caption>
+      <image>https://raw.githubusercontent.com/misc-de/emilia/main/data/screenshots/desktop_artists.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Adaptive layout on a phone in portrait mode</caption>
+      <caption xml:lang="de">Adaptive Oberfläche im Hochformat auf dem Handy</caption>
+      <image>https://raw.githubusercontent.com/misc-de/emilia/main/data/screenshots/mobile_artists.png</image>
+    </screenshot>
+  </screenshots>
+
   <launchable type="desktop-id">de.cais.Emilia.desktop</launchable>
 
   <categories>

@@ -111,9 +111,14 @@ impl App {
             .iter()
             .map(|(_, oid)| self.library.get_eq(oid, scope, &key).ok().flatten().unwrap_or([0.0; 10]))
             .collect();
+        let preloaded_enabled: Vec<bool> = outputs
+            .iter()
+            .map(|(_, oid)| self.library.eq_enabled(oid, scope, &key).unwrap_or(true))
+            .collect();
 
         let outputs = Rc::new(outputs);
         let bands = Rc::new(RefCell::new(preloaded));
+        let enabled = Rc::new(RefCell::new(preloaded_enabled));
         let cur_out = Rc::new(Cell::new(out_default));
         let key = Rc::new(key);
         let loading = Rc::new(Cell::new(false));
@@ -226,6 +231,9 @@ impl App {
         }
         let scales = Rc::new(scales);
         content.append(&bands_box);
+        // Grey out the sliders while the EQ is bypassed ("Turn off") for the
+        // current output; re-enabled on "Turn on", reset, or output switch.
+        bands_box.set_sensitive(enabled.borrow()[out_default]);
 
         // Slider movement → remember value + save (+ apply live via Msg).
         for (i, scale) in scales.iter().enumerate() {
@@ -269,6 +277,8 @@ impl App {
             });
         }
 
+        let bypass_button: Rc<RefCell<Option<gtk::Button>>> = Rc::new(RefCell::new(None));
+
         // Neutralize the current selection and reset it to "inherit".
         let reset = gtk::Button::builder()
             .label(gettext("Reset"))
@@ -281,11 +291,20 @@ impl App {
             let loading = loading.clone();
             let scales = scales.clone();
             let outputs = outputs.clone();
+            let enabled = enabled.clone();
+            let bypass_button = bypass_button.clone();
+            let bands_box = bands_box.clone();
             let key = key.clone();
             let sender = sender.clone();
             reset.connect_clicked(move |_| {
                 let o = cur_out.get();
                 bands.borrow_mut()[o] = [0.0; 10];
+                enabled.borrow_mut()[o] = true;
+                bands_box.set_sensitive(true);
+                if let Some(button) = bypass_button.borrow().as_ref() {
+                    let label = gettext("Turn off");
+                    button.set_label(&label);
+                }
                 loading.set(true);
                 for sc in scales.iter() {
                     sc.set_value(0.0);
@@ -299,37 +318,55 @@ impl App {
                 });
             });
         }
-        // **Turn off** the EQ for this level: store flat zero bands persistently.
-        // Unlike "Reset" (delete → inherits album/artist/global), this
-        // overrides an inherited setting with "no EQ".
+        // Bypass the EQ for this level without changing its saved values. Unlike
+        // "Reset" (delete → inherits album/artist/global), this is a flat
+        // override for A/B comparison and can be turned back on.
         let off = gtk::Button::builder()
-            .label(gettext("Turn off"))
+            .label(if enabled.borrow()[out_default] {
+                gettext("Turn off")
+            } else {
+                gettext("Turn on")
+            })
             .css_classes(["pill"])
             .halign(gtk::Align::Center)
             .build();
+        *bypass_button.borrow_mut() = Some(off.clone());
         {
-            let bands = bands.clone();
             let cur_out = cur_out.clone();
-            let loading = loading.clone();
-            let scales = scales.clone();
             let outputs = outputs.clone();
+            let enabled = enabled.clone();
+            let bands_box = bands_box.clone();
             let key = key.clone();
             let sender = sender.clone();
-            off.connect_clicked(move |_| {
+            off.connect_clicked(move |button| {
                 let o = cur_out.get();
-                bands.borrow_mut()[o] = [0.0; 10];
-                loading.set(true);
-                for sc in scales.iter() {
-                    sc.set_value(0.0);
-                }
-                loading.set(false);
+                let now_enabled = !enabled.borrow()[o];
+                enabled.borrow_mut()[o] = now_enabled;
+                let label = if now_enabled {
+                    gettext("Turn off")
+                } else {
+                    gettext("Turn on")
+                };
+                button.set_label(&label);
+                bands_box.set_sensitive(now_enabled);
                 let (_, oid) = &outputs[o];
-                sender.input(Msg::SetEq {
+                sender.input(Msg::SetEqEnabled {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
-                    bands: [0.0; 10],
+                    enabled: now_enabled,
                 });
+            });
+        }
+        {
+            let enabled = enabled.clone();
+            let cur_out = cur_out.clone();
+            let off = off.clone();
+            let bands_box = bands_box.clone();
+            out_combo.connect_selected_notify(move |_| {
+                let on = enabled.borrow()[cur_out.get()];
+                off.set_label(&if on { gettext("Turn off") } else { gettext("Turn on") });
+                bands_box.set_sensitive(on);
             });
         }
 

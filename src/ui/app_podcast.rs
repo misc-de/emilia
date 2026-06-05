@@ -129,6 +129,25 @@ impl App {
         self.reload_newest(sender);
     }
 
+    /// Re-fetches **every** subscribed podcast feed in the background (the
+    /// global refresh button). Per-feed errors are ignored; on completion the
+    /// overview is rebuilt once. Skips quietly when there are no subscriptions.
+    /// Returns `true` if a worker was actually spawned (drives the refresh spinner).
+    pub(crate) fn refresh_all_podcasts(&self, sender: &ComponentSender<Self>) -> bool {
+        if self.podcasts.podcast_items.is_empty() {
+            return false;
+        }
+        sender.spawn_oneshot_command(move || {
+            if let Ok(lib) = Library::open() {
+                for url in lib.podcast_feed_urls().unwrap_or_default() {
+                    let _ = fetch_and_store_podcast(&url);
+                }
+            }
+            crate::ui::app::Cmd::PodcastsRefreshed
+        });
+        true
+    }
+
     /// Builds the "Newest" list: newest episodes (entries) across **all**
     /// subscriptions, chronologically by publication date. Tapping streams;
     /// **long press** opens the entry detail view.

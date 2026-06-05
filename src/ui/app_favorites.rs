@@ -365,6 +365,20 @@ impl App {
             .flatten()
             .and_then(|m| m.cover_path)
             .or_else(|| self.library.album_cover(album).ok().flatten())
+            .or_else(|| {
+                self.library
+                    .album_track_paths(artist, album)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find_map(|p| crate::core::online::local_track_cover(&p))
+            })
+            .or_else(|| {
+                self.library
+                    .album_track_paths_by_name(album)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find_map(|p| crate::core::online::local_track_cover(&p))
+            })
     }
 
     /// Cover of a folder: cover of any track within it.

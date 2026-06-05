@@ -9,7 +9,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::core::sync::protocol::{self, LibraryExport, PairRequest, PairResponse, PairingInfo};
+use crate::core::sync::protocol::{
+    self, Capabilities, LibraryExport, PairRequest, PairResponse, PairingInfo,
+};
+use crate::core::sync::share::{ShareDecision, ShareManifest};
 use crate::core::sync::{crypto, ImportStats};
 
 /// Paired client against a [`super::server::SyncServer`].
@@ -18,14 +21,18 @@ pub struct SyncClient {
     base: String,
     device_id: String,
     device_name: String,
+    /// Capabilities this device advertises to the peer.
+    caps: Capabilities,
     session_token: Option<String>,
     /// Display name of the peer (set after successful pairing).
     pub peer_name: String,
+    /// Capabilities the peer advertised (set after successful pairing).
+    pub peer_caps: Capabilities,
 }
 
 impl SyncClient {
     /// Builds the client together with the fingerprint-pinned TLS configuration.
-    pub fn new(info: &PairingInfo, device_id: String, device_name: String) -> Self {
+    pub fn new(info: &PairingInfo, device_id: String, device_name: String, caps: Capabilities) -> Self {
         let config = crypto::pinned_client_config(info.fingerprint.clone());
         let agent = ureq::AgentBuilder::new()
             .tls_config(config)
@@ -36,17 +43,20 @@ impl SyncClient {
             base: format!("https://{}:{}", info.host, info.port),
             device_id,
             device_name,
+            caps,
             session_token: None,
             peer_name: String::new(),
+            peer_caps: Capabilities::default(),
         }
     }
 
-    /// Pairing handshake. On success the session token is stored.
+    /// Pairing handshake. On success the session token + peer caps are stored.
     pub fn pair(&mut self, token: &str) -> Result<()> {
         let body = PairRequest {
             token: token.to_string(),
             device_id: self.device_id.clone(),
             device_name: self.device_name.clone(),
+            caps: self.caps.clone(),
         };
         let resp: PairResponse = self
             .agent
@@ -57,6 +67,7 @@ impl SyncClient {
 
         if resp.ok {
             self.session_token = Some(resp.session_token);
+            self.peer_caps = resp.caps;
             self.peer_name = if resp.device_name.is_empty() {
                 "Device".to_string()
             } else {
@@ -117,10 +128,99 @@ impl SyncClient {
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        let tmp = dest.with_extension("part");
         let mut reader = resp.into_reader();
-        let mut file = std::fs::File::create(dest)?;
+        let mut file = std::fs::File::create(&tmp)?;
         let n = std::io::copy(&mut reader, &mut file)?;
+        file.sync_all().ok();
+        if n == 0 {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(anyhow!("downloaded file is empty"));
+        }
+        std::fs::rename(&tmp, dest)?;
         Ok(n)
+    }
+
+    /// Keep-alive ping (extends the server session while the user reviews).
+    pub fn ping(&self) -> Result<()> {
+        self.agent
+            .get(&format!("{}/ping", self.base))
+            .set("Authorization", &self.bearer())
+            .call()
+            .map_err(|e| anyhow!("ping failed: {e}"))?;
+        Ok(())
+    }
+
+    // --- Selective share (offer / decision / upload) -----------------------
+
+    /// Polls for an offer parked by the server-side user (server-as-sender).
+    /// `Ok(None)` if nothing is on offer yet.
+    pub fn fetch_offer(&self) -> Result<Option<ShareManifest>> {
+        let resp = self
+            .agent
+            .get(&format!("{}/share/offer", self.base))
+            .set("Authorization", &self.bearer())
+            .call()
+            .map_err(|e| anyhow!("fetch offer failed: {e}"))?;
+        if resp.status() == 204 {
+            return Ok(None);
+        }
+        Ok(Some(resp.into_json()?))
+    }
+
+    /// Sends our own offer to the server (client-as-sender).
+    pub fn send_offer(&self, manifest: &ShareManifest) -> Result<()> {
+        self.agent
+            .post(&format!("{}/share/offer", self.base))
+            .set("Authorization", &self.bearer())
+            .send_json(serde_json::to_value(manifest)?)
+            .map_err(|e| anyhow!("send offer failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Polls for the server-side user's decision on our offer (client-as-sender).
+    pub fn fetch_decision(&self) -> Result<Option<ShareDecision>> {
+        let resp = self
+            .agent
+            .get(&format!("{}/share/decision", self.base))
+            .set("Authorization", &self.bearer())
+            .call()
+            .map_err(|e| anyhow!("fetch decision failed: {e}"))?;
+        if resp.status() == 204 {
+            return Ok(None);
+        }
+        Ok(Some(resp.into_json()?))
+    }
+
+    /// Sends our decision on the server's offer (server-as-sender → we receive).
+    pub fn send_decision(&self, decision: &ShareDecision) -> Result<()> {
+        self.agent
+            .post(&format!("{}/share/decision", self.base))
+            .set("Authorization", &self.bearer())
+            .send_json(serde_json::to_value(decision)?)
+            .map_err(|e| anyhow!("send decision failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Uploads a local file to the server at `rel_path` (client-as-sender). The
+    /// body is streamed with an explicit Content-Length so the server can write
+    /// it without buffering. Returns the number of bytes sent.
+    pub fn upload_file(&self, rel_path: &str, src: &Path) -> Result<u64> {
+        let file = std::fs::File::open(src)?;
+        let size = file.metadata()?.len();
+        let url = format!(
+            "{}/files/put?path={}",
+            self.base,
+            protocol::percent_encode(rel_path)
+        );
+        self.agent
+            .post(&url)
+            .set("Authorization", &self.bearer())
+            .set("Content-Length", &size.to_string())
+            .set("Content-Type", "application/octet-stream")
+            .send(file)
+            .map_err(|e| anyhow!("upload failed: {e}"))?;
+        Ok(size)
     }
 
     /// Cleanly drops the connection (errors are ignored).

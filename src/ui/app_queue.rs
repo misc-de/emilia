@@ -36,14 +36,16 @@ impl App {
         content.append(&self.transport.queue_list);
 
         let scroller = gtk::ScrolledWindow::builder()
+            .propagate_natural_height(true)
             .vexpand(true)
             .child(&content)
             .build();
         let toolbar = adw::ToolbarView::new();
+        // Height follows the content (natural height of the scroller); only the
+        // width is fixed. Long queues grow to the window height, then scroll.
         let dialog = adw::Dialog::builder()
             .title(&gettext("Queue"))
             .content_width(400)
-            .content_height(620)
             .build();
 
         // Header bar with a trash button at the top left for clearing (with
@@ -109,10 +111,22 @@ impl App {
             .enumerate()
             .skip(pos)
             .map(|(idx, path)| {
-                let t = self.library.track_by_path(&path.to_string_lossy()).ok().flatten();
+                let ps = path.to_string_lossy();
+                let t = self.library.track_by_path(&ps).ok().flatten();
                 let album = t.as_ref().and_then(|t| t.album.clone()).filter(|a| !a.trim().is_empty());
                 let artist = t.as_ref().and_then(|t| t.artist.clone()).filter(|a| !a.trim().is_empty());
-                let dur = t.and_then(|t| t.duration_ms).unwrap_or(0).max(0);
+                let dur = t
+                    .as_ref()
+                    .and_then(|t| t.duration_ms)
+                    .or_else(|| {
+                        // YouTube tracks aren't in `track`; use the cached
+                        // duration (stored in seconds) for the runtime display.
+                        crate::core::youtube::parse_yt_path(&ps)
+                            .and_then(|vid| self.library.yt_duration(&vid).ok().flatten())
+                            .map(|secs| secs * 1000)
+                    })
+                    .unwrap_or(0)
+                    .max(0);
                 (idx, album, artist, dur)
             })
             .collect();
