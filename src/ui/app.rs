@@ -1371,14 +1371,26 @@ impl Component for App {
                         },
                     },
 
-                    // Top navigation (icon-only) – only in narrow (mobile) mode
-                    #[name = "top_nav"]
-                    add_top_bar = &gtk::Box {
-                        set_halign: gtk::Align::Center,
-                        set_spacing: 6,
+                    // Top navigation (icon-only) – only in narrow (mobile) mode.
+                    // Wrapped in a horizontal ScrolledWindow so the icon strip can
+                    // scroll / swipe sideways when many sections are enabled and
+                    // would otherwise overflow the narrow width.
+                    #[name = "top_nav_scroller"]
+                    add_top_bar = &gtk::ScrolledWindow {
+                        // `External`: no built-in scrollbar is drawn, but kinetic
+                        // swipe / wheel scrolling still works → a clean icon strip.
+                        set_hscrollbar_policy: gtk::PolicyType::External,
+                        set_vscrollbar_policy: gtk::PolicyType::Never,
+                        set_propagate_natural_height: true,
                         set_visible: false,
-                        set_margin_top: 2,
-                        set_margin_bottom: 2,
+                        #[wrap(Some)]
+                        #[name = "top_nav"]
+                        set_child = &gtk::Box {
+                            set_halign: gtk::Align::Center,
+                            set_spacing: 6,
+                            set_margin_top: 2,
+                            set_margin_bottom: 2,
+                        },
                     },
 
                     // Content with loading overlay. Desktop: a bit of space **between

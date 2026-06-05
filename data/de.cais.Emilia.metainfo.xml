@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.3.1" date="2026-06-05">
+      <description>
+        <p>On phones the top navigation strip now scrolls and swipes sideways instead of overflowing when many sections are enabled, without showing a scrollbar.</p>
+        <p xml:lang="de">Auf dem Handy lässt sich die obere Navigationsleiste jetzt seitlich scrollen und wischen, statt überzulaufen, wenn viele Bereiche aktiv sind – ohne sichtbaren Scrollbalken.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-06-05">
       <description>
         <p>A built-in waveform editor for stream recordings: mark a region, cut it out, zoom and pan, scrub a timeline and play from the playhead, then save (the file is re-encoded in place). Recordings can also be added straight to the music library. Artist detail views gain a multi-cover gallery and the carousel dots are now tappable. The search icon moved to the left of the title bar, and the YouTube, Concerts and Settings icons were refreshed.</p>

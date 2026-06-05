@@ -160,7 +160,9 @@ impl App {
         // to the title bar. The breakpoint itself only flips the `narrow` flag.
         let apply_chrome: std::rc::Rc<dyn Fn()> = {
             let split = widgets.split.clone();
-            let top_nav = widgets.top_nav.clone();
+            // Toggle the scroller (parent of the icon strip), not the strip itself,
+            // so a hidden nav leaves no empty scroll area behind.
+            let top_nav_scroller = widgets.top_nav_scroller.clone();
             let settings_top = widgets.settings_top_btn.clone();
             let narrow = self.nav.narrow.clone();
             let nav_hidden = self.nav.nav_hidden.clone();
@@ -172,7 +174,7 @@ impl App {
                 split.set_collapsed(collapsed);
                 split.set_show_sidebar(!collapsed);
                 // Top nav only in narrow mode, and never when the nav is hidden.
-                top_nav.set_visible(narrow && !single);
+                top_nav_scroller.set_visible(narrow && !single);
                 // Settings sits in the title bar whenever the sidebar is gone.
                 settings_top.set_visible(collapsed);
             })
