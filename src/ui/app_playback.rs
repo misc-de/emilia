@@ -4,7 +4,8 @@
 
 use std::path::PathBuf;
 
-use relm4::gtk;
+use gtk::prelude::GtkWindowExt;
+use relm4::{adw, gtk};
 
 use crate::core::scanner;
 use crate::core::webdav::{self, Creds};
@@ -857,6 +858,105 @@ impl App {
             self.transport.queue_pos = 0;
             self.play_current();
             self.refresh_queue_icons();
+        }
+    }
+
+    /// Handle a desktop / lock-screen MPRIS command (media keys, etc.).
+    pub(crate) fn handle_mpris(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        cmd: crate::core::mpris::MprisCommand,
+    ) {
+        use crate::core::mpris::MprisCommand as M;
+        match cmd {
+            M::PlayPause => {
+                if self.mini.now_playing.is_some() {
+                    if self.mini.playing {
+                        self.save_resume();
+                        self.player.pause();
+                    } else {
+                        self.player.resume();
+                    }
+                    self.mini.playing = !self.mini.playing;
+                    self.mpris.set_playing(self.mini.playing);
+                    self.refresh_queue_icons();
+                }
+            }
+            M::Play => {
+                if self.mini.now_playing.is_some() && !self.mini.playing {
+                    self.player.resume();
+                    self.mini.playing = true;
+                    self.mpris.set_playing(true);
+                    self.refresh_queue_icons();
+                }
+            }
+            M::Pause => {
+                if self.mini.now_playing.is_some() && self.mini.playing {
+                    self.save_resume();
+                    self.player.pause();
+                    self.mini.playing = false;
+                    self.mpris.set_playing(false);
+                    self.refresh_queue_icons();
+                }
+            }
+            M::Next => {
+                if self.files.playing_remote {
+                    self.remote_next();
+                } else {
+                    self.play_next();
+                }
+            }
+            M::Prev => {
+                if self.files.playing_remote {
+                    self.remote_prev();
+                } else {
+                    self.play_prev();
+                }
+            }
+            M::Stop => {
+                self.save_resume();
+                self.finalize_play_session(false);
+                self.player.stop();
+                self.mini.playing = false;
+                self.transport.playing_path = None;
+                self.mini.position_ms = 0;
+                self.mini.track_duration_ms = 0;
+                *self.transport.close_resume.borrow_mut() = None;
+                self.mpris.set_stopped();
+                self.refresh_queue_icons();
+            }
+            M::Raise => root.present(),
+            M::SeekBy(offset_us) => {
+                let cur = self.player.position_ms().unwrap_or(0);
+                let target = (cur + offset_us / 1000).max(0);
+                if self.player.seek_ms(target).is_ok() {
+                    self.mpris.seeked(target);
+                }
+            }
+            M::SetPosition(pos_us) => {
+                let target = (pos_us / 1000).max(0);
+                if self.player.seek_ms(target).is_ok() {
+                    self.mpris.seeked(target);
+                }
+            }
+            M::SetShuffle(on) => {
+                if self.transport.shuffle != on {
+                    self.transport.shuffle = on;
+                    if on {
+                        self.rebuild_shuffle_order();
+                    }
+                }
+                self.mpris.set_shuffle(self.transport.shuffle);
+            }
+            M::SetRepeat(on) => {
+                if self.transport.repeat != on {
+                    self.transport.repeat = on;
+                    let _ = self
+                        .library
+                        .set_setting("repeat", if on { "1" } else { "0" });
+                }
+                self.mpris.set_repeat(self.transport.repeat);
+            }
         }
     }
 }

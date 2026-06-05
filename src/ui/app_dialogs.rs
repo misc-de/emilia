@@ -1268,6 +1268,56 @@ impl App {
             }
         });
     }
+
+    /// Set an album's cover (from the picker), refreshing the albums view on a
+    /// real change.
+    pub(crate) fn set_album_cover(&mut self, artist: String, album: String, path: String) {
+        let mut meta = self
+            .library
+            .get_album_meta(&artist, &album)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| crate::model::AlbumMeta::pending(&artist, &album));
+        if meta.cover_path.as_deref() != Some(path.as_str()) {
+            meta.cover_path = Some(path);
+            let _ = self.library.upsert_album_meta(&meta);
+            self.reload_albums();
+        }
+    }
+
+    /// Set an artist's image (from the picker), refreshing the artists view.
+    pub(crate) fn set_artist_image(&mut self, name: String, path: String) {
+        let mut meta = self
+            .library
+            .get_artist_meta(&name)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| crate::model::ArtistMeta::pending(&name));
+        if meta.image_path.as_deref() != Some(path.as_str()) {
+            meta.image_path = Some(path);
+            let _ = self.library.upsert_artist_meta(&meta);
+            self.reload_artists();
+        }
+    }
+
+    /// Persist a scope+key's section/area assignment and reload the views
+    /// (concerts/audiobooks are derived live from the properties).
+    pub(crate) fn set_areas(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        scope: &'static str,
+        key: String,
+        value: String,
+    ) {
+        if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
+            tracing::error!("Failed to save properties: {e}");
+        }
+        self.reload_albums();
+        self.reload_artists();
+        self.load_concerts(sender);
+        self.load_audiobooks(sender);
+        self.load_dir(sender);
+    }
 }
 
 /// Copies a chosen image into the cover or artist cache and returns the new

@@ -4230,99 +4230,7 @@ impl Component for App {
                     self.mpris.seeked(ms);
                 }
             }
-            Msg::Mpris(cmd) => {
-                use crate::core::mpris::MprisCommand as M;
-                match cmd {
-                    M::PlayPause => {
-                        if self.mini.now_playing.is_some() {
-                            if self.mini.playing {
-                                self.save_resume();
-                                self.player.pause();
-                            } else {
-                                self.player.resume();
-                            }
-                            self.mini.playing = !self.mini.playing;
-                            self.mpris.set_playing(self.mini.playing);
-                            self.refresh_queue_icons();
-                        }
-                    }
-                    M::Play => {
-                        if self.mini.now_playing.is_some() && !self.mini.playing {
-                            self.player.resume();
-                            self.mini.playing = true;
-                            self.mpris.set_playing(true);
-                            self.refresh_queue_icons();
-                        }
-                    }
-                    M::Pause => {
-                        if self.mini.now_playing.is_some() && self.mini.playing {
-                            self.save_resume();
-                            self.player.pause();
-                            self.mini.playing = false;
-                            self.mpris.set_playing(false);
-                            self.refresh_queue_icons();
-                        }
-                    }
-                    M::Next => {
-                        if self.files.playing_remote {
-                            self.remote_next();
-                        } else {
-                            self.play_next();
-                        }
-                    }
-                    M::Prev => {
-                        if self.files.playing_remote {
-                            self.remote_prev();
-                        } else {
-                            self.play_prev();
-                        }
-                    }
-                    M::Stop => {
-                        self.save_resume();
-                        self.finalize_play_session(false);
-                        self.player.stop();
-                        self.mini.playing = false;
-                        self.transport.playing_path = None;
-                        self.mini.position_ms = 0;
-                        self.mini.track_duration_ms = 0;
-                        *self.transport.close_resume.borrow_mut() = None;
-                        self.mpris.set_stopped();
-                        self.refresh_queue_icons();
-                    }
-                    M::Raise => root.present(),
-                    M::SeekBy(offset_us) => {
-                        let cur = self.player.position_ms().unwrap_or(0);
-                        let target = (cur + offset_us / 1000).max(0);
-                        if self.player.seek_ms(target).is_ok() {
-                            self.mpris.seeked(target);
-                        }
-                    }
-                    M::SetPosition(pos_us) => {
-                        let target = (pos_us / 1000).max(0);
-                        if self.player.seek_ms(target).is_ok() {
-                            self.mpris.seeked(target);
-                        }
-                    }
-                    M::SetShuffle(on) => {
-                        if self.transport.shuffle != on {
-                            self.transport.shuffle = on;
-                            if on {
-                                self.rebuild_shuffle_order();
-                            }
-                        }
-                        self.mpris.set_shuffle(self.transport.shuffle);
-                    }
-                    M::SetRepeat(on) => {
-                        if self.transport.repeat != on {
-                            self.transport.repeat = on;
-                            let _ = self
-                                .library
-                                .set_setting("repeat", if on { "1" } else { "0" });
-                        }
-                        self.mpris.set_repeat(self.transport.repeat);
-                    }
-                }
-            }
+            Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
             Msg::Next => {
                 if self.files.playing_remote {
                     self.remote_next();
@@ -4644,33 +4552,8 @@ impl Component for App {
                 artist,
                 album,
                 path,
-            } => {
-                let mut meta = self
-                    .library
-                    .get_album_meta(&artist, &album)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| crate::model::AlbumMeta::pending(&artist, &album));
-                // Save + refresh the views only on an actual change.
-                if meta.cover_path.as_deref() != Some(path.as_str()) {
-                    meta.cover_path = Some(path);
-                    let _ = self.library.upsert_album_meta(&meta);
-                    self.reload_albums();
-                }
-            }
-            Msg::SetArtistImage { name, path } => {
-                let mut meta = self
-                    .library
-                    .get_artist_meta(&name)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| crate::model::ArtistMeta::pending(&name));
-                if meta.image_path.as_deref() != Some(path.as_str()) {
-                    meta.image_path = Some(path);
-                    let _ = self.library.upsert_artist_meta(&meta);
-                    self.reload_artists();
-                }
-            }
+            } => self.set_album_cover(artist, album, path),
+            Msg::SetArtistImage { name, path } => self.set_artist_image(name, path),
             Msg::UploadCover => self.open_cover_upload_dialog(root, &sender),
             Msg::SetFanartKey(key) => {
                 let key = key.trim().to_string();
@@ -4715,19 +4598,7 @@ impl Component for App {
                     self.rebuild_all_lists(&sender);
                 }
             }
-            Msg::SetAreas { scope, key, value } => {
-                if let Err(e) = self.library.set_category(scope, &key, Some(&value)) {
-                    tracing::error!("Failed to save properties: {e}");
-                }
-                // Visibility/assignment may have changed anywhere →
-                // reload the views. Concerts/audiobooks are derived live from
-                // the properties (no separate reconciliation needed).
-                self.reload_albums();
-                self.reload_artists();
-                self.load_concerts(&sender);
-                self.load_audiobooks(&sender);
-                self.load_dir(&sender);
-            }
+            Msg::SetAreas { scope, key, value } => self.set_areas(&sender, scope, key, value),
             Msg::SetEq {
                 output,
                 scope,
