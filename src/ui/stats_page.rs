@@ -39,11 +39,22 @@ impl StatsPeriod {
 
 /// The statistics page component.
 pub(crate) struct StatsPage {
-    /// Own read-only DB connection (the page never writes).
-    library: Library,
     period: StatsPeriod,
     /// Root box; rebuilt in place on every refresh.
     container: gtk::Box,
+}
+
+/// All numbers for one render, computed off the UI thread by [`fetch`].
+#[derive(Debug)]
+pub(crate) struct StatsData {
+    period: StatsPeriod,
+    totals: StatTotals,
+    artists: Vec<StatEntry>,
+    albums: Vec<StatEntry>,
+    tracks: Vec<StatEntry>,
+    genres: Vec<StatEntry>,
+    weekday: [i64; 7],
+    hour: [i64; 24],
 }
 
 #[derive(Debug)]
@@ -51,6 +62,33 @@ pub(crate) enum StatsInput {
     SetPeriod(StatsPeriod),
     /// Recompute from the DB (sent by the parent when the section is opened).
     Refresh,
+    /// A background computation finished → render it on the UI thread.
+    Rendered(Box<StatsData>),
+}
+
+/// Runs all the statistics aggregations on a worker thread (own DB connection).
+/// A large `play_event` history makes these slow, so they must not run on the
+/// GTK main loop.
+fn fetch(period: StatsPeriod) -> StatsData {
+    let lib = Library::open_or_memory();
+    let since = period.since(unix_now());
+    let mut totals = lib.stats_totals(since).unwrap_or_default();
+    // The (feat./album-name-folded) rankings are computed in full once: the
+    // distinct counts are their lengths, the display takes the top N.
+    let artists = lib.stats_top_artists(since, usize::MAX).unwrap_or_default();
+    let albums = lib.stats_top_albums(since, usize::MAX).unwrap_or_default();
+    totals.distinct_artists = artists.len() as i64;
+    totals.distinct_albums = albums.len() as i64;
+    StatsData {
+        period,
+        totals,
+        artists: artists.into_iter().take(TOP_N).collect(),
+        albums: albums.into_iter().take(TOP_N).collect(),
+        tracks: lib.stats_top_tracks(since, TOP_N).unwrap_or_default(),
+        genres: lib.stats_top_genres(since, TOP_N).unwrap_or_default(),
+        weekday: lib.stats_by_weekday(since).unwrap_or([0; 7]),
+        hour: lib.stats_by_hour(since).unwrap_or([0; 24]),
+    }
 }
 
 #[relm4::component(pub(crate))]
@@ -72,16 +110,12 @@ impl SimpleComponent for StatsPage {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        // A failed second connection must not crash the whole app; degrade to a
-        // temporary in-memory DB (logged) instead of panicking the UI thread.
-        let library = Library::open_or_memory();
         let model = StatsPage {
-            library,
             period: StatsPeriod::All,
             container: root.clone(),
         };
         let widgets = view_output!();
-        model.rebuild(&sender);
+        model.spawn_fetch(&sender);
         ComponentParts { model, widgets }
     }
 
@@ -89,24 +123,41 @@ impl SimpleComponent for StatsPage {
         match msg {
             StatsInput::SetPeriod(period) => {
                 self.period = period;
-                self.rebuild(&sender);
+                self.spawn_fetch(&sender);
             }
-            StatsInput::Refresh => self.rebuild(&sender),
+            StatsInput::Refresh => self.spawn_fetch(&sender),
+            StatsInput::Rendered(data) => {
+                // Ignore a stale result from a period switch that was superseded
+                // while its worker was still running.
+                if data.period == self.period {
+                    self.render(&data, &sender);
+                }
+            }
         }
     }
 }
 
 impl StatsPage {
-    /// Rebuilds the page (on open and on a period change). Only reads.
-    fn rebuild(&self, sender: &ComponentSender<Self>) {
+    /// Recomputes the page off the UI thread (on open and on a period change),
+    /// posting the result back as `Rendered`. The old content stays visible
+    /// until the worker finishes.
+    fn spawn_fetch(&self, sender: &ComponentSender<Self>) {
+        let period = self.period;
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            sender.input(StatsInput::Rendered(Box::new(fetch(period))));
+        });
+    }
+
+    /// Rebuilds the page from already-computed data (UI thread; no DB access).
+    fn render(&self, data: &StatsData, sender: &ComponentSender<Self>) {
         let container = &self.container;
         while let Some(child) = container.first_child() {
             container.remove(&child);
         }
         container.append(&self.period_selector(sender));
 
-        let since = self.period.since(unix_now());
-        let mut totals = self.library.stats_totals(since).unwrap_or_default();
+        let totals = &data.totals;
 
         let scroller = gtk::ScrolledWindow::builder()
             .vexpand(true)
@@ -141,59 +192,24 @@ impl StatsPage {
             return;
         }
 
-        // Fetch the full artist/album rankings once: the distinct counts are
-        // their lengths, the display takes the top N. Avoids running these
-        // (feat./album-name-folded) aggregations twice — they used to run once
-        // inside stats_totals and once again here.
-        let artists = self
-            .library
-            .stats_top_artists(since, usize::MAX)
-            .unwrap_or_default();
-        let albums = self
-            .library
-            .stats_top_albums(since, usize::MAX)
-            .unwrap_or_default();
-        totals.distinct_artists = artists.len() as i64;
-        totals.distinct_albums = albums.len() as i64;
+        content.append(&summary_group(totals));
+        content.append(&diversity_group(totals));
 
-        content.append(&summary_group(&totals));
-        content.append(&diversity_group(&totals));
-
-        if !artists.is_empty() {
-            content.append(&top_group(
-                &gettext("Top artists"),
-                &artists[..artists.len().min(TOP_N)],
-                true,
-            ));
+        if !data.artists.is_empty() {
+            content.append(&top_group(&gettext("Top artists"), &data.artists, true));
         }
-        if !albums.is_empty() {
-            content.append(&top_group(
-                &gettext("Top albums"),
-                &albums[..albums.len().min(TOP_N)],
-                false,
-            ));
+        if !data.albums.is_empty() {
+            content.append(&top_group(&gettext("Top albums"), &data.albums, false));
         }
-        let tracks = self
-            .library
-            .stats_top_tracks(since, TOP_N)
-            .unwrap_or_default();
-        if !tracks.is_empty() {
-            content.append(&top_group(&gettext("Top tracks"), &tracks, false));
+        if !data.tracks.is_empty() {
+            content.append(&top_group(&gettext("Top tracks"), &data.tracks, false));
         }
-        let genres = self
-            .library
-            .stats_top_genres(since, TOP_N)
-            .unwrap_or_default();
-        if !genres.is_empty() {
-            content.append(&top_group(&gettext("Top genres"), &genres, true));
+        if !data.genres.is_empty() {
+            content.append(&top_group(&gettext("Top genres"), &data.genres, true));
         }
 
-        content.append(&weekday_group(
-            &self.library.stats_by_weekday(since).unwrap_or([0; 7]),
-        ));
-        content.append(&clock_group(
-            &self.library.stats_by_hour(since).unwrap_or([0; 24]),
-        ));
+        content.append(&weekday_group(&data.weekday));
+        content.append(&clock_group(&data.hour));
     }
 
     /// Period selection (linked toggles, full width like the Podcast/Streaming
