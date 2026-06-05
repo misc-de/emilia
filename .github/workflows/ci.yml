@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 env:
@@ -67,3 +68,25 @@ jobs:
             echo "msgfmt --check $po"
             msgfmt --check "$po" -o /dev/null
           done
+
+  # On a pushed release tag (v*), the version must be consistent everywhere:
+  # the git tag, Cargo.toml and the newest <release> in the AppStream metainfo
+  # must all match — otherwise a drifted/incomplete release is blocked.
+  release-consistency:
+    name: Release version consistency
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag == Cargo.toml == metainfo
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo_ver=$(sed -n -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' Cargo.toml | head -1)
+          meta_ver=$(grep -m1 -oE 'release version="[0-9]+\.[0-9]+\.[0-9]+"' \
+            data/de.cais.Emilia.metainfo.xml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "tag=$tag  cargo=$cargo_ver  metainfo=$meta_ver"
+          fail=0
+          [ "$tag" = "$cargo_ver" ] || { echo "::error::Cargo.toml ($cargo_ver) != tag ($tag)"; fail=1; }
+          [ "$tag" = "$meta_ver" ]  || { echo "::error::newest metainfo release ($meta_ver) != tag ($tag)"; fail=1; }
+          exit $fail
