@@ -4752,18 +4752,7 @@ impl Component for App {
                 let _ = self.library.clear_eq(&output, scope, &key);
                 self.apply_current_eq();
             }
-            Msg::ConcertImport => {
-                // Concert import refers to the primary library.
-                let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
-                    self.toast(&gettext("No music folder set"));
-                    return;
-                };
-                let existing = self.library.concert_paths().unwrap_or_default();
-                self.toast(&gettext("Searching for concerts …"));
-                sender.spawn_oneshot_command(move || {
-                    Cmd::Candidates(crate::core::concert::scan_candidates(&root, &existing))
-                });
-            }
+            Msg::ConcertImport => self.concert_import(&sender),
             Msg::ConcertDismissHint => {
                 self.concerts.concert_hint_dismissed = true;
                 let _ = self.library.set_setting("concert_hint_dismissed", "1");
@@ -4772,34 +4761,7 @@ impl Component for App {
                 self.set_section_visible("concerts", false);
                 self.toast(&gettext("Hid the Concerts menu item"));
             }
-            Msg::ConcertAdd(items) => {
-                let n = items.len();
-                for (path, title, is_dir) in &items {
-                    // Table: only for the candidate filtering at the next import.
-                    let _ = self.library.add_concert(path, title, *is_dir);
-                    // Display/management via the properties: mark the
-                    // "Concerts" area on the contained albums/tracks, so that
-                    // the concert can also be removed again via it.
-                    let entries = if *is_dir {
-                        self.folder_albums_and_tracks(path)
-                    } else {
-                        vec![("track".to_string(), path.clone(), title.clone(), false)]
-                    };
-                    for (scope, key, _, _) in entries {
-                        let _ = self.library.add_category_area(
-                            &scope,
-                            &key,
-                            crate::core::category::Area::Concerts,
-                        );
-                    }
-                }
-                self.load_concerts(&sender);
-                self.toast(&ngettext_n(
-                    "Added {n} concert",
-                    "Added {n} concerts",
-                    n as u32,
-                ));
-            }
+            Msg::ConcertAdd(items) => self.concert_add(&sender, items),
             Msg::PlayConcert(index) => {
                 if let Some((scope, key, _, is_dir)) =
                     self.concerts.concert_items.get(index).cloned()

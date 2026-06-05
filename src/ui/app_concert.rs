@@ -150,4 +150,49 @@ impl App {
         dialog.set_child(Some(&toolbar));
         dialog.present(Some(root));
     }
+
+    /// Scan the primary music folder for likely concert recordings (background).
+    pub(crate) fn concert_import(&mut self, sender: &ComponentSender<Self>) {
+        let Some(root) = self.files.music_dir.as_ref().map(std::path::PathBuf::from) else {
+            self.toast(&gettext("No music folder set"));
+            return;
+        };
+        let existing = self.library.concert_paths().unwrap_or_default();
+        self.toast(&gettext("Searching for concerts …"));
+        sender.spawn_oneshot_command(move || {
+            crate::ui::app::Cmd::Candidates(crate::core::concert::scan_candidates(&root, &existing))
+        });
+    }
+
+    /// Add the chosen candidates as concerts (table + Concerts area markers on
+    /// the contained albums/tracks, so they can be removed via the properties).
+    pub(crate) fn concert_add(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        items: Vec<(String, String, bool)>,
+    ) {
+        let n = items.len();
+        for (path, title, is_dir) in &items {
+            // Table: only for the candidate filtering at the next import.
+            let _ = self.library.add_concert(path, title, *is_dir);
+            let entries = if *is_dir {
+                self.folder_albums_and_tracks(path)
+            } else {
+                vec![("track".to_string(), path.clone(), title.clone(), false)]
+            };
+            for (scope, key, _, _) in entries {
+                let _ = self.library.add_category_area(
+                    &scope,
+                    &key,
+                    crate::core::category::Area::Concerts,
+                );
+            }
+        }
+        self.load_concerts(sender);
+        self.toast(&ngettext_n(
+            "Added {n} concert",
+            "Added {n} concerts",
+            n as u32,
+        ));
+    }
 }
