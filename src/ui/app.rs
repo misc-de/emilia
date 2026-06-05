@@ -3888,105 +3888,17 @@ impl Component for App {
             }
             // --- Streaming (internet radio) ---
             Msg::StreamAdd => self.open_add_stream_dialog(root, &sender),
-            Msg::StreamSearch(term) => {
-                let term = term.trim().to_string();
-                if !term.is_empty() {
-                    self.toast(&gettext("Searching …"));
-                    sender.spawn_command(move |out| {
-                        let results =
-                            crate::core::streaming::search_stations(&term).unwrap_or_default();
-                        // Show hits immediately (still without logos) …
-                        let _ = out.send(Cmd::StreamSearchResults(results.clone()));
-                        // … and fetch the logos afterwards in the background.
-                        for r in &results {
-                            if let Some(img) = r.favicon.as_deref() {
-                                crate::core::online::cache_station_image(img);
-                            }
-                        }
-                        let _ = out.send(Cmd::StreamSearchCoversReady);
-                    });
-                }
-            }
+            Msg::StreamSearch(term) => self.stream_search(&sender, term),
             Msg::StreamAddResult(index) => self.add_stream_result(&sender, index),
-            Msg::StreamAddUrl(url) => {
-                let url = url.trim().to_string();
-                if !url.is_empty() {
-                    let name = crate::core::streaming::name_from_url(&url);
-                    match self
-                        .library
-                        .add_stream(&name, &url, None, None, None, None, None)
-                    {
-                        Ok(_) => {
-                            self.reload_streams(&sender);
-                            self.toast(&gettext("Station added"));
-                        }
-                        Err(_) => self.toast(&gettext("Could not add station")),
-                    }
-                }
-            }
-            Msg::ToggleStream(id) => {
-                if self.streaming.playing_stream == Some(id) {
-                    // Already running → toggle pause/resume (buffer keeps running).
-                    if self.mini.playing {
-                        self.player.pause();
-                        self.mini.playing = false;
-                    } else {
-                        self.player.resume();
-                        self.mini.playing = true;
-                    }
-                    self.mpris.set_playing(self.mini.playing);
-                } else {
-                    self.play_stream(id);
-                }
-                self.refresh_stream_icons();
-            }
-            Msg::StreamRecordToggle(id) => {
-                if self.streaming.record_state.as_ref().map(|r| r.stream_id) == Some(id) {
-                    // Running → stop.
-                    sender.input(Msg::RecordStop);
-                } else if self.streaming.recording_buffer_minutes == 0 {
-                    self.toast(&gettext(
-                        "Enable the recording buffer in the settings first",
-                    ));
-                } else {
-                    // Ensure the station (with buffer), then start the continuous recording.
-                    if self.streaming.playing_stream != Some(id) {
-                        self.play_stream(id);
-                    }
-                    self.record_arm(&sender, id);
-                    self.refresh_stream_icons();
-                }
-            }
+            Msg::StreamAddUrl(url) => self.stream_add_url(&sender, url),
+            Msg::ToggleStream(id) => self.toggle_stream(id),
+            Msg::StreamRecordToggle(id) => self.stream_record_toggle(&sender, id),
             Msg::TransportRecordToggle => {
                 if let Some(id) = self.streaming.playing_stream {
                     sender.input(Msg::StreamRecordToggle(id));
                 }
             }
-            Msg::StreamTitle(title) => {
-                // Only relevant while a station is running (file/episode tags
-                // are ignored). Shows "Station — Title" in the mini player and
-                // reports the title to the lock screen/media keys.
-                let title = title.trim().to_string();
-                if let Some(id) = self.streaming.playing_stream {
-                    if !title.is_empty()
-                        && self.streaming.stream_title.as_deref() != Some(title.as_str())
-                    {
-                        self.streaming.stream_title = Some(title.clone());
-                        let station = self
-                            .streaming
-                            .stream_items
-                            .iter()
-                            .find(|s| s.id == id)
-                            .map(|s| s.name.clone());
-                        self.mini.now_playing = Some(match &station {
-                            Some(name) => format!("{name} — {title}"),
-                            None => title.clone(),
-                        });
-                        self.mpris
-                            .set_metadata(0, &title, station.as_deref(), None, None, None);
-                    }
-                }
-            }
+            Msg::StreamTitle(title) => self.stream_title(title),
             Msg::OpenStream(id) => self.open_stream(root, &sender, id),
             Msg::StreamDelete(id) => {
                 self.undo_toast(
@@ -3995,18 +3907,7 @@ impl Component for App {
                     Msg::StreamDeleteConfirmed(id),
                 );
             }
-            Msg::StreamDeleteConfirmed(id) => {
-                if self.streaming.playing_stream == Some(id) {
-                    self.player.stop();
-                    self.mini.playing = false;
-                    self.streaming.playing_stream = None;
-                    self.mini.now_playing = None;
-                    self.mpris.set_playing(false);
-                    self.stop_recorder();
-                }
-                let _ = self.library.delete_stream(id);
-                self.reload_streams(&sender);
-            }
+            Msg::StreamDeleteConfirmed(id) => self.stream_delete_confirmed(&sender, id),
             // --- Recording (timeshift) ---
             Msg::RecordStop => {
                 if self.streaming.record_state.is_some() {
@@ -4018,54 +3919,9 @@ impl Component for App {
                 }
             }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
-            Msg::ReplayPlay { start, end } => {
-                let temp = self
-                    .streaming
-                    .recorder
-                    .as_ref()
-                    .and_then(|r| r.extract_temp(start, end).ok());
-                match temp {
-                    Some(path) => {
-                        let p = path.to_string_lossy().to_string();
-                        self.player.stop();
-                        match self.player.play_file(&p, 0) {
-                            Ok(()) => {
-                                self.mini.now_playing = Some(gettext("Replay"));
-                                self.mini.playing = true;
-                                self.transport.playing_path = Some(path);
-                                self.podcasts.playing_episode_url = None;
-                                self.streaming.playing_stream = None;
-                                self.mpris.set_playing(true);
-                            }
-                            Err(e) => tracing::error!("Replay failed: {e}"),
-                        }
-                    }
-                    None => self.toast(&gettext("Could not extract from buffer")),
-                }
-            }
-            Msg::ReplaySave { start, end, title } => {
-                let station = self
-                    .streaming
-                    .playing_stream
-                    .and_then(|id| self.streaming.stream_items.iter().find(|s| s.id == id))
-                    .map(|s| s.name.clone());
-                if self.store_segment(&sender, start, end, &title, station.as_deref(), false) {
-                    self.reload_recordings(&sender);
-                } else {
-                    self.toast(&gettext("Could not extract from buffer"));
-                }
-            }
-            Msg::PlayRecording(path) => {
-                let p = PathBuf::from(&path);
-                if p.exists() {
-                    self.stop_recorder();
-                    self.transport.queue = vec![p];
-                    self.transport.queue_pos = 0;
-                    self.play_current();
-                } else {
-                    self.toast(&gettext("File not found"));
-                }
-            }
+            Msg::ReplayPlay { start, end } => self.replay_play(start, end),
+            Msg::ReplaySave { start, end, title } => self.replay_save(&sender, start, end, title),
+            Msg::PlayRecording(path) => self.play_recording(path),
             Msg::OpenRecording(id) => self.open_recording(root, &sender, id),
             Msg::RecordingDelete(id) => {
                 self.undo_toast(
