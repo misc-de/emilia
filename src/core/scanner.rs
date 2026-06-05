@@ -36,41 +36,25 @@ pub fn read_meta(path: &Path) -> (Option<String>, Option<String>, Option<i64>) {
     (title, artist, duration_ms)
 }
 
-/// Reads album tag and release year in a single pass
-/// (for the brief overview in "More info").
-pub fn read_album_year(path: &Path) -> (Option<String>, Option<u32>) {
+/// Reads album, year **and** genre in a single tag parse (for the folder detail
+/// view, which would otherwise parse the same files once for the collection
+/// summary and once for the first genre). The file is only read, never modified.
+pub fn read_album_year_genre(path: &Path) -> (Option<String>, Option<u32>, Option<String>) {
     let Ok(tagged) = lofty::read_from_path(path) else {
-        return (None, None);
+        return (None, None, None);
     };
     let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
-        return (None, None);
+        return (None, None, None);
     };
     let album = tag
         .album()
         .map(|c| c.trim().to_string())
         .filter(|s| !s.is_empty());
-    (album, tag.year())
-}
-
-/// Reads genre and composer from the file tags (for "More info").
-/// Both only if actually set; empty tags yield `None`. As everywhere
-/// here, the file is only read, never modified.
-pub fn read_genre_composer(path: &Path) -> (Option<String>, Option<String>) {
-    let Ok(tagged) = lofty::read_from_path(path) else {
-        return (None, None);
-    };
-    let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
-        return (None, None);
-    };
     let genre = tag
         .genre()
         .map(|c| c.trim().to_string())
         .filter(|s| !s.is_empty());
-    let composer = tag
-        .get_string(&lofty::tag::ItemKey::Composer)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    (genre, composer)
+    (album, tag.year(), genre)
 }
 
 /// Reads the (unsynchronized) lyrics from the tags, if present.

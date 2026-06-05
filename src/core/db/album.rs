@@ -51,6 +51,22 @@ impl Library {
         Ok(cover)
     }
 
+    /// Map of lowercased album name -> a stored cover path (any artist credit),
+    /// fetched in one query. Lets the album overview resolve every album's cover
+    /// from one scan instead of an `album_cover` lookup per coverless album.
+    pub fn album_meta_covers(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT LOWER(album), cover_path FROM album_meta
+             WHERE cover_path IS NOT NULL AND cover_path <> ''",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut map = std::collections::HashMap::new();
+        for (album, cover) in rows.flatten() {
+            map.entry(album).or_insert(cover);
+        }
+        Ok(map)
+    }
+
     /// Stores/updates the online metadata of an album.
     pub fn upsert_album_meta(&self, m: &AlbumMeta) -> Result<()> {
         self.conn.execute(

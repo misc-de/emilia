@@ -483,13 +483,20 @@ impl App {
 
     pub(crate) fn reload_albums_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {
         let mut albums = self.library.albums_overview_with(snap).unwrap_or_default();
+        // Resolve missing covers: pull every stored album_meta cover in one
+        // query (instead of an `album_cover` lookup per album), and only fall
+        // back to the per-track local-cover scan for albums still without one.
+        let meta_covers = self.library.album_meta_covers().unwrap_or_default();
         for album in &mut albums {
             if album
                 .cover_path
                 .as_deref()
                 .is_none_or(|p| p.trim().is_empty())
             {
-                album.cover_path = self.album_cover_for(&album.artist, &album.album);
+                album.cover_path = meta_covers
+                    .get(&album.album.to_lowercase())
+                    .cloned()
+                    .or_else(|| self.album_local_cover(&album.artist, &album.album));
             }
         }
         self.libview.album_count = albums.len();
@@ -2034,7 +2041,7 @@ impl App {
                 }
                 lines.push((
                     gettext("Collection"),
-                    Self::files_summary(&files, !year_shown),
+                    Self::folder_summary(&files, !year_shown).0,
                 ));
                 lines
             }
@@ -2045,16 +2052,14 @@ impl App {
                 }
                 lines.push((gettext("Album"), m.album.clone()));
                 let files = self.album_files(&m.artist, &m.album);
-                if let Some(g) = Self::first_genre(&files) {
+                let (summary, genre) = Self::folder_summary(&files, m.year.is_none());
+                if let Some(g) = genre {
                     lines.push((gettext("Genre"), g));
                 }
                 if let Some(y) = m.year {
                     lines.push((gettext("Year"), y.to_string()));
                 }
-                lines.push((
-                    gettext("Collection"),
-                    Self::files_summary(&files, m.year.is_none()),
-                ));
+                lines.push((gettext("Collection"), summary));
                 lines
             }
         }
@@ -2267,19 +2272,27 @@ impl App {
     /// Short summary "N albums - M songs[ - year/range]". The year is only
     /// appended if `with_year` is set – as soon as a dedicated "Year"/"Years"
     /// line is shown, it is omitted here (to avoid duplication).
-    pub(crate) fn files_summary(files: &[PathBuf], with_year: bool) -> String {
+    /// One-pass folder summary: songs / album count / year span **and** the
+    /// first genre, from a single tag parse per file (was two passes — one for
+    /// the summary, one for the genre). The genre is `None` for callers that
+    /// don't need it (it's read in the same pass either way).
+    pub(crate) fn folder_summary(files: &[PathBuf], with_year: bool) -> (String, Option<String>) {
         let songs = files.len();
         let mut albums = std::collections::HashSet::new();
         let mut min_year: Option<u32> = None;
         let mut max_year: Option<u32> = None;
+        let mut genre: Option<String> = None;
         for f in files {
-            let (album, year) = scanner::read_album_year(f);
+            let (album, year, g) = scanner::read_album_year_genre(f);
             if let Some(a) = album {
                 albums.insert(a);
             }
             if let Some(y) = year {
                 min_year = Some(min_year.map_or(y, |m| m.min(y)));
                 max_year = Some(max_year.map_or(y, |m| m.max(y)));
+            }
+            if genre.is_none() {
+                genre = g;
             }
         }
 
@@ -2302,7 +2315,7 @@ impl App {
                 value.push_str(&format!(" - {span}"));
             }
         }
-        value
+        (value, genre)
     }
 
     pub(crate) fn toast(&self, _msg: &str) {
@@ -2416,28 +2429,21 @@ impl App {
         gtk::gdk::Texture::from_filename(&path).ok()
     }
 
-    /// First set genre of a set of files (for the album display). Albums
-    /// are usually genre-uniform, so the first match suffices.
-    fn first_genre(files: &[PathBuf]) -> Option<String> {
-        files.iter().find_map(|f| scanner::read_genre_composer(f).0)
-    }
-
     /// Detail lines for the "More info" expander.
     pub(crate) fn info_lines(&self, entry: &FsEntry) -> Vec<(String, String)> {
         let mut lines = Vec::new();
         if entry.is_dir() {
             // Folders recognized as album/artist show matching info incl. year.
             let files = self.entry_files(entry);
+            let kind = self.fs_music_kind(entry);
+            let is_album = matches!(&kind, Some(FsKind::Album { .. }));
             let mut year_shown = false;
-            match self.fs_music_kind(entry) {
+            match kind {
                 Some(FsKind::Album { artist, album }) => {
                     if !artist.is_empty() {
                         lines.push((gettext("Artist"), artist.clone()));
                     }
                     lines.push((gettext("Album"), album.clone()));
-                    if let Some(g) = Self::first_genre(&files) {
-                        lines.push((gettext("Genre"), g));
-                    }
                     if let Some(y) = self
                         .library
                         .get_album_meta(&artist, &album)
@@ -2458,10 +2464,14 @@ impl App {
                 }
                 None => {}
             }
-            lines.push((
-                gettext("Collection"),
-                Self::files_summary(&files, !year_shown),
-            ));
+            // One tag parse per file: collection summary + (for albums) the genre.
+            let (summary, genre) = Self::folder_summary(&files, !year_shown);
+            if is_album {
+                if let Some(g) = genre {
+                    lines.push((gettext("Genre"), g));
+                }
+            }
+            lines.push((gettext("Collection"), summary));
         } else if let Some(p) = entry.path() {
             // Single tag read for title/artist/album/genre/duration **and** the
             // composer (was previously two parses of the same file).

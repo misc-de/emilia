@@ -381,6 +381,24 @@ impl App {
             })
     }
 
+    /// Local cover of an album from its tracks' embedded/cached images only (no
+    /// album_meta lookup). The per-track-scan fallback for the album overview,
+    /// used once the batched `album_meta_covers` map has no entry for it.
+    pub(crate) fn album_local_cover(&self, artist: &str, album: &str) -> Option<String> {
+        self.library
+            .album_track_paths(artist, album)
+            .unwrap_or_default()
+            .into_iter()
+            .find_map(|p| crate::core::online::local_track_cover(&p))
+            .or_else(|| {
+                self.library
+                    .album_track_paths_by_name(album)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find_map(|p| crate::core::online::local_track_cover(&p))
+            })
+    }
+
     /// Cover of a folder: cover of any track within it.
     fn folder_cover(&self, folder: &str) -> Option<String> {
         let prefix = format!("{}/", folder.trim_end_matches('/'));
