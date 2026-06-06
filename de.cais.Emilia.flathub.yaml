@@ -31,13 +31,13 @@ finish-args:
   - --socket=pulseaudio
   # Online-Metadaten **und** Geräte-Synchronisierung im LAN (HTTPS-Server/-Client)
   - --share=network
-  # Geräte-Synchronisierung: Kamera für den QR-Scan. Dekodierung läuft in-process
-  # (rqrr) — kein `zxing`-Plugin nötig. Quelle ist `v4l2src`/`autovideosrc` aus
-  # der Runtime; auf Halium (FuriOS/Droidian) ist die Kamera über `droidcam2v4l2`
-  # als /dev/video* erreichbar (das Portal exponiert diese V4L2-Loopbacks nicht
-  # zuverlässig), daher direkter Geräte-Zugriff. `gtk4paintablesink` (Vorschau)
-  # ist optional. Override per `EMILIA_CAMERA_SRC`.
-  - --device=all
+  # GPU für die GTK4-Renderpipeline (zuvor Teil von --device=all). Der Kamera-
+  # Zugriff für den QR-Scan läuft über das XDG-Kamera-Portal (PipeWire-fd via
+  # `pipewiresrc`), daher KEIN Rohzugriff auf /dev/video* / kein `--device=all`.
+  # Dekodierung in-process (rqrr), kein `zxing`-Plugin; `gtk4paintablesink`
+  # (Vorschau) optional. (Halium/FuriOS nutzt den Selbst-Repo-Build mit
+  # --device=all + EMILIA_CAMERA_SRC.)
+  - --device=dri
   # Musikbibliothek: Standardzugriff nur auf den XDG-Musikordner. Weitere
   # Ordner werden über den GTK-Dateidialog ausgewählt; Schreibzugriff im
   # Musikordner ist für Stream-Aufnahmen und per Sync empfangene Audiodateien

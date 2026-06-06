@@ -467,7 +467,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "emilia"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -499,6 +499,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "x509-parser",
+ "zbus",
 ]
 
 [[package]]

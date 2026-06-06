@@ -29,11 +29,11 @@ finish-args:
   # Online-Metadaten **und** Geräte-Synchronisierung im LAN (HTTPS-Server/-Client)
   - --share=network
   # Geräte-Synchronisierung: Kamera für den QR-Scan. Dekodierung läuft in-process
-  # (rqrr) — kein `zxing`-Plugin nötig. Quelle ist `v4l2src`/`autovideosrc` aus
-  # der Runtime; auf Halium (FuriOS/Droidian) ist die Kamera über `droidcam2v4l2`
-  # als /dev/video* erreichbar (das Portal exponiert diese V4L2-Loopbacks nicht
-  # zuverlässig), daher direkter Geräte-Zugriff. `gtk4paintablesink` (Vorschau)
-  # ist optional. Override per `EMILIA_CAMERA_SRC`.
+  # (rqrr) — kein `zxing`-Plugin nötig. Dieser Build (insb. FuriOS/Droidian/
+  # Halium) umgeht das Kamera-Portal via `EMILIA_CAMERA_SRC` (siehe Env unten) und
+  # greift direkt auf /dev/video* zu — auf Halium bridgt `droidcam2v4l2` die HAL
+  # dorthin, und das Portal exponiert diese V4L2-Loopbacks nicht zuverlässig.
+  # Daher `--device=all`. `gtk4paintablesink` (Vorschau) ist optional.
   - --device=all
   # Musikbibliothek: Standardzugriff nur auf den XDG-Musikordner. Weitere
   # Ordner werden über den GTK-Dateidialog ausgewählt; Schreibzugriff im
@@ -46,6 +46,11 @@ finish-args:
   # Keys/Tokens wie AcoustID/fanart.tv) werden, wenn verfügbar, über libsecret
   # im Secret Service statt in der lokalen SQLite-Datenbank gespeichert.
   - --talk-name=org.freedesktop.secrets
+  # Kamera-Quelle für den QR-Scan: direkter V4L2-Pfad (dieser Build hat
+  # --device=all). Umgeht das Kamera-Portal, das auf Halium die V4L2-Loopbacks
+  # nicht zuverlässig exponiert. Auf dem Flathub-Build ist das NICHT gesetzt, dort
+  # läuft die Kamera über das Portal (kein --device=all).
+  - --env=EMILIA_CAMERA_SRC=autovideosrc
   # Übersetzungskataloge liegen privat unter /app (nicht in der Locale-Extension,
   # die nur die Gerätesprachen installiert), damit der eingebaute Sprachwähler
   # jede Sprache laden kann – unabhängig von der Systemsprache.
