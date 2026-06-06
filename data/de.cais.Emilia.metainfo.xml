@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.3.4" date="2026-06-06">
+      <description>
+        <p>Phone layout overflow fixes traced with an on-device measurement: the top navigation strip now clamps and scrolls instead of widening the window, the statistics period tabs ellipsize, and the YouTube notice no longer reserves extra width. The window now fits a 360 px screen.</p>
+        <p xml:lang="de">Überlauf-Korrekturen fürs Handy, per On-Device-Messung gefunden: Die obere Navigationsleiste begrenzt sich jetzt und scrollt, statt das Fenster zu verbreitern, die Statistik-Zeitraum-Tabs werden gekürzt, und der YouTube-Hinweis reserviert keine zusätzliche Breite mehr. Das Fenster passt nun auf einen 360-px-Bildschirm.</p>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-06-05">
       <description>
         <p>More narrow-screen layout fixes: the album/artist galleries can shrink to a single column, and long extra-source names (e.g. a Nextcloud URL) no longer force the window wider than a phone screen.</p>

@@ -1389,7 +1389,6 @@ impl Component for App {
                         #[wrap(Some)]
                         #[name = "top_nav"]
                         set_child = &gtk::Box {
-                            set_halign: gtk::Align::Center,
                             set_spacing: 3,
                             set_margin_top: 2,
                             set_margin_bottom: 2,
@@ -1896,9 +1895,13 @@ impl Component for App {
                                     // "cat and mouse" breakage); refreshed on entering the section and
                                     // after each extraction. The button opens the settings (yt-dlp update).
                                     adw::Banner {
+                                        // Fully hidden (not just collapsed) when fine, so its
+                                        // intrinsic min width doesn't widen the view stack on a phone.
+                                        #[watch]
+                                        set_visible: model.youtube.ytdlp_broken,
                                         #[watch]
                                         set_revealed: model.youtube.ytdlp_broken,
-                                        set_title: &gettext("YouTube isn't working right now – it changed and the installed yt-dlp can't read it. Look for a newer version of the app or update yt-dlp in the settings. If neither helps, please wait for a new yt-dlp release."),
+                                        set_title: &gettext("YouTube isn't working right now – update yt-dlp in the settings, or wait for a newer release."),
                                         set_button_label: Some(&gettext("Settings")),
                                         connect_button_clicked => Msg::OpenSettings,
                                     },

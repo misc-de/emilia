@@ -227,7 +227,12 @@ impl StatsPage {
         group.set_hexpand(true);
         let mut leader: Option<gtk::ToggleButton> = None;
         for period in [StatsPeriod::Weeks4, StatsPeriod::Year, StatsPeriod::All] {
-            let btn = gtk::ToggleButton::with_label(&period.label());
+            // Ellipsizing label so the period names don't force the tab bar (and
+            // thus the whole window) wider than a phone screen.
+            let lbl = gtk::Label::new(Some(&period.label()));
+            lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            let btn = gtk::ToggleButton::new();
+            btn.set_child(Some(&lbl));
             btn.set_hexpand(true);
             btn.set_active(period == self.period);
             match &leader {
