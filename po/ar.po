@@ -1751,3 +1751,30 @@ msgstr ""
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
 msgstr "نُزّل"
+
+msgid "Sort"
+msgstr "ترتيب"
+
+msgid "Sort by"
+msgstr "ترتيب حسب"
+
+msgid "Descending"
+msgstr "تنازلي"
+
+msgid "Ascending"
+msgstr "تصاعدي"
+
+msgid "Length"
+msgstr "المدة"
+
+msgid "Release"
+msgstr "الإصدار"
+
+msgid "Number of songs"
+msgstr "عدد الأغاني"
+
+msgid "Date"
+msgstr "التاريخ"
+
+msgid "Unknown year"
+msgstr "سنة غير معروفة"

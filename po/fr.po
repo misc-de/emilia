@@ -1740,3 +1740,30 @@ msgstr ""
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
 msgstr "Téléchargé"
+
+msgid "Sort"
+msgstr "Trier"
+
+msgid "Sort by"
+msgstr "Trier par"
+
+msgid "Descending"
+msgstr "Décroissant"
+
+msgid "Ascending"
+msgstr "Croissant"
+
+msgid "Length"
+msgstr "Durée"
+
+msgid "Release"
+msgstr "Sortie"
+
+msgid "Number of songs"
+msgstr "Nombre de titres"
+
+msgid "Date"
+msgstr "Date"
+
+msgid "Unknown year"
+msgstr "Année inconnue"

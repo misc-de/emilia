@@ -1705,3 +1705,30 @@ msgstr ""
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
 msgstr "已下载"
+
+msgid "Sort"
+msgstr "排序"
+
+msgid "Sort by"
+msgstr "排序方式"
+
+msgid "Descending"
+msgstr "降序"
+
+msgid "Ascending"
+msgstr "升序"
+
+msgid "Length"
+msgstr "时长"
+
+msgid "Release"
+msgstr "发行"
+
+msgid "Number of songs"
+msgstr "歌曲数量"
+
+msgid "Date"
+msgstr "日期"
+
+msgid "Unknown year"
+msgstr "未知年份"

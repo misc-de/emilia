@@ -17,7 +17,7 @@ use crate::i18n::{gettext, ngettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
     album_subtitle, cover_widget, duration_label, find_scroller, fmt_duration, most_common_artist,
-    read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
+    read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg, SortCrit,
 };
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::FsEntry;
@@ -505,10 +505,17 @@ impl App {
                     .or_else(|| self.album_local_cover(&album.artist, &album.album));
             }
         }
+        // Apply the chosen sort order (criterion + direction). The DB already
+        // returns the albums by name; here we re-order to match the user's pick.
+        self.sort_albums(&mut albums);
         self.libview.album_count = albums.len();
         // Mirror the overview so that gallery clicks (the factory is empty then) can
         // resolve the entry by index.
         self.libview.albums_overview = albums.clone();
+        // Group by release year (with year headings) only when sorting by date.
+        let group_by_year = matches!(self.libview.sort_for("albums").0, SortCrit::Release);
+        *self.libview.album_year_headers.borrow_mut() = group_by_year
+            .then(|| albums.iter().map(|a| a.year).collect::<Vec<_>>());
         let offline_keys = self.offline_album_keys();
         if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = albums
@@ -521,12 +528,7 @@ impl App {
                     )
                 })
                 .collect();
-            self.fill_gallery(
-                &self.libview.albums_gallery,
-                &items,
-                Msg::ShowAlbumTracks,
-                Msg::ShowAlbumDetail,
-            );
+            self.fill_albums_gallery(&items, &albums, group_by_year);
         } else {
             let mut guard = self.libview.albums.guard();
             guard.clear();
@@ -534,6 +536,9 @@ impl App {
                 let offline = offline_keys.contains(&(a.artist.clone(), a.album.clone()));
                 guard.push_back((a, offline));
             }
+            drop(guard);
+            // Refresh the year headings for the rebuilt rows (or clear them).
+            self.libview.albums.widget().invalidate_headers();
         }
     }
 
@@ -685,6 +690,8 @@ impl App {
                 }
             }
         }
+        // Apply the section's chosen sort (criterion + direction).
+        self.sort_artists(&mut artists);
         // Mirror the overview (for gallery index resolution, see reload_albums).
         self.libview.artists_overview = artists.clone();
         if self.libview.gallery_view {

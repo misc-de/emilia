@@ -1728,3 +1728,30 @@ msgstr ""
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
 msgstr "Gedownload"
+
+msgid "Sort"
+msgstr "Sorteren"
+
+msgid "Sort by"
+msgstr "Sorteren op"
+
+msgid "Descending"
+msgstr "Aflopend"
+
+msgid "Ascending"
+msgstr "Oplopend"
+
+msgid "Length"
+msgstr "Duur"
+
+msgid "Release"
+msgstr "Uitgave"
+
+msgid "Number of songs"
+msgstr "Aantal nummers"
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "Unknown year"
+msgstr "Onbekend jaar"

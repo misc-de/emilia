@@ -1875,3 +1875,30 @@ msgstr ""
 #: src/ui/sync_share_ui.rs:486
 msgid "Would overwrite a different file"
 msgstr ""
+
+msgid "Sort"
+msgstr ""
+
+msgid "Sort by"
+msgstr ""
+
+msgid "Descending"
+msgstr ""
+
+msgid "Ascending"
+msgstr ""
+
+msgid "Length"
+msgstr ""
+
+msgid "Release"
+msgstr ""
+
+msgid "Number of songs"
+msgstr ""
+
+msgid "Date"
+msgstr ""
+
+msgid "Unknown year"
+msgstr ""

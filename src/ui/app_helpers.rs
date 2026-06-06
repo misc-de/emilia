@@ -158,6 +158,38 @@ pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget
     crate::ui::widgets::rounded_image(texture.as_ref(), placeholder, 48)
 }
 
+/// If `sub` is a single-album folder (and not a known artist folder), returns
+/// its album info (artist, album) so the row can offer a "play album" button.
+/// `in_dir` are the library tracks already scoped to `sub`.
+fn dir_album_info(
+    lib: &Library,
+    sub: &std::path::Path,
+    in_dir: &[&Track],
+) -> Option<crate::ui::fs_row::DirAlbum> {
+    let name = sub.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    // A folder named like a known artist is shown as an artist, not an album.
+    if matches!(lib.get_artist_meta(name), Ok(Some(_))) {
+        return None;
+    }
+    // Exactly one distinct album in the folder → treat it as an album.
+    let mut album: Option<&str> = None;
+    for t in in_dir {
+        if let Some(a) = t.album.as_deref().filter(|s| !s.is_empty()) {
+            match album {
+                None => album = Some(a),
+                Some(x) if x == a => {}
+                _ => return None,
+            }
+        }
+    }
+    let album = album?.to_string();
+    let artist = in_dir
+        .iter()
+        .find_map(|t| t.artist.clone())
+        .unwrap_or_default();
+    Some(crate::ui::fs_row::DirAlbum { artist, album })
+}
+
 /// Reads subfolders and audio files of a folder (folders first, sorted).
 /// Runs in a background thread - may therefore block.
 pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
@@ -177,6 +209,18 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
     files.sort();
 
     let lib = Library::open().ok();
+    // Load the library once so folders can show their summed runtime (and album
+    // folders a play button). Scoped to tracks under the current folder; skipped
+    // when there are no subfolders to classify.
+    let all_tracks = if dirs.is_empty() {
+        Vec::new()
+    } else {
+        lib.as_ref().and_then(|l| l.all_tracks().ok()).unwrap_or_default()
+    };
+    let under: Vec<&Track> = all_tracks
+        .iter()
+        .filter(|t| std::path::Path::new(&t.path).starts_with(&dir))
+        .collect();
     let mut out = Vec::with_capacity(dirs.len() + files.len());
     for d in dirs {
         let visible = match &lib {
@@ -186,7 +230,16 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
             None => true,
         };
         if visible {
-            out.push(FsEntry::dir(d));
+            // Tracks under this subfolder → its summed runtime (shown for every
+            // folder with songs) and single-album detection (for the play button).
+            let in_dir: Vec<&Track> = under
+                .iter()
+                .copied()
+                .filter(|t| std::path::Path::new(&t.path).starts_with(&d))
+                .collect();
+            let total_ms = in_dir.iter().filter_map(|t| t.duration_ms).sum();
+            let album = lib.as_ref().and_then(|l| dir_album_info(l, &d, &in_dir));
+            out.push(FsEntry::dir_album(d, album, total_ms));
         }
     }
     for f in files {

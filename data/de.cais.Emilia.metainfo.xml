@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.3.25" date="2026-06-06">
+      <description>
+        <p>The library overviews gain per-category sorting: a sort button in the title bar opens a popover to order artists, albums, concerts and audiobooks by name, length, number of songs and — for albums — date, each remembering its own choice and direction. Sorting albums by date groups them under year headings in both the list and the gallery. The file browser now shows the total runtime of every folder (artists and albums alike), and playlists show their runtime including YouTube entries. Smaller fixes: the favorites reorder handle moved to the far left, the device-sync window only grows as tall as its content, the podcast icon is bundled so it looks the same everywhere, and recordings are saved to a "Streaming" folder.</p>
+        <p xml:lang="de">Die Bibliotheksübersichten erhalten eine Sortierung je Kategorie: Ein Sortier-Knopf in der Titelleiste öffnet ein Menü, um Interpreten, Alben, Konzerte und Hörbücher nach Name, Länge, Anzahl der Lieder und – bei Alben – Datum zu ordnen, wobei sich jede Kategorie ihre Auswahl und Richtung merkt. Sortiert man Alben nach Datum, werden sie in Liste und Galerie unter Jahres-Überschriften gruppiert. Der Dateibrowser zeigt nun die Gesamtlaufzeit jedes Ordners (Interpreten wie Alben), und Playlisten zeigen ihre Laufzeit inklusive YouTube-Einträgen. Kleinere Verbesserungen: Der Verschieben-Griff in den Favoriten sitzt jetzt ganz links, das Gerätesync-Fenster wird nur so hoch wie sein Inhalt, das Podcast-Symbol ist eingebettet (überall gleiches Icon) und Aufnahmen werden in einem „Streaming"-Ordner gespeichert.</p>
+      </description>
+    </release>
     <release version="0.3.21" date="2026-06-06">
       <description>
         <p>Device sync now indexes each received file from its own tags as it arrives, so received tracks show up in the artist and album overviews right away — no restart needed. The review screen groups incoming files by album into expandable rows with a tri-state checkbox, so a whole album can be accepted or deselected at once while each track keeps its own status. Transfer progress shows a clean artist/album/title label instead of a raw file path, and the connected panel keeps only the Disconnect button.</p>

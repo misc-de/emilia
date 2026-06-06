@@ -105,7 +105,7 @@ impl Library {
     ) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
-                    COALESCE(m.status, 'pending'), COUNT(*)
+                    COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms)
              FROM track t
              LEFT JOIN album_meta m
                     ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
@@ -123,6 +123,7 @@ impl Library {
                     r.get::<_, Option<i32>>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, i64>(6)?,
+                    r.get::<_, Option<i64>>(7)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -139,7 +140,7 @@ impl Library {
         let mut order: Vec<String> = Vec::new();
         let mut map: HashMap<String, AlbumMeta> = HashMap::new();
         let mut by_artist: HashMap<String, HashMap<String, ArtistInfo>> = HashMap::new();
-        for (artist, album, mbid, cover, year, status, count) in raw {
+        for (artist, album, mbid, cover, year, status, count, duration) in raw {
             let key = album.to_lowercase();
             let entry = map.entry(key.clone()).or_insert_with(|| {
                 order.push(key.clone());
@@ -151,9 +152,13 @@ impl Library {
                     year: None,
                     status: "pending".to_string(),
                     track_count: 0,
+                    total_duration_ms: None,
                 }
             });
             entry.track_count += count;
+            if let Some(ms) = duration {
+                entry.total_duration_ms = Some(entry.total_duration_ms.unwrap_or(0) + ms);
+            }
             if matches!(status.as_str(), "matched" | "local") {
                 entry.status = status;
             }
@@ -234,6 +239,7 @@ impl Library {
             year: r.get(4)?,
             status: r.get(5)?,
             track_count: 0,
+            total_duration_ms: None,
         })
     }
 

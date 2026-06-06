@@ -491,7 +491,10 @@ impl Library {
                 thumbnail TEXT,
                 played_at INTEGER NOT NULL DEFAULT 0,
                 kind      TEXT NOT NULL DEFAULT 'video',
-                count     INTEGER NOT NULL DEFAULT 0
+                count     INTEGER NOT NULL DEFAULT 0,
+                -- For 'playlist' entries: summed runtime (seconds) of all songs,
+                -- so the row can show a total. NULL when unknown.
+                total_duration INTEGER
             );
             -- Title cache for `yt:<id>` tracks, so playlist/queue entries show a
             -- name instead of their id without polluting the library. `duration`
@@ -597,6 +600,21 @@ impl Library {
                 "ALTER TABLE yt_recent ADD COLUMN kind TEXT NOT NULL DEFAULT 'video';
                  ALTER TABLE yt_recent ADD COLUMN count INTEGER NOT NULL DEFAULT 0;",
             )?;
+        }
+
+        // Migration: recent playlists gained a `total_duration` (summed runtime).
+        let has_yt_total = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('yt_recent') WHERE name = 'total_duration'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_yt_total {
+            self.conn
+                .execute_batch("ALTER TABLE yt_recent ADD COLUMN total_duration INTEGER;")?;
         }
 
         // Migration: playlists gained an `origin` marker so a mirrored YouTube

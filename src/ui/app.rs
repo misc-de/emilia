@@ -86,7 +86,7 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 11] = [
     ("artists", "Artists", "avatar-default-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
     ("concerts", "Concerts", "ticket-special-symbolic"),
-    ("podcasts", "Podcasts", "microphone-symbolic"),
+    ("podcasts", "Podcasts", "emilia-podcast-symbolic"),
     ("streaming", "Streaming", "audio-x-generic-symbolic"),
     ("youtube", "YouTube", "im-youtube-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
@@ -178,6 +178,71 @@ pub(crate) enum StatsPeriod {
     All,
 }
 
+/// A sort criterion of a library overview, chosen via the sort popover in the
+/// title bar. Not every category offers every criterion (see
+/// [`section_sort_criteria`]); the direction (asc/desc) is tracked per category
+/// in [`LibView::sort`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SortCrit {
+    /// By name/title (natural order).
+    Name,
+    /// By the summed playback length of all tracks.
+    Length,
+    /// By the release year.
+    Release,
+    /// By the number of songs.
+    Songs,
+}
+
+impl SortCrit {
+    /// Stable token for persisting the choice in the settings DB.
+    pub(crate) fn as_key(self) -> &'static str {
+        match self {
+            SortCrit::Name => "name",
+            SortCrit::Length => "length",
+            SortCrit::Release => "release",
+            SortCrit::Songs => "songs",
+        }
+    }
+
+    /// Parse the persisted token; falls back to [`SortCrit::Name`].
+    pub(crate) fn from_key(s: &str) -> Self {
+        match s {
+            "length" => SortCrit::Length,
+            "release" => SortCrit::Release,
+            "songs" => SortCrit::Songs,
+            _ => SortCrit::Name,
+        }
+    }
+
+    /// Localized label shown in the sort popover.
+    pub(crate) fn label(self) -> String {
+        match self {
+            SortCrit::Name => gettext("Name"),
+            SortCrit::Length => gettext("Length"),
+            // Release year; sorting by it groups the album list under year headings.
+            SortCrit::Release => gettext("Date"),
+            SortCrit::Songs => gettext("Number of songs"),
+        }
+    }
+}
+
+/// The library sections that offer a sort control (with their own remembered
+/// criterion + direction). Other sections (Files/Podcasts/YouTube/Stats) don't.
+pub(crate) const SORTABLE_SECTIONS: &[&str] = &["artists", "albums", "concerts", "audiobooks"];
+
+/// The criteria a given section offers, in popover order. Category-appropriate:
+/// only albums carry a release year, so the rest omit [`SortCrit::Release`].
+pub(crate) fn section_sort_criteria(section: &str) -> &'static [SortCrit] {
+    use SortCrit::*;
+    match section {
+        "albums" => &[Name, Length, Release, Songs],
+        "artists" => &[Name, Songs, Length],
+        "concerts" | "audiobooks" => &[Name, Length, Songs],
+        _ => &[],
+    }
+}
+
 /// Ongoing listening session of a track. On switch/end it is written as **one**
 /// `play_event` into the statistics (see `finalize_play_session`).
 /// Purely local – never leaves the device.
@@ -197,6 +262,13 @@ pub(crate) struct LibView {
     pub(crate) albums: FactoryVecDeque<AlbumCard>,
     /// Gallery variant of the albums (cover grid), parallel to the list factory.
     pub(crate) albums_gallery: gtk::FlowBox,
+    /// Scrolled child of the album gallery. Normally holds [`Self::albums_gallery`]
+    /// as a single grid; when sorting by date it holds year-grouped sections
+    /// (a year heading + a `FlowBox` per year). See [`App::fill_albums_gallery`].
+    pub(crate) albums_gallery_box: gtk::Box,
+    /// Per-row release year of the album **list** (sorted order) when sorting by
+    /// date – drives the `set_header_func` year headings; `None` = no grouping.
+    pub(crate) album_year_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<Option<i32>>>>>,
     /// Album overview (same order as factory/gallery); index resolution for the gallery.
     pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) album_count: usize,
@@ -206,6 +278,10 @@ pub(crate) struct LibView {
     /// Artist overview (same order); index resolution for the gallery.
     pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
     pub(crate) artist_count: usize,
+    /// Per-section sort state (criterion + `desc` direction), keyed by the
+    /// view-stack section name. Only the [`SORTABLE_SECTIONS`] have an entry;
+    /// a missing entry means the default (by name, ascending).
+    pub(crate) sort: std::collections::HashMap<&'static str, (SortCrit, bool)>,
     /// Show lists as a gallery (cover grid) instead of a list.
     pub(crate) gallery_view: bool,
     /// Number of tiles per row in the gallery view (2–8).
@@ -227,6 +303,15 @@ impl LibView {
         self.loading_label
             .clone()
             .unwrap_or_else(|| gettext("Reading music data"))
+    }
+
+    /// The remembered sort of a section (criterion + `desc`), defaulting to
+    /// name-ascending when the section has no stored choice yet.
+    pub(crate) fn sort_for(&self, section: &str) -> (SortCrit, bool) {
+        self.sort
+            .get(section)
+            .copied()
+            .unwrap_or((SortCrit::Name, false))
     }
 }
 
@@ -309,6 +394,9 @@ pub(crate) struct NavState {
     /// Main split view – collapsed (`is_collapsed`) means narrow/mobile mode.
     pub(crate) split: adw::OverlaySplitView,
     pub(crate) view_stack: adw::ViewStack,
+    /// Title-bar sort button; its popover is (re)built per section in
+    /// [`App::rebuild_sort_menu`], and it's hidden on non-sortable sections.
+    pub(crate) sort_btn: gtk::MenuButton,
     /// Navigation container for the subpages (artist → albums → album).
     pub(crate) nav_view: adw::NavigationView,
     /// Navigation containers (sidebar, top bar) for reordering.
@@ -683,6 +771,8 @@ pub enum Msg {
         artist: String,
         album: String,
     },
+    /// Play the album folder at this file-browser row index (its play button).
+    PlayFsAlbum(usize),
     CtxPlay,
     /// Play the album in track order (shuffle off, stop at the end).
     CtxPlayAlbum,
@@ -817,6 +907,13 @@ pub enum Msg {
     SetGalleryView(bool),
     /// Tiles per row in the gallery view (2–8); rebuilds the lists.
     SetGalleryColumns(u32),
+    /// Rebuild the title-bar sort popover for the current section (or hide it).
+    /// Emitted when the visible section changes.
+    SortMenuRefresh,
+    /// Change the sort criterion of the current section; persists and re-sorts.
+    SetSortCrit(SortCrit),
+    /// Change the sort direction of the current section (`true` = descending).
+    SetSortDir(bool),
     /// Set a property of a level (or with `None` reset to "inherit").
     /// Set the areas (properties) of a level; empty value = hidden.
     SetAreas {
@@ -1224,6 +1321,9 @@ pub enum Cmd {
         url: String,
         title: String,
         items: Vec<(String, String)>,
+        /// Summed runtime (seconds) of the playlist, for the Recent row. `None`
+        /// when no durations were available.
+        total_duration: Option<i64>,
     },
     /// Async metadata (channel/duration/cover) for an open video detail dialog.
     YtVideoMeta {
@@ -1363,6 +1463,15 @@ impl Component for App {
                             set_tooltip_text: Some(&gettext("Settings")),
                             set_visible: false,
                             connect_clicked => Msg::OpenSettings,
+                        },
+                        // Per-category sorting. The popover (criteria + direction)
+                        // is built per section in `rebuild_sort_menu`; the button
+                        // is hidden on sections without a sort control.
+                        #[name = "sort_btn"]
+                        pack_end = &gtk::MenuButton {
+                            set_icon_name: "view-sort-descending-symbolic",
+                            set_tooltip_text: Some(&gettext("Sort")),
+                            set_visible: false,
                         },
                         pack_start = &gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
@@ -1569,13 +1678,16 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Gallery variant (cover grid)
+                                    // Gallery variant (cover grid). The box holds either
+                                    // a single grid or year-grouped sections (date sort).
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.libview.album_count > 0 && model.libview.gallery_view,
                                         #[local_ref]
-                                        albums_gallery -> gtk::FlowBox {
+                                        albums_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
@@ -1692,7 +1804,7 @@ impl Component for App {
                                     // playlists are created from a track's "Add to
                                     // playlist" options (which can create one inline).
                                 },
-                            add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "microphone-symbolic"] =
+                            add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "emilia-podcast-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -1749,7 +1861,7 @@ impl Component for App {
                                         },
                                     },
                                     adw::StatusPage {
-                                        set_icon_name: Some("microphone-symbolic"),
+                                        set_icon_name: Some("emilia-podcast-symbolic"),
                                         set_title: &gettext("No episodes"),
                                         set_vexpand: true,
                                         #[watch]
@@ -1787,7 +1899,7 @@ impl Component for App {
                                         },
                                     },
                                     adw::StatusPage {
-                                        set_icon_name: Some("microphone-symbolic"),
+                                        set_icon_name: Some("emilia-podcast-symbolic"),
                                         set_title: &gettext("No podcasts"),
                                         set_description: Some(&gettext("Subscribe to a podcast via its feed address (RSS).")),
                                         set_vexpand: true,
@@ -2632,6 +2744,29 @@ impl Component for App {
             .ok()
             .flatten()
             .unwrap_or_else(|| "system".to_string());
+        // Per-section sort (criterion + direction). Each sortable section keeps
+        // its own choice in the settings DB ("sort_<section>" / "..._desc").
+        let mut sort: std::collections::HashMap<&'static str, (SortCrit, bool)> =
+            std::collections::HashMap::new();
+        for &section in SORTABLE_SECTIONS {
+            let crit = library
+                .get_setting(&format!("sort_{section}"))
+                .ok()
+                .flatten()
+                .map(|s| SortCrit::from_key(&s));
+            let desc = matches!(
+                library
+                    .get_setting(&format!("sort_{section}_desc"))
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+                Some("1")
+            );
+            // Only store a non-default entry, so `sort_for` keeps its fallback.
+            if crit.is_some() || desc {
+                sort.insert(section, (crit.unwrap_or(SortCrit::Name), desc));
+            }
+        }
         // Gallery view (default: off) and tiles/row (default: 3 mobile / 4 desktop).
         let gallery_view = matches!(
             library
@@ -2671,6 +2806,7 @@ impl Component for App {
                 FsOutput::Activated(index) => Msg::Activate(index.current_index()),
                 FsOutput::LongPress(index) => Msg::ShowContextMenu(index.current_index()),
                 FsOutput::DoubleClick(index) => Msg::ToggleQueue(index.current_index()),
+                FsOutput::PlayDir(index) => Msg::PlayFsAlbum(index.current_index()),
             });
 
         let albums = FactoryVecDeque::builder()
@@ -2814,12 +2950,15 @@ impl Component for App {
                 entries,
                 albums,
                 albums_gallery: gtk::FlowBox::new(),
+                albums_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
+                album_year_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 albums_overview: Vec::new(),
                 album_count: 0,
                 artists,
                 artists_gallery: gtk::FlowBox::new(),
                 artists_overview: Vec::new(),
                 artist_count: 0,
+                sort,
                 gallery_view,
                 gallery_columns,
                 loading: false,
@@ -2974,6 +3113,7 @@ impl Component for App {
             nav: NavState {
                 split: adw::OverlaySplitView::new(),
                 view_stack: adw::ViewStack::new(),
+                sort_btn: gtk::MenuButton::new(),
                 nav_view: adw::NavigationView::new(),
                 sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
                 top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
@@ -3134,7 +3274,7 @@ impl Component for App {
         let entries_box = model.libview.entries.widget();
         let albums_box = model.libview.albums.widget();
         let artists_box = model.libview.artists.widget();
-        let albums_gallery = model.libview.albums_gallery.clone();
+        let albums_gallery_box = model.libview.albums_gallery_box.clone();
         let artists_gallery = model.libview.artists_gallery.clone();
         let concerts_gallery = model.concerts.concerts_gallery.clone();
         let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
@@ -3450,6 +3590,21 @@ impl Component for App {
                     self.play_current();
                     self.refresh_queue_icons();
                     self.nav.nav_view.pop_to_tag("main");
+                }
+            }
+            Msg::PlayFsAlbum(idx) => {
+                // The play button on an album folder in the file browser.
+                let info = self
+                    .libview
+                    .entries
+                    .guard()
+                    .get(idx)
+                    .and_then(|r| r.entry.album().cloned());
+                if let Some(a) = info {
+                    sender.input(Msg::PlayAlbum {
+                        artist: a.artist,
+                        album: a.album,
+                    });
                 }
             }
             Msg::CtxPlay => {
@@ -4491,6 +4646,25 @@ impl Component for App {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
             }
+            Msg::SortMenuRefresh => self.rebuild_sort_menu(),
+            Msg::SetSortCrit(crit) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                let (cur, desc) = self.libview.sort_for(&section);
+                if cur != crit {
+                    self.set_section_sort(&section, crit, desc, &sender);
+                }
+            }
+            Msg::SetSortDir(desc) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                let (crit, cur) = self.libview.sort_for(&section);
+                if cur != desc {
+                    self.set_section_sort(&section, crit, desc, &sender);
+                }
+            }
             Msg::SetGalleryView(on) => {
                 self.libview.gallery_view = on;
                 let _ = self
@@ -4989,7 +5163,12 @@ impl Component for App {
                 duration,
                 cover,
             } => self.apply_video_meta(&video_id, uploader, duration, cover),
-            Cmd::YtPlaylistStart { url, title, items } => {
+            Cmd::YtPlaylistStart {
+                url,
+                title,
+                items,
+                total_duration,
+            } => {
                 if items.is_empty() {
                     self.toast(&gettext("Playlist is empty"));
                 } else {
@@ -5006,9 +5185,12 @@ impl Component for App {
                     }
                     // Log the playlist as one "Recent" entry (not the videos).
                     self.youtube.playing_playlist = true;
-                    let _ = self
-                        .library
-                        .add_recent_playlist(&url, &title, items.len() as i64);
+                    let _ = self.library.add_recent_playlist(
+                        &url,
+                        &title,
+                        items.len() as i64,
+                        total_duration,
+                    );
                     // Recent playlist cover = its first video's thumbnail.
                     if let Some((id, _)) = items.first() {
                         let _ = self

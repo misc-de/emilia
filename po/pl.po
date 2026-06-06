@@ -1732,3 +1732,30 @@ msgstr ""
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
 msgstr "Pobrano"
+
+msgid "Sort"
+msgstr "Sortuj"
+
+msgid "Sort by"
+msgstr "Sortuj według"
+
+msgid "Descending"
+msgstr "Malejąco"
+
+msgid "Ascending"
+msgstr "Rosnąco"
+
+msgid "Length"
+msgstr "Długość"
+
+msgid "Release"
+msgstr "Wydanie"
+
+msgid "Number of songs"
+msgstr "Liczba utworów"
+
+msgid "Date"
+msgstr "Data"
+
+msgid "Unknown year"
+msgstr "Nieznany rok"

@@ -2005,6 +2005,33 @@ msgstr ""
 "Beim Speichern wird die Originaldatei durch die bearbeitete Version ersetzt. "
 "Das kann nicht rückgängig gemacht werden."
 
+msgid "Sort"
+msgstr "Sortieren"
+
+msgid "Sort by"
+msgstr "Sortieren nach"
+
+msgid "Descending"
+msgstr "Absteigend"
+
+msgid "Ascending"
+msgstr "Aufsteigend"
+
+msgid "Length"
+msgstr "Länge"
+
+msgid "Release"
+msgstr "Veröffentlichung"
+
+msgid "Number of songs"
+msgstr "Anzahl Lieder"
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "Unknown year"
+msgstr "Unbekanntes Jahr"
+
 #~ msgid ""
 #~ "YouTube isn't working right now – it changed and the installed yt-dlp "
 #~ "can't read it. Look for a newer version of the app or update yt-dlp in "

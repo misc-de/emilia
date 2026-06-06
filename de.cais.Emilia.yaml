@@ -124,6 +124,8 @@ modules:
         /app/share/icons/hicolor/scalable/actions/ticket-special-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/xsi-view-more-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/xsi-view-more-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/emilia-podcast-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/emilia-podcast-symbolic.svg
     sources:
       - type: dir
         path: .

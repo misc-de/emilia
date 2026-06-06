@@ -493,12 +493,17 @@ impl App {
                 .build();
             row.add_css_class("emilia-flush");
             if r.kind == "playlist" {
-                // A played playlist: "Playlist · N songs"; tap/▶ replays it,
-                // long press opens its detail.
-                row.set_subtitle(&gettext_f(
+                // A played playlist: "Playlist · N songs [· runtime]"; tap/▶
+                // replays it, long press opens its detail.
+                let mut subtitle = gettext_f(
                     "Playlist · {n}",
                     &[("n", &ngettext_n("{n} song", "{n} songs", r.count as u32))],
-                ));
+                );
+                if let Some(total) = r.total_duration.filter(|d| *d > 0) {
+                    subtitle.push_str(" · ");
+                    subtitle.push_str(&fmt_duration(total));
+                }
+                row.set_subtitle(&subtitle);
                 // Cover derived from the playlist's first song (stored on
                 // play/open); resolves the cached thumbnail from its URL.
                 let cover = r.thumbnail.as_deref().and_then(|t| {
@@ -1513,13 +1518,24 @@ impl App {
         let input = self.input.clone();
         let (vid, t) = (video_id.to_string(), title.to_string());
         std::thread::spawn(move || {
-            // The channel is the artist: take it from storage, else a metadata
-            // fetch, and normalise ("… - Topic"/"…VEVO" → artist).
-            let artist = Library::open()
-                .ok()
-                .and_then(|l| l.yt_video_info(&vid).ok().flatten())
+            let lib = Library::open().ok();
+            // The channel (artist) from storage if the feed knows the video.
+            let stored = lib.as_ref().and_then(|l| l.yt_video_info(&vid).ok().flatten());
+            // Otherwise fetch the metadata once and reuse it for both the artist
+            // and the duration cache, so the "Recent" list can show a runtime for
+            // videos played from search/links (not in any subscribed feed).
+            let meta = if stored.is_none() {
+                youtube::video_meta(&vid).ok()
+            } else {
+                None
+            };
+            if let (Some(l), Some(d)) = (lib.as_ref(), meta.as_ref().and_then(|m| m.duration)) {
+                let _ = l.set_yt_meta(&vid, &t, Some(d));
+            }
+            // Normalise the channel name ("… - Topic"/"…VEVO" → artist).
+            let artist = stored
                 .map(|(c, _, _)| c)
-                .or_else(|| youtube::video_meta(&vid).ok().and_then(|m| m.uploader))
+                .or_else(|| meta.as_ref().and_then(|m| m.uploader.clone()))
                 .map(|c| youtube::clean_channel_name(&c))
                 .filter(|s| !s.trim().is_empty());
             // Cover from the external DB using the channel as the artist; fall
@@ -1871,9 +1887,14 @@ impl App {
             )));
         }
         self.youtube.playing_playlist = true;
-        let _ = self
-            .library
-            .add_recent_playlist(&url, &title, videos.len() as i64);
+        // Total runtime for the Recent row (0 → unknown, store None).
+        let total: i64 = videos.iter().filter_map(|v| v.duration).sum();
+        let _ = self.library.add_recent_playlist(
+            &url,
+            &title,
+            videos.len() as i64,
+            (total > 0).then_some(total),
+        );
         // Recent playlist cover = its first video's thumbnail.
         if let Some(first) = videos.first() {
             let _ = self
@@ -1903,12 +1924,16 @@ impl App {
             &[("title", &title)],
         ));
         sender.spawn_command(move |out| {
-            let items: Vec<(String, String)> = crate::core::youtube::list_playlist(&url, 200)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|v| (v.id, v.title))
-                .collect();
-            let _ = out.send(crate::ui::app::Cmd::YtPlaylistStart { url, title, items });
+            let videos = crate::core::youtube::list_playlist(&url, 200).unwrap_or_default();
+            let total: i64 = videos.iter().filter_map(|v| v.duration).sum();
+            let items: Vec<(String, String)> =
+                videos.into_iter().map(|v| (v.id, v.title)).collect();
+            let _ = out.send(crate::ui::app::Cmd::YtPlaylistStart {
+                url,
+                title,
+                items,
+                total_duration: (total > 0).then_some(total),
+            });
         });
     }
 

@@ -1729,3 +1729,30 @@ msgstr ""
 #: src/ui/fs_row.rs:328
 msgid "Downloaded"
 msgstr "Imepakuliwa"
+
+msgid "Sort"
+msgstr "Panga"
+
+msgid "Sort by"
+msgstr "Panga kwa"
+
+msgid "Descending"
+msgstr "Kushuka"
+
+msgid "Ascending"
+msgstr "Kupanda"
+
+msgid "Length"
+msgstr "Urefu"
+
+msgid "Release"
+msgstr "Toleo"
+
+msgid "Number of songs"
+msgstr "Idadi ya nyimbo"
+
+msgid "Date"
+msgstr "Tarehe"
+
+msgid "Unknown year"
+msgstr "Mwaka usiojulikana"

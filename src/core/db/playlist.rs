@@ -102,13 +102,16 @@ impl Library {
         Ok(())
     }
 
-    /// Total runtime of a playlist in milliseconds, summed over the tracks that
-    /// the library knows a duration for (YouTube/stream entries without one
-    /// simply contribute 0).
+    /// Total runtime of a playlist in milliseconds. Local/remote tracks
+    /// contribute their `track.duration_ms`; YouTube entries (`yt:<id>`) their
+    /// cached `yt_title.duration` (seconds). Entries with no known length count
+    /// as 0. A path matches at most one source, so the two sums don't overlap.
     pub fn playlist_duration_ms(&self, id: i64) -> Result<i64> {
         let ms: i64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(t.duration_ms), 0)
-             FROM playlist_item i JOIN track t ON t.path = i.path
+            "SELECT COALESCE(SUM(t.duration_ms), 0) + COALESCE(SUM(y.duration), 0) * 1000
+             FROM playlist_item i
+             LEFT JOIN track t ON t.path = i.path
+             LEFT JOIN yt_title y ON ('yt:' || y.video_id) = i.path
              WHERE i.playlist_id = ?1",
             [id],
             |r| r.get(0),
@@ -117,13 +120,16 @@ impl Library {
     }
 
     /// Total runtime per playlist in one pass, for rebuilding the playlist
-    /// overview without one aggregate query per row.
+    /// overview without one aggregate query per row. Sums track durations and
+    /// cached YouTube durations (see [`Self::playlist_duration_ms`]).
     pub fn playlist_durations_ms(&self) -> Result<std::collections::HashMap<i64, i64>> {
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, COALESCE(SUM(t.duration_ms), 0)
+            "SELECT p.id,
+                    COALESCE(SUM(t.duration_ms), 0) + COALESCE(SUM(y.duration), 0) * 1000
              FROM playlist p
              LEFT JOIN playlist_item i ON i.playlist_id = p.id
              LEFT JOIN track t ON t.path = i.path
+             LEFT JOIN yt_title y ON ('yt:' || y.video_id) = i.path
              GROUP BY p.id",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;

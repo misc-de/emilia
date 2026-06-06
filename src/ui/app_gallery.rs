@@ -153,6 +153,22 @@ pub(crate) fn size_gallery_tiles_when_ready(fb: &gtk::FlowBox) {
     });
 }
 
+/// A year heading for the date-sorted album views (list `set_header_func` and
+/// the gallery year sections). `None` = albums without a known year.
+pub(crate) fn year_header_label(year: Option<i32>) -> gtk::Label {
+    let text = match year {
+        Some(y) => y.to_string(),
+        None => crate::i18n::gettext("Unknown year"),
+    };
+    let label = gtk::Label::new(Some(&text));
+    label.set_xalign(0.0);
+    label.add_css_class("heading");
+    label.set_margin_top(8);
+    label.set_margin_bottom(2);
+    label.set_margin_start(4);
+    label
+}
+
 impl App {
     /// Fills a FlowBox as a gallery: tiles from `(cover, icon, title)`.
     pub(crate) fn fill_gallery(
@@ -161,6 +177,22 @@ impl App {
         items: &[(Option<String>, &'static str, String)],
         activate: fn(usize) -> Msg,
         detail: fn(usize) -> Msg,
+    ) {
+        self.fill_gallery_into(fb, items, 0, activate, detail, true);
+    }
+
+    /// Like [`Self::fill_gallery`], but the click/detail message indices are
+    /// offset by `base` (so a year section maps to the full sorted list), and
+    /// the one-time resize hook is only registered when `hook` is set (skipped
+    /// for the throwaway per-year FlowBoxes of the date-grouped gallery).
+    pub(crate) fn fill_gallery_into(
+        &self,
+        fb: &gtk::FlowBox,
+        items: &[(Option<String>, &'static str, String)],
+        base: usize,
+        activate: fn(usize) -> Msg,
+        detail: fn(usize) -> Msg,
+        hook: bool,
     ) {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
@@ -185,13 +217,14 @@ impl App {
                 }
             }
 
+            let idx = base + i;
             let click = gtk::GestureClick::new();
             {
                 let input = self.input.clone();
                 click.connect_released(move |g, n, _, _| {
                     if n == 1 {
                         g.set_state(gtk::EventSequenceState::Claimed);
-                        let _ = input.send(activate(i));
+                        let _ = input.send(activate(idx));
                     }
                 });
             }
@@ -202,7 +235,7 @@ impl App {
                 let input = self.input.clone();
                 long_press.connect_pressed(move |g, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    let _ = input.send(detail(i));
+                    let _ = input.send(detail(idx));
                 });
             }
             cell.add_controller(long_press);
@@ -211,11 +244,12 @@ impl App {
 
         spawn_gallery_decode(to_decode);
         size_gallery_tiles_when_ready(fb);
-        if self
-            .libview
-            .gallery_hooked
-            .borrow_mut()
-            .insert(fb.as_ptr() as usize)
+        if hook
+            && self
+                .libview
+                .gallery_hooked
+                .borrow_mut()
+                .insert(fb.as_ptr() as usize)
         {
             let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
             fb.connect_map(move |fb| {

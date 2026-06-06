@@ -197,15 +197,23 @@ impl Library {
     }
 
     /// Records a playlist as "recently played" (keyed by its URL; `count` =
-    /// number of songs). Moves it to the top.
-    pub fn add_recent_playlist(&self, url: &str, title: &str, count: i64) -> Result<()> {
+    /// number of songs, `total_duration` = summed runtime in seconds if known).
+    /// Moves it to the top. A `None` total keeps any previously stored value.
+    pub fn add_recent_playlist(
+        &self,
+        url: &str,
+        title: &str,
+        count: i64,
+        total_duration: Option<i64>,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO yt_recent (video_id, title, played_at, kind, count)
-             VALUES (?1, ?2, strftime('%s','now'), 'playlist', ?3)
+            "INSERT INTO yt_recent (video_id, title, played_at, kind, count, total_duration)
+             VALUES (?1, ?2, strftime('%s','now'), 'playlist', ?3, ?4)
              ON CONFLICT(video_id) DO UPDATE SET
                 title = excluded.title, played_at = excluded.played_at,
-                kind = 'playlist', count = excluded.count",
-            rusqlite::params![url, title, count],
+                kind = 'playlist', count = excluded.count,
+                total_duration = COALESCE(excluded.total_duration, yt_recent.total_duration)",
+            rusqlite::params![url, title, count, total_duration],
         )?;
         self.trim_recent()
     }
@@ -239,8 +247,15 @@ impl Library {
     /// Recently played items (videos and playlists), newest first.
     pub fn recent_videos(&self, limit: usize) -> Result<Vec<YtRecent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT r.video_id, r.title, r.artist, r.kind, r.count, r.thumbnail, t.duration
-             FROM yt_recent r LEFT JOIN yt_title t ON t.video_id = r.video_id
+            // Duration: prefer the meta cache (`yt_title`, set on play), else the
+            // channel-feed value (`yt_video`) so feed videos show a runtime even
+            // when they were never resolved individually. Playlists match neither
+            // (their key is the playlist URL) → NULL, as intended.
+            "SELECT r.video_id, r.title, r.artist, r.kind, r.count, r.thumbnail,
+                    COALESCE(t.duration, v.duration), r.total_duration
+             FROM yt_recent r
+             LEFT JOIN yt_title t ON t.video_id = r.video_id
+             LEFT JOIN yt_video v ON v.video_id = r.video_id
              ORDER BY r.played_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit as i64], |r| {
@@ -252,6 +267,7 @@ impl Library {
                 count: r.get(4)?,
                 thumbnail: r.get(5)?,
                 duration: r.get(6)?,
+                total_duration: r.get(7)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

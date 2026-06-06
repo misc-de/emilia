@@ -43,6 +43,7 @@ install: build mo install-mo
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg $(ICON_ACT)/emilia-audiobook-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg $(ICON_ACT)/emilia-stats-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-share-symbolic.svg $(ICON_ACT)/emilia-share-symbolic.svg
+	install -Dm644 data/icons/hicolor/scalable/actions/emilia-podcast-symbolic.svg $(ICON_ACT)/emilia-podcast-symbolic.svg
 	@# Icon-Cache & Desktop-DB auffrischen, damit das neue App-Icon sofort
 	@# erscheint (nur bei direkter Installation, nicht in eine DESTDIR-Stage).
 	@if [ -z "$(DESTDIR)" ]; then \

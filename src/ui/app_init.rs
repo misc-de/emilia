@@ -286,6 +286,37 @@ impl App {
         }
         widgets.sidebar_nav.append(&settings_btn);
 
+        // The title-bar sort button; its popover is (re)built per section.
+        self.nav.sort_btn = widgets.sort_btn.clone();
+
+        // Album list: year headings when sorting by date. The header function
+        // reads the per-row years filled in `reload_albums_with`; `None` there
+        // means no grouping, so every row's header is cleared.
+        {
+            let years = self.libview.album_year_headers.clone();
+            self.libview.albums.widget().set_header_func(move |row, _before| {
+                let guard = years.borrow();
+                let Some(years) = guard.as_ref() else {
+                    row.set_header(None::<&gtk::Widget>);
+                    return;
+                };
+                let i = row.index();
+                if i < 0 {
+                    row.set_header(None::<&gtk::Widget>);
+                    return;
+                }
+                let i = i as usize;
+                let cur = years.get(i).copied();
+                let prev = if i == 0 { None } else { years.get(i - 1).copied() };
+                if i == 0 || cur != prev {
+                    let label = crate::ui::app_gallery::year_header_label(cur.flatten());
+                    row.set_header(Some(&label));
+                } else {
+                    row.set_header(None::<&gtk::Widget>);
+                }
+            });
+        }
+
         // Set the active button to match the visible stack page and show the name
         // of the menu item discreetly as the subtitle of the header.
         let win_title = widgets.win_title.clone();
@@ -319,12 +350,17 @@ impl App {
             widgets.view_stack.set_visible_child_name(section);
         }
         sync_active(&widgets.view_stack, &nav_buttons);
+        // Build the sort popover for the section shown at startup.
+        self.rebuild_sort_menu();
         {
             let stats_sender = self.stats_page.sender().clone();
+            let sender = sender.clone();
             widgets
                 .view_stack
                 .connect_visible_child_notify(move |stack| {
                     sync_active(stack, &nav_buttons);
+                    // Rebuild (or hide) the title-bar sort control for the section.
+                    sender.input(Msg::SortMenuRefresh);
                     // Recompute the statistics fresh when opening the section.
                     if stack.visible_child_name().as_deref() == Some("stats") {
                         stats_sender.emit(crate::ui::stats_page::StatsInput::Refresh);

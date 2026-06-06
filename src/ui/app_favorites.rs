@@ -96,8 +96,9 @@ impl App {
         let raw = self
             .library
             .area_entries(crate::core::category::Area::Audiobooks, true, false);
-        self.favorites.audiobook_items = self.expand_area_items(raw);
-        let items = self.favorites.audiobook_items.clone();
+        let mut items = self.expand_area_items(raw);
+        self.sort_entries("audiobooks", &mut items);
+        self.favorites.audiobook_items = items.clone();
         if self.libview.gallery_view {
             let tiles = self.entry_gallery_items(&items);
             self.fill_gallery(
@@ -167,6 +168,36 @@ impl App {
             let cover = self.entry_cover(scope, key, *is_dir);
             row.add_prefix(&cover_widget(cover.as_deref(), icon));
 
+            // Reorder handle on the far **left** (favorites only). `add_prefix`
+            // prepends, so adding it *after* the cover puts it leftmost. The
+            // DragSource sits on the whole row; the handle is the visible grip.
+            if let Some(move_msg) = move_msg {
+                let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+                handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
+                handle.add_css_class("dim-label");
+                row.add_prefix(&handle);
+
+                let drag = gtk::DragSource::new();
+                drag.set_actions(gtk::gdk::DragAction::MOVE);
+                drag.connect_prepare(move |_, _, _| {
+                    Some(gtk::gdk::ContentProvider::for_value(&(i as i32).to_value()))
+                });
+                row.add_controller(drag);
+
+                let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
+                {
+                    let sender = sender.clone();
+                    drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
+                        Ok(from) => {
+                            sender.input(move_msg(from as usize, i));
+                            true
+                        }
+                        Err(_) => false,
+                    });
+                }
+                row.add_controller(drop);
+            }
+
             if let Some(remove) = remove {
                 let btn = gtk::Button::builder()
                     .icon_name("user-trash-symbolic")
@@ -222,35 +253,6 @@ impl App {
                     "media-playback-start-symbolic"
                 };
                 row.add_suffix(&gtk::Image::from_icon_name(play_icon));
-            }
-
-            // Drag handle for reordering (if allowed) - far right. The
-            // DragSource sits on the whole row; the handle is just the
-            // visible grab zone.
-            if let Some(move_msg) = move_msg {
-                let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
-                handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
-                row.add_suffix(&handle);
-
-                let drag = gtk::DragSource::new();
-                drag.set_actions(gtk::gdk::DragAction::MOVE);
-                drag.connect_prepare(move |_, _, _| {
-                    Some(gtk::gdk::ContentProvider::for_value(&(i as i32).to_value()))
-                });
-                row.add_controller(drag);
-
-                let drop = gtk::DropTarget::new(i32::static_type(), gtk::gdk::DragAction::MOVE);
-                {
-                    let sender = sender.clone();
-                    drop.connect_drop(move |_, value, _, _| match value.get::<i32>() {
-                        Ok(from) => {
-                            sender.input(move_msg(from as usize, i));
-                            true
-                        }
-                        Err(_) => false,
-                    });
-                }
-                row.add_controller(drop);
             }
 
             {

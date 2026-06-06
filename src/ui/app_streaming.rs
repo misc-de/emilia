@@ -54,12 +54,12 @@ fn format_datetime(secs: i64) -> String {
         .unwrap_or_else(|_| format_date(secs))
 }
 
-/// Storage folder for saved recordings: `<Music>/Emilia-Aufnahmen`.
+/// Storage folder for saved recordings: `<Music>/Streaming`.
 pub(crate) fn recordings_dir() -> std::path::PathBuf {
     let mut dir = dirs::audio_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    dir.push("Emilia-Aufnahmen");
+    dir.push("Streaming");
     dir
 }
 

@@ -61,6 +61,9 @@ pub struct AlbumMeta {
     pub status: String,
     /// Number of tracks of this album in the library (display only).
     pub track_count: i64,
+    /// Summed playback length of the album's tracks in milliseconds; `None` when
+    /// no track duration is known. Only filled for the album overview (sorting).
+    pub total_duration_ms: Option<i64>,
 }
 
 impl AlbumMeta {
@@ -74,6 +77,7 @@ impl AlbumMeta {
             year: None,
             status: "pending".to_string(),
             track_count: 0,
+            total_duration_ms: None,
         }
     }
 }
@@ -178,6 +182,9 @@ pub struct YtRecent {
     /// Cached playback length in seconds (videos only; `None` for playlists or
     /// when not yet known).
     pub duration: Option<i64>,
+    /// Summed runtime in seconds of all songs (playlists only; `None` for videos
+    /// or when not yet known).
+    pub total_duration: Option<i64>,
 }
 
 /// A video together with its channel – for the cross-channel "Newest videos"

@@ -45,11 +45,24 @@ fn split_stem_str(stem: &str) -> (Option<String>, String) {
     }
 }
 
+/// A folder recognised as a single album (file browser): lets its row show a
+/// play button that plays the whole album. Filled in by `read_entries`.
+#[derive(Debug, Clone)]
+pub struct DirAlbum {
+    pub artist: String,
+    pub album: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum FsEntry {
     Dir {
         name: String,
         path: PathBuf,
+        /// Set when the folder is a single album → row also shows a play button.
+        album: Option<DirAlbum>,
+        /// Summed runtime (ms) of all tracks under the folder; shown on the row
+        /// for any folder that contains songs (artist folder or single album).
+        total_ms: i64,
     },
     File {
         name: String,
@@ -82,12 +95,31 @@ pub enum FsEntry {
 
 impl FsEntry {
     pub fn dir(path: PathBuf) -> Self {
+        Self::dir_album(path, None, 0)
+    }
+
+    /// Like [`Self::dir`] but with the folder's summed runtime and, when it is a
+    /// recognised single album, its album info (for the play button).
+    pub fn dir_album(path: PathBuf, album: Option<DirAlbum>, total_ms: i64) -> Self {
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?")
             .to_string();
-        FsEntry::Dir { name, path }
+        FsEntry::Dir {
+            name,
+            path,
+            album,
+            total_ms,
+        }
+    }
+
+    /// Album info if this folder is a recognised single album (file browser).
+    pub fn album(&self) -> Option<&DirAlbum> {
+        match self {
+            FsEntry::Dir { album, .. } => album.as_ref(),
+            _ => None,
+        }
     }
 
     pub fn file(path: PathBuf) -> Self {
@@ -156,7 +188,9 @@ impl FsEntry {
         }
     }
 
-    /// Play duration as "M:SS" or "H:MM:SS"; empty for folders/without duration.
+    /// Play duration as "M:SS" or "H:MM:SS". For files their own length; for a
+    /// folder with songs (artist folder or album) its summed runtime; empty for
+    /// plain folders/without duration.
     fn duration_label(&self) -> String {
         match self {
             FsEntry::File {
@@ -167,6 +201,9 @@ impl FsEntry {
                 duration_ms: Some(ms),
                 ..
             } if *ms > 0 => crate::ui::app::fmt_duration(*ms),
+            FsEntry::Dir { total_ms, .. } if *total_ms > 0 => {
+                crate::ui::app::fmt_duration(*total_ms)
+            }
             _ => String::new(),
         }
     }
@@ -291,6 +328,8 @@ pub enum FsOutput {
     Activated(DynamicIndex),
     LongPress(DynamicIndex),
     DoubleClick(DynamicIndex),
+    /// Play button of an album folder pressed.
+    PlayDir(DynamicIndex),
 }
 
 #[relm4::factory(pub)]
@@ -312,13 +351,26 @@ impl FactoryComponent for FsRow {
             set_activatable: true,
             add_prefix = &gtk::Image::from_icon_name(self.entry.prefix_icon()),
 
-            // As in the artist view: duration right-aligned & subtle
-            // (files only - folders have no play duration).
+            // As in the artist view: duration right-aligned & subtle. Files show
+            // their own length; album folders their summed runtime.
             add_suffix = &gtk::Label {
                 #[watch]
                 set_label: &self.entry.duration_label(),
-                set_visible: !self.entry.is_dir(),
+                set_visible: !self.entry.duration_label().is_empty(),
                 set_css_classes: &["dim-label", "numeric"],
+            },
+
+            // Play button for an album folder (plays the whole album; the row
+            // itself still opens the folder). Plain folders have none.
+            add_suffix = &gtk::Button {
+                set_visible: self.entry.album().is_some(),
+                set_icon_name: "media-playback-start-symbolic",
+                set_valign: gtk::Align::Center,
+                set_css_classes: &["flat"],
+                set_tooltip_text: Some(&crate::i18n::gettext("Play album")),
+                connect_clicked[sender, index] => move |_| {
+                    let _ = sender.output(FsOutput::PlayDir(index.clone()));
+                },
             },
 
             // Marker for remote files available offline (downloaded).

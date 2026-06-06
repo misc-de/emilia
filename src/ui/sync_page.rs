@@ -276,10 +276,11 @@ impl SyncPage {
         };
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());
+        // No fixed content_height: the dialog follows its content's natural
+        // height (mode select is short, QR/camera/review grow as needed).
         let dialog = adw::Dialog::builder()
             .title(gettext("Device sync"))
             .content_width(440)
-            .content_height(600)
             .build();
         dialog.set_child(Some(&toolbar));
         {
