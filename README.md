@@ -13,8 +13,8 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
 
 | | |
 |:-:|:-:|
-| <img src="data/screenshots/desktop_artists.png" width="420"><br>*Library by artist (with photos)* | <img src="data/screenshots/desktop_streaming.png" width="420"><br>*Internet radio &amp; recordings* |
-| <img src="data/screenshots/desktop_podcast.png" width="420"><br>*Podcasts with show notes* | <img src="data/screenshots/desktop_youtube.png" width="420"><br>*YouTube as a music source* |
+| <img src="data/screenshots/desktop_artists.png" width="420"><br>*Library by artist and albums* | <img src="data/screenshots/desktop_streaming.png" width="420"><br>*Internet radio &amp; recordings* |
+| <img src="data/screenshots/desktop_podcast.png" width="420"><br>*Podcasts* | <img src="data/screenshots/desktop_youtube.png" width="420"><br>*YouTube as a music source* |
 | <img src="data/screenshots/desktop_equalizer.png" width="420"><br>*10-band equalizer with cascade* | <img src="data/screenshots/desktop_statistics.png" width="420"><br>*Listening statistics* |
 | <img src="data/screenshots/desktop_preferences.png" width="420"><br>*Preferences* | <img src="data/screenshots/mobile_artists.png" width="210"><br>*Adaptive phone layout (portrait)* |
 
