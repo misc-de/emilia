@@ -43,16 +43,14 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
   changes the album covers.
 - **Playback** – play/pause, next/previous, shuffle, repeat, a queue, and a
   bottom mini-player with a **seek bar** (scrub through long tracks).
-- **Resume for audio dramas** – long tracks (15 min+ or classified as
-  audiobook/podcast) remember the playback position and continue there next time;
   once a track ends it starts from the beginning again.
 - **Lock screen & media keys** – control via **MPRIS** (play/pause, next/previous,
   seek) including title/album display.
 - **Playlists** – create your own playlists, add tracks/albums/folders via the
   options, play, rename and remove individual tracks.
 - **Podcasts** – subscribe to feeds by RSS address or search the iTunes directory;
-  episodes are **streamed** directly (no download), with show notes, chapter marks
-  and resume. Refresh a feed, remove a podcast.
+  episodes are **streamed** directly, with show notes, chapter marks
+  and resume. 
 - **Streaming / Internet radio** – add a stream URL or **search stations
   worldwide** (Radio-Browser API). Live now-playing title from the ICY metadata,
   plus a **timeshift recorder**:
@@ -67,15 +65,11 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
     from the playhead (*Save re-encodes and overwrites the file*) – or **add a
     recording to your music library** as a regular track.
 - **YouTube** – search for tracks and play them in-app, or **add a track to your
-  library**: it is downloaded via `yt-dlp` and transcoded to MP3 with cover and
-  metadata, filed under `Artist/Album`. The section can be hidden in the
-  navigation if you don't need it.
+  library**. The section can be hidden in the navigation if you don't need it.
 - **Nextcloud** – connect a Nextcloud (login QR code or manual), then **index its
   music into the library** so the tracks behave 1:1 like local songs (Artists,
-  Albums, queue, resume). Audio streams on demand (cached on play); duration,
-  covers and photos are cached locally for performance. A red **disconnected**
-  badge appears on the affected covers, photos and songs while the source is
-  unreachable.
+  Albums, queue, resume). Audio streams on demand; duration,
+  covers and photos are cached locally for performance.
 - **Device sync** – share library/resume data between devices over the LAN with a
   QR-code pairing handshake.
 - **Equalizer with cascade** – 10-band EQ (`equalizer-10bands`), live during
