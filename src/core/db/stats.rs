@@ -89,9 +89,31 @@ impl Library {
     }
 
     /// Top tracks from `since`, sorted by plays (then time heard).
+    ///
+    /// Besides local tracks (joined from `track`), this also resolves the
+    /// display name of podcast episodes and YouTube videos, which have no
+    /// `track` row: a `yt:<id>` path takes its title from `yt_title` and its
+    /// channel from `yt_recent`; a podcast URL takes title and show name from
+    /// `episode`/`podcast`. Scalar subqueries (not joins) keep the per-path
+    /// SUMs free of fan-out.
     pub fn stats_top_tracks(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT t.title, e.path, COALESCE(t.artist, '') AS artist,
+            "SELECT COALESCE(
+                        NULLIF(t.title, ''),
+                        (SELECT y.title FROM yt_title y
+                         WHERE e.path LIKE 'yt:%' AND y.video_id = substr(e.path, 4)),
+                        (SELECT ep.title FROM episode ep WHERE ep.audio_url = e.path LIMIT 1)
+                    ) AS title,
+                    e.path,
+                    COALESCE(
+                        NULLIF(t.artist, ''),
+                        (SELECT yr.artist FROM yt_recent yr
+                         WHERE e.path LIKE 'yt:%' AND yr.video_id = substr(e.path, 4)),
+                        (SELECT pc.title FROM podcast pc
+                         JOIN episode ep ON ep.podcast_id = pc.id
+                         WHERE ep.audio_url = e.path LIMIT 1),
+                        ''
+                    ) AS artist,
                     SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
                     SUM(e.played_ms) AS ms
              FROM play_event e

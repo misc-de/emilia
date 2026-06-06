@@ -1855,6 +1855,13 @@ impl App {
                 Ok(()) => {
                     let start = self.player.position_ms().unwrap_or(resume.max(0));
                     self.mpris.set_position(start);
+                    // Count the streamed video in the statistics: a session
+                    // keyed by its `yt:<id>` path (an offline copy already opens
+                    // one via start_track_playback). Duration backfills on tick.
+                    self.start_play_session(
+                        std::path::PathBuf::from(crate::core::youtube::yt_path(&video_id)),
+                        0,
+                    );
                 }
                 Err(e) => {
                     tracing::error!("yt play_uri failed: {e}");

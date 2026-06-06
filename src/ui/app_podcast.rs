@@ -956,6 +956,9 @@ impl App {
 
     fn play_episode_from(&mut self, url: &str, title: &str, resume: i64) {
         self.save_episode_progress();
+        // Close the previous statistics session (a track or another episode)
+        // as a skip before this one starts; its own session opens below.
+        self.finalize_play_session(false);
         // Offline copy present → play the local file (works without a
         // connection and starts instantly); otherwise stream the network URL.
         // Playback state stays keyed by `url` (resume position, play/pause
@@ -1000,6 +1003,10 @@ impl App {
                 self.set_chapters(chapters);
                 // Show the current chapter (at the resume/start position) immediately.
                 self.update_current_chapter();
+                // Count the episode in the statistics: a session keyed by the
+                // audio URL (the tick accumulates listened time, finalize on
+                // end/switch writes the play_event). Duration backfills on tick.
+                self.start_play_session(std::path::PathBuf::from(url), 0);
             }
             Err(e) => tracing::error!("Failed to play episode: {e}"),
         }

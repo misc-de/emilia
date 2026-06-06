@@ -3917,7 +3917,9 @@ impl Component for App {
                     && self.transport.queue.is_empty()
                 {
                     // A streamed episode has ended (no queue
-                    // behind it): reset the playback state, clear the marking.
+                    // behind it): finalize its statistics session as "fully
+                    // listened", then reset the playback state and marking.
+                    self.finalize_play_session(true);
                     self.mini.playing = false;
                     self.podcasts.playing_episode_url = None;
                     self.mpris.set_playing(false);

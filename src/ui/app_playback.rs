@@ -556,6 +556,23 @@ impl App {
         *self.transport.close_session.borrow_mut() = None;
     }
 
+    /// Opens a new statistics listening session for `path` and mirrors it into
+    /// `close_session` (so a hard exit still logs it). Local tracks, podcast
+    /// episodes and streamed YouTube all funnel through this into one
+    /// `play_event` once [`Self::finalize_play_session`] runs. `duration_ms`
+    /// may be 0 when not yet known – the tick backfills it.
+    pub(crate) fn start_play_session(&mut self, path: PathBuf, duration_ms: i64) {
+        let now = crate::ui::app::unix_now();
+        let path_str = path.to_string_lossy().into_owned();
+        self.transport.play_session = Some(PlaySession {
+            path,
+            started_at: now,
+            played_ms: 0,
+            duration_ms,
+        });
+        *self.transport.close_session.borrow_mut() = Some((path_str, now, 0, duration_ms));
+    }
+
     pub(crate) fn play_current(&mut self) {
         // Save the position of the previously running track before a new one is loaded.
         self.save_resume();
@@ -699,15 +716,7 @@ impl App {
                 *self.transport.close_resume.borrow_mut() =
                     resumable.then(|| (path_str.clone(), start, self.mini.track_duration_ms));
                 // Start a new listening session for the statistics.
-                let now = crate::ui::app::unix_now();
-                self.transport.play_session = Some(PlaySession {
-                    path: path.clone(),
-                    started_at: now,
-                    played_ms: 0,
-                    duration_ms: self.mini.track_duration_ms,
-                });
-                *self.transport.close_session.borrow_mut() =
-                    Some((path_str.clone(), now, 0, self.mini.track_duration_ms));
+                self.start_play_session(path.clone(), self.mini.track_duration_ms);
                 // Adjust the play/queue markers in the list to the new track.
                 self.refresh_queue_icons();
                 // Save the queue + position for the next start.
