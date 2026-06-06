@@ -5,7 +5,7 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
 
 ⚠️ **AI-assisted project**  
 
-> App ID: `de.cais.Emilia` · License: GPL-3.0-or-later · Status: in development
+> App ID: `de.cais.Emilia` · License: GPL-3.0-or-later
 
 ---
 
