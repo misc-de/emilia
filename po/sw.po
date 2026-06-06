@@ -1756,3 +1756,17 @@ msgstr "Tarehe"
 
 msgid "Unknown year"
 msgstr "Mwaka usiojulikana"
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr "Anzisha upya ili kubadilisha lugha?"
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr "Lugha mpya hupakiwa tu baada ya kuanzisha upya. Anzisha upya sasa, au uifanye mwenyewe baadaye."
+
+msgid "Later"
+msgstr "Baadaye"
+
+msgid "Restart now"
+msgstr "Anzisha upya sasa"

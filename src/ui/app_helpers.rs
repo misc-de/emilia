@@ -126,6 +126,17 @@ pub(crate) fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
     parts.join(" · ")
 }
 
+/// Secondary line of an artist row: "N albums · M songs". The albums part is
+/// omitted when the artist has no album (e.g. only loose tracks).
+pub(crate) fn artist_count_subtitle(albums: u32, songs: u32) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if albums > 0 {
+        parts.push(ngettext_n("{n} album", "{n} albums", albums));
+    }
+    parts.push(ngettext_n("{n} song", "{n} songs", songs));
+    parts.join(" · ")
+}
+
 /// Right-aligned, subtle duration label for a track row.
 pub(crate) fn duration_label(ms: i64) -> gtk::Label {
     gtk::Label::builder()

@@ -87,10 +87,23 @@ fn locale_dir() -> PathBuf {
         return PathBuf::from(d);
     }
     if let Ok(exe) = std::env::current_exe() {
+        // Installed layout: <prefix>/bin/emilia → <prefix>/share/locale.
         if let Some(prefix) = exe.parent().and_then(|p| p.parent()) {
             let p = prefix.join("share").join("locale");
             if p.is_dir() {
                 return p;
+            }
+        }
+        // Development: the binary is run straight from target/{debug,release},
+        // so no catalog is installed anywhere. Fall back to the checkout's
+        // `po/` dir (same layout: po/<lang>/LC_MESSAGES/emilia.mo), so the
+        // in-app language switch works without setting EMILIA_LOCALEDIR.
+        for dir in exe.ancestors() {
+            if dir.join("Cargo.toml").is_file() {
+                let po = dir.join("po");
+                if po.is_dir() {
+                    return po;
+                }
             }
         }
     }

@@ -13,9 +13,9 @@ use crate::i18n::{gettext, gettext_f};
 use crate::model::{AlbumMeta, ArtistMeta, Source};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
 pub(crate) use crate::ui::app_helpers::{
-    album_subtitle, apply_color_scheme, cover_widget, duration_label, find_scroller, fmt_duration,
-    fmt_rate, guarded_resume, initial_gallery_columns, most_common_artist, online_available,
-    read_entries, save_window_state, unix_now,
+    album_subtitle, apply_color_scheme, artist_count_subtitle, cover_widget, duration_label,
+    find_scroller, fmt_duration, fmt_rate, guarded_resume, initial_gallery_columns,
+    most_common_artist, online_available, read_entries, save_window_state, unix_now,
 };
 use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
@@ -130,6 +130,25 @@ pub(crate) fn confirm_destructive(
         }
     });
     confirm.present(Some(parent));
+}
+
+/// Re-exec the app in place (replace the process image) so gettext re-reads the
+/// chosen UI language at startup — the language can only be picked up on a fresh
+/// start. Uses `exec()` rather than spawn + exit because under Flatpak this
+/// process is PID 1 of the sandbox's PID namespace: exiting it makes the kernel
+/// kill every other process in the namespace, including a freshly spawned child,
+/// leaving the app simply gone. `exec()` keeps the same PID, so the sandbox
+/// stays alive and the new image starts. Only returns (via the spawn fallback)
+/// if `exec()` itself fails; otherwise it never returns.
+fn relaunch_for_language_change() -> ! {
+    if let Ok(exe) = std::env::current_exe() {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new(&exe).exec();
+        // exec() only returns on failure; fall back to spawn.
+        tracing::error!("re-exec for language change failed: {err}");
+        let _ = std::process::Command::new(&exe).spawn();
+    }
+    std::process::exit(0);
 }
 
 /// Cadence of the quiet background backfill of missing artist photos & covers.
@@ -1522,6 +1541,9 @@ impl Component for App {
                             set_spacing: 3,
                             set_margin_top: 2,
                             set_margin_bottom: 2,
+                            // Center the icon strip when it fits; it still scrolls
+                            // (left-aligned) once the icons overflow the width.
+                            set_halign: gtk::Align::Center,
                         },
                     },
 
@@ -4475,25 +4497,11 @@ impl Component for App {
 
                 if lang_code != crate::i18n::system_language_code() {
                     // The chosen language differs from the active (system) one.
-                    // gettext only reads the catalog at startup, so re-launch to
+                    // gettext only reads the catalog at startup, so relaunch to
                     // rebuild the UI in the chosen language; setup is complete now
                     // (persisted above), so the assistant won't reappear and the
                     // normal startup re-roots the folder and scans.
-                    //
-                    // Re-exec *in place* (replace this process image) rather than
-                    // spawn + exit: under Flatpak this process is PID 1 of the
-                    // sandbox's PID namespace, so exiting it makes the kernel kill
-                    // every other process in the namespace — including a freshly
-                    // spawned child, leaving the app simply gone. exec() keeps the
-                    // same PID, so the sandbox stays alive and the new image starts.
-                    if let Ok(exe) = std::env::current_exe() {
-                        use std::os::unix::process::CommandExt;
-                        let err = std::process::Command::new(&exe).exec();
-                        // exec() only returns on failure; fall back to spawn.
-                        tracing::error!("re-exec for language change failed: {err}");
-                        let _ = std::process::Command::new(&exe).spawn();
-                    }
-                    std::process::exit(0);
+                    relaunch_for_language_change();
                 }
 
                 // Same language → keep running: apply the navigation and folder now.
@@ -4634,12 +4642,27 @@ impl Component for App {
                 if lang != self.settings.ui_language {
                     self.settings.ui_language = lang.clone();
                     let _ = self.library.set_setting("ui_language", &lang);
-                    // gettext reads the language only at startup; therefore restart
-                    // the app so that the whole interface switches over.
-                    if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe).spawn();
-                    }
-                    std::process::exit(0);
+                    // gettext reads the language only at startup, so the choice
+                    // takes effect on the next launch. Ask whether to restart now
+                    // or later instead of restarting the running app unannounced.
+                    let confirm = adw::AlertDialog::new(
+                        Some(&gettext("Restart to change the language?")),
+                        Some(&gettext(
+                            "The new language is loaded only after a restart. Restart now, or do it yourself later.",
+                        )),
+                    );
+                    confirm.add_response("later", &gettext("Later"));
+                    confirm.add_response("restart", &gettext("Restart now"));
+                    confirm
+                        .set_response_appearance("restart", adw::ResponseAppearance::Suggested);
+                    confirm.set_default_response(Some("restart"));
+                    confirm.set_close_response("later");
+                    confirm.connect_response(None, move |_, resp| {
+                        if resp == "restart" {
+                            relaunch_for_language_change();
+                        }
+                    });
+                    confirm.present(Some(root));
                 }
             }
             Msg::SetColorScheme(scheme) => {

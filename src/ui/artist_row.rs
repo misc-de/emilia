@@ -25,6 +25,8 @@ pub enum ArtistOutput {
 
 pub struct ArtistCard {
     pub meta: ArtistMeta,
+    /// Secondary line: number of albums and songs (e.g. "3 albums · 41 songs").
+    subtitle: String,
     /// Square photo frame; image is supplied asynchronously.
     avatar: adw::Bin,
     /// Prefix: photo, with a red "Disconnected" overlay when the source is offline.
@@ -33,8 +35,8 @@ pub struct ArtistCard {
 
 #[relm4::factory(pub)]
 impl FactoryComponent for ArtistCard {
-    /// `(artist, is the source currently offline?)`.
-    type Init = (ArtistMeta, bool);
+    /// `(artist, is the source currently offline?, "N albums · M songs" subtitle)`.
+    type Init = (ArtistMeta, bool, String);
     type Input = ();
     type Output = ArtistOutput;
     /// The photo decoded in the background (or `None` if the file is missing/faulty).
@@ -45,6 +47,7 @@ impl FactoryComponent for ArtistCard {
         adw::ActionRow {
             add_css_class: "emilia-flush",
             set_title: &esc(&self.meta.name),
+            set_subtitle: &esc(&self.subtitle),
             set_activatable: true,
             add_prefix: &self.prefix,
 
@@ -65,7 +68,7 @@ impl FactoryComponent for ArtistCard {
 
     fn init_model(init: Self::Init, _index: &DynamicIndex, sender: FactorySender<Self>) -> Self {
         use crate::ui::widgets;
-        let (meta, offline) = init;
+        let (meta, offline, subtitle) = init;
         let avatar = widgets::thumb_frame("avatar-default-symbolic", 48);
         if let Some(path) = meta.image_path.clone() {
             // Already decoded? Then immediately from the cache – no flashing.
@@ -80,6 +83,7 @@ impl FactoryComponent for ArtistCard {
         let prefix = widgets::offline_overlay(&avatar, offline);
         Self {
             meta,
+            subtitle,
             avatar,
             prefix,
         }

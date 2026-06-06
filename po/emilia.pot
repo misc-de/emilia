@@ -1902,3 +1902,17 @@ msgstr ""
 
 msgid "Unknown year"
 msgstr ""
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr ""
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr ""
+
+msgid "Later"
+msgstr ""
+
+msgid "Restart now"
+msgstr ""

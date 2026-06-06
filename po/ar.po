@@ -1778,3 +1778,17 @@ msgstr "التاريخ"
 
 msgid "Unknown year"
 msgstr "سنة غير معروفة"
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr "إعادة التشغيل لتغيير اللغة؟"
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr "لا يتم تحميل اللغة الجديدة إلا بعد إعادة التشغيل. أعد التشغيل الآن، أو افعل ذلك بنفسك لاحقًا."
+
+msgid "Later"
+msgstr "لاحقًا"
+
+msgid "Restart now"
+msgstr "أعد التشغيل الآن"

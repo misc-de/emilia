@@ -2268,3 +2268,17 @@ msgstr "Unbekanntes Jahr"
 #~ "Applies to everything without its own artist, album or track setting."
 #~ msgstr ""
 #~ "Gilt für alles ohne eigene Einstellung für Interpret, Album oder Titel."
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr "Neu starten, um die Sprache zu wechseln?"
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr "Die neue Sprache wird erst nach einem Neustart geladen. Jetzt neu starten oder später selbst."
+
+msgid "Later"
+msgstr "Später"
+
+msgid "Restart now"
+msgstr "Jetzt neu starten"

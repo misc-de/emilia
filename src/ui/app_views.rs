@@ -16,8 +16,9 @@ use crate::core::{cover, scanner};
 use crate::i18n::{gettext, ngettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
-    album_subtitle, cover_widget, duration_label, find_scroller, fmt_duration, most_common_artist,
-    read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg, SortCrit,
+    album_subtitle, artist_count_subtitle, cover_widget, duration_label, find_scroller,
+    fmt_duration, most_common_artist, read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
+    SortCrit,
 };
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::FsEntry;
@@ -713,12 +714,19 @@ impl App {
             );
         } else {
             let offline_names = self.offline_artist_names_lc();
+            // Album/song counts for the secondary line, fetched in one pass.
+            let counts = self.library.artist_counts().unwrap_or_default();
             let mut guard = self.libview.artists.guard();
             guard.clear();
             for a in artists {
                 let name_lc = a.name.to_lowercase();
                 let offline = offline_names.iter().any(|n| n.contains(&name_lc));
-                guard.push_back((a, offline));
+                let (albums, songs) = counts
+                    .get(&crate::core::artist::norm_key(&a.name))
+                    .copied()
+                    .unwrap_or((0, 0));
+                let subtitle = artist_count_subtitle(albums, songs);
+                guard.push_back((a, offline, subtitle));
             }
         }
     }

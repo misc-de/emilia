@@ -1754,3 +1754,17 @@ msgstr "Data"
 
 msgid "Unknown year"
 msgstr "Ano desconhecido"
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr "Reiniciar para alterar o idioma?"
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr "O novo idioma só é carregado após reiniciar. Reinicie agora ou faça-o você mesmo mais tarde."
+
+msgid "Later"
+msgstr "Mais tarde"
+
+msgid "Restart now"
+msgstr "Reiniciar agora"

@@ -240,6 +240,13 @@ impl App {
                 }
                 row.add_suffix(&play_btn);
             } else {
+                // Runtime to the left of the play/pause icon, as in the other
+                // track lists. A single track shows its length; a favorited
+                // album/folder shows its total runtime.
+                let total_ms = self.entry_duration_ms(scope, key);
+                if total_ms > 0 {
+                    row.add_suffix(&duration_label(total_ms));
+                }
                 // If exactly this track is currently playing, show a pause icon.
                 let is_active = scope == "track"
                     && self
@@ -316,6 +323,24 @@ impl App {
             _ => Vec::new(),
         };
         tracks.iter().filter_map(|t| t.duration_ms).sum()
+    }
+
+    /// Runtime (ms) shown next to the play icon of a list entry: a single
+    /// track's length, or the total runtime of an album/folder. 0 = unknown
+    /// (no label is rendered).
+    fn entry_duration_ms(&self, scope: &str, key: &str) -> i64 {
+        match scope {
+            "track" => self
+                .library
+                .track_by_path(key)
+                .ok()
+                .flatten()
+                .and_then(|t| t.duration_ms)
+                .filter(|ms| *ms > 0)
+                .unwrap_or(0),
+            "album" | "folder" => self.entry_total_ms(scope, key),
+            _ => 0,
+        }
     }
 
     // ---- Resolution (cover / playback / detail) ----
@@ -479,23 +504,22 @@ impl App {
         }
     }
 
-    /// Subtitle of a track entry: "<album> / <duration>" (the parts present).
+    /// Subtitle of a track entry: the album (or "Track" if unknown). The
+    /// duration is shown on the right, next to the play icon, as in the other
+    /// track lists.
     fn track_meta_subtitle(&self, path: &str) -> String {
-        let Some(t) = self.library.track_by_path(path).ok().flatten() else {
-            return entry_kind("track");
-        };
-        let album = t.album.unwrap_or_default();
-        let album = album.trim();
-        let dur = t
-            .duration_ms
-            .filter(|ms| *ms > 0)
-            .map(crate::ui::app::fmt_duration)
+        let album = self
+            .library
+            .track_by_path(path)
+            .ok()
+            .flatten()
+            .and_then(|t| t.album)
             .unwrap_or_default();
-        match (album.is_empty(), dur.is_empty()) {
-            (false, false) => format!("{album} / {dur}"),
-            (false, true) => album.to_string(),
-            (true, false) => dur,
-            (true, true) => entry_kind("track"),
+        let album = album.trim();
+        if album.is_empty() {
+            entry_kind("track")
+        } else {
+            album.to_string()
         }
     }
 

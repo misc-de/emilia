@@ -1762,3 +1762,17 @@ msgstr "Дата"
 
 msgid "Unknown year"
 msgstr "Неизвестный год"
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr "Перезапустить для смены языка?"
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr "Новый язык загрузится только после перезапуска. Перезапустите сейчас или сделайте это позже сами."
+
+msgid "Later"
+msgstr "Позже"
+
+msgid "Restart now"
+msgstr "Перезапустить сейчас"

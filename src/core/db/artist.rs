@@ -110,6 +110,37 @@ impl Library {
         Ok(out)
     }
 
+    /// Per-artist counts of distinct albums and of songs (tracks), keyed by the
+    /// normalized artist key ([`crate::core::artist::norm_key`]). Composite
+    /// credits ("A feat. B") are split so each individual artist is counted,
+    /// matching [`Self::distinct_artists`]. One pass over the track table, so
+    /// the artist overview can show counts without a query per row.
+    pub fn artist_counts(&self) -> Result<std::collections::HashMap<String, (u32, u32)>> {
+        use crate::core::artist::{norm_key, split_artists};
+        let mut stmt = self
+            .conn
+            .prepare("SELECT artist, album FROM track WHERE artist IS NOT NULL AND artist <> ''")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        // norm_key -> (distinct album names, song count)
+        let mut acc: std::collections::HashMap<String, (std::collections::HashSet<String>, u32)> =
+            std::collections::HashMap::new();
+        for (artist, album) in rows.flatten() {
+            for name in split_artists(&artist) {
+                let entry = acc.entry(norm_key(&name)).or_default();
+                entry.1 += 1;
+                if let Some(al) = album.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    entry.0.insert(al.to_lowercase());
+                }
+            }
+        }
+        Ok(acc
+            .into_iter()
+            .map(|(k, (albums, songs))| (k, (albums.len() as u32, songs)))
+            .collect())
+    }
+
     fn map_artist_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistMeta> {
         Ok(ArtistMeta {
             name: r.get(0)?,

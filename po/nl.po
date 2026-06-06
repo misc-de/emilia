@@ -1755,3 +1755,17 @@ msgstr "Datum"
 
 msgid "Unknown year"
 msgstr "Onbekend jaar"
+
+# Restart-to-apply-language confirmation (added 2026-06-06).
+
+msgid "Restart to change the language?"
+msgstr "Opnieuw opstarten om de taal te wijzigen?"
+
+msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
+msgstr "De nieuwe taal wordt pas na een herstart geladen. Start nu opnieuw op of doe het later zelf."
+
+msgid "Later"
+msgstr "Later"
+
+msgid "Restart now"
+msgstr "Nu opnieuw opstarten"
