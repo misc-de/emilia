@@ -5158,7 +5158,13 @@ fn gallery_width_hint(fb: &gtk::FlowBox) -> i32 {
 /// "does not scale along"), while the field gets wider. Called on every fill
 /// and on every width change of the window.
 pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
-    let cols = fb.min_children_per_line().max(1) as i32;
+    // Use `max_children_per_line` (= the configured `gallery_columns`), **not**
+    // `min_children_per_line`. `min` is deliberately pinned to 1 so the gallery
+    // can shrink to a single column on a narrow phone (see `fill_gallery`).
+    // Reading `min` here would compute `cols == 1` and size every tile to the
+    // full row width → exactly one giant tile per row instead of the configured
+    // column count.
+    let cols = fb.max_children_per_line().max(1) as i32;
     let w = gallery_width_hint(fb);
     if w <= 1 {
         return; // not yet assigned – the resize hook catches up
