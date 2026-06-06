@@ -277,7 +277,7 @@ impl App {
         settings_btn.add_css_class("flat");
         settings_btn.set_hexpand(true);
         let settings_inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        settings_inner.append(&gtk::Image::from_icon_name("emblem-system-symbolic"));
+        settings_inner.append(&gtk::Image::from_icon_name("xsi-view-more-symbolic"));
         settings_inner.append(&gtk::Label::new(Some(&gettext("Settings"))));
         settings_btn.set_child(Some(&settings_inner));
         {
