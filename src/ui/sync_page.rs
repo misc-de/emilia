@@ -681,6 +681,10 @@ impl SyncPage {
                 }
                 self.prepared_manifest = None;
                 self.incoming_manifest = None;
+                // The receiver registers each file as it lands; on the server side
+                // that finishes only now (after the client uploaded), so refresh the
+                // parent's library views once more here, when the files are in.
+                let _ = sender.output(SyncOutput::Imported);
                 self.show_success(sender);
             }
             SyncEvent::PeerDisconnected => {

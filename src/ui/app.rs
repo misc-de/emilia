@@ -3977,6 +3977,9 @@ impl Component for App {
                 self.load_favorites(&sender);
                 self.reload_playlists(&sender);
                 self.reload_podcasts(&sender);
+                // Received audio files were indexed into the `track` table as they
+                // arrived → rebuild the artist/album overviews so they show up.
+                self.reload_library_overviews();
             }
             Msg::TrackFinished => {
                 if self.files.playing_remote {
