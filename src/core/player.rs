@@ -65,6 +65,49 @@ fn rate_seek(playbin: &gst::Element, rate: f64, pos: gst::ClockTime) {
     );
 }
 
+/// A cheap, cloneable handle to query the live playback state from the UI
+/// without going through the 1 s `Tick` — used by the recording editor to keep
+/// its timeline and waveform playhead in sync with the audio. Holds a clone of
+/// the `playbin` element; all methods must be called on the GTK main thread.
+#[derive(Clone)]
+pub struct PlaybackProbe {
+    playbin: gst::Element,
+}
+
+impl PlaybackProbe {
+    /// Current playback position in milliseconds, if the pipeline can report one.
+    pub fn position_ms(&self) -> Option<i64> {
+        self.playbin
+            .query_position::<gst::ClockTime>()
+            .map(|t| t.mseconds() as i64)
+    }
+
+    /// Whether the pipeline is actually in the Playing state (not paused/buffering).
+    pub fn is_playing(&self) -> bool {
+        self.playbin.current_state() == gst::State::Playing
+    }
+
+    /// The URI currently loaded into `playbin` (`current-uri`), if any. Lets the
+    /// editor tell whether *its* recording — rather than some other track the
+    /// user started meanwhile — is the one playing.
+    pub fn current_uri(&self) -> Option<String> {
+        self.playbin
+            .property_value("current-uri")
+            .get::<Option<String>>()
+            .ok()
+            .flatten()
+    }
+
+    /// Seeks the running pipeline to `ms` (used to skip over pending cut ranges
+    /// while previewing). Best effort; a failing seek is ignored.
+    pub fn seek_ms(&self, ms: i64) {
+        let _ = self.playbin.seek_simple(
+            gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+            gst::ClockTime::from_mseconds(ms.max(0) as u64),
+        );
+    }
+}
+
 pub struct Player {
     playbin: gst::Element,
     /// 10-band equalizer (lives inside the `audio-filter` chain if available).
@@ -283,6 +326,16 @@ impl Player {
         self.playbin
             .query_position::<gst::ClockTime>()
             .map(|t| t.mseconds() as i64)
+    }
+
+    /// A cheap, cloneable view onto the running pipeline for live UI probing
+    /// (the recording editor's timeline polls it ~20×/s). All queries run on the
+    /// GTK main thread; the wrapped `playbin` is internally refcounted, so a
+    /// clone is just a handle to the same element.
+    pub fn probe(&self) -> PlaybackProbe {
+        PlaybackProbe {
+            playbin: self.playbin.clone(),
+        }
     }
 
     pub fn duration_ms(&self) -> Option<i64> {

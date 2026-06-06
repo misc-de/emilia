@@ -1,9 +1,10 @@
 //! Recording editor subpage: shows a saved recording as a waveform, lets the
 //! user click to place the playhead, drag to mark a region, zoom with the +/-
 //! buttons or the scroll wheel, pan the zoomed view with the scrollbar, delete
-//! the marked region (scissors), preview from the playhead, and finally save —
-//! which destructively re-encodes the recording without the cut ranges (see
-//! [`crate::core::waveform`]).
+//! the marked region (scissors) — which immediately recomputes the waveform as a
+//! shortened preview — play/pause from the playhead with the timeline staying in
+//! sync with the audio, and finally save, which destructively re-encodes the
+//! recording without the cut ranges (see [`crate::core::waveform`]).
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -11,6 +12,7 @@ use relm4::{adw, gtk};
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use crate::i18n::gettext;
 use crate::ui::app::{App, Msg};
@@ -21,38 +23,93 @@ const BUCKETS: usize = 1200;
 const MAX_ZOOM: f64 = 50.0;
 /// Pointer movement (px) below which a drag counts as a click.
 const CLICK_SLOP: f64 = 4.0;
+/// How often the timeline follows the audio while previewing (ms).
+const FOLLOW_INTERVAL_MS: u64 = 50;
+/// Grace ticks after starting playback before the "still playing?" check kicks
+/// in — covers the pipeline preroll (reset → preroll → seek → play).
+const PLAY_GUARD_TICKS: u8 = 40;
+
+/// Maps an original-timeline position (seconds) onto the shortened preview
+/// timeline by subtracting every cut that lies before it. A position inside a cut
+/// collapses to that cut's start. `merged` must be sorted and non-overlapping.
+fn orig_to_preview(merged: &[(f64, f64)], t: f64) -> f64 {
+    let mut p = t;
+    for &(a, b) in merged {
+        if t >= b {
+            p -= b - a;
+        } else if t > a {
+            p -= t - a;
+            break;
+        } else {
+            break;
+        }
+    }
+    p.max(0.0)
+}
+
+/// Inverse of [`orig_to_preview`]: maps a preview position back onto the original
+/// timeline by walking the kept segments between the cuts.
+fn preview_to_orig(merged: &[(f64, f64)], p: f64) -> f64 {
+    let mut acc = 0.0; // preview coordinate at the current segment's start
+    let mut start = 0.0; // original coordinate at the current segment's start
+    for &(a, b) in merged {
+        let seg = a - start; // kept segment [start, a]
+        if p <= acc + seg {
+            return start + (p - acc);
+        }
+        acc += seg;
+        start = b;
+    }
+    start + (p - acc)
+}
 
 /// Mutable editor state shared between the drawing area and the controls.
 struct EditState {
-    /// Per-column peak amplitudes (0.0–1.0); empty until decoded.
-    peaks: Vec<f32>,
-    /// Total duration in seconds; 0.0 until decoded.
+    /// Per-column peak amplitudes (0.0–1.0) over the *original* timeline; empty
+    /// until decoded.
+    orig_peaks: Vec<f32>,
+    /// Total duration of the original recording in seconds; 0.0 until decoded.
+    orig_dur: f64,
+    /// Preview waveform: `(preview-time seconds, amplitude)` of the kept columns,
+    /// recomputed whenever the cuts change. This is what gets drawn.
+    vpeaks: Vec<(f64, f32)>,
+    /// Duration of the shortened preview in seconds (original minus the cuts).
     duration: f64,
-    /// Pending selection (start, end) in seconds, before it is cut.
+    /// Committed cuts merged + sorted, in *original* time — used for the preview
+    /// mapping and to skip the removed parts during playback.
+    merged: Vec<(f64, f64)>,
+    /// Pending selection (start, end) in *preview* seconds, before it is cut.
     sel: Option<(f64, f64)>,
-    /// Committed cut ranges (seconds) to be removed on save.
+    /// Committed cut ranges in *original* seconds, to be removed on save.
     cuts: Vec<(f64, f64)>,
-    /// Playhead position (seconds): click target and play-from position.
+    /// Playhead position in *preview* seconds.
     playhead: f64,
+    /// Whether the preview is currently playing (drives the play/pause icon).
+    playing: bool,
+    /// Grace countdown after starting playback (see [`PLAY_GUARD_TICKS`]).
+    play_guard: u8,
+    /// Last cut end we seeked to while skipping, to avoid re-issuing the seek
+    /// every tick; `-1.0` = not currently skipping.
+    last_seek_b: f64,
     /// Horizontal zoom factor (>= 1.0).
     zoom: f64,
-    /// Left edge of the visible window, in seconds.
+    /// Left edge of the visible window, in preview seconds.
     view_start: f64,
 }
 
 impl EditState {
-    /// Duration (seconds) of the currently visible window.
+    /// Duration (preview seconds) of the currently visible window.
     fn visible(&self) -> f64 {
         self.duration / self.zoom.max(1.0)
     }
-    /// Maps a widget x (0..w) to a time in seconds within the visible window.
+    /// Maps a widget x (0..w) to a preview time within the visible window.
     fn x_to_time(&self, x: f64, w: f64) -> f64 {
         if self.duration <= 0.0 || w <= 0.0 {
             return 0.0;
         }
         (self.view_start + (x / w).clamp(0.0, 1.0) * self.visible()).clamp(0.0, self.duration)
     }
-    /// Maps a time (seconds) to a widget x within the visible window.
+    /// Maps a preview time to a widget x within the visible window.
     fn time_to_x(&self, t: f64, w: f64) -> f64 {
         let vis = self.visible();
         if vis <= 0.0 {
@@ -70,6 +127,52 @@ impl EditState {
         self.zoom = (self.zoom * factor).clamp(1.0, MAX_ZOOM);
         let vis = self.visible();
         self.view_start = (focal_t - frac * vis).clamp(0.0, (self.duration - vis).max(0.0));
+    }
+    /// Recomputes the shortened preview (merged cuts, preview duration, drawn
+    /// columns) from `cuts` + the decoded original peaks. Called after a decode,
+    /// a new cut, or a reset.
+    fn recompute_view(&mut self) {
+        // Normalise + clamp the cuts, then merge overlapping ranges.
+        let mut cs: Vec<(f64, f64)> = self
+            .cuts
+            .iter()
+            .map(|&(a, b)| {
+                let (a, b) = if a <= b { (a, b) } else { (b, a) };
+                (a.clamp(0.0, self.orig_dur), b.clamp(0.0, self.orig_dur))
+            })
+            .filter(|&(a, b)| b > a)
+            .collect();
+        cs.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut merged: Vec<(f64, f64)> = Vec::new();
+        for (a, b) in cs {
+            if let Some(last) = merged.last_mut() {
+                if a <= last.1 {
+                    last.1 = last.1.max(b);
+                    continue;
+                }
+            }
+            merged.push((a, b));
+        }
+        let cut_total: f64 = merged.iter().map(|&(a, b)| b - a).sum();
+        self.duration = (self.orig_dur - cut_total).max(0.0);
+        self.merged = merged;
+
+        // Drop the columns that fall inside a cut; map the rest onto preview time.
+        let n = self.orig_peaks.len();
+        let nf = n.max(1) as f64;
+        let mut v = Vec::with_capacity(n);
+        for (i, p) in self.orig_peaks.iter().enumerate() {
+            let t = (i as f64 + 0.5) / nf * self.orig_dur;
+            if self.merged.iter().any(|&(a, b)| t >= a && t < b) {
+                continue;
+            }
+            v.push((orig_to_preview(&self.merged, t), *p));
+        }
+        self.vpeaks = v;
+
+        // Keep the view and playhead within the (possibly shorter) preview.
+        self.view_start = self.view_start.min((self.duration - self.visible()).max(0.0));
+        self.playhead = self.playhead.min(self.duration);
     }
 }
 
@@ -97,6 +200,12 @@ fn sync_scrollbar(
     area.queue_draw();
 }
 
+/// Switches the play/pause button back to "play" and updates its tooltip.
+fn show_play_icon(btn: &gtk::Button) {
+    btn.set_icon_name("media-playback-start-symbolic");
+    btn.set_tooltip_text(Some(&gettext("Play from the playhead")));
+}
+
 impl App {
     pub(crate) fn open_recording_edit(&self, sender: &ComponentSender<Self>, id: i64) {
         let Some(rec) = self
@@ -115,11 +224,17 @@ impl App {
         }
 
         let state = Rc::new(RefCell::new(EditState {
-            peaks: Vec::new(),
+            orig_peaks: Vec::new(),
+            orig_dur: 0.0,
+            vpeaks: Vec::new(),
             duration: 0.0,
+            merged: Vec::new(),
             sel: None,
             cuts: Vec::new(),
             playhead: 0.0,
+            playing: false,
+            play_guard: 0,
+            last_seek_b: -1.0,
             zoom: 1.0,
             view_start: 0.0,
         }));
@@ -133,7 +248,7 @@ impl App {
             .margin_end(12)
             .build();
 
-        // Top controls: scissors (left), play (right).
+        // Top controls: scissors (left), play/pause (right).
         let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         let scissors = gtk::Button::from_icon_name("edit-cut-symbolic");
         scissors.set_tooltip_text(Some(&gettext("Delete the marked part")));
@@ -173,7 +288,7 @@ impl App {
         }
         content.append(&scrollbar);
 
-        // Timeline (synced with the waveform): a global position picker.
+        // Timeline (synced with the waveform and the audio): a position picker.
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
         scale.set_draw_value(false);
         scale.set_hexpand(true);
@@ -293,18 +408,29 @@ impl App {
         }
         area.add_controller(drag);
 
-        // Scissors: commit the selection as a cut.
+        // Scissors: commit the selection as a cut and recompute the preview.
         {
             let state = state.clone();
             let area2 = area.clone();
+            let adj = adj.clone();
+            let scrollbar = scrollbar.clone();
+            let scale2 = scale.clone();
             scissors.connect_clicked(move |_| {
                 let sel = state.borrow().sel;
-                if let Some(s) = sel {
-                    let mut st = state.borrow_mut();
-                    st.cuts.push(s);
-                    st.sel = None;
-                    drop(st);
-                    area2.queue_draw();
+                if let Some((s0, s1)) = sel {
+                    {
+                        let mut st = state.borrow_mut();
+                        // The selection is in preview time → map back to the
+                        // original timeline before storing it as a cut.
+                        let a = preview_to_orig(&st.merged, s0);
+                        let b = preview_to_orig(&st.merged, s1);
+                        st.cuts.push((a, b));
+                        st.sel = None;
+                        st.recompute_view();
+                    }
+                    let dur = state.borrow().duration;
+                    scale2.set_range(0.0, dur.max(0.001));
+                    sync_scrollbar(&adj, &scrollbar, &area2, &state);
                 }
             });
         }
@@ -333,49 +459,242 @@ impl App {
             });
         }
 
-        // Play from the playhead (uses the main player, starting at the position).
+        // Play / pause from the playhead (through the main player).
         {
             let sender = sender.clone();
             let state = state.clone();
             let path = path.clone();
+            let play_btn = play.clone();
             play.connect_clicked(move |_| {
-                let ms = (state.borrow().playhead * 1000.0).round() as i64;
-                sender.input(Msg::RecordingPlayFrom {
-                    path: path.clone(),
-                    ms,
-                });
+                let mut st = state.borrow_mut();
+                if st.playing {
+                    // → pause: halt the audio, freeze the playhead.
+                    st.playing = false;
+                    drop(st);
+                    show_play_icon(&play_btn);
+                    sender.input(Msg::RecordingPreviewPause);
+                } else {
+                    // → play: (re)start from the current (preview) playhead,
+                    // mapped back onto the original file.
+                    st.playing = true;
+                    st.play_guard = PLAY_GUARD_TICKS;
+                    st.last_seek_b = -1.0;
+                    let ms = (preview_to_orig(&st.merged, st.playhead) * 1000.0).round() as i64;
+                    drop(st);
+                    play_btn.set_icon_name("media-playback-pause-symbolic");
+                    play_btn.set_tooltip_text(Some(&gettext("Pause")));
+                    sender.input(Msg::RecordingPlayFrom {
+                        path: path.clone(),
+                        ms,
+                    });
+                }
             });
         }
 
-        // Reset: drop all cuts, the selection, and the zoom.
+        // Reset: drop all cuts (and the zoom) after confirming.
         {
             let state = state.clone();
             let area2 = area.clone();
             let adj = adj.clone();
             let scrollbar = scrollbar.clone();
-            reset.connect_clicked(move |_| {
-                {
-                    let mut st = state.borrow_mut();
-                    st.cuts.clear();
-                    st.sel = None;
-                    st.zoom = 1.0;
-                    st.view_start = 0.0;
+            let scale2 = scale.clone();
+            reset.connect_clicked(move |btn| {
+                let has_cuts = !state.borrow().cuts.is_empty();
+                let apply = {
+                    let state = state.clone();
+                    let area2 = area2.clone();
+                    let adj = adj.clone();
+                    let scrollbar = scrollbar.clone();
+                    let scale2 = scale2.clone();
+                    move || {
+                        {
+                            let mut st = state.borrow_mut();
+                            st.cuts.clear();
+                            st.sel = None;
+                            st.zoom = 1.0;
+                            st.view_start = 0.0;
+                            st.recompute_view();
+                        }
+                        let dur = state.borrow().duration;
+                        scale2.set_range(0.0, dur.max(0.001));
+                        sync_scrollbar(&adj, &scrollbar, &area2, &state);
+                    }
+                };
+                if !has_cuts {
+                    // Nothing committed yet — just reset the zoom silently.
+                    apply();
+                    return;
                 }
-                sync_scrollbar(&adj, &scrollbar, &area2, &state);
+                let dlg = adw::AlertDialog::new(
+                    Some(&gettext("Discard all edits?")),
+                    Some(&gettext(
+                        "This removes every marked cut and restores the full recording.",
+                    )),
+                );
+                dlg.add_response("cancel", &gettext("Cancel"));
+                dlg.add_response("ok", &gettext("Discard"));
+                dlg.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
+                dlg.set_default_response(Some("cancel"));
+                dlg.set_close_response("cancel");
+                let apply = RefCell::new(Some(apply));
+                dlg.connect_response(None, move |_, resp| {
+                    if resp == "ok" {
+                        if let Some(f) = apply.borrow_mut().take() {
+                            f();
+                        }
+                    }
+                });
+                dlg.present(Some(btn));
             });
         }
 
-        // Save: apply the cuts destructively and leave the page.
+        // Save: confirm overwriting the original, then apply the cuts and leave.
         {
             let sender = sender.clone();
             let state = state.clone();
+            let overlay = self.toast_overlay.clone();
             save.connect_clicked(move |_| {
                 let cuts = state.borrow().cuts.clone();
-                sender.input(Msg::RecordingApplyCut { id, cuts });
+                if cuts.is_empty() {
+                    // Let the apply path surface the "mark a part first" hint.
+                    sender.input(Msg::RecordingApplyCut { id, cuts });
+                    return;
+                }
+                let dlg = adw::AlertDialog::new(
+                    Some(&gettext("Overwrite the original recording?")),
+                    Some(&gettext(
+                        "Saving replaces the original file with the edited version. \
+                         This cannot be undone.",
+                    )),
+                );
+                dlg.add_response("cancel", &gettext("Cancel"));
+                dlg.add_response("ok", &gettext("Save"));
+                dlg.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
+                dlg.set_default_response(Some("cancel"));
+                dlg.set_close_response("cancel");
+                let sender = sender.clone();
+                dlg.connect_response(None, move |_, resp| {
+                    if resp == "ok" {
+                        sender.input(Msg::RecordingApplyCut {
+                            id,
+                            cuts: cuts.clone(),
+                        });
+                    }
+                });
+                dlg.present(Some(&overlay));
             });
         }
 
         self.push_subpage(&gettext("Edit recording"), &content);
+
+        // Follow the audio while previewing: keep the timeline + waveform
+        // playhead in sync, skip over committed cuts, and flip back to the play
+        // icon when playback ends or is replaced. Self-terminates once the
+        // subpage (and thus the drawing area) is gone.
+        {
+            let state = state.clone();
+            let scale = scale.clone();
+            let adj = adj.clone();
+            let scrollbar = scrollbar.clone();
+            let play_btn = play.clone();
+            let area_weak = area.downgrade();
+            let probe = self.player.probe();
+            let want_uri = gtk::glib::filename_to_uri(&path, None)
+                .ok()
+                .map(|g| g.to_string());
+            let sender = sender.clone();
+            gtk::glib::timeout_add_local(Duration::from_millis(FOLLOW_INTERVAL_MS), move || {
+                let Some(area) = area_weak.upgrade() else {
+                    return gtk::glib::ControlFlow::Break;
+                };
+                if area.root().is_none() {
+                    return gtk::glib::ControlFlow::Break; // subpage popped
+                }
+                if !state.borrow().playing {
+                    return gtk::glib::ControlFlow::Continue;
+                }
+
+                let ours = match (&want_uri, probe.current_uri()) {
+                    (Some(w), Some(c)) => *w == c,
+                    _ => false,
+                };
+                let is_playing = probe.is_playing();
+
+                // Once the start-up grace is over, leave play mode if our track is
+                // no longer the one playing (ended externally / replaced / paused
+                // from the mini player).
+                {
+                    let mut st = state.borrow_mut();
+                    if st.play_guard > 0 {
+                        st.play_guard -= 1;
+                    }
+                    if (!ours || !is_playing) && st.play_guard == 0 {
+                        st.playing = false;
+                        st.last_seek_b = -1.0;
+                        drop(st);
+                        show_play_icon(&play_btn);
+                        area.queue_draw();
+                        return gtk::glib::ControlFlow::Continue;
+                    }
+                }
+                if !ours {
+                    return gtk::glib::ControlFlow::Continue; // preroll: our track not loaded yet
+                }
+                let Some(ms) = probe.position_ms() else {
+                    return gtk::glib::ControlFlow::Continue;
+                };
+                let t_orig = ms as f64 / 1000.0;
+
+                // Inside a committed cut → jump to its end so the preview matches
+                // the saved result (once per cut, guarded by `last_seek_b`).
+                let skip_to = {
+                    let st = state.borrow();
+                    st.merged
+                        .iter()
+                        .find(|&&(a, b)| t_orig >= a && t_orig < b)
+                        .map(|&(_, b)| b)
+                };
+                if let Some(b) = skip_to {
+                    let need = (state.borrow().last_seek_b - b).abs() > 0.05;
+                    if need {
+                        state.borrow_mut().last_seek_b = b;
+                        probe.seek_ms((b * 1000.0).round() as i64);
+                    }
+                    return gtk::glib::ControlFlow::Continue;
+                }
+                state.borrow_mut().last_seek_b = -1.0;
+
+                // Map to preview time; stop at the (preview) end.
+                let (p, dur, ended) = {
+                    let st = state.borrow();
+                    let p = orig_to_preview(&st.merged, t_orig);
+                    (p, st.duration, p >= st.duration - 0.05)
+                };
+                if ended {
+                    {
+                        let mut st = state.borrow_mut();
+                        st.playing = false;
+                        st.last_seek_b = -1.0;
+                    }
+                    show_play_icon(&play_btn);
+                    sender.input(Msg::RecordingPreviewPause);
+                    area.queue_draw();
+                    return gtk::glib::ControlFlow::Continue;
+                }
+
+                // Keep the playhead inside the visible window when zoomed in.
+                {
+                    let mut st = state.borrow_mut();
+                    let vis = st.visible();
+                    if p < st.view_start || p > st.view_start + vis {
+                        st.view_start = (p - vis / 2.0).clamp(0.0, (dur - vis).max(0.0));
+                    }
+                }
+                scale.set_value(p); // sets the playhead + redraws
+                sync_scrollbar(&adj, &scrollbar, &area, &state);
+                gtk::glib::ControlFlow::Continue
+            });
+        }
 
         // Decode the waveform off-thread, then fill in the peaks and timeline range.
         let (tx, rx) = async_channel::bounded(1);
@@ -395,8 +714,9 @@ impl App {
                 if let Ok(Ok((peaks, dur))) = rx.recv().await {
                     {
                         let mut st = state.borrow_mut();
-                        st.peaks = peaks;
-                        st.duration = dur;
+                        st.orig_peaks = peaks;
+                        st.orig_dur = dur;
+                        st.recompute_view();
                     }
                     scale.set_range(0.0, dur.max(0.001));
                     sync_scrollbar(&adj, &scrollbar, &area, &state);
@@ -466,45 +786,31 @@ impl App {
     }
 }
 
-/// Paints the waveform for the visible window: kept columns in the accent colour,
-/// cut columns dimmed, plus the pending selection overlay and the playhead line.
+/// Paints the shortened preview waveform for the visible window (the kept columns
+/// in the accent colour), plus the pending selection overlay and the playhead.
 fn draw_waveform(cr: &gtk::cairo::Context, w: i32, h: i32, st: &EditState) {
     let w = f64::from(w);
     let h = f64::from(h);
     let mid = h / 2.0;
 
-    if st.peaks.is_empty() || st.duration <= 0.0 {
+    if st.vpeaks.is_empty() || st.duration <= 0.0 {
         return;
     }
-    let n = st.peaks.len();
-    let nf = n as f64;
-    let dur = st.duration;
-    let in_cut = |t: f64| st.cuts.iter().any(|&(a, b)| t >= a && t < b);
+    let n = st.vpeaks.len();
 
     // On-screen spacing of one column grows with the zoom factor.
-    cr.set_line_width((w * st.zoom / nf).max(1.0));
-
-    // Two batched strokes: kept columns (accent), then cut columns (dim red).
-    for &(r, g, b, a, cut_pass) in &[
-        (0.30, 0.55, 0.95, 0.95, false),
-        (0.80, 0.22, 0.22, 0.40, true),
-    ] {
-        cr.set_source_rgba(r, g, b, a);
-        for (i, p) in st.peaks.iter().enumerate() {
-            let t = (i as f64 + 0.5) / nf * dur;
-            if in_cut(t) != cut_pass {
-                continue;
-            }
-            let x = st.time_to_x(t, w);
-            if x < -1.0 || x > w + 1.0 {
-                continue; // outside the visible window
-            }
-            let bar_h = (f64::from(*p) * h * 0.9).max(1.0);
-            cr.move_to(x, mid - bar_h / 2.0);
-            cr.line_to(x, mid + bar_h / 2.0);
+    cr.set_line_width((w * st.zoom / n as f64).max(1.0));
+    cr.set_source_rgba(0.30, 0.55, 0.95, 0.95);
+    for &(t, p) in &st.vpeaks {
+        let x = st.time_to_x(t, w);
+        if x < -1.0 || x > w + 1.0 {
+            continue; // outside the visible window
         }
-        let _ = cr.stroke();
+        let bar_h = (f64::from(p) * h * 0.9).max(1.0);
+        cr.move_to(x, mid - bar_h / 2.0);
+        cr.line_to(x, mid + bar_h / 2.0);
     }
+    let _ = cr.stroke();
 
     // Pending selection overlay (clipped to the visible window).
     if let Some((a, b)) = st.sel {
@@ -518,7 +824,7 @@ fn draw_waveform(cr: &gtk::cairo::Context, w: i32, h: i32, st: &EditState) {
     }
 
     // Playhead (only when inside the visible window).
-    let px = st.time_to_x(st.playhead.clamp(0.0, dur), w);
+    let px = st.time_to_x(st.playhead.clamp(0.0, st.duration), w);
     if px >= 0.0 && px <= w {
         cr.set_source_rgba(0.95, 0.95, 0.95, 0.9);
         cr.set_line_width(2.0);

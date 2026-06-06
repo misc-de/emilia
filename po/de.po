@@ -1975,6 +1975,36 @@ msgstr "Bereits auf diesem Gerät"
 msgid "Would overwrite a different file"
 msgstr "Würde eine andere Datei überschreiben"
 
+#: src/ui/app_rec_edit.rs:485
+msgid "Pause"
+msgstr "Pause"
+
+#: src/ui/app_rec_edit.rs:529
+msgid "Discard all edits?"
+msgstr "Alle Bearbeitungen verwerfen?"
+
+#: src/ui/app_rec_edit.rs:531
+msgid "This removes every marked cut and restores the full recording."
+msgstr ""
+"Entfernt alle markierten Schnitte und stellt die vollständige Aufnahme wieder "
+"her."
+
+#: src/ui/app_rec_edit.rs:535
+msgid "Discard"
+msgstr "Verwerfen"
+
+#: src/ui/app_rec_edit.rs:564
+msgid "Overwrite the original recording?"
+msgstr "Originalaufnahme überschreiben?"
+
+#: src/ui/app_rec_edit.rs:566
+msgid ""
+"Saving replaces the original file with the edited version. This cannot be "
+"undone."
+msgstr ""
+"Beim Speichern wird die Originaldatei durch die bearbeitete Version ersetzt. "
+"Das kann nicht rückgängig gemacht werden."
+
 #~ msgid ""
 #~ "YouTube isn't working right now – it changed and the installed yt-dlp "
 #~ "can't read it. Look for a newer version of the app or update yt-dlp in "

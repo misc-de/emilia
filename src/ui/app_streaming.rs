@@ -636,18 +636,8 @@ impl App {
             if rec.incomplete {
                 row.set_tooltip_text(Some(&gettext("Incomplete (beginning was missing)")));
             }
-            let del = gtk::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .valign(gtk::Align::Center)
-                .tooltip_text(gettext("Delete"))
-                .build();
-            del.add_css_class("flat");
-            {
-                let sender = sender.clone();
-                let id = rec.id;
-                del.connect_clicked(move |_| sender.input(Msg::RecordingDelete(id)));
-            }
-            row.add_suffix(&del);
+            // No delete button in the list: a recording is removed only from its
+            // detail page (long press → "Delete recording").
             {
                 let sender = sender.clone();
                 let path = rec.path.clone();
