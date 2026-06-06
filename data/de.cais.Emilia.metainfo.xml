@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.3.27" date="2026-06-06">
+      <description>
+        <p>Fixes the display language staying English on systems whose region/format locale differs from the display language (notably on phones): the chosen language is now applied regardless of which system locales are installed. The YouTube search shows a progress spinner while it runs. New icons for the Podcasts and Streaming sections.</p>
+        <p xml:lang="de">Behebt, dass die Anzeigesprache auf Systemen englisch blieb, deren Regions-/Format-Locale von der Anzeigesprache abweicht (vor allem auf Smartphones): Die gewählte Sprache wird jetzt unabhängig von den installierten System-Locales angewendet. Die YouTube-Suche zeigt während der Suche eine Fortschrittsanzeige. Neue Symbole für die Bereiche Podcasts und Streaming.</p>
+      </description>
+    </release>
     <release version="0.3.26" date="2026-06-06">
       <description>
         <p>The favorites now show each entry's runtime next to the play button, matching the other track lists. The artist list gains a second line with the number of albums and songs. On a narrow (mobile) window the top navigation icons are centered. Changing the display language no longer restarts the app unannounced: it asks whether to restart now or later and explains that the new language takes effect after a restart.</p>

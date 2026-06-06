@@ -86,8 +86,8 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 11] = [
     ("artists", "Artists", "avatar-default-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
     ("concerts", "Concerts", "ticket-special-symbolic"),
-    ("podcasts", "Podcasts", "emilia-podcast-symbolic"),
-    ("streaming", "Streaming", "audio-x-generic-symbolic"),
+    ("podcasts", "Podcasts", "podcast-symbolic"),
+    ("streaming", "Streaming", "internet-radio-symbolic"),
     ("youtube", "YouTube", "im-youtube-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
@@ -581,9 +581,11 @@ pub(crate) struct YoutubeState {
     pub(crate) recent_list: gtk::Box,
     /// Hits of the last search, for the subscribe/search dialog.
     pub(crate) search_results: Vec<crate::core::youtube::YtResult>,
-    /// While the search dialog is open: (dialog, hit list), so asynchronously
-    /// arriving hits can be inserted into the shown list.
-    pub(crate) search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    /// While the search dialog is open: (dialog, hit list, spinner box), so
+    /// asynchronously arriving hits can be inserted into the shown list and the
+    /// busy spinner shown during the search can be hidden again.
+    pub(crate) search:
+        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox, gtk::Box)>>>,
     /// Video id currently loaded/playing (play/pause row marker); `None` when
     /// music/other is playing or nothing is running.
     pub(crate) playing_video_id: Option<String>,
@@ -1826,7 +1828,7 @@ impl Component for App {
                                     // playlists are created from a track's "Add to
                                     // playlist" options (which can create one inline).
                                 },
-                            add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "emilia-podcast-symbolic"] =
+                            add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "podcast-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -1883,7 +1885,7 @@ impl Component for App {
                                         },
                                     },
                                     adw::StatusPage {
-                                        set_icon_name: Some("emilia-podcast-symbolic"),
+                                        set_icon_name: Some("podcast-symbolic"),
                                         set_title: &gettext("No episodes"),
                                         set_vexpand: true,
                                         #[watch]
@@ -1921,7 +1923,7 @@ impl Component for App {
                                         },
                                     },
                                     adw::StatusPage {
-                                        set_icon_name: Some("emilia-podcast-symbolic"),
+                                        set_icon_name: Some("podcast-symbolic"),
                                         set_title: &gettext("No podcasts"),
                                         set_description: Some(&gettext("Subscribe to a podcast via its feed address (RSS).")),
                                         set_vexpand: true,
@@ -1929,7 +1931,7 @@ impl Component for App {
                                         set_visible: model.podcasts.podcast_view == PodcastView::Overview && model.podcasts.podcast_items.is_empty(),
                                     },
                                 },
-                            add_titled_with_icon[Some("streaming"), &gettext("Streaming"), "audio-x-generic-symbolic"] =
+                            add_titled_with_icon[Some("streaming"), &gettext("Streaming"), "internet-radio-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
 
@@ -1981,7 +1983,7 @@ impl Component for App {
                                         },
                                     },
                                     adw::StatusPage {
-                                        set_icon_name: Some("audio-x-generic-symbolic"),
+                                        set_icon_name: Some("internet-radio-symbolic"),
                                         set_title: &gettext("No stations"),
                                         set_description: Some(&gettext("Add a stream address or search for a station worldwide.")),
                                         set_vexpand: true,
@@ -3947,7 +3949,6 @@ impl Component for App {
             Msg::YtSearch(term, kind) => {
                 let term = term.trim().to_string();
                 if !term.is_empty() {
-                    self.toast(&gettext("Searching …"));
                     sender.spawn_command(move |out| {
                         let results =
                             crate::core::youtube::search(&term, kind, 25).unwrap_or_default();
@@ -3969,7 +3970,12 @@ impl Component for App {
                     .find(|r| r.url == url && r.kind == crate::core::youtube::YtKind::Channel)
                     .cloned()
                 {
-                    self.toast(&gettext_f("Subscribing to {t} …", &[("t", &r.title)]));
+                    // Central loading overlay (same spinner as library/playlist
+                    // loads) while yt-dlp fetches the channel; cleared in
+                    // `Cmd::YtChannelFetched`.
+                    self.libview.loading_label =
+                        Some(gettext_f("Subscribing to {t} …", &[("t", &r.title)]));
+                    self.libview.loading = true;
                     sender.spawn_command(move |out| {
                         let t = crate::ui::app_youtube::fetch_and_store_channel(
                             &r.id,
@@ -5169,6 +5175,8 @@ impl Component for App {
             }
             Cmd::YtSearchThumbsReady => self.rebuild_youtube_search_results(&sender),
             Cmd::YtChannelFetched(title) => {
+                self.libview.loading = false;
+                self.libview.loading_label = None;
                 self.reload_channels(&sender);
                 match title {
                     Some(t) => self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)])),

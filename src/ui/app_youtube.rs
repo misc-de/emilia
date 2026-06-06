@@ -675,11 +675,42 @@ impl App {
         search_group.add(&search_row);
         content.append(&search_group);
 
+        let results = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .build();
+        results.add_css_class("boxed-list");
+        results.set_visible(false);
+
+        // Busy spinner shown while yt-dlp runs the search; hidden again as soon
+        // as hits arrive (see `rebuild_youtube_search_results`).
+        let spinner_box = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .margin_top(24)
+            .margin_bottom(24)
+            .visible(false)
+            .build();
+        let spinner = gtk::Spinner::builder().build();
+        spinner.set_size_request(36, 36);
+        spinner.set_spinning(true);
+        spinner_box.append(&spinner);
+        spinner_box.append(
+            &gtk::Label::builder()
+                .label(gettext("Searching …"))
+                .css_classes(["dim-label"])
+                .build(),
+        );
+
         let trigger = {
             let (sender, entry, kind) = (sender.clone(), search_entry.clone(), kind.clone());
+            let (results, spinner_box) = (results.clone(), spinner_box.clone());
             move || {
                 let term = entry.text().to_string();
                 if !term.trim().is_empty() {
+                    results.set_visible(false);
+                    spinner_box.set_visible(true);
                     sender.input(Msg::YtSearch(term, kind.get()));
                 }
             }
@@ -690,14 +721,11 @@ impl App {
         }
         search_btn.connect_clicked(move |_| trigger());
 
-        let results = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .build();
-        results.add_css_class("boxed-list");
-        results.set_visible(false);
         content.append(&results);
+        content.append(&spinner_box);
 
-        *self.youtube.search.borrow_mut() = Some((dialog.clone(), results.clone()));
+        *self.youtube.search.borrow_mut() =
+            Some((dialog.clone(), results.clone(), spinner_box.clone()));
         {
             let slot = self.youtube.search.clone();
             dialog.connect_closed(move |_| {
@@ -711,9 +739,10 @@ impl App {
     /// `self.youtube.search_results`. Each result is tappable.
     pub(crate) fn rebuild_youtube_search_results(&self, sender: &ComponentSender<Self>) {
         let guard = self.youtube.search.borrow();
-        let Some((dialog, list)) = guard.as_ref() else {
+        let Some((dialog, list, spinner_box)) = guard.as_ref() else {
             return;
         };
+        spinner_box.set_visible(false);
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
