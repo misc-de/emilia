@@ -260,6 +260,18 @@ impl SyncClient {
         Ok(size)
     }
 
+    /// Tells the peer (server-side) that a share finished, so its UI can show the
+    /// transfer-success screen too. The server is otherwise passive during a
+    /// pull/upload and has no other way to learn the transfer completed.
+    pub fn notify_complete(&self, files: usize) -> Result<()> {
+        self.agent
+            .post(&format!("{}/share/complete", self.base))
+            .set("Authorization", &self.bearer())
+            .send_json(serde_json::json!({ "files": files }))
+            .map_err(|e| anyhow!("notify complete failed: {e}"))?;
+        Ok(())
+    }
+
     /// Cleanly drops the connection (errors are ignored).
     pub fn disconnect(&self) {
         let _ = self

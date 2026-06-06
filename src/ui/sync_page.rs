@@ -1,11 +1,14 @@
-//! Device sync as a standalone relm4 component: a mode-selection dialog plus a
-//! dedicated, navigation-free window for each flow (offer/QR or scan/camera),
-//! which morphs into the paired/progress view and finally a green success
-//! message in place. Owns the server thread and the client worker. Extracted
-//! from the `App` god-object.
+//! Device sync as a standalone relm4 component. **The live connection is
+//! decoupled from any window:** the server thread / client worker keep running in
+//! the background once paired, so the pairing survives closing the window. A
+//! single navigation-free window swaps its content through the flow
+//! (mode-select → QR/scan → "Connected with X" → picker/confirm → progress →
+//! success). The header "Share" button routes here: while connected it opens the
+//! connected panel (Share / Disconnect) straight away, otherwise the mode-select.
+//! Extracted from the `App` god-object.
 //!
 //! Logic/network lives in [`crate::core::sync`]; here only widgets + event flow.
-//! The component owns its dialogs and worker; it tells the parent (via `Output`)
+//! The component owns its window and worker; it tells the parent (via `Output`)
 //! only the two things the parent still needs: the connected state (for the
 //! green header icon) and that an import happened (so the parent reloads the
 //! affected library views).
@@ -41,9 +44,8 @@ enum ClientCmd {
     Decide(ShareDecision),
     /// Reject an incoming offer.
     Reject,
-    /// Tear the session down.
-    #[allow(dead_code)] // not yet wired to a UI control
-    Cancel,
+    /// Tear the session down (user tapped "Disconnect").
+    Disconnect,
 }
 
 /// The device-sync component (owns the dialogs, server thread and client worker).
@@ -56,24 +58,20 @@ pub(crate) struct SyncPage {
     stop: Option<Arc<AtomicBool>>,
     /// Running camera scanner pipeline (drop stops the camera).
     scanner: Option<Scanner>,
-    /// Mode-selection dialog ("Device sync").
-    dialog: Option<adw::Dialog>,
-    /// Standalone window of the active flow (offer/QR or scan) — no navigation.
+    /// Whether a live pairing exists (kept alive in the background, independent of
+    /// the window). Drives the green header icon and the "Share" routing.
+    connected: bool,
+    /// The single navigation-free flow window — its content is swapped through the
+    /// whole flow. `None` while no window is shown (the connection may still live).
     sub: Option<adw::Dialog>,
     qr: Option<gtk::Picture>,
     cam: Option<gtk::Picture>,
-    /// The QR/camera section of the active flow window, hidden once paired so the
-    /// same window shows only the connection status/progress.
-    details: Option<gtk::Box>,
-    /// Status label (pairing, import, transfer) of the active flow window.
+    /// Status label (pairing, import, transfer) of the current flow content.
     status: Option<gtk::Label>,
-    /// Address/waiting label of the offer window.
+    /// Address/waiting label of the offer content.
     server_status: Option<gtk::Label>,
     progress: Option<gtk::ProgressBar>,
-    /// Green "sync successful" box (icon + title + detail), shown when done.
-    success: Option<gtk::Box>,
-    success_detail: Option<gtk::Label>,
-    /// Whether a successful exchange happened (→ show the success box on finish).
+    /// Whether a successful exchange happened (→ show the success screen on finish).
     synced_ok: bool,
     /// Accumulated summary (imported counts, transferred files) for the success box.
     sync_summary: String,
@@ -104,26 +102,31 @@ pub(crate) struct SyncPage {
 
 #[derive(Debug)]
 pub(crate) enum SyncInput {
-    /// Open the sync dialog on the given window (start page: mode selection).
+    /// Header "Share" tapped: open the flow window. While connected this lands on
+    /// the connected panel (Share / Disconnect); otherwise on the mode selection.
     Open(adw::ApplicationWindow),
     StartServer,
     StartScan,
     QrDecoded(String),
-    /// User tapped "Share" on the paired screen → open the selection picker.
+    /// User tapped "Share" on the connected panel → open the selection picker.
     OpenSharePicker,
     /// Picker "Continue" → resolve the selection to a manifest (size confirm next).
     PreparePicked,
     /// Size-confirmation "Send" → park/send the prepared offer.
     ConfirmSend,
-    /// Cancel out of the picker/confirm back to the paired screen.
+    /// Cancel out of the picker/confirm back to the connected panel.
     CancelShare,
     /// Review "Accept" → apply the (selectively) accepted offer.
     AcceptOffer,
     /// Review "Reject all".
     RejectOffer,
-    /// The flow window (offer/scan) was closed → stop its activity.
+    /// Transfer-success "Done" → back to the connected panel (stay paired).
+    BackToConnected,
+    /// User tapped "Disconnect" → end the live pairing.
+    Disconnect,
+    /// The flow window was closed. Keeps the connection alive if still paired;
+    /// otherwise (e.g. closed mid-pairing) stops the server/scanner.
     SubClosed,
-    DialogClosed,
 }
 
 #[derive(Debug)]
@@ -160,16 +163,13 @@ impl Component for SyncPage {
             window: None,
             stop: None,
             scanner: None,
-            dialog: None,
+            connected: false,
             sub: None,
             qr: None,
             cam: None,
-            details: None,
             status: None,
             server_status: None,
             progress: None,
-            success: None,
-            success_detail: None,
             synced_ok: false,
             sync_summary: String::new(),
             peer_caps: Capabilities::default(),
@@ -192,7 +192,7 @@ impl Component for SyncPage {
         match msg {
             SyncInput::Open(window) => {
                 self.window = Some(window);
-                self.open_dialog(&sender);
+                self.open_entry(&sender);
             }
             SyncInput::StartServer => self.start_server(&sender),
             SyncInput::StartScan => self.start_scan(&sender),
@@ -200,11 +200,12 @@ impl Component for SyncPage {
             SyncInput::OpenSharePicker => self.open_share_picker(&sender),
             SyncInput::PreparePicked => self.prepare_picked(&sender),
             SyncInput::ConfirmSend => self.confirm_send(),
-            SyncInput::CancelShare => self.show_paired_panel(&sender),
+            SyncInput::CancelShare => self.show_connected_panel(&sender),
             SyncInput::AcceptOffer => self.accept_offer(&sender),
             SyncInput::RejectOffer => self.reject_offer(&sender),
+            SyncInput::BackToConnected => self.show_connected_panel(&sender),
+            SyncInput::Disconnect => self.disconnect_peer(&sender),
             SyncInput::SubClosed => self.close_sub(&sender),
-            SyncInput::DialogClosed => self.teardown(&sender),
         }
     }
 
@@ -253,35 +254,59 @@ impl SyncPage {
             == Some("1")
     }
 
-    /// Opens the mode-selection dialog (offer a connection / scan a code).
-    fn open_dialog(&mut self, sender: &ComponentSender<Self>) {
-        // Clean up any open dialog/server first.
-        self.teardown(sender);
+    /// Header "Share" entry: ensure the flow window exists, then land on the
+    /// connected panel (if a pairing is live) or the mode selection.
+    fn open_entry(&mut self, sender: &ComponentSender<Self>) {
+        self.ensure_window(sender);
+        if self.connected {
+            self.show_connected_panel(sender);
+        } else {
+            self.show_mode_select(sender);
+        }
+    }
+
+    /// Presents the single flow window (once); later phases only swap its content.
+    fn ensure_window(&mut self, sender: &ComponentSender<Self>) {
+        if self.sub.is_some() {
+            return;
+        }
         let Some(window) = self.window.clone() else {
             return;
         };
-
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Device sync"))
-            .content_width(420)
-            .content_height(420)
-            .build();
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());
-        toolbar.set_content(Some(&self.mode_content(sender)));
+        let dialog = adw::Dialog::builder()
+            .title(gettext("Device sync"))
+            .content_width(440)
+            .content_height(600)
+            .build();
         dialog.set_child(Some(&toolbar));
-
         {
             let sender = sender.clone();
-            dialog.connect_closed(move |_| sender.input(SyncInput::DialogClosed));
+            dialog.connect_closed(move |_| sender.input(SyncInput::SubClosed));
         }
-
-        self.dialog = Some(dialog.clone());
+        self.sub = Some(dialog.clone());
+        self.sub_toolbar = Some(toolbar);
         dialog.present(Some(&window));
     }
 
-    /// The mode-selection content (two rows: offer / scan).
-    fn mode_content(&self, sender: &ComponentSender<Self>) -> gtk::Box {
+    /// Updates the flow window's title (no-op if no window is shown).
+    fn set_title(&self, title: &str) {
+        if let Some(d) = &self.sub {
+            d.set_title(title);
+        }
+    }
+
+    /// Swaps the body of the open flow window (mode / QR / picker / review / …).
+    fn set_sub_content(&self, content: &impl gtk::prelude::IsA<gtk::Widget>) {
+        if let Some(tb) = &self.sub_toolbar {
+            tb.set_content(Some(content));
+        }
+    }
+
+    /// Mode-selection content (offer a connection / scan a code).
+    fn show_mode_select(&mut self, sender: &ComponentSender<Self>) {
+        self.set_title(&gettext("Device sync"));
         let group = adw::PreferencesGroup::builder()
             .description(gettext("Connect two devices on the same network."))
             .build();
@@ -315,46 +340,11 @@ impl SyncPage {
 
         let content = padded_vbox();
         content.append(&group);
-        content
+        self.set_sub_content(&content);
     }
 
-    /// Presents a standalone flow window (no navigation: only a close button).
-    /// `content` becomes its body; closing it sends [`SyncInput::SubClosed`].
-    fn present_sub(
-        &mut self,
-        window: &adw::ApplicationWindow,
-        title: &str,
-        content: &impl gtk::prelude::IsA<gtk::Widget>,
-        sender: &ComponentSender<Self>,
-    ) {
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        toolbar.set_content(Some(content));
-
-        let dialog = adw::Dialog::builder()
-            .title(title)
-            .content_width(440)
-            .content_height(600)
-            .build();
-        dialog.set_child(Some(&toolbar));
-        {
-            let sender = sender.clone();
-            dialog.connect_closed(move |_| sender.input(SyncInput::SubClosed));
-        }
-        self.sub = Some(dialog.clone());
-        self.sub_toolbar = Some(toolbar);
-        dialog.present(Some(window));
-    }
-
-    /// Swaps the body of the open flow window (picker / confirm / review / …).
-    fn set_sub_content(&self, content: &impl gtk::prelude::IsA<gtk::Widget>) {
-        if let Some(tb) = &self.sub_toolbar {
-            tb.set_content(Some(content));
-        }
-    }
-
-    /// Builds the standard progress panel (status + progress bar + green success
-    /// box) and stores the handles, returning the container to mount.
+    /// Builds a progress panel (status + progress bar) and stores the handles,
+    /// returning the container to mount.
     fn progress_panel(&mut self) -> gtk::Box {
         let status = gtk::Label::builder()
             .wrap(true)
@@ -364,56 +354,83 @@ impl SyncPage {
             .show_text(true)
             .visible(false)
             .build();
-        let (success, success_detail) = build_success();
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
         content.append(&status);
         content.append(&progress);
-        content.append(&success);
         self.status = Some(status);
         self.progress = Some(progress);
-        self.success = Some(success);
-        self.success_detail = Some(success_detail);
-        self.details = None;
         content
     }
 
-    /// Shows the post-pairing panel: a "Share" button + a hint, plus the progress
-    /// panel widgets (used later for transfer status / success).
-    fn show_paired_panel(&mut self, sender: &ComponentSender<Self>) {
-        let panel = self.progress_panel();
+    /// The connected panel — the single "Connected with X" success screen, with
+    /// "Share" (→ picker) and "Disconnect". Reached on pairing and whenever the
+    /// header "Share" button is tapped while a pairing is live.
+    fn show_connected_panel(&mut self, sender: &ComponentSender<Self>) {
+        self.set_title(&gettext("Device sync"));
+        let content = padded_vbox();
+        content.set_valign(gtk::Align::Center);
+
+        let icon = gtk::Image::from_icon_name("emblem-ok-symbolic");
+        icon.set_pixel_size(64);
+        icon.add_css_class("success");
+        let title = gtk::Label::builder()
+            .label(gettext_f(
+                "Connected with {name}",
+                &[("name", &self.peer_name)],
+            ))
+            .css_classes(["title-2", "success"])
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        let hint = gtk::Label::builder()
+            .label(gettext(
+                "You can share now, or wait for the other device to share.",
+            ))
+            .css_classes(["dim-label"])
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+
         let share_btn = gtk::Button::builder()
             .label(gettext_f("Share with {peer}", &[("peer", &self.peer_name)]))
             .css_classes(["suggested-action", "pill"])
             .halign(gtk::Align::Center)
+            .margin_top(6)
             .build();
         {
             let sender = sender.clone();
             share_btn.connect_clicked(move |_| sender.input(SyncInput::OpenSharePicker));
         }
-        let hint = gtk::Label::builder()
-            .label(gettext("…or wait for the other device to share."))
-            .css_classes(["dim-label"])
-            .wrap(true)
-            .justify(gtk::Justification::Center)
+        let disconnect_btn = gtk::Button::builder()
+            .label(gettext("Disconnect"))
+            .css_classes(["destructive-action", "pill"])
+            .halign(gtk::Align::Center)
             .build();
-        panel.prepend(&hint);
-        panel.prepend(&share_btn);
-        self.set_sub_content(&panel);
+        {
+            let sender = sender.clone();
+            disconnect_btn.connect_clicked(move |_| sender.input(SyncInput::Disconnect));
+        }
+
+        content.append(&icon);
+        content.append(&title);
+        content.append(&hint);
+        content.append(&share_btn);
+        content.append(&disconnect_btn);
+        // No live status widgets on this panel; a transfer rebuilds the progress
+        // panel with its own status/progress labels.
+        self.status = None;
+        self.progress = None;
+        self.set_sub_content(&content);
     }
 
-    /// Start server mode: present the standalone QR window and run the server.
+    /// Start server mode: swap the window to the QR view and run the server.
     fn start_server(&mut self, sender: &ComponentSender<Self>) {
-        if self.sub.is_some() {
-            return;
-        }
-        let Some(window) = self.window.clone() else {
-            return;
-        };
+        self.ensure_window(sender);
+        self.set_title(&gettext("Offer connection"));
         self.synced_ok = false;
         self.sync_summary.clear();
 
-        // QR + waiting status live in a "details" box that is hidden on pairing.
         let qr = gtk::Picture::builder()
             .width_request(220)
             .height_request(220)
@@ -432,12 +449,6 @@ impl SyncPage {
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
-        let details = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        details.set_valign(gtk::Align::Center);
-        details.append(&hint);
-        details.append(&qr);
-        details.append(&server_status);
-
         let status = gtk::Label::builder()
             .wrap(true)
             .justify(gtk::Justification::Center)
@@ -446,23 +457,20 @@ impl SyncPage {
             .show_text(true)
             .visible(false)
             .build();
-        let (success, success_detail) = build_success();
 
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
-        content.append(&details);
+        content.append(&hint);
+        content.append(&qr);
+        content.append(&server_status);
         content.append(&status);
         content.append(&progress);
-        content.append(&success);
+        self.set_sub_content(&content);
 
-        self.present_sub(&window, &gettext("Offer connection"), &content, sender);
         self.qr = Some(qr);
         self.server_status = Some(server_status);
         self.status = Some(status);
         self.progress = Some(progress);
-        self.details = Some(details);
-        self.success = Some(success);
-        self.success_detail = Some(success_detail);
 
         self.is_server = true;
         if self.stop.is_some() {
@@ -500,14 +508,10 @@ impl SyncPage {
         });
     }
 
-    /// Start client mode: present the standalone scan window with live preview.
+    /// Start client mode: swap the window to the scan view with live preview.
     fn start_scan(&mut self, sender: &ComponentSender<Self>) {
-        if self.sub.is_some() {
-            return;
-        }
-        let Some(window) = self.window.clone() else {
-            return;
-        };
+        self.ensure_window(sender);
+        self.set_title(&gettext("Scan QR code"));
         self.synced_ok = false;
         self.sync_summary.clear();
         self.is_server = false;
@@ -523,11 +527,6 @@ impl SyncPage {
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
-        let details = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        details.set_valign(gtk::Align::Center);
-        details.append(&hint);
-        details.append(&cam);
-
         let status = gtk::Label::builder()
             .wrap(true)
             .justify(gtk::Justification::Center)
@@ -536,22 +535,18 @@ impl SyncPage {
             .show_text(true)
             .visible(false)
             .build();
-        let (success, success_detail) = build_success();
 
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
-        content.append(&details);
+        content.append(&hint);
+        content.append(&cam);
         content.append(&status);
         content.append(&progress);
-        content.append(&success);
+        self.set_sub_content(&content);
 
-        self.present_sub(&window, &gettext("Scan QR code"), &content, sender);
         self.cam = Some(cam);
         self.status = Some(status);
         self.progress = Some(progress);
-        self.details = Some(details);
-        self.success = Some(success);
-        self.success_detail = Some(success_detail);
 
         if self.scanner.is_some() {
             return;
@@ -568,9 +563,6 @@ impl SyncPage {
             Err(e) => {
                 // Surface the reason in the window instead of an empty preview.
                 tracing::warn!("Camera scanner failed: {e}");
-                if let Some(d) = &self.details {
-                    d.set_visible(false);
-                }
                 if let Some(st) = &self.status {
                     st.set_text(&gettext_f(
                         "Camera unavailable: {err}",
@@ -632,20 +624,18 @@ impl SyncPage {
             } => {
                 self.peer_caps = peer_caps;
                 self.peer_name = peer_name;
+                self.connected = true;
                 // Paired → tint the sync icon at the top green.
                 let _ = sender.output(SyncOutput::ConnectedChanged(true));
-                // Swap the QR/camera window for the paired panel (Share button +
-                // status/progress/success).
-                self.show_paired_panel(sender);
-                if let Some(st) = &self.status {
-                    st.set_text(&gettext_f(
-                        "Connected with {name}",
-                        &[("name", &self.peer_name)],
-                    ));
-                }
+                // The single connection-success screen ("Connected with X" with
+                // Share / Disconnect). The connection now lives in the background,
+                // independent of this window.
+                self.show_connected_panel(sender);
             }
             SyncEvent::ImportReceived { stats } => {
-                // A successful metadata exchange happened.
+                // A metadata exchange happened. The final success screen is shown
+                // on TransferDone (server side is told via /share/complete), so
+                // here we only record the summary + reload the imported views.
                 self.synced_ok = true;
                 self.sync_summary = gettext_f(
                     "Received {fav} favorites, {pl} playlists, {pod} podcasts.",
@@ -677,7 +667,9 @@ impl SyncPage {
                 }
             }
             SyncEvent::TransferDone { files } => {
-                // Client side: files done → success now (with a combined summary).
+                // A share finished (this side, or the peer told us via
+                // /share/complete) → the transfer-success screen with a "Done"
+                // button back to the connected panel. The pairing stays alive.
                 self.synced_ok = true;
                 let files_line = gettext_f("{n} files transferred.", &[("n", &files.to_string())]);
                 self.sync_summary = if self.sync_summary.is_empty() {
@@ -685,21 +677,24 @@ impl SyncPage {
                 } else {
                     format!("{}\n{}", self.sync_summary, files_line)
                 };
-                self.show_success();
+                // Reset the parked offer/decision so the next share starts fresh.
+                if let Some(chan) = &self.share_chan {
+                    if let Ok(mut c) = chan.lock() {
+                        c.outgoing = None;
+                        c.decision = None;
+                    }
+                }
+                self.prepared_manifest = None;
+                self.incoming_manifest = None;
+                self.show_success(sender);
             }
             SyncEvent::PeerDisconnected => {
-                let _ = sender.output(SyncOutput::ConnectedChanged(false));
-                // Server side has no TransferDone: show success here if the
-                // exchange completed, otherwise a neutral disconnect note.
-                if self.synced_ok {
-                    self.show_success();
-                } else if let Some(st) = &self.status {
-                    st.set_text(&gettext("Disconnected."));
-                }
+                self.on_connection_lost(sender);
             }
             SyncEvent::ServerStopped => {
-                let _ = sender.output(SyncOutput::ConnectedChanged(false));
                 self.stop = None;
+                self.share_chan = None;
+                self.on_connection_lost(sender);
             }
             SyncEvent::ShareOffered { manifest } => self.on_share_offered(manifest, sender),
             SyncEvent::ManifestReady { manifest } => self.on_manifest_ready(manifest, sender),
@@ -717,23 +712,85 @@ impl SyncPage {
         }
     }
 
-    /// Replaces the QR/status/progress widgets with the green success message.
-    fn show_success(&self) {
-        if let Some(d) = &self.details {
-            d.set_visible(false);
+    /// Swaps the window to the green transfer-success screen (summary + a "Done"
+    /// button back to the connected panel — the pairing stays alive).
+    fn show_success(&mut self, sender: &ComponentSender<Self>) {
+        let content = padded_vbox();
+        content.set_valign(gtk::Align::Center);
+
+        let icon = gtk::Image::from_icon_name("emblem-ok-symbolic");
+        icon.set_pixel_size(64);
+        icon.add_css_class("success");
+        let title = gtk::Label::builder()
+            .label(gettext("Sync successful"))
+            .css_classes(["title-2", "success"])
+            .build();
+        let detail = gtk::Label::builder()
+            .label(&self.sync_summary)
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .css_classes(["dim-label"])
+            .build();
+        let done = gtk::Button::builder()
+            .label(gettext("Done"))
+            .css_classes(["suggested-action", "pill"])
+            .halign(gtk::Align::Center)
+            .margin_top(6)
+            .build();
+        {
+            let sender = sender.clone();
+            done.connect_clicked(move |_| sender.input(SyncInput::BackToConnected));
         }
-        if let Some(st) = &self.status {
-            st.set_visible(false);
+
+        content.append(&icon);
+        content.append(&title);
+        content.append(&detail);
+        content.append(&done);
+        self.status = None;
+        self.progress = None;
+        self.set_sub_content(&content);
+    }
+
+    /// The pairing was lost (peer disconnected, timeout or server stopped): grey
+    /// the header icon, drop the connection resources, and — if a window is open —
+    /// show a short notice with a way to reconnect.
+    fn on_connection_lost(&mut self, sender: &ComponentSender<Self>) {
+        let was_connected = self.connected;
+        self.connected = false;
+        self.client_cmd = None;
+        let _ = sender.output(SyncOutput::ConnectedChanged(false));
+        // Only show the notice if the user is actually looking at the window and
+        // we had a live pairing (avoid flashing it during a normal teardown).
+        if was_connected && self.sub.is_some() {
+            self.show_disconnected_notice(sender);
         }
-        if let Some(p) = &self.progress {
-            p.set_visible(false);
+    }
+
+    /// A small "Disconnected" page with a "Connect again" button (→ mode select).
+    fn show_disconnected_notice(&mut self, sender: &ComponentSender<Self>) {
+        self.set_title(&gettext("Device sync"));
+        let content = padded_vbox();
+        content.set_valign(gtk::Align::Center);
+        let label = gtk::Label::builder()
+            .label(gettext("Disconnected."))
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        let again = gtk::Button::builder()
+            .label(gettext("Connect again"))
+            .css_classes(["suggested-action", "pill"])
+            .halign(gtk::Align::Center)
+            .margin_top(6)
+            .build();
+        if let Some(window) = self.window.clone() {
+            let sender = sender.clone();
+            again.connect_clicked(move |_| sender.input(SyncInput::Open(window.clone())));
         }
-        if let Some(det) = &self.success_detail {
-            det.set_text(&self.sync_summary);
-        }
-        if let Some(sb) = &self.success {
-            sb.set_visible(true);
-        }
+        content.append(&label);
+        content.append(&again);
+        self.status = None;
+        self.progress = None;
+        self.set_sub_content(&content);
     }
 
     // --- Selective share (sender + receiver) -------------------------------
@@ -799,7 +856,10 @@ impl SyncPage {
         if self.is_server {
             if let (Some(chan), Some(m)) = (&self.share_chan, self.prepared_manifest.clone()) {
                 if let Ok(mut c) = chan.lock() {
+                    // Fresh share: park the new offer, drop any stale decision from
+                    // a previous one (timing-independent).
                     c.outgoing = Some(m);
+                    c.decision = None;
                 }
             }
             if let Some(st) = &self.status {
@@ -815,8 +875,12 @@ impl SyncPage {
         }
     }
 
-    /// Peer offered a share → classify it and show the review screen.
+    /// Peer offered a share → classify it and show the review screen. The peer
+    /// may share while our window is closed (background connection), so make sure
+    /// a window is present first.
     fn on_share_offered(&mut self, manifest: ShareManifest, sender: &ComponentSender<Self>) {
+        self.ensure_window(sender);
+        self.set_title(&gettext("Device sync"));
         let reviews = share::review_files(&self.library, &manifest);
         let yt = self.youtube_enabled();
         let (page, handles) = build_review(&manifest, &reviews, yt, sender);
@@ -838,10 +902,12 @@ impl SyncPage {
         }
         if self.is_server {
             // Park the decision (client uploads files) + apply blobs/YT and
-            // register accepted files locally off the UI thread.
+            // register accepted files locally off the UI thread. Drop any stale
+            // parked offer so the next cycle starts clean.
             if let Some(chan) = &self.share_chan {
                 if let Ok(mut c) = chan.lock() {
                     c.decision = Some(decision.clone());
+                    c.outgoing = None;
                 }
             }
             self.synced_ok = true;
@@ -872,57 +938,72 @@ impl SyncPage {
         } else if let Some(cmd) = &self.client_cmd {
             let _ = cmd.send(ClientCmd::Reject);
         }
-        self.show_paired_panel(sender);
+        self.show_connected_panel(sender);
     }
 
-    /// The flow window was closed: stop its server/camera but keep the
-    /// mode-selection dialog open so the user can pick the other option.
-    fn close_sub(&mut self, sender: &ComponentSender<Self>) {
-        let _ = sender.output(SyncOutput::ConnectedChanged(false));
-        if let Some(stop) = self.stop.take() {
-            stop.store(true, Ordering::Relaxed);
+    /// "Disconnect" tapped → end the live pairing and close the window. The
+    /// background server/worker tears itself down and reports back via
+    /// `PeerDisconnected`/`ServerStopped`.
+    fn disconnect_peer(&mut self, sender: &ComponentSender<Self>) {
+        if self.is_server {
+            if let Some(stop) = &self.stop {
+                stop.store(true, Ordering::Relaxed);
+            }
+        } else if let Some(cmd) = &self.client_cmd {
+            let _ = cmd.send(ClientCmd::Disconnect);
         }
-        self.scanner = None; // drop stops the camera
-        self.sub = None;
-        self.clear_flow_widgets();
-    }
-
-    /// Cleans up all sync state (stop server, camera off, close both dialogs).
-    fn teardown(&mut self, sender: &ComponentSender<Self>) {
+        self.connected = false;
         let _ = sender.output(SyncOutput::ConnectedChanged(false));
-        if let Some(stop) = self.stop.take() {
-            stop.store(true, Ordering::Relaxed);
-        }
-        self.scanner = None; // drop stops the camera
         if let Some(sub) = self.sub.take() {
             sub.close();
         }
-        if let Some(dialog) = self.dialog.take() {
-            dialog.close();
-        }
-        self.clear_flow_widgets();
     }
 
-    /// Drops the per-flow widget handles (after a flow window is gone).
-    fn clear_flow_widgets(&mut self) {
+    /// The flow window was closed. If a pairing is still live it is **kept** (the
+    /// background server/worker keeps running, the icon stays green); only the
+    /// per-window widgets are dropped. Otherwise (closed mid-attempt or after a
+    /// disconnect) the server/scanner are stopped.
+    fn close_sub(&mut self, sender: &ComponentSender<Self>) {
+        self.sub = None;
+        if self.connected {
+            self.clear_window_widgets();
+        } else {
+            self.stop_connection();
+            self.clear_window_widgets();
+            let _ = sender.output(SyncOutput::ConnectedChanged(false));
+        }
+    }
+
+    /// Stops the background connection resources (server thread + camera + client
+    /// worker). Leaves the per-window widgets to [`Self::clear_window_widgets`].
+    fn stop_connection(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
+        self.scanner = None; // drop stops the camera
+        self.share_chan = None;
+        self.client_cmd = None; // dropping the sender ends the client worker
+        self.connected = false;
+        self.is_server = false;
+    }
+
+    /// Drops the per-window widget handles (after the flow window is gone). Does
+    /// **not** touch the live connection (stop flag / share channel / worker).
+    fn clear_window_widgets(&mut self) {
         self.qr = None;
         self.cam = None;
-        self.details = None;
         self.status = None;
         self.server_status = None;
         self.progress = None;
-        self.success = None;
-        self.success_detail = None;
         self.synced_ok = false;
         self.sync_summary.clear();
         self.sub_toolbar = None;
-        self.share_chan = None;
-        self.client_cmd = None;
         self.picker = None;
         self.review = None;
         self.prepared_manifest = None;
         self.incoming_manifest = None;
-        self.is_server = false;
+        // `is_server` / `share_chan` / `client_cmd` / `connected` are connection
+        // state and are kept here (cleared by `stop_connection` on disconnect).
     }
 }
 
@@ -936,37 +1017,12 @@ fn padded_vbox() -> gtk::Box {
     b
 }
 
-/// The green "sync successful" box (hidden until shown). Returns the box and its
-/// detail label (filled with the imported counts / transferred files).
-fn build_success() -> (gtk::Box, gtk::Label) {
-    let b = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    b.set_valign(gtk::Align::Center);
-    b.set_visible(false);
-
-    let icon = gtk::Image::from_icon_name("emblem-ok-symbolic");
-    icon.set_pixel_size(64);
-    icon.add_css_class("success");
-
-    let title = gtk::Label::builder()
-        .label(gettext("Sync successful"))
-        .css_classes(["title-2", "success"])
-        .build();
-    let detail = gtk::Label::builder()
-        .wrap(true)
-        .justify(gtk::Justification::Center)
-        .css_classes(["dim-label"])
-        .build();
-
-    b.append(&icon);
-    b.append(&title);
-    b.append(&detail);
-    (b, detail)
-}
-
-/// Persistent client-session worker: pairs, then loops — polling for an incoming
-/// offer and serving commands from the UI (prepare/send an offer, accept/reject
-/// an incoming one) — with a periodic ping that keeps the server session warm
-/// while the user reviews. Each terminal action runs to completion then ends.
+/// Persistent client-session worker: pairs, then **stays connected**, looping —
+/// polling for an incoming offer and serving commands from the UI (prepare/send
+/// an offer, accept/reject an incoming one) — with a periodic ping that keeps the
+/// server session warm. Each share runs to completion and the loop returns to
+/// idle (the pairing survives), until the UI asks to `Disconnect` (or drops the
+/// command channel) or the link to the server breaks.
 fn run_client_session(
     info: PairingInfo,
     device_id: String,
@@ -982,6 +1038,7 @@ fn run_client_session(
     let mut client = SyncClient::new(&info, device_id, device_name, caps);
     if let Err(e) = client.pair(&info.token) {
         let _ = out.send(SyncEvent::Error(e.to_string()));
+        let _ = out.send(SyncEvent::PeerDisconnected);
         return;
     }
     let _ = out.send(SyncEvent::PeerPaired {
@@ -992,16 +1049,23 @@ fn run_client_session(
     let mut prepared: Option<ShareManifest> = None;
     let mut offered = false;
     let mut last_ping = Instant::now();
-    loop {
+    'session: loop {
         if last_ping.elapsed() > Duration::from_secs(10) {
-            let _ = client.ping();
+            // A failed ping means the server is gone → end the session.
+            if client.ping().is_err() {
+                break 'session;
+            }
             last_ping = Instant::now();
         }
         // Poll for an offer from the server-side user (only while idle).
         if !offered && prepared.is_none() {
-            if let Ok(Some(m)) = client.fetch_offer() {
-                offered = true;
-                let _ = out.send(SyncEvent::ShareOffered { manifest: m });
+            match client.fetch_offer() {
+                Ok(Some(m)) => {
+                    offered = true;
+                    let _ = out.send(SyncEvent::ShareOffered { manifest: m });
+                }
+                Ok(None) => {}
+                Err(_) => break 'session, // connection lost
             }
         }
         match cmd_rx.recv_timeout(Duration::from_millis(300)) {
@@ -1016,15 +1080,18 @@ fn run_client_session(
                 let _ = out.send(SyncEvent::ManifestReady { manifest: m });
             }
             Ok(ClientCmd::Send) => {
-                let Some(m) = prepared.clone() else { continue };
+                let Some(m) = prepared.take() else { continue };
                 if let Err(e) = client.send_offer(&m) {
                     let _ = out.send(SyncEvent::Error(e.to_string()));
-                    break;
+                    break 'session;
                 }
-                // Wait for the peer's decision (keep pinging).
+                // Wait for the peer's decision (keep pinging). Bail to idle on a
+                // Disconnect command; end the session if the link drops.
                 let decision = loop {
                     if last_ping.elapsed() > Duration::from_secs(10) {
-                        let _ = client.ping();
+                        if client.ping().is_err() {
+                            break 'session;
+                        }
                         last_ping = Instant::now();
                     }
                     match client.fetch_decision() {
@@ -1032,16 +1099,21 @@ fn run_client_session(
                         Ok(None) => {}
                         Err(_) => break ShareDecision::default(),
                     }
-                    if matches!(cmd_rx.try_recv(), Ok(ClientCmd::Cancel)) {
-                        break ShareDecision::default();
+                    match cmd_rx.try_recv() {
+                        Ok(ClientCmd::Disconnect) | Err(mpsc::TryRecvError::Disconnected) => {
+                            break 'session
+                        }
+                        _ => {}
                     }
                     std::thread::sleep(Duration::from_millis(400));
                 };
                 if decision.accept {
                     let files = client_upload(&client, &m, &decision, out);
+                    let _ = client.notify_complete(files);
                     let _ = out.send(SyncEvent::TransferDone { files });
                 }
-                break;
+                offered = false;
+                // Stay connected: back to idle for the next share.
             }
             Ok(ClientCmd::Decide(decision)) => {
                 // Re-fetch the offer to know which files to pull (the server keeps
@@ -1050,13 +1122,16 @@ fn run_client_session(
                     let _ = client.send_decision(&decision);
                     client_receive(&client, &m, &decision, out);
                 }
-                break;
+                offered = false;
+                prepared = None;
+                // Stay connected.
             }
             Ok(ClientCmd::Reject) => {
                 let _ = client.send_decision(&ShareDecision::default());
-                break;
+                offered = false;
+                // Stay connected.
             }
-            Ok(ClientCmd::Cancel) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Ok(ClientCmd::Disconnect) | Err(mpsc::RecvTimeoutError::Disconnected) => break 'session,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
     }
@@ -1138,6 +1213,9 @@ fn client_receive(
     }
     let stats = apply_received(&lib, manifest, decision);
     let _ = out.send(SyncEvent::ImportReceived { stats });
+    // Tell the (passive) server-as-sender we finished, so its UI also shows the
+    // transfer-success screen.
+    let _ = client.notify_complete(total as usize);
     let _ = out.send(SyncEvent::TransferDone {
         files: total as usize,
     });

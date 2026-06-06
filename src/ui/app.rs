@@ -464,6 +464,10 @@ pub(crate) struct YoutubeState {
     /// Status label of the yt-dlp row in the open settings dialog (download /
     /// update progress + version), refreshed via `Cmd::YtDlpReady`.
     pub(crate) settings_status: std::rc::Rc<std::cell::RefCell<Option<gtk::Label>>>,
+    /// Download/update button of the yt-dlp row in the open settings dialog. Its
+    /// label flips between "Download" and "Update" once the background version
+    /// probe resolves (`Cmd::YtDlpChecked`).
+    pub(crate) settings_dl_btn: std::rc::Rc<std::cell::RefCell<Option<gtk::Button>>>,
     /// Whether a yt-dlp download/update is currently running (ignore repeat taps).
     pub(crate) ytdlp_busy: bool,
     /// Whether the last YouTube extraction looked broken (yt-dlp can't parse
@@ -706,8 +710,6 @@ pub enum Msg {
     CtxAddPlaylist,
     CtxEqualizer,
     CtxShare,
-    ShareHost,
-    ShareScan,
     // --- Device synchronization (handled by the SyncPage component) ---
     /// The sync component paired/disconnected → tint the header icon.
     SyncConnected(bool),
@@ -966,10 +968,11 @@ pub enum Msg {
     /// Toggle the YouTube feature on/off (settings switch). Shows/hides the
     /// section and persists the setting.
     SetYoutubeEnabled(bool),
-    /// Download (install) yt-dlp into the app data dir (settings button).
-    DownloadYtDlp,
-    /// Re-download the latest yt-dlp (settings button; YouTube breaks it often).
-    UpdateYtDlp,
+    /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
+    /// when one is already present. The download/update choice is decided from the
+    /// cached version at handling time, so the button works even before the
+    /// background version probe has resolved.
+    FetchYtDlp,
     /// Open the YouTube search/subscribe dialog.
     YtSubscribe,
     /// Search YouTube for this term + kind filter (background).
@@ -1183,6 +1186,10 @@ pub enum Cmd {
     /// yt-dlp install/update/startup-check finished: the version on success,
     /// or an error message. Drives the settings status and `youtube.ytdlp_version`.
     YtDlpReady(Result<String, String>),
+    /// Background yt-dlp version probe (opened settings) finished: `Some(v)` if a
+    /// usable yt-dlp is present, `None` otherwise. Caches the result and refreshes
+    /// the settings row without ever blocking the UI thread on the subprocess.
+    YtDlpChecked(Option<String>),
     /// Hits of the YouTube search (for the open search dialog).
     YtSearchResults(Vec<crate::core::youtube::YtResult>),
     /// Thumbnails of the search hits cached → redraw the hit list.
@@ -2869,6 +2876,7 @@ impl Component for App {
                 enabled: youtube_enabled,
                 ytdlp_version: None,
                 settings_status: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                settings_dl_btn: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ytdlp_busy: false,
                 ytdlp_broken: false,
                 yt_view: YtView::Recent,
@@ -3638,8 +3646,10 @@ impl Component for App {
             Msg::ShowPodcastDetail(id) => self.open_podcast_detail(root, &sender, id),
             // --- YouTube ---
             Msg::SetYoutubeEnabled(on) => self.set_youtube_enabled(on, &sender),
-            Msg::DownloadYtDlp => self.start_ytdlp_fetch(false, &sender),
-            Msg::UpdateYtDlp => self.start_ytdlp_fetch(true, &sender),
+            Msg::FetchYtDlp => {
+                let update = self.youtube.ytdlp_version.is_some();
+                self.start_ytdlp_fetch(update, &sender);
+            }
             Msg::YtSubscribe => self.open_youtube_search_dialog(root, &sender),
             Msg::YtSearch(term, kind) => {
                 let term = term.trim().to_string();
@@ -3775,16 +3785,12 @@ impl Component for App {
                 self.yt_open_recent_playlist(&sender, url, title)
             }
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
-            Msg::CtxShare => self.open_share_dialog(root, &sender),
-            Msg::ShareHost => {
+            Msg::CtxShare => {
+                // The SyncPage decides what to show: while connected it opens the
+                // connected panel (Share / Disconnect) directly, otherwise the
+                // connection menu (offer / scan).
                 use crate::ui::sync_page::SyncInput;
                 self.sync_page.emit(SyncInput::Open(root.clone()));
-                self.sync_page.emit(SyncInput::StartServer);
-            }
-            Msg::ShareScan => {
-                use crate::ui::sync_page::SyncInput;
-                self.sync_page.emit(SyncInput::Open(root.clone()));
-                self.sync_page.emit(SyncInput::StartScan);
             }
             Msg::SyncConnected(connected) => self.sync_connected = connected,
             Msg::SyncImported => {
@@ -4723,6 +4729,10 @@ impl Component for App {
                         self.toast(&gettext("yt-dlp download failed"));
                     }
                 }
+                self.refresh_ytdlp_status_label();
+            }
+            Cmd::YtDlpChecked(version) => {
+                self.youtube.ytdlp_version = version;
                 self.refresh_ytdlp_status_label();
             }
             Cmd::YtSearchResults(results) => {

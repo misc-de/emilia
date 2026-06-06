@@ -446,11 +446,28 @@ impl SyncServer {
             ("POST", "/share/decision") => {
                 match serde_json::from_slice::<ShareDecision>(&req.body) {
                     Ok(d) => {
+                        // The offer has been delivered and decided on: drop it so a
+                        // re-polling client can't pick up the same offer twice.
+                        if let Ok(mut c) = self.share.lock() {
+                            c.outgoing = None;
+                        }
                         emit(SyncEvent::OfferAccepted { decision: d });
                         write_json(out, 200, &serde_json::json!({ "ok": true }));
                     }
                     Err(e) => write_json(out, 400, &serde_json::json!({ "error": e.to_string() })),
                 }
+                Action::Continue
+            }
+
+            // Client signals a finished share (after uploading or pulling all
+            // files) so the (passive) server side can show its success screen.
+            ("POST", "/share/complete") => {
+                let files = serde_json::from_slice::<serde_json::Value>(&req.body)
+                    .ok()
+                    .and_then(|v| v.get("files").and_then(|f| f.as_u64()))
+                    .unwrap_or(0) as usize;
+                emit(SyncEvent::TransferDone { files });
+                write_json(out, 200, &serde_json::json!({ "ok": true }));
                 Action::Continue
             }
 

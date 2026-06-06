@@ -327,78 +327,6 @@ impl App {
         }
     }
 
-    /// "Share" dialog: offer a connection (start the service) or scan a QR code.
-    /// The actual device sync logic follows later.
-    pub(crate) fn open_share_dialog(
-        &self,
-        root: &adw::ApplicationWindow,
-        sender: &ComponentSender<Self>,
-    ) {
-        let dialog = adw::Dialog::builder().title(gettext("Share")).build();
-
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(12)
-            .margin_top(6)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-
-        let group = adw::PreferencesGroup::builder()
-            .description(gettext("Connect to another device to sync content."))
-            .build();
-
-        let actions: [(String, String, &str, fn() -> Msg); 2] = [
-            (
-                gettext("Offer connection"),
-                gettext("Start the service and wait for another device"),
-                "network-wireless-symbolic",
-                || Msg::ShareHost,
-            ),
-            (
-                gettext("Scan QR code"),
-                gettext("Scan another device's code"),
-                "camera-photo-symbolic",
-                || Msg::ShareScan,
-            ),
-        ];
-
-        for (title, subtitle, icon, make_msg) in actions {
-            let row = adw::ActionRow::builder()
-                .title(&title)
-                .subtitle(&subtitle)
-                .activatable(true)
-                .build();
-            row.add_prefix(&gtk::Image::from_icon_name(icon));
-            let sender = sender.clone();
-            let dialog = dialog.clone();
-            row.connect_activated(move |_| {
-                sender.input(make_msg());
-                dialog.close();
-            });
-            group.add(&row);
-        }
-
-        content.append(&group);
-
-        // For overly large content (e.g. on the phone) scroll vertically, otherwise
-        // let the dialog grow to the natural content height. `Automatic` shows a
-        // scrollbar on overflow.
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .propagate_natural_height(true)
-            .propagate_natural_width(true)
-            .vexpand(true)
-            .child(&content)
-            .build();
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        toolbar.set_content(Some(&scroller));
-        dialog.set_child(Some(&toolbar));
-        dialog.present(Some(root));
-    }
     /// Opens the settings dialog (among others, sets the music folder).
     /// Fills the "Other sources" list with **all** configured extra sources
     /// (second local folder + Nextcloud/WebDAV). Called on open **and** after
@@ -1159,14 +1087,20 @@ impl App {
                 "Required tool – downloaded into the app data folder (not bundled).",
             ))
             .build();
-        let installed = crate::core::youtube::version();
+        // Probing the installed version spawns `yt-dlp --version` (a Python zipapp
+        // whose import takes a second or more on a phone). NEVER do that on the UI
+        // thread while building the dialog – it would freeze the settings open for
+        // seconds. Show the cached value (or the busy text) and run the probe in the
+        // background; `Cmd::YtDlpChecked` updates the row when it finishes. (Reuses
+        // the already-translated "Working …" string rather than a new one.)
+        let cached = self.youtube.ytdlp_version.clone();
         let status = gtk::Label::builder().css_classes(["dim-label"]).build();
-        status.set_text(&match &installed {
+        status.set_text(&match &cached {
             Some(v) => gettext_f("Installed (version {v})", &[("v", v)]),
-            None => gettext("Not installed"),
+            None => gettext("Working …"),
         });
         ytdlp_row.add_suffix(&status);
-        let dl_label = if installed.is_some() {
+        let dl_label = if cached.is_some() {
             gettext("Update")
         } else {
             gettext("Download")
@@ -1178,25 +1112,32 @@ impl App {
         dl_btn.add_css_class("flat");
         {
             let sender = sender.clone();
-            let update = installed.is_some();
-            dl_btn.connect_clicked(move |_| {
-                sender.input(if update {
-                    Msg::UpdateYtDlp
-                } else {
-                    Msg::DownloadYtDlp
-                });
-            });
+            // Download vs. update is decided from the cached version at click time
+            // (see `Msg::FetchYtDlp`), so the button is correct even mid-probe.
+            dl_btn.connect_clicked(move |_| sender.input(Msg::FetchYtDlp));
         }
         ytdlp_row.add_suffix(&dl_btn);
         yt_group.add(&ytdlp_row);
         // The YouTube group lives at the bottom of the "Library" page.
         lib_page.add(&yt_group);
-        // Remember the status label so a finished download/update refreshes it.
+        // Remember the status label + button so a finished probe/download/update
+        // refreshes them (see `refresh_ytdlp_status_label`).
         *self.youtube.settings_status.borrow_mut() = Some(status);
+        *self.youtube.settings_dl_btn.borrow_mut() = Some(dl_btn);
         {
-            let slot = self.youtube.settings_status.clone();
+            let status_slot = self.youtube.settings_status.clone();
+            let btn_slot = self.youtube.settings_dl_btn.clone();
             dialog.connect_closed(move |_| {
-                *slot.borrow_mut() = None;
+                *status_slot.borrow_mut() = None;
+                *btn_slot.borrow_mut() = None;
+            });
+        }
+        // Resolve the real version in the background unless it is already cached.
+        if cached.is_none() {
+            sender.spawn_command(|out| {
+                let _ = out.send(crate::ui::app::Cmd::YtDlpChecked(
+                    crate::core::youtube::version(),
+                ));
             });
         }
 

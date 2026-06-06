@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-05 13:09+0000\n"
+"POT-Creation-Date: 2026-06-06 07:09+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,13 +17,13 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/ui/album_row.rs:29 src/ui/app.rs:5618 src/ui/app_youtube.rs:412 src/ui/app_views.rs:2170
+#: src/ui/album_row.rs:29 src/ui/app.rs:4979 src/ui/app_views.rs:2345 src/ui/app_youtube.rs:430
 msgid "{n} song"
 msgid_plural "{n} songs"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app.rs:114 src/ui/app_playlist.rs:603 src/ui/app_queue.rs:68
+#: src/ui/app.rs:114 src/ui/app_playlist.rs:648 src/ui/app_queue.rs:68 src/ui/sync_share_ui.rs:267
 msgid "Cancel"
 msgstr ""
 
@@ -31,664 +31,1034 @@ msgstr ""
 msgid "Reading music data"
 msgstr ""
 
-#: src/ui/app.rs:1224 src/ui/app.rs:1775 src/ui/app.rs:3132
-msgid "Settings"
-msgstr ""
-
-#: src/ui/app.rs:1230
-msgid "Rescan folder"
-msgstr ""
-
-#: src/ui/app.rs:1244 src/ui/app_dialogs.rs:268 src/ui/app_dialogs.rs:321
-msgid "Share"
-msgstr ""
-
-#: src/ui/app.rs:1257 src/ui/app_podcast.rs:646 src/ui/app_podcast.rs:658 src/ui/app_streaming.rs:289 src/ui/app_streaming.rs:301 src/ui/app_youtube.rs:535 src/ui/app_youtube.rs:545 src/ui/app_dialogs.rs:448 src/ui/app_dialogs.rs:794
+#: src/ui/app.rs:1332 src/ui/app_dialogs.rs:396 src/ui/app_dialogs.rs:743 src/ui/app_podcast.rs:683 src/ui/app_podcast.rs:695 src/ui/app_streaming.rs:306 src/ui/app_streaming.rs:318 src/ui/app_youtube.rs:582 src/ui/app_youtube.rs:593
 msgid "Search"
 msgstr ""
 
-#: src/ui/app.rs:1282
+#: src/ui/app.rs:1341 src/ui/app.rs:1903 src/ui/app_init.rs:281
+msgid "Settings"
+msgstr ""
+
+#: src/ui/app.rs:1347
+msgid "Rescan folder"
+msgstr ""
+
+#: src/ui/app.rs:1361 src/ui/app_dialogs.rs:280
+msgid "Share"
+msgstr ""
+
+#: src/ui/app.rs:1406 src/ui/sync_share_ui.rs:369
 msgid "Files"
 msgstr ""
 
-#: src/ui/app.rs:1318 src/ui/app.rs:2165
+#: src/ui/app.rs:1442 src/ui/app.rs:2293
 msgid "Back"
 msgstr ""
 
-#: src/ui/app.rs:1352 src/ui/app_dialogs.rs:521 src/ui/stats_page.rs:223
+#: src/ui/app.rs:1476 src/ui/app_dialogs.rs:469 src/ui/stats_page.rs:281 src/ui/sync_share_ui.rs:109
 msgid "Artists"
 msgstr ""
 
-#: src/ui/app.rs:1358
+#: src/ui/app.rs:1482
 msgid "No artists"
 msgstr ""
 
-#: src/ui/app.rs:1360 src/ui/app.rs:1404
+#: src/ui/app.rs:1484 src/ui/app.rs:1528
 msgid "Scan a music folder and fetch online metadata"
 msgstr ""
 
-#: src/ui/app.rs:1395 src/ui/app_playlist.rs:120 src/ui/app_dialogs.rs:544 src/ui/app_views.rs:995 src/ui/stats_page.rs:224
+#: src/ui/app.rs:1519 src/ui/app_dialogs.rs:492 src/ui/app_playlist.rs:125 src/ui/app_views.rs:1065 src/ui/stats_page.rs:285 src/ui/sync_share_ui.rs:128
 msgid "Albums"
 msgstr ""
 
-#: src/ui/app.rs:1402
+#: src/ui/app.rs:1526
 msgid "No albums"
 msgstr ""
 
-#: src/ui/app.rs:1440 src/ui/app.rs:1477
+#: src/ui/app.rs:1564 src/ui/app.rs:1601 src/ui/sync_share_ui.rs:147
 msgid "Concerts"
 msgstr ""
 
-#: src/ui/app.rs:1478
+#: src/ui/app.rs:1602
 msgid "Here you can list your collected concerts. Via Import concerts you get an overview of likely concerts: albums with live, unplugged or concert in the name, plus single files of 30 minutes or more. Mark them as a concert and they'll appear here. You can also add concerts later at any time via the options."
 msgstr ""
 
-#: src/ui/app.rs:1488 src/ui/app_concert.rs:59
+#: src/ui/app.rs:1612 src/ui/app_concert.rs:59
 msgid "Import concerts"
 msgstr ""
 
-#: src/ui/app.rs:1493
+#: src/ui/app.rs:1617
 msgid "I'll do it myself"
 msgstr ""
 
-#: src/ui/app.rs:1498
+#: src/ui/app.rs:1622
 msgid "Hide menu item"
 msgstr ""
 
-#: src/ui/app.rs:1510
+#: src/ui/app.rs:1634
 msgid "No concerts"
 msgstr ""
 
-#: src/ui/app.rs:1511
+#: src/ui/app.rs:1635
 msgid "Mark an album or a track as a concert via the options."
 msgstr ""
 
-#: src/ui/app.rs:1517 src/ui/app_youtube.rs:515
+#: src/ui/app.rs:1641 src/ui/app_youtube.rs:558 src/ui/sync_share_ui.rs:179 src/ui/sync_share_ui.rs:199 src/ui/sync_share_ui.rs:411
 msgid "Playlists"
 msgstr ""
 
-#: src/ui/app.rs:1538
+#: src/ui/app.rs:1662
 msgid "No playlists"
 msgstr ""
 
-#: src/ui/app.rs:1539
+#: src/ui/app.rs:1663
 msgid "Create a playlist or add tracks via the options."
 msgstr ""
 
-#: src/ui/app.rs:1548
+#: src/ui/app.rs:1672 src/ui/sync_share_ui.rs:201 src/ui/sync_share_ui.rs:412
 msgid "Podcasts"
 msgstr ""
 
-#: src/ui/app.rs:1566 src/ui/app.rs:1797
+#: src/ui/app.rs:1690 src/ui/app.rs:1925
 msgid "Newest"
 msgstr ""
 
-#: src/ui/app.rs:1573 src/ui/stats_page.rs:207
+#: src/ui/app.rs:1697 src/ui/stats_page.rs:258
 msgid "Overview"
 msgstr ""
 
-#: src/ui/app.rs:1581 src/ui/app_podcast.rs:639
+#: src/ui/app.rs:1705 src/ui/app_podcast.rs:676
 msgid "Subscribe to podcast"
 msgstr ""
 
-#: src/ui/app.rs:1606 src/ui/app_podcast.rs:573
+#: src/ui/app.rs:1730 src/ui/app_podcast.rs:605
 msgid "No episodes"
 msgstr ""
 
-#: src/ui/app.rs:1644
+#: src/ui/app.rs:1768
 msgid "No podcasts"
 msgstr ""
 
-#: src/ui/app.rs:1645
+#: src/ui/app.rs:1769
 msgid "Subscribe to a podcast via its feed address (RSS)."
 msgstr ""
 
-#: src/ui/app.rs:1651 src/ui/app_dialogs.rs:1010
+#: src/ui/app.rs:1775 src/ui/app_dialogs.rs:979
 msgid "Streaming"
 msgstr ""
 
-#: src/ui/app.rs:1665
+#: src/ui/app.rs:1789
 msgid "Stations"
 msgstr ""
 
-#: src/ui/app.rs:1672
+#: src/ui/app.rs:1796
 msgid "Recordings"
 msgstr ""
 
-#: src/ui/app.rs:1680 src/ui/app_streaming.rs:283
+#: src/ui/app.rs:1804 src/ui/app_streaming.rs:300
 msgid "Add station"
 msgstr ""
 
-#: src/ui/app.rs:1704
+#: src/ui/app.rs:1828
 msgid "No stations"
 msgstr ""
 
-#: src/ui/app.rs:1705
+#: src/ui/app.rs:1829
 msgid "Add a stream address or search for a station worldwide."
 msgstr ""
 
-#: src/ui/app.rs:1729
+#: src/ui/app.rs:1853
 msgid "No recordings"
 msgstr ""
 
-#: src/ui/app.rs:1730
+#: src/ui/app.rs:1854
 msgid "Record the current song while a station plays."
 msgstr ""
 
-#: src/ui/app.rs:1736
+#: src/ui/app.rs:1860 src/ui/sync_share_ui.rs:196 src/ui/sync_share_ui.rs:410
 msgid "Favorites"
 msgstr ""
 
-#: src/ui/app.rs:1757
+#: src/ui/app.rs:1881
 msgid "No favorites"
 msgstr ""
 
-#: src/ui/app.rs:1758
+#: src/ui/app.rs:1882
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
 msgstr ""
 
-#: src/ui/app.rs:1764 src/ui/app_dialogs.rs:1095
+#: src/ui/app.rs:1888 src/ui/app_dialogs.rs:1064 src/ui/sync_share_ui.rs:157 src/ui/sync_share_ui.rs:381
 msgid "YouTube"
 msgstr ""
 
-#: src/ui/app.rs:1774
-msgid "YouTube isn't working right now – it changed and the installed yt-dlp can't read it. Look for a newer version of the app or update yt-dlp in the settings. If neither helps, please wait for a new yt-dlp release."
+#: src/ui/app.rs:1902
+msgid "YouTube isn't working right now – update yt-dlp in the settings, or wait for a newer release."
 msgstr ""
 
-#: src/ui/app.rs:1790
+#: src/ui/app.rs:1918
 msgid "Recent"
 msgstr ""
 
-#: src/ui/app.rs:1804
+#: src/ui/app.rs:1932
 msgid "Subscriptions"
 msgstr ""
 
-#: src/ui/app.rs:1812 src/ui/app_youtube.rs:502
+#: src/ui/app.rs:1940 src/ui/app_youtube.rs:540
 msgid "Search YouTube"
 msgstr ""
 
-#: src/ui/app.rs:1837
+#: src/ui/app.rs:1965
 msgid "No videos yet"
 msgstr ""
 
-#: src/ui/app.rs:1838
+#: src/ui/app.rs:1966
 msgid "Subscribe to a channel to follow its newest videos."
 msgstr ""
 
-#: src/ui/app.rs:1863
+#: src/ui/app.rs:1991
 msgid "Nothing played yet"
 msgstr ""
 
-#: src/ui/app.rs:1864
+#: src/ui/app.rs:1992
 msgid "Videos you play appear here."
 msgstr ""
 
-#: src/ui/app.rs:1900
+#: src/ui/app.rs:2028
 msgid "No subscriptions"
 msgstr ""
 
-#: src/ui/app.rs:1901
+#: src/ui/app.rs:2029
 msgid "Search YouTube and subscribe to a channel."
 msgstr ""
 
-#: src/ui/app.rs:1907
+#: src/ui/app.rs:2035 src/ui/sync_share_ui.rs:145
 msgid "Audiobooks"
 msgstr ""
 
-#: src/ui/app.rs:1942
+#: src/ui/app.rs:2070
 msgid "No audiobooks"
 msgstr ""
 
-#: src/ui/app.rs:1943
+#: src/ui/app.rs:2071
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
 msgstr ""
 
-#: src/ui/app.rs:1949
+#: src/ui/app.rs:2077
 msgid "Statistics"
 msgstr ""
 
-#: src/ui/app.rs:1996
+#: src/ui/app.rs:2124
 msgid "Long press for details of the current track"
 msgstr ""
 
-#: src/ui/app.rs:2088
+#: src/ui/app.rs:2216
 msgid "Equalizer for this track"
 msgstr ""
 
-#: src/ui/app.rs:2101 src/ui/app.rs:2118
+#: src/ui/app.rs:2229 src/ui/app.rs:2246
 msgid "Playback speed"
 msgstr ""
 
-#: src/ui/app.rs:2146
+#: src/ui/app.rs:2274
 msgid "Shuffle"
 msgstr ""
 
-#: src/ui/app.rs:2179 src/ui/app_podcast.rs:794 src/ui/app_queue.rs:153 src/ui/app_streaming.rs:150 src/ui/app_youtube.rs:1195
+#: src/ui/app.rs:2307 src/ui/app_podcast.rs:838 src/ui/app_queue.rs:171 src/ui/app_streaming.rs:158 src/ui/app_youtube.rs:1334
 msgid "Play/Pause"
 msgstr ""
 
-#: src/ui/app.rs:2197
+#: src/ui/app.rs:2325
 msgid "Record"
 msgstr ""
 
-#: src/ui/app.rs:2212
+#: src/ui/app.rs:2340
 msgid "Forward"
 msgstr ""
 
-#: src/ui/app.rs:2229
+#: src/ui/app.rs:2357
 msgid "Repeat"
 msgstr ""
 
-#: src/ui/app.rs:2242 src/ui/app_queue.rs:47
+#: src/ui/app.rs:2370 src/ui/app_queue.rs:47
 msgid "Queue"
 msgstr ""
 
-#: src/ui/app.rs:3352
+#: src/ui/app.rs:3140
 msgid "Removed from queue"
 msgstr ""
 
-#: src/ui/app.rs:3355
+#: src/ui/app.rs:3143
 msgid "Will play next"
 msgstr ""
 
-#: src/ui/app.rs:3598
+#: src/ui/app.rs:3396
 msgid "Added {n} tracks to the queue"
 msgstr ""
 
-#: src/ui/app.rs:3656
+#: src/ui/app.rs:3463
 msgid "Playlist deleted"
 msgstr ""
 
-#: src/ui/app.rs:3674 src/ui/app.rs:3736 src/ui/app.rs:3997
+#: src/ui/app.rs:3483 src/ui/app.rs:3645 src/ui/app_streaming.rs:1158
 msgid "Searching …"
 msgstr ""
 
-#: src/ui/app.rs:3693
+#: src/ui/app.rs:3502
 msgid "Loading feed …"
 msgstr ""
 
-#: src/ui/app.rs:3701
+#: src/ui/app.rs:3510
 msgid "Updating feed …"
 msgstr ""
 
-#: src/ui/app.rs:3725
+#: src/ui/app.rs:3540
 msgid "Podcast removed"
 msgstr ""
 
-#: src/ui/app.rs:3763
-msgid "Station added"
-msgstr ""
-
-#: src/ui/app.rs:3765 src/ui/app_streaming.rs:729
-msgid "Could not add station"
-msgstr ""
-
-#: src/ui/app.rs:3790
-msgid "Enable the recording buffer in the settings first"
-msgstr ""
-
-#: src/ui/app.rs:3830
+#: src/ui/app.rs:3565
 msgid "Station removed"
 msgstr ""
 
-#: src/ui/app.rs:3850
+#: src/ui/app.rs:3576
 msgid "Recording stopped"
 msgstr ""
 
-#: src/ui/app.rs:3863
-msgid "Replay"
-msgstr ""
-
-#: src/ui/app.rs:3873 src/ui/app.rs:3885
-msgid "Could not extract from buffer"
-msgstr ""
-
-#: src/ui/app.rs:3896
-msgid "File not found"
-msgstr ""
-
-#: src/ui/app.rs:3901
+#: src/ui/app.rs:3588
 msgid "Recording deleted"
 msgstr ""
 
-#: src/ui/app.rs:3955
-msgid "Download removed"
+#: src/ui/app.rs:3614
+msgid "Recording edited"
 msgstr ""
 
-#: src/ui/app.rs:3961
-msgid "Downloading “{title}” …"
+#: src/ui/app.rs:3616
+msgid "Editing the recording failed"
 msgstr ""
 
-#: src/ui/app.rs:4019
+#: src/ui/app.rs:3667
 msgid "Subscribing to {t} …"
 msgstr ""
 
-#: src/ui/app.rs:4061
+#: src/ui/app.rs:3709
 msgid "Refreshing …"
 msgstr ""
 
-#: src/ui/app.rs:4069
+#: src/ui/app.rs:3719
 msgid "Channel removed"
 msgstr ""
 
-#: src/ui/app.rs:4172
-msgid "Starting playlist “{title}” …"
-msgstr ""
-
-#: src/ui/app.rs:4618
+#: src/ui/app.rs:4093
 msgid "Queue cleared"
 msgstr ""
 
-#: src/ui/app.rs:4735 src/ui/app_podcast.rs:848
+#: src/ui/app.rs:4211 src/ui/app_podcast.rs:893
 msgid "Downloading …"
 msgstr ""
 
-#: src/ui/app.rs:4859
-msgid "No music folder set"
-msgstr ""
-
-#: src/ui/app.rs:4863
-msgid "Searching for concerts …"
-msgstr ""
-
-#: src/ui/app.rs:4874
+#: src/ui/app.rs:4306
 msgid "Hid the Concerts menu item"
 msgstr ""
 
-#: src/ui/app.rs:4899
+#: src/ui/app.rs:4352
+msgid "Shown again"
+msgstr ""
+
+#: src/ui/app.rs:4504
+msgid "Could not load this folder"
+msgstr ""
+
+#: src/ui/app.rs:4608
+msgid "Download complete"
+msgstr ""
+
+#: src/ui/app.rs:4612 src/ui/app.rs:4694
+msgid "Download failed"
+msgstr ""
+
+#: src/ui/app.rs:4675
+msgid "No new concert candidates found"
+msgstr ""
+
+#: src/ui/app.rs:4683 src/ui/app.rs:4730
+msgid "Subscribed: {t}"
+msgstr ""
+
+#: src/ui/app.rs:4684
+msgid "Could not load feed"
+msgstr ""
+
+#: src/ui/app.rs:4691
+msgid "Episode downloaded"
+msgstr ""
+
+#: src/ui/app.rs:4713
+msgid "yt-dlp ready (version {v})"
+msgstr ""
+
+#: src/ui/app.rs:4717
+msgid "yt-dlp download failed"
+msgstr ""
+
+#: src/ui/app.rs:4731
+msgid "Could not load channel"
+msgstr ""
+
+#: src/ui/app.rs:4747
+msgid "Playlist is empty"
+msgstr ""
+
+#: src/ui/app.rs:4785
+msgid "Saved {n} track(s) to Playlists"
+msgstr ""
+
+#: src/ui/app.rs:4791
+msgid "Could not save playlist"
+msgstr ""
+
+#: src/ui/app.rs:4796
+msgid "Adding to library {done}/{total} …"
+msgstr ""
+
+#: src/ui/app.rs:4809
+msgid "Added {n} track(s) to your library"
+msgstr ""
+
+#: src/ui/app.rs:4815
+msgid "Could not add to library"
+msgstr ""
+
+#: src/ui/app.rs:4826
+msgid "Song already exists"
+msgstr ""
+
+#: src/ui/app.rs:4829
+msgid "Overwrite existing song?"
+msgstr ""
+
+#: src/ui/app.rs:4831
+msgid "“{title}” is already saved at:\n"
+"{dest}"
+msgstr ""
+
+#: src/ui/app.rs:4835
+msgid "Skip"
+msgstr ""
+
+#: src/ui/app.rs:4836
+msgid "Overwrite"
+msgstr ""
+
+#: src/ui/app.rs:4866
+msgid "Could not load playlist"
+msgstr ""
+
+#: src/ui/app.rs:5293
+msgid "Updating …"
+msgstr ""
+
+#: src/ui/app.rs:5637 src/ui/app_views.rs:255 src/ui/sync_share_ui.rs:104
+msgid "Music"
+msgstr ""
+
+#: src/ui/app.rs:5663
+msgid "No music folder – please set one in settings"
+msgstr ""
+
+#: src/ui/app_concert.rs:76
+msgid "Select all"
+msgstr ""
+
+#: src/ui/app_concert.rs:85
+msgid "{n} candidate"
+msgid_plural "{n} candidates"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/app_concert.rs:114
+msgid "Add"
+msgstr ""
+
+#: src/ui/app_concert.rs:157
+msgid "No music folder set"
+msgstr ""
+
+#: src/ui/app_concert.rs:161
+msgid "Searching for concerts …"
+msgstr ""
+
+#: src/ui/app_concert.rs:193
 msgid "Added {n} concert"
 msgid_plural "Added {n} concerts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app.rs:4941
-msgid "Shown again"
+#: src/ui/app_dialogs.rs:17
+msgid "Search the library"
 msgstr ""
 
-#: src/ui/app.rs:4950
+#: src/ui/app_dialogs.rs:18
+msgid "Find by artist, album, song or date."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:77
+msgid "Lyrics"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:97
+msgid "Info"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:168 src/ui/app_views.rs:1097
+msgid "Play album"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:169
+msgid "Play artist"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:170 src/ui/app_favorites.rs:202 src/ui/app_playlist.rs:151 src/ui/app_playlist.rs:321 src/ui/app_streaming.rs:712 src/ui/app_streaming.rs:1133 src/ui/app_views.rs:1199 src/ui/app_views.rs:1436 src/ui/app_youtube.rs:838 src/ui/app_youtube.rs:960 src/ui/app_youtube.rs:1238
+msgid "Play"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:179
+msgid "Oldest first"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:180
+msgid "Newest first"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:183
+msgid "Album order"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:225 src/ui/app_dialogs.rs:1100 src/ui/app_podcast.rs:400
+msgid "Download"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:244
+msgid "Remove from favorites"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:246
+msgid "Add to favorites"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:264
+msgid "Add to queue"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:269 src/ui/app_playlist.rs:555
+msgid "Add to playlist"
+msgstr ""
+
+#. Equalizer for this track (keyed by its yt:<id> path, like during playback).
+#: src/ui/app_dialogs.rs:275 src/ui/app_youtube.rs:993
+msgid "Equalizer settings"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:346
+msgid "No additional sources"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:369 src/ui/app_favorites.rs:173 src/ui/app_favorites.rs:182 src/ui/app_podcast.rs:557 src/ui/app_streaming.rs:262 src/ui/app_youtube.rs:872
+msgid "Remove"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:411
+msgid "Artist, album, song, date …"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:459
+msgid "No results"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:524 src/ui/app_playlist.rs:180
+msgid "Songs"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:565
+msgid "Library"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:569
+msgid "Music folder"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:570
+msgid "Folder for the file system view"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:573
+msgid "Not set"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:583 src/ui/app_dialogs.rs:645
+msgid "Choose folder"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:594
+msgid "Choose music folder"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:619
+msgid "Other sources"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:620
+msgid "Shown as tabs in the file view"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:637
+msgid "Add local folder"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:688
+msgid "Nextcloud"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:690
+msgid "Connect a Nextcloud and index its music folder like a local library."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:694 src/ui/cloud_page.rs:133
+msgid "Connect to Nextcloud"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:696
+msgid "Scan the login QR code or enter the details manually."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:715
+msgid "Sound"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:720 src/ui/app_eq.rs:141 src/ui/sync_share_ui.rs:203 src/ui/sync_share_ui.rs:413
+msgid "Equalizer"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:722
+msgid "Global sound control. It applies everywhere unless a custom setting is set for an artist, an album or a track."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:727
+msgid "Global equalizer"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:728
+msgid "Ten bands, per output"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:749
+msgid "Read music data"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:751
+msgid "Complete missing cover art, photos and tracks from open online sources."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:755
+msgid "Fetch automatically"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:757
+msgid "Loads missing data in the background at startup – on any connection."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:772
+msgid "AcoustID"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:774
+msgid "Optional key for fingerprint-based track detection (free at acoustid.org/new-application)."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:778
+msgid "AcoustID API key"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:794
+msgid "fanart.tv"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:795
+msgid "Optional key for showing several artist photos."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:798
+msgid "fanart.tv API key"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:819
+msgid "View"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:825
+msgid "Language"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:835
+msgid "System default"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:851
+msgid "Display language"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:852
+msgid "Takes effect after a restart"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:877
+msgid "Appearance"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:880
+msgid "Automatic"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:880
+msgid "Dark"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:880
+msgid "Light"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:883
+msgid "Theme"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:914
+msgid "List display"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:917
+msgid "Gallery view"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:918
+msgid "Show lists as a grid of cover thumbnails"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:929
+msgid "Tiles per row"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:952
+msgid "Menu"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:956
+msgid "Menu items"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:958
+msgid "Drag handle to reorder; the switch hides a menu item."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:975
+msgid "Cache"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:981
+msgid "Timeshift buffer for recording the currently playing station."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:985
+msgid "Recording buffer (minutes)"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:987
+msgid "Keep the last minutes of a station so you can record a song after it played. 0 turns it off."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1010 src/ui/app_views.rs:2197
+msgid "Hidden"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1014
+msgid "Hidden content"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1016
+msgid "Artists, albums and tracks whose properties are visible nowhere – each the object that carries the setting. Use the eye to show them again."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1023
+msgid "Nothing hidden"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1038
+msgid "Show again"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1066
+msgid "Search and play YouTube, follow channels, add videos/playlists to your music or keep them offline. May be restricted in some countries."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1070
+msgid "Enable YouTube"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1072
+msgid "Adds a YouTube section. Requires downloading yt-dlp below."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1087
+msgid "Required tool – downloaded into the app data folder (not bundled)."
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1093 src/ui/app_youtube.rs:1685
+msgid "Installed (version {v})"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1094 src/ui/app_youtube.rs:1686
+msgid "Not installed"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1098
+msgid "Update"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1165
+msgid "No custom image can be set here"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1171
+msgid "Images"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1173
+msgid "Choose a custom image"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1295 src/ui/app_favorites.rs:232 src/ui/app_queue.rs:255
+msgid "Drag to reorder"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1392 src/ui/app_favorites.rs:149 src/ui/app_favorites.rs:599 src/ui/app_streaming.rs:693 src/ui/app_views.rs:2091 src/ui/app_views.rs:2484 src/ui/app_views.rs:2530
+msgid "Album"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1393 src/ui/app_favorites.rs:600 src/ui/app_streaming.rs:690 src/ui/app_views.rs:2073 src/ui/app_views.rs:2089 src/ui/app_views.rs:2482 src/ui/app_views.rs:2497 src/ui/app_views.rs:2524 src/ui/app_views.rs:2571
+msgid "Artist"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1394 src/ui/app_favorites.rs:601
+msgid "Folder"
+msgstr ""
+
+#: src/ui/app_dialogs.rs:1395 src/ui/app_favorites.rs:602
+msgid "Track"
+msgstr ""
+
+#: src/ui/app_eq.rs:64
+msgid "Equalizer is not available here"
+msgstr ""
+
+#: src/ui/app_eq.rs:108
+msgid "Default (all outputs)"
+msgstr ""
+
+#: src/ui/app_eq.rs:169
+msgid "Settings for {subject}"
+msgstr ""
+
+#: src/ui/app_eq.rs:205
+msgid "Output"
+msgstr ""
+
+#: src/ui/app_eq.rs:206
+msgid "Device / Bluetooth"
+msgstr ""
+
+#: src/ui/app_eq.rs:298 src/ui/app_rec_edit.rs:202
+msgid "Reset"
+msgstr ""
+
+#: src/ui/app_eq.rs:319 src/ui/app_eq.rs:340 src/ui/app_eq.rs:360 src/ui/app_eq.rs:383
+msgid "Turn off"
+msgstr ""
+
+#: src/ui/app_eq.rs:342 src/ui/app_eq.rs:362 src/ui/app_eq.rs:385
+msgid "Turn on"
+msgstr ""
+
+#: src/ui/app_favorites.rs:181
+msgid "Remove this entry?"
+msgstr ""
+
+#: src/ui/app_favorites.rs:507
 msgid "Added to favorites"
 msgstr ""
 
-#: src/ui/app.rs:4952
+#: src/ui/app_favorites.rs:509
 msgid "Removed from favorites"
 msgstr ""
 
-#: src/ui/app.rs:5154
-msgid "Could not load this folder"
-msgstr ""
-
-#: src/ui/app.rs:5255
-msgid "Download complete"
-msgstr ""
-
-#: src/ui/app.rs:5259 src/ui/app.rs:5342
-msgid "Download failed"
-msgstr ""
-
-#: src/ui/app.rs:5323
-msgid "No new concert candidates found"
-msgstr ""
-
-#: src/ui/app.rs:5331 src/ui/app.rs:5378
-msgid "Subscribed: {t}"
-msgstr ""
-
-#: src/ui/app.rs:5332
-msgid "Could not load feed"
-msgstr ""
-
-#: src/ui/app.rs:5339
-msgid "Episode downloaded"
-msgstr ""
-
-#: src/ui/app.rs:5361
-msgid "yt-dlp ready (version {v})"
-msgstr ""
-
-#: src/ui/app.rs:5365
-msgid "yt-dlp download failed"
-msgstr ""
-
-#: src/ui/app.rs:5379
-msgid "Could not load channel"
-msgstr ""
-
-#: src/ui/app.rs:5392
-msgid "Playlist is empty"
-msgstr ""
-
-#: src/ui/app.rs:5428
-msgid "Saved {n} track(s) to Playlists"
-msgstr ""
-
-#: src/ui/app.rs:5434
-msgid "Could not save playlist"
-msgstr ""
-
-#: src/ui/app.rs:5439
-msgid "Adding to library {done}/{total} …"
-msgstr ""
-
-#: src/ui/app.rs:5453
-msgid "Added {n} track(s) to your library"
-msgstr ""
-
-#: src/ui/app.rs:5459
-msgid "Could not add to library"
-msgstr ""
-
-#: src/ui/app.rs:5466
-msgid "Song already exists"
-msgstr ""
-
-#: src/ui/app.rs:5469
-msgid "Overwrite existing song?"
-msgstr ""
-
-#: src/ui/app.rs:5471
-msgid "“{title}” is already saved at:\n"
-"{dest}"
-msgstr ""
-
-#: src/ui/app.rs:5475
-msgid "Skip"
-msgstr ""
-
-#: src/ui/app.rs:5476
-msgid "Overwrite"
-msgstr ""
-
-#: src/ui/app.rs:5504
-msgid "Could not load playlist"
-msgstr ""
-
-#: src/ui/app.rs:5926
-msgid "Updating …"
-msgstr ""
-
-#: src/ui/app.rs:6239 src/ui/app_views.rs:246
-msgid "Music"
-msgstr ""
-
-#: src/ui/app.rs:6265
-msgid "No music folder – please set one in settings"
-msgstr ""
-
-#: src/ui/app_playback.rs:735
+#: src/ui/app_playback.rs:770
 msgid "No playable tracks"
 msgstr ""
 
-#: src/ui/app_playback.rs:740
+#: src/ui/app_playback.rs:775
 msgid "Skipping unavailable track"
 msgstr ""
 
-#: src/ui/app_playlist.rs:40 src/ui/app_playlist.rs:412 src/ui/app_playlist.rs:555 src/ui/app_queue.rs:189
+#: src/ui/app_playlist.rs:40 src/ui/app_playlist.rs:448 src/ui/app_playlist.rs:600 src/ui/app_queue.rs:207
 msgid "{n} track"
 msgid_plural "{n} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app_playlist.rs:59 src/ui/app_playlist.rs:432
+#: src/ui/app_playlist.rs:62 src/ui/app_playlist.rs:471
 msgid "Play playlist"
 msgstr ""
 
-#: src/ui/app_playlist.rs:111
+#: src/ui/app_playlist.rs:114
 msgid "No tracks yet"
 msgstr ""
 
-#: src/ui/app_playlist.rs:112
+#: src/ui/app_playlist.rs:116
 msgid "Add tracks via the options of a song, album or artist."
 msgstr ""
 
-#: src/ui/app_playlist.rs:142 src/ui/app_playlist.rs:299 src/ui/app_streaming.rs:674 src/ui/app_streaming.rs:1056 src/ui/app_youtube.rs:758 src/ui/app_youtube.rs:877 src/ui/app_youtube.rs:1111 src/ui/app_favorites.rs:202 src/ui/app_dialogs.rs:164 src/ui/app_views.rs:1122 src/ui/app_views.rs:1348
-msgid "Play"
-msgstr ""
-
-#: src/ui/app_playlist.rs:164 src/ui/app_dialogs.rs:576
-msgid "Songs"
-msgstr ""
-
-#: src/ui/app_playlist.rs:172
+#: src/ui/app_playlist.rs:188
 msgid "Playlist – {name}"
 msgstr ""
 
-#: src/ui/app_playlist.rs:257
+#: src/ui/app_playlist.rs:276
 msgid "Source: {source}"
 msgstr ""
 
-#: src/ui/app_playlist.rs:444
+#: src/ui/app_playlist.rs:485
 msgid "Shuffle playlist"
 msgstr ""
 
-#: src/ui/app_playlist.rs:456
+#: src/ui/app_playlist.rs:498
 msgid "Show songs"
 msgstr ""
 
-#: src/ui/app_playlist.rs:467 src/ui/app_playlist.rs:604
+#: src/ui/app_playlist.rs:509 src/ui/app_playlist.rs:649
 msgid "Rename"
 msgstr ""
 
-#: src/ui/app_playlist.rs:478
+#: src/ui/app_playlist.rs:520
 msgid "Delete playlist"
 msgstr ""
 
-#: src/ui/app_playlist.rs:514 src/ui/app_dialogs.rs:259
-msgid "Add to playlist"
-msgstr ""
-
-#. Create a new playlist (enter a name, Enter confirms).
-#: src/ui/app_playlist.rs:532
+#: src/ui/app_playlist.rs:574
 msgid "New playlist"
 msgstr ""
 
-#: src/ui/app_playlist.rs:533
+#: src/ui/app_playlist.rs:576
 msgid "Name"
 msgstr ""
 
-#: src/ui/app_playlist.rs:551
+#: src/ui/app_playlist.rs:595
 msgid "Existing"
 msgstr ""
 
-#: src/ui/app_playlist.rs:595
+#: src/ui/app_playlist.rs:640
 msgid "Rename playlist"
 msgstr ""
 
-#: src/ui/app_playlist.rs:635
+#: src/ui/app_playlist.rs:681
 msgid "Added {n} to the playlist"
 msgstr ""
 
-#: src/ui/app_podcast.rs:191
+#: src/ui/app_podcast.rs:194
 msgid "Today"
 msgstr ""
 
-#: src/ui/app_podcast.rs:192
+#: src/ui/app_podcast.rs:195
 msgid "Yesterday"
 msgstr ""
 
-#: src/ui/app_podcast.rs:193
+#: src/ui/app_podcast.rs:196
 msgid "This week"
 msgstr ""
 
-#: src/ui/app_podcast.rs:194
+#: src/ui/app_podcast.rs:197
 msgid "This month"
 msgstr ""
 
-#: src/ui/app_podcast.rs:328
+#: src/ui/app_podcast.rs:333
 msgid "Podcast"
 msgstr ""
 
-#: src/ui/app_podcast.rs:375
+#: src/ui/app_podcast.rs:391
 msgid "Published"
 msgstr ""
 
-#: src/ui/app_podcast.rs:378 src/ui/app_youtube.rs:869 src/ui/app_views.rs:2360
+#: src/ui/app_podcast.rs:394 src/ui/app_views.rs:2536 src/ui/app_youtube.rs:948
 msgid "Duration"
 msgstr ""
 
-#: src/ui/app_podcast.rs:384 src/ui/app_dialogs.rs:216 src/ui/app_dialogs.rs:1127
-msgid "Download"
-msgstr ""
-
-#: src/ui/app_podcast.rs:463
+#: src/ui/app_podcast.rs:479
 msgid "Shownotes"
 msgstr ""
 
-#: src/ui/app_podcast.rs:498
+#: src/ui/app_podcast.rs:518
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app_podcast.rs:508
+#: src/ui/app_podcast.rs:531
 msgid "Open episodes"
 msgstr ""
 
-#: src/ui/app_podcast.rs:517
+#: src/ui/app_podcast.rs:540
 msgid "Refresh feed"
 msgstr ""
 
-#: src/ui/app_podcast.rs:526
+#: src/ui/app_podcast.rs:549
 msgid "Remove podcast"
 msgstr ""
 
-#: src/ui/app_podcast.rs:533
+#: src/ui/app_podcast.rs:556
 msgid "Remove this podcast?"
 msgstr ""
 
-#: src/ui/app_podcast.rs:534 src/ui/app_streaming.rs:245 src/ui/app_youtube.rs:792 src/ui/app_favorites.rs:173 src/ui/app_favorites.rs:182 src/ui/app_dialogs.rs:425
-msgid "Remove"
-msgstr ""
-
-#: src/ui/app_podcast.rs:624
+#: src/ui/app_podcast.rs:659
 msgid "Podcast – {title}"
 msgstr ""
 
-#: src/ui/app_podcast.rs:647
+#: src/ui/app_podcast.rs:684
 msgid "Find a podcast by name"
 msgstr ""
 
-#: src/ui/app_podcast.rs:654
+#: src/ui/app_podcast.rs:691
 msgid "Podcast name …"
 msgstr ""
 
-#: src/ui/app_podcast.rs:696
+#: src/ui/app_podcast.rs:733
 msgid "Or enter feed address"
 msgstr ""
 
-#: src/ui/app_podcast.rs:699
+#: src/ui/app_podcast.rs:736
 msgid "Feed address (RSS)"
 msgstr ""
 
-#: src/ui/app_podcast.rs:745
+#: src/ui/app_podcast.rs:783
 msgid "No podcasts found"
 msgstr ""
 
-#: src/ui/app_podcast.rs:850
+#: src/ui/app_podcast.rs:895
 msgid "Remove download"
 msgstr ""
 
-#: src/ui/app_podcast.rs:852
+#: src/ui/app_podcast.rs:897
 msgid "For offline listening"
+msgstr ""
+
+#: src/ui/app_podcast.rs:1057
+msgid "Download removed"
+msgstr ""
+
+#: src/ui/app_podcast.rs:1063
+msgid "Downloading “{title}” …"
 msgstr ""
 
 #: src/ui/app_queue.rs:56
@@ -707,781 +1077,452 @@ msgstr ""
 msgid "Clear"
 msgstr ""
 
-#: src/ui/app_queue.rs:101
+#: src/ui/app_queue.rs:102
 msgid "The queue is empty"
 msgstr ""
 
-#: src/ui/app_queue.rs:194
+#: src/ui/app_queue.rs:212
 msgid "Various artists"
 msgstr ""
 
-#: src/ui/app_queue.rs:197 src/ui/app_queue.rs:231
+#: src/ui/app_queue.rs:215 src/ui/app_queue.rs:249
 msgid "Now playing"
 msgstr ""
 
-#: src/ui/app_queue.rs:237 src/ui/app_favorites.rs:232 src/ui/app_dialogs.rs:1266
-msgid "Drag to reorder"
+#: src/ui/app_rec_edit.rs:113 src/ui/app_streaming.rs:1321 src/ui/app_streaming.rs:1344
+msgid "File not found"
 msgstr ""
 
-#: src/ui/app_streaming.rs:231
-msgid "Replay (buffer)"
+#: src/ui/app_rec_edit.rs:139
+msgid "Delete the marked part"
 msgstr ""
 
-#: src/ui/app_streaming.rs:236
-msgid "Remove station"
+#: src/ui/app_rec_edit.rs:144
+msgid "Play from the playhead"
 msgstr ""
 
-#: src/ui/app_streaming.rs:244
-msgid "Remove this station?"
+#: src/ui/app_rec_edit.rs:195
+msgid "Zoom out"
 msgstr ""
 
-#: src/ui/app_streaming.rs:290
-msgid "Find a station worldwide by name"
+#: src/ui/app_rec_edit.rs:197
+msgid "Zoom in"
 msgstr ""
 
-#: src/ui/app_streaming.rs:297
-msgid "Station name …"
-msgstr ""
-
-#: src/ui/app_streaming.rs:337
-msgid "Or enter a stream address"
-msgstr ""
-
-#: src/ui/app_streaming.rs:340
-msgid "Stream address (URL)"
-msgstr ""
-
-#: src/ui/app_streaming.rs:383
-msgid "No stations found"
-msgstr ""
-
-#: src/ui/app_streaming.rs:505
-msgid "Current recording"
-msgstr ""
-
-#: src/ui/app_streaming.rs:518 src/ui/app_streaming.rs:752
-msgid "Recording …"
-msgstr ""
-
-#: src/ui/app_streaming.rs:563 src/ui/app_streaming.rs:667
-msgid "Incomplete (beginning was missing)"
-msgstr ""
-
-#: src/ui/app_streaming.rs:568 src/ui/app_streaming.rs:692
-msgid "Delete"
-msgstr ""
-
-#: src/ui/app_streaming.rs:655 src/ui/app_favorites.rs:496 src/ui/app_dialogs.rs:1364 src/ui/app_views.rs:1920 src/ui/app_views.rs:1933 src/ui/app_views.rs:2309 src/ui/app_views.rs:2327 src/ui/app_views.rs:2348 src/ui/app_views.rs:2397
-msgid "Artist"
-msgstr ""
-
-#: src/ui/app_streaming.rs:658 src/ui/app_favorites.rs:149 src/ui/app_favorites.rs:495 src/ui/app_dialogs.rs:1363 src/ui/app_views.rs:1935 src/ui/app_views.rs:2311 src/ui/app_views.rs:2354
-msgid "Album"
-msgstr ""
-
-#: src/ui/app_streaming.rs:661
-msgid "Station"
-msgstr ""
-
-#: src/ui/app_streaming.rs:663
-msgid "Recorded"
-msgstr ""
-
-#: src/ui/app_streaming.rs:666
-msgid "Note"
-msgstr ""
-
-#: src/ui/app_streaming.rs:683
-msgid "Delete recording"
-msgstr ""
-
-#: src/ui/app_streaming.rs:691
-msgid "Delete this recording?"
-msgstr ""
-
-#: src/ui/app_streaming.rs:721
-msgid "Added: {n}"
-msgstr ""
-
-#: src/ui/app_streaming.rs:812
-msgid "Recording stopped (stream ended)"
-msgstr ""
-
-#: src/ui/app_streaming.rs:905
-msgid "Recording"
-msgstr ""
-
-#: src/ui/app_streaming.rs:1019
-msgid "Recently detected"
-msgstr ""
-
-#: src/ui/app_streaming.rs:1024
-msgid "Nothing buffered yet"
-msgstr ""
-
-#: src/ui/app_streaming.rs:1034
-msgid "Beginning missing"
-msgstr ""
-
-#: src/ui/app_streaming.rs:1039 src/ui/cloud_page.rs:219
+#: src/ui/app_rec_edit.rs:203 src/ui/app_streaming.rs:1116 src/ui/cloud_page.rs:226
 msgid "Save"
 msgstr ""
 
-#: src/ui/app_streaming.rs:1072
-msgid "Replay – {name}"
+#: src/ui/app_rec_edit.rs:378
+msgid "Edit recording"
 msgstr ""
 
-#: src/ui/app_youtube.rs:411
-msgid "Playlist · {n}"
+#: src/ui/app_rec_edit.rs:419
+msgid "Mark a part to cut first"
 msgstr ""
 
-#: src/ui/app_youtube.rs:428 src/ui/app_youtube.rs:994
-msgid "Start Playlist"
+#: src/ui/app_rec_edit.rs:441
+msgid "Editing the recording …"
 msgstr ""
 
-#: src/ui/app_youtube.rs:499
-msgid "Download yt-dlp in the settings first"
+#: src/ui/app_streaming.rs:248
+msgid "Replay (buffer)"
 msgstr ""
 
-#: src/ui/app_youtube.rs:514
-msgid "Videos"
+#: src/ui/app_streaming.rs:253
+msgid "Remove station"
 msgstr ""
 
-#: src/ui/app_youtube.rs:516
-msgid "Channels"
+#: src/ui/app_streaming.rs:261
+msgid "Remove this station?"
 msgstr ""
 
-#: src/ui/app_youtube.rs:541
-msgid "Search term …"
+#: src/ui/app_streaming.rs:307
+msgid "Find a station worldwide by name"
 msgstr ""
 
-#: src/ui/app_youtube.rs:595
-msgid "Nothing found"
+#: src/ui/app_streaming.rs:314
+msgid "Station name …"
 msgstr ""
 
-#: src/ui/app_youtube.rs:606
-msgid "Video"
+#: src/ui/app_streaming.rs:354
+msgid "Or enter a stream address"
 msgstr ""
 
-#: src/ui/app_youtube.rs:607 src/ui/app_youtube.rs:989
-msgid "Playlist"
+#: src/ui/app_streaming.rs:357
+msgid "Stream address (URL)"
 msgstr ""
 
-#: src/ui/app_youtube.rs:608 src/ui/app_youtube.rs:864
-msgid "Channel"
+#: src/ui/app_streaming.rs:400
+msgid "No stations found"
 msgstr ""
 
-#: src/ui/app_youtube.rs:683 src/ui/app_youtube.rs:1083 src/ui/app_youtube.rs:1453
-msgid "No videos"
+#: src/ui/app_streaming.rs:533
+msgid "Current recording"
 msgstr ""
 
-#: src/ui/app_youtube.rs:721
-msgid "Channel – {title}"
+#: src/ui/app_streaming.rs:546 src/ui/app_streaming.rs:808
+msgid "Recording …"
 msgstr ""
 
-#: src/ui/app_youtube.rs:750
-msgid "{n} video"
-msgid_plural "{n} videos"
-msgstr[0] ""
-msgstr[1] ""
-
-#: src/ui/app_youtube.rs:767
-msgid "Refresh"
+#: src/ui/app_streaming.rs:591 src/ui/app_streaming.rs:705
+msgid "Incomplete (beginning was missing)"
 msgstr ""
 
-#: src/ui/app_youtube.rs:779
-msgid "Notify of newest publications"
+#: src/ui/app_streaming.rs:596 src/ui/app_streaming.rs:748
+msgid "Delete"
 msgstr ""
 
-#. Remote file: only the (possibly fetched) display values.
-#: src/ui/app_youtube.rs:858 src/ui/app_views.rs:2341 src/ui/app_views.rs:2395
-msgid "Title"
+#: src/ui/app_streaming.rs:696
+msgid "Station"
 msgstr ""
 
-#: src/ui/app_youtube.rs:891 src/ui/app_youtube.rs:1014 src/ui/app_youtube.rs:1243
+#: src/ui/app_streaming.rs:699
+msgid "Recorded"
+msgstr ""
+
+#: src/ui/app_streaming.rs:704
+msgid "Note"
+msgstr ""
+
+#: src/ui/app_streaming.rs:721 src/ui/app_youtube.rs:981 src/ui/app_youtube.rs:1124 src/ui/app_youtube.rs:1385
 msgid "Add to library"
 msgstr ""
 
-#: src/ui/app_youtube.rs:900 src/ui/app_dialogs.rs:264
-msgid "Equalizer settings"
+#: src/ui/app_streaming.rs:730
+msgid "Edit"
 msgstr ""
 
-#: src/ui/app_youtube.rs:916 src/ui/app_youtube.rs:1026
-msgid "Remove from recent"
+#: src/ui/app_streaming.rs:739
+msgid "Delete recording"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1004
-msgid "Add to Playlists"
+#: src/ui/app_streaming.rs:747
+msgid "Delete this recording?"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1051
-msgid "Loading “{title}” …"
+#: src/ui/app_streaming.rs:777
+msgid "Added: {n}"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1157
-msgid "Playlist – {title}"
+#: src/ui/app_streaming.rs:785 src/ui/app_streaming.rs:1187
+msgid "Could not add station"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1241
-msgid "Adding to library …"
+#: src/ui/app_streaming.rs:868
+msgid "Recording stopped (stream ended)"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1359 src/ui/app_youtube.rs:1395
-msgid "Set a music folder in settings first"
+#: src/ui/app_streaming.rs:968
+msgid "Recording"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1364
-msgid "Adding “{title}” to library …"
+#: src/ui/app_streaming.rs:1096
+msgid "Recently detected"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1398
-msgid "Adding playlist “{title}” to library …"
+#: src/ui/app_streaming.rs:1101
+msgid "Nothing buffered yet"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1431
-msgid "Saving “{title}” to Playlists …"
+#: src/ui/app_streaming.rs:1111
+msgid "Beginning missing"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1477
-msgid "Could not play video"
+#: src/ui/app_streaming.rs:1149
+msgid "Replay – {name}"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1490
-msgid "Updating yt-dlp …"
+#: src/ui/app_streaming.rs:1185
+msgid "Station added"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1492
-msgid "Downloading yt-dlp …"
+#: src/ui/app_streaming.rs:1217
+msgid "Enable the recording buffer in the settings first"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1514
-msgid "Working …"
+#: src/ui/app_streaming.rs:1278
+msgid "Replay"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1517 src/ui/app_dialogs.rs:1120
-msgid "Installed (version {v})"
+#: src/ui/app_streaming.rs:1288 src/ui/app_streaming.rs:1308
+msgid "Could not extract from buffer"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1518 src/ui/app_dialogs.rs:1121
-msgid "Not installed"
+#: src/ui/app_streaming.rs:1339
+msgid "Set a music folder first"
 msgstr ""
 
-#: src/ui/app_youtube.rs:1539
-msgid "Download yt-dlp in the settings to use YouTube"
+#: src/ui/app_streaming.rs:1387
+msgid "Already in the library"
 msgstr ""
 
-#: src/ui/app_concert.rs:76
-msgid "Select all"
+#: src/ui/app_streaming.rs:1395 src/ui/app_streaming.rs:1420
+msgid "Could not add to the library"
 msgstr ""
 
-#: src/ui/app_concert.rs:85
-msgid "{n} candidate"
-msgid_plural "{n} candidates"
-msgstr[0] ""
-msgstr[1] ""
-
-#: src/ui/app_concert.rs:114
-msgid "Add"
-msgstr ""
-
-#: src/ui/app_favorites.rs:181
-msgid "Remove this entry?"
-msgstr ""
-
-#: src/ui/app_favorites.rs:497 src/ui/app_dialogs.rs:1365
-msgid "Folder"
-msgstr ""
-
-#: src/ui/app_favorites.rs:498 src/ui/app_dialogs.rs:1366
-msgid "Track"
-msgstr ""
-
-#: src/ui/app_eq.rs:60
-msgid "Equalizer is not available here"
-msgstr ""
-
-#: src/ui/app_eq.rs:100
-msgid "Default (all outputs)"
-msgstr ""
-
-#: src/ui/app_eq.rs:127 src/ui/app_dialogs.rs:771
-msgid "Equalizer"
-msgstr ""
-
-#: src/ui/app_eq.rs:155
-msgid "Settings for {subject}"
-msgstr ""
-
-#: src/ui/app_eq.rs:191
-msgid "Output"
-msgstr ""
-
-#: src/ui/app_eq.rs:192
-msgid "Device / Bluetooth"
-msgstr ""
-
-#: src/ui/app_eq.rs:284
-msgid "Reset"
-msgstr ""
-
-#: src/ui/app_eq.rs:305 src/ui/app_eq.rs:326 src/ui/app_eq.rs:346 src/ui/app_eq.rs:368
-msgid "Turn off"
-msgstr ""
-
-#: src/ui/app_eq.rs:328 src/ui/app_eq.rs:348 src/ui/app_eq.rs:368
-msgid "Turn on"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:17
-msgid "Search the library"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:18
-msgid "Find by artist, album, song or date."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:73
-msgid "Lyrics"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:93
-msgid "Info"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:162 src/ui/app_views.rs:1024
-msgid "Play album"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:163
-msgid "Play artist"
-msgstr ""
-
-#. Album order selectable, on the same line as the action.
-#: src/ui/app_dialogs.rs:172
-msgid "Oldest first"
-msgstr ""
-
-#. Album order selectable, on the same line as the action.
-#: src/ui/app_dialogs.rs:172
-msgid "Newest first"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:174
-msgid "Album order"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:235
-msgid "Remove from favorites"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:237
-msgid "Add to favorites"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:255
-msgid "Add to queue"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:333
-msgid "Connect to another device to sync content."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:338 src/ui/sync_page.rs:239 src/ui/sync_page.rs:346
-msgid "Offer connection"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:339
-msgid "Start the service and wait for another device"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:344 src/ui/sync_page.rs:245 src/ui/sync_page.rs:423
-msgid "Scan QR code"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:345
-msgid "Scan another device's code"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:402
-msgid "No additional sources"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:463
-msgid "Artist, album, song, date …"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:511
-msgid "No results"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:616
-msgid "Library"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:620
-msgid "Music folder"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:621
-msgid "Folder for the file system view"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:624
-msgid "Not set"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:634 src/ui/app_dialogs.rs:698
-msgid "Choose folder"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:645
-msgid "Choose music folder"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:672
-msgid "Other sources"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:673
-msgid "Shown as tabs in the file view"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:690
-msgid "Add local folder"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:741
-msgid "Nextcloud"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:743
-msgid "Connect a Nextcloud and index its music folder like a local library."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:747 src/ui/cloud_page.rs:130
-msgid "Connect to Nextcloud"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:748
-msgid "Scan the login QR code or enter the details manually."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:766
-msgid "Sound"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:773
-msgid "Global sound control. It applies everywhere unless a custom setting is set for an artist, an album or a track."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:778
-msgid "Global equalizer"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:779
-msgid "Ten bands, per output"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:800
-msgid "Read music data"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:802
-msgid "Complete missing cover art, photos and tracks from open online sources."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:806
-msgid "Fetch automatically"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:808
-msgid "Loads missing data in the background at startup – on any connection."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:823
-msgid "AcoustID"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:825
-msgid "Optional key for fingerprint-based track detection (free at acoustid.org/new-application)."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:828
-msgid "AcoustID API key"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:843
-msgid "fanart.tv"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:844
-msgid "Optional key for showing several artist photos."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:847
-msgid "fanart.tv API key"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:868
-msgid "View"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:874
-msgid "Language"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:884
-msgid "System default"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:891
-msgid "Display language"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:892
-msgid "Takes effect after a restart"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:914
-msgid "Appearance"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:917
-msgid "Automatic"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:917
-msgid "Dark"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:917
-msgid "Light"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:920
-msgid "Theme"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:945
-msgid "List display"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:948
-msgid "Gallery view"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:949
-msgid "Show lists as a grid of cover thumbnails"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:960
-msgid "Tiles per row"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:983
-msgid "Menu"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:987
-msgid "Menu items"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:989
-msgid "Drag handle to reorder; the switch hides a menu item."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1006
-msgid "Cache"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1012
-msgid "Timeshift buffer for recording the currently playing station."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1016
-msgid "Recording buffer (minutes)"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1018
-msgid "Keep the last minutes of a station so you can record a song after it played. 0 turns it off."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1041 src/ui/app_views.rs:2033
-msgid "Hidden"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1045
-msgid "Hidden content"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1047
-msgid "Artists, albums and tracks whose properties are visible nowhere – each the object that carries the setting. Use the eye to show them again."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1054
-msgid "Nothing hidden"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1069
-msgid "Show again"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1097
-msgid "Search and play YouTube, follow channels, add videos/playlists to your music or keep them offline. May be restricted in some countries."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1101
-msgid "Enable YouTube"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1102
-msgid "Adds a YouTube section. Requires downloading yt-dlp below."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1115
-msgid "Required tool – downloaded into the app data folder (not bundled)."
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1125
-msgid "Update"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1185
-msgid "No custom image can be set here"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1191
-msgid "Images"
-msgstr ""
-
-#: src/ui/app_dialogs.rs:1193
-msgid "Choose a custom image"
+#: src/ui/app_streaming.rs:1417
+msgid "Added to the library"
 msgstr ""
 
-#: src/ui/app_views.rs:365
+#: src/ui/app_views.rs:381
 msgid "This source is not configured correctly"
 msgstr ""
 
-#: src/ui/app_views.rs:546
+#: src/ui/app_views.rs:593
 msgid "No music folder set – please choose one in the settings"
 msgstr ""
 
-#: src/ui/app_views.rs:985
+#: src/ui/app_views.rs:1053
 msgid "No tracks"
 msgstr ""
 
-#: src/ui/app_views.rs:986
+#: src/ui/app_views.rs:1055
 msgid "There are no songs for this artist in the library."
 msgstr ""
 
-#: src/ui/app_views.rs:1074
+#: src/ui/app_views.rs:1147
 msgid "Singles"
 msgstr ""
 
-#: src/ui/app_views.rs:1927 src/ui/app_views.rs:1943 src/ui/app_views.rs:2335
+#: src/ui/app_views.rs:2081 src/ui/app_views.rs:2100 src/ui/app_views.rs:2512
 msgid "Collection"
 msgstr ""
 
-#: src/ui/app_views.rs:1938 src/ui/app_views.rs:2313 src/ui/app_views.rs:2357
+#: src/ui/app_views.rs:2095 src/ui/app_views.rs:2509 src/ui/app_views.rs:2533
 msgid "Genre"
 msgstr ""
 
-#: src/ui/app_views.rs:1941 src/ui/app_views.rs:2322 src/ui/app_views.rs:2371
+#: src/ui/app_views.rs:2098 src/ui/app_views.rs:2492 src/ui/app_views.rs:2547
 msgid "Year"
 msgstr ""
 
-#: src/ui/app_views.rs:2026
+#: src/ui/app_views.rs:2189
 msgid "Properties"
 msgstr ""
 
-#: src/ui/app_views.rs:2044
+#: src/ui/app_views.rs:2208
 msgid "Hide"
 msgstr ""
 
-#: src/ui/app_views.rs:2168
+#: src/ui/app_views.rs:2342
 msgid "{n} album"
 msgid_plural "{n} albums"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/app_views.rs:2196
+#: src/ui/app_views.rs:2371
 msgid "Undo"
 msgstr ""
 
-#: src/ui/app_views.rs:2351
+#: src/ui/app_views.rs:2517 src/ui/app_views.rs:2569 src/ui/app_youtube.rs:937
+msgid "Title"
+msgstr ""
+
+#: src/ui/app_views.rs:2527
 msgid "Composer"
 msgstr ""
 
-#: src/ui/app_views.rs:2383
+#: src/ui/app_views.rs:2557
 msgid "Detected (title)"
 msgstr ""
 
-#: src/ui/app_views.rs:2386
+#: src/ui/app_views.rs:2560
 msgid "Detected (artist)"
 msgstr ""
 
-#: src/ui/app_views.rs:2389
+#: src/ui/app_views.rs:2563
 msgid "Detected (album)"
 msgstr ""
 
-#: src/ui/cloud_page.rs:110
+#. A played playlist: "Playlist · N songs"; tap/▶ replays it,
+#. long press opens its detail.
+#: src/ui/app_youtube.rs:429
+msgid "Playlist · {n}"
+msgstr ""
+
+#: src/ui/app_youtube.rs:448 src/ui/app_youtube.rs:1090
+msgid "Start Playlist"
+msgstr ""
+
+#: src/ui/app_youtube.rs:536
+msgid "Download yt-dlp in the settings first"
+msgstr ""
+
+#: src/ui/app_youtube.rs:554
+msgid "Videos"
+msgstr ""
+
+#: src/ui/app_youtube.rs:561 src/ui/sync_share_ui.rs:162
+msgid "Channels"
+msgstr ""
+
+#: src/ui/app_youtube.rs:589
+msgid "Search term …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:646
+msgid "Nothing found"
+msgstr ""
+
+#: src/ui/app_youtube.rs:658
+msgid "Video"
+msgstr ""
+
+#: src/ui/app_youtube.rs:659 src/ui/app_youtube.rs:1085
+msgid "Playlist"
+msgstr ""
+
+#: src/ui/app_youtube.rs:660 src/ui/app_youtube.rs:943
+msgid "Channel"
+msgstr ""
+
+#: src/ui/app_youtube.rs:747 src/ui/app_youtube.rs:1208 src/ui/app_youtube.rs:1617
+msgid "No videos"
+msgstr ""
+
+#: src/ui/app_youtube.rs:794
+msgid "Channel – {title}"
+msgstr ""
+
+#: src/ui/app_youtube.rs:825
+msgid "{n} video"
+msgid_plural "{n} videos"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/app_youtube.rs:847
+msgid "Refresh"
+msgstr ""
+
+#: src/ui/app_youtube.rs:859
+msgid "Notify of newest publications"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1012 src/ui/app_youtube.rs:1143
+msgid "Remove from recent"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1107
+msgid "Add to Playlists"
+msgstr ""
+
+#. Central loading overlay (same spinner as the local/Nextcloud library)
+#. while yt-dlp fetches the playlist; cleared in `Cmd::YtPlaylistSongs`.
+#: src/ui/app_youtube.rs:1167
+msgid "Loading “{title}” …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1290
+msgid "Playlist – {title}"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1383
+msgid "Adding to library …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1508 src/ui/app_youtube.rs:1549
+msgid "Set a music folder in settings first"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1514
+msgid "Adding “{title}” to library …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1553
+msgid "Adding playlist “{title}” to library …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1592
+msgid "Saving “{title}” to Playlists …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1645
+msgid "Could not play video"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1658
+msgid "Updating yt-dlp …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1660
+msgid "Downloading yt-dlp …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1682
+msgid "Working …"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1707
+msgid "Download yt-dlp in the settings to use YouTube"
+msgstr ""
+
+#: src/ui/app_youtube.rs:1819
+msgid "Starting playlist “{title}” …"
+msgstr ""
+
+#: src/ui/cloud_page.rs:113
 msgid "Connection works"
 msgstr ""
 
-#: src/ui/cloud_page.rs:112
+#: src/ui/cloud_page.rs:115
 msgid "Connection failed – check the details"
 msgstr ""
 
-#: src/ui/cloud_page.rs:157
+#: src/ui/cloud_page.rs:160
 msgid "Point the camera at the Nextcloud login QR code"
 msgstr ""
 
-#: src/ui/cloud_page.rs:167
+#: src/ui/cloud_page.rs:170
 msgid "Enter the details manually"
 msgstr ""
 
-#: src/ui/cloud_page.rs:169
+#: src/ui/cloud_page.rs:173
 msgid "Server URL"
 msgstr ""
 
-#: src/ui/cloud_page.rs:170
+#: src/ui/cloud_page.rs:175
 msgid "User name"
 msgstr ""
 
-#: src/ui/cloud_page.rs:172
+#: src/ui/cloud_page.rs:177
 msgid "App password"
 msgstr ""
 
-#: src/ui/cloud_page.rs:191
+#: src/ui/cloud_page.rs:196
 msgid "Music folder to index"
 msgstr ""
 
-#: src/ui/cloud_page.rs:194
+#: src/ui/cloud_page.rs:199
 msgid "Folder (e.g. /Music)"
 msgstr ""
 
-#: src/ui/cloud_page.rs:213
+#: src/ui/cloud_page.rs:219
 msgid "Test connection"
 msgstr ""
 
-#: src/ui/cloud_page.rs:264
+#: src/ui/cloud_page.rs:271
 msgid "Point the camera at the login QR code"
 msgstr ""
 
-#: src/ui/cloud_page.rs:297
+#: src/ui/cloud_page.rs:304
 msgid "Login data scanned – set the music path and save"
 msgstr ""
 
-#: src/ui/cloud_page.rs:320 src/ui/cloud_page.rs:332
+#: src/ui/cloud_page.rs:327 src/ui/cloud_page.rs:339
 msgid "Please fill in URL, user and app password"
 msgstr ""
 
-#: src/ui/cloud_page.rs:323
+#: src/ui/cloud_page.rs:330
 msgid "Testing …"
 msgstr ""
 
-#: src/ui/cloud_page.rs:356
+#: src/ui/cloud_page.rs:363
 msgid "Could not save this source"
+msgstr ""
+
+#: src/ui/fs_row.rs:329
+msgid "Downloaded"
 msgstr ""
 
 #: src/ui/stats_page.rs:33
@@ -1496,160 +1537,272 @@ msgstr ""
 msgid "All time"
 msgstr ""
 
-#: src/ui/stats_page.rs:134
+#: src/ui/stats_page.rs:185
 msgid "No listening data yet"
 msgstr ""
 
-#: src/ui/stats_page.rs:135
+#: src/ui/stats_page.rs:187
 msgid "Play some music — your listening statistics will appear here."
 msgstr ""
 
-#: src/ui/stats_page.rs:147
+#: src/ui/stats_page.rs:199
 msgid "Top artists"
 msgstr ""
 
-#: src/ui/stats_page.rs:151
+#: src/ui/stats_page.rs:202
 msgid "Top albums"
 msgstr ""
 
-#: src/ui/stats_page.rs:155
+#: src/ui/stats_page.rs:205
 msgid "Top tracks"
 msgstr ""
 
-#: src/ui/stats_page.rs:159
+#: src/ui/stats_page.rs:208
 msgid "Top genres"
 msgstr ""
 
-#: src/ui/stats_page.rs:208
+#: src/ui/stats_page.rs:261
 msgid "Listening time"
 msgstr ""
 
-#: src/ui/stats_page.rs:209
+#: src/ui/stats_page.rs:264
 msgid "Plays"
 msgstr ""
 
-#: src/ui/stats_page.rs:216
+#: src/ui/stats_page.rs:271
 msgid "Skip rate"
 msgstr ""
 
-#: src/ui/stats_page.rs:222
+#: src/ui/stats_page.rs:278
 msgid "Variety"
 msgstr ""
 
-#: src/ui/stats_page.rs:225
+#: src/ui/stats_page.rs:289
 msgid "Tracks"
 msgstr ""
 
-#: src/ui/stats_page.rs:260
+#: src/ui/stats_page.rs:326
 msgid "{n} play"
 msgid_plural "{n} plays"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/stats_page.rs:271
+#: src/ui/stats_page.rs:338
 msgid "By weekday"
 msgstr ""
 
-#: src/ui/stats_page.rs:282
+#: src/ui/stats_page.rs:350
 msgid "Mon"
 msgstr ""
 
-#: src/ui/stats_page.rs:283
+#: src/ui/stats_page.rs:351
 msgid "Tue"
 msgstr ""
 
-#: src/ui/stats_page.rs:284
+#: src/ui/stats_page.rs:352
 msgid "Wed"
 msgstr ""
 
-#: src/ui/stats_page.rs:285
+#: src/ui/stats_page.rs:353
 msgid "Thu"
 msgstr ""
 
-#: src/ui/stats_page.rs:286
+#: src/ui/stats_page.rs:354
 msgid "Fri"
 msgstr ""
 
-#: src/ui/stats_page.rs:287
+#: src/ui/stats_page.rs:355
 msgid "Sat"
 msgstr ""
 
-#: src/ui/stats_page.rs:288
+#: src/ui/stats_page.rs:356
 msgid "Sun"
 msgstr ""
 
-#: src/ui/stats_page.rs:321
+#: src/ui/stats_page.rs:389
 msgid "By time of day"
 msgstr ""
 
-#: src/ui/stats_page.rs:372
+#: src/ui/stats_page.rs:445
 msgid "{h} h {m} min"
 msgstr ""
 
-#: src/ui/stats_page.rs:374
+#: src/ui/stats_page.rs:449
 msgid "{m} min"
 msgstr ""
 
-#: src/ui/sync_page.rs:213
+#: src/ui/sync_page.rs:279 src/ui/sync_page.rs:309 src/ui/sync_page.rs:370 src/ui/sync_page.rs:771 src/ui/sync_page.rs:883
 msgid "Device sync"
 msgstr ""
 
-#: src/ui/sync_page.rs:234
+#: src/ui/sync_page.rs:311
 msgid "Connect two devices on the same network."
 msgstr ""
 
-#: src/ui/sync_page.rs:240
+#: src/ui/sync_page.rs:316 src/ui/sync_page.rs:430
+msgid "Offer connection"
+msgstr ""
+
+#: src/ui/sync_page.rs:317
 msgid "Start a server and show a QR code"
 msgstr ""
 
-#: src/ui/sync_page.rs:246
+#: src/ui/sync_page.rs:322 src/ui/sync_page.rs:514
+msgid "Scan QR code"
+msgstr ""
+
+#: src/ui/sync_page.rs:323
 msgid "Point the camera at the other device's code"
 msgstr ""
 
-#: src/ui/sync_page.rs:322
-msgid "Scan this code on the other device."
-msgstr ""
-
-#: src/ui/sync_page.rs:400
-msgid "Point the camera at the QR code."
-msgstr ""
-
-#: src/ui/sync_page.rs:451
-msgid "Camera unavailable: {err}"
-msgstr ""
-
-#: src/ui/sync_page.rs:471
-msgid "Connecting …"
-msgstr ""
-
-#: src/ui/sync_page.rs:497
-msgid "Waiting for another device … ({addr})"
-msgstr ""
-
-#: src/ui/sync_page.rs:512
+#: src/ui/sync_page.rs:379
 msgid "Connected with {name}"
 msgstr ""
 
-#: src/ui/sync_page.rs:519
+#: src/ui/sync_page.rs:388
+msgid "You can share now, or wait for the other device to share."
+msgstr ""
+
+#: src/ui/sync_page.rs:396 src/ui/sync_share_ui.rs:93
+msgid "Share with {peer}"
+msgstr ""
+
+#: src/ui/sync_page.rs:406
+msgid "Disconnect"
+msgstr ""
+
+#: src/ui/sync_page.rs:448
+msgid "Scan this code on the other device."
+msgstr ""
+
+#: src/ui/sync_page.rs:488
+msgid "Cannot start: {err}"
+msgstr ""
+
+#: src/ui/sync_page.rs:526
+msgid "Point the camera at the QR code."
+msgstr ""
+
+#: src/ui/sync_page.rs:568
+msgid "Camera unavailable: {err}"
+msgstr ""
+
+#: src/ui/sync_page.rs:588
+msgid "Connecting …"
+msgstr ""
+
+#: src/ui/sync_page.rs:616
+msgid "Waiting for another device … ({addr})"
+msgstr ""
+
+#: src/ui/sync_page.rs:641
 msgid "Received {fav} favorites, {pl} playlists, {pod} podcasts."
 msgstr ""
 
-#: src/ui/sync_page.rs:534
+#: src/ui/sync_page.rs:656
 msgid "Metadata synced. Transferring files …"
 msgstr ""
 
-#: src/ui/sync_page.rs:551
+#: src/ui/sync_page.rs:674
 msgid "{n} files transferred."
 msgstr ""
 
-#: src/ui/sync_page.rs:566
-msgid "Disconnected."
+#: src/ui/sync_page.rs:703
+msgid "The other device accepted. Transferring …"
 msgstr ""
 
-#: src/ui/sync_page.rs:665
+#: src/ui/sync_page.rs:709
+msgid "Error: {e}"
+msgstr ""
+
+#: src/ui/sync_page.rs:725
 msgid "Sync successful"
 msgstr ""
 
-#: src/ui/fs_row.rs:328
-msgid "Downloaded"
+#: src/ui/sync_page.rs:735
+msgid "Done"
+msgstr ""
+
+#: src/ui/sync_page.rs:775
+msgid "Disconnected."
+msgstr ""
+
+#: src/ui/sync_page.rs:780
+msgid "Connect again"
+msgstr ""
+
+#: src/ui/sync_page.rs:815
+msgid "Preparing …"
+msgstr ""
+
+#: src/ui/sync_page.rs:866
+msgid "Waiting for the other device to accept …"
+msgstr ""
+
+#: src/ui/sync_page.rs:873
+msgid "Sending …"
+msgstr ""
+
+#: src/ui/sync_page.rs:901
+msgid "Receiving …"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:96
+msgid "Entire library"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:142
+msgid "Collections"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:193 src/ui/sync_share_ui.rs:401
+msgid "Library data"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:206 src/ui/sync_share_ui.rs:414
+msgid "Categories"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:220
+msgid "Continue"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:249
+msgid "Transfer summary"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:252
+msgid "{n} files"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:256
+msgid "Total size"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:269
+msgid "Send"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:351
+msgid "{name} wants to share"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:355
+msgid "{n} files · {size} · {new} new, {have} already here, {coll} would overwrite"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:424
+msgid "Reject all"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:428
+msgid "Accept"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:480
+msgid "Already on this device"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs:486
+msgid "Would overwrite a different file"
 msgstr ""
