@@ -335,6 +335,27 @@ impl App {
         }
     }
 
+    /// Keeps the play/pause icon of each recording row in sync with the
+    /// playback state (the active recording shows a pause icon while running).
+    pub(crate) fn refresh_recording_icons(&self) {
+        let playing = self.mini.playing;
+        let cur = self
+            .transport
+            .playing_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
+        let mut btns = self.streaming.rec_play_buttons.borrow_mut();
+        btns.retain(|(_, b)| b.root().is_some());
+        for (path, btn) in btns.iter() {
+            let active = cur.as_deref() == Some(path.as_str()) && playing;
+            btn.set_icon_name(if active {
+                "media-playback-pause-symbolic"
+            } else {
+                "media-playback-start-symbolic"
+            });
+        }
+    }
+
     /// Dialog for adding a station: at the top a **worldwide search**
     /// (Radio-Browser, tappable results), below it a field for a
     /// **stream address** as the manual route.
@@ -556,6 +577,20 @@ impl App {
     /// file, the trash button removes it.
     pub(crate) fn reload_recordings(&mut self, sender: &ComponentSender<Self>) {
         self.streaming.recording_items = self.library.recordings().unwrap_or_default();
+        // Backfill the playback length for rows stored before durations were
+        // tracked (probe the file header once, then cache it in the DB).
+        for rec in &mut self.streaming.recording_items {
+            if rec.duration_ms <= 0 {
+                let ms = crate::core::scanner::duration_secs(std::path::Path::new(&rec.path))
+                    as i64
+                    * 1000;
+                if ms > 0 {
+                    let _ = self.library.set_recording_duration(rec.id, ms);
+                    rec.duration_ms = ms;
+                }
+            }
+        }
+        self.streaming.rec_play_buttons.borrow_mut().clear();
         while let Some(child) = self.streaming.recordings_list.first_child() {
             self.streaming.recordings_list.remove(&child);
         }
@@ -636,6 +671,40 @@ impl App {
             if rec.incomplete {
                 row.set_tooltip_text(Some(&gettext("Incomplete (beginning was missing)")));
             }
+            // Total length of the song (right-aligned, subtle) – like the
+            // library track rows.
+            if rec.duration_ms > 0 {
+                let dur = gtk::Label::new(Some(&crate::ui::app::fmt_duration(rec.duration_ms)));
+                dur.set_valign(gtk::Align::Center);
+                dur.set_css_classes(&["dim-label", "numeric"]);
+                row.add_suffix(&dur);
+            }
+            // Play/pause button on the far right – starts the recording or
+            // toggles pause/resume when it is already the active one (the icon
+            // tracks the state via `refresh_recording_icons`).
+            let is_active = self
+                .transport
+                .playing_path
+                .as_ref()
+                .is_some_and(|p| p.to_string_lossy() == rec.path);
+            let play_btn = gtk::Button::from_icon_name(if is_active && self.mini.playing {
+                "media-playback-pause-symbolic"
+            } else {
+                "media-playback-start-symbolic"
+            });
+            play_btn.set_valign(gtk::Align::Center);
+            play_btn.set_tooltip_text(Some(&gettext("Play")));
+            play_btn.add_css_class("flat");
+            {
+                let sender = sender.clone();
+                let path = rec.path.clone();
+                play_btn.connect_clicked(move |_| sender.input(Msg::PlayRecording(path.clone())));
+            }
+            row.add_suffix(&play_btn);
+            self.streaming
+                .rec_play_buttons
+                .borrow_mut()
+                .push((rec.path.clone(), play_btn));
             // No delete button in the list: a recording is removed only from its
             // detail page (long press → "Delete recording").
             {
@@ -1348,6 +1417,11 @@ impl App {
     /// Play a saved recording file.
     pub(crate) fn play_recording(&mut self, path: String) {
         let p = std::path::PathBuf::from(&path);
+        // Re-tapping the recording that is already playing toggles
+        // pause/resume instead of restarting it.
+        if self.toggle_if_active_file(&p) {
+            return;
+        }
         if p.exists() {
             self.stop_recorder();
             self.transport.queue = vec![p];

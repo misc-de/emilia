@@ -168,6 +168,24 @@ fn to_model_video(r: YtResult) -> crate::model::YtVideo {
     }
 }
 
+/// Sortable key `YYYYMMDDHHMMSS` from an ISO-8601 publication timestamp,
+/// matching [`crate::core::podcast::pubdate_key`] so the same day buckets apply.
+/// Missing/unparsable dates yield `0` (sorted last, grouped under "Older").
+fn yt_pubdate_key(published: Option<&str>) -> i64 {
+    let Some(s) = published.filter(|s| !s.trim().is_empty()) else {
+        return 0;
+    };
+    let Ok(dt) = gtk::glib::DateTime::from_iso8601(s, None) else {
+        return 0;
+    };
+    (((((dt.year() as i64 * 100 + dt.month() as i64) * 100 + dt.day_of_month() as i64) * 100
+        + dt.hour() as i64)
+        * 100
+        + dt.minute() as i64)
+        * 100)
+        + dt.seconds() as i64
+}
+
 /// Formats an ISO-8601 publication timestamp as `DD.MM.YYYY HH:MM` (local
 /// formatting via glib); falls back to the raw string.
 fn fmt_published(iso: &str) -> String {
@@ -176,6 +194,15 @@ fn fmt_published(iso: &str) -> String {
         .and_then(|dt| dt.format("%d.%m.%Y %H:%M").ok())
         .map(|g| g.to_string())
         .unwrap_or_else(|| iso.to_string())
+}
+
+/// A right-aligned, subtle duration label for a video row (shown left of the
+/// play button), matching the library track rows.
+fn duration_chip(secs: i64) -> gtk::Label {
+    let lbl = gtk::Label::new(Some(&fmt_duration(secs)));
+    lbl.set_valign(gtk::Align::Center);
+    lbl.set_css_classes(&["dim-label", "numeric"]);
+    lbl
 }
 
 /// Formats a duration in seconds as `M:SS` or `H:MM:SS` (display only).
@@ -337,9 +364,15 @@ impl App {
         true
     }
 
-    /// Builds the "Newest videos" list across all subscribed channels.
+    /// Builds the "Newest videos" list across all subscribed channels, grouped
+    /// by publication date (Today / Yesterday / This week / This month / Older),
+    /// like the podcast "Newest" page.
     pub(crate) fn reload_yt_newest(&mut self, sender: &ComponentSender<Self>) {
         let mut videos = self.library.all_videos().unwrap_or_default();
+        // Newest first by publication date (across all channels).
+        videos.sort_by(|a, b| {
+            yt_pubdate_key(b.published.as_deref()).cmp(&yt_pubdate_key(a.published.as_deref()))
+        });
         videos.truncate(150);
         self.youtube.newest_items = videos;
         while let Some(child) = self.youtube.newest_list.first_child() {
@@ -348,13 +381,46 @@ impl App {
         if self.youtube.newest_items.is_empty() {
             return;
         }
-        let group = adw::PreferencesGroup::new();
-        for (i, v) in self.youtube.newest_items.iter().enumerate() {
-            let mut subtitle = v.channel_title.clone();
-            if let Some(d) = v.duration {
-                subtitle.push_str(" · ");
-                subtitle.push_str(&fmt_duration(d));
+        // Date sections (the list is sorted descending, so each bucket is a
+        // contiguous run → one group with a heading per bucket).
+        let (today, yesterday, week_start) = crate::core::podcast::recent_day_buckets();
+        let month_start = crate::core::podcast::recent_cutoff_key();
+        let bucket_of = |k: i64| -> usize {
+            if k >= today {
+                0
+            } else if k >= yesterday {
+                1
+            } else if k >= week_start {
+                2
+            } else if k >= month_start {
+                3
+            } else {
+                4
             }
+        };
+        let bucket_title = |b: usize| match b {
+            0 => gettext("Today"),
+            1 => gettext("Yesterday"),
+            2 => gettext("This week"),
+            3 => gettext("This month"),
+            _ => gettext("Older"),
+        };
+        let mut cur_bucket: Option<usize> = None;
+        let mut group: Option<adw::PreferencesGroup> = None;
+        for (i, v) in self.youtube.newest_items.iter().enumerate() {
+            // New section → new group with heading.
+            let b = bucket_of(yt_pubdate_key(v.published.as_deref()));
+            if cur_bucket != Some(b) {
+                cur_bucket = Some(b);
+                let g = adw::PreferencesGroup::builder()
+                    .title(bucket_title(b))
+                    .build();
+                self.youtube.newest_list.append(&g);
+                group = Some(g);
+            }
+            // The duration is shown as a label next to the play button (right),
+            // so the subtitle keeps only channel · publication date.
+            let mut subtitle = v.channel_title.clone();
             if let Some(p) = v.published.as_deref().filter(|s| !s.trim().is_empty()) {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&fmt_published(p));
@@ -380,6 +446,9 @@ impl App {
                 cover.as_deref(),
                 "video-x-generic-symbolic",
             ));
+            if let Some(d) = v.duration.filter(|d| *d > 0) {
+                row.add_suffix(&duration_chip(d));
+            }
             row.add_suffix(&self.video_play_button(sender, &v.video_id, &v.title));
             {
                 let (sender, vid, title) = (sender.clone(), v.video_id.clone(), v.title.clone());
@@ -399,9 +468,10 @@ impl App {
                 });
             }
             row.add_controller(lp);
-            group.add(&row);
+            if let Some(g) = &group {
+                g.add(&row);
+            }
         }
-        self.youtube.newest_list.append(&group);
         self.refresh_yt_icons();
     }
 
@@ -495,6 +565,9 @@ impl App {
                 cover.as_deref(),
                 "video-x-generic-symbolic",
             ));
+            if let Some(d) = r.duration.filter(|d| *d > 0) {
+                row.add_suffix(&duration_chip(d));
+            }
             row.add_suffix(&self.video_play_button(sender, &r.video_id, &r.title));
             {
                 let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());

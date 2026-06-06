@@ -1058,6 +1058,10 @@ msgstr "Diese Woche"
 msgid "This month"
 msgstr "Diesen Monat"
 
+#: src/ui/app_youtube.rs
+msgid "Older"
+msgstr "Älter"
+
 #: src/ui/app_podcast.rs:333
 msgid "Podcast"
 msgstr "Podcast"

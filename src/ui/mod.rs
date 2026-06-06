@@ -4,6 +4,8 @@ pub mod app_concert;
 pub mod app_dialogs;
 pub mod app_eq;
 pub mod app_favorites;
+pub mod app_gallery;
+pub mod app_helpers;
 pub mod app_init;
 pub mod app_playback;
 pub mod app_playlist;

@@ -239,8 +239,9 @@ impl Library {
     /// Recently played items (videos and playlists), newest first.
     pub fn recent_videos(&self, limit: usize) -> Result<Vec<YtRecent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT video_id, title, artist, kind, count, thumbnail FROM yt_recent
-             ORDER BY played_at DESC LIMIT ?1",
+            "SELECT r.video_id, r.title, r.artist, r.kind, r.count, r.thumbnail, t.duration
+             FROM yt_recent r LEFT JOIN yt_title t ON t.video_id = r.video_id
+             ORDER BY r.played_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit as i64], |r| {
             Ok(YtRecent {
@@ -250,6 +251,7 @@ impl Library {
                 kind: r.get(3)?,
                 count: r.get(4)?,
                 thumbnail: r.get(5)?,
+                duration: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

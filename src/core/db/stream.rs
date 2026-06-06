@@ -145,7 +145,7 @@ impl Library {
     /// All recordings, newest first.
     pub fn recordings(&self) -> Result<Vec<crate::model::RecordingItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, artist, title, station, recorded_at, incomplete
+            "SELECT id, path, artist, title, station, recorded_at, duration_ms, incomplete
              FROM recording ORDER BY recorded_at DESC, id DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -156,10 +156,21 @@ impl Library {
                 title: r.get(3)?,
                 station: r.get(4)?,
                 recorded_at: r.get(5)?,
-                incomplete: r.get::<_, i64>(6)? != 0,
+                duration_ms: r.get(6)?,
+                incomplete: r.get::<_, i64>(7)? != 0,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Backfills the cached playback length of a recording (probed lazily when
+    /// the list is shown, since older rows were stored without a duration).
+    pub fn set_recording_duration(&self, id: i64, duration_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE recording SET duration_ms = ?2 WHERE id = ?1",
+            rusqlite::params![id, duration_ms],
+        )?;
+        Ok(())
     }
 
     /// Removes a recording from management and returns its file path

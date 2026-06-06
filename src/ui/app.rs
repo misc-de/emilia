@@ -9,10 +9,14 @@ use relm4::{adw, gtk};
 
 use crate::core::db::Library;
 use crate::core::player::Player;
-use crate::core::scanner;
-use crate::i18n::{gettext, gettext_f, ngettext_n};
-use crate::model::{AlbumMeta, ArtistMeta, Source, Track};
+use crate::i18n::{gettext, gettext_f};
+use crate::model::{AlbumMeta, ArtistMeta, Source};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
+pub(crate) use crate::ui::app_helpers::{
+    album_subtitle, apply_color_scheme, cover_widget, duration_label, find_scroller, fmt_duration,
+    fmt_rate, guarded_resume, initial_gallery_columns, most_common_artist, online_available,
+    read_entries, save_window_state, unix_now,
+};
 use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
 use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow, RowOpts};
@@ -128,66 +132,10 @@ pub(crate) fn confirm_destructive(
     confirm.present(Some(parent));
 }
 
-/// Before this position no resume is remembered (too close to the start).
-const RESUME_MIN_POS_MS: i64 = 5_000;
-/// This close to the end the track counts as finished → reset resume to 0.
-const RESUME_END_GUARD_MS: i64 = 10_000;
 /// Cadence of the quiet background backfill of missing artist photos & covers.
 /// Deliberately low (~1 min) so new users quickly get an enriched overview;
 /// the worker throttles the actual network requests itself.
 const AUTO_ENRICH_INTERVAL_SECS: u32 = 60;
-
-/// Resume position with guards: near start or end it is set to 0,
-/// so a nearly finished track starts from the beginning next time.
-/// Current time in Unix seconds (for the listening statistics timestamps).
-pub(crate) fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// Applies the color scheme ("system"/"dark"/"light") via the global
-/// libadwaita StyleManager. "system" follows the desktop setting.
-pub(crate) fn apply_color_scheme(code: &str) {
-    let scheme = match code {
-        "dark" => adw::ColorScheme::ForceDark,
-        "light" => adw::ColorScheme::ForceLight,
-        _ => adw::ColorScheme::Default,
-    };
-    adw::StyleManager::default().set_color_scheme(scheme);
-}
-
-/// Default gallery tiles-per-row when the user has not chosen one yet: **3** on
-/// phone-sized screens, **4** on the desktop. Decided from the monitor geometry
-/// (application pixels) mirroring the 550-unit narrow/mobile UI breakpoint —
-/// `is_mobile()` reads the runtime breakpoint flag, which is not set yet while
-/// the model is built. Once a value is stored in Settings, that wins.
-pub(crate) fn initial_gallery_columns() -> u32 {
-    let mobile = gtk::gdk::Display::default()
-        .and_then(|d| d.monitors().item(0))
-        .and_then(|obj| obj.downcast::<gtk::gdk::Monitor>().ok())
-        .map(|mon| {
-            let g = mon.geometry();
-            g.width().min(g.height()) <= 550
-        })
-        .unwrap_or(false);
-    if mobile {
-        3
-    } else {
-        4
-    }
-}
-
-pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
-    let too_early = pos_ms < RESUME_MIN_POS_MS;
-    let too_late = dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS;
-    if too_early || too_late {
-        0
-    } else {
-        pos_ms
-    }
-}
 
 /// Which view the podcast page shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -446,6 +394,9 @@ pub(crate) struct StreamingState {
     /// Play/pause buttons of the station rows (station id → button), for
     /// refreshing the icon when the playback state changes.
     pub(crate) stream_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(i64, gtk::Button)>>>,
+    /// Play/pause buttons of the recording rows (file path → button), same
+    /// purpose as [`Self::stream_play_buttons`].
+    pub(crate) rec_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
 }
 
 /// Podcasts page state, grouped off the `App` god-object.
@@ -2986,6 +2937,7 @@ impl Component for App {
                 recording_items: Vec::new(),
                 recordings_list: recordings_list.clone(),
                 stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                rec_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             },
             youtube: YoutubeState {
                 enabled: youtube_enabled,
@@ -3247,19 +3199,7 @@ impl Component for App {
                         };
                         // Tapping the active song again → toggle playback
                         // (pause/resume), instead of restarting.
-                        let is_active = self.mini.now_playing.is_some()
-                            && self.transport.queue.get(self.transport.queue_pos) == Some(&path);
-                        if is_active {
-                            if self.mini.playing {
-                                self.save_resume();
-                                self.player.pause();
-                            } else {
-                                self.player.resume();
-                            }
-                            self.mini.playing = !self.mini.playing;
-                            self.mpris.set_playing(self.mini.playing);
-                            self.refresh_queue_icons();
-                        } else {
+                        if !self.toggle_if_active_file(&path) {
                             // Is a real queue currently running? Then slip the
                             // single song in between and resume the queue
                             // afterwards at its spot (it stays intact).
@@ -3430,6 +3370,11 @@ impl Component for App {
                 path,
                 close,
             } => {
+                // Re-tapping the song that is already playing toggles
+                // pause/resume instead of restarting it.
+                if self.toggle_if_active_file(&PathBuf::from(&path)) {
+                    return;
+                }
                 let files: Vec<PathBuf> = self
                     .folder_tracks_ordered(&folder)
                     .into_iter()
@@ -3447,6 +3392,11 @@ impl Component for App {
                 }
             }
             Msg::PlayArtistTrack { name, path, close } => {
+                // Re-tapping the song that is already playing toggles
+                // pause/resume instead of restarting it.
+                if self.toggle_if_active_file(&PathBuf::from(&path)) {
+                    return;
+                }
                 // Queue = all tracks of the artist (across albums),
                 // start at the tapped track.
                 let files: Vec<PathBuf> = self
@@ -3468,6 +3418,11 @@ impl Component for App {
                 }
             }
             Msg::PlayOneTrack { path, close } => {
+                // Re-tapping the song that is already playing toggles
+                // pause/resume instead of restarting it.
+                if self.toggle_if_active_file(&PathBuf::from(&path)) {
+                    return;
+                }
                 // Selecting a single track (album or playlist) plays *only* that
                 // track – its siblings are not enqueued. Use the album/playlist
                 // play button for the whole thing. A single play is logged to
@@ -5205,362 +5160,6 @@ impl Component for App {
     }
 }
 
-/// Saves the window size/maximization and the most recently open navigation item
-/// (own short-lived DB connection, since called in the close handler).
-pub(crate) fn save_window_state(width: i32, height: i32, maximized: bool, section: Option<&str>) {
-    if let Ok(lib) = Library::open() {
-        let _ = lib.set_setting("win_width", &width.to_string());
-        let _ = lib.set_setting("win_height", &height.to_string());
-        let _ = lib.set_setting("win_maximized", if maximized { "1" } else { "0" });
-        if let Some(sec) = section {
-            let _ = lib.set_setting("active_section", sec);
-        }
-    }
-}
-
-/// Formats milliseconds as `m:ss` or `h:mm:ss` (negative → 0).
-pub(crate) fn fmt_duration(ms: i64) -> String {
-    let secs = ms.max(0) / 1000;
-    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
-
-/// Formats a playback rate compactly: `1.0 → "1×"`, `1.5 → "1.5×"`, `0.25 → "0.25×"`.
-pub(crate) fn fmt_rate(rate: f64) -> String {
-    let s = format!("{rate:.2}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    format!("{s}×")
-}
-
-/// Whether an online fetch makes sense: simply whether there is any connection
-/// at all. Deliberately **without** a metering check – the sync runs on any
-/// connection (the user's wish). The offline check remains, so that in a
-/// dead zone "failed attempts" are not logged in droves (which would lock an entry
-/// permanently). Basis: `gio::NetworkMonitor` (NetworkManager).
-pub(crate) fn online_available() -> bool {
-    use gtk::gio::prelude::NetworkMonitorExt;
-    gtk::gio::NetworkMonitor::default().is_network_available()
-}
-
-/// Most common artist designation (raw tag string) of a set of tracks – serves
-/// as the display/key artist of an album (for cover & album metadata).
-pub(crate) fn most_common_artist(tracks: &[Track]) -> String {
-    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for t in tracks {
-        if let Some(a) = t.artist.as_deref() {
-            *counts.entry(a).or_default() += 1;
-        }
-    }
-    counts
-        .into_iter()
-        .max_by_key(|(_, n)| *n)
-        .map(|(a, _)| a.to_string())
-        .unwrap_or_default()
-}
-
-/// Subtitle of an album row: "year · N songs" (year only if known).
-pub(crate) fn album_subtitle(year: Option<i32>, track_count: usize) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(y) = year {
-        parts.push(y.to_string());
-    }
-    parts.push(ngettext_n("{n} song", "{n} songs", track_count as u32));
-    parts.join(" · ")
-}
-
-/// Right-aligned, subtle duration label for a track row.
-pub(crate) fn duration_label(ms: i64) -> gtk::Label {
-    gtk::Label::builder()
-        .label(fmt_duration(ms))
-        .css_classes(["dim-label", "numeric"])
-        .build()
-}
-
-/// Square 48-px cover preview from a file path – decoded **synchronously**
-/// and cached; if the image is missing, the frame shows the placeholder icon. Intended for
-/// the on-demand opened, short subpage lists.
-/// First `ScrolledWindow` in the widget subtree (depth-first search), e.g. to find the
-/// scroll position of the currently visible overview section.
-pub(crate) fn find_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
-    // Skip invisible subtrees – otherwise one grabs e.g. the internal,
-    // hidden scroller of an empty `adw::StatusPage` instead of the real list.
-    if !widget.is_visible() {
-        return None;
-    }
-    if let Some(sc) = widget.downcast_ref::<gtk::ScrolledWindow>() {
-        return Some(sc.clone());
-    }
-    let mut child = widget.first_child();
-    while let Some(c) = child {
-        if let Some(sc) = find_scroller(&c) {
-            return Some(sc);
-        }
-        child = c.next_sibling();
-    }
-    None
-}
-
-pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget {
-    let texture = path.and_then(crate::ui::widgets::thumb_cached);
-    crate::ui::widgets::rounded_image(texture.as_ref(), placeholder, 48)
-}
-
-/// A **gallery tile**: square cover (or placeholder icon) with the
-/// title as a semi-transparent band at the bottom (overlay). Click/long-press handlers
-/// are added by the caller (FlowBox).
-///
-/// Does **not** decode synchronously: only an already cached cover is set
-/// immediately. The returned `Picture` (if a cover path is present) is filled
-/// in by the caller via background decoding ([`spawn_gallery_decode`]).
-/// Square default edge length of a gallery tile, until
-/// [`size_gallery_tiles`] knows the exact column width. Keeps the tile
-/// square from the start (instead of following the landscape format of the cover).
-const GALLERY_TILE_DEFAULT: i32 = 110;
-
-pub(crate) fn gallery_cell(
-    cover_path: Option<&str>,
-    icon: &str,
-    title: &str,
-) -> (gtk::Overlay, Option<gtk::Picture>) {
-    let overlay = gtk::Overlay::new();
-    // The exact tile size (exactly 1/column count of the width) is set centrally via
-    // [`size_gallery_tiles`] as the `size_request`. **No `hexpand`**: otherwise
-    // the FlowBox stretches the tiles beyond their share (e.g. with few
-    // entries a tile would take up more than 100%/columns of the width).
-    // `halign: Start`, so that the cell never grows beyond the `size_request`.
-    overlay.set_hexpand(false);
-    overlay.set_halign(gtk::Align::Start);
-    overlay.set_valign(gtk::Align::Start);
-    // **Square default size** right from creation – so that the tile
-    // stays square during the whole loading/layout phase (never landscape
-    // or collapsed), no matter when/if asynchronous covers arrive. [`size_gallery_tiles`]
-    // subsequently only refines the exact pixel size (column width).
-    overlay.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
-    // Square tile frame as a simple `Box` container. Its size is set hard
-    // by [`size_gallery_tiles`] to the square (width = height). Deliberately NOT
-    // an `AspectFrame`: it ignored its `size_request` in height and let the
-    // cell follow the landscape format of asynchronously loaded covers. A `Box` respects
-    // the `size_request` reliably; the cover fills format-filling (`Cover`),
-    // `overflow: Hidden` + `card` round/clip the corners.
-    let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    frame.set_overflow(gtk::Overflow::Hidden);
-    frame.set_hexpand(false);
-    frame.set_halign(gtk::Align::Fill);
-    frame.set_valign(gtk::Align::Fill);
-    frame.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
-    frame.add_css_class("card");
-    let picture = match cover_path {
-        Some(path) => {
-            // Cover as a `Picture`. Set **only** an already cached texture
-            // immediately (no synchronous decoding – that would otherwise block startup and
-            // gallery construction). Otherwise the card stays as a placeholder, until the
-            // cover is delivered in the background.
-            let pic = gtk::Picture::new();
-            pic.set_content_fit(gtk::ContentFit::Cover);
-            pic.set_can_shrink(true);
-            pic.set_hexpand(true);
-            pic.set_vexpand(true);
-            pic.set_halign(gtk::Align::Fill);
-            pic.set_valign(gtk::Align::Fill);
-            if let Some(tex) = crate::ui::widgets::cached_thumb(path) {
-                pic.set_paintable(Some(&tex));
-            }
-            frame.append(&pic);
-            Some(pic)
-        }
-        None => {
-            let img = gtk::Image::from_icon_name(icon);
-            img.set_pixel_size(64);
-            img.set_hexpand(true);
-            img.set_vexpand(true);
-            frame.append(&img);
-            None
-        }
-    };
-    overlay.set_child(Some(&frame));
-    let label = gtk::Label::new(Some(title));
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label.set_xalign(0.0);
-    label.set_valign(gtk::Align::End);
-    label.set_halign(gtk::Align::Fill);
-    label.add_css_class("emilia-gallery-title");
-    overlay.add_overlay(&label);
-    (overlay, picture)
-}
-
-/// Decodes the covers (path → target `Picture`) **in a background thread**
-/// and delivers the textures progressively on the UI thread. As a result, neither
-/// app startup nor gallery construction blocks the image decoding. Backpressure via
-/// a small, bounded channel, so that the thread does not run far ahead.
-pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
-    if items.is_empty() {
-        return;
-    }
-    let (tx, rx) = async_channel::bounded::<(usize, String, gtk::gdk::Texture)>(8);
-    let paths: Vec<String> = items.iter().map(|(p, _)| p.clone()).collect();
-    let targets: Vec<gtk::Picture> = items.into_iter().map(|(_, pic)| pic).collect();
-    std::thread::spawn(move || {
-        for (i, path) in paths.into_iter().enumerate() {
-            if let Some(tex) = crate::ui::widgets::decode_thumb(&path) {
-                // Aborts as soon as the receiver is gone (gallery rebuilt).
-                if tx.send_blocking((i, path, tex)).is_err() {
-                    break;
-                }
-            }
-        }
-    });
-    gtk::glib::spawn_future_local(async move {
-        while let Ok((i, path, tex)) = rx.recv().await {
-            crate::ui::widgets::store_thumb(path, tex.clone());
-            if let Some(pic) = targets.get(i) {
-                pic.set_paintable(Some(&tex));
-            }
-        }
-    });
-}
-
-fn gallery_width_hint(fb: &gtk::FlowBox) -> i32 {
-    if fb.width() > 1 {
-        return fb.width();
-    }
-    let mut ancestor = fb.parent();
-    while let Some(w) = ancestor {
-        if w.width() > 1 {
-            let margins = fb.margin_start() + fb.margin_end();
-            return (w.width() - margins).max(1);
-        }
-        ancestor = w.parent();
-    }
-    0
-}
-
-/// Sets each gallery tile to a **square in column width**. Necessary because
-/// the `FlowBox` does not stretch children beyond their natural size: without a fixed
-/// `size_request` the thumbnails would stay small in wide desktop mode (the image
-/// "does not scale along"), while the field gets wider. Called on every fill
-/// and on every width change of the window.
-pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
-    // Use `max_children_per_line` (= the configured `gallery_columns`), **not**
-    // `min_children_per_line`. `min` is deliberately pinned to 1 so the gallery
-    // can shrink to a single column on a narrow phone (see `fill_gallery`).
-    // Reading `min` here would compute `cols == 1` and size every tile to the
-    // full row width → exactly one giant tile per row instead of the configured
-    // column count.
-    let cols = fb.max_children_per_line().max(1) as i32;
-    let w = gallery_width_hint(fb);
-    if w <= 1 {
-        return; // not yet assigned – the resize hook catches up
-    }
-    let spacing = fb.column_spacing() as i32;
-    // Subtract `cols` times the spacing (instead of `cols-1`) as a safety buffer,
-    // so that always exactly `cols` tiles fit per row and do not wrap.
-    let tile = ((w - spacing * cols) / cols).max(64);
-    let mut child = fb.first_child();
-    while let Some(c) = child {
-        let next = c.next_sibling();
-        if let Some(inner) = c
-            .downcast_ref::<gtk::FlowBoxChild>()
-            .and_then(|f| f.child())
-        {
-            inner.set_size_request(tile, tile);
-            // Also set the AspectFrame (main child of the overlay) hard to the square
-            // – otherwise the cell height follows the aspect ratio of the (possibly
-            // landscape/portrait) cover instead of the width.
-            if let Some(frame) = inner.first_child() {
-                frame.set_size_request(tile, tile);
-            }
-        }
-        child = next;
-    }
-}
-
-/// Like [`size_gallery_tiles`], but tolerant of being called *before* the
-/// FlowBox has a real allocation. GTK assigns the width only **after** map, so a
-/// direct call during init (or right after a refill on a not-yet-shown page)
-/// sees `width()==0` and bails out – the tiles then keep their square default
-/// edge and only snap to the correct column width on the next relayout (e.g.
-/// when the user scrolls or resizes). To square them from the very first paint
-/// we wait, via a tick callback that runs once the widget is on a frame clock,
-/// for the first frame with a real width and then size exactly once.
-pub(crate) fn size_gallery_tiles_when_ready(fb: &gtk::FlowBox) {
-    if fb.width() > 1 {
-        size_gallery_tiles(fb);
-        return;
-    }
-    let tries = std::cell::Cell::new(0u32);
-    fb.add_tick_callback(move |fb, _| {
-        if fb.width() > 1 {
-            size_gallery_tiles(fb);
-            return gtk::glib::ControlFlow::Break;
-        }
-        tries.set(tries.get() + 1);
-        // Give up after a few seconds of frames so a never-shown gallery does
-        // not keep a callback alive forever.
-        if tries.get() > 240 {
-            gtk::glib::ControlFlow::Break
-        } else {
-            gtk::glib::ControlFlow::Continue
-        }
-    });
-}
-
-/// Reads subfolders and audio files of a folder (folders first, sorted).
-/// Runs in a background thread – may therefore block.
-pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(&dir) {
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                dirs.push(path);
-            } else if scanner::is_audio(&path) {
-                files.push(path);
-            }
-        }
-    }
-    dirs.sort();
-    files.sort();
-
-    // Properties: hide files that are not visible in the "Filesystem" area
-    // (inherited from album/artist). Files without a DB entry stay
-    // visible. Folders are not filtered (stay navigable).
-    let lib = Library::open().ok();
-    let mut out = Vec::with_capacity(dirs.len() + files.len());
-    // Hide folders whose folder property does not contain "Filesystem"
-    // (inherited from parent folders).
-    for d in dirs {
-        let visible = match &lib {
-            Some(lib) => lib
-                .folder_areas(&d.to_string_lossy())
-                .contains(&crate::core::category::Area::Filesystem),
-            None => true,
-        };
-        if visible {
-            out.push(FsEntry::dir(d));
-        }
-    }
-    for f in files {
-        let visible = match &lib {
-            Some(lib) => match lib.track_by_path(&f.to_string_lossy()).ok().flatten() {
-                Some(t) => lib
-                    .resolve_areas(t.artist.as_deref(), t.album.as_deref(), &t.path)
-                    .contains(&crate::core::category::Area::Filesystem),
-                None => true,
-            },
-            None => true,
-        };
-        if visible {
-            out.push(FsEntry::file(f));
-        }
-    }
-    out
-}
-
 impl App {
     /// One background worker of a manual refresh reported back → decrement the
     /// pending counter (saturating, so a stray completion can never wrap it).
@@ -5598,118 +5197,6 @@ impl App {
         self.load_audiobooks(sender);
         self.load_concerts(sender);
         self.reload_podcasts(sender);
-    }
-
-    /// Fills a FlowBox as a **gallery**: tiles from `(cover, icon, title)`,
-    /// column count = `gallery_columns`. A single click activates (`activate(index)`),
-    /// long press opens the detail (`detail(index)`). Messages go via
-    /// the own input sender. On a renewed call all tiles (including
-    /// their controllers) are removed – no duplicate handlers.
-    pub(crate) fn fill_gallery(
-        &self,
-        fb: &gtk::FlowBox,
-        items: &[(Option<String>, &'static str, String)],
-        activate: fn(usize) -> Msg,
-        detail: fn(usize) -> Msg,
-    ) {
-        while let Some(c) = fb.first_child() {
-            fb.remove(&c);
-        }
-        // `min = 1` (not the column count) so the gallery can shrink to a single
-        // column on a narrow phone screen; otherwise its minimum width
-        // (columns × tile) forces the whole window wider than the screen and the
-        // layout runs off the right edge. `max` still caps the columns on wide views.
-        fb.set_min_children_per_line(1);
-        fb.set_max_children_per_line(self.libview.gallery_columns);
-        // `homogeneous(true)` gives **all** tiles exactly the size set via `size_request`
-        // ([`size_gallery_tiles`]) (= 1/column count of the width) and
-        // does NOT stretch them to the row width. Without it the FlowBox distributes
-        // the row width over the tiles actually present – with few
-        // entries a tile would then take up more than 100%/columns.
-        fb.set_homogeneous(true);
-        fb.set_row_spacing(8);
-        fb.set_column_spacing(8);
-        fb.set_selection_mode(gtk::SelectionMode::None);
-        // Do NOT let the FlowBox itself react to a single click – otherwise
-        // it swallows the click before the tile gesture can evaluate it.
-        fb.set_activate_on_single_click(false);
-        if !fb.has_css_class("emilia-gallery") {
-            fb.add_css_class("emilia-gallery");
-        }
-        // Collect non-cached covers and load them in the background after construction.
-        let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
-        for (i, (cover, icon, title)) in items.iter().enumerate() {
-            let (cell, pic) = gallery_cell(cover.as_deref(), icon, title);
-            if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
-                if crate::ui::widgets::cached_thumb(path).is_none() {
-                    to_decode.push((path.to_string(), pic));
-                }
-            }
-            // Single tap → subpage **immediately** (`activate`), long press →
-            // detail view (`detail`) – exactly as in the list view. Deliberately
-            // NO double tap/no delay, so that the click does not hang.
-            let click = gtk::GestureClick::new();
-            {
-                let input = self.input.clone();
-                click.connect_released(move |g, n, _, _| {
-                    if n == 1 {
-                        g.set_state(gtk::EventSequenceState::Claimed);
-                        let _ = input.send(activate(i));
-                    }
-                });
-            }
-            cell.add_controller(click);
-            let long_press = gtk::GestureLongPress::new();
-            {
-                let input = self.input.clone();
-                long_press.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    let _ = input.send(detail(i));
-                });
-            }
-            cell.add_controller(long_press);
-            fb.append(&cell);
-        }
-        // Fetch the covers of the not-yet-cached tiles in the background.
-        spawn_gallery_decode(to_decode);
-        // Bring the tiles to a square at column width. At the first fill (init /
-        // not-yet-shown page) the FlowBox has no width yet, so this defers via a
-        // tick callback until the first frame with a real allocation – squaring
-        // them on the first paint instead of only after a scroll.
-        size_gallery_tiles_when_ready(fb);
-        // Couple to size changes once per FlowBox. `connect_map` fires
-        // only when the FlowBox is visible **and allocated in the tree** – there
-        // we re-measure and couple (once) to the `page-size` of the
-        // enclosing ScrolledWindow, so that the tiles scale along in desktop mode on
-        // a window width change.
-        if self
-            .libview
-            .gallery_hooked
-            .borrow_mut()
-            .insert(fb.as_ptr() as usize)
-        {
-            let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
-            fb.connect_map(move |fb| {
-                size_gallery_tiles_when_ready(fb);
-                if pagesize_done.get() {
-                    return;
-                }
-                let mut ancestor = fb.parent();
-                while let Some(w) = ancestor {
-                    if let Ok(sw) = w.clone().downcast::<gtk::ScrolledWindow>() {
-                        let weak = fb.downgrade();
-                        sw.hadjustment().connect_page_size_notify(move |_| {
-                            if let Some(fb) = weak.upgrade() {
-                                size_gallery_tiles(&fb);
-                            }
-                        });
-                        pagesize_done.set(true);
-                        break;
-                    }
-                    ancestor = w.parent();
-                }
-            });
-        }
     }
 
     /// Narrow (mobile) mode? Driven purely by the width breakpoint – not by the
@@ -6046,35 +5533,5 @@ impl App {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{fmt_duration, guarded_resume};
-
-    #[test]
-    fn guarded_resume_clamps_start_and_end() {
-        let dur = 3_600_000; // 1 h
-                             // In the middle → unchanged.
-        assert_eq!(guarded_resume(1_000_000, dur), 1_000_000);
-        // Near the start (< 5 s) → 0.
-        assert_eq!(guarded_resume(3_000, dur), 0);
-        // Near the end (< 10 s remaining) → 0 (next time from the start).
-        assert_eq!(guarded_resume(dur - 5_000, dur), 0);
-        // Unknown duration (0) → no end check, position stays.
-        assert_eq!(guarded_resume(1_000_000, 0), 1_000_000);
-    }
-
-    #[test]
-    fn fmt_duration_formats_minutes_and_hours() {
-        assert_eq!(fmt_duration(0), "0:00");
-        assert_eq!(fmt_duration(5_000), "0:05");
-        assert_eq!(fmt_duration(65_000), "1:05");
-        assert_eq!(fmt_duration(600_000), "10:00");
-        // Audio drama lengths with hours.
-        assert_eq!(fmt_duration(3_661_000), "1:01:01");
-        // Negative values are clamped to 0.
-        assert_eq!(fmt_duration(-1), "0:00");
     }
 }

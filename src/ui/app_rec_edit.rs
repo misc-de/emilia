@@ -29,6 +29,13 @@ const FOLLOW_INTERVAL_MS: u64 = 50;
 /// in — covers the pipeline preroll (reset → preroll → seek → play).
 const PLAY_GUARD_TICKS: u8 = 40;
 
+/// Formats a number of seconds as `m:ss` (negative clamped to zero), for the
+/// playhead/total time labels next to the timeline.
+fn fmt_secs(secs: f64) -> String {
+    let s = secs.max(0.0).round() as i64;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
 /// Maps an original-timeline position (seconds) onto the shortened preview
 /// timeline by subtracting every cut that lies before it. A position inside a cut
 /// collapses to that cut's start. `merged` must be sorted and non-overlapping.
@@ -288,19 +295,30 @@ impl App {
         }
         content.append(&scrollbar);
 
-        // Timeline (synced with the waveform and the audio): a position picker.
+        // Timeline (synced with the waveform and the audio): a position picker,
+        // flanked by the current playhead time (left) and the total length (right).
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
         scale.set_draw_value(false);
         scale.set_hexpand(true);
+        let time_pos = gtk::Label::new(Some("0:00"));
+        time_pos.set_css_classes(&["dim-label", "numeric"]);
+        let time_total = gtk::Label::new(Some("0:00"));
+        time_total.set_css_classes(&["dim-label", "numeric"]);
         {
             let state = state.clone();
             let area2 = area.clone();
+            let time_pos = time_pos.clone();
             scale.connect_value_changed(move |s| {
                 state.borrow_mut().playhead = s.value();
                 area2.queue_draw();
+                time_pos.set_label(&fmt_secs(s.value()));
             });
         }
-        content.append(&scale);
+        let scale_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        scale_row.append(&time_pos);
+        scale_row.append(&scale);
+        scale_row.append(&time_total);
+        content.append(&scale_row);
 
         // Bottom: zoom −/+ (left), reset + save (right).
         let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -415,6 +433,7 @@ impl App {
             let adj = adj.clone();
             let scrollbar = scrollbar.clone();
             let scale2 = scale.clone();
+            let time_total = time_total.clone();
             scissors.connect_clicked(move |_| {
                 let sel = state.borrow().sel;
                 if let Some((s0, s1)) = sel {
@@ -430,6 +449,7 @@ impl App {
                     }
                     let dur = state.borrow().duration;
                     scale2.set_range(0.0, dur.max(0.001));
+                    time_total.set_label(&fmt_secs(dur));
                     sync_scrollbar(&adj, &scrollbar, &area2, &state);
                 }
             });
@@ -498,6 +518,7 @@ impl App {
             let adj = adj.clone();
             let scrollbar = scrollbar.clone();
             let scale2 = scale.clone();
+            let time_total = time_total.clone();
             reset.connect_clicked(move |btn| {
                 let has_cuts = !state.borrow().cuts.is_empty();
                 let apply = {
@@ -506,6 +527,7 @@ impl App {
                     let adj = adj.clone();
                     let scrollbar = scrollbar.clone();
                     let scale2 = scale2.clone();
+                    let time_total = time_total.clone();
                     move || {
                         {
                             let mut st = state.borrow_mut();
@@ -517,6 +539,7 @@ impl App {
                         }
                         let dur = state.borrow().duration;
                         scale2.set_range(0.0, dur.max(0.001));
+                        time_total.set_label(&fmt_secs(dur));
                         sync_scrollbar(&adj, &scrollbar, &area2, &state);
                     }
                 };
@@ -710,6 +733,7 @@ impl App {
             let scale = scale.clone();
             let adj = adj.clone();
             let scrollbar = scrollbar.clone();
+            let time_total = time_total.clone();
             gtk::glib::spawn_future_local(async move {
                 if let Ok(Ok((peaks, dur))) = rx.recv().await {
                     {
@@ -719,6 +743,7 @@ impl App {
                         st.recompute_view();
                     }
                     scale.set_range(0.0, dur.max(0.001));
+                    time_total.set_label(&fmt_secs(state.borrow().duration));
                     sync_scrollbar(&adj, &scrollbar, &area, &state);
                 }
             });

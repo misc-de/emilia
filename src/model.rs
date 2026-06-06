@@ -175,6 +175,9 @@ pub struct YtRecent {
     /// this is the cover derived from the first song; videos resolve their own
     /// cover from the id.
     pub thumbnail: Option<String>,
+    /// Cached playback length in seconds (videos only; `None` for playlists or
+    /// when not yet known).
+    pub duration: Option<i64>,
 }
 
 /// A video together with its channel – for the cross-channel "Newest videos"
@@ -215,6 +218,8 @@ pub struct RecordingItem {
     pub station: Option<String>,
     /// Recording time (Unix seconds).
     pub recorded_at: i64,
+    /// Playback length in milliseconds (0 until probed/backfilled).
+    pub duration_ms: i64,
     /// Beginning was missing (started too late) – marked as a hint only.
     pub incomplete: bool,
 }

@@ -2,7 +2,7 @@
 //! running equalizer. Extracted from app.rs – pure reordering, no
 //! change in behavior; the methods remain inherent `impl App` methods.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gtk::prelude::GtkWindowExt;
 use relm4::{adw, gtk};
@@ -68,6 +68,8 @@ impl App {
         self.refresh_episode_icons();
         // …and of the YouTube video rows.
         self.refresh_yt_icons();
+        // …and of the saved-recording rows.
+        self.refresh_recording_icons();
     }
 
     /// Credentials of the currently active WebDAV source (if one is active).
@@ -620,6 +622,27 @@ impl App {
         *self.transport.close_session.borrow_mut() = Some((path_str, now, 0, duration_ms));
     }
 
+    /// Tapping the entry of the file that is *already loaded* must not restart
+    /// it. If `path` is the currently playing/paused file, this toggles
+    /// pause/resume (like the mini player) and returns `true` so the caller
+    /// skips re-queuing it. Returns `false` for any other file, so the caller
+    /// proceeds to start it normally.
+    pub(crate) fn toggle_if_active_file(&mut self, path: &Path) -> bool {
+        if self.transport.playing_path.as_deref() != Some(path) {
+            return false;
+        }
+        if self.mini.playing {
+            self.save_resume();
+            self.player.pause();
+        } else {
+            self.player.resume();
+        }
+        self.mini.playing = !self.mini.playing;
+        self.mpris.set_playing(self.mini.playing);
+        self.refresh_queue_icons();
+        true
+    }
+
     pub(crate) fn play_current(&mut self) {
         // Save the position of the previously running track before a new one is loaded.
         self.save_resume();
@@ -908,6 +931,11 @@ impl App {
     /// (CD folder), then disc and track number from the tags, otherwise file name.
     pub(crate) fn play_path(&mut self, path: &str, is_dir: bool) {
         let p = PathBuf::from(path);
+        // Re-tapping the song that is already playing toggles pause/resume
+        // instead of restarting it (folders always (re)start the whole set).
+        if !is_dir && self.toggle_if_active_file(&p) {
+            return;
+        }
         let files = if is_dir {
             let mut fs = scanner::collect_audio_files(&p);
             // Like the display (`folder_tracks_ordered`): **natural** path

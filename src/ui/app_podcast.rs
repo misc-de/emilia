@@ -230,6 +230,17 @@ impl App {
                 cover.as_deref(),
                 "microphone-symbolic",
             ));
+            // Episode length as a subtle label, left of the play button.
+            if let Some(d) = ep
+                .duration
+                .as_deref()
+                .and_then(crate::core::podcast::format_duration)
+            {
+                let lbl = gtk::Label::new(Some(&d));
+                lbl.set_valign(gtk::Align::Center);
+                lbl.set_css_classes(&["dim-label", "numeric"]);
+                row.add_suffix(&lbl);
+            }
             row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
             {
                 let sender = sender.clone();
