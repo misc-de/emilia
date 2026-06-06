@@ -1527,6 +1527,24 @@ impl App {
         }
     }
 
+    /// Builds a share [`Selection`](crate::core::sync::share::Selection) for a
+    /// detail-view target: all of its local files, as absolute paths. Empty when
+    /// the target has no shareable local files (e.g. a YouTube-only item).
+    pub(crate) fn ctx_share_selection(
+        &self,
+        target: &CtxTarget,
+    ) -> crate::core::sync::share::Selection {
+        let song_paths = self
+            .ctx_files(target)
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        crate::core::sync::share::Selection {
+            song_paths,
+            ..Default::default()
+        }
+    }
+
     /// Converts raw area entries (concerts/audiobooks) into a list of
     /// **albums and individual pieces**: "album"/"track" stay; a marked
     /// "folder" is resolved into its albums and loose tracks; "artist" is dropped.

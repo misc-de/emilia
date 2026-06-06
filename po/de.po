@@ -1820,13 +1820,17 @@ msgstr "Die Kamera auf den Code des anderen Geräts richten"
 msgid "Connected with {name}"
 msgstr "Verbunden mit {name}"
 
-#: src/ui/sync_page.rs:388
-msgid "You can share now, or wait for the other device to share."
-msgstr "Du kannst jetzt teilen oder warten, bis das andere Gerät teilt."
+#: src/ui/sync_page.rs:397
+msgid "To share something, open a track or album and choose “Share”."
+msgstr "Zum Teilen einen Titel oder ein Album öffnen und „Teilen“ wählen."
 
-#: src/ui/sync_page.rs:396 src/ui/sync_share_ui.rs:93
-msgid "Share with {peer}"
-msgstr "Mit {peer} teilen"
+#: src/ui/sync_page.rs:407
+msgid "Close"
+msgstr "Schließen"
+
+#: src/ui/app.rs:3872
+msgid "Nothing here to share"
+msgstr "Nichts zum Teilen vorhanden"
 
 #: src/ui/sync_page.rs:406
 msgid "Disconnect"

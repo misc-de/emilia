@@ -2,10 +2,11 @@
 //! decoupled from any window:** the server thread / client worker keep running in
 //! the background once paired, so the pairing survives closing the window. A
 //! single navigation-free window swaps its content through the flow
-//! (mode-select → QR/scan → "Connected with X" → picker/confirm → progress →
-//! success). The header "Share" button routes here: while connected it opens the
-//! connected panel (Share / Disconnect) straight away, otherwise the mode-select.
-//! Extracted from the `App` god-object.
+//! (mode-select → QR/scan → "Connected with X" with Close / Disconnect). The
+//! header sync icon routes here for **pairing/status only**; it never starts a
+//! share. Sharing is always initiated from an item's detail view, which hands us
+//! a ready `Selection` via [`SyncInput::ShareSelection`] → size confirm →
+//! progress → success. Extracted from the `App` god-object.
 //!
 //! Logic/network lives in [`crate::core::sync`]; here only widgets + event flow.
 //! The component owns its window and worker; it tells the parent (via `Output`)
@@ -30,9 +31,7 @@ use crate::core::sync::server::{ShareChannel, SyncServer};
 use crate::core::sync::share::{self, ShareDecision, ShareManifest};
 use crate::core::sync::{self, crypto, data, SyncEvent};
 use crate::i18n::{gettext, gettext_f};
-use crate::ui::sync_share_ui::{
-    build_confirm, build_picker, build_review, PickerHandles, ReviewHandles,
-};
+use crate::ui::sync_share_ui::{build_confirm, build_review, ReviewHandles};
 
 /// Commands from the UI to the persistent client-session worker.
 enum ClientCmd {
@@ -88,8 +87,6 @@ pub(crate) struct SyncPage {
     share_chan: Option<Arc<Mutex<ShareChannel>>>,
     /// Client role: command channel to the session worker.
     client_cmd: Option<mpsc::Sender<ClientCmd>>,
-    /// Sender picker widget handles (read into a `Selection` on continue).
-    picker: Option<PickerHandles>,
     /// Receiver review widget handles (read into a `ShareDecision` on accept).
     review: Option<ReviewHandles>,
     /// The offer we are about to send (server role parks it; client role sends).
@@ -102,20 +99,25 @@ pub(crate) struct SyncPage {
 
 #[derive(Debug)]
 pub(crate) enum SyncInput {
-    /// Header "Share" tapped: open the flow window. While connected this lands on
-    /// the connected panel (Share / Disconnect); otherwise on the mode selection.
+    /// Header sync icon tapped: open the flow window. While connected this lands
+    /// on the connected panel (Close / Disconnect); otherwise on the mode
+    /// selection (offer / scan).
     Open(adw::ApplicationWindow),
     StartServer,
     StartScan,
     QrDecoded(String),
-    /// User tapped "Share" on the connected panel → open the selection picker.
-    OpenSharePicker,
-    /// Picker "Continue" → resolve the selection to a manifest (size confirm next).
-    PreparePicked,
+    /// Share a concrete selection built from a detail view with the connected
+    /// peer: resolve it to a manifest off-thread, then show the size confirmation.
+    ShareSelection {
+        window: adw::ApplicationWindow,
+        selection: share::Selection,
+    },
     /// Size-confirmation "Send" → park/send the prepared offer.
     ConfirmSend,
-    /// Cancel out of the picker/confirm back to the connected panel.
+    /// Cancel out of the confirmation back to the connected panel.
     CancelShare,
+    /// "Close" on the connected panel → hide the window, keep the pairing alive.
+    CloseWindow,
     /// Review "Accept" → apply the (selectively) accepted offer.
     AcceptOffer,
     /// Review "Reject all".
@@ -178,7 +180,6 @@ impl Component for SyncPage {
             sub_toolbar: None,
             share_chan: None,
             client_cmd: None,
-            picker: None,
             review: None,
             prepared_manifest: None,
             incoming_manifest: None,
@@ -197,10 +198,17 @@ impl Component for SyncPage {
             SyncInput::StartServer => self.start_server(&sender),
             SyncInput::StartScan => self.start_scan(&sender),
             SyncInput::QrDecoded(url) => self.handle_qr(&url, &sender),
-            SyncInput::OpenSharePicker => self.open_share_picker(&sender),
-            SyncInput::PreparePicked => self.prepare_picked(&sender),
+            SyncInput::ShareSelection { window, selection } => {
+                self.window = Some(window);
+                self.share_selection(selection, &sender);
+            }
             SyncInput::ConfirmSend => self.confirm_send(),
             SyncInput::CancelShare => self.show_connected_panel(&sender),
+            SyncInput::CloseWindow => {
+                if let Some(sub) = &self.sub {
+                    sub.close();
+                }
+            }
             SyncInput::AcceptOffer => self.accept_offer(&sender),
             SyncInput::RejectOffer => self.reject_offer(&sender),
             SyncInput::BackToConnected => self.show_connected_panel(&sender),
@@ -254,7 +262,7 @@ impl SyncPage {
             == Some("1")
     }
 
-    /// Header "Share" entry: ensure the flow window exists, then land on the
+    /// Header sync-icon entry: ensure the flow window exists, then land on the
     /// connected panel (if a pairing is live) or the mode selection.
     fn open_entry(&mut self, sender: &ComponentSender<Self>) {
         self.ensure_window(sender);
@@ -364,8 +372,9 @@ impl SyncPage {
     }
 
     /// The connected panel — the single "Connected with X" success screen, with
-    /// "Share" (→ picker) and "Disconnect". Reached on pairing and whenever the
-    /// header "Share" button is tapped while a pairing is live.
+    /// "Close" (hide, keep the pairing) and "Disconnect". Reached on pairing and
+    /// whenever the header sync icon is tapped while a pairing is live. Sharing is
+    /// **not** offered here; it is started per item from a detail view.
     fn show_connected_panel(&mut self, sender: &ComponentSender<Self>) {
         self.set_title(&gettext("Device sync"));
         let content = padded_vbox();
@@ -385,22 +394,24 @@ impl SyncPage {
             .build();
         let hint = gtk::Label::builder()
             .label(gettext(
-                "You can share now, or wait for the other device to share.",
+                "To share something, open a track or album and choose \u{201c}Share\u{201d}.",
             ))
             .css_classes(["dim-label"])
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
 
-        let share_btn = gtk::Button::builder()
-            .label(gettext_f("Share with {peer}", &[("peer", &self.peer_name)]))
+        // "Close" hides the window but keeps the pairing alive in the background;
+        // "Disconnect" actively ends it.
+        let close_btn = gtk::Button::builder()
+            .label(gettext("Close"))
             .css_classes(["suggested-action", "pill"])
             .halign(gtk::Align::Center)
             .margin_top(6)
             .build();
         {
             let sender = sender.clone();
-            share_btn.connect_clicked(move |_| sender.input(SyncInput::OpenSharePicker));
+            close_btn.connect_clicked(move |_| sender.input(SyncInput::CloseWindow));
         }
         let disconnect_btn = gtk::Button::builder()
             .label(gettext("Disconnect"))
@@ -415,7 +426,7 @@ impl SyncPage {
         content.append(&icon);
         content.append(&title);
         content.append(&hint);
-        content.append(&share_btn);
+        content.append(&close_btn);
         content.append(&disconnect_btn);
         // No live status widgets on this panel; a transfer rebuilds the progress
         // panel with its own status/progress labels.
@@ -795,19 +806,15 @@ impl SyncPage {
 
     // --- Selective share (sender + receiver) -------------------------------
 
-    /// "Share" tapped → show the selection picker.
-    fn open_share_picker(&mut self, sender: &ComponentSender<Self>) {
-        let (page, handles) = build_picker(&self.library, &self.peer_name, &self.peer_caps, sender);
-        self.picker = Some(handles);
-        self.set_sub_content(&page);
-    }
-
-    /// Picker "Continue" → resolve the selection to a manifest off the UI thread.
-    fn prepare_picked(&mut self, sender: &ComponentSender<Self>) {
-        let Some(picker) = self.picker.take() else {
+    /// Share a concrete selection (built from a detail view) with the connected
+    /// peer: resolve it to a manifest off the UI thread, then show the size
+    /// confirmation. No-op when not paired.
+    fn share_selection(&mut self, sel: share::Selection, sender: &ComponentSender<Self>) {
+        if !self.connected {
             return;
-        };
-        let sel = picker.to_selection();
+        }
+        self.ensure_window(sender);
+        self.set_title(&gettext("Device sync"));
         // Brief feedback while hashing runs.
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
@@ -998,7 +1005,6 @@ impl SyncPage {
         self.synced_ok = false;
         self.sync_summary.clear();
         self.sub_toolbar = None;
-        self.picker = None;
         self.review = None;
         self.prepared_manifest = None;
         self.incoming_manifest = None;

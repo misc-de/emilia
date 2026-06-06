@@ -733,6 +733,8 @@ pub enum Msg {
     CtxAddPlaylist,
     CtxEqualizer,
     CtxShare,
+    /// Header sync icon → open the pairing / connection-status dialog (no item).
+    OpenSync,
     // --- Device synchronization (handled by the SyncPage component) ---
     /// The sync component paired/disconnected → tint the header icon.
     SyncConnected(bool),
@@ -1391,15 +1393,16 @@ impl Component for App {
                             #[watch]
                             set_sensitive: model.refresh_pending == 0,
                         },
-                        // Device synchronization: opens the same "Share" dialog
-                        // as the action in the detail menu (no separate popover). With
-                        // an existing pairing the icon is rendered green
+                        // Device sync: opens the pairing / connection-status dialog
+                        // (QR offer / scan, or "Connected with X"). Sharing itself
+                        // is always started per item from a detail view, not here.
+                        // With an existing pairing the icon is rendered green
                         // (CSS class, see below).
                         #[name = "sync_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emilia-share-symbolic",
-                            set_tooltip_text: Some(&gettext("Share")),
-                            connect_clicked => Msg::CtxShare,
+                            set_tooltip_text: Some(&gettext("Device sync")),
+                            connect_clicked => Msg::OpenSync,
                             #[watch]
                             set_css_classes: if model.sync_connected {
                                 &["sync-connected"]
@@ -3859,9 +3862,28 @@ impl Component for App {
             }
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => {
-                // The SyncPage decides what to show: while connected it opens the
-                // connected panel (Share / Disconnect) directly, otherwise the
-                // connection menu (offer / scan).
+                use crate::ui::sync_page::SyncInput;
+                if self.sync_connected {
+                    // Paired: share the item whose detail menu this is. The
+                    // SyncPage shows a short size confirmation, then sends it.
+                    if let Some(target) = self.nav.context_target.clone() {
+                        let selection = self.ctx_share_selection(&target);
+                        if selection.song_paths.is_empty() {
+                            self.toast(&gettext("Nothing here to share"));
+                        } else {
+                            self.sync_page.emit(SyncInput::ShareSelection {
+                                window: root.clone(),
+                                selection,
+                            });
+                        }
+                    }
+                } else {
+                    // Not paired yet: open the pairing dialog. Once connected, the
+                    // user starts the share again from the detail view.
+                    self.sync_page.emit(SyncInput::Open(root.clone()));
+                }
+            }
+            Msg::OpenSync => {
                 use crate::ui::sync_page::SyncInput;
                 self.sync_page.emit(SyncInput::Open(root.clone()));
             }
