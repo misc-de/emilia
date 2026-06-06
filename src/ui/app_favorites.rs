@@ -335,11 +335,23 @@ impl App {
                 .flatten()
                 .and_then(|m| m.image_path)
                 .or_else(|| self.artist_album_cover(key)),
-            "track" => crate::core::online::local_track_cover(key).or_else(|| {
-                let t = self.library.track_by_path(key).ok().flatten()?;
-                let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
-                self.album_cover_for(t.artist.as_deref().unwrap_or(""), album)
-            }),
+            "track" => {
+                // YouTube tracks (synthetic `yt:<id>` path) aren't in the `track`
+                // table and have no embedded cover; use the enriched cover or the
+                // video thumbnail (same lookup as the playlist rows).
+                if let Some(vid) = crate::core::youtube::parse_yt_path(key) {
+                    return crate::core::online::youtube_cover_path(&vid).or_else(|| {
+                        crate::core::online::youtube_thumb_path(
+                            &crate::core::youtube::thumbnail_url(&vid),
+                        )
+                    });
+                }
+                crate::core::online::local_track_cover(key).or_else(|| {
+                    let t = self.library.track_by_path(key).ok().flatten()?;
+                    let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
+                    self.album_cover_for(t.artist.as_deref().unwrap_or(""), album)
+                })
+            }
             "folder" => self.folder_cover(key),
             _ => None,
         }

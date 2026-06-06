@@ -284,8 +284,15 @@ impl LibView {
 
 /// Playback transport: queue, shuffle order, history, resume/stats sessions.
 pub(crate) struct TransportState {
+    /// Active playback context: the album/artist/folder/track currently being
+    /// played through. Replaced freely whenever the user starts something new.
     pub(crate) queue: Vec<PathBuf>,
     pub(crate) queue_pos: usize,
+    /// Explicitly enqueued tracks ("Add to queue"). This is the user-curated
+    /// queue shown in the queue dialog – it is **never** overwritten by simply
+    /// playing an album/song. Its entries jump ahead of the rest of the context
+    /// (spliced in by `play_next`) and are consumed as they play.
+    pub(crate) user_queue: Vec<PathBuf>,
     pub(crate) shuffle: bool,
     /// Random order of the queue indices (Fisher-Yates) for shuffle.
     pub(crate) shuffle_order: Vec<usize>,
@@ -330,6 +337,10 @@ pub(crate) struct MiniState {
     /// Title shown in the player bar; `None` when nothing is loaded.
     pub(crate) now_playing: Option<String>,
     pub(crate) playing: bool,
+    /// A slow source (Nextcloud/YouTube) is resolving/buffering: show a spinner
+    /// in the play button until the pipeline is ready. Local files start fast
+    /// enough that a spinner would only flicker, so it stays off for them.
+    pub(crate) loading: bool,
     /// Current position and total duration of the running track (ms).
     pub(crate) position_ms: i64,
     pub(crate) track_duration_ms: i64,
@@ -785,18 +796,27 @@ pub enum Msg {
     },
     /// Open the queue dialog.
     ShowQueue,
-    /// Start playback at a specific queue entry (queue index).
-    PlayQueueAt(usize),
+    /// Play a user-queue entry now (its index + length; album rows span `len`
+    /// tracks). The entry jumps ahead of the rest of the queue.
+    PlayQueueAt {
+        start: usize,
+        len: usize,
+    },
     /// Set the playback speed (0.25–2.0, in 0.25 steps).
     SetPlaybackRate(f64),
     /// The current track failed to play (missing file/mount, unreachable
     /// Nextcloud, …) → skip to the next entry.
     PlaybackError,
-    /// Clear the entire queue (after confirmation) and stop playback.
+    /// The freshly loaded pipeline prerolled (buffered enough to play) → clear
+    /// the loading spinner of a slow source (Nextcloud/YouTube).
+    PlaybackReady,
+    /// Clear the user queue (after confirmation). Playback keeps running.
     QueueClear,
-    /// Move a queue entry (queue indices).
-    QueueMove {
+    /// Reorder the user queue: move the `len`-track block starting at `from` so
+    /// it lands at index `to` (album rows move as one block).
+    QueueMoveRange {
         from: usize,
+        len: usize,
         to: usize,
     },
     SetMusicDir(PathBuf),
@@ -1165,6 +1185,8 @@ pub enum Msg {
     EditRecording(i64),
     /// Preview a recording file from a chosen position (ms) – editor playhead.
     RecordingPlayFrom { path: String, ms: i64 },
+    /// Pause the editor preview (pauses the main player it plays through).
+    RecordingPreviewPause,
     /// Apply the editor's cut ranges (seconds) to a recording and overwrite it.
     RecordingApplyCut { id: i64, cuts: Vec<(f64, f64)> },
     /// Result of the background cut: new path (`None` = failed) + new duration.
@@ -2348,11 +2370,24 @@ impl Component for App {
                                     connect_clicked => Msg::Prev,
                                 },
                                 gtk::Button {
-                                    #[watch]
-                                    set_icon_name: if model.mini.playing {
-                                        "media-playback-pause-symbolic"
-                                    } else {
-                                        "media-playback-start-symbolic"
+                                    // Play/pause icon, or a spinner while a slow
+                                    // source (Nextcloud/YouTube) resolves/buffers.
+                                    #[wrap(Some)]
+                                    set_child = &gtk::Stack {
+                                        #[watch]
+                                        set_visible_child_name: if model.mini.loading { "spinner" } else { "icon" },
+                                        add_named[Some("icon")] = &gtk::Image {
+                                            #[watch]
+                                            set_icon_name: Some(if model.mini.playing {
+                                                "media-playback-pause-symbolic"
+                                            } else {
+                                                "media-playback-start-symbolic"
+                                            }),
+                                        },
+                                        add_named[Some("spinner")] = &gtk::Spinner {
+                                            #[watch]
+                                            set_spinning: model.mini.loading,
+                                        },
                                     },
                                     set_tooltip_text: Some(&gettext("Play/Pause")),
                                     add_css_class: "circular",
@@ -2364,7 +2399,9 @@ impl Component for App {
                                     // exists (so a freshly enqueued track can be
                                     // started without auto-playing on add).
                                     #[watch]
-                                    set_sensitive: model.mini.now_playing.is_some() || !model.transport.queue.is_empty(),
+                                    set_sensitive: model.mini.now_playing.is_some()
+                                        || !model.transport.queue.is_empty()
+                                        || !model.transport.user_queue.is_empty(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
                                 // Record button right next to play/pause, on the
@@ -2716,7 +2753,11 @@ impl Component for App {
                     let sender = sender.clone();
                     move |title| sender.input(Msg::StreamTitle(title))
                 },
-                move || sender.input(Msg::PlaybackError),
+                {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::PlaybackError)
+                },
+                move || sender.input(Msg::PlaybackReady),
             );
         }
 
@@ -2867,6 +2908,7 @@ impl Component for App {
             transport: TransportState {
                 queue: Vec::new(),
                 queue_pos: 0,
+                user_queue: Vec::new(),
                 shuffle: false,
                 shuffle_order: Vec::new(),
                 shuffle_idx: 0,
@@ -2888,6 +2930,7 @@ impl Component for App {
             mini: MiniState {
                 now_playing: None,
                 playing: false,
+                loading: false,
                 position_ms: 0,
                 track_duration_ms: 0,
                 playback_rate: 1.0,
@@ -3036,6 +3079,28 @@ impl Component for App {
             model.transport.queue = q;
             model.transport.queue_pos = q_pos;
         }
+
+        // Restore the explicit user queue ("Add to queue"). Streamable remote
+        // entries (YouTube `yt:` / Nextcloud `nc:`) have no local file but are
+        // still playable, so they are kept alongside existing local files.
+        model.transport.user_queue = model
+            .library
+            .get_setting("user_queue_paths")
+            .ok()
+            .flatten()
+            .map(|s| {
+                s.split('\n')
+                    .filter(|l| !l.is_empty())
+                    .map(PathBuf::from)
+                    .filter(|p| {
+                        let s = p.to_string_lossy();
+                        p.exists()
+                            || crate::core::youtube::parse_yt_path(&s).is_some()
+                            || crate::core::webdav::parse_nc_path(&s).is_some()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         // With no primary music folder configured the "Music" tab is dropped, so
         // a stale Primary selection is moved to the first real source (which then
@@ -3225,16 +3290,16 @@ impl Component for App {
                     .map(|r| r.entry.clone());
                 let path = entry.and_then(|e| self.entry_files(&e).into_iter().next());
                 if let Some(path) = path {
-                    if let Some(pos) = self.transport.queue.iter().position(|p| *p == path) {
-                        self.transport.queue.remove(pos);
-                        if self.transport.queue_pos > pos {
-                            self.transport.queue_pos -= 1;
-                        }
+                    // Toggle membership in the user queue (never the active
+                    // context): a second tap removes it again.
+                    if let Some(pos) = self.transport.user_queue.iter().position(|p| *p == path) {
+                        self.transport.user_queue.remove(pos);
                         self.toast(&gettext("Removed from queue"));
                     } else {
-                        self.transport.queue.push(path);
+                        self.transport.user_queue.push(path);
                         self.toast(&gettext("Will play next"));
                     }
+                    self.reload_queue_list();
                     self.refresh_queue_icons();
                     self.save_queue();
                 }
@@ -3475,14 +3540,11 @@ impl Component for App {
                 if let Some(entry) = self.nav.context_target.clone() {
                     let mut files = self.ctx_files(&entry);
                     let n = files.len();
-                    let was_empty = self.transport.queue.is_empty();
-                    self.transport.queue.append(&mut files);
-                    // Don't auto-start: just enqueue. If the queue was empty,
-                    // point the position at the first added track so the play
-                    // button starts there when the user decides to play.
-                    if was_empty {
-                        self.transport.queue_pos = 0;
-                    }
+                    // Explicit enqueue: append to the user queue, never the active
+                    // context. Playback is untouched; the tracks play next, ahead
+                    // of the rest of the running album.
+                    self.transport.user_queue.append(&mut files);
+                    self.reload_queue_list();
                     self.refresh_queue_icons();
                     self.save_queue();
                     self.toast(&gettext_f(
@@ -3701,6 +3763,14 @@ impl Component for App {
             Msg::RecordingPlayFrom { path, ms } => {
                 self.transport.forced_start_ms = Some(ms);
                 self.play_recording(path);
+            }
+            Msg::RecordingPreviewPause => {
+                if self.mini.playing {
+                    self.player.pause();
+                    self.mini.playing = false;
+                    self.mpris.set_playing(false);
+                    self.refresh_queue_icons();
+                }
             }
             Msg::RecordingApplyCut { id, cuts } => self.apply_recording_cut(&sender, id, cuts),
             Msg::RecordingCutDone {
@@ -4170,11 +4240,20 @@ impl Component for App {
                 self.open_eq_editor(root, &sender, "the track", &title, None, "track", path);
             }
             Msg::ShowQueue => self.open_queue_dialog(root, &sender),
-            Msg::PlayQueueAt(idx) => {
-                if idx < self.transport.queue.len() {
-                    self.transport.queue_pos = idx;
-                    self.play_current();
-                    self.reload_queue_list(&sender);
+            Msg::PlayQueueAt { start, len } => {
+                // Play this queue entry now: move its block to the front of the
+                // user queue, then advance – `play_next` splices the first track
+                // into the context and the rest follow track by track. Entries
+                // before it stay queued and play afterwards.
+                let n = self.transport.user_queue.len();
+                if start < n {
+                    let len = len.clamp(1, n - start);
+                    let block: Vec<PathBuf> =
+                        self.transport.user_queue.drain(start..start + len).collect();
+                    for (i, p) in block.into_iter().enumerate() {
+                        self.transport.user_queue.insert(i, p);
+                    }
+                    self.play_next();
                 }
             }
             Msg::SetPlaybackRate(rate) => {
@@ -4186,7 +4265,15 @@ impl Component for App {
                     self.player.set_rate(rate);
                 }
             }
+            Msg::PlaybackReady => {
+                // Source finished buffering → stop the loading spinner.
+                if self.mini.loading {
+                    self.mini.loading = false;
+                }
+            }
             Msg::PlaybackError => {
+                // A failed start clears the loading spinner regardless of source.
+                self.mini.loading = false;
                 // Streams/episodes have no "next" → don't skip on their errors.
                 if self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
@@ -4199,43 +4286,28 @@ impl Component for App {
                 }
             }
             Msg::QueueClear => {
-                self.player.stop();
-                self.transport.queue.clear();
-                self.transport.queue_pos = 0;
-                self.transport.shuffle_order.clear();
-                self.transport.shuffle_idx = 0;
-                self.mini.playing = false;
-                self.mini.now_playing = None;
-                self.transport.playing_path = None;
-                self.mini.position_ms = 0;
-                self.mini.track_duration_ms = 0;
-                *self.transport.close_resume.borrow_mut() = None;
-                self.mpris.set_stopped();
-                self.reload_queue_list(&sender);
+                // Clear only the explicit user queue; the currently playing
+                // album/track (the context) keeps running untouched.
+                self.transport.user_queue.clear();
+                self.reload_queue_list();
                 self.refresh_queue_icons();
                 self.save_queue();
                 self.toast(&gettext("Queue cleared"));
             }
-            Msg::QueueMove { from, to } => {
-                let len = self.transport.queue.len();
-                if from < len && to < len && from != to {
-                    let item = self.transport.queue.remove(from);
-                    self.transport.queue.insert(to, item);
-                    // Adjust queue_pos so that the same track keeps playing.
-                    let cur = self.transport.queue_pos;
-                    self.transport.queue_pos = if cur == from {
-                        to
-                    } else {
-                        let mut p = cur;
-                        if from < cur {
-                            p -= 1;
-                        }
-                        if to <= p {
-                            p += 1;
-                        }
-                        p
-                    };
-                    self.reload_queue_list(&sender);
+            Msg::QueueMoveRange { from, len, to } => {
+                let n = self.transport.user_queue.len();
+                // Dropping a block onto itself is a no-op.
+                if from < n && len >= 1 && !(to >= from && to < from + len) {
+                    let len = len.min(n - from);
+                    let block: Vec<PathBuf> =
+                        self.transport.user_queue.drain(from..from + len).collect();
+                    // After removal everything past the block shifts left by `len`.
+                    let insert_at = if to > from { to - len } else { to }
+                        .min(self.transport.user_queue.len());
+                    for (i, p) in block.into_iter().enumerate() {
+                        self.transport.user_queue.insert(insert_at + i, p);
+                    }
+                    self.reload_queue_list();
                     self.refresh_queue_icons();
                     self.save_queue();
                 }
@@ -4600,6 +4672,8 @@ impl Component for App {
                     self.save_resume();
                     self.player.pause();
                     self.mini.playing = false;
+                    // Pausing during buffering stops the spinner (no longer "loading").
+                    self.mini.loading = false;
                 } else if self.transport.playing_path.is_some()
                     || self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
@@ -4612,6 +4686,11 @@ impl Component for App {
                     // to 0 after the end). play_current sets
                     // playing/MPRIS/icons itself.
                     self.play_current();
+                    return;
+                } else if !self.transport.user_queue.is_empty() {
+                    // Nothing loaded, but the user queued tracks → start the queue
+                    // (play_next splices the first queued track into the context).
+                    self.play_next();
                     return;
                 } else {
                     return;

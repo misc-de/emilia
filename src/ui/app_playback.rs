@@ -16,8 +16,10 @@ use crate::ui::fs_row::{FsEntry, FsInput};
 impl App {
     /// Refreshes the queue marker of all visible file rows.
     pub(crate) fn refresh_queue_icons(&mut self) {
-        let queue = self.transport.queue.clone();
-        let queued: std::collections::HashSet<PathBuf> = queue.iter().cloned().collect();
+        // The "in queue" marker reflects the explicit user queue, not the active
+        // context (the album currently playing through).
+        let queued: std::collections::HashSet<PathBuf> =
+            self.transport.user_queue.iter().cloned().collect();
         // Currently playing track (for the play marker).
         let active_path = self.transport.queue.get(self.transport.queue_pos).cloned();
         // Remote playback: the active entry is marked via the rel path.
@@ -154,6 +156,7 @@ impl App {
         // remote row (not the main queue).
         self.files.playing_remote = true;
         let cached = self.remote_cache_path(&track.rel_path);
+        let is_stream = !matches!(&cached, Some(p) if p.exists());
         let result = match &cached {
             Some(p) if p.exists() => self.player.play_file(&p.to_string_lossy(), 0),
             _ => self
@@ -165,6 +168,9 @@ impl App {
                 self.transport.skip_count = 0;
                 self.mini.now_playing = Some(track.title.clone());
                 self.mini.playing = true;
+                // Streaming from Nextcloud buffers first → spinner until ready
+                // (a cached copy plays instantly, so no spinner there).
+                self.mini.loading = is_stream;
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
@@ -238,6 +244,28 @@ impl App {
     /// Next track: when shuffling, the next of the shuffle order, otherwise the
     /// following one. At the end (all played) playback stops.
     pub(crate) fn play_next(&mut self) {
+        // The explicit user queue jumps ahead of the rest of the context: take
+        // the first queued track, splice it into the context right after the
+        // current track and play it. Splicing (instead of a separate list) keeps
+        // play_current/play_prev/save_queue working unchanged; the queue entry is
+        // consumed as it starts playing.
+        if !self.transport.user_queue.is_empty() {
+            let path = self.transport.user_queue.remove(0);
+            let at = if self.transport.queue.is_empty() {
+                0
+            } else {
+                (self.transport.queue_pos + 1).min(self.transport.queue.len())
+            };
+            self.transport.queue.insert(at, path);
+            self.transport.queue_pos = at;
+            // The context length changed → let the shuffle order rebuild.
+            self.transport.shuffle_order.clear();
+            self.play_current();
+            self.refresh_queue_icons();
+            self.reload_queue_list();
+            self.save_queue();
+            return;
+        }
         if self.transport.queue.is_empty() {
             return;
         }
@@ -289,6 +317,7 @@ impl App {
                 self.finalize_play_session(false);
                 self.player.stop();
                 self.mini.playing = false;
+                self.mini.loading = false;
                 self.transport.playing_path = None;
                 self.transport.queue_pos = 0;
                 self.mini.position_ms = 0;
@@ -368,11 +397,16 @@ impl App {
     /// Starts playback of a track path. Local paths go through
     /// `play_file`; **remote** tracks (synthetic path `nc:<id>:<rel>`) are
     /// played from the local cache or streamed directly from Nextcloud.
+    /// Starts playback of `path_str`. Returns `Ok(true)` when a **network
+    /// stream** (Nextcloud over the network) was started – it still has to
+    /// buffer/preroll, so the caller shows a loading spinner until the player
+    /// reports ready. `Ok(false)` for local files / cached copies, which start
+    /// fast enough that a spinner would only flicker.
     pub(crate) fn start_track_playback(
         &self,
         path_str: &str,
         resume_ms: i64,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         // YouTube: an offline copy plays directly; a stream must be resolved
         // asynchronously (done in `play_current`), so reaching here without a
         // local file is an error – we never block the UI thread on `yt-dlp -g`.
@@ -384,7 +418,7 @@ impl App {
                 .flatten()
                 .filter(|p| std::path::Path::new(p).exists())
             {
-                return self.player.play_file(&local, resume_ms);
+                return self.player.play_file(&local, resume_ms).map(|_| false);
             }
             return Err(anyhow::anyhow!(
                 "YouTube stream must be resolved asynchronously"
@@ -393,7 +427,10 @@ impl App {
         if let Some((sid, rel)) = crate::core::webdav::parse_nc_path(path_str) {
             let cache = crate::core::webdav::cache_path(sid, &rel);
             if cache.exists() {
-                return self.player.play_file(&cache.to_string_lossy(), resume_ms);
+                return self
+                    .player
+                    .play_file(&cache.to_string_lossy(), resume_ms)
+                    .map(|_| false);
             }
             if let Some(creds) = self
                 .files
@@ -404,7 +441,8 @@ impl App {
             {
                 return self
                     .player
-                    .play_uri(&crate::core::webdav::stream_uri(&creds, &rel), resume_ms);
+                    .play_uri(&crate::core::webdav::stream_uri(&creds, &rel), resume_ms)
+                    .map(|_| true);
             }
             return Err(anyhow::anyhow!("Nextcloud source unavailable"));
         }
@@ -415,7 +453,7 @@ impl App {
                 "file unavailable (mount missing?): {path_str}"
             ));
         }
-        self.player.play_file(path_str, resume_ms)
+        self.player.play_file(path_str, resume_ms).map(|_| false)
     }
 
     /// Display name of a track for the bar/queue: preferably from the
@@ -490,6 +528,15 @@ impl App {
         let _ = self
             .library
             .set_setting("queue_pos", &self.transport.queue_pos.to_string());
+        // The user-curated queue (explicit "Add to queue") persists separately.
+        let user_paths = self
+            .transport
+            .user_queue
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = self.library.set_setting("user_queue_paths", &user_paths);
     }
 
     /// Saves the current playback position of the loaded track as a
@@ -645,6 +692,9 @@ impl App {
                 self.stop_recorder();
                 self.mini.now_playing = Some(name.clone());
                 self.mini.playing = true;
+                // Resolving the stream URL (yt-dlp) and buffering takes a moment
+                // → spinner until `YtStreamResolved` plays and the player is ready.
+                self.mini.loading = true;
                 self.mini.position_ms = resume.max(0);
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
@@ -677,9 +727,12 @@ impl App {
             },
         };
         match self.start_track_playback(&path_str, resume_ms) {
-            Ok(()) => {
+            Ok(is_network_stream) => {
                 // A track started → reset the unplayable-skip guard.
                 self.transport.skip_count = 0;
+                // Network streams (Nextcloud) buffer before playing → spinner
+                // until ready; local/cached files start instantly (no spinner).
+                self.mini.loading = is_network_stream;
                 self.transport.playing_path = Some(path.clone());
                 // Music is playing again – no podcast episode/station/
                 // remote file active anymore.

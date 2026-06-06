@@ -187,11 +187,17 @@ impl Player {
     /// **currently playing track** as a tag via the ICY metadata – this lets
     /// us show "Now Playing" without opening a second connection. Runs in the
     /// main loop.
-    pub fn connect_bus_events<E, T, R>(&self, on_eos: E, on_title: T, on_error: R)
-    where
+    pub fn connect_bus_events<E, T, R, A>(
+        &self,
+        on_eos: E,
+        on_title: T,
+        on_error: R,
+        on_ready: A,
+    ) where
         E: Fn() + 'static,
         T: Fn(String) + 'static,
         R: Fn() + 'static,
+        A: Fn() + 'static,
     {
         if let Some(bus) = self.playbin.bus() {
             let playbin = self.playbin.clone();
@@ -209,6 +215,12 @@ impl Player {
                         // it is a no-op.
                         let target = pending_seek.replace(0);
                         let fresh = fresh_load.replace(false);
+                        // A freshly loaded pipeline just prerolled (buffered enough
+                        // to start) → the track is ready to play. Used to clear the
+                        // "loading" spinner for slow sources (Nextcloud/YouTube).
+                        if fresh {
+                            on_ready();
+                        }
                         let r = rate.get();
                         let want_rate = (r - 1.0).abs() > 1e-3;
                         if target > 0 {

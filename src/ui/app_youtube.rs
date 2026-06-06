@@ -1638,6 +1638,7 @@ impl App {
     /// Resets the optimistic now-playing state after a failed resolve/stream.
     pub(crate) fn youtube_playback_failed(&mut self, _sender: &ComponentSender<Self>) {
         self.mini.playing = false;
+        self.mini.loading = false;
         self.youtube.playing_video_id = None;
         self.mpris.set_playing(false);
         self.refresh_yt_icons();
