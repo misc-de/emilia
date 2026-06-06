@@ -46,6 +46,10 @@ finish-args:
   # Keys/Tokens wie AcoustID/fanart.tv) werden, wenn verfügbar, über libsecret
   # im Secret Service statt in der lokalen SQLite-Datenbank gespeichert.
   - --talk-name=org.freedesktop.secrets
+  # Übersetzungskataloge liegen privat unter /app (nicht in der Locale-Extension,
+  # die nur die Gerätesprachen installiert), damit der eingebaute Sprachwähler
+  # jede Sprache laden kann – unabhängig von der Systemsprache.
+  - --env=EMILIA_LOCALEDIR=/app/share/emilia/translations
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
@@ -80,10 +84,16 @@ modules:
       - cargo build --release --offline
       - install -Dm755 target/release/emilia /app/bin/emilia
       # Übersetzungskataloge (.po → .mo) für alle Sprachen aus po/LINGUAS bauen.
+      # Bewusst NICHT nach /app/share/locale: flatpak-builder lagert dort liegende
+      # Kataloge automatisch in die Locale-Extension (de.cais.Emilia.Locale) aus,
+      # die nur die auf dem Gerät konfigurierten Sprachen installiert – auf einem
+      # en-only-System fehlt damit der deutsche Katalog komplett. Emilia hat einen
+      # eigenen Sprachwähler, also müssen ALLE Kataloge immer vorhanden sein:
+      # privater Pfad + EMILIA_LOCALEDIR (siehe finish-args, src/i18n.rs).
       - |
         for lang in $(grep -v '^#' po/LINGUAS); do
-          install -d /app/share/locale/$lang/LC_MESSAGES
-          msgfmt --check po/$lang.po -o /app/share/locale/$lang/LC_MESSAGES/emilia.mo
+          install -d /app/share/emilia/translations/$lang/LC_MESSAGES
+          msgfmt --check po/$lang.po -o /app/share/emilia/translations/$lang/LC_MESSAGES/emilia.mo
         done
       - install -Dm644 data/de.cais.Emilia.desktop
         /app/share/applications/de.cais.Emilia.desktop

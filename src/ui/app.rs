@@ -4251,10 +4251,23 @@ impl Component for App {
 
                 if lang_code != crate::i18n::system_language_code() {
                     // The chosen language differs from the active (system) one.
-                    // gettext only reads the catalog at startup, so restart the
-                    // app; setup is complete now, so the assistant won't reappear.
+                    // gettext only reads the catalog at startup, so re-launch to
+                    // rebuild the UI in the chosen language; setup is complete now
+                    // (persisted above), so the assistant won't reappear and the
+                    // normal startup re-roots the folder and scans.
+                    //
+                    // Re-exec *in place* (replace this process image) rather than
+                    // spawn + exit: under Flatpak this process is PID 1 of the
+                    // sandbox's PID namespace, so exiting it makes the kernel kill
+                    // every other process in the namespace — including a freshly
+                    // spawned child, leaving the app simply gone. exec() keeps the
+                    // same PID, so the sandbox stays alive and the new image starts.
                     if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe).spawn();
+                        use std::os::unix::process::CommandExt;
+                        let err = std::process::Command::new(&exe).exec();
+                        // exec() only returns on failure; fall back to spawn.
+                        tracing::error!("re-exec for language change failed: {err}");
+                        let _ = std::process::Command::new(&exe).spawn();
                     }
                     std::process::exit(0);
                 }
