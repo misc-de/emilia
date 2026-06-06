@@ -1124,6 +1124,13 @@ pub enum Msg {
     StreamTitle(String),
     /// Open the detail page of a station.
     OpenStream(i64),
+    /// Open the rename dialog of a station.
+    StreamRenameDialog(i64),
+    /// Rename a station.
+    StreamRename {
+        id: i64,
+        name: String,
+    },
     /// Remove a station (undo toast; deferred to `StreamDeleteConfirmed`).
     StreamDelete(i64),
     /// Actually remove a station (after the undo toast expires).
@@ -3645,6 +3652,14 @@ impl Component for App {
             }
             Msg::StreamTitle(title) => self.stream_title(title),
             Msg::OpenStream(id) => self.open_stream(root, &sender, id),
+            Msg::StreamRenameDialog(id) => self.open_rename_stream_dialog(root, &sender, id),
+            Msg::StreamRename { id, name } => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    let _ = self.library.rename_stream(id, name);
+                    self.reload_streams(&sender);
+                }
+            }
             Msg::StreamDelete(id) => {
                 self.undo_toast(
                     &sender,

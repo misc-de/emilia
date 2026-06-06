@@ -34,12 +34,12 @@ impl Library {
             .query_row("SELECT id FROM stream WHERE url = ?1", [url], |r| r.get(0))?)
     }
 
-    /// All stored stations -- favorites first, then the most recently
-    /// added.
+    /// All stored stations, sorted alphanumerically by name
+    /// (case-insensitive), with the most recently added breaking ties.
     pub fn streams(&self) -> Result<Vec<crate::model::StreamItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, url, favicon, tags, country FROM stream
-             ORDER BY added_at DESC, name COLLATE NOCASE",
+             ORDER BY name COLLATE NOCASE, added_at DESC",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(crate::model::StreamItem {
@@ -52,6 +52,15 @@ impl Library {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Renames a station.
+    pub fn rename_stream(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE stream SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )?;
+        Ok(())
     }
 
     /// Removes a station.

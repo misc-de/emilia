@@ -250,6 +250,11 @@ impl App {
                 Msg::OpenStreamReplay(id),
             ));
         }
+        actions.add(&row_action(
+            &gettext("Rename station"),
+            "document-edit-symbolic",
+            Msg::StreamRenameDialog(id),
+        ));
         let remove = action_row(&gettext("Remove station"), "user-trash-symbolic");
         {
             let sender = sender.clone();
@@ -269,6 +274,47 @@ impl App {
         content.append(&actions);
 
         present_dialog(&dialog, &content, root);
+    }
+
+    /// Dialog: rename a station (name prefilled). Reached from the detail view.
+    pub(crate) fn open_rename_stream_dialog(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        id: i64,
+    ) {
+        let current = self
+            .streaming
+            .stream_items
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+        let dialog = adw::AlertDialog::new(Some(&gettext("Rename station")), None);
+        let entry = gtk::Entry::builder()
+            .text(&current)
+            .activates_default(true)
+            .build();
+        crate::ui::widgets::no_autofocus(&entry);
+        dialog.set_extra_child(Some(&entry));
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("rename", &gettext("Rename")),
+        ]);
+        dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("rename"));
+        {
+            let sender = sender.clone();
+            dialog.connect_response(None, move |_, resp| {
+                if resp == "rename" {
+                    sender.input(Msg::StreamRename {
+                        id,
+                        name: entry.text().to_string(),
+                    });
+                }
+            });
+        }
+        dialog.present(Some(root));
     }
 
     /// Refreshes the Play/Pause icons of the station rows to the current
