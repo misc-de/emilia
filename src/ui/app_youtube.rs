@@ -1672,21 +1672,30 @@ impl App {
         });
     }
 
-    /// Refreshes the yt-dlp status label in the open settings dialog.
+    /// Refreshes the yt-dlp status label (and download/update button) in the open
+    /// settings dialog. Reads only the cached `ytdlp_version` – never spawns the
+    /// subprocess here, so it stays cheap on the UI thread (the version is probed
+    /// in the background via `Cmd::YtDlpChecked`).
     pub(crate) fn refresh_ytdlp_status_label(&self) {
-        let guard = self.youtube.settings_status.borrow();
-        let Some(label) = guard.as_ref() else {
-            return;
-        };
-        let text = if self.youtube.ytdlp_busy {
-            gettext("Working …")
-        } else {
-            match self.youtube.ytdlp_version.clone().or_else(youtube::version) {
-                Some(v) => gettext_f("Installed (version {v})", &[("v", &v)]),
-                None => gettext("Not installed"),
-            }
-        };
-        label.set_text(&text);
+        let installed = self.youtube.ytdlp_version.is_some();
+        if let Some(label) = self.youtube.settings_status.borrow().as_ref() {
+            let text = if self.youtube.ytdlp_busy {
+                gettext("Working …")
+            } else {
+                match self.youtube.ytdlp_version.as_deref() {
+                    Some(v) => gettext_f("Installed (version {v})", &[("v", v)]),
+                    None => gettext("Not installed"),
+                }
+            };
+            label.set_text(&text);
+        }
+        if let Some(btn) = self.youtube.settings_dl_btn.borrow().as_ref() {
+            btn.set_label(&if installed {
+                gettext("Update")
+            } else {
+                gettext("Download")
+            });
+        }
     }
 
     // ---- enable/disable the feature --------------------------------------
