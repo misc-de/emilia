@@ -2,7 +2,7 @@
 //! decoupled from any window:** the server thread / client worker keep running in
 //! the background once paired, so the pairing survives closing the window. A
 //! single navigation-free window swaps its content through the flow
-//! (mode-select → QR/scan → "Connected with X" with Close / Disconnect). The
+//! (mode-select → QR/scan → "Connected with X" with a Disconnect action). The
 //! header sync icon routes here for **pairing/status only**; it never starts a
 //! share. Sharing is always initiated from an item's detail view, which hands us
 //! a ready `Selection` via [`SyncInput::ShareSelection`] → size confirm →
@@ -100,7 +100,7 @@ pub(crate) struct SyncPage {
 #[derive(Debug)]
 pub(crate) enum SyncInput {
     /// Header sync icon tapped: open the flow window. While connected this lands
-    /// on the connected panel (Close / Disconnect); otherwise on the mode
+    /// on the connected panel (Disconnect); otherwise on the mode
     /// selection (offer / scan).
     Open(adw::ApplicationWindow),
     StartServer,
@@ -116,8 +116,6 @@ pub(crate) enum SyncInput {
     ConfirmSend,
     /// Cancel out of the confirmation back to the connected panel.
     CancelShare,
-    /// "Close" on the connected panel → hide the window, keep the pairing alive.
-    CloseWindow,
     /// Review "Accept" → apply the (selectively) accepted offer.
     AcceptOffer,
     /// Review "Reject all".
@@ -204,11 +202,6 @@ impl Component for SyncPage {
             }
             SyncInput::ConfirmSend => self.confirm_send(),
             SyncInput::CancelShare => self.show_connected_panel(&sender),
-            SyncInput::CloseWindow => {
-                if let Some(sub) = &self.sub {
-                    sub.close();
-                }
-            }
             SyncInput::AcceptOffer => self.accept_offer(&sender),
             SyncInput::RejectOffer => self.reject_offer(&sender),
             SyncInput::BackToConnected => self.show_connected_panel(&sender),
@@ -371,10 +364,12 @@ impl SyncPage {
         content
     }
 
-    /// The connected panel — the single "Connected with X" success screen, with
-    /// "Close" (hide, keep the pairing) and "Disconnect". Reached on pairing and
-    /// whenever the header sync icon is tapped while a pairing is live. Sharing is
-    /// **not** offered here; it is started per item from a detail view.
+    /// The connected panel — the single "Connected with X" success screen with a
+    /// "Disconnect" action. The window's own header close button hides it while
+    /// keeping the pairing alive, so no separate close/OK button is shown. Reached
+    /// on pairing and whenever the header sync icon is tapped while a pairing is
+    /// live. Sharing is **not** offered here; it is started per item from a detail
+    /// view.
     fn show_connected_panel(&mut self, sender: &ComponentSender<Self>) {
         self.set_title(&gettext("Device sync"));
         let content = padded_vbox();
@@ -401,18 +396,8 @@ impl SyncPage {
             .justify(gtk::Justification::Center)
             .build();
 
-        // "Close" hides the window but keeps the pairing alive in the background;
-        // "Disconnect" actively ends it.
-        let close_btn = gtk::Button::builder()
-            .label(gettext("Close"))
-            .css_classes(["suggested-action", "pill"])
-            .halign(gtk::Align::Center)
-            .margin_top(6)
-            .build();
-        {
-            let sender = sender.clone();
-            close_btn.connect_clicked(move |_| sender.input(SyncInput::CloseWindow));
-        }
+        // Closing the window (its header close button) hides it but keeps the
+        // pairing alive in the background; "Disconnect" actively ends it.
         let disconnect_btn = gtk::Button::builder()
             .label(gettext("Disconnect"))
             .css_classes(["destructive-action", "pill"])
@@ -426,7 +411,6 @@ impl SyncPage {
         content.append(&icon);
         content.append(&title);
         content.append(&hint);
-        content.append(&close_btn);
         content.append(&disconnect_btn);
         // No live status widgets on this panel; a transfer rebuilds the progress
         // panel with its own status/progress labels.
@@ -1171,7 +1155,7 @@ fn client_upload(
         let _ = out.send(SyncEvent::FileProgress {
             done: i as u64 + 1,
             total,
-            name: f.rel_path.clone(),
+            name: transfer_label(f),
         });
         let abs = data::resolve(&f.rel_path, &base);
         if client.upload_file(&f.rel_path, Path::new(&abs)).is_ok() {
@@ -1209,11 +1193,13 @@ fn client_receive(
         let _ = out.send(SyncEvent::FileProgress {
             done: i as u64 + 1,
             total,
-            name: f.rel_path.clone(),
+            name: transfer_label(f),
         });
         if let Some(dest) = crate::core::sync::resolve_new(&base, &f.rel_path) {
             if client.download_file(&f.rel_path, &dest).is_ok() {
-                register_track(&lib, &base, f);
+                // Re-read the file we just received so it is indexed and sorted in
+                // from its own tags (not the sender's second-hand metadata).
+                crate::core::scanner::ingest_file(&lib, &dest);
             }
         }
     }
@@ -1227,50 +1213,46 @@ fn client_receive(
     });
 }
 
-/// Applies library/YT blobs and registers the accepted files in the `track`
-/// table so they are immediately playable (no rescan needed).
+/// Applies library/YT blobs (favorites/playlists/podcasts/categories/EQ + YT).
+/// The accepted audio files are **not** registered here: each is read in and
+/// indexed from its own tags the moment it lands ([`crate::core::scanner::ingest_file`],
+/// called by the download loop on the client and the `/files/put` handler on the
+/// server), so a half-finished transfer never leaves rows for files that never
+/// arrived. `stats.files` is the intended count, for the summary only.
 fn apply_received(
     lib: &Library,
     manifest: &ShareManifest,
     decision: &ShareDecision,
 ) -> sync::ImportStats {
     let mut stats = share::apply_manifest(lib, manifest, decision).unwrap_or_default();
-    let base = lib
-        .get_setting("music_dir")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let mut n = 0;
-    for f in manifest
+    stats.files = manifest
         .files
         .iter()
         .filter(|f| decision.files.contains(&f.rel_path))
-    {
-        // Never trust the sender's rel_path: only register a track row for files
-        // that resolve to a safe location inside the music dir (the same check
-        // the transfer itself used). Otherwise a malicious paired peer could
-        // inject a row pointing at an arbitrary absolute path (e.g. /etc/passwd)
-        // or escape via `..` straight from its manifest.
-        if crate::core::sync::resolve_new(&base, &f.rel_path).is_none() {
-            continue;
-        }
-        register_track(lib, &base, f);
-        n += 1;
-    }
-    stats.files = n;
+        .count();
     stats
 }
 
-/// Inserts a minimal `track` row for a received file from its manifest metadata.
-fn register_track(lib: &Library, base: &str, f: &share::ManifestFile) {
-    let _ = lib.upsert_track(&crate::model::Track {
-        path: data::resolve(&f.rel_path, base),
-        title: f.title.clone(),
-        artist: f.artist.clone(),
-        album: f.album.clone(),
-        duration_ms: f.duration_ms,
-        ..Default::default()
-    });
+/// A centered, path-free label for the transfer progress: the artist, album and
+/// title of the file currently moving, one per line, skipping whatever is empty.
+/// Falls back to the bare file name (never the full path) when no tags are known.
+fn transfer_label(f: &share::ManifestFile) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    if let Some(a) = f.artist.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        lines.push(a);
+    }
+    if let Some(al) = f.album.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        lines.push(al);
+    }
+    let title = f.title.trim();
+    if !title.is_empty() {
+        lines.push(title);
+    }
+    if lines.is_empty() {
+        // Last resort: the file name only, not the path.
+        return f.rel_path.rsplit('/').next().unwrap_or(&f.rel_path).to_string();
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]

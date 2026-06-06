@@ -194,3 +194,29 @@ pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
     lib.prune_tracks_under(root, &present)?;
     Ok(count)
 }
+
+/// Indexes a single, freshly arrived file (e.g. one received over device sync) by
+/// **reading its actual tags** and upserting the `track` row — so it is read in
+/// and sorted into the library exactly like a normal scan would, rather than
+/// trusting second-hand metadata. If the tags can't be parsed, a minimal row is
+/// still written from the file name so the file stays playable.
+pub fn ingest_file(lib: &Library, path: &Path) {
+    match read_track(path) {
+        Ok(track) => {
+            let _ = lib.upsert_track(&track);
+        }
+        Err(e) => {
+            tracing::warn!("Indexed received file without tags {}: {e}", path.display());
+            let title = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let _ = lib.upsert_track(&Track {
+                path: path.to_string_lossy().into_owned(),
+                title,
+                ..Default::default()
+            });
+        }
+    }
+}

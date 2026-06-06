@@ -1829,8 +1829,8 @@ msgid "To share something, open a track or album and choose “Share”."
 msgstr "Zum Teilen einen Titel oder ein Album öffnen und „Teilen“ wählen."
 
 #: src/ui/sync_page.rs:407
-msgid "Close"
-msgstr "Schließen"
+msgid "OK"
+msgstr "OK"
 
 #: src/ui/app.rs:3872
 msgid "Nothing here to share"

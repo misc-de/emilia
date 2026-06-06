@@ -153,10 +153,23 @@ pub(crate) fn build_review(
         let files = adw::PreferencesGroup::builder()
             .title(gettext("Files"))
             .build();
-        for r in reviews {
-            let (row, check) = review_row(r);
-            files.add(&row);
-            h.files.push((check, r.file.rel_path.clone()));
+        // Group by album so a whole album is confirmed as **one** unit (a single
+        // checkbox) instead of one tick per track; loose songs stay individual
+        // rows. Files without an album each form their own single-item group.
+        for (album, idxs) in group_by_album(reviews) {
+            if album.is_some() && idxs.len() >= 2 {
+                let group: Vec<&FileReview> = idxs.iter().map(|&i| &reviews[i]).collect();
+                let (row, handles) = album_expander(album.as_deref().unwrap_or_default(), &group);
+                files.add(&row);
+                h.files.extend(handles);
+            } else {
+                for &i in &idxs {
+                    let r = &reviews[i];
+                    let (row, check) = review_row(r);
+                    files.add(&row);
+                    h.files.push((check, r.file.rel_path.clone()));
+                }
+            }
         }
         page.add(&files);
     }
@@ -272,6 +285,106 @@ fn review_row(r: &FileReview) -> (adw::ActionRow, gtk::CheckButton) {
         }
     }
     (row, check)
+}
+
+/// Groups reviews by album, preserving first-seen order. Files without an album
+/// each become their own single-item group (so they render as loose rows).
+fn group_by_album(reviews: &[FileReview]) -> Vec<(Option<String>, Vec<usize>)> {
+    let mut groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
+    for (i, r) in reviews.iter().enumerate() {
+        match r.file.album.as_deref().filter(|a| !a.trim().is_empty()) {
+            Some(album) => {
+                if let Some(g) = groups.iter_mut().find(|(k, _)| k.as_deref() == Some(album)) {
+                    g.1.push(i);
+                } else {
+                    groups.push((Some(album.to_string()), vec![i]));
+                }
+            }
+            None => groups.push((None, vec![i])),
+        }
+    }
+    groups
+}
+
+/// An [`adw::ExpanderRow`] for a whole album: the prefix master checkbox selects or
+/// deselects every track at once, so the album is confirmed as a single unit while
+/// each track still keeps its own row + status marker inside the expander. The
+/// master shows an inconsistent (tri-state) mark when only some tracks are picked.
+/// Returns the row plus the per-track `(check, rel_path)` handles to fold into the
+/// [`ReviewHandles`].
+fn album_expander(
+    album: &str,
+    reviews: &[&FileReview],
+) -> (adw::ExpanderRow, Vec<(gtk::CheckButton, String)>) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let total: u64 = reviews.iter().map(|r| r.file.size).sum();
+    let artist = reviews
+        .iter()
+        .find_map(|r| r.file.artist.as_deref().filter(|a| !a.trim().is_empty()));
+
+    let exp = adw::ExpanderRow::builder().title(album).build();
+    let count = gettext_f("{n} files", &[("n", &reviews.len().to_string())]);
+    let summary = format!("{count} · {}", human_size(total));
+    exp.set_subtitle(&match artist {
+        Some(a) => format!("{a} · {summary}"),
+        None => summary,
+    });
+
+    let master = gtk::CheckButton::builder()
+        .valign(gtk::Align::Center)
+        .build();
+    exp.add_prefix(&master);
+
+    let mut handles = Vec::with_capacity(reviews.len());
+    let mut checks = Vec::with_capacity(reviews.len());
+    for r in reviews {
+        let (row, check) = review_row(r);
+        exp.add_row(&row);
+        checks.push(check.clone());
+        handles.push((check, r.file.rel_path.clone()));
+    }
+
+    // Keep the master and the per-track checks in sync without feedback loops: a
+    // re-entrancy flag swallows the toggles each side triggers in the other.
+    let syncing = Rc::new(Cell::new(false));
+    {
+        let checks = checks.clone();
+        let syncing = syncing.clone();
+        master.connect_toggled(move |m| {
+            if syncing.replace(true) {
+                return;
+            }
+            m.set_inconsistent(false);
+            let active = m.is_active();
+            for c in &checks {
+                c.set_active(active);
+            }
+            syncing.set(false);
+        });
+    }
+    let refresh_master = {
+        let master = master.clone();
+        let checks = checks.clone();
+        let syncing = syncing.clone();
+        move || {
+            if syncing.replace(true) {
+                return;
+            }
+            let on = checks.iter().filter(|c| c.is_active()).count();
+            master.set_inconsistent(on != 0 && on != checks.len());
+            master.set_active(on == checks.len());
+            syncing.set(false);
+        }
+    };
+    for c in &checks {
+        let refresh = refresh_master.clone();
+        c.connect_toggled(move |_| refresh());
+    }
+    refresh_master();
+
+    (exp, handles)
 }
 
 /// Wraps a preferences page in a vertically-scrolling container.

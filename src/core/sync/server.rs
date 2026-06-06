@@ -523,9 +523,10 @@ impl SyncServer {
             .find_map(|p| p.strip_prefix("path="))
             .map(protocol::percent_decode)
             .unwrap_or_default();
-        let music_dir = Library::open()
-            .ok()
-            .and_then(|lib| lib.get_setting("music_dir").ok().flatten())
+        let lib = Library::open().ok();
+        let music_dir = lib
+            .as_ref()
+            .and_then(|l| l.get_setting("music_dir").ok().flatten())
             .unwrap_or_default();
         let Some(dest) = crate::core::sync::resolve_new(&music_dir, &rel) else {
             write_status(stream, 403);
@@ -533,11 +534,15 @@ impl SyncServer {
         };
         let limit = req.content_length.min(MAX_PUT);
         match stream_to_file(stream, &req.body, limit, &dest) {
-            Ok(n) => write_json(
-                stream,
-                200,
-                &serde_json::json!({ "ok": true, "written": n }),
-            ),
+            Ok(n) => {
+                // Read in and sort the freshly received file into the library from
+                // its own tags (same as the client-as-receiver path), so it is
+                // indexed exactly like a normal scan.
+                if let Some(lib) = &lib {
+                    crate::core::scanner::ingest_file(lib, &dest);
+                }
+                write_json(stream, 200, &serde_json::json!({ "ok": true, "written": n }))
+            }
             Err(_) => write_json(stream, 400, &serde_json::json!({ "error": "write failed" })),
         }
         Action::Continue
