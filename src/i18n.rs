@@ -71,7 +71,32 @@ pub fn init(lang: Option<&str>) {
         // not C/POSIX) – this way the language can be chosen independently of the system.
         std::env::set_var("LANGUAGE", code);
     }
-    setlocale(LocaleCategory::LcAll, "");
+
+    // Apply the locale from the environment. This can FAIL: when the environment
+    // names a locale the runtime doesn't ship, glibc keeps the "C" locale – and
+    // under "C"/"POSIX" gettext IGNORES `LANGUAGE`, so the chosen UI language
+    // silently stays English. This bites on phones (Flatpak): the GNOME runtime
+    // installs only the *configured* system languages, but a user can set German
+    // regional formats (`LC_TIME=de_DE.UTF-8`, …) while keeping the display
+    // language English – `de_DE.UTF-8` isn't installed, `setlocale(LC_ALL, "")`
+    // returns NULL, the locale falls back to "C", and `LANGUAGE=de` is dropped.
+    // If that happens, pin a valid, installed UTF-8 locale in the ENVIRONMENT
+    // (not just via this one call) so that this *and* any later
+    // `setlocale(LC_ALL, "")` (e.g. GTK's own) succeed instead of hitting "C".
+    // `C.UTF-8` does NOT help (gettext still ignores LANGUAGE under it), so a
+    // real locale like `en_US.UTF-8` – always present in the GNOME runtime – is
+    // required; messages then come from the chosen `LANGUAGE` catalog regardless
+    // of which glibc locales are installed (the whole point of shipping our own
+    // catalogs). The fallback only triggers when the env locale is unavailable,
+    // so a working `de_DE`/etc. system locale is never clobbered.
+    if setlocale(LocaleCategory::LcAll, "").is_none() {
+        for fallback in ["en_US.UTF-8", "C.UTF-8"] {
+            std::env::set_var("LC_ALL", fallback);
+            if setlocale(LocaleCategory::LcAll, "").is_some() {
+                break;
+            }
+        }
+    }
 
     let dir = locale_dir();
     let _ = bindtextdomain(DOMAIN, dir);
