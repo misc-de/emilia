@@ -824,28 +824,13 @@ impl App {
         let lang_group = adw::PreferencesGroup::builder()
             .title(gettext("Language"))
             .build();
-        // Stable codes alongside the display labels, shown by their endonym
-        // (proper name, untranslated) and sorted alphabetically (Latin scripts
-        // first, then Cyrillic, then Chinese); "System default" stays on top.
-        // English is the source language (no catalog needed) and the default.
-        let lang_codes = [
-            "system", "de", "en", "es", "fr", "it", "sw", "nl", "pl", "pt", "ru", "ar", "zh",
-        ];
-        let lang_labels = [
-            gettext("System default"),
-            "Deutsch".into(),
-            "English".into(),
-            "Español".into(),
-            "Français".into(),
-            "Italiano".into(),
-            "Kiswahili".into(),
-            "Nederlands".into(),
-            "Polski".into(),
-            "Português".into(),
-            "Русский".into(),
-            "العربية".into(),
-            "中文".into(),
-        ];
+        // The shared language list ([`crate::i18n::LANGUAGES`], codes + endonyms),
+        // with the "System default" choice prepended so it stays on top. The
+        // endonyms are shown untranslated; English is the source language.
+        let mut lang_codes: Vec<&str> = vec!["system"];
+        lang_codes.extend(crate::i18n::LANGUAGES.iter().map(|(c, _)| *c));
+        let mut lang_labels: Vec<String> = vec![gettext("System default")];
+        lang_labels.extend(crate::i18n::LANGUAGES.iter().map(|(_, l)| (*l).to_string()));
         let lang_label_refs: Vec<&str> = lang_labels.iter().map(String::as_str).collect();
         let lang_row = adw::ComboRow::builder()
             .title(gettext("Display language"))

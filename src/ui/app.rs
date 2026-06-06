@@ -158,6 +158,27 @@ pub(crate) fn apply_color_scheme(code: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
+/// Default gallery tiles-per-row when the user has not chosen one yet: **3** on
+/// phone-sized screens, **4** on the desktop. Decided from the monitor geometry
+/// (application pixels) mirroring the 550-unit narrow/mobile UI breakpoint —
+/// `is_mobile()` reads the runtime breakpoint flag, which is not set yet while
+/// the model is built. Once a value is stored in Settings, that wins.
+pub(crate) fn initial_gallery_columns() -> u32 {
+    let mobile = gtk::gdk::Display::default()
+        .and_then(|d| d.monitors().item(0))
+        .and_then(|obj| obj.downcast::<gtk::gdk::Monitor>().ok())
+        .map(|mon| {
+            let g = mon.geometry();
+            g.width().min(g.height()) <= 550
+        })
+        .unwrap_or(false);
+    if mobile {
+        3
+    } else {
+        4
+    }
+}
+
 pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     let too_early = pos_ms < RESUME_MIN_POS_MS;
     let too_late = dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS;
@@ -638,6 +659,8 @@ pub struct App {
     pub(crate) sync_connected: bool,
     /// Nextcloud setup dialog, extracted into its own relm4 component.
     pub(crate) cloud_page: relm4::Controller<crate::ui::cloud_page::CloudPage>,
+    /// First-run setup assistant, shown once on the very first launch.
+    pub(crate) setup_page: relm4::Controller<crate::ui::setup::SetupPage>,
 }
 
 #[derive(Debug)]
@@ -775,6 +798,14 @@ pub enum Msg {
         to: usize,
     },
     SetMusicDir(PathBuf),
+    /// The first-run setup assistant completed: persist the chosen language,
+    /// music folder and enabled menu items, then scan (or restart for a language
+    /// change).
+    SetupFinished {
+        lang_code: String,
+        music_dir: PathBuf,
+        enabled_sections: Vec<String>,
+    },
     /// Switch to another source (tab) in the file view.
     SelectSource(ActiveSource),
     /// The source list has changed (added/removed in the settings dialog)
@@ -2421,6 +2452,10 @@ impl Component for App {
                  button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  button.emilia-nav-btn:checked image { color: @accent_color; }\
+                 box.emilia-step { background-color: alpha(@window_fg_color, 0.12); border-radius: 999px; }\
+                 box.emilia-step label { font-weight: bold; }\
+                 box.emilia-step-active { background-color: @accent_bg_color; }\
+                 box.emilia-step-active label { color: @accent_fg_color; }\
                  scrolledwindow.emilia-nav-scroller scrollbar { opacity: 0; min-width: 0px; min-height: 0px; }\
                  scrolledwindow.emilia-nav-scroller button.emilia-nav-btn { padding-left: 6px; padding-right: 6px; min-width: 0px; }\
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
@@ -2479,6 +2514,18 @@ impl Component for App {
 
         // Additional music sources (local secondary folder / Nextcloud) for the tabs.
         let sources = library.list_sources().unwrap_or_default();
+
+        // First-run setup: shown once when nothing is configured yet. Existing
+        // installations (a music folder or sources already set) are silently
+        // marked complete instead, so the assistant never appears for them.
+        let setup_done = matches!(
+            library.get_setting("setup_complete").ok().flatten().as_deref(),
+            Some("1")
+        );
+        let first_run = !setup_done && music_dir.is_none() && sources.is_empty();
+        if !setup_done && !first_run {
+            let _ = library.set_setting("setup_complete", "1");
+        }
 
         // Most recently saved window size / maximization.
         let saved_w = library
@@ -2587,7 +2634,7 @@ impl Component for App {
             .ok()
             .flatten()
             .unwrap_or_else(|| "system".to_string());
-        // Gallery view (default: off) and tiles/row (default: 3, 2–8).
+        // Gallery view (default: off) and tiles/row (default: 3 mobile / 4 desktop).
         let gallery_view = matches!(
             library
                 .get_setting("gallery_view")
@@ -2596,12 +2643,14 @@ impl Component for App {
                 .as_deref(),
             Some("1")
         );
+        // Tiles per row (2–8). Initial default depends on the form factor:
+        // 3 on phone-sized screens, 4 on the desktop (see `initial_gallery_columns`).
         let gallery_columns = library
             .get_setting("gallery_columns")
             .ok()
             .flatten()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(3)
+            .unwrap_or_else(initial_gallery_columns)
             .clamp(2, 8);
         // Timeshift buffer for stations in minutes (default 5, 0 = off, max. 60).
         let recording_buffer_minutes = library
@@ -2739,6 +2788,19 @@ impl Component for App {
             .forward(sender.input_sender(), |out| match out {
                 crate::ui::cloud_page::CloudOutput::SourcesChanged => Msg::SourcesChanged,
                 crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
+            });
+        let setup_page = crate::ui::setup::SetupPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |out| match out {
+                crate::ui::setup::SetupOutput::Finished {
+                    lang_code,
+                    music_dir,
+                    enabled_sections,
+                } => Msg::SetupFinished {
+                    lang_code,
+                    music_dir,
+                    enabled_sections,
+                },
             });
 
         let mut model = App {
@@ -2923,6 +2985,7 @@ impl Component for App {
             sync_page,
             sync_connected: false,
             cloud_page,
+            setup_page,
         };
 
         // Restore the queue from last time (only still existing
@@ -3060,6 +3123,16 @@ impl Component for App {
             saved_max,
             saved_section,
         );
+        // On the very first launch, present the setup assistant once the main
+        // window is shown (relm4 maps it only after `init` returns, so defer the
+        // dialog to the next main-loop iteration).
+        if first_run {
+            let setup_sender = model.setup_page.sender().clone();
+            let win = root.clone();
+            gtk::glib::idle_add_local_once(move || {
+                setup_sender.emit(crate::ui::setup::SetupInput::Open(win));
+            });
+        }
         ComponentParts { model, widgets }
     }
 
@@ -4143,6 +4216,75 @@ impl Component for App {
                 }
                 // Read the new folder and (Wi-Fi + switch) fetch automatically.
                 self.start_scan(&sender, true, false);
+            }
+            Msg::SetupFinished {
+                lang_code,
+                music_dir,
+                enabled_sections,
+            } => {
+                // Which menu items the user keeps. At least one must stay visible.
+                let mut enabled: std::collections::HashSet<String> =
+                    enabled_sections.into_iter().collect();
+                if !SECTIONS.iter().any(|(n, _, _)| enabled.contains(*n)) {
+                    enabled.insert("files".to_string());
+                }
+                let hidden_value = SECTIONS
+                    .iter()
+                    .map(|(n, _, _)| *n)
+                    .filter(|n| !enabled.contains(*n))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let _ = self.library.set_setting("hidden_sections", &hidden_value);
+                // The YouTube section is the opt-in feature: its menu item mirrors
+                // the `youtube_enabled` flag.
+                let yt_on = enabled.contains("youtube");
+                let _ = self
+                    .library
+                    .set_setting("youtube_enabled", if yt_on { "1" } else { "0" });
+                self.youtube.enabled = yt_on;
+                // Persist the rest before any possible restart below.
+                let _ = self.library.set_setting("setup_complete", "1");
+                let _ = self.library.set_setting("ui_language", &lang_code);
+                self.settings.ui_language = lang_code.clone();
+                let dir = music_dir.to_string_lossy().into_owned();
+                let _ = self.library.set_setting("music_dir", &dir);
+
+                if lang_code != crate::i18n::system_language_code() {
+                    // The chosen language differs from the active (system) one.
+                    // gettext only reads the catalog at startup, so restart the
+                    // app; setup is complete now, so the assistant won't reappear.
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe).spawn();
+                    }
+                    std::process::exit(0);
+                }
+
+                // Same language → keep running: apply the navigation and folder now.
+                self.nav.hidden_sections = SECTIONS
+                    .iter()
+                    .map(|(n, _, _)| *n)
+                    .filter(|n| !enabled.contains(*n))
+                    .map(str::to_string)
+                    .collect();
+                self.refresh_nav_visibility();
+                let cur = self.nav.view_stack.visible_child_name();
+                let on_hidden = cur
+                    .as_deref()
+                    .map(|c| self.nav.hidden_sections.contains(c))
+                    .unwrap_or(true);
+                if on_hidden {
+                    if let Some(next) = self
+                        .nav
+                        .section_order
+                        .iter()
+                        .copied()
+                        .find(|n| !self.nav.hidden_sections.contains(*n))
+                    {
+                        self.nav.view_stack.set_visible_child_name(next);
+                    }
+                }
+                // Re-root the file view to the chosen folder and start the scan.
+                sender.input(Msg::SetMusicDir(music_dir));
             }
             Msg::SelectSource(sel) => {
                 if self.files.active_source != sel {

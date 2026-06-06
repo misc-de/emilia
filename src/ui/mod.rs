@@ -17,6 +17,7 @@ pub mod artist_row;
 pub mod cloud_page;
 pub mod enrich;
 pub mod fs_row;
+pub mod setup;
 pub mod stats_page;
 pub mod sync_page;
 pub mod sync_share_ui;

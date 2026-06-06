@@ -13,6 +13,54 @@ pub use gettextrs::{gettext, ngettext};
 /// Text domain (corresponds to the `.mo` file name `emilia.mo`).
 pub const DOMAIN: &str = "emilia";
 
+/// Selectable display languages as `(stable code, endonym)`. The endonym (the
+/// language's own name) is shown untranslated; English is the source language
+/// (no catalog needed). Order: Latin scripts first, then Cyrillic, Arabic,
+/// Chinese – mirroring the original list. The special "system" choice (follow
+/// the OS locale) is **not** part of this list; callers add it where needed.
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("de", "Deutsch"),
+    ("en", "English"),
+    ("es", "Español"),
+    ("fr", "Français"),
+    ("it", "Italiano"),
+    ("sw", "Kiswahili"),
+    ("nl", "Nederlands"),
+    ("pl", "Polski"),
+    ("pt", "Português"),
+    ("ru", "Русский"),
+    ("ar", "العربية"),
+    ("zh", "中文"),
+];
+
+/// The supported language code that best matches the **system** locale, or
+/// `"en"` (the source language) as a fallback. Reads the locale environment in
+/// gettext's precedence order and maps its two-letter prefix onto [`LANGUAGES`].
+/// Used only to pre-select an entry (e.g. in the first-run setup); it does not
+/// change any setting.
+pub fn system_language_code() -> &'static str {
+    let raw = ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"]
+        .into_iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|v| !v.is_empty())
+        .unwrap_or_default();
+    // Take the first locale of a possibly colon-separated LANGUAGE list, then
+    // its language part before any '_'/'.'/'@' (e.g. "de_DE.UTF-8" → "de").
+    let code = raw
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .split(['_', '.', '@'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    LANGUAGES
+        .iter()
+        .map(|(c, _)| *c)
+        .find(|c| *c == code)
+        .unwrap_or("en")
+}
+
 /// Initializes gettext. Must run before any translation (early in `main`).
 ///
 /// `lang`: `None` follows the system locale (`LANG`/`LC_*`); `Some("de"|"en")`
