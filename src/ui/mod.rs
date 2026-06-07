@@ -8,6 +8,7 @@ pub mod app_gallery;
 pub mod app_helpers;
 pub mod app_init;
 pub mod app_lyrics;
+pub mod app_memo;
 pub mod app_playback;
 pub mod app_playlist;
 pub mod app_podcast;

@@ -80,7 +80,7 @@ pub(crate) enum FsKind {
 /// and can be reordered by the user.
 // The labels are English gettext `msgid`s; translate them at the display site
 // with `gettext()` (see usage in `build_nav` / `win_title`).
-pub(crate) const SECTIONS: [(&str, &str, &str); 11] = [
+pub(crate) const SECTIONS: [(&str, &str, &str); 12] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
     ("files", "Files", "folder-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
@@ -91,6 +91,7 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 11] = [
     ("youtube", "YouTube", "im-youtube-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
+    ("memo", "Memo", "audio-input-microphone-symbolic"),
     ("stats", "Statistics", "emilia-stats-symbolic"),
 ];
 
@@ -172,6 +173,17 @@ pub(crate) enum StreamView {
     Channels,
     /// Timeshift recordings.
     Recordings,
+}
+
+/// What the (shared) waveform editor is currently editing. The editor body is
+/// generic over "an audio file with a path"; this only distinguishes where the
+/// item is looked up and where the cut result is written back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditKind {
+    /// A radio timeshift recording (`recording` table).
+    Recording,
+    /// A voice memo (`memo` table).
+    Memo,
 }
 
 /// Which view the YouTube page shows (tab switcher).
@@ -750,6 +762,8 @@ pub struct App {
     pub(crate) podcasts: PodcastsState,
     /// Streaming (internet radio) + timeshift-recording page state.
     pub(crate) streaming: StreamingState,
+    /// Voice-memo page state (microphone recordings + categories).
+    pub(crate) memo: crate::ui::app_memo::MemoState,
     /// YouTube page state (optional feature, gated behind `youtube_enabled`).
     pub(crate) youtube: YoutubeState,
     /// "Other sources" list in the open settings dialog, so that it can be
@@ -1304,20 +1318,57 @@ pub enum Msg {
     AddRecordingToLibrary(i64),
     /// Open the waveform editor subpage for a recording (id).
     EditRecording(i64),
-    /// Preview a recording file from a chosen position (ms) – editor playhead.
+    /// Open the waveform editor subpage for a voice memo (id).
+    EditMemo(i64),
+    /// Preview a recording/memo file from a chosen position (ms) – editor playhead.
     RecordingPlayFrom { path: String, ms: i64 },
     /// Pause the editor preview (pauses the main player it plays through).
     RecordingPreviewPause,
-    /// Apply the editor's cut ranges (seconds) to a recording and overwrite it.
-    RecordingApplyCut { id: i64, cuts: Vec<(f64, f64)> },
+    /// Apply the editor's cut ranges (seconds) to a recording/memo and overwrite it.
+    EditApplyCut {
+        kind: EditKind,
+        id: i64,
+        cuts: Vec<(f64, f64)>,
+    },
     /// Result of the background cut: new path (`None` = failed) + new duration.
-    RecordingCutDone {
+    EditCutDone {
+        kind: EditKind,
         id: i64,
         path: Option<String>,
         duration_ms: i64,
     },
     /// Set the size of the timeshift buffer in minutes (0–60).
     SetRecordingBufferMinutes(u32),
+
+    // ---- Voice memos ----
+    /// Player-bar / page record button: start or stop a microphone recording.
+    MemoRecordToggle,
+    /// A finished recording was finalized off-thread: new file path (`None` =
+    /// failed) + its duration. Creates the memo row.
+    MemoRecordSaved {
+        path: Option<String>,
+        duration_ms: i64,
+    },
+    /// Change the memo list filter (None = Recent, Some(None) = General).
+    SetMemoFilter(Option<Option<i64>>),
+    /// Open a memo's detail dialog (id) – via long press.
+    OpenMemo(i64),
+    /// Rename a memo.
+    MemoRename { id: i64, title: String },
+    /// Assign (or clear, with `None`) a memo's category.
+    MemoSetCategory { id: i64, category_id: Option<i64> },
+    /// Delete a memo (id) – undo toast; deferred to `MemoDeleteConfirmed`.
+    MemoDelete(i64),
+    /// Actually delete a memo (after the undo toast expires).
+    MemoDeleteConfirmed(i64),
+    /// Open the category management dialog.
+    OpenMemoCategories,
+    /// Add a new memo category.
+    MemoCategoryAdd(String),
+    /// Rename a memo category.
+    MemoCategoryRename { id: i64, name: String },
+    /// Delete a memo category (its memos fall back to General).
+    MemoCategoryDelete(i64),
 }
 
 /// Results of the background workers (read folder or online enrichment).
@@ -2291,6 +2342,92 @@ impl Component for App {
                                         set_visible: model.favorites.audiobook_items.is_empty(),
                                     },
                                 },
+                            add_titled_with_icon[Some("memo"), &gettext("Memo"), "audio-input-microphone-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    set_spacing: 6,
+                                    // Control row: record button + elapsed timer + manage categories.
+                                    gtk::Box {
+                                        set_orientation: gtk::Orientation::Horizontal,
+                                        set_spacing: 8,
+                                        set_margin_top: 10,
+                                        set_margin_start: 12,
+                                        set_margin_end: 12,
+                                        gtk::Button {
+                                            #[watch]
+                                            set_icon_name: if model.memo.recording {
+                                                "media-playback-stop-symbolic"
+                                            } else {
+                                                "media-record-symbolic"
+                                            },
+                                            #[watch]
+                                            set_tooltip_text: Some(&if model.memo.recording {
+                                                gettext("Stop recording")
+                                            } else {
+                                                gettext("Record voice memo")
+                                            }),
+                                            #[watch]
+                                            set_css_classes: if model.memo.recording {
+                                                &["circular", "emilia-record-dot", "emilia-recording"]
+                                            } else {
+                                                &["circular", "emilia-record-dot"]
+                                            },
+                                            connect_clicked => Msg::MemoRecordToggle,
+                                        },
+                                        gtk::Label {
+                                            #[watch]
+                                            set_visible: model.memo.recording,
+                                            #[watch]
+                                            set_label: &model.memo.rec_elapsed,
+                                            add_css_class: "numeric",
+                                            add_css_class: "dim-label",
+                                        },
+                                        gtk::Box { set_hexpand: true },
+                                        gtk::Button {
+                                            set_icon_name: "view-list-symbolic",
+                                            set_tooltip_text: Some(&gettext("Manage categories")),
+                                            add_css_class: "flat",
+                                            connect_clicked => Msg::OpenMemoCategories,
+                                        },
+                                    },
+                                    // Category filter bar (filled imperatively in reload_memo_categories).
+                                    gtk::ScrolledWindow {
+                                        set_hscrollbar_policy: gtk::PolicyType::Automatic,
+                                        set_vscrollbar_policy: gtk::PolicyType::Never,
+                                        #[local_ref]
+                                        memo_filter_bar -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Horizontal,
+                                            set_spacing: 6,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_margin_top: 2,
+                                        },
+                                    },
+                                    // Memo list + empty state.
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[wrap(Some)]
+                                        set_child = &gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            #[local_ref]
+                                            memos_list -> gtk::ListBox {
+                                                set_valign: gtk::Align::Start,
+                                                set_margin_top: 6,
+                                                set_margin_start: 12,
+                                                set_margin_end: 12,
+                                                add_css_class: "boxed-list",
+                                            },
+                                            adw::StatusPage {
+                                                set_icon_name: Some("audio-input-microphone-symbolic"),
+                                                set_title: &gettext("No memos yet"),
+                                                set_description: Some(&gettext("Tap record to capture a voice memo.")),
+                                                set_vexpand: true,
+                                                #[watch]
+                                                set_visible: model.memo.memo_items.is_empty() && !model.memo.recording,
+                                            },
+                                        },
+                                    },
+                                },
                             add_titled_with_icon[Some("stats"), &gettext("Statistics"), "emilia-stats-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
@@ -2566,6 +2703,27 @@ impl Component for App {
                                         &["flat", "circular", "emilia-record-dot"]
                                     },
                                     connect_clicked => Msg::TransportRecordToggle,
+                                },
+                                // Voice-memo microphone button: always available
+                                // (record from anywhere). A distinct mic icon keeps
+                                // it apart from the radio Record button above; it
+                                // turns into a blinking red dot while recording.
+                                gtk::Button {
+                                    set_icon_name: "audio-input-microphone-symbolic",
+                                    set_valign: gtk::Align::Center,
+                                    #[watch]
+                                    set_tooltip_text: Some(&if model.memo.recording {
+                                        gettext("Stop the voice memo")
+                                    } else {
+                                        gettext("Record a voice memo")
+                                    }),
+                                    #[watch]
+                                    set_css_classes: if model.memo.recording {
+                                        &["flat", "circular", "emilia-record-dot", "emilia-recording"]
+                                    } else {
+                                        &["flat", "circular"]
+                                    },
+                                    connect_clicked => Msg::MemoRecordToggle,
                                 },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
@@ -3003,6 +3161,8 @@ impl Component for App {
         let podcasts_list = gtk::ListBox::new();
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
+        let memos_list = gtk::ListBox::new();
+        let memo_filter_bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let yt_channels_list = gtk::ListBox::new();
         let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -3182,6 +3342,10 @@ impl Component for App {
                 stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 rec_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             },
+            memo: crate::ui::app_memo::MemoState::new(
+                memos_list.clone(),
+                memo_filter_bar.clone(),
+            ),
             youtube: YoutubeState {
                 enabled: youtube_enabled,
                 ytdlp_version: None,
@@ -3313,6 +3477,20 @@ impl Component for App {
         model.reload_podcasts(&sender);
         model.reload_streams(&sender);
         model.reload_recordings(&sender);
+        // Seed the starter memo categories once (localized; i18n is ready here),
+        // then load categories + memos for the Memo page.
+        {
+            let names = [
+                gettext("Idea"),
+                gettext("Task"),
+                gettext("Note"),
+                gettext("Music"),
+            ];
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let _ = model.library.seed_memo_categories(&refs);
+        }
+        model.reload_memo_categories(&sender);
+        model.reload_memos(&sender);
         // (Statistics build themselves in the StatsPage component's init.)
         // Cache the podcast feed images once in the background, then rebuild
         // the list so that the covers appear (no UI block at startup).
@@ -3973,7 +4151,8 @@ impl Component for App {
                 self.reload_recordings(&sender);
             }
             Msg::AddRecordingToLibrary(id) => self.add_recording_to_library(id),
-            Msg::EditRecording(id) => self.open_recording_edit(&sender, id),
+            Msg::EditRecording(id) => self.open_recording_edit(&sender, EditKind::Recording, id),
+            Msg::EditMemo(id) => self.open_recording_edit(&sender, EditKind::Memo, id),
             Msg::RecordingPlayFrom { path, ms } => {
                 self.transport.forced_start_ms = Some(ms);
                 self.play_recording(path);
@@ -3986,19 +4165,31 @@ impl Component for App {
                     self.refresh_queue_icons();
                 }
             }
-            Msg::RecordingApplyCut { id, cuts } => self.apply_recording_cut(&sender, id, cuts),
-            Msg::RecordingCutDone {
+            Msg::EditApplyCut { kind, id, cuts } => {
+                self.apply_recording_cut(&sender, kind, id, cuts)
+            }
+            Msg::EditCutDone {
+                kind,
                 id,
                 path,
                 duration_ms,
             } => match path {
                 Some(p) => {
-                    let _ = self.library.update_recording_file(id, &p, duration_ms);
                     self.nav.nav_view.pop();
-                    self.reload_recordings(&sender);
-                    self.toast(&gettext("Recording edited"));
+                    match kind {
+                        EditKind::Recording => {
+                            let _ = self.library.update_recording_file(id, &p, duration_ms);
+                            self.reload_recordings(&sender);
+                            self.toast(&gettext("Recording edited"));
+                        }
+                        EditKind::Memo => {
+                            let _ = self.library.update_memo_file(id, &p, duration_ms);
+                            self.reload_memos(&sender);
+                            self.toast(&gettext("Memo edited"));
+                        }
+                    }
                 }
-                None => self.toast(&gettext("Editing the recording failed")),
+                None => self.toast(&gettext("Editing failed")),
             },
             Msg::SetRecordingBufferMinutes(n) => {
                 self.streaming.recording_buffer_minutes = n.min(60);
@@ -4006,6 +4197,60 @@ impl Component for App {
                     "recording_buffer_minutes",
                     &self.streaming.recording_buffer_minutes.to_string(),
                 );
+            }
+            // --- Voice memos ---
+            Msg::MemoRecordToggle => self.toggle_memo_record(&sender),
+            Msg::MemoRecordSaved { path, duration_ms } => match path {
+                Some(p) => {
+                    let title = crate::ui::app_memo::memo_default_title();
+                    let _ = self.library.add_memo(&p, &title, None, duration_ms);
+                    self.reload_memos(&sender);
+                    self.toast(&gettext("Memo saved"));
+                }
+                None => self.toast(&gettext("Recording failed")),
+            },
+            Msg::SetMemoFilter(f) => {
+                if self.memo.filter != f {
+                    self.memo.filter = f;
+                    self.reload_memos(&sender);
+                }
+            }
+            Msg::OpenMemo(id) => self.open_memo(root, &sender, id),
+            Msg::MemoRename { id, title } => {
+                let _ = self.library.rename_memo(id, &title);
+                self.reload_memos(&sender);
+            }
+            Msg::MemoSetCategory { id, category_id } => {
+                let _ = self.library.set_memo_category(id, category_id);
+                self.reload_memos(&sender);
+            }
+            Msg::MemoDelete(id) => {
+                self.undo_toast(&sender, &gettext("Memo deleted"), Msg::MemoDeleteConfirmed(id));
+            }
+            Msg::MemoDeleteConfirmed(id) => {
+                if let Ok(Some(path)) = self.library.delete_memo(id) {
+                    let _ = std::fs::remove_file(&path);
+                }
+                self.reload_memos(&sender);
+            }
+            Msg::OpenMemoCategories => self.open_memo_categories(root, &sender),
+            Msg::MemoCategoryAdd(name) => {
+                let _ = self.library.add_memo_category(&name);
+                self.reload_memo_categories(&sender);
+            }
+            Msg::MemoCategoryRename { id, name } => {
+                let _ = self.library.rename_memo_category(id, &name);
+                self.reload_memo_categories(&sender);
+                self.reload_memos(&sender);
+            }
+            Msg::MemoCategoryDelete(id) => {
+                let _ = self.library.delete_memo_category(id);
+                // A deleted category may have been the active filter → fall back.
+                if self.memo.filter == Some(Some(id)) {
+                    self.memo.filter = None;
+                }
+                self.reload_memo_categories(&sender);
+                self.reload_memos(&sender);
             }
             Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
@@ -4261,6 +4506,11 @@ impl Component for App {
                 // Advance the running timeshift recording at the song boundaries.
                 if self.streaming.record_state.is_some() {
                     self.drive_recording(&sender);
+                }
+                // Update the voice-memo elapsed counter while recording.
+                if let Some(rec) = self.memo.recorder.as_ref() {
+                    let secs = rec.elapsed_ms() / 1000;
+                    self.memo.rec_elapsed = format!("{}:{:02}", secs / 60, secs % 60);
                 }
                 // Sync the play/pause and record icons of the station rows.
                 self.refresh_stream_icons();

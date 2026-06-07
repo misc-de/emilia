@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::i18n::gettext;
-use crate::ui::app::{App, Msg};
+use crate::ui::app::{App, EditKind, Msg};
 
 /// Number of waveform columns decoded for the display.
 const BUCKETS: usize = 1200;
@@ -214,17 +214,31 @@ fn show_play_icon(btn: &gtk::Button) {
 }
 
 impl App {
-    pub(crate) fn open_recording_edit(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(rec) = self
-            .streaming
-            .recording_items
-            .iter()
-            .find(|r| r.id == id)
-            .cloned()
-        else {
+    pub(crate) fn open_recording_edit(
+        &self,
+        sender: &ComponentSender<Self>,
+        kind: EditKind,
+        id: i64,
+    ) {
+        // Look up the file path of the item being edited; the editor body itself
+        // is generic and only needs the path.
+        let path = match kind {
+            EditKind::Recording => self
+                .streaming
+                .recording_items
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| r.path.clone()),
+            EditKind::Memo => self
+                .memo
+                .memo_items
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.path.clone()),
+        };
+        let Some(path) = path else {
             return;
         };
-        let path = rec.path.clone();
         if !std::path::Path::new(&path).exists() {
             self.toast(&gettext("File not found"));
             return;
@@ -580,7 +594,7 @@ impl App {
                 let cuts = state.borrow().cuts.clone();
                 if cuts.is_empty() {
                     // Let the apply path surface the "mark a part first" hint.
-                    sender.input(Msg::RecordingApplyCut { id, cuts });
+                    sender.input(Msg::EditApplyCut { kind, id, cuts });
                     return;
                 }
                 let dlg = adw::AlertDialog::new(
@@ -598,7 +612,8 @@ impl App {
                 let sender = sender.clone();
                 dlg.connect_response(None, move |_, resp| {
                     if resp == "ok" {
-                        sender.input(Msg::RecordingApplyCut {
+                        sender.input(Msg::EditApplyCut {
+                            kind,
                             id,
                             cuts: cuts.clone(),
                         });
@@ -608,7 +623,11 @@ impl App {
             });
         }
 
-        self.push_subpage(&gettext("Edit recording"), &content);
+        let page_title = match kind {
+            EditKind::Recording => gettext("Edit recording"),
+            EditKind::Memo => gettext("Edit memo"),
+        };
+        self.push_subpage(&page_title, &content);
 
         // Follow the audio while previewing: keep the timeline + waveform
         // playhead in sync, skip over committed cuts, and flip back to the play
@@ -750,13 +769,14 @@ impl App {
         }
     }
 
-    /// Destructively applies the editor's cut ranges to a recording. The decode +
-    /// re-encode runs on a background thread (it would otherwise freeze the UI for
-    /// seconds); the result arrives as [`Msg::RecordingCutDone`], which overwrites
-    /// the DB row and returns to the recordings list.
+    /// Destructively applies the editor's cut ranges to a recording or memo. The
+    /// decode + re-encode runs on a background thread (it would otherwise freeze
+    /// the UI for seconds); the result arrives as [`Msg::EditCutDone`], which
+    /// overwrites the DB row and returns to the list.
     pub(crate) fn apply_recording_cut(
         &mut self,
         sender: &ComponentSender<Self>,
+        kind: EditKind,
         id: i64,
         cuts: Vec<(f64, f64)>,
     ) {
@@ -764,26 +784,38 @@ impl App {
             self.toast(&gettext("Mark a part to cut first"));
             return;
         }
-        let Some(rec) = self
-            .streaming
-            .recording_items
-            .iter()
-            .find(|r| r.id == id)
-            .cloned()
-        else {
+        // (path, artist, album, title) of the item; memos carry no artist/album.
+        let meta = match kind {
+            EditKind::Recording => self
+                .streaming
+                .recording_items
+                .iter()
+                .find(|r| r.id == id)
+                .cloned()
+                .map(|rec| {
+                    let src = std::path::PathBuf::from(&rec.path);
+                    // Album from the embedded tag, artist from the DB row (tag fallback).
+                    let tag = crate::core::scanner::read_track(&src).ok();
+                    let album = tag.as_ref().and_then(|t| t.album.clone());
+                    let artist = rec
+                        .artist
+                        .clone()
+                        .filter(|a| !a.trim().is_empty())
+                        .or_else(|| tag.as_ref().and_then(|t| t.artist.clone()));
+                    (src, artist, album, rec.title.clone())
+                }),
+            EditKind::Memo => self
+                .memo
+                .memo_items
+                .iter()
+                .find(|m| m.id == id)
+                .cloned()
+                .map(|m| (std::path::PathBuf::from(&m.path), None, None, m.title.clone())),
+        };
+        let Some((src, artist, album, title)) = meta else {
             return;
         };
-        let src = std::path::PathBuf::from(&rec.path);
-        // Album from the embedded tag, artist from the DB row (tag as fallback).
-        let tag = crate::core::scanner::read_track(&src).ok();
-        let album = tag.as_ref().and_then(|t| t.album.clone());
-        let artist = rec
-            .artist
-            .clone()
-            .filter(|a| !a.trim().is_empty())
-            .or_else(|| tag.as_ref().and_then(|t| t.artist.clone()));
-        let title = rec.title.clone();
-        self.toast(&gettext("Editing the recording …"));
+        self.toast(&gettext("Editing …"));
 
         let (tx, rx) = async_channel::bounded(1);
         std::thread::spawn(move || {
@@ -797,12 +829,13 @@ impl App {
             let (path, duration_ms) = match rx.recv().await {
                 Ok(Ok((p, d))) => (Some(p), d),
                 Ok(Err(e)) => {
-                    tracing::warn!("Recording cut failed: {e}");
+                    tracing::warn!("Cut failed: {e}");
                     (None, 0)
                 }
                 Err(_) => (None, 0),
             };
-            sender.input(Msg::RecordingCutDone {
+            sender.input(Msg::EditCutDone {
+                kind,
                 id,
                 path,
                 duration_ms,

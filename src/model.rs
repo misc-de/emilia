@@ -231,6 +231,40 @@ pub struct RecordingItem {
     pub incomplete: bool,
 }
 
+/// A user-created category for organising voice memos. Each memo has at most
+/// one (optional); a memo without one falls back to "General" — represented by
+/// a NULL `category_id`, only ever shown as a label, never a real row, so it
+/// cannot be deleted. Deliberately separate from the `category` *areas*
+/// (filesystem/artists/albums/…), which are an unrelated concept.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MemoCategory {
+    pub id: i64,
+    /// Display name (free text, user-editable). Not run through gettext — the
+    /// localized defaults are translated once at seed time, then stored as data.
+    pub name: String,
+    /// Manual sort order (`ORDER BY position`).
+    pub position: i64,
+}
+
+/// A voice memo (microphone recording). Stored as an audio file at `path`; here
+/// only the metadata/management. Kept separate from `recording` (radio
+/// timeshift) and `track` (the music library).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MemoItem {
+    pub id: i64,
+    pub path: String,
+    pub title: String,
+    /// Assigned category, or `None` = unassigned ("General"). Assignable (and
+    /// re-assignable) after recording.
+    pub category_id: Option<i64>,
+    /// Recording time (Unix seconds). Primary sort key (newest first).
+    pub recorded_at: i64,
+    /// Playback length in milliseconds (0 until probed/backfilled).
+    pub duration_ms: i64,
+}
+
 /// Aggregated metrics of the listening statistics over a period. All computed
 /// from the raw `play_event` table (see [`crate::core::db`]).
 #[derive(Debug, Clone, Default)]

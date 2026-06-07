@@ -15,6 +15,7 @@ mod category;
 mod eq;
 mod favorites;
 mod gallery;
+mod memo;
 mod playlist;
 mod podcast;
 mod stats;
@@ -517,6 +518,34 @@ impl Library {
                 source    TEXT NOT NULL,
                 cached_at INTEGER NOT NULL
             );
+
+            -- Voice memos (microphone recordings) and the user-created
+            -- categories that organise them. Unrelated to the `category`
+            -- *areas* table above (same word, different concept) and to
+            -- `recording` (radio timeshift): a memo's audio file lives at
+            -- `path`, here only the metadata/management.
+            CREATE TABLE IF NOT EXISTS memo_category (
+                id         INTEGER PRIMARY KEY,
+                name       TEXT NOT NULL,
+                position   INTEGER NOT NULL DEFAULT 0,  -- manual sort order
+                created_at INTEGER
+            );
+            -- category_id NULL = unassigned ("General"). Foreign keys are not
+            -- enforced (no PRAGMA foreign_keys), so deleting a category resets
+            -- its memos to NULL explicitly in `delete_memo_category` rather than
+            -- via ON DELETE — the REFERENCES clause is documentation only.
+            CREATE TABLE IF NOT EXISTS memo (
+                id          INTEGER PRIMARY KEY,
+                path        TEXT NOT NULL,
+                title       TEXT NOT NULL,
+                category_id INTEGER REFERENCES memo_category(id),
+                recorded_at INTEGER,                    -- Unix seconds (newest first)
+                duration_ms INTEGER NOT NULL DEFAULT 0
+            );
+            -- The default "Recent" view sorts by recording time; the category
+            -- filter is the second axis.
+            CREATE INDEX IF NOT EXISTS idx_memo_recorded ON memo(recorded_at);
+            CREATE INDEX IF NOT EXISTS idx_memo_category ON memo(category_id);
             "#,
         )?;
 
