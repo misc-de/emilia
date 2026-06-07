@@ -1034,12 +1034,11 @@ impl App {
             .vexpand(true)
             .child(content)
             .build();
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        toolbar.set_content(Some(&scroller));
+        // No own header: the shared header above the NavigationView provides the
+        // back arrow + title (so the top/bottom navigation stays visible).
         let page = adw::NavigationPage::builder()
             .title(title)
-            .child(&toolbar)
+            .child(&scroller)
             .build();
         self.nav.nav_view.push(&page);
     }

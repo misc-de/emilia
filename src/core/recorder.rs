@@ -244,8 +244,15 @@ fn run(
     // ignores station idents, ad insertions and fast back-and-forth
     // changes of the display (otherwise several files per song would arise).
     let min_bytes = MIN_SONG_SECS * bytes_per_sec;
+    // Like `min_bytes`, but for the *cleared*-title gap: the title must stay empty
+    // this long before we end the running song (filters brief title flicker).
+    let min_gap = MIN_GAP_SECS * bytes_per_sec;
     // Candidate for the next song boundary: (start offset, title).
     let mut pending: Option<(u64, String)> = None;
+    // Offset at which the ICY title most recently went empty (while a song was
+    // running). Once the clear persists for `min_gap`, the song ends here and an
+    // untitled gap segment begins. Reset when a title reappears.
+    let mut empty_since: Option<u64> = None;
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -287,6 +294,24 @@ fn run(
                 }
                 pending = None;
             }
+            // Cleared title that has persisted long enough → end the running song
+            // exactly where the title cleared and start an untitled gap segment
+            // (the talk/ads between songs, saved to its own file, not identified).
+            if let Some(empty_off) = empty_since {
+                let cuttable =
+                    s.current_title.is_some() && total.saturating_sub(empty_off) >= min_gap;
+                if cuttable {
+                    s.markers.push(Marker {
+                        offset: empty_off,
+                        title: String::new(),
+                    });
+                    s.current_title = None;
+                    if s.markers.len() > 256 {
+                        s.markers.remove(0);
+                    }
+                    empty_since = None;
+                }
+            }
             prune_markers(&mut s);
         }
 
@@ -304,7 +329,15 @@ fn run(
             let mut meta = vec![0u8; mlen];
             reader.read_exact(&mut meta)?;
             if let Some(title) = parse_stream_title(&meta) {
-                if !title.trim().is_empty() {
+                let title = title.trim().to_string();
+                if title.is_empty() {
+                    // ICY title cleared → remember where. If it stays cleared (see
+                    // the commit in the section above), the running song ends there
+                    // and an untitled gap segment begins.
+                    empty_since.get_or_insert(total);
+                    pending = None;
+                } else {
+                    empty_since = None; // a title is present again
                     let current = shared.lock().unwrap().current_title.clone();
                     if current.as_deref() == Some(title.as_str()) {
                         // Back to the running song (e.g. after an insertion)
@@ -325,6 +358,11 @@ fn run(
 /// Shorter insertions (ads, station idents, fast changes)
 /// are attributed to the running song instead of producing a second file.
 const MIN_SONG_SECS: u64 = 30;
+
+/// Minimum duration (seconds) the ICY title must stay *empty* before the running
+/// song is ended at the clear point. Filters brief title flicker between songs
+/// while still catching real gaps (talk/ads with no metadata).
+const MIN_GAP_SECS: u64 = 6;
 
 /// Removes song boundaries that have fully scrolled out of the buffer (whose
 /// following boundary already lies beyond the available window) – but keeps the
@@ -384,11 +422,10 @@ fn parse_stream_title(meta: &[u8]) -> Option<String> {
         .or_else(|| rest.find('\''))
         .unwrap_or(rest.len());
     let value = rest[..endq].trim_matches(char::from(0)).trim();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value.to_string())
-    }
+    // Return the value even when empty: an explicit empty `StreamTitle=''` is a
+    // meaningful signal that the running song just ended. `None` means the field
+    // was absent from this metadata block.
+    Some(value.to_string())
 }
 
 fn ext_from_content_type(ct: Option<&str>) -> &'static str {

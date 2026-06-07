@@ -14,7 +14,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 use gstreamer as gst;
@@ -28,14 +27,13 @@ const EXT: &str = "ogg";
 /// Unique file-name counter so two quick recordings never collide.
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Where voice memos are stored: `~/Music/Memos` (mirrors the radio
-/// `recordings_dir` helper). User-visible on purpose, just like the radio
-/// recordings.
+/// Where voice memos are stored: `$XDG_DATA_HOME/emilia/memos` — inside the app
+/// data dir (like podcast downloads), **not** the music library, so the library
+/// scan never picks memos up as tracks.
 pub fn memos_dir() -> PathBuf {
-    let mut dir = dirs::audio_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
-    dir.push("Memos");
+    let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("emilia");
+    dir.push("memos");
     dir
 }
 
@@ -45,7 +43,6 @@ pub fn memos_dir() -> PathBuf {
 pub struct MicRecorder {
     pipeline: gst::Pipeline,
     path: PathBuf,
-    start: Instant,
     /// Set once [`stop`](Self::stop) has taken over teardown, so `Drop` does not
     /// also delete the (now finalized) file.
     stopped: bool,
@@ -92,14 +89,8 @@ impl MicRecorder {
         Ok(MicRecorder {
             pipeline,
             path,
-            start: Instant::now(),
             stopped: false,
         })
-    }
-
-    /// Elapsed recording time in milliseconds (for the live UI counter).
-    pub fn elapsed_ms(&self) -> u64 {
-        self.start.elapsed().as_millis() as u64
     }
 
     /// Stops and **finalizes** the recording: sends EOS, waits for it to reach

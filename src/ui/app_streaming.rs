@@ -534,6 +534,7 @@ impl App {
         match self.player.play_uri(&st.url, 0) {
             Ok(()) => {
                 self.mini.now_playing = Some(st.name.clone());
+                self.mini.current_album = None; // station — no album page
                 self.mini.playing = true;
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
@@ -1012,14 +1013,21 @@ impl App {
 
         let mut saved = 0;
         for (start, end, raw_title, incomplete) in &segs {
-            if self.store_segment(
-                sender,
-                *start,
-                *end,
-                raw_title,
-                station.as_deref(),
-                *incomplete,
-            ) {
+            let ok = if raw_title.trim().is_empty() {
+                // Untitled gap (talk/ads between songs): save to its own file, but
+                // without any song recognition/enrichment.
+                self.store_plain_segment(*start, *end, station.as_deref(), *incomplete)
+            } else {
+                self.store_segment(
+                    sender,
+                    *start,
+                    *end,
+                    raw_title,
+                    station.as_deref(),
+                    *incomplete,
+                )
+            };
+            if ok {
                 saved += 1;
             }
         }
@@ -1124,6 +1132,40 @@ impl App {
         true
     }
 
+    /// Saves a non-song segment (the talk/ads gap between songs) to its own file
+    /// with a neutral label and **no** song recognition or online lookup. Returns
+    /// `true` on success.
+    pub(crate) fn store_plain_segment(
+        &mut self,
+        start: u64,
+        end: u64,
+        station: Option<&str>,
+        incomplete: bool,
+    ) -> bool {
+        let title = gettext("Talk");
+        let Some(rec) = self.streaming.recorder.as_ref() else {
+            return false;
+        };
+        let path = match rec.save_song(start, end, None, &title, &recordings_dir()) {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!("Could not save gap recording: {e}");
+                return false;
+            }
+        };
+        match self
+            .library
+            .add_plain_recording(&path.to_string_lossy(), &title, station, incomplete)
+        {
+            Ok(_) => true,
+            Err(e) => {
+                tracing::warn!("Could not store gap recording: {e}");
+                let _ = std::fs::remove_file(&path);
+                false
+            }
+        }
+    }
+
     /// On stop: saves the song currently being recorded (from `next_start` up to
     /// the current buffer end) so the in-progress song is not lost. Best effort;
     /// does nothing if nothing has been buffered/identified yet.
@@ -1146,9 +1188,7 @@ impl App {
             .songs
             .iter()
             .find(|s| s.start <= next_start && s.end.is_none());
-        let Some(raw_title) = live_title.or_else(|| song.map(|s| s.title.clone())) else {
-            return; // nothing identified yet → don't save an untitled blob
-        };
+        let raw_title = live_title.or_else(|| song.map(|s| s.title.clone()));
         let incomplete = song.is_none_or(|s| !s.complete || next_start > s.start);
         let station = self
             .streaming
@@ -1156,14 +1196,18 @@ impl App {
             .iter()
             .find(|s| s.id == stream_id)
             .map(|s| s.name.clone());
-        self.store_segment(
-            sender,
-            next_start,
-            end,
-            &raw_title,
-            station.as_deref(),
-            incomplete,
-        );
+        match raw_title {
+            // A real song still running → save with recognition.
+            Some(t) if !t.trim().is_empty() => {
+                self.store_segment(sender, next_start, end, &t, station.as_deref(), incomplete);
+            }
+            // A trailing untitled gap (talk/ads) → save plainly.
+            Some(_) => {
+                self.store_plain_segment(next_start, end, station.as_deref(), incomplete);
+            }
+            // Nothing identified yet → don't save an untitled blob.
+            None => {}
+        }
     }
 
     /// Replay subpage of a station: the songs detected in the buffer for
@@ -1327,6 +1371,9 @@ impl App {
                 self.play_stream(id);
             }
             self.record_arm(sender, id);
+            // Jump to the recordings view so the new captures are visible as they
+            // are saved at the song boundaries.
+            self.streaming.stream_view = crate::ui::app::StreamView::Recordings;
             self.refresh_stream_icons();
         }
     }
@@ -1381,6 +1428,7 @@ impl App {
                 match self.player.play_file(&p, 0) {
                     Ok(()) => {
                         self.mini.now_playing = Some(gettext("Replay"));
+                        self.mini.current_album = None; // replay clip — no album page
                         self.mini.playing = true;
                         self.transport.playing_path = Some(path);
                         self.podcasts.playing_episode_url = None;

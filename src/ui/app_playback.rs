@@ -169,6 +169,7 @@ impl App {
             Ok(()) => {
                 self.transport.skip_count = 0;
                 self.mini.now_playing = Some(track.title.clone());
+                self.mini.current_album = None; // cloud track — no local album page
                 self.mini.playing = true;
                 // Streaming from Nextcloud buffers first → spinner until ready
                 // (a cached copy plays instantly, so no spinner there).
@@ -714,6 +715,7 @@ impl App {
                 self.youtube.playing_video_id = Some(video_id.clone());
                 self.stop_recorder();
                 self.mini.now_playing = Some(name.clone());
+                self.mini.current_album = None; // YouTube — no local album page
                 self.mini.playing = true;
                 // Resolving the stream URL (yt-dlp) and buffering takes a moment
                 // → spinner until `YtStreamResolved` plays and the player is ready.
@@ -772,6 +774,23 @@ impl App {
                 self.mini.now_playing = Some(match &yt_video {
                     Some(_) => yt_name.clone().unwrap_or_else(|| self.display_name(&path)),
                     None => self.display_name(&path),
+                });
+                // Album shortcut in the player bar: only for a local track with an
+                // album (not for YouTube tracks) …
+                let album = match &yt_video {
+                    Some(_) => None,
+                    None => track
+                        .as_ref()
+                        .and_then(|t| t.album.clone())
+                        .filter(|a| !a.trim().is_empty()),
+                };
+                // … and only when the album actually has more than this one track
+                // (a single-track album has no meaningful song page to open).
+                self.mini.current_album = album.filter(|a| {
+                    self.library
+                        .album_track_paths_by_name(a)
+                        .map(|p| p.len() > 1)
+                        .unwrap_or(false)
                 });
                 self.mini.playing = true;
                 // Refresh the active output (may have changed).
@@ -855,6 +874,7 @@ impl App {
             self.player.stop();
             self.mini.playing = false;
             self.mini.now_playing = None;
+            self.mini.current_album = None;
             self.transport.playing_path = None;
             self.files.playing_remote = false;
             *self.transport.close_resume.borrow_mut() = None;

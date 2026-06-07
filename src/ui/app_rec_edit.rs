@@ -239,6 +239,16 @@ impl App {
         let Some(path) = path else {
             return;
         };
+        // For memos, the editable name shown at the top of the editor.
+        let memo_title = match kind {
+            EditKind::Memo => self
+                .memo
+                .memo_items
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.title.clone()),
+            EditKind::Recording => None,
+        };
         if !std::path::Path::new(&path).exists() {
             self.toast(&gettext("File not found"));
             return;
@@ -268,6 +278,72 @@ impl App {
             .margin_start(12)
             .margin_end(12)
             .build();
+
+        // Memo name at the very top: a real text field, read-only until the edit
+        // (pencil) button is pressed; the new name is only accepted when the save
+        // button (or Enter) is pressed.
+        if let Some(title) = memo_title {
+            let name_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            let entry = gtk::Entry::builder()
+                .text(&title)
+                .hexpand(true)
+                .editable(false)
+                .build();
+            let edit_btn = gtk::Button::from_icon_name("document-edit-symbolic");
+            edit_btn.add_css_class("flat");
+            edit_btn.set_valign(gtk::Align::Center);
+            edit_btn.set_tooltip_text(Some(&gettext("Rename")));
+            let save_btn = gtk::Button::from_icon_name("object-select-symbolic");
+            save_btn.add_css_class("flat");
+            save_btn.set_valign(gtk::Align::Center);
+            save_btn.set_tooltip_text(Some(&gettext("Save name")));
+            save_btn.set_visible(false);
+
+            // Pencil → enter edit mode (editable + focused, text selected).
+            {
+                let (entry, edit_btn2, save_btn2) =
+                    (entry.clone(), edit_btn.clone(), save_btn.clone());
+                edit_btn.connect_clicked(move |_| {
+                    entry.set_editable(true);
+                    entry.grab_focus();
+                    entry.select_region(0, -1);
+                    edit_btn2.set_visible(false);
+                    save_btn2.set_visible(true);
+                });
+            }
+            // Save → accept the (non-empty) new name and leave edit mode.
+            {
+                let (sender, entry, edit_btn2, save_btn2) =
+                    (sender.clone(), entry.clone(), edit_btn.clone(), save_btn.clone());
+                save_btn.connect_clicked(move |_| {
+                    let t = entry.text().to_string();
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        sender.input(Msg::MemoRename {
+                            id,
+                            title: t.to_string(),
+                        });
+                    }
+                    entry.set_editable(false);
+                    save_btn2.set_visible(false);
+                    edit_btn2.set_visible(true);
+                });
+            }
+            // Enter in the field = click save (only while editing).
+            {
+                let save_btn2 = save_btn.clone();
+                entry.connect_activate(move |_| {
+                    if save_btn2.is_visible() {
+                        save_btn2.emit_clicked();
+                    }
+                });
+            }
+
+            name_row.append(&entry);
+            name_row.append(&edit_btn);
+            name_row.append(&save_btn);
+            content.append(&name_row);
+        }
 
         // Top controls: scissors (left), play/pause (right).
         let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);

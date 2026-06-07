@@ -987,6 +987,7 @@ impl App {
         match started {
             Ok(()) => {
                 self.mini.now_playing = Some(title.to_string());
+                self.mini.current_album = None; // podcast episode — no album page
                 self.mini.playing = true;
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = Some(url.to_string());

@@ -186,6 +186,14 @@ pub(crate) enum EditKind {
     Memo,
 }
 
+/// Which view the Memo page shows (tab switcher): a flat "Recent" list or a
+/// "Category" tree (categories alphanumeric, their memos nested underneath).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemoView {
+    Recent,
+    Category,
+}
+
 /// Which view the YouTube page shows (tab switcher).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum YtView {
@@ -400,6 +408,9 @@ pub(crate) struct TransportState {
 pub(crate) struct MiniState {
     /// Title shown in the player bar; `None` when nothing is loaded.
     pub(crate) now_playing: Option<String>,
+    /// Album of the running **local** track, if it has one — drives the album
+    /// shortcut in the player bar. `None` for streams/podcasts/YouTube/cloud.
+    pub(crate) current_album: Option<String>,
     pub(crate) playing: bool,
     /// A slow source (Nextcloud/YouTube) is resolving/buffering: show a spinner
     /// in the play button until the pipeline is ready. Local files start fast
@@ -453,6 +464,14 @@ pub(crate) struct LyricsView {
     pub(crate) timer: Option<gtk::glib::SourceId>,
     /// The dialog itself, so reopening can close a stale one.
     pub(crate) dialog: adw::Dialog,
+    /// Whether timed karaoke highlighting is active (off → static lyrics, no
+    /// timer). Persisted per track in `lyrics_pref`.
+    pub(crate) karaoke: bool,
+    /// Manual karaoke timing offset in ms (+ = lyrics shown later). Persisted
+    /// per track.
+    pub(crate) delay_ms: i64,
+    /// Header label that shows the current delay (updated by the +/− buttons).
+    pub(crate) delay_label: gtk::Label,
 }
 
 /// Navigation + layout chrome, grouped off the `App` god-object.
@@ -887,6 +906,13 @@ pub enum Msg {
     LyricsTick,
     /// The karaoke dialog was closed: stop its timer and drop the view.
     LyricsClosed,
+    /// Seek the song to a clicked karaoke line (its LRC timestamp in ms; the
+    /// current delay offset is applied by the handler).
+    LyricsSeek(i64),
+    /// Toggle timed karaoke highlighting for the running track (persisted).
+    LyricsToggleKaraoke,
+    /// Nudge the karaoke timing offset by the given ms (+ = later); persisted.
+    LyricsDelayAdjust(i64),
     /// Online lyrics for an open file-info dialog returned (path + lyrics).
     FileLyricsFetched {
         path: String,
@@ -924,6 +950,10 @@ pub enum Msg {
     },
     /// Open the queue dialog.
     ShowQueue,
+    /// Open the song page of the album currently playing (player-bar shortcut).
+    ShowCurrentAlbum,
+    /// Back arrow in the shared header: pop the current subpage.
+    NavBack,
     /// Play a user-queue entry now (its index + length; album rows span `len`
     /// tracks). The entry jumps ahead of the rest of the queue.
     PlayQueueAt {
@@ -1273,8 +1303,9 @@ pub enum Msg {
     ToggleStream(i64),
     /// Record button of a station row: starts/stops the continuous recording.
     StreamRecordToggle(i64),
-    /// Record button in the player bar: records/stops the running station.
-    TransportRecordToggle,
+    /// Shared player-bar record button: records a voice memo (Memo section) or
+    /// toggles the running station's timeshift recording (Streaming section).
+    RecordToggle,
     /// Title tag from the playback (for stations: the running ICY title).
     StreamTitle(String),
     /// Open the detail page of a station.
@@ -1341,16 +1372,14 @@ pub enum Msg {
     SetRecordingBufferMinutes(u32),
 
     // ---- Voice memos ----
-    /// Player-bar / page record button: start or stop a microphone recording.
-    MemoRecordToggle,
     /// A finished recording was finalized off-thread: new file path (`None` =
     /// failed) + its duration. Creates the memo row.
     MemoRecordSaved {
         path: Option<String>,
         duration_ms: i64,
     },
-    /// Change the memo list filter (None = Recent, Some(None) = General).
-    SetMemoFilter(Option<Option<i64>>),
+    /// Switch the memo view: Recent list or Category tree.
+    SetMemoView(MemoView),
     /// Open a memo's detail dialog (id) – via long press.
     OpenMemo(i64),
     /// Rename a memo.
@@ -1361,14 +1390,10 @@ pub enum Msg {
     MemoDelete(i64),
     /// Actually delete a memo (after the undo toast expires).
     MemoDeleteConfirmed(i64),
-    /// Open the category management dialog.
-    OpenMemoCategories,
-    /// Add a new memo category.
+    /// Open the "new category" text prompt (the "+" in the tab bar).
+    MemoCategoryAddPrompt,
+    /// Add a new memo category (confirmed name).
     MemoCategoryAdd(String),
-    /// Rename a memo category.
-    MemoCategoryRename { id: i64, name: String },
-    /// Delete a memo category (its memos fall back to General).
-    MemoCategoryDelete(i64),
 }
 
 /// Results of the background workers (read folder or online enrichment).
@@ -1562,17 +1587,21 @@ impl Component for App {
                 // subpages are pushed only here (in the content area). In desktop
                 // mode the sidebar stays visible; when narrow the split is
                 // collapsed and the content fills the window as before.
+                // The persistent chrome (header, top nav, player) wraps the
+                // NavigationView, so pushed subpages (album/track lists) appear in
+                // the body **without** hiding the top/bottom navigation.
                 #[wrap(Some)]
-                #[name = "nav_view"]
-                set_content = &adw::NavigationView {
-                    // Root page: the actual content (header, tabs, mini player).
-                    adw::NavigationPage {
-                        set_title: "Emilia",
-                        set_tag: Some("main"),
-                        #[wrap(Some)]
-                        #[name = "content_view"]
-                        set_child = &adw::ToolbarView {
+                #[name = "content_view"]
+                set_content = &adw::ToolbarView {
                     add_top_bar = &adw::HeaderBar {
+                        // Back arrow on a pushed subpage (the only header now).
+                        #[name = "nav_back_btn"]
+                        pack_start = &gtk::Button {
+                            set_icon_name: "go-previous-symbolic",
+                            set_tooltip_text: Some(&gettext("Back")),
+                            set_visible: false,
+                            connect_clicked => Msg::NavBack,
+                        },
                         #[wrap(Some)]
                         #[name = "win_title"]
                         set_title_widget = &adw::WindowTitle::new("Emilia", ""),
@@ -1661,9 +1690,18 @@ impl Component for App {
                     // Content with loading overlay. Desktop: a bit of space **between
                     // the title bar and the content** (top); in narrow (mobile) mode
                     // back to 0 via breakpoint (see `init`).
+                    // The NavigationView lives in the body; the chrome around it
+                    // stays put. Subpages are pushed onto it (header-less; the
+                    // shared header above provides the back arrow + title).
+                    #[wrap(Some)]
+                    #[name = "nav_view"]
+                    set_content = &adw::NavigationView {
+                        adw::NavigationPage {
+                            set_title: "Emilia",
+                            set_tag: Some("main"),
                     #[wrap(Some)]
                     #[name = "content_overlay"]
-                    set_content = &gtk::Overlay {
+                    set_child = &gtk::Overlay {
                         set_margin_top: 10,
                         #[wrap(Some)]
                         #[name = "view_stack"]
@@ -2345,62 +2383,37 @@ impl Component for App {
                             add_titled_with_icon[Some("memo"), &gettext("Memo"), "audio-input-microphone-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-                                    set_spacing: 6,
-                                    // Control row: record button + elapsed timer + manage categories.
+
+                                    // Header: Recent / Category switcher + "+" (same layout and
+                                    // top height as the YouTube header).
                                     gtk::Box {
                                         set_orientation: gtk::Orientation::Horizontal,
-                                        set_spacing: 8,
-                                        set_margin_top: 10,
+                                        set_spacing: 6,
+                                        set_margin_top: 2,
+                                        set_margin_bottom: 4,
                                         set_margin_start: 12,
                                         set_margin_end: 12,
-                                        gtk::Button {
+                                        add_css_class: "linked",
+
+                                        gtk::ToggleButton {
+                                            set_label: &gettext("Recent"),
+                                            set_hexpand: true,
                                             #[watch]
-                                            set_icon_name: if model.memo.recording {
-                                                "media-playback-stop-symbolic"
-                                            } else {
-                                                "media-record-symbolic"
-                                            },
-                                            #[watch]
-                                            set_tooltip_text: Some(&if model.memo.recording {
-                                                gettext("Stop recording")
-                                            } else {
-                                                gettext("Record voice memo")
-                                            }),
-                                            #[watch]
-                                            set_css_classes: if model.memo.recording {
-                                                &["circular", "emilia-record-dot", "emilia-recording"]
-                                            } else {
-                                                &["circular", "emilia-record-dot"]
-                                            },
-                                            connect_clicked => Msg::MemoRecordToggle,
+                                            set_active: model.memo.view == MemoView::Recent,
+                                            connect_clicked => Msg::SetMemoView(MemoView::Recent),
                                         },
-                                        gtk::Label {
+                                        gtk::ToggleButton {
+                                            set_label: &gettext("Category"),
+                                            set_hexpand: true,
                                             #[watch]
-                                            set_visible: model.memo.recording,
-                                            #[watch]
-                                            set_label: &model.memo.rec_elapsed,
-                                            add_css_class: "numeric",
-                                            add_css_class: "dim-label",
+                                            set_active: model.memo.view == MemoView::Category,
+                                            connect_clicked => Msg::SetMemoView(MemoView::Category),
                                         },
-                                        gtk::Box { set_hexpand: true },
                                         gtk::Button {
-                                            set_icon_name: "view-list-symbolic",
-                                            set_tooltip_text: Some(&gettext("Manage categories")),
+                                            set_icon_name: "list-add-symbolic",
+                                            set_tooltip_text: Some(&gettext("Add category")),
                                             add_css_class: "flat",
-                                            connect_clicked => Msg::OpenMemoCategories,
-                                        },
-                                    },
-                                    // Category filter bar (filled imperatively in reload_memo_categories).
-                                    gtk::ScrolledWindow {
-                                        set_hscrollbar_policy: gtk::PolicyType::Automatic,
-                                        set_vscrollbar_policy: gtk::PolicyType::Never,
-                                        #[local_ref]
-                                        memo_filter_bar -> gtk::Box {
-                                            set_orientation: gtk::Orientation::Horizontal,
-                                            set_spacing: 6,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                            set_margin_top: 2,
+                                            connect_clicked => Msg::MemoCategoryAddPrompt,
                                         },
                                     },
                                     // Memo list + empty state.
@@ -2412,18 +2425,22 @@ impl Component for App {
                                             #[local_ref]
                                             memos_list -> gtk::ListBox {
                                                 set_valign: gtk::Align::Start,
-                                                set_margin_top: 6,
+                                                set_margin_top: 10,
                                                 set_margin_start: 12,
                                                 set_margin_end: 12,
+                                                set_margin_bottom: 12,
                                                 add_css_class: "boxed-list",
                                             },
                                             adw::StatusPage {
                                                 set_icon_name: Some("audio-input-microphone-symbolic"),
                                                 set_title: &gettext("No memos yet"),
-                                                set_description: Some(&gettext("Tap record to capture a voice memo.")),
+                                                set_description: Some(&gettext("Use the microphone button in the player bar to record a voice memo.")),
                                                 set_vexpand: true,
+                                                // Only on the Recent tab; the Category tree shows nothing when empty.
                                                 #[watch]
-                                                set_visible: model.memo.memo_items.is_empty() && !model.memo.recording,
+                                                set_visible: model.memo.view == MemoView::Recent
+                                                    && model.memo.memo_items.is_empty()
+                                                    && !model.memo.recording,
                                             },
                                         },
                                     },
@@ -2460,6 +2477,8 @@ impl Component for App {
                             },
                         },
                     },
+                        }, // close the main NavigationPage
+                    }, // close the NavigationView (nav_view)
 
                     // Mini player at the bottom with transport controls. The bar stays
                     // always visible; without a selected track only the
@@ -2686,44 +2705,47 @@ impl Component for App {
                                         || !model.transport.user_queue.is_empty(),
                                     connect_clicked => Msg::TogglePlay,
                                 },
-                                // Record button right next to play/pause, on the
-                                // same height. Red dot; blinks during recording.
-                                // Only visible when a station is running and the buffer is on.
+                                // Shared record button, same size as play/pause
+                                // (emilia-bigplay); blinks red while recording. On the
+                                // Memo section it records a voice memo; in Streaming it
+                                // toggles the timeshift recording of the running
+                                // station. Shown only in those contexts.
                                 gtk::Button {
-                                    set_icon_name: "media-record-symbolic",
-                                    set_tooltip_text: Some(&gettext("Record")),
                                     set_valign: gtk::Align::Center,
                                     #[watch]
-                                    set_visible: model.streaming.playing_stream.is_some()
-                                        && model.streaming.recording_buffer_minutes > 0,
+                                    set_visible: model.nav.view_stack.visible_child_name().as_deref() == Some("memo")
+                                        || (model.nav.view_stack.visible_child_name().as_deref() == Some("streaming")
+                                            && model.streaming.playing_stream.is_some()
+                                            && model.streaming.recording_buffer_minutes > 0),
                                     #[watch]
-                                    set_css_classes: if model.streaming.record_state.is_some() {
-                                        &["flat", "circular", "emilia-record-dot", "emilia-recording"]
+                                    set_icon_name: if model.nav.view_stack.visible_child_name().as_deref() == Some("streaming") {
+                                        "media-record-symbolic"
                                     } else {
-                                        &["flat", "circular", "emilia-record-dot"]
+                                        "audio-input-microphone-symbolic"
                                     },
-                                    connect_clicked => Msg::TransportRecordToggle,
-                                },
-                                // Voice-memo microphone button: always available
-                                // (record from anywhere). A distinct mic icon keeps
-                                // it apart from the radio Record button above; it
-                                // turns into a blinking red dot while recording.
-                                gtk::Button {
-                                    set_icon_name: "audio-input-microphone-symbolic",
-                                    set_valign: gtk::Align::Center,
                                     #[watch]
-                                    set_tooltip_text: Some(&if model.memo.recording {
+                                    set_tooltip_text: Some(&if model.nav.view_stack.visible_child_name().as_deref() == Some("streaming") {
+                                        if model.streaming.record_state.is_some() {
+                                            gettext("Stop recording")
+                                        } else {
+                                            gettext("Record")
+                                        }
+                                    } else if model.memo.recording {
                                         gettext("Stop the voice memo")
                                     } else {
                                         gettext("Record a voice memo")
                                     }),
                                     #[watch]
-                                    set_css_classes: if model.memo.recording {
-                                        &["flat", "circular", "emilia-record-dot", "emilia-recording"]
+                                    set_css_classes: if (model.nav.view_stack.visible_child_name().as_deref() == Some("streaming")
+                                        && model.streaming.record_state.is_some())
+                                        || (model.nav.view_stack.visible_child_name().as_deref() != Some("streaming")
+                                            && model.memo.recording)
+                                    {
+                                        &["circular", "emilia-bigplay", "emilia-record-dot", "emilia-recording"]
                                     } else {
-                                        &["flat", "circular"]
+                                        &["circular", "emilia-bigplay"]
                                     },
-                                    connect_clicked => Msg::MemoRecordToggle,
+                                    connect_clicked => Msg::RecordToggle,
                                 },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
@@ -2769,6 +2791,17 @@ impl Component for App {
                                     set_opacity: if model.transport.repeat { 1.0 } else { 0.4 },
                                     connect_clicked => Msg::ToggleRepeat,
                                 },
+                                // Album shortcut: only while a local album track
+                                // plays. Opens the album's song page (back returns).
+                                gtk::Button {
+                                    set_icon_name: "media-optical-symbolic",
+                                    set_tooltip_text: Some(&gettext("Show album")),
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_visible: model.mini.current_album.is_some(),
+                                    connect_clicked => Msg::ShowCurrentAlbum,
+                                },
                                 gtk::Button {
                                     set_icon_name: "list-high-priority-symbolic",
                                     set_tooltip_text: Some(&gettext("Queue")),
@@ -2782,8 +2815,6 @@ impl Component for App {
                         },
                     },
                 },
-                }
-                    }
                 }
             }
         }
@@ -3162,7 +3193,6 @@ impl Component for App {
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
         let memos_list = gtk::ListBox::new();
-        let memo_filter_bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let yt_channels_list = gtk::ListBox::new();
         let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -3277,6 +3307,7 @@ impl Component for App {
             },
             mini: MiniState {
                 now_playing: None,
+                current_album: None,
                 playing: false,
                 loading: false,
                 position_ms: 0,
@@ -3342,10 +3373,7 @@ impl Component for App {
                 stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 rec_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             },
-            memo: crate::ui::app_memo::MemoState::new(
-                memos_list.clone(),
-                memo_filter_bar.clone(),
-            ),
+            memo: crate::ui::app_memo::MemoState::new(memos_list.clone()),
             youtube: YoutubeState {
                 enabled: youtube_enabled,
                 ytdlp_version: None,
@@ -3480,14 +3508,32 @@ impl Component for App {
         // Seed the starter memo categories once (localized; i18n is ready here),
         // then load categories + memos for the Memo page.
         {
-            let names = [
-                gettext("Idea"),
-                gettext("Task"),
-                gettext("Note"),
-                gettext("Music"),
-            ];
+            let names = [gettext("Idea"), gettext("Task"), gettext("Note")];
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             let _ = model.library.seed_memo_categories(&refs);
+            // One-time: the former default "Music" category was dropped from the
+            // seed set; remove an existing one (its memos fall back to General).
+            if model
+                .library
+                .get_setting("memo_music_default_removed")
+                .ok()
+                .flatten()
+                .is_none()
+            {
+                let music = gettext("Music");
+                for c in model
+                    .library
+                    .memo_categories()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|c| c.name == music)
+                {
+                    let _ = model.library.delete_memo_category(c.id);
+                }
+                let _ = model
+                    .library
+                    .set_setting("memo_music_default_removed", "1");
+            }
         }
         model.reload_memo_categories(&sender);
         model.reload_memos(&sender);
@@ -4099,9 +4145,14 @@ impl Component for App {
             Msg::StreamAddUrl(url) => self.stream_add_url(&sender, url),
             Msg::ToggleStream(id) => self.toggle_stream(id),
             Msg::StreamRecordToggle(id) => self.stream_record_toggle(&sender, id),
-            Msg::TransportRecordToggle => {
-                if let Some(id) = self.streaming.playing_stream {
-                    sender.input(Msg::StreamRecordToggle(id));
+            Msg::RecordToggle => {
+                // Context decides the action: timeshift in Streaming, memo elsewhere.
+                if self.nav.view_stack.visible_child_name().as_deref() == Some("streaming") {
+                    if let Some(id) = self.streaming.playing_stream {
+                        sender.input(Msg::StreamRecordToggle(id));
+                    }
+                } else {
+                    self.toggle_memo_record(&sender);
                 }
             }
             Msg::StreamTitle(title) => self.stream_title(title),
@@ -4199,7 +4250,6 @@ impl Component for App {
                 );
             }
             // --- Voice memos ---
-            Msg::MemoRecordToggle => self.toggle_memo_record(&sender),
             Msg::MemoRecordSaved { path, duration_ms } => match path {
                 Some(p) => {
                     let title = crate::ui::app_memo::memo_default_title();
@@ -4209,9 +4259,9 @@ impl Component for App {
                 }
                 None => self.toast(&gettext("Recording failed")),
             },
-            Msg::SetMemoFilter(f) => {
-                if self.memo.filter != f {
-                    self.memo.filter = f;
+            Msg::SetMemoView(view) => {
+                if self.memo.view != view {
+                    self.memo.view = view;
                     self.reload_memos(&sender);
                 }
             }
@@ -4233,24 +4283,10 @@ impl Component for App {
                 }
                 self.reload_memos(&sender);
             }
-            Msg::OpenMemoCategories => self.open_memo_categories(root, &sender),
+            Msg::MemoCategoryAddPrompt => self.prompt_new_memo_category(root, &sender),
             Msg::MemoCategoryAdd(name) => {
                 let _ = self.library.add_memo_category(&name);
                 self.reload_memo_categories(&sender);
-            }
-            Msg::MemoCategoryRename { id, name } => {
-                let _ = self.library.rename_memo_category(id, &name);
-                self.reload_memo_categories(&sender);
-                self.reload_memos(&sender);
-            }
-            Msg::MemoCategoryDelete(id) => {
-                let _ = self.library.delete_memo_category(id);
-                // A deleted category may have been the active filter → fall back.
-                if self.memo.filter == Some(Some(id)) {
-                    self.memo.filter = None;
-                }
-                self.reload_memo_categories(&sender);
-                self.reload_memos(&sender);
             }
             Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
@@ -4507,11 +4543,6 @@ impl Component for App {
                 if self.streaming.record_state.is_some() {
                     self.drive_recording(&sender);
                 }
-                // Update the voice-memo elapsed counter while recording.
-                if let Some(rec) = self.memo.recorder.as_ref() {
-                    let secs = rec.elapsed_ms() / 1000;
-                    self.memo.rec_elapsed = format!("{}:{:02}", secs / 60, secs % 60);
-                }
                 // Sync the play/pause and record icons of the station rows.
                 self.refresh_stream_icons();
                 if self.mini.playing {
@@ -4566,7 +4597,19 @@ impl Component for App {
             Msg::LoadLyrics(path) => self.load_lyrics(&sender, path),
             Msg::ShowLyrics => self.show_lyrics(),
             Msg::LyricsTick => self.update_lyrics_highlight(),
+            Msg::LyricsSeek(ts) => {
+                // Jump to the clicked line (its LRC time shifted by the delay).
+                let delay = self.lyrics.view.as_ref().map(|v| v.delay_ms).unwrap_or(0);
+                let target = (ts + delay).max(0);
+                self.mini.position_ms = target;
+                if self.player.seek_ms(target).is_ok() {
+                    self.mpris.seeked(target);
+                }
+                self.update_lyrics_highlight();
+            }
             Msg::LyricsClosed => self.close_lyrics_view(),
+            Msg::LyricsToggleKaraoke => self.toggle_lyrics_karaoke(),
+            Msg::LyricsDelayAdjust(step) => self.adjust_lyrics_delay(step),
             Msg::FileLyricsFetched { path, lyrics } => self.on_file_lyrics_fetched(path, lyrics),
             Msg::Seek(ms) => {
                 let ms = ms.max(0);
@@ -4716,6 +4759,14 @@ impl Component for App {
                 self.open_eq_editor(root, &sender, "the track", &title, None, "track", path);
             }
             Msg::ShowQueue => self.open_queue_dialog(root, &sender),
+            Msg::ShowCurrentAlbum => {
+                if let Some(album) = self.mini.current_album.clone() {
+                    self.open_album_by_name(&sender, &album);
+                }
+            }
+            Msg::NavBack => {
+                self.nav.nav_view.pop();
+            }
             Msg::PlayQueueAt { start, len } => {
                 // Play this queue entry now: move its block to the front of the
                 // user queue, then advance – `play_next` splices the first track

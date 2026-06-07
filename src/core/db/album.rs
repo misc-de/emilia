@@ -266,6 +266,50 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Albums (with tracks) that still have no release year and have not yet
+    /// exhausted the year-lookup attempts (≤ 3). For the background year
+    /// backfill — independent of the cover state.
+    pub fn albums_missing_year(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(t.artist, ''), t.album
+             FROM track t
+             LEFT JOIN album_meta m
+                    ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
+             WHERE t.album IS NOT NULL AND t.album <> ''
+               AND m.year IS NULL
+               AND COALESCE(m.year_attempts, 0) < 3
+             GROUP BY COALESCE(t.artist, ''), t.album
+             ORDER BY t.album COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Records a release-year backfill result: stores the `year` when found and
+    /// always bumps `year_attempts` (so an unfindable year is not retried
+    /// forever). Preserves any existing cover/mbid/status.
+    pub fn set_album_year(
+        &self,
+        artist: &str,
+        album: &str,
+        year: Option<i32>,
+        mbid: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO album_meta (artist, album, year, mbid, status, fetched_at, year_attempts)
+             VALUES (?1, ?2, ?3, ?4, 'pending', strftime('%s','now'), 1)
+             ON CONFLICT(artist, album) DO UPDATE SET
+                 year          = COALESCE(excluded.year, album_meta.year),
+                 mbid          = COALESCE(album_meta.mbid, excluded.mbid),
+                 year_attempts = album_meta.year_attempts + 1,
+                 fetched_at    = excluded.fetched_at",
+            rusqlite::params![artist, album, year, mbid],
+        )?;
+        Ok(())
+    }
+
     /// All track paths of an (artist, album) pair, ordered by path. Used by the
     /// local cover extraction: the `albums_missing_cover` sample is just
     /// `MIN(path)`, which may lack embedded art even though a sibling track on

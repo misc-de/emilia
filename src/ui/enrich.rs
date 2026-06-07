@@ -183,7 +183,14 @@ pub(crate) fn enrich_worker(
                     None => local_album_cover_scan(&lib, artist, album, path),
                 };
                 if let Some(cover_path) = cover_path {
-                    let mut m = crate::model::AlbumMeta::pending(artist, album);
+                    // Merge into the existing meta so a previously fetched year/mbid
+                    // is preserved — a fresh `pending` here would wipe the year
+                    // (the cause of albums losing their release date).
+                    let mut m = lib
+                        .get_album_meta(artist, album)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| crate::model::AlbumMeta::pending(artist, album));
                     m.cover_path = Some(cover_path);
                     m.status = "local".to_string();
                     let _ = lib.upsert_album_meta(&m);
@@ -254,6 +261,28 @@ pub(crate) fn enrich_worker(
         }
         if !light || new_covers > 0 {
             let _ = out.send(Cmd::ReloadViews);
+        }
+
+        // Phase 4: release-year backfill for albums that have no year yet (e.g.
+        // those that only ever received a local cover, so the online album fetch
+        // above never ran for them). Bounded per album by `year_attempts` so an
+        // unfindable year is not retried forever. Full sweeps only.
+        if !light {
+            let mut new_years = 0usize;
+            for (artist, album) in lib.albums_missing_year().unwrap_or_default() {
+                if stopped() {
+                    break 'work;
+                }
+                if artist.is_empty() {
+                    continue;
+                }
+                online::enrich_album_year(&client, &lib, &artist, &album);
+                new_years += 1;
+                std::thread::sleep(online::RATE_LIMIT);
+            }
+            if new_years > 0 {
+                let _ = out.send(Cmd::ReloadViews);
+            }
         }
 
         // Galleries (multiple photos/covers per artist or album) and the

@@ -368,6 +368,38 @@ impl App {
                 });
         }
 
+        // Shared-header sync: a pushed subpage (album/track list, …) shows a back
+        // arrow + the page title in the single header; on the root the back arrow
+        // hides and the section name returns as the subtitle. Keeps the top/bottom
+        // navigation visible across subpages.
+        {
+            let win_title = widgets.win_title.clone();
+            let back_btn = widgets.nav_back_btn.clone();
+            let stack = widgets.view_stack.clone();
+            widgets.nav_view.connect_visible_page_notify(move |nv| {
+                let on_main = nv
+                    .visible_page()
+                    .and_then(|p| p.tag())
+                    .is_some_and(|t| t == "main");
+                back_btn.set_visible(!on_main);
+                if on_main {
+                    win_title.set_title("Emilia");
+                    let cur = stack.visible_child_name();
+                    let cur = cur.as_deref().unwrap_or("files");
+                    win_title.set_subtitle(
+                        &section_meta(cur).map(|(l, _)| gettext(l)).unwrap_or_default(),
+                    );
+                } else {
+                    let t = nv
+                        .visible_page()
+                        .map(|p| p.title().to_string())
+                        .unwrap_or_default();
+                    win_title.set_title(&t);
+                    win_title.set_subtitle("");
+                }
+            });
+        }
+
         // Swipe-to-go-back on the file system page: a horizontal drag to the
         // right navigates back. Implemented as a `GestureDrag` in the **capture**
         // phase so it recognises the horizontal intent *early* and claims the

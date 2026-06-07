@@ -911,6 +911,20 @@ pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &
     meta
 }
 
+/// Release-year backfill: looks the album up on MusicBrainz purely to obtain the
+/// release year (and mbid), then stores it via [`Library::set_album_year`],
+/// which preserves any existing cover/mbid and bounds the retries. One
+/// MusicBrainz request — the caller honours [`RATE_LIMIT`] between calls.
+pub fn enrich_album_year(client: &OnlineClient, lib: &Library, artist: &str, album: &str) {
+    let (year, mbid) = match client.match_release(artist, album) {
+        Ok(Some(rel)) => (rel.year, Some(rel.mbid)),
+        _ => (None, None),
+    };
+    if let Err(e) = lib.set_album_year(artist, album, year, mbid.as_deref()) {
+        tracing::warn!("Failed to store album year ({artist} – {album}): {e}");
+    }
+}
+
 /// Fetches the MusicBrainz id (and year) for an album **without** touching an
 /// existing cover. Used to enable the online cover *gallery* (alternatives) for
 /// albums that already show the user's embedded cover — so the embedded artwork

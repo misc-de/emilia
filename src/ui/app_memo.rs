@@ -1,6 +1,9 @@
-//! Voice memos page: a "Recent" list of microphone recordings, filterable by a
-//! user-created category, with per-memo actions (play, edit via the shared
-//! waveform editor, rename, assign category, delete) and category management.
+//! Voice memos page. Two tabs:
+//! - **Recent**: every memo, newest first (a flat list).
+//! - **Category**: a tree — categories sorted alphanumerically, each an
+//!   expander holding the memos assigned to it (plus a "General" node for the
+//!   unassigned ones). A "+" in the tab bar adds a category; each category node
+//!   carries rename/delete actions.
 //!
 //! Recording itself runs through [`crate::core::mic::MicRecorder`]; the record
 //! button lives in the player bar (built in `app.rs`). New memos start
@@ -13,42 +16,36 @@ use relm4::{adw, gtk};
 use crate::core::mic::MicRecorder;
 use crate::i18n::gettext;
 use crate::model::{MemoCategory, MemoItem};
-use crate::ui::app::{fmt_duration, App, Msg};
+use crate::ui::app::{fmt_duration, App, MemoView, Msg};
 
 /// Memo page state, grouped off the `App` god-object (mirrors `StreamingState`).
 pub(crate) struct MemoState {
-    /// Memos currently shown (already filtered + newest first).
+    /// All memos (newest first); the Recent list shows these flat and the
+    /// Category tree groups them by `category_id`.
     pub(crate) memo_items: Vec<MemoItem>,
-    /// All categories (for the filter bar and the assignment menu).
+    /// All categories (for the tree and the assignment menu).
     pub(crate) categories: Vec<MemoCategory>,
-    /// Active filter: `None` = Recent (all), `Some(None)` = General (unassigned),
-    /// `Some(Some(id))` = a specific category.
-    pub(crate) filter: Option<Option<i64>>,
+    /// Which tab is shown: Recent or Category.
+    pub(crate) view: MemoView,
     pub(crate) memos_list: gtk::ListBox,
-    /// Horizontal bar of filter toggle buttons (rebuilt when categories change).
-    pub(crate) filter_bar: gtk::Box,
     /// Active microphone recording; `None` when idle.
     pub(crate) recorder: Option<MicRecorder>,
-    /// Whether a recording is in progress (drives the `#[watch]` record button
-    /// and the elapsed label without borrowing the recorder).
+    /// Whether a recording is in progress (drives the `#[watch]` player-bar
+    /// record button without borrowing the recorder).
     pub(crate) recording: bool,
-    /// Elapsed time of the running recording as `m:ss` (updated on the 1 s tick).
-    pub(crate) rec_elapsed: String,
 }
 
 impl MemoState {
-    /// Initial (empty) state. `memos_list`/`filter_bar` are the widgets bound by
-    /// `#[local_ref]` in the view macro.
-    pub(crate) fn new(memos_list: gtk::ListBox, filter_bar: gtk::Box) -> Self {
+    /// Initial (empty) state. `memos_list` is the widget bound by `#[local_ref]`
+    /// in the view macro.
+    pub(crate) fn new(memos_list: gtk::ListBox) -> Self {
         MemoState {
             memo_items: Vec::new(),
             categories: Vec::new(),
-            filter: None,
+            view: MemoView::Recent,
             memos_list,
-            filter_bar,
             recorder: None,
             recording: false,
-            rec_elapsed: String::new(),
         }
     }
 }
@@ -86,7 +83,7 @@ fn detail_box() -> gtk::Box {
         .build()
 }
 
-/// Activatable action row with an icon prefix (for the detail dialogs).
+/// Activatable action row with an icon prefix (for the detail dialog).
 fn action_row(title: &str, icon: &str) -> adw::ActionRow {
     let row = adw::ActionRow::builder()
         .title(title)
@@ -146,8 +143,7 @@ fn prompt_text(
 impl App {
     // ---- Recording ----
 
-    /// Player-bar / page record button: start a new recording or stop the
-    /// running one.
+    /// Player-bar record button: start a new recording or stop the running one.
     pub(crate) fn toggle_memo_record(&mut self, sender: &ComponentSender<Self>) {
         if self.memo.recorder.is_some() {
             self.stop_memo_record(sender);
@@ -161,7 +157,6 @@ impl App {
             Ok(rec) => {
                 self.memo.recorder = Some(rec);
                 self.memo.recording = true;
-                self.memo.rec_elapsed = "0:00".to_string();
                 self.toast(&gettext("Recording …"));
             }
             Err(e) => {
@@ -198,55 +193,16 @@ impl App {
 
     // ---- List + categories ----
 
-    /// Reloads the categories from the DB and rebuilds the filter bar.
+    /// Reloads the categories from the DB, then rebuilds the list/tree.
     pub(crate) fn reload_memo_categories(&mut self, sender: &ComponentSender<Self>) {
         self.memo.categories = self.library.memo_categories().unwrap_or_default();
-        self.rebuild_memo_filter_bar(sender);
+        self.reload_memos(sender);
     }
 
-    fn rebuild_memo_filter_bar(&self, sender: &ComponentSender<Self>) {
-        let bar = &self.memo.filter_bar;
-        while let Some(c) = bar.first_child() {
-            bar.remove(&c);
-        }
-        // (label, filter value): Recent, General, then one per category.
-        let mut entries: Vec<(String, Option<Option<i64>>)> = vec![
-            (gettext("Recent"), None),
-            (gettext("General"), Some(None)),
-        ];
-        for c in &self.memo.categories {
-            entries.push((c.name.clone(), Some(Some(c.id))));
-        }
-        let mut group: Option<gtk::ToggleButton> = None;
-        for (label, value) in entries {
-            let btn = gtk::ToggleButton::with_label(&label);
-            btn.add_css_class("flat");
-            if let Some(g) = group.as_ref() {
-                btn.set_group(Some(g));
-            }
-            btn.set_active(self.memo.filter == value);
-            {
-                let sender = sender.clone();
-                btn.connect_toggled(move |b| {
-                    if b.is_active() {
-                        sender.input(Msg::SetMemoFilter(value));
-                    }
-                });
-            }
-            bar.append(&btn);
-            if group.is_none() {
-                group = Some(btn);
-            }
-        }
-    }
-
-    /// Rebuilds the memo list for the current filter (newest first).
+    /// Rebuilds the memo list for the current view (Recent flat list, or the
+    /// Category tree).
     pub(crate) fn reload_memos(&mut self, sender: &ComponentSender<Self>) {
-        self.memo.memo_items = match self.memo.filter {
-            None => self.library.memos(),
-            Some(cat) => self.library.memos_in_category(cat),
-        }
-        .unwrap_or_default();
+        self.memo.memo_items = self.library.memos().unwrap_or_default();
 
         // Backfill the playback length for rows stored without one.
         for m in &mut self.memo.memo_items {
@@ -263,13 +219,78 @@ impl App {
         while let Some(child) = self.memo.memos_list.first_child() {
             self.memo.memos_list.remove(&child);
         }
-        for m in self.memo.memo_items.clone() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&m.title))
-                .activatable(true)
+
+        match self.memo.view {
+            MemoView::Recent => {
+                for m in self.memo.memo_items.clone() {
+                    let row = self.build_memo_row(&m, sender, true);
+                    self.memo.memos_list.append(&row);
+                }
+            }
+            MemoView::Category => self.build_memo_tree(sender),
+        }
+    }
+
+    /// Builds the Category tree: a "General" node for unassigned memos (only if
+    /// any) followed by the categories sorted alphanumerically, each an expander
+    /// of its assigned memos.
+    fn build_memo_tree(&self, sender: &ComponentSender<Self>) {
+        // General (unassigned) first, if there are any.
+        let unassigned: Vec<MemoItem> = self
+            .memo
+            .memo_items
+            .iter()
+            .filter(|m| m.category_id.is_none())
+            .cloned()
+            .collect();
+        if !unassigned.is_empty() {
+            let exp = adw::ExpanderRow::builder().title(gettext("General")).build();
+            exp.add_suffix(&count_label(unassigned.len()));
+            for m in &unassigned {
+                exp.add_row(&self.build_memo_row(m, sender, false));
+            }
+            self.memo.memos_list.append(&exp);
+        }
+
+        let mut cats = self.memo.categories.clone();
+        cats.sort_by_key(|c| c.name.to_lowercase());
+        for c in cats {
+            let items: Vec<MemoItem> = self
+                .memo
+                .memo_items
+                .iter()
+                .filter(|m| m.category_id == Some(c.id))
+                .cloned()
+                .collect();
+            let exp = adw::ExpanderRow::builder()
+                .title(gtk::glib::markup_escape_text(&c.name))
                 .build();
-            row.add_css_class("emilia-flush");
-            let mut sub: Vec<String> = vec![fmt_datetime(m.recorded_at)];
+            exp.add_suffix(&count_label(items.len()));
+            for m in &items {
+                exp.add_row(&self.build_memo_row(m, sender, false));
+            }
+            self.memo.memos_list.append(&exp);
+        }
+    }
+
+    /// One memo row: title + (date, optional category, duration), a play button,
+    /// tap to play, long press for the detail dialog. `show_category` adds the
+    /// category name to the subtitle (used in the flat Recent list, redundant in
+    /// the tree).
+    fn build_memo_row(
+        &self,
+        m: &MemoItem,
+        sender: &ComponentSender<Self>,
+        show_category: bool,
+    ) -> adw::ActionRow {
+        let row = adw::ActionRow::builder()
+            .title(gtk::glib::markup_escape_text(&m.title))
+            .activatable(true)
+            .build();
+        // Note: no "emilia-flush" here on purpose — the default row padding gives
+        // the prefix icon the same gap from the frame as the suffixes on the right.
+        let mut sub: Vec<String> = vec![fmt_datetime(m.recorded_at)];
+        if show_category {
             if let Some(name) = m.category_id.and_then(|cid| {
                 self.memo
                     .categories
@@ -279,43 +300,64 @@ impl App {
             }) {
                 sub.push(name);
             }
-            row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
-            row.add_prefix(&gtk::Image::from_icon_name("audio-input-microphone-symbolic"));
-            if m.duration_ms > 0 {
-                let dur = gtk::Label::new(Some(&fmt_duration(m.duration_ms)));
-                dur.set_valign(gtk::Align::Center);
-                dur.set_css_classes(&["dim-label", "numeric"]);
-                row.add_suffix(&dur);
-            }
-            // Play button (reuses the recording playback path — both are files).
-            let play_btn = gtk::Button::from_icon_name("media-playback-start-symbolic");
-            play_btn.set_valign(gtk::Align::Center);
-            play_btn.add_css_class("flat");
-            play_btn.set_tooltip_text(Some(&gettext("Play")));
-            {
-                let sender = sender.clone();
-                let path = m.path.clone();
-                play_btn.connect_clicked(move |_| sender.input(Msg::PlayRecording(path.clone())));
-            }
-            row.add_suffix(&play_btn);
-            {
-                let sender = sender.clone();
-                let path = m.path.clone();
-                row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
-            }
-            // Long press → detail dialog.
-            let lp = gtk::GestureLongPress::new();
-            {
-                let sender = sender.clone();
-                let id = m.id;
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::OpenMemo(id));
-                });
-            }
-            row.add_controller(lp);
-            self.memo.memos_list.append(&row);
         }
+        row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
+        row.add_prefix(&gtk::Image::from_icon_name("audio-input-microphone-symbolic"));
+        // Duration + play button grouped so the runtime sits directly to the
+        // left of the play button (reuses the recording playback path — both are
+        // files).
+        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        controls.set_valign(gtk::Align::Center);
+        if m.duration_ms > 0 {
+            let dur = gtk::Label::new(Some(&fmt_duration(m.duration_ms)));
+            dur.set_valign(gtk::Align::Center);
+            dur.set_css_classes(&["dim-label", "numeric"]);
+            controls.append(&dur);
+        }
+        let play_btn = gtk::Button::from_icon_name("media-playback-start-symbolic");
+        play_btn.set_valign(gtk::Align::Center);
+        play_btn.add_css_class("flat");
+        play_btn.set_tooltip_text(Some(&gettext("Play")));
+        {
+            let sender = sender.clone();
+            let path = m.path.clone();
+            play_btn.connect_clicked(move |_| sender.input(Msg::PlayRecording(path.clone())));
+        }
+        controls.append(&play_btn);
+        row.add_suffix(&controls);
+        {
+            let sender = sender.clone();
+            let path = m.path.clone();
+            row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
+        }
+        // Long press → detail dialog.
+        let lp = gtk::GestureLongPress::new();
+        {
+            let sender = sender.clone();
+            let id = m.id;
+            lp.connect_pressed(move |g, _, _| {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                sender.input(Msg::OpenMemo(id));
+            });
+        }
+        row.add_controller(lp);
+        row
+    }
+
+    /// "+" in the tab bar: prompt for a new category name.
+    pub(crate) fn prompt_new_memo_category(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let sender = sender.clone();
+        prompt_text(
+            root,
+            &gettext("New category"),
+            "",
+            &gettext("Add"),
+            move |name| sender.input(Msg::MemoCategoryAdd(name)),
+        );
     }
 
     /// Detail dialog of a memo: metadata, category assignment, and the
@@ -369,32 +411,33 @@ impl App {
         }
         content.append(&details);
 
-        // Category assignment: General + one row per category, current marked.
-        let catgrp = adw::PreferencesGroup::builder()
-            .title(gettext("Category"))
-            .build();
-        let mut options: Vec<(Option<i64>, String)> = vec![(None, gettext("General"))];
+        // Category assignment as a pulldown (AdwComboRow), like the song
+        // properties: General + one entry per category, single-select.
+        let catgrp = adw::PreferencesGroup::new();
+        let mut option_ids: Vec<Option<i64>> = vec![None];
+        let mut labels: Vec<String> = vec![gettext("General")];
         for c in &self.memo.categories {
-            options.push((Some(c.id), c.name.clone()));
+            option_ids.push(Some(c.id));
+            labels.push(c.name.clone());
         }
-        for (cid, name) in options {
-            let r = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&name))
-                .activatable(true)
-                .build();
-            if cid == m.category_id {
-                r.add_suffix(&gtk::Image::from_icon_name("object-select-symbolic"));
-            }
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            r.connect_activated(move |_| {
-                sender.input(Msg::MemoSetCategory {
-                    id,
-                    category_id: cid,
-                });
-                dialog.close();
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let selected = option_ids
+            .iter()
+            .position(|o| *o == m.category_id)
+            .unwrap_or(0) as u32;
+        let combo = adw::ComboRow::builder()
+            .title(gettext("Category"))
+            .model(&gtk::StringList::new(&label_refs))
+            .selected(selected)
+            .build();
+        {
+            let sender = sender.clone();
+            combo.connect_selected_notify(move |c| {
+                let category_id = option_ids.get(c.selected() as usize).copied().flatten();
+                sender.input(Msg::MemoSetCategory { id, category_id });
             });
-            catgrp.add(&r);
         }
+        catgrp.add(&combo);
         content.append(&catgrp);
 
         // Actions.
@@ -454,92 +497,12 @@ impl App {
 
         present_dialog(&dialog, &content, root);
     }
+}
 
-    /// Category management dialog: add, rename, delete user categories.
-    pub(crate) fn open_memo_categories(
-        &self,
-        root: &adw::ApplicationWindow,
-        sender: &ComponentSender<Self>,
-    ) {
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Categories"))
-            .build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-
-        let add = action_row(&gettext("New category"), "list-add-symbolic");
-        {
-            let (sender, root) = (sender.clone(), root.clone());
-            add.connect_activated(move |_| {
-                let sender = sender.clone();
-                prompt_text(
-                    &root,
-                    &gettext("New category"),
-                    "",
-                    &gettext("Add"),
-                    move |name| sender.input(Msg::MemoCategoryAdd(name)),
-                );
-            });
-        }
-        let addgrp = adw::PreferencesGroup::new();
-        addgrp.add(&add);
-        content.append(&addgrp);
-
-        let list = adw::PreferencesGroup::builder()
-            .title(gettext("Your categories"))
-            .build();
-        if self.memo.categories.is_empty() {
-            let empty = adw::ActionRow::builder()
-                .title(gettext("No categories yet"))
-                .build();
-            empty.add_css_class("dim-label");
-            list.add(&empty);
-        }
-        for c in &self.memo.categories {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&c.name))
-                .build();
-            let id = c.id;
-            let rename_btn = gtk::Button::from_icon_name("text-editor-symbolic");
-            rename_btn.set_valign(gtk::Align::Center);
-            rename_btn.add_css_class("flat");
-            rename_btn.set_tooltip_text(Some(&gettext("Rename")));
-            {
-                let (sender, root, cur) = (sender.clone(), root.clone(), c.name.clone());
-                rename_btn.connect_clicked(move |_| {
-                    let sender = sender.clone();
-                    prompt_text(
-                        &root,
-                        &gettext("Rename category"),
-                        &cur,
-                        &gettext("Rename"),
-                        move |name| sender.input(Msg::MemoCategoryRename { id, name }),
-                    );
-                });
-            }
-            row.add_suffix(&rename_btn);
-            let del_btn = gtk::Button::from_icon_name("user-trash-symbolic");
-            del_btn.set_valign(gtk::Align::Center);
-            del_btn.add_css_class("flat");
-            del_btn.set_tooltip_text(Some(&gettext("Delete")));
-            {
-                let sender = sender.clone();
-                let overlay = self.toast_overlay.clone();
-                del_btn.connect_clicked(move |_| {
-                    crate::ui::app::confirm_destructive(
-                        &overlay,
-                        &gettext("Delete this category? Its memos move to General."),
-                        &gettext("Delete"),
-                        sender.clone(),
-                        Msg::MemoCategoryDelete(id),
-                    );
-                });
-            }
-            row.add_suffix(&del_btn);
-            list.add(&row);
-        }
-        content.append(&list);
-
-        present_dialog(&dialog, &content, root);
-    }
+/// A small dim count label (suffix on a category expander).
+fn count_label(n: usize) -> gtk::Label {
+    let label = gtk::Label::new(Some(&n.to_string()));
+    label.set_valign(gtk::Align::Center);
+    label.set_css_classes(&["dim-label", "numeric"]);
+    label
 }

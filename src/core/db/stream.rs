@@ -142,6 +142,24 @@ impl Library {
         Ok((self.conn.last_insert_rowid(), true, None))
     }
 
+    /// Inserts a recording **without** the song deduplication — for non-song
+    /// captures (the talk/ads gap between songs), which carry no artist and must
+    /// never be merged with another. Returns the new id.
+    pub fn add_plain_recording(
+        &self,
+        path: &str,
+        title: &str,
+        station: Option<&str>,
+        incomplete: bool,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO recording (path, artist, title, station, recorded_at, incomplete)
+             VALUES (?1, NULL, ?2, ?3, strftime('%s','now'), ?4)",
+            rusqlite::params![path, title, station, incomplete as i64],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
     /// All recordings, newest first.
     pub fn recordings(&self) -> Result<Vec<crate::model::RecordingItem>> {
         let mut stmt = self.conn.prepare(

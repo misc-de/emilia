@@ -50,6 +50,16 @@ fn lookup_info(lib: &Library, path: &str) -> Option<(String, String, Option<Stri
     Some((artist, title, album, (dur > 0).then_some(dur)))
 }
 
+/// Formats the karaoke timing offset for the header label, e.g. `0.0 s`,
+/// `+1.5 s`, `−2.0 s`.
+fn fmt_delay(ms: i64) -> String {
+    if ms == 0 {
+        return "0.0 s".to_string();
+    }
+    let sign = if ms > 0 { '+' } else { '−' };
+    format!("{sign}{:.1} s", (ms.abs() as f64) / 1000.0)
+}
+
 impl App {
     /// Loads lyrics for the just-started track: embedded tags + DB cache
     /// (instant, offline), then an LRCLIB lookup in the background when no
@@ -142,15 +152,27 @@ impl App {
             return;
         }
 
-        let title = self
-            .mini
-            .now_playing
-            .clone()
-            .unwrap_or_else(|| gettext("Lyrics"));
+        // With karaoke (synced lyrics) the title bar stays neutral; for plain
+        // lyrics (no karaoke) show the track name instead, so it's still labelled.
+        let title = if lyr.has_synced() {
+            gettext("Lyrics")
+        } else {
+            self.mini
+                .now_playing
+                .clone()
+                .unwrap_or_else(|| gettext("Lyrics"))
+        };
         let dialog = adw::Dialog::builder().title(&title).build();
         dialog.set_content_width(520);
         dialog.set_content_height(640);
         self.adapt_detail_dialog(&dialog);
+
+        // Per-track preferences: karaoke on/off + manual timing offset.
+        let (karaoke_off, delay_ms) = match self.lyrics.for_path.as_deref() {
+            Some(p) => self.library.lyrics_pref(p),
+            None => (false, 0),
+        };
+        let karaoke = lyr.has_synced() && !karaoke_off;
 
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -167,7 +189,7 @@ impl App {
 
         let mut lines = Vec::new();
         if lyr.has_synced() {
-            for (_, text) in &lyr.synced {
+            for (ts, text) in &lyr.synced {
                 // Blank lines (intros/instrumental breaks) get a music note.
                 let display = if text.trim().is_empty() { "♪" } else { text };
                 let label = gtk::Label::builder()
@@ -177,7 +199,23 @@ impl App {
                     .xalign(0.5)
                     .build();
                 label.add_css_class("emilia-lyric-line");
-                label.add_css_class("dim-label");
+                // Dim only under karaoke (the active line is highlighted); with
+                // karaoke off the lyrics are shown as plain, static text.
+                if karaoke {
+                    label.add_css_class("dim-label");
+                }
+                // Click a line to jump the song there (lyrics as seek markers).
+                let click = gtk::GestureClick::new();
+                {
+                    let input = self.input.clone();
+                    let ts = *ts;
+                    click.connect_released(move |g, _, _, _| {
+                        g.set_state(gtk::EventSequenceState::Claimed);
+                        let _ = input.send(Msg::LyricsSeek(ts));
+                    });
+                }
+                label.add_controller(click);
+                label.set_cursor_from_name(Some("pointer"));
                 container.append(&label);
                 lines.push(label);
             }
@@ -192,7 +230,64 @@ impl App {
             container.append(&label);
         }
         scroller.set_child(Some(&container));
-        dialog.set_child(Some(&scroller));
+
+        // Header bar: a close button (top-right) and, for synced lyrics, the
+        // karaoke toggle plus the timing-offset (−/value/+) controls.
+        let header = adw::HeaderBar::new();
+        let delay_label = gtk::Label::new(Some(&fmt_delay(delay_ms)));
+        if lyr.has_synced() {
+            // Labelled boolean: "Karaoke" + a switch (clearer than a bare button).
+            let karaoke_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            karaoke_row.set_valign(gtk::Align::Center);
+            let karaoke_lbl = gtk::Label::new(Some(&gettext("Karaoke")));
+            let karaoke_sw = gtk::Switch::builder()
+                .active(karaoke)
+                .valign(gtk::Align::Center)
+                .tooltip_text(gettext("Timed highlighting — turn off if the timing is wrong"))
+                .build();
+            {
+                let input = self.input.clone();
+                karaoke_sw.connect_active_notify(move |_| {
+                    let _ = input.send(Msg::LyricsToggleKaraoke);
+                });
+            }
+            karaoke_row.append(&karaoke_lbl);
+            karaoke_row.append(&karaoke_sw);
+            header.pack_start(&karaoke_row);
+
+            let delay_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            delay_box.set_valign(gtk::Align::Center);
+            let minus = gtk::Button::from_icon_name("list-remove-symbolic");
+            minus.add_css_class("flat");
+            minus.set_tooltip_text(Some(&gettext("Lyrics earlier")));
+            let plus = gtk::Button::from_icon_name("list-add-symbolic");
+            plus.add_css_class("flat");
+            plus.set_tooltip_text(Some(&gettext("Lyrics later")));
+            delay_label.set_width_chars(6);
+            delay_label.add_css_class("numeric");
+            delay_label.set_tooltip_text(Some(&gettext("Karaoke timing offset")));
+            {
+                let input = self.input.clone();
+                minus.connect_clicked(move |_| {
+                    let _ = input.send(Msg::LyricsDelayAdjust(-100));
+                });
+            }
+            {
+                let input = self.input.clone();
+                plus.connect_clicked(move |_| {
+                    let _ = input.send(Msg::LyricsDelayAdjust(100));
+                });
+            }
+            delay_box.append(&minus);
+            delay_box.append(&delay_label);
+            delay_box.append(&plus);
+            header.pack_start(&delay_box);
+        }
+
+        let toolbar = adw::ToolbarView::new();
+        toolbar.add_top_bar(&header);
+        toolbar.set_content(Some(&scroller));
+        dialog.set_child(Some(&toolbar));
 
         // Closing stops the timer and drops the view.
         let input = self.input.clone();
@@ -200,8 +295,8 @@ impl App {
             let _ = input.send(Msg::LyricsClosed);
         });
 
-        // Fine-grained karaoke timer – only runs while the dialog is open.
-        let timer = if lyr.has_synced() {
+        // Fine-grained karaoke timer – only while the dialog is open and karaoke on.
+        let timer = if karaoke {
             let input = self.input.clone();
             Some(gtk::glib::timeout_add_local(
                 Duration::from_millis(200),
@@ -221,18 +316,31 @@ impl App {
             active: None,
             timer,
             dialog: dialog.clone(),
+            karaoke,
+            delay_ms,
+            delay_label,
         });
         dialog.present(Some(&self.toast_overlay));
-        // Highlight the current line straight away.
-        self.update_lyrics_highlight();
+        if karaoke {
+            // Highlight the current line straight away.
+            self.update_lyrics_highlight();
+        }
     }
 
     /// Karaoke tick: move the highlight (and auto-scroll) to the line active at
     /// the current playback position. No-op when the dialog is closed.
     pub(crate) fn update_lyrics_highlight(&mut self) {
+        // Honour the per-track karaoke toggle + timing offset.
+        let (karaoke, delay) = match self.lyrics.view.as_ref() {
+            Some(v) => (v.karaoke, v.delay_ms),
+            None => return,
+        };
+        if !karaoke {
+            return;
+        }
         let pos = self.player.position_ms().unwrap_or(self.mini.position_ms);
         let active = match self.lyrics.current.as_ref() {
-            Some(l) => l.active_line(pos),
+            Some(l) => l.active_line((pos - delay).max(0)),
             None => return,
         };
         let Some(view) = self.lyrics.view.as_mut() else {
@@ -267,6 +375,76 @@ impl App {
             }
             view.dialog.close();
         }
+    }
+
+    /// Toggles timed karaoke highlighting for the running track (persisted per
+    /// track). Off → stop the timer and show the lyrics as plain static text; on
+    /// → dim the lines, restart the timer and highlight the current line.
+    pub(crate) fn toggle_lyrics_karaoke(&mut self) {
+        let Some(path) = self.lyrics.for_path.clone() else {
+            return;
+        };
+        // Only meaningful for synced lyrics.
+        if !self.lyrics.current.as_ref().is_some_and(|l| l.has_synced()) {
+            return;
+        }
+        if self.lyrics.view.is_none() {
+            return;
+        }
+        let on = !self.lyrics.view.as_ref().map(|v| v.karaoke).unwrap_or(false);
+        self.library.set_lyrics_karaoke_off(&path, !on);
+        if on {
+            let input = self.input.clone();
+            {
+                let view = self.lyrics.view.as_mut().unwrap();
+                view.karaoke = true;
+                view.active = None;
+                for l in &view.lines {
+                    l.remove_css_class("emilia-lyric-active");
+                    l.add_css_class("dim-label");
+                }
+                if view.timer.is_none() {
+                    view.timer = Some(gtk::glib::timeout_add_local(
+                        Duration::from_millis(200),
+                        move || {
+                            let _ = input.send(Msg::LyricsTick);
+                            gtk::glib::ControlFlow::Continue
+                        },
+                    ));
+                }
+            }
+            self.update_lyrics_highlight();
+        } else {
+            let view = self.lyrics.view.as_mut().unwrap();
+            view.karaoke = false;
+            if let Some(id) = view.timer.take() {
+                id.remove();
+            }
+            for l in &view.lines {
+                l.remove_css_class("emilia-lyric-active");
+                l.remove_css_class("dim-label");
+            }
+            view.active = None;
+        }
+    }
+
+    /// Nudges the karaoke timing offset (ms; + = lyrics later) for the running
+    /// track and persists it. Takes effect immediately.
+    pub(crate) fn adjust_lyrics_delay(&mut self, step: i64) {
+        let Some(path) = self.lyrics.for_path.clone() else {
+            return;
+        };
+        let delay = {
+            let Some(view) = self.lyrics.view.as_mut() else {
+                return;
+            };
+            view.delay_ms = (view.delay_ms + step).clamp(-30_000, 30_000);
+            view.delay_label.set_text(&fmt_delay(view.delay_ms));
+            view.active = None; // force a re-highlight with the new offset
+            view.delay_ms
+        };
+        self.library.set_lyrics_delay(&path, delay);
+        self.update_lyrics_highlight();
     }
 
     /// Kicks off an online lyrics lookup for an open file-info dialog whose

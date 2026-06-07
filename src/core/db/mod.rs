@@ -519,6 +519,16 @@ impl Library {
                 cached_at INTEGER NOT NULL
             );
 
+            -- Per-track lyric preferences. Kept separate from `lyrics_cache` so a
+            -- lyrics re-fetch (which replaces the cache row) does not reset them:
+            -- whether the timed karaoke highlighting is off, and a manual timing
+            -- offset in milliseconds (+ = lyrics shown later).
+            CREATE TABLE IF NOT EXISTS lyrics_pref (
+                path        TEXT PRIMARY KEY,
+                karaoke_off INTEGER NOT NULL DEFAULT 0,
+                delay_ms    INTEGER NOT NULL DEFAULT 0
+            );
+
             -- Voice memos (microphone recordings) and the user-created
             -- categories that organise them. Unrelated to the `category`
             -- *areas* table above (same word, different concept) and to
@@ -764,6 +774,24 @@ impl Library {
         if !has_pl_cover {
             self.conn
                 .execute_batch("ALTER TABLE playlist ADD COLUMN cover_path TEXT;")?;
+        }
+
+        // Migration: separate retry counter for the release-year backfill. The
+        // cover `attempts` counter resets to 0 whenever a cover is present, so it
+        // can't bound year lookups for albums that already have (local) artwork.
+        let has_year_attempts = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('album_meta') WHERE name = 'year_attempts'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_year_attempts {
+            self.conn.execute_batch(
+                "ALTER TABLE album_meta ADD COLUMN year_attempts INTEGER NOT NULL DEFAULT 0;",
+            )?;
         }
 
         // Migration: map the old single attributes (music/concert/…) onto the new
@@ -1274,6 +1302,41 @@ impl Library {
             "INSERT OR REPLACE INTO lyrics_cache(path, plain, synced, source, cached_at) \
              VALUES(?1, ?2, ?3, ?4, strftime('%s','now'))",
             rusqlite::params![path, plain, synced, source],
+        );
+    }
+
+    /// Per-track lyric preferences: `(karaoke_off, delay_ms)`. Defaults to
+    /// `(false, 0)` when nothing is stored.
+    pub fn lyrics_pref(&self, path: &str) -> (bool, i64) {
+        self.conn
+            .query_row(
+                "SELECT karaoke_off, delay_ms FROM lyrics_pref WHERE path = ?1",
+                [path],
+                |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .unwrap_or((false, 0))
+    }
+
+    /// Turns the timed karaoke highlighting on/off for a track (preserving the
+    /// stored delay).
+    pub fn set_lyrics_karaoke_off(&self, path: &str, off: bool) {
+        let _ = self.conn.execute(
+            "INSERT INTO lyrics_pref(path, karaoke_off) VALUES(?1, ?2)
+             ON CONFLICT(path) DO UPDATE SET karaoke_off = excluded.karaoke_off",
+            rusqlite::params![path, off as i64],
+        );
+    }
+
+    /// Sets the manual karaoke timing offset (ms) for a track (preserving the
+    /// karaoke on/off flag).
+    pub fn set_lyrics_delay(&self, path: &str, delay_ms: i64) {
+        let _ = self.conn.execute(
+            "INSERT INTO lyrics_pref(path, delay_ms) VALUES(?1, ?2)
+             ON CONFLICT(path) DO UPDATE SET delay_ms = excluded.delay_ms",
+            rusqlite::params![path, delay_ms],
         );
     }
 
