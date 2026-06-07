@@ -18,7 +18,7 @@ use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
     album_subtitle, artist_count_subtitle, cover_widget, duration_label, find_scroller,
     fmt_duration, most_common_artist, online_available, read_entries, ActiveSource, App, Cmd,
-    CtxTarget, FsKind, Msg, SortCrit,
+    CtxTarget, FsKind, Msg,
 };
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::{FsEntry, FsInput, RowOpts};
@@ -513,10 +513,10 @@ impl App {
         // Mirror the overview so that gallery clicks (the factory is empty then) can
         // resolve the entry by index.
         self.libview.albums_overview = albums.clone();
-        // Group by release year (with year headings) only when sorting by date.
-        let group_by_year = matches!(self.libview.sort_for("albums").0, SortCrit::Release);
-        *self.libview.album_year_headers.borrow_mut() =
-            group_by_year.then(|| albums.iter().map(|a| a.year).collect::<Vec<_>>());
+        // Per-row section headings for the chosen sort (alphabetical by name,
+        // year by date, none otherwise) – shared by the list and the gallery.
+        let headers = self.album_section_headers(&albums);
+        *self.libview.album_headers.borrow_mut() = headers.clone();
         let offline_keys = self.offline_album_keys();
         if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = albums
@@ -529,7 +529,14 @@ impl App {
                     )
                 })
                 .collect();
-            self.fill_albums_gallery(&items, &albums, group_by_year);
+            self.fill_sectioned_gallery(
+                &self.libview.albums_gallery_box,
+                &self.libview.albums_gallery,
+                &items,
+                headers.as_deref(),
+                Msg::ShowAlbumTracks,
+                Msg::ShowAlbumDetail,
+            );
         } else {
             let mut guard = self.libview.albums.guard();
             guard.clear();
@@ -538,7 +545,7 @@ impl App {
                 guard.push_back((a, offline));
             }
             drop(guard);
-            // Refresh the year headings for the rebuilt rows (or clear them).
+            // Refresh the section headings for the rebuilt rows (or clear them).
             self.libview.albums.widget().invalidate_headers();
         }
     }
@@ -703,6 +710,9 @@ impl App {
         self.sort_artists(&mut artists);
         // Mirror the overview (for gallery index resolution, see reload_albums).
         self.libview.artists_overview = artists.clone();
+        // Alphabetical section headings when sorting by name (shared list/gallery).
+        let headers = self.artist_section_headers(&artists);
+        *self.libview.artist_headers.borrow_mut() = headers.clone();
         if self.libview.gallery_view {
             let items: Vec<(Option<String>, &'static str, String)> = artists
                 .iter()
@@ -714,9 +724,11 @@ impl App {
                     )
                 })
                 .collect();
-            self.fill_gallery(
+            self.fill_sectioned_gallery(
+                &self.libview.artists_gallery_box,
                 &self.libview.artists_gallery,
                 &items,
+                headers.as_deref(),
                 Msg::OpenArtistTracks,
                 Msg::ShowArtistDetail,
             );
@@ -736,6 +748,9 @@ impl App {
                 let subtitle = artist_count_subtitle(albums, songs);
                 guard.push_back((a, offline, subtitle));
             }
+            drop(guard);
+            // Refresh the alphabetical headings for the rebuilt rows (or clear).
+            self.libview.artists.widget().invalidate_headers();
         }
     }
 
@@ -957,6 +972,7 @@ impl App {
                     disc_no: None,
                     duration_ms: None,
                     resume_ms: 0,
+                    year: None,
                 });
             let album = track.album.clone().unwrap_or_default();
             if !groups.contains_key(&album) {
@@ -1822,7 +1838,10 @@ impl App {
                     .get_album_meta(&artist, &album)
                     .ok()
                     .flatten()
-                    .and_then(|m| m.year);
+                    .and_then(|m| m.year)
+                    // No online year → fall back to the embedded tag year of the
+                    // album's tracks (metadata in the DB, never the file mtime).
+                    .or_else(|| tracks.iter().filter_map(|t| t.year).max());
                 (year, album, tracks)
             })
             .collect()
@@ -3214,6 +3233,7 @@ mod tests {
             disc_no: disc,
             duration_ms: None,
             resume_ms: 0,
+            year: None,
         }
     }
 

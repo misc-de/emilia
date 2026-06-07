@@ -304,18 +304,27 @@ pub(crate) struct LibView {
     /// Gallery variant of the albums (cover grid), parallel to the list factory.
     pub(crate) albums_gallery: gtk::FlowBox,
     /// Scrolled child of the album gallery. Normally holds [`Self::albums_gallery`]
-    /// as a single grid; when sorting by date it holds year-grouped sections
-    /// (a year heading + a `FlowBox` per year). See [`App::fill_albums_gallery`].
+    /// as a single grid; when grouping is active it holds sections (a heading +
+    /// a `FlowBox` per group): alphabetical initials by name, years by date. See
+    /// [`App::fill_sectioned_gallery`].
     pub(crate) albums_gallery_box: gtk::Box,
-    /// Per-row release year of the album **list** (sorted order) when sorting by
-    /// date – drives the `set_header_func` year headings; `None` = no grouping.
-    pub(crate) album_year_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<Option<i32>>>>>,
+    /// Per-row section heading of the album **list** (sorted order): year strings
+    /// when sorting by date, the alphabetical initial (`0–9`, `A`, `B`, …) when
+    /// sorting by name. Drives the `set_header_func`; `None` = no grouping.
+    pub(crate) album_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     /// Album overview (same order as factory/gallery); index resolution for the gallery.
     pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) album_count: usize,
     pub(crate) artists: FactoryVecDeque<ArtistCard>,
     /// Gallery variant of the artists (photo grid).
     pub(crate) artists_gallery: gtk::FlowBox,
+    /// Scrolled child of the artist gallery. Normally holds [`Self::artists_gallery`]
+    /// as a single grid; when sorting by name it holds alphabetically grouped
+    /// sections (a heading + a `FlowBox` per initial). Mirrors the album gallery.
+    pub(crate) artists_gallery_box: gtk::Box,
+    /// Per-row alphabetical section heading of the artist **list** (sorted order)
+    /// when sorting by name; drives the `set_header_func`. `None` = no grouping.
+    pub(crate) artist_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     /// Artist overview (same order); index resolution for the gallery.
     pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
     pub(crate) artist_count: usize,
@@ -431,6 +440,33 @@ pub(crate) struct MiniState {
     pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
     /// Is the seek bar currently being hovered?
     pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+/// Sleep-timer state. When `remaining_s` is set, playback pauses once it counts
+/// down to zero, fading out over the final [`crate::ui::app_sleep::SLEEP_FADE_S`]
+/// seconds. `until_track_end` instead stops after the current track (no fade).
+/// The countdown only advances while actually playing (see [`App::sleep_tick`]).
+#[derive(Default)]
+pub(crate) struct SleepState {
+    /// Seconds left until playback pauses; `None` = no timed sleep armed.
+    pub(crate) remaining_s: Option<i64>,
+    /// Stop at the end of the current track instead of after a fixed time.
+    pub(crate) until_track_end: bool,
+    /// Header menu button (gets the "sleep-armed" CSS class while a timer runs).
+    pub(crate) button: gtk::MenuButton,
+    /// Status label inside the popover ("Off" / "Pauses in 28:30").
+    pub(crate) status_label: gtk::Label,
+}
+
+/// A sleep-timer choice from the header popover.
+#[derive(Debug, Clone, Copy)]
+pub enum SleepChoice {
+    /// Cancel any running sleep timer.
+    Off,
+    /// Pause after this many minutes (with a fade-out over the final stretch).
+    Minutes(i64),
+    /// Stop once the current track finishes (no fade).
+    EndOfTrack,
 }
 
 /// Lyrics for the currently playing track + the open karaoke view, grouped off
@@ -783,6 +819,8 @@ pub struct App {
     pub(crate) transport: TransportState,
     /// Mini-player / now-playing strip state.
     pub(crate) mini: MiniState,
+    /// Sleep-timer state (header zzz button + countdown / fade-out).
+    pub(crate) sleep: SleepState,
     /// Lyrics of the running track + open karaoke view.
     pub(crate) lyrics: LyricsState,
     pub(crate) toast_overlay: adw::ToastOverlay,
@@ -948,6 +986,8 @@ pub enum Msg {
     /// Open the detail view of the currently running track (click on the bar).
     OpenNowPlaying,
     OpenSettings,
+    /// Set or clear the sleep timer (from the header zzz popover).
+    SetSleepTimer(SleepChoice),
     /// Open the library search dialog (title-bar search icon).
     OpenSearch,
     /// A song hit of the search was activated → play it (close the dialog).
@@ -1677,6 +1717,15 @@ impl Component for App {
                             set_tooltip_text: Some(&gettext("Sort")),
                             set_visible: false,
                         },
+                        // Sleep timer ("zzz"): a popover with presets (15/30/45/60
+                        // min, end of track, off). The popover content + handlers
+                        // are built in `setup_sleep_button`; the icon gets the
+                        // "sleep-armed" CSS class while a timer is running.
+                        #[name = "sleep_btn"]
+                        pack_end = &gtk::MenuButton {
+                            set_icon_name: "emilia-sleep-symbolic",
+                            set_tooltip_text: Some(&gettext("Sleep timer")),
+                        },
                         pack_start = &gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
                             set_tooltip_text: Some(&gettext("Rescan folder")),
@@ -1850,12 +1899,16 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
+                                    // Gallery variant (photo grid). The box holds either
+                                    // a single grid or alphabetically grouped sections.
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: model.libview.artist_count > 0 && model.libview.gallery_view,
                                         #[local_ref]
-                                        artists_gallery -> gtk::FlowBox {
+                                        artists_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
@@ -3100,11 +3153,13 @@ impl Component for App {
                 albums,
                 albums_gallery: gtk::FlowBox::new(),
                 albums_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
-                album_year_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                album_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 albums_overview: Vec::new(),
                 album_count: 0,
                 artists,
                 artists_gallery: gtk::FlowBox::new(),
+                artists_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
+                artist_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 artists_overview: Vec::new(),
                 artist_count: 0,
                 sort,
@@ -3180,6 +3235,7 @@ impl Component for App {
                 chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
             },
+            sleep: SleepState::default(),
             lyrics: LyricsState {
                 current: None,
                 for_path: None,
@@ -3466,7 +3522,7 @@ impl Component for App {
         let albums_box = model.libview.albums.widget();
         let artists_box = model.libview.artists.widget();
         let albums_gallery_box = model.libview.albums_gallery_box.clone();
-        let artists_gallery = model.libview.artists_gallery.clone();
+        let artists_gallery_box = model.libview.artists_gallery_box.clone();
         let concerts_gallery = model.concerts.concerts_gallery.clone();
         let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
         let podcasts_gallery = model.podcasts.podcasts_gallery.clone();
@@ -4114,6 +4170,7 @@ impl Component for App {
             Msg::FilesGoStart => self.on_files_go_start(&sender),
             Msg::Refresh => self.on_refresh(&sender),
             Msg::OpenSettings => self.open_settings(root, &sender),
+            Msg::SetSleepTimer(choice) => self.on_set_sleep_timer(choice),
             Msg::OpenSearch => self.open_search_dialog(root, &sender),
             Msg::SearchPlayTrack(path) => self.on_search_play_track(path, &sender),
             Msg::SearchOpenAlbum(album) => self.open_album_by_name(&sender, &album),

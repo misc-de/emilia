@@ -38,8 +38,8 @@ pub struct Library {
 /// Shared upsert for the `track` table, used by both the single-row
 /// [`Library::upsert_track`] and the batched [`Library::upsert_tracks`].
 const UPSERT_TRACK_SQL: &str = r#"
-    INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms, genre)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+    INSERT INTO track (path, title, artist, album, track_no, disc_no, duration_ms, genre, year)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
     ON CONFLICT(path) DO UPDATE SET
         title       = excluded.title,
         artist      = excluded.artist,
@@ -47,7 +47,8 @@ const UPSERT_TRACK_SQL: &str = r#"
         track_no    = excluded.track_no,
         disc_no     = excluded.disc_no,
         duration_ms = excluded.duration_ms,
-        genre       = excluded.genre
+        genre       = excluded.genre,
+        year        = excluded.year
 "#;
 
 /// Binds a `Track` to [`UPSERT_TRACK_SQL`]'s placeholders. A macro (not a fn)
@@ -63,6 +64,7 @@ macro_rules! track_upsert_params {
             $t.disc_no,
             $t.duration_ms,
             $t.genre,
+            $t.year,
         ]
     };
 }
@@ -221,7 +223,8 @@ impl Library {
                 duration_ms INTEGER,
                 resume_ms   INTEGER NOT NULL DEFAULT 0,
                 last_played INTEGER,
-                genre       TEXT
+                genre       TEXT,
+                year        INTEGER
             );
             -- Fast lookup of a sample track per album (folder inheritance).
             CREATE INDEX IF NOT EXISTS idx_track_album ON track(album);
@@ -659,6 +662,24 @@ impl Library {
         if !has_genre {
             self.conn
                 .execute_batch("ALTER TABLE track ADD COLUMN genre TEXT;")?;
+        }
+
+        // Migration: per-track release year (from the file's date tag). Lets the
+        // album/song date sort work from the embedded metadata stored in the DB,
+        // never from the file's modification timestamp. Existing rows stay NULL
+        // until the next library scan re-reads their tags.
+        let has_year = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('track') WHERE name = 'year'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_year {
+            self.conn
+                .execute_batch("ALTER TABLE track ADD COLUMN year INTEGER;")?;
         }
 
         // Migration: yt_recent gained `kind`/`count` columns (playlists in the
@@ -1446,7 +1467,7 @@ impl Library {
         let track = self
             .conn
             .query_row(
-                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
+                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
                  FROM track WHERE path = ?1",
                 [path],
                 |r| {
@@ -1461,6 +1482,7 @@ impl Library {
                         duration_ms: r.get(6)?,
                         resume_ms: r.get(7)?,
                         disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+                        year: r.get(9)?,
                     })
                 },
             )
@@ -1480,7 +1502,7 @@ impl Library {
         for chunk in paths.chunks(900) {
             let placeholders = vec!["?"; chunk.len()].join(",");
             let sql = format!(
-                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
+                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
                  FROM track WHERE path IN ({placeholders})"
             );
             let mut stmt = self.conn.prepare(&sql)?;
@@ -1496,6 +1518,7 @@ impl Library {
                     duration_ms: r.get(6)?,
                     resume_ms: r.get(7)?,
                     disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+                    year: r.get(9)?,
                 })
             })?;
             for t in rows {
@@ -1509,7 +1532,7 @@ impl Library {
     /// All tracks, sorted by album and track number.
     pub fn all_tracks(&self) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
              FROM track
              ORDER BY album, COALESCE(disc_no, 1), track_no, title",
         )?;
@@ -1525,6 +1548,7 @@ impl Library {
                 duration_ms: r.get(6)?,
                 resume_ms: r.get(7)?,
                 disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+                year: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1534,7 +1558,7 @@ impl Library {
     /// avoids loading the whole library when opening a single album.
     pub fn tracks_by_album_name(&self, album: &str) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
              FROM track
              WHERE album = ?1 COLLATE NOCASE
              ORDER BY COALESCE(disc_no, 1), track_no, path",
@@ -1551,6 +1575,7 @@ impl Library {
                 duration_ms: r.get(6)?,
                 resume_ms: r.get(7)?,
                 disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+                year: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1610,6 +1635,7 @@ mod tests {
             disc_no: None,
             duration_ms: Some(60_000),
             resume_ms: 0,
+            year: None,
         }
     }
 

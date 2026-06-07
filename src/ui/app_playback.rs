@@ -1179,6 +1179,10 @@ impl App {
     /// A track finished: advance the queue (local / remote / streamed episode),
     /// finalizing the listening session and clearing the resume point.
     pub(crate) fn on_track_finished(&mut self) {
+        // "Sleep after this track": stop here instead of advancing the queue.
+        if self.sleep_stop_at_track_end() {
+            return;
+        }
         if self.files.playing_remote {
             // Remote queue: advance to the next track (or stop at the
             // end). Runs separately from the local queue.
@@ -1246,6 +1250,8 @@ impl App {
         // Sync the play/pause and record icons of the station rows.
         self.refresh_stream_icons();
         if self.mini.playing {
+            // Advance the sleep-timer countdown / fade-out (only while playing).
+            self.sleep_tick();
             if let Some(pos) = self.player.position_ms() {
                 self.mini.position_ms = pos;
             }

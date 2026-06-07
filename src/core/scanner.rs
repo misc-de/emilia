@@ -122,7 +122,7 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
         .unwrap_or("Unknown")
         .to_string();
 
-    let (title, artist, album, genre, track_no, disc_no, composer) = match tag {
+    let (title, artist, album, genre, track_no, disc_no, year, composer) = match tag {
         Some(tag) => (
             tag.title().map(|c| c.to_string()).unwrap_or(file_stem),
             tag.artist().map(|c| c.to_string()),
@@ -132,11 +132,12 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
                 .filter(|s| !s.trim().is_empty()),
             tag.track(),
             tag.disk(),
+            tag.year().map(|y| y as i32),
             tag.get_string(&lofty::tag::ItemKey::Composer)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
         ),
-        None => (file_stem, None, None, None, None, None, None),
+        None => (file_stem, None, None, None, None, None, None, None),
     };
 
     let duration_ms = tagged.properties().duration().as_millis() as i64;
@@ -153,6 +154,7 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
             disc_no,
             duration_ms: Some(duration_ms),
             resume_ms: 0,
+            year,
         },
         composer,
     ))

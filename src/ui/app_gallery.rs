@@ -153,14 +153,11 @@ pub(crate) fn size_gallery_tiles_when_ready(fb: &gtk::FlowBox) {
     });
 }
 
-/// A year heading for the date-sorted album views (list `set_header_func` and
-/// the gallery year sections). `None` = albums without a known year.
-pub(crate) fn year_header_label(year: Option<i32>) -> gtk::Label {
-    let text = match year {
-        Some(y) => y.to_string(),
-        None => crate::i18n::gettext("Unknown year"),
-    };
-    let label = gtk::Label::new(Some(&text));
+/// A styled section heading shared by the grouped library overviews — year
+/// sections (date sort) and alphabetical sections (name sort) — in both the list
+/// `set_header_func` and the gallery sections.
+pub(crate) fn section_header_label(text: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
     label.set_xalign(0.0);
     label.add_css_class("heading");
     label.set_margin_top(8);
@@ -169,7 +166,45 @@ pub(crate) fn year_header_label(year: Option<i32>) -> gtk::Label {
     label
 }
 
+
 impl App {
+    /// Fills `container` as a gallery, optionally split into labelled sections.
+    /// `labels` (one per item, same order/length as `items`) groups consecutive
+    /// equal labels under a [`section_header_label`] heading; `None` (or a
+    /// length mismatch) renders a single grid using the reusable `single`
+    /// FlowBox. Section FlowBoxes are throwaway (no resize hook); the
+    /// click/detail indices are offset so they map back to the full overview.
+    pub(crate) fn fill_sectioned_gallery(
+        &self,
+        container: &gtk::Box,
+        single: &gtk::FlowBox,
+        items: &[(Option<String>, &'static str, String)],
+        labels: Option<&[String]>,
+        activate: fn(usize) -> Msg,
+        detail: fn(usize) -> Msg,
+    ) {
+        while let Some(c) = container.first_child() {
+            container.remove(&c);
+        }
+        let Some(labels) = labels.filter(|l| l.len() == items.len()) else {
+            container.append(single);
+            self.fill_gallery(single, items, activate, detail);
+            return;
+        };
+        let mut i = 0;
+        while i < items.len() {
+            let mut j = i;
+            while j < items.len() && labels[j] == labels[i] {
+                j += 1;
+            }
+            container.append(&section_header_label(&labels[i]));
+            let fb = gtk::FlowBox::new();
+            container.append(&fb);
+            self.fill_gallery_into(&fb, &items[i..j], i, activate, detail, false);
+            i = j;
+        }
+    }
+
     /// Fills a FlowBox as a gallery: tiles from `(cover, icon, title)`.
     pub(crate) fn fill_gallery(
         &self,

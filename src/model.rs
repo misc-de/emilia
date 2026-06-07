@@ -18,6 +18,10 @@ pub struct Track {
     pub disc_no: Option<u32>,
     pub duration_ms: Option<i64>,
     pub resume_ms: i64,
+    /// Release year from the file's date tag; `None` if untagged or not yet
+    /// (re-)scanned. Stored in the DB so date sorting uses the embedded
+    /// metadata, never the file's modification timestamp.
+    pub year: Option<i32>,
 }
 
 /// An additional music source besides the primary `music_dir` folder.

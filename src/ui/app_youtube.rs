@@ -122,6 +122,7 @@ fn library_add_one(
                 .and_then(|m| m.duration)
                 .map(|s| s.saturating_mul(1000)),
             resume_ms: 0,
+            year: None,
         };
         let _ = lib.upsert_track(&track);
         let _ = lib.delete_yt_download(video_id);

@@ -162,6 +162,15 @@ impl Player {
         })
     }
 
+    /// Sets the linear output volume (0.0–1.0) on the pipeline. Used by the
+    /// sleep-timer fade-out (and crossfading). `playbin` exposes a stream-volume
+    /// `volume` property, so this affects whatever is currently playing without
+    /// touching the system mixer.
+    pub fn set_volume(&self, vol: f64) {
+        self.playbin
+            .set_property("volume", vol.clamp(0.0, 1.0));
+    }
+
     /// Sets the 10 band gains (dB, each −24…+12) live.
     pub fn set_eq_bands(&self, bands: &[f64; 10]) {
         let Some(eq) = &self.equalizer else {

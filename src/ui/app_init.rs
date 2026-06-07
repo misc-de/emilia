@@ -285,6 +285,8 @@ impl App {
         self.mini.chapter_label = widgets.chapter_label.clone();
         self.files.source_tabs = widgets.source_tabs.clone();
         self.rebuild_source_tabs();
+        // Build the sleep-timer popover (presets) onto the header zzz button.
+        self.setup_sleep_button(&widgets.sleep_btn, sender);
 
         // Hover over the seek bar → temporarily show the hovered chapter below the
         // title; on leaving, back to the current chapter (at the
@@ -541,17 +543,16 @@ impl App {
         // The title-bar sort button; its popover is (re)built per section.
         self.nav.sort_btn = widgets.sort_btn.clone();
 
-        // Album list: year headings when sorting by date. The header function
-        // reads the per-row years filled in `reload_albums_with`; `None` there
-        // means no grouping, so every row's header is cleared.
-        {
-            let years = self.libview.album_year_headers.clone();
-            self.libview
-                .albums
-                .widget()
-                .set_header_func(move |row, _before| {
-                    let guard = years.borrow();
-                    let Some(years) = guard.as_ref() else {
+        // Album & artist lists: section headings driven by the per-row labels
+        // filled in `reload_albums_with`/`reload_artists_with` (alphabetical when
+        // sorting by name, year strings by date). `None` means no grouping, so
+        // every row's header is cleared; otherwise a header is shown whenever a
+        // row's label differs from the row above it.
+        let header_func =
+            |labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>| {
+                move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
+                    let guard = labels.borrow();
+                    let Some(labels) = guard.as_ref() else {
                         row.set_header(None::<&gtk::Widget>);
                         return;
                     };
@@ -561,20 +562,24 @@ impl App {
                         return;
                     }
                     let i = i as usize;
-                    let cur = years.get(i).copied();
-                    let prev = if i == 0 {
-                        None
-                    } else {
-                        years.get(i - 1).copied()
-                    };
-                    if i == 0 || cur != prev {
-                        let label = crate::ui::app_gallery::year_header_label(cur.flatten());
-                        row.set_header(Some(&label));
-                    } else {
-                        row.set_header(None::<&gtk::Widget>);
+                    let cur = labels.get(i);
+                    let prev = i.checked_sub(1).and_then(|p| labels.get(p));
+                    match cur {
+                        Some(cur) if i == 0 || prev != Some(cur) => {
+                            row.set_header(Some(&crate::ui::app_gallery::section_header_label(cur)));
+                        }
+                        _ => row.set_header(None::<&gtk::Widget>),
                     }
-                });
-        }
+                }
+            };
+        self.libview
+            .albums
+            .widget()
+            .set_header_func(header_func(self.libview.album_headers.clone()));
+        self.libview
+            .artists
+            .widget()
+            .set_header_func(header_func(self.libview.artist_headers.clone()));
 
         // Set the active button to match the visible stack page and show the name
         // of the menu item discreetly as the subtitle of the header.
@@ -948,6 +953,7 @@ impl App {
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
                  row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
                  button.sync-connected { color: @success_color; }\
+                 button.sleep-armed { color: @accent_color; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
                  button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\
                  button.emilia-record-dot image { color: @error_color; }\

@@ -1544,6 +1544,7 @@ impl App {
             disc_no: None,
             duration_ms: None,
             resume_ms: 0,
+            year: None,
         });
         let artist = track
             .artist

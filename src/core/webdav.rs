@@ -393,6 +393,7 @@ pub struct RemoteMeta {
     pub track_no: Option<u32>,
     pub disc_no: Option<u32>,
     pub duration_ms: Option<i64>,
+    pub year: Option<i32>,
 }
 
 /// Like [`read_tags`], but reads **all** fields needed for the library
@@ -438,6 +439,7 @@ pub fn read_meta(c: &Creds, rel: &str) -> RemoteMeta {
         m.genre = clean(tag.genre());
         m.track_no = tag.track();
         m.disc_no = tag.disk();
+        m.year = tag.year().map(|y| y as i32);
     }
     m
 }
@@ -546,6 +548,7 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
             disc_no: meta.disc_no,
             duration_ms: meta.duration_ms,
             resume_ms: 0,
+            year: meta.year,
         });
         if batch.len() >= BATCH {
             n += lib.upsert_tracks_resilient(&batch);

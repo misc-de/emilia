@@ -105,7 +105,7 @@ impl Library {
     ) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
-                    COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms)
+                    COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms), MAX(t.year)
              FROM track t
              LEFT JOIN album_meta m
                     ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
@@ -124,6 +124,7 @@ impl Library {
                     r.get::<_, String>(5)?,
                     r.get::<_, i64>(6)?,
                     r.get::<_, Option<i64>>(7)?,
+                    r.get::<_, Option<i32>>(8)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -140,8 +141,16 @@ impl Library {
         let mut order: Vec<String> = Vec::new();
         let mut map: HashMap<String, AlbumMeta> = HashMap::new();
         let mut by_artist: HashMap<String, HashMap<String, ArtistInfo>> = HashMap::new();
-        for (artist, album, mbid, cover, year, status, count, duration) in raw {
+        // Per-album fallback year from the file tags (max across the album's
+        // tracks), used when no online release year exists – so date sorting has
+        // a metadata-backed year even without enrichment.
+        let mut tag_years: HashMap<String, Option<i32>> = HashMap::new();
+        for (artist, album, mbid, cover, year, status, count, duration, tag_year) in raw {
             let key = album.to_lowercase();
+            if let Some(ty) = tag_year {
+                let slot = tag_years.entry(key.clone()).or_insert(None);
+                *slot = Some(slot.map_or(ty, |e| e.max(ty)));
+            }
             let entry = map.entry(key.clone()).or_insert_with(|| {
                 order.push(key.clone());
                 AlbumMeta {
@@ -202,6 +211,11 @@ impl Library {
                 if meta.mbid.is_none() {
                     meta.mbid = info.3.clone();
                 }
+            }
+            // No online year on any artist credit → fall back to the embedded
+            // tag year read during the scan.
+            if meta.year.is_none() {
+                meta.year = tag_years.get(key).copied().flatten();
             }
             // Cover = the cover of the most representative artist (the list is
             // already sorted by track count, so the display artist comes first),

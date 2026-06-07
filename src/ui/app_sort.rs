@@ -15,6 +15,19 @@ use crate::model::{AlbumMeta, ArtistMeta};
 use crate::ui::app::{section_sort_criteria, App, Msg, SortCrit, SORTABLE_SECTIONS};
 use crate::ui::app_views::natural_key;
 
+/// Alphabetical group heading for a name (Artists/Albums sorted by name):
+/// digit-initial entries collapse into one `0–9` group, letters use their
+/// uppercased initial (A, B, C …), anything else falls under `#`. Kept
+/// consistent with [`natural_key`] so the grouping never repeats a heading:
+/// digit and letter runs are each contiguous after the sort.
+pub(crate) fn alpha_header(name: &str) -> String {
+    match name.trim().chars().next() {
+        Some(c) if c.is_ascii_digit() => "0–9".to_string(),
+        Some(c) if c.is_alphabetic() => c.to_uppercase().to_string(),
+        _ => "#".to_string(),
+    }
+}
+
 /// Icon for a sort direction – shared by the title-bar button and the popover
 /// toggle so they always match.
 pub(crate) fn sort_dir_icon(desc: bool) -> &'static str {
@@ -148,45 +161,33 @@ impl App {
         self.nav.sort_btn.set_popover(Some(&popover));
     }
 
-    /// Fills the album gallery. When `group` (date sort) is set, the gallery box
-    /// holds year-grouped sections (a heading + a `FlowBox` per year); otherwise
-    /// a single grid. `items`/`albums` are in the same sorted order, so the
-    /// per-section base index maps back to the full overview for clicks.
-    pub(crate) fn fill_albums_gallery(
-        &self,
-        items: &[(Option<String>, &'static str, String)],
-        albums: &[AlbumMeta],
-        group: bool,
-    ) {
-        let bx = &self.libview.albums_gallery_box;
-        while let Some(c) = bx.first_child() {
-            bx.remove(&c);
+    /// Per-row section headings for the album overview in its current sort order:
+    /// the alphabetical initial (`0–9`, `A`, …) when sorting by name, the release
+    /// year (or "Unknown year") when sorting by date, and no grouping otherwise.
+    /// Same length/order as `albums`, so it indexes the list rows and gallery
+    /// tiles 1:1.
+    pub(crate) fn album_section_headers(&self, albums: &[AlbumMeta]) -> Option<Vec<String>> {
+        match self.libview.sort_for("albums").0 {
+            SortCrit::Name => Some(albums.iter().map(|a| alpha_header(&a.album)).collect()),
+            SortCrit::Release => Some(
+                albums
+                    .iter()
+                    .map(|a| match a.year {
+                        Some(y) => y.to_string(),
+                        None => gettext("Unknown year"),
+                    })
+                    .collect(),
+            ),
+            _ => None,
         }
-        if !group {
-            let fb = &self.libview.albums_gallery;
-            bx.append(fb);
-            self.fill_gallery(fb, items, Msg::ShowAlbumTracks, Msg::ShowAlbumDetail);
-            return;
-        }
-        let mut i = 0;
-        while i < albums.len() {
-            let year = albums[i].year;
-            let mut j = i;
-            while j < albums.len() && albums[j].year == year {
-                j += 1;
-            }
-            bx.append(&crate::ui::app_gallery::year_header_label(year));
-            let fb = gtk::FlowBox::new();
-            bx.append(&fb);
-            self.fill_gallery_into(
-                &fb,
-                &items[i..j],
-                i,
-                Msg::ShowAlbumTracks,
-                Msg::ShowAlbumDetail,
-                false,
-            );
-            i = j;
+    }
+
+    /// Per-row alphabetical headings for the artist overview when sorting by
+    /// name; no grouping for the other criteria. Same length/order as `artists`.
+    pub(crate) fn artist_section_headers(&self, artists: &[ArtistMeta]) -> Option<Vec<String>> {
+        match self.libview.sort_for("artists").0 {
+            SortCrit::Name => Some(artists.iter().map(|a| alpha_header(&a.name)).collect()),
+            _ => None,
         }
     }
 
@@ -286,5 +287,41 @@ impl App {
         let count = tracks.len() as i64;
         let ms: i64 = tracks.iter().filter_map(|t| t.duration_ms).sum();
         (count, ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::alpha_header;
+    use crate::ui::app_views::natural_key;
+
+    #[test]
+    fn alpha_header_groups_digits_letters_and_symbols() {
+        assert_eq!(alpha_header("2Pac"), "0–9");
+        assert_eq!(alpha_header("50 Cent"), "0–9");
+        assert_eq!(alpha_header("ABBA"), "A");
+        assert_eq!(alpha_header("aha"), "A"); // case-folded to the upper initial
+        assert_eq!(alpha_header("Östro 430"), "Ö");
+        assert_eq!(alpha_header("+44"), "#");
+        assert_eq!(alpha_header("  Beatles"), "B"); // leading space ignored
+        assert_eq!(alpha_header(""), "#");
+    }
+
+    /// The digit and letter groups must each stay contiguous under the natural
+    /// sort, so a heading is never emitted twice for the same group.
+    #[test]
+    fn digit_and_letter_groups_are_contiguous_after_sort() {
+        let mut names = vec!["Beatles", "2Pac", "ABBA", "50 Cent", "Coldplay", "aha"];
+        names.sort_by_cached_key(|s| natural_key(s));
+        // Collapse to the run of headings in sorted order.
+        let mut runs: Vec<String> = Vec::new();
+        for n in &names {
+            let h = alpha_header(n);
+            if runs.last() != Some(&h) {
+                runs.push(h);
+            }
+        }
+        // No heading repeats (digits first, then A, B, C …).
+        assert_eq!(runs, vec!["0–9", "A", "B", "C"]);
     }
 }

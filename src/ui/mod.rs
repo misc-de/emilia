@@ -14,6 +14,7 @@ pub mod app_playlist;
 pub mod app_podcast;
 pub mod app_queue;
 pub mod app_rec_edit;
+pub mod app_sleep;
 pub mod app_sort;
 pub mod app_streaming;
 pub mod app_views;
