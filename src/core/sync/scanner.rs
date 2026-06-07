@@ -200,7 +200,10 @@ fn portal_camera_fd() -> Option<zbus::zvariant::OwnedFd> {
     // Predicted request path: /…/request/SENDER/TOKEN, SENDER = the unique name
     // without the leading ':' and with '.' → '_'.
     let token = "emilia_cam";
-    let sender = conn.unique_name()?.trim_start_matches(':').replace('.', "_");
+    let sender = conn
+        .unique_name()?
+        .trim_start_matches(':')
+        .replace('.', "_");
     let req_path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
 
     let camera = Proxy::new(
@@ -212,7 +215,10 @@ fn portal_camera_fd() -> Option<zbus::zvariant::OwnedFd> {
     .ok()?;
 
     // Don't prompt if there is no camera at all.
-    if !camera.get_property::<bool>("IsCameraPresent").unwrap_or(false) {
+    if !camera
+        .get_property::<bool>("IsCameraPresent")
+        .unwrap_or(false)
+    {
         return None;
     }
 

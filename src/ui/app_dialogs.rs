@@ -112,8 +112,7 @@ impl App {
                 if text.is_none() {
                     // Nothing local: hide the pulldown and try to fetch it online.
                     group.set_visible(false);
-                    *self.lyrics.file_pending.borrow_mut() =
-                        Some((path_str.clone(), label, group));
+                    *self.lyrics.file_pending.borrow_mut() = Some((path_str.clone(), label, group));
                     self.fetch_file_lyrics(&path_str);
                 }
             }
@@ -1255,6 +1254,95 @@ impl App {
         self.load_concerts(sender);
         self.load_audiobooks(sender);
         self.load_dir(sender);
+    }
+
+    /// Context menu: play the current target (file/folder/album/artist).
+    pub(crate) fn on_ctx_play(&mut self) {
+        if let Some(entry) = self.nav.context_target.clone() {
+            let files = self.ctx_files(&entry);
+            if !files.is_empty() {
+                self.transport.queue = files;
+                self.transport.queue_pos = 0;
+                self.play_current();
+                self.refresh_queue_icons();
+            }
+        }
+    }
+
+    /// Context menu: play the target album in track order (shuffle off).
+    pub(crate) fn on_ctx_play_album(&mut self) {
+        // Album always in track order from song 1, without shuffle; at the end
+        // of the queue `play_next` stops by itself (no further song).
+        if let Some((artist, album)) = self.ctx_album() {
+            let files = self.album_files(&artist, &album);
+            if !files.is_empty() {
+                self.transport.shuffle = false;
+                self.transport.queue = files;
+                self.transport.queue_pos = 0;
+                self.play_current();
+                self.refresh_queue_icons();
+            }
+        }
+    }
+
+    /// Context menu: play all tracks of the target artist, albums by year
+    /// (newest or oldest first), each album top-down (shuffle off).
+    pub(crate) fn on_ctx_play_artist(&mut self, newest_first: bool) {
+        // Albums by year (oldest/newest first), each album top-down,
+        // without shuffle.
+        if let Some(name) = self.ctx_artist() {
+            let files = self.artist_files_ordered(&name, newest_first);
+            if !files.is_empty() {
+                self.transport.shuffle = false;
+                self.transport.queue = files;
+                self.transport.queue_pos = 0;
+                self.play_current();
+                self.refresh_queue_icons();
+            }
+        }
+    }
+
+    /// Context menu: share the target over device sync (or open pairing first).
+    pub(crate) fn on_ctx_share(&mut self, root: &adw::ApplicationWindow) {
+        use crate::ui::sync_page::SyncInput;
+        if self.sync_connected {
+            // Paired: share the item whose detail menu this is. The
+            // SyncPage shows a short size confirmation, then sends it.
+            if let Some(target) = self.nav.context_target.clone() {
+                let selection = self.ctx_share_selection(&target);
+                if selection.song_paths.is_empty() {
+                    self.toast(&gettext("Nothing here to share"));
+                } else {
+                    self.sync_page.emit(SyncInput::ShareSelection {
+                        window: root.clone(),
+                        selection,
+                    });
+                }
+            }
+        } else {
+            // Not paired yet: open the pairing dialog. Once connected, the
+            // user starts the share again from the detail view.
+            self.sync_page.emit(SyncInput::Open(root.clone()));
+        }
+    }
+
+    /// Context menu: append the target's tracks to the user queue.
+    pub(crate) fn on_ctx_add_queue(&mut self) {
+        if let Some(entry) = self.nav.context_target.clone() {
+            let mut files = self.ctx_files(&entry);
+            let n = files.len();
+            // Explicit enqueue: append to the user queue, never the active
+            // context. Playback is untouched; the tracks play next, ahead
+            // of the rest of the running album.
+            self.transport.user_queue.append(&mut files);
+            self.reload_queue_list();
+            self.refresh_queue_icons();
+            self.save_queue();
+            self.toast(&gettext_f(
+                "Added {n} tracks to the queue",
+                &[("n", &n.to_string())],
+            ));
+        }
     }
 }
 

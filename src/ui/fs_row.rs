@@ -76,10 +76,7 @@ pub enum FsEntry {
     },
     /// Folder of a remote source (Nextcloud/WebDAV). `rel_path` is relative
     /// to the source's music root (leading slash).
-    RemoteDir {
-        name: String,
-        rel_path: String,
-    },
+    RemoteDir { name: String, rel_path: String },
     /// Audio file of a remote source. Tags are filled in later
     /// (see [`FsInput::SetTags`]); `downloaded` points to the local copy
     /// once the file is available offline.

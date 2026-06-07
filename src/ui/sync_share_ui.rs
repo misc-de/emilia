@@ -12,9 +12,7 @@
 use adw::prelude::*;
 use relm4::{adw, gtk, ComponentSender};
 
-use crate::core::sync::share::{
-    human_size, FileReview, FileStatus, ShareDecision, ShareManifest,
-};
+use crate::core::sync::share::{human_size, FileReview, FileStatus, ShareDecision, ShareManifest};
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::sync_page::{SyncInput, SyncPage};
 

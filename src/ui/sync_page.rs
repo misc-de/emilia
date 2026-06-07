@@ -1255,7 +1255,12 @@ fn transfer_label(f: &share::ManifestFile) -> String {
     }
     if lines.is_empty() {
         // Last resort: the file name only, not the path.
-        return f.rel_path.rsplit('/').next().unwrap_or(&f.rel_path).to_string();
+        return f
+            .rel_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&f.rel_path)
+            .to_string();
     }
     lines.join("\n")
 }

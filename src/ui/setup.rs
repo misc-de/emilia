@@ -146,8 +146,9 @@ impl Component for SetupPage {
             SetupInput::PickFolder => self.pick_folder(&sender),
             SetupInput::FolderChosen(path) => {
                 self.music_dir = path;
-                self.folder_row
-                    .set_title(&gtk::glib::markup_escape_text(&self.music_dir.to_string_lossy()));
+                self.folder_row.set_title(&gtk::glib::markup_escape_text(
+                    &self.music_dir.to_string_lossy(),
+                ));
             }
             SetupInput::ToggleSection(name, on) => {
                 if on {
@@ -172,8 +173,11 @@ impl Component for SetupPage {
                 }
             }
             SetupInput::Finish => {
-                let enabled_sections =
-                    self.enabled.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                let enabled_sections = self
+                    .enabled
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
                 let _ = sender.output(SetupOutput::Finished {
                     lang_code: self.lang_code.clone(),
                     music_dir: self.music_dir.clone(),
@@ -253,13 +257,15 @@ impl SetupPage {
         self.back_btn.add_css_class("flat");
         {
             let sender = sender.clone();
-            self.back_btn.connect_clicked(move |_| sender.input(SetupInput::Back));
+            self.back_btn
+                .connect_clicked(move |_| sender.input(SetupInput::Back));
         }
         self.next_btn.add_css_class("suggested-action");
         self.next_btn.add_css_class("pill");
         {
             let sender = sender.clone();
-            self.next_btn.connect_clicked(move |_| sender.input(SetupInput::Next));
+            self.next_btn
+                .connect_clicked(move |_| sender.input(SetupInput::Next));
         }
         let nav = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         nav.set_margin_top(6);
@@ -452,7 +458,10 @@ impl SetupPage {
 
     fn build_folder_page(&self, sender: &ComponentSender<Self>) -> gtk::ScrolledWindow {
         let page = Self::page_box();
-        page.append(&Self::step_header("folder-open-symbolic", &gettext("Music folder")));
+        page.append(&Self::step_header(
+            "folder-open-symbolic",
+            &gettext("Music folder"),
+        ));
 
         // Title + subtitle are filled in by `apply_folder_text` (they depend on
         // the collection choice made in the previous step).
@@ -469,8 +478,9 @@ impl SetupPage {
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
             .build();
-        self.folder_row
-            .set_title(&gtk::glib::markup_escape_text(&self.music_dir.to_string_lossy()));
+        self.folder_row.set_title(&gtk::glib::markup_escape_text(
+            &self.music_dir.to_string_lossy(),
+        ));
         self.folder_row.set_title_lines(2);
         let browse = gtk::Button::builder()
             .label(gettext("Browse…"))
@@ -528,7 +538,8 @@ impl SetupPage {
     /// Sets the folder step's heading/subtitle from the collection choice.
     fn apply_folder_text(&self) {
         if self.has_collection {
-            self.folder_title.set_text(&gettext("Choose your music folder"));
+            self.folder_title
+                .set_text(&gettext("Choose your music folder"));
             self.folder_subtitle.set_text(&gettext(
                 "Pick the folder that already holds your collection. You can add more sources later in Settings.",
             ));
@@ -576,8 +587,11 @@ impl SetupPage {
         }
         self.back_btn.set_sensitive(self.step > 0);
         let last = self.step + 1 == STEPS;
-        self.next_btn
-            .set_label(&if last { gettext("Continue") } else { gettext("Next") });
+        self.next_btn.set_label(&if last {
+            gettext("Continue")
+        } else {
+            gettext("Next")
+        });
         // On the last step the "Continue" click is routed to `Finish` by the
         // `Next` handler. Keep the folder text in sync when arriving at it.
         if self.step == 2 {

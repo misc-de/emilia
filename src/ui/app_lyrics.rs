@@ -27,7 +27,10 @@ fn lookup_info(lib: &Library, path: &str) -> Option<(String, String, Option<Stri
     if let Some(t) = lib.track_by_path(path).ok().flatten() {
         let artist = t.artist.clone().unwrap_or_default();
         if !artist.trim().is_empty() && !t.title.trim().is_empty() {
-            let dur = t.duration_ms.map(|m| (m.max(0) / 1000) as u64).filter(|d| *d > 0);
+            let dur = t
+                .duration_ms
+                .map(|m| (m.max(0) / 1000) as u64)
+                .filter(|d| *d > 0);
             return Some((artist, t.title, t.album, dur));
         }
     }
@@ -86,10 +89,7 @@ impl App {
         // Already have karaoke lyrics, offline, or recently confirmed missing →
         // no online lookup.
         let have_synced = self.lyrics.current.as_ref().is_some_and(|l| l.has_synced());
-        if have_synced
-            || !online_available()
-            || self.library.lyrics_recently_missing(&path_str)
-        {
+        if have_synced || !online_available() || self.library.lyrics_recently_missing(&path_str) {
             return;
         }
         let Some((artist, title, album, dur)) = lookup_info(&self.library, &path_str) else {
@@ -112,10 +112,12 @@ impl App {
     /// result (positive or negative) and applies it if the track is unchanged.
     pub(crate) fn on_lyrics_loaded(&mut self, path: String, lyrics: Option<Lyrics>) {
         match &lyrics {
-            Some(l) => {
-                self.library
-                    .store_lyrics(&path, l.plain.as_deref(), l.synced_raw.as_deref(), "lrclib")
-            }
+            Some(l) => self.library.store_lyrics(
+                &path,
+                l.plain.as_deref(),
+                l.synced_raw.as_deref(),
+                "lrclib",
+            ),
             // Remember the miss so we don't refetch on every play for a while.
             None => self.library.store_lyrics(&path, None, None, "none"),
         }
@@ -243,7 +245,9 @@ impl App {
             let karaoke_sw = gtk::Switch::builder()
                 .active(karaoke)
                 .valign(gtk::Align::Center)
-                .tooltip_text(gettext("Timed highlighting — turn off if the timing is wrong"))
+                .tooltip_text(gettext(
+                    "Timed highlighting — turn off if the timing is wrong",
+                ))
                 .build();
             {
                 let input = self.input.clone();
@@ -391,7 +395,12 @@ impl App {
         if self.lyrics.view.is_none() {
             return;
         }
-        let on = !self.lyrics.view.as_ref().map(|v| v.karaoke).unwrap_or(false);
+        let on = !self
+            .lyrics
+            .view
+            .as_ref()
+            .map(|v| v.karaoke)
+            .unwrap_or(false);
         self.library.set_lyrics_karaoke_off(&path, !on);
         if on {
             let input = self.input.clone();
@@ -473,10 +482,12 @@ impl App {
     /// the dialog still shows the same file, reveal the pulldown with the text.
     pub(crate) fn on_file_lyrics_fetched(&mut self, path: String, lyrics: Option<Lyrics>) {
         match &lyrics {
-            Some(l) => {
-                self.library
-                    .store_lyrics(&path, l.plain.as_deref(), l.synced_raw.as_deref(), "lrclib")
-            }
+            Some(l) => self.library.store_lyrics(
+                &path,
+                l.plain.as_deref(),
+                l.synced_raw.as_deref(),
+                "lrclib",
+            ),
             None => self.library.store_lyrics(&path, None, None, "none"),
         }
         // Mirror into the running track's state too, if it's the same file.

@@ -178,7 +178,9 @@ impl EditState {
         self.vpeaks = v;
 
         // Keep the view and playhead within the (possibly shorter) preview.
-        self.view_start = self.view_start.min((self.duration - self.visible()).max(0.0));
+        self.view_start = self
+            .view_start
+            .min((self.duration - self.visible()).max(0.0));
         self.playhead = self.playhead.min(self.duration);
     }
 }
@@ -313,8 +315,12 @@ impl App {
             }
             // Save → accept the (non-empty) new name and leave edit mode.
             {
-                let (sender, entry, edit_btn2, save_btn2) =
-                    (sender.clone(), entry.clone(), edit_btn.clone(), save_btn.clone());
+                let (sender, entry, edit_btn2, save_btn2) = (
+                    sender.clone(),
+                    entry.clone(),
+                    edit_btn.clone(),
+                    save_btn.clone(),
+                );
                 save_btn.connect_clicked(move |_| {
                     let t = entry.text().to_string();
                     let t = t.trim();
@@ -886,7 +892,14 @@ impl App {
                 .iter()
                 .find(|m| m.id == id)
                 .cloned()
-                .map(|m| (std::path::PathBuf::from(&m.path), None, None, m.title.clone())),
+                .map(|m| {
+                    (
+                        std::path::PathBuf::from(&m.path),
+                        None,
+                        None,
+                        m.title.clone(),
+                    )
+                }),
         };
         let Some((src, artist, album, title)) = meta else {
             return;
@@ -895,10 +908,15 @@ impl App {
 
         let (tx, rx) = async_channel::bounded(1);
         std::thread::spawn(move || {
-            let res =
-                crate::core::waveform::cut(&src, &cuts, artist.as_deref(), &title, album.as_deref());
-            let _ =
-                tx.send_blocking(res.map(|r| (r.path.to_string_lossy().into_owned(), r.duration_ms)));
+            let res = crate::core::waveform::cut(
+                &src,
+                &cuts,
+                artist.as_deref(),
+                &title,
+                album.as_deref(),
+            );
+            let _ = tx
+                .send_blocking(res.map(|r| (r.path.to_string_lossy().into_owned(), r.duration_ms)));
         });
         let sender = sender.clone();
         gtk::glib::spawn_future_local(async move {

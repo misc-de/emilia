@@ -226,7 +226,9 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
     let all_tracks = if dirs.is_empty() {
         Vec::new()
     } else {
-        lib.as_ref().and_then(|l| l.all_tracks().ok()).unwrap_or_default()
+        lib.as_ref()
+            .and_then(|l| l.all_tracks().ok())
+            .unwrap_or_default()
     };
     let under: Vec<&Track> = all_tracks
         .iter()

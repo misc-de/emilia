@@ -5,6 +5,8 @@
 //! its runtime plus a play button (start here now). The whole queue is cleared
 //! via the header button (playback keeps running).
 
+use std::path::PathBuf;
+
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
@@ -271,6 +273,37 @@ impl App {
                 self.transport.queue_list.append(&row);
             }
             gi = end;
+        }
+    }
+
+    /// Clear the explicit user queue (the playing context keeps running).
+    pub(crate) fn on_queue_clear(&mut self) {
+        // Clear only the explicit user queue; the currently playing
+        // album/track (the context) keeps running untouched.
+        self.transport.user_queue.clear();
+        self.reload_queue_list();
+        self.refresh_queue_icons();
+        self.save_queue();
+        self.toast(&gettext("Queue cleared"));
+    }
+
+    /// Reorder the user queue: move the `len`-track block at `from` to `to`
+    /// (album rows move as one block).
+    pub(crate) fn on_queue_move_range(&mut self, from: usize, len: usize, to: usize) {
+        let n = self.transport.user_queue.len();
+        // Dropping a block onto itself is a no-op.
+        if from < n && len >= 1 && !(to >= from && to < from + len) {
+            let len = len.min(n - from);
+            let block: Vec<PathBuf> = self.transport.user_queue.drain(from..from + len).collect();
+            // After removal everything past the block shifts left by `len`.
+            let insert_at =
+                if to > from { to - len } else { to }.min(self.transport.user_queue.len());
+            for (i, p) in block.into_iter().enumerate() {
+                self.transport.user_queue.insert(insert_at + i, p);
+            }
+            self.reload_queue_list();
+            self.refresh_queue_icons();
+            self.save_queue();
         }
     }
 }

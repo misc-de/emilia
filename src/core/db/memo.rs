@@ -216,7 +216,9 @@ mod tests {
         let idea = lib.add_memo_category("Idea").unwrap();
         assert_eq!(lib.memo_categories().unwrap().len(), 2);
 
-        let a = lib.add_memo("/tmp/a.ogg", "Memo A", Some(work), 1000).unwrap();
+        let a = lib
+            .add_memo("/tmp/a.ogg", "Memo A", Some(work), 1000)
+            .unwrap();
         lib.add_memo("/tmp/b.ogg", "Memo B", None, 0).unwrap();
 
         // Assign afterwards / reassign.

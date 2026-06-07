@@ -292,6 +292,9 @@ fn reembed_tags(path: &Path, ext: &str, artist: Option<&str>, title: &str, album
         tag.set_album(al.to_string());
     }
     if let Err(e) = tag.save_to_path(path, WriteOptions::default()) {
-        tracing::debug!("Could not re-tag the edited recording {}: {e}", path.display());
+        tracing::debug!(
+            "Could not re-tag the edited recording {}: {e}",
+            path.display()
+        );
     }
 }

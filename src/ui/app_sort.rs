@@ -6,15 +6,13 @@
 use std::collections::HashMap;
 
 use adw::prelude::*;
-use relm4::prelude::*;
 use relm4::gtk;
+use relm4::prelude::*;
 
 use crate::core::artist::{norm_key, split_artists};
 use crate::i18n::gettext;
 use crate::model::{AlbumMeta, ArtistMeta};
-use crate::ui::app::{
-    section_sort_criteria, App, Msg, SortCrit, SORTABLE_SECTIONS,
-};
+use crate::ui::app::{section_sort_criteria, App, Msg, SortCrit, SORTABLE_SECTIONS};
 use crate::ui::app_views::natural_key;
 
 /// Icon for a sort direction – shared by the title-bar button and the popover
@@ -49,7 +47,9 @@ impl App {
             return;
         };
         self.libview.sort.insert(key, (crit, desc));
-        let _ = self.library.set_setting(&format!("sort_{key}"), crit.as_key());
+        let _ = self
+            .library
+            .set_setting(&format!("sort_{key}"), crit.as_key());
         let _ = self
             .library
             .set_setting(&format!("sort_{key}_desc"), if desc { "1" } else { "0" });
@@ -227,11 +227,7 @@ impl App {
     }
 
     /// Orders a concert/audiobook entry list in place by the section's sort.
-    pub(crate) fn sort_entries(
-        &self,
-        section: &str,
-        items: &mut [(String, String, String, bool)],
-    ) {
+    pub(crate) fn sort_entries(&self, section: &str, items: &mut [(String, String, String, bool)]) {
         let (crit, desc) = self.libview.sort_for(section);
         match crit {
             SortCrit::Name => items.sort_by_cached_key(|e| natural_key(&e.2)),

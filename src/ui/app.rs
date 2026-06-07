@@ -17,9 +17,10 @@ pub(crate) use crate::ui::app_helpers::{
     find_scroller, fmt_duration, fmt_rate, guarded_resume, initial_gallery_columns,
     most_common_artist, online_available, read_entries, save_window_state, unix_now,
 };
+use crate::ui::app_init::InitState;
 use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
-use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow, RowOpts};
+use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow};
 
 /// Target of the detail view (long press): a file/folder in the
 /// file browser, an artist, an album or a concert (= path → `Fs`).
@@ -141,7 +142,7 @@ pub(crate) fn confirm_destructive(
 /// leaving the app simply gone. `exec()` keeps the same PID, so the sandbox
 /// stays alive and the new image starts. Only returns (via the spawn fallback)
 /// if `exec()` itself fails; otherwise it never returns.
-fn relaunch_for_language_change() -> ! {
+pub(crate) fn relaunch_for_language_change() -> ! {
     if let Ok(exe) = std::env::current_exe() {
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new(&exe).exec();
@@ -1352,7 +1353,10 @@ pub enum Msg {
     /// Open the waveform editor subpage for a voice memo (id).
     EditMemo(i64),
     /// Preview a recording/memo file from a chosen position (ms) – editor playhead.
-    RecordingPlayFrom { path: String, ms: i64 },
+    RecordingPlayFrom {
+        path: String,
+        ms: i64,
+    },
     /// Pause the editor preview (pauses the main player it plays through).
     RecordingPreviewPause,
     /// Apply the editor's cut ranges (seconds) to a recording/memo and overwrite it.
@@ -1383,9 +1387,15 @@ pub enum Msg {
     /// Open a memo's detail dialog (id) – via long press.
     OpenMemo(i64),
     /// Rename a memo.
-    MemoRename { id: i64, title: String },
+    MemoRename {
+        id: i64,
+        title: String,
+    },
     /// Assign (or clear, with `None`) a memo's category.
-    MemoSetCategory { id: i64, category_id: Option<i64> },
+    MemoSetCategory {
+        id: i64,
+        category_id: Option<i64>,
+    },
     /// Delete a memo (id) – undo toast; deferred to `MemoDeleteConfirmed`.
     MemoDelete(i64),
     /// Actually delete a memo (after the undo toast expires).
@@ -2825,49 +2835,8 @@ impl Component for App {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        // Make custom app icons (e.g. the concert mic) discoverable.
-        if let Some(display) = gtk::gdk::Display::default() {
-            gtk::IconTheme::for_display(&display)
-                .add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons"));
-            // App icon (logo.png under the app id name) for window/taskbar –
-            // takes effect even without an installed .desktop file (e.g. `cargo run`).
-            gtk::Window::set_default_icon_name("de.cais.Emilia");
-
-            // Covers/photos in the album/artist list flush left (no indentation).
-            let css = gtk::CssProvider::new();
-            css.load_from_string(
-                "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
-                 row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
-                 button.sync-connected { color: @success_color; }\
-                 button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
-                 button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\
-                 button.emilia-record-dot image { color: @error_color; }\
-                 image.emilia-record-dot { color: @error_color; }\
-                 @keyframes emilia-blink { 0% { opacity: 1; } 50% { opacity: 0.25; } 100% { opacity: 1; } }\
-                 button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
-                 image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
-                 button.emilia-nav-btn:checked image { color: @accent_color; }\
-                 box.emilia-step { background-color: alpha(@window_fg_color, 0.12); border-radius: 999px; }\
-                 box.emilia-step label { font-weight: bold; }\
-                 box.emilia-step-active { background-color: @accent_bg_color; }\
-                 box.emilia-step-active label { color: @accent_fg_color; }\
-                 scrolledwindow.emilia-nav-scroller scrollbar { opacity: 0; min-width: 0px; min-height: 0px; }\
-                 scrolledwindow.emilia-nav-scroller button.emilia-nav-btn { padding-left: 6px; padding-right: 6px; min-width: 0px; }\
-                 image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
-                 box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
-                 progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
-                 label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
-                 flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\
-                 flowbox.emilia-gallery > flowboxchild:selected { background: none; }\
-                 label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\
-                 label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }",
-            );
-            gtk::style_context_add_provider_for_display(
-                &display,
-                &css,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
+        // Register the bundled app icons and the application-wide CSS.
+        Self::install_styles();
 
         // The main app cannot run without its on-disk library (an in-memory
         // fallback would silently hide the user's real data). On failure, log a
@@ -2897,195 +2866,31 @@ impl Component for App {
                 .as_deref()
                 .unwrap_or("system"),
         );
-        let music_dir = library.get_setting("music_dir").ok().flatten();
-        let root_dir = music_dir.as_ref().map(PathBuf::from);
-        // Restore the most recently opened folder – only if it still exists
-        // and lies under the start folder; otherwise the start folder itself.
-        let browse_dir = library
-            .get_setting("browse_dir")
-            .ok()
-            .flatten()
-            .map(PathBuf::from)
-            .filter(|p| root_dir.as_ref().is_some_and(|r| p.starts_with(r)) && p.is_dir())
-            .or_else(|| root_dir.clone());
-
-        // Additional music sources (local secondary folder / Nextcloud) for the tabs.
-        let sources = library.list_sources().unwrap_or_default();
-
-        // First-run setup: shown once when nothing is configured yet. Existing
-        // installations (a music folder or sources already set) are silently
-        // marked complete instead, so the assistant never appears for them.
-        let setup_done = matches!(
-            library.get_setting("setup_complete").ok().flatten().as_deref(),
-            Some("1")
-        );
-        let first_run = !setup_done && music_dir.is_none() && sources.is_empty();
-        if !setup_done && !first_run {
-            let _ = library.set_setting("setup_complete", "1");
-        }
-
-        // Most recently saved window size / maximization.
-        let saved_w = library
-            .get_setting("win_width")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<i32>().ok());
-        let saved_h = library
-            .get_setting("win_height")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<i32>().ok());
-        let saved_max = matches!(
-            library
-                .get_setting("win_maximized")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
-        // Concert options.
-        let concert_hint_dismissed = matches!(
-            library
-                .get_setting("concert_hint_dismissed")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
-        // Hidden menu items (comma-separated). The old key
-        // "concerts_hidden=1" is still honored.
-        let mut hidden_sections: std::collections::HashSet<String> = library
-            .get_setting("hidden_sections")
-            .ok()
-            .flatten()
-            .map(|s| {
-                s.split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if matches!(
-            library
-                .get_setting("concerts_hidden")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        ) {
-            hidden_sections.insert("concerts".to_string());
-        }
-        // YouTube is an opt-in feature (off by default, restricted in some
-        // countries, extractor not bundled). When disabled, hide its section –
-        // toggling the setting adds/removes "youtube" from `hidden_sections`.
-        let youtube_enabled = matches!(
-            library
-                .get_setting("youtube_enabled")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
-        if !youtube_enabled {
-            hidden_sections.insert("youtube".to_string());
-        }
-        // Menu order (comma-separated stack names). Unknown names are
-        // discarded, new sections appended at the end in default order – so
-        // future menu items appear automatically.
-        let mut section_order: Vec<&'static str> = library
-            .get_setting("section_order")
-            .ok()
-            .flatten()
-            .map(|s| {
-                s.split(',')
-                    .filter_map(|name| {
-                        SECTIONS
-                            .iter()
-                            .find(|(n, _, _)| *n == name.trim())
-                            .map(|(n, _, _)| *n)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (name, _, _) in SECTIONS {
-            if !section_order.contains(&name) {
-                section_order.push(name);
-            }
-        }
-        // Automatic online fetch (default: on; only "0" turns it off).
-        let auto_enrich = !matches!(
-            library.get_setting("auto_enrich").ok().flatten().as_deref(),
-            Some("0")
-        );
-        // Repeat state (default: off).
-        let repeat_on = matches!(
-            library.get_setting("repeat").ok().flatten().as_deref(),
-            Some("1")
-        );
-        // Display language (default: system locale). It already took effect
-        // at startup in `main` via `i18n::init`; here only for the display in
-        // the settings switcher.
-        let ui_language = library
-            .get_setting("ui_language")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "system".to_string());
-        // Per-section sort (criterion + direction). Each sortable section keeps
-        // its own choice in the settings DB ("sort_<section>" / "..._desc").
-        let mut sort: std::collections::HashMap<&'static str, (SortCrit, bool)> =
-            std::collections::HashMap::new();
-        for &section in SORTABLE_SECTIONS {
-            let crit = library
-                .get_setting(&format!("sort_{section}"))
-                .ok()
-                .flatten()
-                .map(|s| SortCrit::from_key(&s));
-            let desc = matches!(
-                library
-                    .get_setting(&format!("sort_{section}_desc"))
-                    .ok()
-                    .flatten()
-                    .as_deref(),
-                Some("1")
-            );
-            // Only store a non-default entry, so `sort_for` keeps its fallback.
-            if crit.is_some() || desc {
-                sort.insert(section, (crit.unwrap_or(SortCrit::Name), desc));
-            }
-        }
-        // Gallery view (default: off) and tiles/row (default: 3 mobile / 4 desktop).
-        let gallery_view = matches!(
-            library
-                .get_setting("gallery_view")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
-        // Tiles per row (2–8). Initial default depends on the form factor:
-        // 3 on phone-sized screens, 4 on the desktop (see `initial_gallery_columns`).
-        let gallery_columns = library
-            .get_setting("gallery_columns")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or_else(initial_gallery_columns)
-            .clamp(2, 8);
-        // Timeshift buffer for stations in minutes (default 5, 0 = off, max. 60).
-        let recording_buffer_minutes = library
-            .get_setting("recording_buffer_minutes")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(5)
-            .min(60);
-        // Most recently open navigation item (only allow valid section names).
-        let saved_section = library
-            .get_setting("active_section")
-            .ok()
-            .flatten()
-            .filter(|s| SECTIONS.iter().any(|(name, _, _)| name == s));
+        // All persisted startup settings, read in one place (see
+        // `App::read_init_state`) and destructured back into locals so the model
+        // literal below stays unchanged.
+        let InitState {
+            music_dir,
+            root_dir,
+            browse_dir,
+            sources,
+            first_run,
+            saved_w,
+            saved_h,
+            saved_max,
+            concert_hint_dismissed,
+            hidden_sections,
+            youtube_enabled,
+            section_order,
+            auto_enrich,
+            repeat_on,
+            ui_language,
+            sort,
+            gallery_view,
+            gallery_columns,
+            recording_buffer_minutes,
+            saved_section,
+        } = Self::read_init_state(&library);
 
         let entries = FactoryVecDeque::builder()
             .launch(gtk::ListBox::default())
@@ -3215,9 +3020,9 @@ impl Component for App {
                 crate::ui::cloud_page::CloudOutput::SourcesChanged => Msg::SourcesChanged,
                 crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
             });
-        let setup_page = crate::ui::setup::SetupPage::builder()
-            .launch(())
-            .forward(sender.input_sender(), |out| match out {
+        let setup_page = crate::ui::setup::SetupPage::builder().launch(()).forward(
+            sender.input_sender(),
+            |out| match out {
                 crate::ui::setup::SetupOutput::Finished {
                     lang_code,
                     music_dir,
@@ -3227,7 +3032,8 @@ impl Component for App {
                     music_dir,
                     enabled_sections,
                 },
-            });
+            },
+        );
 
         let mut model = App {
             library,
@@ -3530,9 +3336,7 @@ impl Component for App {
                 {
                     let _ = model.library.delete_memo_category(c.id);
                 }
-                let _ = model
-                    .library
-                    .set_setting("memo_music_default_removed", "1");
+                let _ = model.library.set_setting("memo_music_default_removed", "1");
             }
         }
         model.reload_memo_categories(&sender);
@@ -3633,191 +3437,21 @@ impl Component for App {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
         match msg {
-            Msg::Activate(index) => {
-                let entry = self
-                    .libview
-                    .entries
-                    .guard()
-                    .get(index)
-                    .map(|r| r.entry.clone());
-                let Some(entry) = entry else {
-                    return;
-                };
-                // Remote entries (Nextcloud) go through their own path.
-                if let crate::ui::fs_row::FsEntry::RemoteDir { rel_path, .. } = &entry {
-                    self.files.remote_browse = Some(rel_path.clone());
-                    self.load_dir(&sender);
-                    return;
-                }
-                if let crate::ui::fs_row::FsEntry::RemoteFile { rel_path, .. } = &entry {
-                    let rel = rel_path.clone();
-                    self.activate_remote(&rel);
-                    return;
-                }
-                {
-                    if entry.is_dir() {
-                        let Some(p) = entry.path().cloned() else {
-                            return;
-                        };
-                        self.files.browse_dir = Some(p);
-                        self.load_dir(&sender);
-                    } else {
-                        let Some(path) = entry.path().cloned() else {
-                            return;
-                        };
-                        // Tapping the active song again → toggle playback
-                        // (pause/resume), instead of restarting.
-                        if !self.toggle_if_active_file(&path) {
-                            // Is a real queue currently running? Then slip the
-                            // single song in between and resume the queue
-                            // afterwards at its spot (it stays intact).
-                            if self.mini.playing
-                                && self.transport.queue.len() > 1
-                                && self.transport.interrupted_queue.is_none()
-                            {
-                                self.transport.interrupted_queue =
-                                    Some((self.transport.queue.clone(), self.transport.queue_pos));
-                            }
-                            self.transport.queue = vec![path];
-                            self.transport.queue_pos = 0;
-                            self.play_current();
-                            self.refresh_queue_icons();
-                        }
-                    }
-                }
-            }
-            Msg::ToggleQueue(index) => {
-                // Local files use their path, remote (NC) files their synthetic
-                // nc: path (resolved via `entry_files`), so both can be queued.
-                let entry = self
-                    .libview
-                    .entries
-                    .guard()
-                    .get(index)
-                    .filter(|r| !r.entry.is_dir())
-                    .map(|r| r.entry.clone());
-                let path = entry.and_then(|e| self.entry_files(&e).into_iter().next());
-                if let Some(path) = path {
-                    // Toggle membership in the user queue (never the active
-                    // context): a second tap removes it again.
-                    if let Some(pos) = self.transport.user_queue.iter().position(|p| *p == path) {
-                        self.transport.user_queue.remove(pos);
-                        self.toast(&gettext("Removed from queue"));
-                    } else {
-                        self.transport.user_queue.push(path);
-                        self.toast(&gettext("Will play next"));
-                    }
-                    self.reload_queue_list();
-                    self.refresh_queue_icons();
-                    self.save_queue();
-                }
-            }
-            Msg::ShowContextMenu(index) => {
-                let entry = self
-                    .libview
-                    .entries
-                    .guard()
-                    .get(index)
-                    .map(|r| CtxTarget::Fs(r.entry.clone()));
-                if entry.is_some() {
-                    self.nav.context_target = entry;
-                    self.open_context_menu(root, &sender);
-                }
-            }
-            Msg::ShowArtistDetail(index) => {
-                let meta = self
-                    .libview
-                    .artists
-                    .guard()
-                    .get(index)
-                    .map(|c| c.meta.clone())
-                    .or_else(|| self.libview.artists_overview.get(index).cloned());
-                if let Some(meta) = meta {
-                    // Fetch the photo of the opened artist with priority.
-                    self.fetch_focus_artist(&sender, &meta.name);
-                    self.nav.context_target = Some(CtxTarget::Artist(meta));
-                    self.open_context_menu(root, &sender);
-                }
-            }
-            Msg::ShowAlbumDetail(index) => {
-                let meta = self
-                    .libview
-                    .albums
-                    .guard()
-                    .get(index)
-                    .map(|c| c.meta.clone())
-                    .or_else(|| self.libview.albums_overview.get(index).cloned());
-                if let Some(meta) = meta {
-                    // Fetch the cover of the opened album with priority.
-                    self.fetch_focus_album(&sender, &meta.artist, &meta.album);
-                    self.nav.context_target = Some(CtxTarget::Album(meta));
-                    self.open_context_menu(root, &sender);
-                }
-            }
+            Msg::Activate(index) => self.on_activate(index, &sender),
+            Msg::ToggleQueue(index) => self.on_toggle_queue(index),
+            Msg::ShowContextMenu(index) => self.on_show_context_menu(index, root, &sender),
+            Msg::ShowArtistDetail(index) => self.on_show_artist_detail(index, root, &sender),
+            Msg::ShowAlbumDetail(index) => self.on_show_album_detail(index, root, &sender),
             Msg::ShowAlbumDetailFor { artist, album } => {
-                self.fetch_focus_album(&sender, &artist, &album);
-                // Load album metadata (for cover/year), otherwise an empty entry.
-                let meta = self
-                    .library
-                    .get_album_meta(&artist, &album)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| crate::model::AlbumMeta::pending(artist, album));
-                let mut meta = meta;
-                if meta
-                    .cover_path
-                    .as_deref()
-                    .is_none_or(|p| p.trim().is_empty())
-                {
-                    meta.cover_path = self.album_cover_for(&meta.artist, &meta.album);
-                }
-                self.nav.context_target = Some(CtxTarget::Album(meta));
-                self.open_context_menu(root, &sender);
+                self.on_show_album_detail_for(artist, album, root, &sender)
             }
             Msg::ShowTrackDetail(path) => {
                 self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(PathBuf::from(path))));
                 self.open_context_menu(root, &sender);
             }
-            Msg::ShowAlbumTracks(index) => {
-                // Album overview: open by album name (artist irrelevant).
-                let album = self
-                    .libview
-                    .albums
-                    .guard()
-                    .get(index)
-                    .map(|c| c.meta.album.clone())
-                    .or_else(|| {
-                        self.libview
-                            .albums_overview
-                            .get(index)
-                            .map(|m| m.album.clone())
-                    });
-                if let Some(album) = album {
-                    self.open_album_by_name(&sender, &album);
-                }
-            }
-            Msg::ShowConcertDetail(index) => {
-                if let Some((scope, key, _, is_dir)) =
-                    self.concerts.concert_items.get(index).cloned()
-                {
-                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
-                    self.open_context_menu(root, &sender);
-                }
-            }
-            Msg::OpenArtistTracks(index) => {
-                let meta = self
-                    .libview
-                    .artists
-                    .guard()
-                    .get(index)
-                    .map(|c| c.meta.clone())
-                    .or_else(|| self.libview.artists_overview.get(index).cloned());
-                if let Some(meta) = meta {
-                    // Fetch the photo of the opened artist with priority.
-                    self.fetch_focus_artist(&sender, &meta.name);
-                    self.open_artist_tracks(&sender, &meta);
-                }
-            }
+            Msg::ShowAlbumTracks(index) => self.on_show_album_tracks(index, &sender),
+            Msg::ShowConcertDetail(index) => self.on_show_concert_detail(index, root, &sender),
+            Msg::OpenArtistTracks(index) => self.on_open_artist_tracks(index, &sender),
             Msg::OpenAlbumTracks { artist, album } => {
                 self.fetch_focus_album(&sender, &artist, &album);
                 self.open_album_tracks(&sender, &artist, &album);
@@ -3837,89 +3471,12 @@ impl Component for App {
                 folder,
                 path,
                 close,
-            } => {
-                // Re-tapping the song that is already playing toggles
-                // pause/resume instead of restarting it.
-                if self.toggle_if_active_file(&PathBuf::from(&path)) {
-                    return;
-                }
-                let files: Vec<PathBuf> = self
-                    .folder_tracks_ordered(&folder)
-                    .into_iter()
-                    .map(|t| PathBuf::from(t.path))
-                    .collect();
-                let target = PathBuf::from(&path);
-                if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.transport.queue = files;
-                    self.transport.queue_pos = pos;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                    if close {
-                        self.nav.nav_view.pop_to_tag("main");
-                    }
-                }
-            }
+            } => self.on_play_folder_track(folder, path, close),
             Msg::PlayArtistTrack { name, path, close } => {
-                // Re-tapping the song that is already playing toggles
-                // pause/resume instead of restarting it.
-                if self.toggle_if_active_file(&PathBuf::from(&path)) {
-                    return;
-                }
-                // Queue = all tracks of the artist (across albums),
-                // start at the tapped track.
-                let files: Vec<PathBuf> = self
-                    .artist_albums(&name)
-                    .into_iter()
-                    .flat_map(|(_, tracks)| tracks)
-                    .map(|t| PathBuf::from(t.path))
-                    .collect();
-                let target = PathBuf::from(&path);
-                if let Some(pos) = files.iter().position(|p| *p == target) {
-                    self.transport.queue = files;
-                    self.transport.queue_pos = pos;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                    // Back to the main page, so that the mini player is visible.
-                    if close {
-                        self.nav.nav_view.pop_to_tag("main");
-                    }
-                }
+                self.on_play_artist_track(name, path, close)
             }
-            Msg::PlayOneTrack { path, close } => {
-                // Re-tapping the song that is already playing toggles
-                // pause/resume instead of restarting it.
-                if self.toggle_if_active_file(&PathBuf::from(&path)) {
-                    return;
-                }
-                // Selecting a single track (album or playlist) plays *only* that
-                // track – its siblings are not enqueued. Use the album/playlist
-                // play button for the whole thing. A single play is logged to
-                // "Recent" like any other standalone track.
-                self.youtube.playing_playlist = false;
-                self.transport.queue = vec![PathBuf::from(&path)];
-                self.transport.queue_pos = 0;
-                self.play_current();
-                self.refresh_queue_icons();
-                if close {
-                    self.nav.nav_view.pop_to_tag("main");
-                }
-            }
-            Msg::PlayAlbum { artist, album } => {
-                // Whole album from track 1 in track order (shuffle off).
-                let files: Vec<PathBuf> = self
-                    .album_tracks_for_artist(&artist, &album)
-                    .into_iter()
-                    .map(|t| PathBuf::from(t.path))
-                    .collect();
-                if !files.is_empty() {
-                    self.transport.shuffle = false;
-                    self.transport.queue = files;
-                    self.transport.queue_pos = 0;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                    self.nav.nav_view.pop_to_tag("main");
-                }
-            }
+            Msg::PlayOneTrack { path, close } => self.on_play_one_track(path, close),
+            Msg::PlayAlbum { artist, album } => self.on_play_album(artist, album),
             Msg::PlayFsAlbum(idx) => {
                 // The play button on an album folder in the file browser.
                 let info = self
@@ -3935,62 +3492,10 @@ impl Component for App {
                     });
                 }
             }
-            Msg::CtxPlay => {
-                if let Some(entry) = self.nav.context_target.clone() {
-                    let files = self.ctx_files(&entry);
-                    if !files.is_empty() {
-                        self.transport.queue = files;
-                        self.transport.queue_pos = 0;
-                        self.play_current();
-                        self.refresh_queue_icons();
-                    }
-                }
-            }
-            Msg::CtxPlayAlbum => {
-                // Album always in track order from song 1, without shuffle; at the end
-                // of the queue `play_next` stops by itself (no further song).
-                if let Some((artist, album)) = self.ctx_album() {
-                    let files = self.album_files(&artist, &album);
-                    if !files.is_empty() {
-                        self.transport.shuffle = false;
-                        self.transport.queue = files;
-                        self.transport.queue_pos = 0;
-                        self.play_current();
-                        self.refresh_queue_icons();
-                    }
-                }
-            }
-            Msg::CtxPlayArtist { newest_first } => {
-                // Albums by year (oldest/newest first), each album top-down,
-                // without shuffle.
-                if let Some(name) = self.ctx_artist() {
-                    let files = self.artist_files_ordered(&name, newest_first);
-                    if !files.is_empty() {
-                        self.transport.shuffle = false;
-                        self.transport.queue = files;
-                        self.transport.queue_pos = 0;
-                        self.play_current();
-                        self.refresh_queue_icons();
-                    }
-                }
-            }
-            Msg::CtxAddQueue => {
-                if let Some(entry) = self.nav.context_target.clone() {
-                    let mut files = self.ctx_files(&entry);
-                    let n = files.len();
-                    // Explicit enqueue: append to the user queue, never the active
-                    // context. Playback is untouched; the tracks play next, ahead
-                    // of the rest of the running album.
-                    self.transport.user_queue.append(&mut files);
-                    self.reload_queue_list();
-                    self.refresh_queue_icons();
-                    self.save_queue();
-                    self.toast(&gettext_f(
-                        "Added {n} tracks to the queue",
-                        &[("n", &n.to_string())],
-                    ));
-                }
-            }
+            Msg::CtxPlay => self.on_ctx_play(),
+            Msg::CtxPlayAlbum => self.on_ctx_play_album(),
+            Msg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
+            Msg::CtxAddQueue => self.on_ctx_add_queue(),
             Msg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, &sender),
             Msg::PlaylistCreateAddTo(name) => {
                 let name = name.trim();
@@ -4275,7 +3780,11 @@ impl Component for App {
                 self.reload_memos(&sender);
             }
             Msg::MemoDelete(id) => {
-                self.undo_toast(&sender, &gettext("Memo deleted"), Msg::MemoDeleteConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Memo deleted"),
+                    Msg::MemoDeleteConfirmed(id),
+                );
             }
             Msg::MemoDeleteConfirmed(id) => {
                 if let Ok(Some(path)) = self.library.delete_memo(id) {
@@ -4445,28 +3954,7 @@ impl Component for App {
                 self.yt_open_recent_playlist(&sender, url, title)
             }
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
-            Msg::CtxShare => {
-                use crate::ui::sync_page::SyncInput;
-                if self.sync_connected {
-                    // Paired: share the item whose detail menu this is. The
-                    // SyncPage shows a short size confirmation, then sends it.
-                    if let Some(target) = self.nav.context_target.clone() {
-                        let selection = self.ctx_share_selection(&target);
-                        if selection.song_paths.is_empty() {
-                            self.toast(&gettext("Nothing here to share"));
-                        } else {
-                            self.sync_page.emit(SyncInput::ShareSelection {
-                                window: root.clone(),
-                                selection,
-                            });
-                        }
-                    }
-                } else {
-                    // Not paired yet: open the pairing dialog. Once connected, the
-                    // user starts the share again from the detail view.
-                    self.sync_page.emit(SyncInput::Open(root.clone()));
-                }
-            }
+            Msg::CtxShare => self.on_ctx_share(root),
             Msg::OpenSync => {
                 use crate::ui::sync_page::SyncInput;
                 self.sync_page.emit(SyncInput::Open(root.clone()));
@@ -4480,119 +3968,10 @@ impl Component for App {
                 // arrived → rebuild the artist/album overviews so they show up.
                 self.reload_library_overviews();
             }
-            Msg::TrackFinished => {
-                if self.files.playing_remote {
-                    // Remote queue: advance to the next track (or stop at the
-                    // end). Runs separately from the local queue.
-                    self.remote_next();
-                } else if self.podcasts.playing_episode_url.is_some()
-                    && self.transport.queue.is_empty()
-                {
-                    // A streamed episode has ended (no queue
-                    // behind it): finalize its statistics session as "fully
-                    // listened", then reset the playback state and marking.
-                    self.finalize_play_session(true);
-                    self.mini.playing = false;
-                    self.podcasts.playing_episode_url = None;
-                    self.mpris.set_playing(false);
-                    self.refresh_queue_icons();
-                } else {
-                    // Listened to the end → finalize the listening session as "fully listened",
-                    // before the subsequent play_current starts a new session.
-                    self.finalize_play_session(true);
-                    // Track finished → forget resume, next time from the start.
-                    // `take()` prevents play_current from saving the (end) position again
-                    // as a resume point.
-                    if let Some(path) = self.transport.playing_path.take() {
-                        let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
-                    }
-                    *self.transport.close_resume.borrow_mut() = None;
-                    // If a single song was slipped in between, now resume the interrupted
-                    // queue at its spot.
-                    if self.transport.queue.len() == 1 && self.transport.interrupted_queue.is_some()
-                    {
-                        if let Some((q, pos)) = self.transport.interrupted_queue.take() {
-                            self.transport.queue = q;
-                            self.transport.queue_pos = pos;
-                            self.play_current();
-                        }
-                    } else {
-                        // A new (multi-part) playback discards a possibly
-                        // remembered interruption.
-                        self.transport.interrupted_queue = None;
-                        self.play_next();
-                    }
-                }
-            }
-            Msg::PersistResume => {
-                if self.mini.playing {
-                    // Persist resume points on this 5 s timer (not every Tick):
-                    // a hard crash loses at most ~5 s of position, while normal
-                    // pause/seek/track-switch/close still save immediately.
-                    self.save_resume();
-                    if self.podcasts.playing_episode_url.is_some() {
-                        self.save_episode_progress();
-                    }
-                    if let Some(pos) = self.player.position_ms() {
-                        self.mpris.set_position(pos);
-                    }
-                }
-            }
-            Msg::Tick => {
-                // Advance the running timeshift recording at the song boundaries.
-                if self.streaming.record_state.is_some() {
-                    self.drive_recording(&sender);
-                }
-                // Sync the play/pause and record icons of the station rows.
-                self.refresh_stream_icons();
-                if self.mini.playing {
-                    if let Some(pos) = self.player.position_ms() {
-                        self.mini.position_ms = pos;
-                    }
-                    if let Some(dur) = self.player.duration_ms() {
-                        self.mini.track_duration_ms = dur;
-                    }
-                    // Carry the close snapshot along.
-                    if let Some(entry) = self.transport.close_resume.borrow_mut().as_mut() {
-                        entry.1 = self.mini.position_ms;
-                        entry.2 = self.mini.track_duration_ms;
-                    }
-                    // (Episode resume is persisted on the 5 s PersistResume timer,
-                    // not here — no per-second DB write on the UI thread.)
-                    // Track the current chapter below the title (except while hovering).
-                    self.update_current_chapter();
-                    // Keep counting the listened time of the statistics session (wall clock, only
-                    // during "Playing"; ~1 s per tick). Backfill the duration if needed,
-                    // in case it was not yet known at the start.
-                    let dur = self.mini.track_duration_ms;
-                    if let Some(s) = self.transport.play_session.as_mut() {
-                        s.played_ms += 1000;
-                        if s.duration_ms == 0 {
-                            s.duration_ms = dur;
-                        }
-                    }
-                    if let Some(cs) = self.transport.close_session.borrow_mut().as_mut() {
-                        if let Some(s) = self.transport.play_session.as_ref() {
-                            cs.2 = s.played_ms;
-                            cs.3 = s.duration_ms;
-                        }
-                    }
-                }
-            }
-            Msg::AutoEnrichTick => {
-                // Quiet backfill of missing artist photos & online covers in the
-                // background (rate-limited in the worker). Only if desired, a
-                // folder is set, no run is currently active and there is network.
-                // If a (full) fetch is already running, the `enriching` lock takes effect and
-                // this tick fizzles out – no pileup.
-                if self.enrich_state.auto_enrich
-                    && !self.enrich_state.enriching
-                    && self.files.music_dir.is_some()
-                    && online_available()
-                {
-                    self.run_enrich(&sender, false, true);
-                }
-            }
+            Msg::TrackFinished => self.on_track_finished(),
+            Msg::PersistResume => self.on_persist_resume(),
+            Msg::Tick => self.on_tick(&sender),
+            Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::LoadLyrics(path) => self.load_lyrics(&sender, path),
             Msg::ShowLyrics => self.show_lyrics(),
@@ -4649,112 +4028,16 @@ impl Component for App {
                     .set_setting("repeat", if self.transport.repeat { "1" } else { "0" });
                 self.mpris.set_repeat(self.transport.repeat);
             }
-            Msg::NavUp => {
-                // Remote source: one rel segment up.
-                if let Some(rel) = self.files.remote_browse.clone() {
-                    if !rel.is_empty() {
-                        let parent = match rel.rfind('/') {
-                            Some(0) | None => String::new(),
-                            Some(i) => rel[..i].to_string(),
-                        };
-                        self.files.remote_browse = Some(parent);
-                        self.load_dir(&sender);
-                    }
-                    return;
-                }
-                if self.can_go_up() {
-                    if let Some(parent) = self.files.browse_dir.as_ref().and_then(|d| d.parent()) {
-                        self.files.browse_dir = Some(parent.to_path_buf());
-                        self.load_dir(&sender);
-                    }
-                }
-            }
-            Msg::FilesGoStart => {
-                // Remote source: back to the music root of the source.
-                if self.files.remote_browse.is_some() {
-                    if self.files.remote_browse.as_deref() != Some("") {
-                        self.files.remote_browse = Some(String::new());
-                        self.load_dir(&sender);
-                    }
-                    return;
-                }
-                if let Some(root) = self.files.root_dir.clone() {
-                    if self.files.browse_dir.as_ref() != Some(&root) {
-                        self.files.browse_dir = Some(root);
-                        self.load_dir(&sender);
-                    }
-                }
-            }
-            Msg::Refresh => {
-                self.load_dir(&sender);
-                // Each helper reports whether it actually spawned a background
-                // worker; we count those so the loading spinner stays up until
-                // the last one reports back (see the matching `Cmd::*` arms).
-                let mut pending = 0u32;
-                // Re-index the cloud sources too, so their structure and covers
-                // update (existing sources are only indexed when first added).
-                // On completion this rebuilds the views and fetches covers.
-                // `manual` → fetch online regardless of the auto-enrich setting.
-                if self.reindex_cloud_sources(&sender, true) {
-                    pending += 1;
-                }
-                // "Rescan" also updates the local library (artists/albums).
-                if self.start_scan(&sender, false, true) {
-                    pending += 1;
-                }
-                // Also pull new content for the media subscriptions: every
-                // podcast feed and every YouTube channel (background workers;
-                // both need a connection, so skip them when offline).
-                if online_available() {
-                    if self.refresh_all_podcasts(&sender) {
-                        pending += 1;
-                    }
-                    if self.refresh_all_channels(&sender) {
-                        pending += 1;
-                    }
-                }
-                self.refresh_pending = pending;
-            }
+            Msg::NavUp => self.on_nav_up(&sender),
+            Msg::FilesGoStart => self.on_files_go_start(&sender),
+            Msg::Refresh => self.on_refresh(&sender),
             Msg::OpenSettings => self.open_settings(root, &sender),
             Msg::OpenSearch => self.open_search_dialog(root, &sender),
-            Msg::SearchPlayTrack(path) => {
-                // A real local file is played directly; remote (`nc:`) hits can't
-                // be played as a file, so fall back to opening their album.
-                if std::path::Path::new(&path).is_file() {
-                    self.play_path(&path, false);
-                } else if let Some(album) = self
-                    .library
-                    .track_by_path(&path)
-                    .ok()
-                    .flatten()
-                    .and_then(|t| t.album)
-                    .filter(|a| !a.trim().is_empty())
-                {
-                    self.open_album_by_name(&sender, &album);
-                }
-            }
+            Msg::SearchPlayTrack(path) => self.on_search_play_track(path, &sender),
             Msg::SearchOpenAlbum(album) => self.open_album_by_name(&sender, &album),
-            Msg::SearchOpenArtist(name) => {
-                self.fetch_focus_artist(&sender, &name);
-                let meta = self
-                    .library
-                    .get_artist_meta(&name)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| crate::model::ArtistMeta::pending(name.clone()));
-                self.open_artist_tracks(&sender, &meta);
-            }
+            Msg::SearchOpenArtist(name) => self.on_search_open_artist(name, &sender),
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
-            Msg::OpenCurrentEq => {
-                if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
-                    let key = path.to_string_lossy().into_owned();
-                    // `display_name` resolves YouTube titles (yt:<id>) and the
-                    // "artist - title" of library tracks; the static helper would
-                    // show the raw path for YouTube.
-                    let name = self.display_name(&path);
-                    self.open_eq_editor(root, &sender, "the track", &name, None, "track", key);
-                }
-            }
+            Msg::OpenCurrentEq => self.on_open_current_eq(root, &sender),
             Msg::OpenTrackEq { path, title } => {
                 self.open_eq_editor(root, &sender, "the track", &title, None, "track", path);
             }
@@ -4767,22 +4050,7 @@ impl Component for App {
             Msg::NavBack => {
                 self.nav.nav_view.pop();
             }
-            Msg::PlayQueueAt { start, len } => {
-                // Play this queue entry now: move its block to the front of the
-                // user queue, then advance – `play_next` splices the first track
-                // into the context and the rest follow track by track. Entries
-                // before it stay queued and play afterwards.
-                let n = self.transport.user_queue.len();
-                if start < n {
-                    let len = len.clamp(1, n - start);
-                    let block: Vec<PathBuf> =
-                        self.transport.user_queue.drain(start..start + len).collect();
-                    for (i, p) in block.into_iter().enumerate() {
-                        self.transport.user_queue.insert(i, p);
-                    }
-                    self.play_next();
-                }
-            }
+            Msg::PlayQueueAt { start, len } => self.on_play_queue_at(start, len),
             Msg::SetPlaybackRate(rate) => {
                 let rate = (rate / 0.25).round() * 0.25;
                 let rate = rate.clamp(0.25, 2.0);
@@ -4812,168 +4080,21 @@ impl Component for App {
                     self.skip_current_track();
                 }
             }
-            Msg::QueueClear => {
-                // Clear only the explicit user queue; the currently playing
-                // album/track (the context) keeps running untouched.
-                self.transport.user_queue.clear();
-                self.reload_queue_list();
-                self.refresh_queue_icons();
-                self.save_queue();
-                self.toast(&gettext("Queue cleared"));
-            }
-            Msg::QueueMoveRange { from, len, to } => {
-                let n = self.transport.user_queue.len();
-                // Dropping a block onto itself is a no-op.
-                if from < n && len >= 1 && !(to >= from && to < from + len) {
-                    let len = len.min(n - from);
-                    let block: Vec<PathBuf> =
-                        self.transport.user_queue.drain(from..from + len).collect();
-                    // After removal everything past the block shifts left by `len`.
-                    let insert_at = if to > from { to - len } else { to }
-                        .min(self.transport.user_queue.len());
-                    for (i, p) in block.into_iter().enumerate() {
-                        self.transport.user_queue.insert(insert_at + i, p);
-                    }
-                    self.reload_queue_list();
-                    self.refresh_queue_icons();
-                    self.save_queue();
-                }
-            }
-            Msg::SetMusicDir(path) => {
-                let dir = path.to_string_lossy().into_owned();
-                if let Err(e) = self.library.set_setting("music_dir", &dir) {
-                    tracing::error!("Failed to save music folder: {e}");
-                }
-                self.files.music_dir = Some(dir);
-                // Only re-root the file view if the primary tab is currently active
-                // – on an additional source the user would otherwise be left stranded.
-                if self.files.active_source == ActiveSource::Primary {
-                    self.files.root_dir = Some(path.clone());
-                    self.files.browse_dir = Some(path);
-                    self.load_dir(&sender);
-                }
-                // Read the new folder and (Wi-Fi + switch) fetch automatically.
-                self.start_scan(&sender, true, false);
-            }
+            Msg::QueueClear => self.on_queue_clear(),
+            Msg::QueueMoveRange { from, len, to } => self.on_queue_move_range(from, len, to),
+            Msg::SetMusicDir(path) => self.on_set_music_dir(path, &sender),
             Msg::SetupFinished {
                 lang_code,
                 music_dir,
                 enabled_sections,
-            } => {
-                // Which menu items the user keeps. At least one must stay visible.
-                let mut enabled: std::collections::HashSet<String> =
-                    enabled_sections.into_iter().collect();
-                if !SECTIONS.iter().any(|(n, _, _)| enabled.contains(*n)) {
-                    enabled.insert("files".to_string());
-                }
-                let hidden_value = SECTIONS
-                    .iter()
-                    .map(|(n, _, _)| *n)
-                    .filter(|n| !enabled.contains(*n))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let _ = self.library.set_setting("hidden_sections", &hidden_value);
-                // The YouTube section is the opt-in feature: its menu item mirrors
-                // the `youtube_enabled` flag.
-                let yt_on = enabled.contains("youtube");
-                let _ = self
-                    .library
-                    .set_setting("youtube_enabled", if yt_on { "1" } else { "0" });
-                self.youtube.enabled = yt_on;
-                // Persist the rest before any possible restart below.
-                let _ = self.library.set_setting("setup_complete", "1");
-                let _ = self.library.set_setting("ui_language", &lang_code);
-                self.settings.ui_language = lang_code.clone();
-                let dir = music_dir.to_string_lossy().into_owned();
-                let _ = self.library.set_setting("music_dir", &dir);
-
-                if lang_code != crate::i18n::system_language_code() {
-                    // The chosen language differs from the active (system) one.
-                    // gettext only reads the catalog at startup, so relaunch to
-                    // rebuild the UI in the chosen language; setup is complete now
-                    // (persisted above), so the assistant won't reappear and the
-                    // normal startup re-roots the folder and scans.
-                    relaunch_for_language_change();
-                }
-
-                // Same language → keep running: apply the navigation and folder now.
-                self.nav.hidden_sections = SECTIONS
-                    .iter()
-                    .map(|(n, _, _)| *n)
-                    .filter(|n| !enabled.contains(*n))
-                    .map(str::to_string)
-                    .collect();
-                self.refresh_nav_visibility();
-                let cur = self.nav.view_stack.visible_child_name();
-                let on_hidden = cur
-                    .as_deref()
-                    .map(|c| self.nav.hidden_sections.contains(c))
-                    .unwrap_or(true);
-                if on_hidden {
-                    if let Some(next) = self
-                        .nav
-                        .section_order
-                        .iter()
-                        .copied()
-                        .find(|n| !self.nav.hidden_sections.contains(*n))
-                    {
-                        self.nav.view_stack.set_visible_child_name(next);
-                    }
-                }
-                // Re-root the file view to the chosen folder and start the scan.
-                sender.input(Msg::SetMusicDir(music_dir));
-            }
+            } => self.on_setup_finished(lang_code, music_dir, enabled_sections, &sender),
             Msg::SelectSource(sel) => {
                 if self.files.active_source != sel {
                     self.apply_source(sel, &sender);
                 }
             }
-            Msg::SourcesChanged => {
-                self.files.sources = self.library.list_sources().unwrap_or_default();
-                // If the active source is no longer valid (removed, or the
-                // primary "Music" tab dropped because no music folder is set),
-                // fall back to the first available folder.
-                if let Some(s) = self.active_source_fallback() {
-                    self.apply_source(s, &sender);
-                }
-                self.rebuild_source_tabs();
-                // Indexed cloud tracks may have been added/removed.
-                self.reload_library_overviews();
-                // Refresh the "Other sources" list of the settings page, in case
-                // the settings dialog is currently open (e.g. right after a
-                // Nextcloud connect, which lands the source in that same list).
-                let src_list = self.settings_src_list.borrow().clone();
-                if let Some(list) = src_list {
-                    if list.root().is_some() {
-                        self.fill_src_list(&list, &sender);
-                    } else {
-                        *self.settings_src_list.borrow_mut() = None;
-                    }
-                }
-            }
-            Msg::CheckSources => {
-                let webdavs: Vec<crate::model::Source> = self
-                    .files
-                    .sources
-                    .iter()
-                    .filter(|s| s.kind == "webdav")
-                    .cloned()
-                    .collect();
-                if !webdavs.is_empty() {
-                    sender.spawn_command(move |out| {
-                        let status: Vec<(i64, bool)> = webdavs
-                            .iter()
-                            .map(|s| {
-                                let ok = crate::core::webdav::Creds::from_source(s)
-                                    .map(|c| crate::core::webdav::test_connection(&c).is_ok())
-                                    .unwrap_or(false);
-                                (s.id, ok)
-                            })
-                            .collect();
-                        let _ = out.send(Cmd::SourceStatus(status));
-                    });
-                }
-            }
+            Msg::SourcesChanged => self.on_sources_changed(&sender),
+            Msg::CheckSources => self.on_check_sources(&sender),
             Msg::AddCloudSource => {
                 use crate::ui::cloud_page::CloudInput;
                 self.cloud_page.emit(CloudInput::Open {
@@ -4981,32 +4102,8 @@ impl Component for App {
                     mobile: self.is_mobile(),
                 });
             }
-            Msg::CloudIndexed => {
-                // Cloud tracks are in the DB → rebuild albums/artists and
-                // (if desired) fetch covers/photos online.
-                self.reload_library_overviews();
-                if self.enrich_state.auto_enrich
-                    && !self.enrich_state.enriching
-                    && online_available()
-                {
-                    self.run_enrich(&sender, false, false);
-                }
-            }
-            Msg::CtxDownloadRemote(rel) => {
-                let Some(creds) = self.active_webdav_creds() else {
-                    return;
-                };
-                let Some(dest) = self.remote_cache_path(&rel) else {
-                    return;
-                };
-                self.toast(&gettext("Downloading …"));
-                sender.spawn_oneshot_command(move || {
-                    match crate::core::webdav::download(&creds, &rel, &dest) {
-                        Ok(()) => Cmd::RemoteDownloaded(Ok((rel, dest))),
-                        Err(e) => Cmd::RemoteDownloaded(Err(e.to_string())),
-                    }
-                });
-            }
+            Msg::CloudIndexed => self.on_cloud_indexed(&sender),
+            Msg::CtxDownloadRemote(rel) => self.on_ctx_download_remote(rel, &sender),
             Msg::SetAcoustidKey(key) => {
                 let key = key.trim().to_string();
                 let _ = self.library.set_secret_setting("acoustid_key", &key);
@@ -5030,33 +4127,7 @@ impl Component for App {
                     .library
                     .set_setting("auto_enrich", if on { "1" } else { "0" });
             }
-            Msg::SetLanguage(lang) => {
-                if lang != self.settings.ui_language {
-                    self.settings.ui_language = lang.clone();
-                    let _ = self.library.set_setting("ui_language", &lang);
-                    // gettext reads the language only at startup, so the choice
-                    // takes effect on the next launch. Ask whether to restart now
-                    // or later instead of restarting the running app unannounced.
-                    let confirm = adw::AlertDialog::new(
-                        Some(&gettext("Restart to change the language?")),
-                        Some(&gettext(
-                            "The new language is loaded only after a restart. Restart now, or do it yourself later.",
-                        )),
-                    );
-                    confirm.add_response("later", &gettext("Later"));
-                    confirm.add_response("restart", &gettext("Restart now"));
-                    confirm
-                        .set_response_appearance("restart", adw::ResponseAppearance::Suggested);
-                    confirm.set_default_response(Some("restart"));
-                    confirm.set_close_response("later");
-                    confirm.connect_response(None, move |_, resp| {
-                        if resp == "restart" {
-                            relaunch_for_language_change();
-                        }
-                    });
-                    confirm.present(Some(root));
-                }
-            }
+            Msg::SetLanguage(lang) => self.on_set_language(lang, root),
             Msg::SetColorScheme(scheme) => {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
@@ -5214,64 +4285,8 @@ impl Component for App {
                     self.open_context_menu(root, &sender);
                 }
             }
-            Msg::TogglePlay => {
-                if self.mini.playing {
-                    self.save_resume();
-                    self.player.pause();
-                    self.mini.playing = false;
-                    // Pausing during buffering stops the spinner (no longer "loading").
-                    self.mini.loading = false;
-                } else if self.transport.playing_path.is_some()
-                    || self.streaming.playing_stream.is_some()
-                    || self.podcasts.playing_episode_url.is_some()
-                {
-                    // Paused (file, station or episode) → resume.
-                    self.player.resume();
-                    self.mini.playing = true;
-                } else if !self.transport.queue.is_empty() {
-                    // Playback had ended → restart from the current position (rewound
-                    // to 0 after the end). play_current sets
-                    // playing/MPRIS/icons itself.
-                    self.play_current();
-                    return;
-                } else if !self.transport.user_queue.is_empty() {
-                    // Nothing loaded, but the user queued tracks → start the queue
-                    // (play_next splices the first queued track into the context).
-                    self.play_next();
-                    return;
-                } else {
-                    return;
-                }
-                self.mpris.set_playing(self.mini.playing);
-                // Adjust the play/pause icon of the active track in the list.
-                self.refresh_queue_icons();
-                self.refresh_stream_icons();
-            }
-            Msg::OpenNowPlaying => {
-                if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
-                    // A running YouTube video (synthetic `yt:<id>` path) needs its
-                    // own detail (channel / URL / thumbnail) – not the file-tag
-                    // based track info, which would be empty/wrong for it.
-                    if let Some(video_id) =
-                        path.to_str().and_then(crate::core::youtube::parse_yt_path)
-                    {
-                        let title = self
-                            .youtube
-                            .video_titles
-                            .get(&video_id)
-                            .cloned()
-                            .or_else(|| self.library.yt_title(&video_id).ok().flatten())
-                            .filter(|t| !t.trim().is_empty())
-                            .or_else(|| self.mini.now_playing.clone())
-                            .unwrap_or_else(|| video_id.clone());
-                        self.show_video_detail(root, &sender, &video_id, &title);
-                    } else {
-                        // Detail view of the running track (as a file entry).
-                        self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
-                        self.open_context_menu(root, &sender);
-                    }
-                }
-            }
+            Msg::TogglePlay => self.on_toggle_play(),
+            Msg::OpenNowPlaying => self.on_open_now_playing(root, &sender),
         }
     }
 
@@ -5287,143 +4302,11 @@ impl Component for App {
         // yt-dlp result (and is correct when the section is next opened).
         self.youtube.ytdlp_broken = crate::core::youtube::extraction_broken();
         match msg {
-            Cmd::Entries(entries) => {
-                // "Mixed album": more than one distinct artist in the folder.
-                let distinct: std::collections::HashSet<String> = entries
-                    .iter()
-                    .filter_map(|e| e.effective_artist())
-                    .collect();
-                let opts = RowOpts {
-                    show_artist: distinct.len() > 1,
-                };
-                let queue = self.transport.queue.clone();
-                let mut guard = self.libview.entries.guard();
-                guard.clear();
-                for e in entries {
-                    let queued = e.path().is_some_and(|ep| queue.iter().any(|p| p == ep));
-                    guard.push_back((e, opts, queued));
-                }
-                drop(guard);
-                self.libview.loading = false;
-
-                // This folder is now shown; restore the remembered scroll position (from
-                // the last visit) after the layout.
-                self.files.shown_dir = self.files.browse_dir.clone();
-                if let (Some(dir), Some(sc)) = (self.files.browse_dir.clone(), self.fs_scroller()) {
-                    if let Some(&value) = self.files.fs_scroll.borrow().get(&dir) {
-                        for delay in [50u64, 250] {
-                            let sc = sc.clone();
-                            gtk::glib::timeout_add_local_once(
-                                std::time::Duration::from_millis(delay),
-                                move || sc.vadjustment().set_value(value),
-                            );
-                        }
-                    }
-                }
-            }
+            Cmd::Entries(entries) => self.on_cmd_entries(entries),
             Cmd::RemoteEntries(result, source, rel) => {
-                // Discard the stale result (source/folder switched in the meantime).
-                if self.files.active_source != source
-                    || self.files.remote_browse.as_deref() != Some(rel.as_str())
-                {
-                    return;
-                }
-                self.libview.loading = false;
-                match result {
-                    Err(e) => {
-                        tracing::warn!("WebDAV listing failed: {e}");
-                        self.libview.entries.guard().clear();
-                        self.toast(&gettext("Could not load this folder"));
-                    }
-                    Ok(list) => {
-                        use crate::ui::app_views::natural_key;
-                        let (mut dirs, mut files): (Vec<_>, Vec<_>) =
-                            list.into_iter().partition(|e| e.is_dir);
-                        dirs.sort_by_key(|a| natural_key(&a.name));
-                        files.sort_by_key(|a| natural_key(&a.name));
-                        // Source id, to read already-indexed track metadata
-                        // (title/artist/duration) straight from the DB.
-                        let source_id = match &source {
-                            ActiveSource::Source(id) => Some(*id),
-                            _ => None,
-                        };
-                        let mut entries: Vec<FsEntry> =
-                            Vec::with_capacity(dirs.len() + files.len());
-                        for d in dirs {
-                            entries.push(FsEntry::remote_dir(d.rel_path, d.name));
-                        }
-                        for f in files {
-                            let cached = self.remote_cache_path(&f.rel_path).filter(|p| p.exists());
-                            // If the source was indexed, the tags already live in
-                            // the DB → show them at once instead of re-reading them
-                            // over the network row by row.
-                            let meta = source_id.and_then(|id| {
-                                self.library
-                                    .track_by_path(&crate::core::webdav::nc_path(id, &f.rel_path))
-                                    .ok()
-                                    .flatten()
-                            });
-                            let (title, artist, duration_ms) = match meta {
-                                Some(t) => (Some(t.title), t.artist, t.duration_ms),
-                                None => (None, None, None),
-                            };
-                            entries.push(FsEntry::remote_file(
-                                f.rel_path,
-                                f.name,
-                                cached,
-                                title,
-                                artist,
-                                duration_ms,
-                            ));
-                        }
-                        let distinct: std::collections::HashSet<String> = entries
-                            .iter()
-                            .filter_map(|e| e.effective_artist())
-                            .collect();
-                        let opts = RowOpts {
-                            show_artist: distinct.len() > 1,
-                        };
-                        {
-                            let mut guard = self.libview.entries.guard();
-                            guard.clear();
-                            for e in entries {
-                                guard.push_back((e, opts, false));
-                            }
-                        }
-                        self.refresh_queue_icons();
-                        // Fetch the tags of the remote files in the background.
-                        if let Some(src) = self.active_remote_source() {
-                            self.start_remote_tag_fetch(&sender, &src);
-                        }
-                    }
-                }
+                self.on_cmd_remote_entries(result, source, rel, &sender)
             }
-            Cmd::RemoteTags(tags) => {
-                // rel path → factory index, then send tags to the respective row.
-                let map: std::collections::HashMap<String, usize> = {
-                    let guard = self.libview.entries.guard();
-                    (0..guard.len())
-                        .filter_map(|i| {
-                            guard.get(i).and_then(|r| match &r.entry {
-                                FsEntry::RemoteFile { rel_path, .. } => Some((rel_path.clone(), i)),
-                                _ => None,
-                            })
-                        })
-                        .collect()
-                };
-                for (rel, title, artist, duration_ms) in tags {
-                    if let Some(&i) = map.get(&rel) {
-                        self.libview.entries.send(
-                            i,
-                            FsInput::SetTags {
-                                title,
-                                artist,
-                                duration_ms,
-                            },
-                        );
-                    }
-                }
-            }
+            Cmd::RemoteTags(tags) => self.on_cmd_remote_tags(tags),
             Cmd::RemoteDownloaded(result) => match result {
                 Ok((rel, path)) => {
                     let idx = {
@@ -5459,49 +4342,8 @@ impl Component for App {
             Cmd::ScanDone {
                 then_enrich,
                 manual,
-            } => {
-                if manual {
-                    self.refresh_done();
-                }
-                // Library is read in → update the views.
-                self.reload_library_overviews();
-                // Fill in album covers from the embedded artwork in the files —
-                // purely local, so they show even offline or with online
-                // enrichment disabled (the online sweep below only runs when
-                // connected).
-                self.run_local_covers(&sender);
-                // Then automatically fetch online – without user action,
-                // provided it is desired, no fetch is already running and there is any
-                // connection at all (on any connection, even metered). The
-                // local scan already ran, so here without re-reading.
-                if then_enrich
-                    && self.enrich_state.auto_enrich
-                    && !self.enrich_state.enriching
-                    && self.files.music_dir.is_some()
-                    && online_available()
-                {
-                    // Automatic run (without a renewed tag scan), full scope.
-                    self.run_enrich(&sender, false, false);
-                }
-            }
-            Cmd::CloudReindexed { manual } => {
-                if manual {
-                    self.refresh_done();
-                }
-                // Freshly indexed remote tracks → rebuild the library views and
-                // favorites. Then fetch covers/photos (incl. the embedded covers
-                // of the remote tracks). A manual refresh does this regardless of
-                // the passive auto-enrich setting; the silent startup top-up only
-                // when auto-enrich is on (like the local scan's `then_enrich`).
-                self.reload_library_overviews();
-                self.load_favorites(&sender);
-                if (manual || self.enrich_state.auto_enrich)
-                    && !self.enrich_state.enriching
-                    && online_available()
-                {
-                    self.run_enrich(&sender, false, false);
-                }
-            }
+            } => self.on_cmd_scan_done(then_enrich, manual, &sender),
+            Cmd::CloudReindexed { manual } => self.on_cmd_cloud_reindexed(manual, &sender),
             Cmd::Candidates(candidates) => {
                 if candidates.is_empty() {
                     self.toast(&gettext("No new concert candidates found"));
@@ -5586,45 +4428,7 @@ impl Component for App {
                 title,
                 items,
                 total_duration,
-            } => {
-                if items.is_empty() {
-                    self.toast(&gettext("Playlist is empty"));
-                } else {
-                    self.youtube.video_titles.clear();
-                    let mut queue = Vec::with_capacity(items.len());
-                    let mut paths = Vec::with_capacity(items.len());
-                    for (id, vtitle) in &items {
-                        self.youtube.video_titles.insert(id.clone(), vtitle.clone());
-                        // Persist the title so the playlist/queue shows names.
-                        let _ = self.library.set_yt_title(id, vtitle);
-                        let p = crate::core::youtube::yt_path(id);
-                        paths.push(p.clone());
-                        queue.push(PathBuf::from(p));
-                    }
-                    // Log the playlist as one "Recent" entry (not the videos).
-                    self.youtube.playing_playlist = true;
-                    let _ = self.library.add_recent_playlist(
-                        &url,
-                        &title,
-                        items.len() as i64,
-                        total_duration,
-                    );
-                    // Recent playlist cover = its first video's thumbnail.
-                    if let Some((id, _)) = items.first() {
-                        let _ = self
-                            .library
-                            .set_recent_thumb(&url, &crate::core::youtube::thumbnail_url(id));
-                    }
-                    // Mirror the playlist into the Playlists section (keyed by
-                    // its URL, so a same-named user playlist is left untouched).
-                    let _ = self.library.replace_yt_playlist(&url, &title, &paths);
-                    self.transport.queue = queue;
-                    self.transport.queue_pos = 0;
-                    self.play_current();
-                    self.reload_yt_recent(&sender);
-                    self.reload_playlists(&sender);
-                }
-            }
+            } => self.on_cmd_yt_playlist_start(url, title, items, total_duration, &sender),
             Cmd::YtPlaylistSaved(result) => match result {
                 Ok(n) => {
                     self.reload_playlists(&sender);
@@ -5645,95 +4449,17 @@ impl Component for App {
                 ));
             }
             Cmd::YtLibraryAdded { video_id, result } => {
-                if let Some(vid) = &video_id {
-                    self.youtube.downloading_videos.remove(vid);
-                    self.refresh_yt_download_row();
-                }
-                match result {
-                    Ok(n) => {
-                        self.reload_library_overviews();
-                        self.yt_progress_done(&gettext_f(
-                            "Added {n} track(s) to your library",
-                            &[("n", &n.to_string())],
-                        ));
-                    }
-                    Err(e) => {
-                        tracing::warn!("yt library add failed: {e}");
-                        self.yt_progress_done(&gettext("Could not add to library"));
-                    }
-                }
+                self.on_cmd_yt_library_added(video_id, result)
             }
             Cmd::YtLibraryExists {
                 video_id,
                 title,
                 dest,
-            } => {
-                self.youtube.downloading_videos.remove(&video_id);
-                self.refresh_yt_download_row();
-                self.yt_progress_done(&gettext("Song already exists"));
-                // Never overwrite a different song silently – let the user decide.
-                let confirm = adw::AlertDialog::new(
-                    Some(&gettext("Overwrite existing song?")),
-                    Some(&gettext_f(
-                        "“{title}” is already saved at:\n{dest}",
-                        &[("title", &title), ("dest", &dest)],
-                    )),
-                );
-                confirm.add_response("skip", &gettext("Skip"));
-                confirm.add_response("overwrite", &gettext("Overwrite"));
-                confirm.set_response_appearance("overwrite", adw::ResponseAppearance::Destructive);
-                confirm.set_default_response(Some("skip"));
-                confirm.set_close_response("skip");
-                {
-                    let sender = sender.clone();
-                    confirm.connect_response(None, move |_, resp| {
-                        if resp == "overwrite" {
-                            sender.input(Msg::YtAddToLibraryConfirmed {
-                                video_id: video_id.clone(),
-                                title: title.clone(),
-                            });
-                        }
-                    });
-                }
-                confirm.present(Some(root));
-            }
+            } => self.on_cmd_yt_library_exists(video_id, title, dest, root, &sender),
             Cmd::YtPlaylistSongs { url, title, result } => {
-                // Hide the loading overlay (covers both success and failure).
-                self.libview.loading = false;
-                self.libview.loading_label = None;
-                match result {
-                    Ok(videos) => {
-                        self.youtube
-                            .playlist_songs_cache
-                            .insert(url.clone(), videos.clone());
-                        self.show_yt_playlist_songs(&sender, &url, &title, videos);
-                    }
-                    Err(e) => {
-                        tracing::warn!("yt playlist load failed: {e}");
-                        self.toast(&gettext("Could not load playlist"));
-                    }
-                }
+                self.on_cmd_yt_playlist_songs(url, title, result, &sender)
             }
-            Cmd::YtPlaylistCoversReady => {
-                // Fill the pending cover frames whose thumbnails are now cached.
-                // Keep any still-uncached ones (a later batch may complete them);
-                // drop frames whose row is no longer on screen.
-                self.youtube.pl_cover_slots.retain(|(thumb_url, frame)| {
-                    if frame.root().is_none() {
-                        return false;
-                    }
-                    match crate::core::online::youtube_thumb_path(thumb_url)
-                        .as_deref()
-                        .and_then(crate::ui::widgets::thumb_cached)
-                    {
-                        Some(tex) => {
-                            crate::ui::widgets::set_cover_thumb(frame, &tex);
-                            false
-                        }
-                        None => true,
-                    }
-                });
-            }
+            Cmd::YtPlaylistCoversReady => self.on_cmd_yt_playlist_covers_ready(),
             Cmd::StreamSearchResults(results) => {
                 self.streaming.stream_search_results = results;
                 self.rebuild_stream_search_results(&sender);

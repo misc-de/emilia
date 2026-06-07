@@ -1297,7 +1297,13 @@ impl Library {
 
     /// Stores (or replaces) the lyrics cache entry for a path. Pass
     /// `source = "none"` with empty texts to record a negative result.
-    pub fn store_lyrics(&self, path: &str, plain: Option<&str>, synced: Option<&str>, source: &str) {
+    pub fn store_lyrics(
+        &self,
+        path: &str,
+        plain: Option<&str>,
+        synced: Option<&str>,
+        source: &str,
+    ) {
         let _ = self.conn.execute(
             "INSERT OR REPLACE INTO lyrics_cache(path, plain, synced, source, cached_at) \
              VALUES(?1, ?2, ?3, ?4, strftime('%s','now'))",

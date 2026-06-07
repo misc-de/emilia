@@ -28,7 +28,9 @@ impl Lyrics {
     /// Builds a [`Lyrics`] from the raw parts as stored/received: an optional
     /// plain text and an optional raw LRC string (which is parsed here).
     pub fn from_parts(plain: Option<String>, synced_raw: Option<String>) -> Self {
-        let plain = plain.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let plain = plain
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let synced_raw = synced_raw
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());

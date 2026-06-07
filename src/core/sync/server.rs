@@ -541,7 +541,11 @@ impl SyncServer {
                 if let Some(lib) = &lib {
                     crate::core::scanner::ingest_file(lib, &dest);
                 }
-                write_json(stream, 200, &serde_json::json!({ "ok": true, "written": n }))
+                write_json(
+                    stream,
+                    200,
+                    &serde_json::json!({ "ok": true, "written": n }),
+                )
             }
             Err(_) => write_json(stream, 400, &serde_json::json!({ "error": "write failed" })),
         }

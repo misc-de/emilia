@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use gtk::prelude::GtkWindowExt;
-use relm4::{adw, gtk};
+use relm4::{adw, gtk, ComponentSender};
 
 use crate::core::scanner;
 use crate::core::webdav::{self, Creds};
@@ -1080,5 +1080,260 @@ impl App {
                 self.mpris.set_repeat(self.transport.repeat);
             }
         }
+    }
+
+    /// Play a track of a folder audiobook/concert (queue = folder in order,
+    /// start at the tapped one). `close` pops the subpage back to the main view.
+    pub(crate) fn on_play_folder_track(&mut self, folder: String, path: String, close: bool) {
+        // Re-tapping the song that is already playing toggles
+        // pause/resume instead of restarting it.
+        if self.toggle_if_active_file(&PathBuf::from(&path)) {
+            return;
+        }
+        let files: Vec<PathBuf> = self
+            .folder_tracks_ordered(&folder)
+            .into_iter()
+            .map(|t| PathBuf::from(t.path))
+            .collect();
+        let target = PathBuf::from(&path);
+        if let Some(pos) = files.iter().position(|p| *p == target) {
+            self.transport.queue = files;
+            self.transport.queue_pos = pos;
+            self.play_current();
+            self.refresh_queue_icons();
+            if close {
+                self.nav.nav_view.pop_to_tag("main");
+            }
+        }
+    }
+
+    /// Play a track from the artist overview (queue = all tracks of the artist,
+    /// start at the tapped one). `close` pops the subpage back to the main view.
+    pub(crate) fn on_play_artist_track(&mut self, name: String, path: String, close: bool) {
+        // Re-tapping the song that is already playing toggles
+        // pause/resume instead of restarting it.
+        if self.toggle_if_active_file(&PathBuf::from(&path)) {
+            return;
+        }
+        // Queue = all tracks of the artist (across albums),
+        // start at the tapped track.
+        let files: Vec<PathBuf> = self
+            .artist_albums(&name)
+            .into_iter()
+            .flat_map(|(_, tracks)| tracks)
+            .map(|t| PathBuf::from(t.path))
+            .collect();
+        let target = PathBuf::from(&path);
+        if let Some(pos) = files.iter().position(|p| *p == target) {
+            self.transport.queue = files;
+            self.transport.queue_pos = pos;
+            self.play_current();
+            self.refresh_queue_icons();
+            // Back to the main page, so that the mini player is visible.
+            if close {
+                self.nav.nav_view.pop_to_tag("main");
+            }
+        }
+    }
+
+    /// Play a **single** selected track (from an album or playlist): only this
+    /// track is enqueued, not its siblings. `close` pops the subpage back.
+    pub(crate) fn on_play_one_track(&mut self, path: String, close: bool) {
+        // Re-tapping the song that is already playing toggles
+        // pause/resume instead of restarting it.
+        if self.toggle_if_active_file(&PathBuf::from(&path)) {
+            return;
+        }
+        // Selecting a single track (album or playlist) plays *only* that
+        // track – its siblings are not enqueued. Use the album/playlist
+        // play button for the whole thing. A single play is logged to
+        // "Recent" like any other standalone track.
+        self.youtube.playing_playlist = false;
+        self.transport.queue = vec![PathBuf::from(&path)];
+        self.transport.queue_pos = 0;
+        self.play_current();
+        self.refresh_queue_icons();
+        if close {
+            self.nav.nav_view.pop_to_tag("main");
+        }
+    }
+
+    /// Play the whole album in track order (shuffle off).
+    pub(crate) fn on_play_album(&mut self, artist: String, album: String) {
+        // Whole album from track 1 in track order (shuffle off).
+        let files: Vec<PathBuf> = self
+            .album_tracks_for_artist(&artist, &album)
+            .into_iter()
+            .map(|t| PathBuf::from(t.path))
+            .collect();
+        if !files.is_empty() {
+            self.transport.shuffle = false;
+            self.transport.queue = files;
+            self.transport.queue_pos = 0;
+            self.play_current();
+            self.refresh_queue_icons();
+            self.nav.nav_view.pop_to_tag("main");
+        }
+    }
+
+    /// A track finished: advance the queue (local / remote / streamed episode),
+    /// finalizing the listening session and clearing the resume point.
+    pub(crate) fn on_track_finished(&mut self) {
+        if self.files.playing_remote {
+            // Remote queue: advance to the next track (or stop at the
+            // end). Runs separately from the local queue.
+            self.remote_next();
+        } else if self.podcasts.playing_episode_url.is_some() && self.transport.queue.is_empty() {
+            // A streamed episode has ended (no queue
+            // behind it): finalize its statistics session as "fully
+            // listened", then reset the playback state and marking.
+            self.finalize_play_session(true);
+            self.mini.playing = false;
+            self.podcasts.playing_episode_url = None;
+            self.mpris.set_playing(false);
+            self.refresh_queue_icons();
+        } else {
+            // Listened to the end → finalize the listening session as "fully listened",
+            // before the subsequent play_current starts a new session.
+            self.finalize_play_session(true);
+            // Track finished → forget resume, next time from the start.
+            // `take()` prevents play_current from saving the (end) position again
+            // as a resume point.
+            if let Some(path) = self.transport.playing_path.take() {
+                let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
+            }
+            *self.transport.close_resume.borrow_mut() = None;
+            // If a single song was slipped in between, now resume the interrupted
+            // queue at its spot.
+            if self.transport.queue.len() == 1 && self.transport.interrupted_queue.is_some() {
+                if let Some((q, pos)) = self.transport.interrupted_queue.take() {
+                    self.transport.queue = q;
+                    self.transport.queue_pos = pos;
+                    self.play_current();
+                }
+            } else {
+                // A new (multi-part) playback discards a possibly
+                // remembered interruption.
+                self.transport.interrupted_queue = None;
+                self.play_next();
+            }
+        }
+    }
+
+    /// 5 s timer: persist the resume point of the running track/episode.
+    pub(crate) fn on_persist_resume(&mut self) {
+        if self.mini.playing {
+            // Persist resume points on this 5 s timer (not every Tick):
+            // a hard crash loses at most ~5 s of position, while normal
+            // pause/seek/track-switch/close still save immediately.
+            self.save_resume();
+            if self.podcasts.playing_episode_url.is_some() {
+                self.save_episode_progress();
+            }
+            if let Some(pos) = self.player.position_ms() {
+                self.mpris.set_position(pos);
+            }
+        }
+    }
+
+    /// 1 s timer: drive timeshift recording, refresh station icons and update
+    /// the seek bar / chapter / statistics counters.
+    pub(crate) fn on_tick(&mut self, sender: &ComponentSender<Self>) {
+        // Advance the running timeshift recording at the song boundaries.
+        if self.streaming.record_state.is_some() {
+            self.drive_recording(sender);
+        }
+        // Sync the play/pause and record icons of the station rows.
+        self.refresh_stream_icons();
+        if self.mini.playing {
+            if let Some(pos) = self.player.position_ms() {
+                self.mini.position_ms = pos;
+            }
+            if let Some(dur) = self.player.duration_ms() {
+                self.mini.track_duration_ms = dur;
+            }
+            // Carry the close snapshot along.
+            if let Some(entry) = self.transport.close_resume.borrow_mut().as_mut() {
+                entry.1 = self.mini.position_ms;
+                entry.2 = self.mini.track_duration_ms;
+            }
+            // (Episode resume is persisted on the 5 s PersistResume timer,
+            // not here — no per-second DB write on the UI thread.)
+            // Track the current chapter below the title (except while hovering).
+            self.update_current_chapter();
+            // Keep counting the listened time of the statistics session (wall clock, only
+            // during "Playing"; ~1 s per tick). Backfill the duration if needed,
+            // in case it was not yet known at the start.
+            let dur = self.mini.track_duration_ms;
+            if let Some(s) = self.transport.play_session.as_mut() {
+                s.played_ms += 1000;
+                if s.duration_ms == 0 {
+                    s.duration_ms = dur;
+                }
+            }
+            if let Some(cs) = self.transport.close_session.borrow_mut().as_mut() {
+                if let Some(s) = self.transport.play_session.as_ref() {
+                    cs.2 = s.played_ms;
+                    cs.3 = s.duration_ms;
+                }
+            }
+        }
+    }
+
+    /// Play a user-queue entry now: move its block to the front, then advance.
+    pub(crate) fn on_play_queue_at(&mut self, start: usize, len: usize) {
+        // Play this queue entry now: move its block to the front of the
+        // user queue, then advance – `play_next` splices the first track
+        // into the context and the rest follow track by track. Entries
+        // before it stay queued and play afterwards.
+        let n = self.transport.user_queue.len();
+        if start < n {
+            let len = len.clamp(1, n - start);
+            let block: Vec<PathBuf> = self
+                .transport
+                .user_queue
+                .drain(start..start + len)
+                .collect();
+            for (i, p) in block.into_iter().enumerate() {
+                self.transport.user_queue.insert(i, p);
+            }
+            self.play_next();
+        }
+    }
+
+    /// Player-bar play/pause: pause/resume the running file/station/episode,
+    /// restart finished playback, or start the user queue.
+    pub(crate) fn on_toggle_play(&mut self) {
+        if self.mini.playing {
+            self.save_resume();
+            self.player.pause();
+            self.mini.playing = false;
+            // Pausing during buffering stops the spinner (no longer "loading").
+            self.mini.loading = false;
+        } else if self.transport.playing_path.is_some()
+            || self.streaming.playing_stream.is_some()
+            || self.podcasts.playing_episode_url.is_some()
+        {
+            // Paused (file, station or episode) → resume.
+            self.player.resume();
+            self.mini.playing = true;
+        } else if !self.transport.queue.is_empty() {
+            // Playback had ended → restart from the current position (rewound
+            // to 0 after the end). play_current sets
+            // playing/MPRIS/icons itself.
+            self.play_current();
+            return;
+        } else if !self.transport.user_queue.is_empty() {
+            // Nothing loaded, but the user queued tracks → start the queue
+            // (play_next splices the first queued track into the context).
+            self.play_next();
+            return;
+        } else {
+            return;
+        }
+        self.mpris.set_playing(self.mini.playing);
+        // Adjust the play/pause icon of the active track in the list.
+        self.refresh_queue_icons();
+        self.refresh_stream_icons();
     }
 }

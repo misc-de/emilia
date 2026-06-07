@@ -230,13 +230,8 @@ impl Player {
     /// **currently playing track** as a tag via the ICY metadata – this lets
     /// us show "Now Playing" without opening a second connection. Runs in the
     /// main loop.
-    pub fn connect_bus_events<E, T, R, A>(
-        &self,
-        on_eos: E,
-        on_title: T,
-        on_error: R,
-        on_ready: A,
-    ) where
+    pub fn connect_bus_events<E, T, R, A>(&self, on_eos: E, on_title: T, on_error: R, on_ready: A)
+    where
         E: Fn() + 'static,
         T: Fn(String) + 'static,
         R: Fn() + 'static,

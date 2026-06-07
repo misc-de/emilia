@@ -1493,7 +1493,12 @@ impl App {
         else {
             return;
         };
-        let Some(music_dir) = self.files.music_dir.clone().filter(|s| !s.trim().is_empty()) else {
+        let Some(music_dir) = self
+            .files
+            .music_dir
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+        else {
             self.toast(&gettext("Set a music folder first"));
             return;
         };
@@ -1556,10 +1561,9 @@ impl App {
 
         let dest_str = dest.to_string_lossy().into_owned();
         // Carry over the recording's cached cover, if one was fetched.
-        if let Some(cover) = crate::core::online::recording_cover_path(
-            artist.as_deref().unwrap_or(""),
-            &title,
-        ) {
+        if let Some(cover) =
+            crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &title)
+        {
             if let Ok(bytes) = std::fs::read(&cover) {
                 crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
             }

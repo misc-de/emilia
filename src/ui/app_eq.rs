@@ -409,4 +409,20 @@ impl App {
         dialog.set_child(Some(&toolbar));
         dialog.present(Some(root));
     }
+
+    /// Open the track-level equalizer for the currently running track.
+    pub(crate) fn on_open_current_eq(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
+            let key = path.to_string_lossy().into_owned();
+            // `display_name` resolves YouTube titles (yt:<id>) and the
+            // "artist - title" of library tracks; the static helper would
+            // show the raw path for YouTube.
+            let name = self.display_name(&path);
+            self.open_eq_editor(root, sender, "the track", &name, None, "track", key);
+        }
+    }
 }

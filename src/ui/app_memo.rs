@@ -244,7 +244,9 @@ impl App {
             .cloned()
             .collect();
         if !unassigned.is_empty() {
-            let exp = adw::ExpanderRow::builder().title(gettext("General")).build();
+            let exp = adw::ExpanderRow::builder()
+                .title(gettext("General"))
+                .build();
             exp.add_suffix(&count_label(unassigned.len()));
             for m in &unassigned {
                 exp.add_row(&self.build_memo_row(m, sender, false));
@@ -302,7 +304,9 @@ impl App {
             }
         }
         row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
-        row.add_prefix(&gtk::Image::from_icon_name("audio-input-microphone-symbolic"));
+        row.add_prefix(&gtk::Image::from_icon_name(
+            "audio-input-microphone-symbolic",
+        ));
         // Duration + play button grouped so the runtime sits directly to the
         // left of the play button (reuses the recording playback path — both are
         // files).
@@ -393,7 +397,9 @@ impl App {
             })
             .unwrap_or_else(|| gettext("General"));
         head.set_subtitle(&gtk::glib::markup_escape_text(&cat_name));
-        head.add_prefix(&gtk::Image::from_icon_name("audio-input-microphone-symbolic"));
+        head.add_prefix(&gtk::Image::from_icon_name(
+            "audio-input-microphone-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 
@@ -405,7 +411,10 @@ impl App {
             r.add_css_class("property");
             r
         };
-        details.add(&info_row(&gettext("Recorded"), &fmt_datetime(m.recorded_at)));
+        details.add(&info_row(
+            &gettext("Recorded"),
+            &fmt_datetime(m.recorded_at),
+        ));
         if m.duration_ms > 0 {
             details.add(&info_row(&gettext("Length"), &fmt_duration(m.duration_ms)));
         }
@@ -462,8 +471,12 @@ impl App {
         actions.add(&edit);
         let rename = action_row(&gettext("Rename"), "text-editor-symbolic");
         {
-            let (sender, dialog, root, cur) =
-                (sender.clone(), dialog.clone(), root.clone(), m.title.clone());
+            let (sender, dialog, root, cur) = (
+                sender.clone(),
+                dialog.clone(),
+                root.clone(),
+                m.title.clone(),
+            );
             rename.connect_activated(move |_| {
                 dialog.close();
                 let sender = sender.clone();

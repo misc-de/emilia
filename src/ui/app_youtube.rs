@@ -13,6 +13,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::core::db::Library;
@@ -1549,7 +1550,9 @@ impl App {
         std::thread::spawn(move || {
             let lib = Library::open().ok();
             // The channel (artist) from storage if the feed knows the video.
-            let stored = lib.as_ref().and_then(|l| l.yt_video_info(&vid).ok().flatten());
+            let stored = lib
+                .as_ref()
+                .and_then(|l| l.yt_video_info(&vid).ok().flatten());
             // Otherwise fetch the metadata once and reuse it for both the artist
             // and the duration cache, so the "Recent" list can show a runtime for
             // videos played from search/links (not in any subscribed feed).
@@ -2017,6 +2020,164 @@ impl App {
                 None => self.yt_open_playlist_songs(url, title, sender),
             },
         }
+    }
+
+    /// Worker result: a YouTube playlist resolved → load its videos as the queue,
+    /// log it as one "Recent" entry and mirror it into the Playlists section.
+    pub(crate) fn on_cmd_yt_playlist_start(
+        &mut self,
+        url: String,
+        title: String,
+        items: Vec<(String, String)>,
+        total_duration: Option<i64>,
+        sender: &ComponentSender<Self>,
+    ) {
+        if items.is_empty() {
+            self.toast(&gettext("Playlist is empty"));
+        } else {
+            self.youtube.video_titles.clear();
+            let mut queue = Vec::with_capacity(items.len());
+            let mut paths = Vec::with_capacity(items.len());
+            for (id, vtitle) in &items {
+                self.youtube.video_titles.insert(id.clone(), vtitle.clone());
+                // Persist the title so the playlist/queue shows names.
+                let _ = self.library.set_yt_title(id, vtitle);
+                let p = crate::core::youtube::yt_path(id);
+                paths.push(p.clone());
+                queue.push(PathBuf::from(p));
+            }
+            // Log the playlist as one "Recent" entry (not the videos).
+            self.youtube.playing_playlist = true;
+            let _ =
+                self.library
+                    .add_recent_playlist(&url, &title, items.len() as i64, total_duration);
+            // Recent playlist cover = its first video's thumbnail.
+            if let Some((id, _)) = items.first() {
+                let _ = self
+                    .library
+                    .set_recent_thumb(&url, &crate::core::youtube::thumbnail_url(id));
+            }
+            // Mirror the playlist into the Playlists section (keyed by
+            // its URL, so a same-named user playlist is left untouched).
+            let _ = self.library.replace_yt_playlist(&url, &title, &paths);
+            self.transport.queue = queue;
+            self.transport.queue_pos = 0;
+            self.play_current();
+            self.reload_yt_recent(sender);
+            self.reload_playlists(sender);
+        }
+    }
+
+    /// Worker result: a library-add finished (or failed).
+    pub(crate) fn on_cmd_yt_library_added(
+        &mut self,
+        video_id: Option<String>,
+        result: Result<usize, String>,
+    ) {
+        if let Some(vid) = &video_id {
+            self.youtube.downloading_videos.remove(vid);
+            self.refresh_yt_download_row();
+        }
+        match result {
+            Ok(n) => {
+                self.reload_library_overviews();
+                self.yt_progress_done(&gettext_f(
+                    "Added {n} track(s) to your library",
+                    &[("n", &n.to_string())],
+                ));
+            }
+            Err(e) => {
+                tracing::warn!("yt library add failed: {e}");
+                self.yt_progress_done(&gettext("Could not add to library"));
+            }
+        }
+    }
+
+    /// Worker result: a library-add hit an existing file → ask before overwriting.
+    pub(crate) fn on_cmd_yt_library_exists(
+        &mut self,
+        video_id: String,
+        title: String,
+        dest: String,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        self.youtube.downloading_videos.remove(&video_id);
+        self.refresh_yt_download_row();
+        self.yt_progress_done(&gettext("Song already exists"));
+        // Never overwrite a different song silently – let the user decide.
+        let confirm = adw::AlertDialog::new(
+            Some(&gettext("Overwrite existing song?")),
+            Some(&gettext_f(
+                "“{title}” is already saved at:\n{dest}",
+                &[("title", &title), ("dest", &dest)],
+            )),
+        );
+        confirm.add_response("skip", &gettext("Skip"));
+        confirm.add_response("overwrite", &gettext("Overwrite"));
+        confirm.set_response_appearance("overwrite", adw::ResponseAppearance::Destructive);
+        confirm.set_default_response(Some("skip"));
+        confirm.set_close_response("skip");
+        {
+            let sender = sender.clone();
+            confirm.connect_response(None, move |_, resp| {
+                if resp == "overwrite" {
+                    sender.input(Msg::YtAddToLibraryConfirmed {
+                        video_id: video_id.clone(),
+                        title: title.clone(),
+                    });
+                }
+            });
+        }
+        confirm.present(Some(root));
+    }
+
+    /// Worker result: a playlist's song list resolved → cache it and show the
+    /// songs subpage.
+    pub(crate) fn on_cmd_yt_playlist_songs(
+        &mut self,
+        url: String,
+        title: String,
+        result: Result<Vec<crate::core::youtube::YtResult>, String>,
+        sender: &ComponentSender<Self>,
+    ) {
+        // Hide the loading overlay (covers both success and failure).
+        self.libview.loading = false;
+        self.libview.loading_label = None;
+        match result {
+            Ok(videos) => {
+                self.youtube
+                    .playlist_songs_cache
+                    .insert(url.clone(), videos.clone());
+                self.show_yt_playlist_songs(sender, &url, &title, videos);
+            }
+            Err(e) => {
+                tracing::warn!("yt playlist load failed: {e}");
+                self.toast(&gettext("Could not load playlist"));
+            }
+        }
+    }
+
+    /// Worker result: pending playlist-songs cover thumbnails finished caching.
+    pub(crate) fn on_cmd_yt_playlist_covers_ready(&mut self) {
+        // Fill the pending cover frames whose thumbnails are now cached.
+        // Keep any still-uncached ones (a later batch may complete them);
+        // drop frames whose row is no longer on screen.
+        self.youtube.pl_cover_slots.retain(|(thumb_url, frame)| {
+            if frame.root().is_none() {
+                return false;
+            }
+            match crate::core::online::youtube_thumb_path(thumb_url)
+                .as_deref()
+                .and_then(crate::ui::widgets::thumb_cached)
+            {
+                Some(tex) => {
+                    crate::ui::widgets::set_cover_thumb(frame, &tex);
+                    false
+                }
+                None => true,
+            }
+        });
     }
 }
 
