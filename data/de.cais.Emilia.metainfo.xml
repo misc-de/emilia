@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.4.1" date="2026-06-07">
+      <description>
+        <p>Adds a Voice Memos section: record from the microphone, organise recordings into your own categories, and trim them in the waveform editor. While recording an internet-radio station, the talk and ads between songs are now saved as their own files. The lyrics window gains a close button, a karaoke on/off switch and a timing offset — both remembered per song — and you can tap a lyric line to jump there. Album release years are stored more reliably (with a background backfill), and a shortcut in the player bar opens the album of the playing song. Album and track lists now open in the content area without hiding the navigation.</p>
+        <p xml:lang="de">Neuer Bereich „Memo" für Sprachaufnahmen: über das Mikrofon aufnehmen, in eigene Kategorien einordnen und im Wellenform-Editor zuschneiden. Beim Mitschneiden eines Internetradio-Senders werden Moderation und Werbung zwischen den Liedern jetzt in eigene Dateien gespeichert. Das Lyrics-Fenster erhält einen Schließen-Knopf, einen Karaoke-Schalter und einen Zeitversatz – beides je Lied gemerkt – und ein Klick auf eine Lyric-Zeile springt an diese Stelle. Erscheinungsjahre von Alben werden zuverlässiger gespeichert (mit Hintergrund-Nachtrag), und ein Knopf in der Player-Leiste öffnet das Album des laufenden Liedes. Album- und Titellisten öffnen jetzt im Inhaltsbereich, ohne die Navigation auszublenden.</p>
+      </description>
+    </release>
     <release version="0.3.27" date="2026-06-06">
       <description>
         <p>Fixes the display language staying English on systems whose region/format locale differs from the display language (notably on phones): the chosen language is now applied regardless of which system locales are installed. The YouTube search shows a progress spinner while it runs. New icons for the Podcasts and Streaming sections.</p>
