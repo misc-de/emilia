@@ -40,6 +40,63 @@ pub fn decode_peaks(path: &Path, buckets: usize) -> Result<(Vec<f32>, f64)> {
     Ok((peaks, duration))
 }
 
+/// Analysis frame and silence thresholds for [`snap_to_silence`].
+const SNAP_HOP_SECS: f64 = 0.02;
+/// A hop counts as "silence" when it sits clearly below the window's median
+/// loudness — a real dip, not just a soft passage.
+const SNAP_SILENCE_FACTOR: f32 = 0.35;
+/// …or below this absolute RMS (≈ −34 dBFS), whichever is larger, so a loud
+/// crossfade (no true gap) never triggers a false snap.
+const SNAP_ABS_FLOOR: f32 = 0.02;
+
+/// Decodes `path` (a short window cut from a stream buffer) to mono PCM and
+/// returns the time — in seconds from the start of `path` — of the silence gap
+/// closest to `target_secs`. Used to snap a raw ICY cut point onto the actual
+/// quiet point between songs. Returns `None` when the window has no genuine
+/// silence dip (e.g. a crossfade), so the caller keeps the raw ICY offset.
+/// Synchronous — run off the UI thread.
+pub fn snap_to_silence(path: &Path, target_secs: f64) -> Option<f64> {
+    let _ = gst::init();
+    let (samples, rate, _ch) = decode_pcm(path, true).ok()?;
+    if samples.is_empty() || rate == 0 {
+        return None;
+    }
+    let hop = ((f64::from(rate) * SNAP_HOP_SECS) as usize).max(1);
+    // Short-term RMS per hop, normalised to 0.0–1.0.
+    let rms: Vec<f32> = samples
+        .chunks(hop)
+        .map(|frame| {
+            let sum: f64 = frame
+                .iter()
+                .map(|&s| {
+                    let v = f64::from(s);
+                    v * v
+                })
+                .sum();
+            ((sum / frame.len() as f64).sqrt() as f32) / f32::from(i16::MAX)
+        })
+        .collect();
+    if rms.len() < 3 {
+        return None;
+    }
+    // Threshold from the window's own loudness: loud material (crossfade) keeps a
+    // high bar that a mere soft passage can't clear, while a quiet window still
+    // has the absolute floor to catch its gaps.
+    let mut sorted = rms.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = sorted[sorted.len() / 2];
+    let threshold = (median * SNAP_SILENCE_FACTOR).max(SNAP_ABS_FLOOR);
+    // Among the silent hops, the one nearest the raw ICY marker: trust the
+    // metadata's rough location and snap only to the local gap.
+    let target_hop = (target_secs / SNAP_HOP_SECS).max(0.0) as usize;
+    let best = rms
+        .iter()
+        .enumerate()
+        .filter(|(_, &r)| r < threshold)
+        .min_by_key(|(i, _)| i.abs_diff(target_hop))?;
+    Some(best.0 as f64 * SNAP_HOP_SECS + SNAP_HOP_SECS / 2.0)
+}
+
 /// Removes the given time ranges (seconds) from the recording, re-encoding to the
 /// same codec (AAC → MP3), and writes the result. Returns the final path and the
 /// new duration. Tags are re-applied best-effort. The caller overwrites the row.

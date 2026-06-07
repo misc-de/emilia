@@ -275,43 +275,59 @@ fn run(
                 return Ok(());
             }
         }
-        {
+        // Decide what (if anything) to commit under a short lock, then refine the
+        // cut point *outside* the lock — decoding the window must not block UI
+        // snapshots. New-song and gap commits are mutually exclusive in any one
+        // iteration (a non-empty title clears `empty_since`; an empty one clears
+        // `pending`), so at most one fires here.
+        let (commit_new, commit_gap, prev_off) = {
             let mut s = shared.lock().unwrap();
             s.total = total;
-            // If a candidate persists long enough → commit it as a real song boundary.
-            let commit = pending
+            let commit_new = pending
                 .as_ref()
                 .filter(|(off, _)| total.saturating_sub(*off) >= min_bytes)
                 .cloned();
-            if let Some((off, title)) = commit {
-                s.markers.push(Marker {
-                    offset: off,
-                    title: title.clone(),
-                });
-                s.current_title = Some(title);
-                if s.markers.len() > 256 {
-                    s.markers.remove(0);
-                }
-                pending = None;
+            let commit_gap = empty_since
+                .filter(|&eo| s.current_title.is_some() && total.saturating_sub(eo) >= min_gap);
+            let avail = total.saturating_sub(s.cap);
+            // A refined boundary may never move before the previous marker (or out
+            // of the buffer) — that would invert the song order.
+            let prev_off = s.markers.last().map_or(avail, |m| m.offset).max(avail);
+            (commit_new, commit_gap, prev_off)
+        };
+
+        if let Some((off, title)) = commit_new {
+            // Snap the raw ICY boundary onto the real silence gap nearby.
+            let at = refine_marker(buffer_path, cap, bytes_per_sec, ext, off, prev_off, total);
+            let mut s = shared.lock().unwrap();
+            s.markers.push(Marker {
+                offset: at,
+                title: title.clone(),
+            });
+            s.current_title = Some(title);
+            if s.markers.len() > 256 {
+                s.markers.remove(0);
             }
+            prune_markers(&mut s);
+            pending = None;
+        } else if let Some(empty_off) = commit_gap {
             // Cleared title that has persisted long enough → end the running song
-            // exactly where the title cleared and start an untitled gap segment
-            // (the talk/ads between songs, saved to its own file, not identified).
-            if let Some(empty_off) = empty_since {
-                let cuttable =
-                    s.current_title.is_some() && total.saturating_sub(empty_off) >= min_gap;
-                if cuttable {
-                    s.markers.push(Marker {
-                        offset: empty_off,
-                        title: String::new(),
-                    });
-                    s.current_title = None;
-                    if s.markers.len() > 256 {
-                        s.markers.remove(0);
-                    }
-                    empty_since = None;
-                }
+            // at the (refined) clear point and start an untitled gap segment (the
+            // talk/ads between songs, saved to its own file, not identified).
+            let at = refine_marker(buffer_path, cap, bytes_per_sec, ext, empty_off, prev_off, total);
+            let mut s = shared.lock().unwrap();
+            s.markers.push(Marker {
+                offset: at,
+                title: String::new(),
+            });
+            s.current_title = None;
+            if s.markers.len() > 256 {
+                s.markers.remove(0);
             }
+            prune_markers(&mut s);
+            empty_since = None;
+        } else {
+            let mut s = shared.lock().unwrap();
             prune_markers(&mut s);
         }
 
@@ -364,6 +380,12 @@ const MIN_SONG_SECS: u64 = 30;
 /// while still catching real gaps (talk/ads with no metadata).
 const MIN_GAP_SECS: u64 = 6;
 
+/// Half-width (seconds) of the window searched around a raw ICY marker for the
+/// real silence gap to snap the cut onto. Stations are usually only a few seconds
+/// off the audio transition, so a narrow window avoids snapping to a quiet
+/// passage *inside* a song.
+const REFINE_WINDOW_SECS: u64 = 5;
+
 /// Removes song boundaries that have fully scrolled out of the buffer (whose
 /// following boundary already lies beyond the available window) – but keeps the
 /// oldest song that is still partially present.
@@ -408,6 +430,62 @@ fn read_ring(buffer_path: &Path, cap: u64, start: u64, end: u64) -> Result<Vec<u
         file.read_exact(&mut out[first..])?;
     }
     Ok(out)
+}
+
+/// Refines a raw ICY marker byte offset to the nearest real silence gap within
+/// ±[`REFINE_WINDOW_SECS`], by decoding that window and snapping to the quiet
+/// point closest to the raw position. Falls back to the raw offset when nothing
+/// decodes or the window has no genuine gap (e.g. a crossfade) — a cut is never
+/// moved further from the truth than the metadata already put it. Best effort;
+/// `lo_bound`/`hi_bound` keep the boundary between its neighbours.
+fn refine_marker(
+    buffer_path: &Path,
+    cap: u64,
+    bytes_per_sec: u64,
+    ext: &str,
+    raw: u64,
+    lo_bound: u64,
+    hi_bound: u64,
+) -> u64 {
+    if bytes_per_sec == 0 {
+        return raw;
+    }
+    let w = REFINE_WINDOW_SECS.saturating_mul(bytes_per_sec);
+    let lo = raw.saturating_sub(w).max(lo_bound);
+    let hi = raw.saturating_add(w).min(hi_bound);
+    // Need a usable window straddling the marker (the decoder also drops the
+    // first partial frame, so demand at least ~2 s).
+    if raw <= lo || hi <= raw || hi.saturating_sub(lo) < bytes_per_sec * 2 {
+        return raw;
+    }
+    let data = match read_ring(buffer_path, cap, lo, hi) {
+        Ok(d) => d,
+        Err(_) => return raw,
+    };
+    // Decode via a temp file so the existing GStreamer `decode_pcm` (filesrc) can
+    // sniff the codec; commits are minutes apart, so the I/O is negligible.
+    let mut tmp = std::env::temp_dir();
+    let n = BUFFER_SEQ.fetch_add(1, Ordering::Relaxed);
+    tmp.push(format!("emilia_refine_{}_{n}.{ext}", std::process::id()));
+    if std::fs::write(&tmp, &data).is_err() {
+        return raw;
+    }
+    let target = (raw - lo) as f64 / bytes_per_sec as f64;
+    let snapped = crate::core::waveform::snap_to_silence(&tmp, target);
+    let _ = std::fs::remove_file(&tmp);
+    match snapped {
+        Some(t) => {
+            let refined = (lo + (t * bytes_per_sec as f64) as u64).clamp(lo, hi);
+            if refined != raw {
+                tracing::debug!(
+                    "stream cut refined {:+.2}s onto silence",
+                    (refined as f64 - raw as f64) / bytes_per_sec as f64
+                );
+            }
+            refined
+        }
+        None => raw,
+    }
 }
 
 /// Reads the value of `StreamTitle='…'` from an ICY metadata block.
