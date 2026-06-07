@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.5.0" date="2026-06-07">
+      <description>
+        <p>Gapless and crossfade playback for albums, concerts and audiobooks. A new filter button searches the visible Artists, Albums, Concerts or Audiobooks list as you type. Concerts and Audiobooks now sort and group like Albums, including by date, with a new "Without grouping" option for a flat list. The YouTube search accepts a pasted video link. A single tap on the now-playing bar opens the track details. Settings and mobile polish: the recording-buffer field no longer pops up the on-screen keyboard, the yt-dlp version shows on its own line, and removing a music source now asks for confirmation.</p>
+        <p xml:lang="de">Lückenlose Wiedergabe und Überblendung für Alben, Konzerte und Hörbücher. Ein neuer Filter-Knopf durchsucht die sichtbare Liste (Interpreten, Alben, Konzerte oder Hörbücher) während der Eingabe. Konzerte und Hörbücher werden jetzt wie Alben sortiert und gruppiert, auch nach Datum, mit einer neuen Option „Ohne Einteilung" für eine flache Liste. Die YouTube-Suche akzeptiert einen eingefügten Video-Link. Ein einfacher Tipp auf die Wiedergabeleiste öffnet die Titeldetails. Feinschliff bei Einstellungen und Mobilgeräten: Das Aufnahme-Puffer-Feld öffnet nicht mehr die Bildschirmtastatur, die yt-dlp-Version steht in einer eigenen Zeile, und das Entfernen einer Musikquelle fragt nun nach.</p>
+      </description>
+    </release>
     <release version="0.4.4" date="2026-06-07">
       <description>
         <p>YouTube refinements: after you add a song or start a playlist the section now jumps to the Recent view so the new entry is visible, and subscribing to a channel switches to your Subscriptions. Video details split the title into separate artist, album and title fields. The first library scan shows an explanatory loading screen instead of appearing frozen, and lists now respond to right-click and long-press. The database upgrade path is more robust against interrupted updates.</p>
