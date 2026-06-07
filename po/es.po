@@ -1792,8 +1792,8 @@ msgstr "¿Eliminar esta fuente?"
 
 # Menu section descriptions + YouTube settings text (added 2026-06-07).
 
-msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
-msgstr "YouTube necesita la herramienta yt-dlp, que se descarga aquí en la carpeta de datos de la aplicación (no incluida). Activa la sección de YouTube en Menú. Puede estar restringido en algunos países."
+msgid "YouTube uses the bundled yt-dlp tool. Since YouTube frequently breaks older versions, you can update it to a newer one here. Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube usa la herramienta yt-dlp incluida. Como YouTube suele romper las versiones antiguas, puedes actualizarla a una más reciente aquí. Activa la sección de YouTube en Menú. Puede estar restringido en algunos países."
 
 msgid "Quick access to the tracks, albums and artists you starred."
 msgstr "Acceso rápido a las pistas, álbumes y artistas que marcaste con estrella."

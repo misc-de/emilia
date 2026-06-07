@@ -1787,8 +1787,8 @@ msgstr "Deze bron verwijderen?"
 
 # Menu section descriptions + YouTube settings text (added 2026-06-07).
 
-msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
-msgstr "YouTube heeft het hulpprogramma yt-dlp nodig, hier gedownload naar de app-gegevensmap (niet meegeleverd). Schakel de YouTube-sectie zelf in onder Menu. Kan in sommige landen beperkt zijn."
+msgid "YouTube uses the bundled yt-dlp tool. Since YouTube frequently breaks older versions, you can update it to a newer one here. Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube gebruikt het meegeleverde hulpprogramma yt-dlp. Omdat YouTube oudere versies vaak onbruikbaar maakt, kun je het hier bijwerken naar een nieuwere. Schakel de YouTube-sectie zelf in onder Menu. Kan in sommige landen beperkt zijn."
 
 msgid "Quick access to the tracks, albums and artists you starred."
 msgstr "Snelle toegang tot de nummers, albums en artiesten die je met een ster markeerde."

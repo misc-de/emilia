@@ -1764,8 +1764,8 @@ msgstr "移除此来源？"
 
 # Menu section descriptions + YouTube settings text (added 2026-06-07).
 
-msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
-msgstr "YouTube 需要 yt-dlp 工具，将在此下载到应用数据文件夹（未内置）。在“菜单”中开启 YouTube 板块本身。某些国家或地区可能受限。"
+msgid "YouTube uses the bundled yt-dlp tool. Since YouTube frequently breaks older versions, you can update it to a newer one here. Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube 使用随应用附带的 yt-dlp 工具。由于 YouTube 经常使旧版本失效，你可以在此将其更新为较新版本。在“菜单”中开启 YouTube 板块本身。某些国家或地区可能受限。"
 
 msgid "Quick access to the tracks, albums and artists you starred."
 msgstr "快速访问你加星标的曲目、专辑和艺术家。"

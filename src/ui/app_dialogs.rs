@@ -1173,7 +1173,7 @@ impl App {
         let yt_group = adw::PreferencesGroup::builder()
             .title(gettext("YouTube"))
             .description(gettext(
-                "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries.",
+                "YouTube uses the bundled yt-dlp tool. Since YouTube frequently breaks older versions, you can update it to a newer one here. Turn the YouTube section itself on under Menu. May be restricted in some countries.",
             ))
             .build();
 

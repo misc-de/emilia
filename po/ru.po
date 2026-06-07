@@ -1794,8 +1794,8 @@ msgstr "Удалить этот источник?"
 
 # Menu section descriptions + YouTube settings text (added 2026-06-07).
 
-msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
-msgstr "Для YouTube нужен инструмент yt-dlp, загружаемый сюда в папку данных приложения (не входит в комплект). Сам раздел YouTube включается в Меню. В некоторых странах может быть ограничено."
+msgid "YouTube uses the bundled yt-dlp tool. Since YouTube frequently breaks older versions, you can update it to a newer one here. Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube использует встроенный инструмент yt-dlp. Поскольку YouTube часто ломает старые версии, здесь можно обновить его до более новой. Сам раздел YouTube включается в Меню. В некоторых странах может быть ограничено."
 
 msgid "Quick access to the tracks, albums and artists you starred."
 msgstr "Быстрый доступ к трекам, альбомам и исполнителям, отмеченным звёздочкой."

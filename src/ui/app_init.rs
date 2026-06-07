@@ -129,9 +129,10 @@ impl App {
         ) {
             hidden_sections.insert("concerts".to_string());
         }
-        // YouTube is an opt-in feature (off by default, restricted in some
-        // countries, extractor not bundled). When disabled, hide its section –
-        // toggling the setting adds/removes "youtube" from `hidden_sections`.
+        // YouTube is an opt-in feature (off by default; may be restricted in some
+        // countries). The yt-dlp extractor is bundled in the Flatpak. When
+        // disabled, hide its section – toggling the setting adds/removes "youtube"
+        // from `hidden_sections`.
         let youtube_enabled = matches!(
             library
                 .get_setting("youtube_enabled")

@@ -1788,8 +1788,8 @@ msgstr "Ondoa chanzo hiki?"
 
 # Menu section descriptions + YouTube settings text (added 2026-06-07).
 
-msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
-msgstr "YouTube inahitaji zana ya yt-dlp, inayopakuliwa hapa kwenye folda ya data ya programu (haijajumuishwa). Washa sehemu ya YouTube yenyewe kwenye Menyu. Inaweza kuzuiwa katika baadhi ya nchi."
+msgid "YouTube uses the bundled yt-dlp tool. Since YouTube frequently breaks older versions, you can update it to a newer one here. Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube hutumia zana ya yt-dlp iliyojumuishwa. Kwa kuwa YouTube mara nyingi huvunja matoleo ya zamani, unaweza kuisasisha hapa hadi toleo jipya zaidi. Washa sehemu ya YouTube yenyewe kwenye Menyu. Inaweza kuzuiwa katika baadhi ya nchi."
 
 msgid "Quick access to the tracks, albums and artists you starred."
 msgstr "Ufikiaji wa haraka wa nyimbo, albamu na wasanii uliowekea nyota."
