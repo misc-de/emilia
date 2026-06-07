@@ -230,6 +230,13 @@ impl App {
             }
             cell.add_controller(click);
 
+            // Right click (classic mouse): same detail view as the long press.
+            crate::ui::app::on_secondary_click(&cell, {
+                let input = self.input.clone();
+                move || {
+                    let _ = input.send(detail(idx));
+                }
+            });
             let long_press = gtk::GestureLongPress::new();
             {
                 let input = self.input.clone();

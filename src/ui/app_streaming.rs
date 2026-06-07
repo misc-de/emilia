@@ -173,7 +173,11 @@ impl App {
                 let sender = sender.clone();
                 row.connect_activated(move |_| sender.input(Msg::ToggleStream(id)));
             }
-            // Long press → detail view (dialog).
+            // Long press (touch) / right click (mouse) → detail view (dialog).
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || sender.input(Msg::OpenStream(id))
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -713,7 +717,12 @@ impl App {
                 let path = rec.path.clone();
                 row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
             }
-            // Long press → detail page (metadata + cover).
+            // Long press (touch) / right click (mouse) → detail page (metadata + cover).
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                let id = rec.id;
+                move || sender.input(Msg::OpenRecording(id))
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();

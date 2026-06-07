@@ -549,7 +549,7 @@ impl App {
     /// the scan is part of a user-triggered refresh (drives the refresh spinner).
     /// Returns `true` if a worker was actually spawned (i.e. a music folder is set).
     pub(crate) fn start_scan(
-        &self,
+        &mut self,
         sender: &ComponentSender<Self>,
         then_enrich: bool,
         manual: bool,
@@ -560,6 +560,14 @@ impl App {
         let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
             return false;
         };
+        // First import: the library is still empty, so there is nothing to show
+        // while the (potentially slow) tag scan runs. Show the loading overlay
+        // with an explanation so the app does not appear frozen. A manual refresh
+        // already drives the overlay via `refresh_pending`, and a non-empty
+        // library keeps its content visible during a background re-scan.
+        if !manual && self.libview.album_count == 0 && self.libview.artist_count == 0 {
+            self.scanning = true;
+        }
         sender.spawn_oneshot_command(move || {
             match Library::open() {
                 Ok(lib) => {
@@ -1136,7 +1144,18 @@ impl App {
                         });
                     });
                 }
-                // Long press: album detail view.
+                // Long press (touch) / right click (mouse): album detail view.
+                crate::ui::app::on_secondary_click(&row, {
+                    let sender = sender.clone();
+                    let display_artist = display_artist.clone();
+                    let album = album.clone();
+                    move || {
+                        sender.input(Msg::ShowAlbumDetailFor {
+                            artist: display_artist.clone(),
+                            album: album.clone(),
+                        });
+                    }
+                });
                 {
                     let sender = sender.clone();
                     let gesture = gtk::GestureLongPress::new();
@@ -1240,7 +1259,12 @@ impl App {
                         });
                     });
                 }
-                // Long press: detail view of the song.
+                // Long press (touch) / right click (mouse): song detail view.
+                crate::ui::app::on_secondary_click(&row, {
+                    let sender = sender.clone();
+                    let path = path.clone();
+                    move || sender.input(Msg::ShowTrackDetail(path.clone()))
+                });
                 {
                     let sender = sender.clone();
                     let gesture = gtk::GestureLongPress::new();
@@ -1466,7 +1490,12 @@ impl App {
                 let path = path.clone();
                 row.connect_activated(move |_| sender.input(build_msg(path.clone(), true)));
             }
-            // Long press: detail view of the song.
+            // Long press (touch) / right click (mouse): song detail view.
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                let path = path.clone();
+                move || sender.input(Msg::ShowTrackDetail(path.clone()))
+            });
             {
                 let sender = sender.clone();
                 let gesture = gtk::GestureLongPress::new();

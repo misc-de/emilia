@@ -116,7 +116,11 @@ impl App {
                     let sender = sender.clone();
                     row.connect_activated(move |_| sender.input(Msg::OpenPodcast(id)));
                 }
-                // Long press → subscription detail view.
+                // Long press (touch) / right click (mouse) → subscription detail view.
+                crate::ui::app::on_secondary_click(&row, {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::ShowPodcastDetail(id))
+                });
                 let lp = gtk::GestureLongPress::new();
                 {
                     let sender = sender.clone();
@@ -253,7 +257,11 @@ impl App {
                     });
                 });
             }
-            // Long press → entry detail view.
+            // Long press (touch) / right click (mouse) → entry detail view.
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || sender.input(Msg::ShowEpisodeDetail(i))
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -650,7 +658,16 @@ impl App {
                     });
                 });
             }
-            // Long press → episode detail (incl. shownotes).
+            // Long press (touch) / right click (mouse) → episode detail (incl. shownotes).
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || {
+                    sender.input(Msg::ShowPodcastEpisodeDetail {
+                        podcast_id: id,
+                        index: i,
+                    });
+                }
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();

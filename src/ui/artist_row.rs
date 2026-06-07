@@ -63,6 +63,15 @@ impl FactoryComponent for ArtistCard {
                     let _ = sender.output(ArtistOutput::LongPress(index.clone()));
                 },
             },
+
+            // Right click (classic mouse): same detail view as the long press.
+            add_controller = gtk::GestureClick {
+                set_button: gtk::gdk::BUTTON_SECONDARY,
+                connect_pressed[sender, index] => move |gesture, _, _, _| {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    let _ = sender.output(ArtistOutput::LongPress(index.clone()));
+                },
+            },
         }
     }
 

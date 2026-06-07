@@ -182,6 +182,73 @@ pub fn clean_channel_name(name: &str) -> String {
     s.to_string()
 }
 
+/// Drops a trailing tag group like "(Official Video)", "[Lyrics]" or
+/// "(Official Audio)" from a video title. Only groups that clearly look like a
+/// production tag (by keyword) are removed, so real bracketed names survive.
+fn strip_title_noise(raw: &str) -> String {
+    const NOISE: &[&str] = &[
+        "official",
+        "video",
+        "audio",
+        "lyric",
+        "visualizer",
+        "remaster",
+        "explicit",
+    ];
+    let mut s = raw.trim().to_string();
+    loop {
+        let trimmed = s.trim_end();
+        let (open, close) = match trimmed.chars().last() {
+            Some(')') => ('(', ')'),
+            Some(']') => ('[', ']'),
+            _ => break,
+        };
+        let Some(open_idx) = trimmed.rfind(open) else {
+            break;
+        };
+        // `open`/`close` are ASCII (1 byte), so these byte slices are valid.
+        let inner = trimmed[open_idx + 1..trimmed.len() - close.len_utf8()].to_lowercase();
+        if NOISE.iter().any(|k| inner.contains(k)) {
+            s = trimmed[..open_idx].trim_end().to_string();
+        } else {
+            break;
+        }
+    }
+    s
+}
+
+/// Splits a YouTube video title into `(artist, album, title)` for display in the
+/// detail view. Music titles are usually `"Artist - Title"`, sometimes
+/// `"Artist - Album - Title"`; Topic/auto uploads often carry just the song
+/// name, so the channel (cleaned of "- Topic"/"VEVO") is the artist fallback.
+/// En/em dashes are treated like the `" - "` separator; trailing tag groups
+/// (e.g. "(Official Video)") are dropped first.
+pub fn split_title(raw: &str, channel: Option<&str>) -> (Option<String>, Option<String>, String) {
+    let cleaned = strip_title_noise(raw);
+    // YouTube uses a spaced hyphen / en dash / em dash between artist and title;
+    // splitting on the *spaced* form avoids breaking names like "Twenty-One".
+    let normalized = cleaned.replace(" – ", " - ").replace(" — ", " - ");
+    let parts: Vec<&str> = normalized
+        .split(" - ")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let chan_artist = channel
+        .map(clean_channel_name)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    match parts.as_slice() {
+        [] => (chan_artist, None, cleaned),
+        [only] => (chan_artist, None, (*only).to_string()),
+        [artist, title] => (Some((*artist).to_string()), None, (*title).to_string()),
+        [artist, album, rest @ ..] => (
+            Some((*artist).to_string()),
+            Some((*album).to_string()),
+            rest.join(" - "),
+        ),
+    }
+}
+
 /// Deterministic thumbnail URL for a video id. Unlike the per-resolution URLs
 /// from the listing (whose `maxresdefault` variant 404s for many videos),
 /// `hqdefault.jpg` always exists – so caching it reliably succeeds.
@@ -463,6 +530,40 @@ fn parse_atom_published(body: &str) -> std::collections::HashMap<String, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_title_artist_and_title() {
+        let (artist, album, title) = split_title("Daft Punk - Get Lucky", None);
+        assert_eq!(artist.as_deref(), Some("Daft Punk"));
+        assert_eq!(album, None);
+        assert_eq!(title, "Get Lucky");
+    }
+
+    #[test]
+    fn split_title_with_album() {
+        let (artist, album, title) = split_title("Pink Floyd - The Wall - Hey You", None);
+        assert_eq!(artist.as_deref(), Some("Pink Floyd"));
+        assert_eq!(album.as_deref(), Some("The Wall"));
+        assert_eq!(title, "Hey You");
+    }
+
+    #[test]
+    fn split_title_strips_noise_and_uses_channel() {
+        // Topic upload: title is just the song; artist comes from the channel.
+        let (artist, album, title) =
+            split_title("Get Lucky (Official Video)", Some("Daft Punk - Topic"));
+        assert_eq!(artist.as_deref(), Some("Daft Punk"));
+        assert_eq!(album, None);
+        assert_eq!(title, "Get Lucky");
+    }
+
+    #[test]
+    fn split_title_keeps_hyphenated_word() {
+        // A spaced separator splits; an in-word hyphen must not.
+        let (artist, _, title) = split_title("Twenty-One Pilots - Stressed Out", None);
+        assert_eq!(artist.as_deref(), Some("Twenty-One Pilots"));
+        assert_eq!(title, "Stressed Out");
+    }
 
     #[test]
     fn parse_atom_extracts_video_dates() {

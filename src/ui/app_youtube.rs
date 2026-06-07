@@ -324,6 +324,11 @@ impl App {
                     let sender = sender.clone();
                     row.connect_activated(move |_| sender.input(Msg::YtOpenChannel(id)));
                 }
+                // Long press (touch) / right click (mouse) → channel detail view.
+                crate::ui::app::on_secondary_click(&row, {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::YtShowChannelDetail(id))
+                });
                 let lp = gtk::GestureLongPress::new();
                 {
                     let sender = sender.clone();
@@ -460,6 +465,11 @@ impl App {
                     });
                 });
             }
+            // Long press (touch) / right click (mouse) → video detail view.
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || sender.input(Msg::YtShowNewestDetail(i))
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -544,6 +554,16 @@ impl App {
                         });
                     });
                 }
+                // Long press (touch) / right click (mouse) → playlist detail view.
+                crate::ui::app::on_secondary_click(&row, {
+                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
+                    move || {
+                        sender.input(Msg::YtShowPlaylistDetail {
+                            url: url.clone(),
+                            title: t.clone(),
+                        });
+                    }
+                });
                 let lp = gtk::GestureLongPress::new();
                 {
                     let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
@@ -584,6 +604,16 @@ impl App {
                     });
                 });
             }
+            // Long press (touch) / right click (mouse) → video detail view.
+            crate::ui::app::on_secondary_click(&row, {
+                let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
+                move || {
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
+                }
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
@@ -789,11 +819,39 @@ impl App {
                 _ => "video-x-generic-symbolic",
             };
             row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), icon));
-            let suffix = match r.kind {
-                YtKind::Channel => "list-add-symbolic",
-                _ => "go-next-symbolic",
-            };
-            row.add_suffix(&gtk::Image::from_icon_name(suffix));
+            match r.kind {
+                // A video: a "+" button that lists it in "Recent" as the newest
+                // entry right away (no download/playback). The row itself still
+                // opens the video detail on tap.
+                YtKind::Video => {
+                    let btn = gtk::Button::builder()
+                        .icon_name("list-add-symbolic")
+                        .valign(gtk::Align::Center)
+                        .css_classes(["flat"])
+                        .tooltip_text(gettext("List as newest"))
+                        .build();
+                    let (sender, vid, title) = (sender.clone(), r.id.clone(), r.title.clone());
+                    btn.connect_clicked(move |b| {
+                        sender.input(Msg::YtAddRecent {
+                            video_id: vid.clone(),
+                            title: title.clone(),
+                        });
+                        // Immediate confirmation: the button becomes a check and
+                        // disables itself (toasts are disabled app-wide).
+                        b.set_icon_name("object-select-symbolic");
+                        b.set_sensitive(false);
+                    });
+                    row.add_suffix(&btn);
+                }
+                // A channel: tapping the row subscribes (kept as a static glyph).
+                YtKind::Channel => {
+                    row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
+                }
+                // A playlist: tapping the row opens its detail (kept as an arrow).
+                YtKind::Playlist => {
+                    row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                }
+            }
             {
                 let (sender, dialog) = (sender.clone(), dialog.clone());
                 let (kind, url, vid, title) =
@@ -883,6 +941,16 @@ impl App {
                     });
                 });
             }
+            // Long press (touch) / right click (mouse) → video detail view.
+            crate::ui::app::on_secondary_click(&row, {
+                let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
+                move || {
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
+                }
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
@@ -1039,19 +1107,31 @@ impl App {
         ));
         content.append(&cover_box);
 
-        // Info: title / channel / duration (from storage; gaps filled async).
+        // Info: split the video title into artist / album / song for display.
+        // The channel (subscribed feeds) is the artist fallback for Topic
+        // uploads whose title is just the song name; the async fetch refines it.
+        let (p_artist, p_album, p_title) = youtube::split_title(title, stored_channel.as_deref());
+        let artist_from_title = p_artist.is_some();
         let info = adw::PreferencesGroup::new();
+        let artist_row = adw::ActionRow::builder()
+            .title(gettext("Artist"))
+            .subtitle(p_artist.as_deref().unwrap_or("…"))
+            .build();
+        info.add(&artist_row);
+        // Album row only when the title actually carried one.
+        if let Some(album) = p_album.as_deref() {
+            let album_row = adw::ActionRow::builder()
+                .title(gettext("Album"))
+                .subtitle(gtk::glib::markup_escape_text(album))
+                .build();
+            info.add(&album_row);
+        }
         let title_row = adw::ActionRow::builder()
             .title(gettext("Title"))
-            .subtitle(gtk::glib::markup_escape_text(title))
+            .subtitle(gtk::glib::markup_escape_text(&p_title))
             .build();
         title_row.set_subtitle_lines(3);
         info.add(&title_row);
-        let channel_row = adw::ActionRow::builder()
-            .title(gettext("Channel"))
-            .subtitle(stored_channel.as_deref().unwrap_or("…"))
-            .build();
-        info.add(&channel_row);
         let duration_row = adw::ActionRow::builder()
             .title(gettext("Duration"))
             .subtitle(
@@ -1134,8 +1214,9 @@ impl App {
         self.youtube.ctx_video_meta.replace(Some((
             video_id.to_string(),
             cover_box,
-            channel_row,
+            artist_row,
             duration_row,
+            artist_from_title,
         )));
         self.refresh_yt_download_row();
         self.refresh_yt_icons();
@@ -1371,7 +1452,16 @@ impl App {
                     });
                 });
             }
-            // Long press: the video's own detail.
+            // Long press (touch) / right click (mouse): the video's own detail.
+            crate::ui::app::on_secondary_click(&row, {
+                let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
+                move || {
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                    });
+                }
+            });
             let lp = gtk::GestureLongPress::new();
             {
                 let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
@@ -1506,18 +1596,22 @@ impl App {
         cover: Option<String>,
     ) {
         let guard = self.youtube.ctx_video_meta.borrow();
-        let Some((vid, cover_box, channel_row, duration_row)) = guard.as_ref() else {
+        let Some((vid, cover_box, artist_row, duration_row, artist_from_title)) = guard.as_ref()
+        else {
             return;
         };
         if vid != video_id {
             return;
         }
-        channel_row.set_subtitle(
-            uploader
+        // Only fill the artist from the channel when the title itself did not
+        // already yield one (otherwise the title's artist wins).
+        if !*artist_from_title {
+            let artist = uploader
                 .as_deref()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or("—"),
-        );
+                .map(youtube::clean_channel_name)
+                .filter(|s| !s.trim().is_empty());
+            artist_row.set_subtitle(artist.as_deref().unwrap_or("—"));
+        }
         duration_row.set_subtitle(&duration.map(fmt_duration).unwrap_or_else(|| "—".into()));
         if let Some(tex) = cover
             .as_deref()
@@ -1532,6 +1626,33 @@ impl App {
                 200,
             ));
         }
+    }
+
+    /// "+" on a YouTube search result: list the video in "Recent" as the newest
+    /// entry – no download, no playback. The cover is fetched off-thread so the
+    /// new row is not just a placeholder; it arrives via [`Msg::YtEnriched`].
+    pub(crate) fn yt_add_recent(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        video_id: String,
+        title: String,
+    ) {
+        let _ = self.library.add_recent_video(&video_id, &title, None);
+        let _ = self.library.set_yt_title(&video_id, &title);
+        self.reload_yt_recent(sender);
+        // Show the freshly added entry: switch the YouTube section to Recent
+        // (in the background — no navigation if the user is elsewhere).
+        self.youtube.yt_view = crate::ui::app::YtView::Recent;
+        let input = self.input.clone();
+        std::thread::spawn(move || {
+            let cover =
+                crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&video_id));
+            let _ = input.send(Msg::YtEnriched {
+                video_id,
+                artist: None,
+                cover,
+            });
+        });
     }
 
     /// Logs a played video to the "Recent" history and enriches it (artist +
@@ -2065,6 +2186,8 @@ impl App {
             self.play_current();
             self.reload_yt_recent(sender);
             self.reload_playlists(sender);
+            // The playlist is now the newest Recent entry → show it there.
+            self.youtube.yt_view = crate::ui::app::YtView::Recent;
         }
     }
 

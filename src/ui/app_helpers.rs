@@ -33,6 +33,25 @@ pub(crate) fn apply_color_scheme(code: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
+/// Attaches a right-click (secondary mouse button) handler to `widget`, running
+/// `action`. This is the classic-mouse counterpart to a long press: touch users
+/// long-press a row to open its detail/context view, desktop users right-click.
+/// Mirror every `GestureLongPress` that opens a detail view with one of these so
+/// both input styles behave the same.
+pub(crate) fn on_secondary_click<W, F>(widget: &W, action: F)
+where
+    W: IsA<gtk::Widget>,
+    F: Fn() + 'static,
+{
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_SECONDARY);
+    click.connect_pressed(move |g, _, _, _| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        action();
+    });
+    widget.add_controller(click);
+}
+
 /// Default gallery tiles-per-row when the user has not chosen one yet: 3 on
 /// phone-sized screens, 4 on the desktop.
 pub(crate) fn initial_gallery_columns() -> u32 {

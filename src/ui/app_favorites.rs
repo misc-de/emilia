@@ -276,6 +276,11 @@ impl App {
                     row.connect_activated(move |_| sender.input(play(i)));
                 }
             }
+            // Right click (classic mouse): same detail view as the long press.
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || sender.input(detail(i))
+            });
             let long_press = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();

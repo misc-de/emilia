@@ -14,8 +14,10 @@ use crate::ui::app::{cover_widget, App, CtxTarget, FsKind, Msg};
 fn search_hint() -> adw::StatusPage {
     adw::StatusPage::builder()
         .icon_name("system-search-symbolic")
-        .title(gettext("Search the library"))
-        .description(gettext("Find by artist, album, song or date."))
+        .title(gettext("Search"))
+        .description(gettext(
+            "Find artists, albums, songs, stations, recordings, videos and memos.",
+        ))
         .vexpand(true)
         .build()
 }
@@ -420,7 +422,7 @@ impl App {
             .build();
 
         let entry = gtk::SearchEntry::builder()
-            .placeholder_text(gettext("Artist, album, song, date …"))
+            .placeholder_text(gettext("Artist, album, song, station, video, memo …"))
             .hexpand(true)
             .margin_top(6)
             .margin_bottom(6)
@@ -555,6 +557,153 @@ impl App {
                     let path = s.path.clone();
                     row.connect_activated(move |_| {
                         sender.input(Msg::SearchPlayTrack(path.clone()));
+                        dlg.close();
+                    });
+                    group.add(&row);
+                }
+                results.append(&group);
+            }
+
+            // --- Streaming stations (tap = play/pause, like in the section) ---
+            if !res.streams.is_empty() {
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("{} ({})", gettext("Stations"), res.streams.len()))
+                    .build();
+                for s in &res.streams {
+                    let row = adw::ActionRow::builder()
+                        .title(gtk::glib::markup_escape_text(&s.name))
+                        .subtitle(gtk::glib::markup_escape_text(s.tags.as_deref().unwrap_or("")))
+                        .activatable(true)
+                        .build();
+                    row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
+                    let sender = sender.clone();
+                    let dlg = dlg.clone();
+                    let id = s.id;
+                    row.connect_activated(move |_| {
+                        sender.input(Msg::ToggleStream(id));
+                        dlg.close();
+                    });
+                    group.add(&row);
+                }
+                results.append(&group);
+            }
+
+            // --- Recordings (timeshift; tap = play) ---
+            if !res.recordings.is_empty() {
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("{} ({})", gettext("Recordings"), res.recordings.len()))
+                    .build();
+                for r in &res.recordings {
+                    let mut parts: Vec<String> = Vec::new();
+                    if let Some(a) = r.artist.as_ref().filter(|a| !a.trim().is_empty()) {
+                        parts.push(a.clone());
+                    }
+                    if let Some(st) = r.station.as_ref().filter(|s| !s.trim().is_empty()) {
+                        parts.push(st.clone());
+                    }
+                    let row = adw::ActionRow::builder()
+                        .title(gtk::glib::markup_escape_text(&r.title))
+                        .subtitle(gtk::glib::markup_escape_text(&parts.join(" · ")))
+                        .activatable(true)
+                        .build();
+                    row.add_prefix(&gtk::Image::from_icon_name("media-record-symbolic"));
+                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+                    let sender = sender.clone();
+                    let dlg = dlg.clone();
+                    let path = r.path.clone();
+                    row.connect_activated(move |_| {
+                        sender.input(Msg::PlayRecording(path.clone()));
+                        dlg.close();
+                    });
+                    group.add(&row);
+                }
+                results.append(&group);
+            }
+
+            // --- Voice memos (tap = play) ---
+            if !res.memos.is_empty() {
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("{} ({})", gettext("Memos"), res.memos.len()))
+                    .build();
+                for m in &res.memos {
+                    let row = adw::ActionRow::builder()
+                        .title(gtk::glib::markup_escape_text(&m.title))
+                        .activatable(true)
+                        .build();
+                    row.add_prefix(&gtk::Image::from_icon_name("audio-input-microphone-symbolic"));
+                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+                    let sender = sender.clone();
+                    let dlg = dlg.clone();
+                    let path = m.path.clone();
+                    row.connect_activated(move |_| {
+                        sender.input(Msg::PlayRecording(path.clone()));
+                        dlg.close();
+                    });
+                    group.add(&row);
+                }
+                results.append(&group);
+            }
+
+            // --- YouTube channels (tap = open the channel's videos) ---
+            if !res.yt_channels.is_empty() {
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("{} ({})", gettext("Channels"), res.yt_channels.len()))
+                    .build();
+                for c in &res.yt_channels {
+                    let row = adw::ActionRow::builder()
+                        .title(gtk::glib::markup_escape_text(&c.title))
+                        .activatable(true)
+                        .build();
+                    let cover = c
+                        .thumb
+                        .as_deref()
+                        .and_then(crate::core::online::youtube_thumb_path);
+                    row.add_prefix(&crate::ui::app::cover_widget(
+                        cover.as_deref(),
+                        "avatar-default-symbolic",
+                    ));
+                    let sender = sender.clone();
+                    let dlg = dlg.clone();
+                    let id = c.id;
+                    row.connect_activated(move |_| {
+                        sender.input(Msg::YtOpenChannel(id));
+                        dlg.close();
+                    });
+                    group.add(&row);
+                }
+                results.append(&group);
+            }
+
+            // --- YouTube videos (cached, of subscribed channels; tap = play) ---
+            if !res.yt_videos.is_empty() {
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("{} ({})", gettext("Videos"), res.yt_videos.len()))
+                    .build();
+                for v in &res.yt_videos {
+                    let row = adw::ActionRow::builder()
+                        .title(gtk::glib::markup_escape_text(&v.title))
+                        .subtitle(gtk::glib::markup_escape_text(&v.channel_title))
+                        .activatable(true)
+                        .build();
+                    let cover = crate::core::online::youtube_cover_path(&v.video_id).or_else(|| {
+                        crate::core::online::youtube_thumb_path(
+                            &crate::core::youtube::thumbnail_url(&v.video_id),
+                        )
+                    });
+                    row.add_prefix(&crate::ui::app::cover_widget(
+                        cover.as_deref(),
+                        "video-x-generic-symbolic",
+                    ));
+                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+                    let sender = sender.clone();
+                    let dlg = dlg.clone();
+                    let video_id = v.video_id.clone();
+                    let title = v.title.clone();
+                    row.connect_activated(move |_| {
+                        sender.input(Msg::YtPlayVideo {
+                            video_id: video_id.clone(),
+                            title: title.clone(),
+                        });
                         dlg.close();
                     });
                     group.add(&row);

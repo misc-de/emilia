@@ -1916,3 +1916,20 @@ msgstr ""
 
 msgid "Restart now"
 msgstr ""
+
+# Initial-scan overlay, YouTube "+" quick-add and the broadened search (added 2026-06-07).
+
+msgid "Reading in your music collection — this may take a moment the first time"
+msgstr ""
+
+msgid "List as newest"
+msgstr ""
+
+msgid "Memos"
+msgstr ""
+
+msgid "Find artists, albums, songs, stations, recordings, videos and memos."
+msgstr ""
+
+msgid "Artist, album, song, station, video, memo …"
+msgstr ""

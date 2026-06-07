@@ -73,7 +73,11 @@ impl App {
                 let sender = sender.clone();
                 row.connect_activated(move |_| sender.input(Msg::OpenPlaylist(id)));
             }
-            // Long press: detail view (cover + actions).
+            // Long press (touch) / right click (mouse): detail view (cover + actions).
+            crate::ui::app::on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || sender.input(Msg::ShowPlaylistDetail(id))
+            });
             let long_press = gtk::GestureLongPress::new();
             {
                 let sender = sender.clone();
@@ -295,25 +299,35 @@ impl App {
         let cover = self.playlist_track_cover(path);
         row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), icon));
 
-        // Long press: open the song's detail view (YouTube tracks get the
-        // YouTube video detail, everything else the file detail).
+        // Long press (touch) / right click (mouse): open the song's detail view
+        // (YouTube tracks get the YouTube video detail, everything else the file
+        // detail).
         {
-            let sender = sender.clone();
-            let path = path.to_string();
-            let title = display.clone();
-            let gesture = gtk::GestureLongPress::new();
-            gesture.connect_pressed(move |g, _, _| {
-                g.set_state(gtk::EventSequenceState::Claimed);
-                if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
-                    sender.input(Msg::YtShowVideoDetail {
-                        video_id,
-                        title: title.clone(),
-                    });
-                } else {
-                    sender.input(Msg::ShowTrackDetail(path.clone()));
+            let open = {
+                let sender = sender.clone();
+                let path = path.to_string();
+                let title = display.clone();
+                move || {
+                    if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
+                        sender.input(Msg::YtShowVideoDetail {
+                            video_id,
+                            title: title.clone(),
+                        });
+                    } else {
+                        sender.input(Msg::ShowTrackDetail(path.clone()));
+                    }
                 }
-            });
+            };
+            let gesture = gtk::GestureLongPress::new();
+            {
+                let open = open.clone();
+                gesture.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    open();
+                });
+            }
             row.add_controller(gesture);
+            crate::ui::app::on_secondary_click(&row, open);
         }
         // Play button: plays only this track, keeps the list open.
         let play_btn = gtk::Button::builder()

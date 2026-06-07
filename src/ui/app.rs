@@ -15,7 +15,8 @@ use crate::ui::album_row::{AlbumCard, AlbumOutput};
 pub(crate) use crate::ui::app_helpers::{
     album_subtitle, apply_color_scheme, artist_count_subtitle, cover_widget, duration_label,
     find_scroller, fmt_duration, fmt_rate, guarded_resume, initial_gallery_columns,
-    most_common_artist, online_available, read_entries, save_window_state, unix_now,
+    most_common_artist, on_secondary_click, online_available, read_entries, save_window_state,
+    unix_now,
 };
 use crate::ui::app_init::InitState;
 use crate::ui::app_podcast::fetch_and_store_podcast;
@@ -667,9 +668,12 @@ pub(crate) struct YoutubeState {
     pub(crate) ctx_video_download:
         std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
     /// Open video detail dialog awaiting async metadata: (video id, cover box,
-    /// channel row, duration row), filled in by `Cmd::YtVideoMeta`.
-    pub(crate) ctx_video_meta:
-        std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow)>>>,
+    /// artist row, duration row, artist-came-from-title), filled in by
+    /// `Cmd::YtVideoMeta`. The bool gates the artist fallback: the async channel
+    /// only fills the artist row when the title itself did not yield an artist.
+    pub(crate) ctx_video_meta: std::rc::Rc<
+        std::cell::RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>,
+    >,
     /// Video ids whose download is currently running (spinner + dedupe taps).
     pub(crate) downloading_videos: std::collections::HashSet<String>,
     /// Titles for the videos in the current play context (video id → title), so
@@ -757,6 +761,11 @@ pub struct App {
     /// (rescan/cloud/podcasts/YouTube). While > 0 the loading overlay shows a
     /// spinner; each worker's completion decrements it back toward zero.
     pub(crate) refresh_pending: u32,
+    /// A first/initial library scan is running (the music folder is being read
+    /// for the very first time, so the views are still empty). Drives the
+    /// loading overlay with an explanatory text so the app does not look frozen.
+    /// Cleared when the scan reports back (`Cmd::ScanDone`).
+    pub(crate) scanning: bool,
     /// Online-enrichment state (covers/artist photos/fingerprint fetching).
     pub(crate) enrich_state: EnrichState,
     /// App-wide preferences (display language, active audio output).
@@ -1216,6 +1225,12 @@ pub enum Msg {
     YtPlayChannel(i64),
     /// Remove an item (video id or playlist URL) from the "Recent" history.
     YtRemoveRecent(String),
+    /// "+" on a search result: list this video in "Recent" as the newest entry
+    /// (no download, no playback).
+    YtAddRecent {
+        video_id: String,
+        title: String,
+    },
     /// Detail view of a video (play / add to collection / offline).
     YtShowVideoDetail {
         video_id: String,
@@ -2519,6 +2534,14 @@ impl Component for App {
                                     sender.input(Msg::OpenNowPlaying);
                                 },
                             },
+                            // Right click (classic mouse): same detail view.
+                            add_controller = gtk::GestureClick {
+                                set_button: gtk::gdk::BUTTON_SECONDARY,
+                                connect_pressed[sender] => move |gesture, _, _, _| {
+                                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                                    sender.input(Msg::OpenNowPlaying);
+                                },
+                            },
                             #[wrap(Some)]
                             set_child = &gtk::Label {
                                 set_xalign: 0.5,
@@ -3061,6 +3084,7 @@ impl Component for App {
                 gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
             },
             refresh_pending: 0,
+            scanning: false,
             enrich_state: EnrichState {
                 enriching: false,
                 auto_enrich,
@@ -3735,7 +3759,18 @@ impl Component for App {
                     match kind {
                         EditKind::Recording => {
                             let _ = self.library.update_recording_file(id, &p, duration_ms);
+                            // A recording lives under <Music>/Streaming, so it is
+                            // also a normal library track. Re-read its tags into
+                            // the library DB and rebuild the overviews; otherwise
+                            // the album/song lists keep the old (longer) duration
+                            // after a cut. (The file browser re-reads from disk on
+                            // its own when navigated to.)
+                            crate::core::scanner::ingest_file(
+                                &self.library,
+                                std::path::Path::new(&p),
+                            );
                             self.reload_recordings(&sender);
+                            self.reload_library_overviews();
                             self.toast(&gettext("Recording edited"));
                         }
                         EditKind::Memo => {
@@ -3910,6 +3945,7 @@ impl Component for App {
                 let _ = self.library.delete_recent(&key);
                 self.reload_yt_recent(&sender);
             }
+            Msg::YtAddRecent { video_id, title } => self.yt_add_recent(&sender, video_id, title),
             Msg::YtShowVideoDetail { video_id, title } => {
                 self.show_video_detail(root, &sender, &video_id, &title)
             }
@@ -4407,7 +4443,12 @@ impl Component for App {
                 self.libview.loading_label = None;
                 self.reload_channels(&sender);
                 match title {
-                    Some(t) => self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)])),
+                    Some(t) => {
+                        // A new subscription landed → show it: switch the YouTube
+                        // section to the channels ("Subscriptions") view.
+                        self.youtube.yt_view = YtView::Channels;
+                        self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)]));
+                    }
                     None => self.toast(&gettext("Could not load channel")),
                 }
             }
@@ -4497,7 +4538,7 @@ impl App {
     /// Whether the loading overlay should be shown: either a folder/list load is
     /// in progress or a manual refresh still has background workers running.
     pub(crate) fn overlay_visible(&self) -> bool {
-        self.libview.loading || self.refresh_pending > 0
+        self.libview.loading || self.refresh_pending > 0 || self.scanning
     }
 
     /// Text beneath the overlay spinner. A specific load label (e.g. a YouTube
@@ -4506,6 +4547,8 @@ impl App {
     pub(crate) fn overlay_text(&self) -> String {
         if let Some(label) = &self.libview.loading_label {
             label.clone()
+        } else if self.scanning {
+            gettext("Reading in your music collection — this may take a moment the first time")
         } else if self.refresh_pending > 0 {
             gettext("Updating …")
         } else {

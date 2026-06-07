@@ -348,17 +348,9 @@ impl FactoryComponent for FsRow {
             set_activatable: true,
             add_prefix = &gtk::Image::from_icon_name(self.entry.prefix_icon()),
 
-            // As in the artist view: duration right-aligned & subtle. Files show
-            // their own length; album folders their summed runtime.
-            add_suffix = &gtk::Label {
-                #[watch]
-                set_label: &self.entry.duration_label(),
-                set_visible: !self.entry.duration_label().is_empty(),
-                set_css_classes: &["dim-label", "numeric"],
-            },
-
             // Play button for an album folder (plays the whole album; the row
-            // itself still opens the folder). Plain folders have none.
+            // itself still opens the folder). Plain folders have none. Placed
+            // before the duration so it sits to the *left* of the runtime.
             add_suffix = &gtk::Button {
                 set_visible: self.entry.album().is_some(),
                 set_icon_name: "media-playback-start-symbolic",
@@ -368,6 +360,15 @@ impl FactoryComponent for FsRow {
                 connect_clicked[sender, index] => move |_| {
                     let _ = sender.output(FsOutput::PlayDir(index.clone()));
                 },
+            },
+
+            // As in the artist view: duration right-aligned & subtle. Files show
+            // their own length; album folders their summed runtime.
+            add_suffix = &gtk::Label {
+                #[watch]
+                set_label: &self.entry.duration_label(),
+                set_visible: !self.entry.duration_label().is_empty(),
+                set_css_classes: &["dim-label", "numeric"],
             },
 
             // Marker for remote files available offline (downloaded).
@@ -416,6 +417,16 @@ impl FactoryComponent for FsRow {
             // Long press: options menu.
             add_controller = gtk::GestureLongPress {
                 connect_pressed[sender, index] => move |gesture, _, _| {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    let _ = sender.output(FsOutput::LongPress(index.clone()));
+                },
+            },
+
+            // Right click (classic mouse): the desktop counterpart of the long
+            // press – opens the same options/detail menu.
+            add_controller = gtk::GestureClick {
+                set_button: gtk::gdk::BUTTON_SECONDARY,
+                connect_pressed[sender, index] => move |gesture, _, _, _| {
                     gesture.set_state(gtk::EventSequenceState::Claimed);
                     let _ = sender.output(FsOutput::LongPress(index.clone()));
                 },

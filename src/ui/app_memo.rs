@@ -334,7 +334,12 @@ impl App {
             let path = m.path.clone();
             row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
         }
-        // Long press → detail dialog.
+        // Long press (touch) / right click (mouse) → detail dialog.
+        crate::ui::app::on_secondary_click(&row, {
+            let sender = sender.clone();
+            let id = m.id;
+            move || sender.input(Msg::OpenMemo(id))
+        });
         let lp = gtk::GestureLongPress::new();
         {
             let sender = sender.clone();

@@ -990,6 +990,8 @@ impl App {
         if manual {
             self.refresh_done();
         }
+        // The (initial) scan finished → hide the explanatory loading overlay.
+        self.scanning = false;
         // Library is read in → update the views.
         self.reload_library_overviews();
         // Fill in album covers from the embedded artwork in the files —
