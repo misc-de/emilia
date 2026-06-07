@@ -2582,9 +2582,10 @@ impl Component for App {
                             set_end_widget = &gtk::Box {
                                 set_spacing: 6,
                                 set_valign: gtk::Align::Center,
-                                // Lyrics/karaoke: shown only when the running
-                                // track has synchronized (.lrc) lyrics. Opens the
-                                // karaoke view with the current line highlighted.
+                                // Lyrics: shown whenever the running track has any
+                                // lyrics (embedded/plain or online). Opens the view;
+                                // synchronized (.lrc) lyrics additionally highlight
+                                // and auto-scroll the current line.
                                 gtk::Button {
                                     set_icon_name: "media-view-subtitles-symbolic",
                                     set_tooltip_text: Some(&gettext("Lyrics")),
@@ -2592,7 +2593,7 @@ impl Component for App {
                                     add_css_class: "flat",
                                     #[watch]
                                     set_visible: model.lyrics.current.as_ref()
-                                        .is_some_and(|l| l.has_synced()),
+                                        .is_some_and(|l| l.has_any()),
                                     connect_clicked => Msg::ShowLyrics,
                                 },
                                 // Repeat (loop): at the end of the queue or

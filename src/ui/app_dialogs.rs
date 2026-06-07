@@ -68,7 +68,21 @@ impl App {
         // Cover/photo, or – when there are multiple images – a carousel with dots.
         self.append_cover_or_gallery(&content, entry, sender, &dialog);
 
-        // Lyrics – expandable pulldown above the info (like the properties).
+        // "Info" – expandable with detail rows
+        let info_group = adw::PreferencesGroup::new();
+        let expander = adw::ExpanderRow::builder().title(gettext("Info")).build();
+        for (label, value) in self.ctx_info_lines(entry) {
+            let row = adw::ActionRow::builder()
+                .title(&label)
+                .subtitle(gtk::glib::markup_escape_text(&value))
+                .build();
+            row.set_subtitle_lines(2);
+            expander.add_row(&row);
+        }
+        info_group.add(&expander);
+        content.append(&info_group);
+
+        // Lyrics – expandable pulldown below the info (like the properties).
         // Source priority: embedded tags → DB cache (filled while playing). When
         // nothing is available yet, the pulldown starts hidden and an LRCLIB
         // lookup reveals it once it returns (see `on_file_lyrics_fetched`).
@@ -104,20 +118,6 @@ impl App {
                 }
             }
         }
-
-        // "Info" – expandable with detail rows
-        let info_group = adw::PreferencesGroup::new();
-        let expander = adw::ExpanderRow::builder().title(gettext("Info")).build();
-        for (label, value) in self.ctx_info_lines(entry) {
-            let row = adw::ActionRow::builder()
-                .title(&label)
-                .subtitle(gtk::glib::markup_escape_text(&value))
-                .build();
-            row.set_subtitle_lines(2);
-            expander.add_row(&row);
-        }
-        info_group.add(&expander);
-        content.append(&info_group);
 
         // "Properties" – category per level (track/album/artist), inherited.
         if let Some(merkmale) = self.ctx_merkmale(entry, sender) {
