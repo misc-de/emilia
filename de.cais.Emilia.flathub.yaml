@@ -122,7 +122,7 @@ modules:
       # commit mit dem zugehörigen SHA ergänzen (von Flathub empfohlen).
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.4.1
+        tag: v0.4.4
         # commit: <SHA des Tags v0.3.21>
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
