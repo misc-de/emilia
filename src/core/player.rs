@@ -507,13 +507,11 @@ impl Player {
                             on_error();
                         }
                     }
-                    gst::MessageView::Tag(tag) => {
-                        if is_active {
-                            if let Some(title) = tag.tags().get::<gst::tags::Title>() {
-                                let t = title.get().to_string();
-                                if !t.trim().is_empty() {
-                                    on_title(t);
-                                }
+                    gst::MessageView::Tag(tag) if is_active => {
+                        if let Some(title) = tag.tags().get::<gst::tags::Title>() {
+                            let t = title.get().to_string();
+                            if !t.trim().is_empty() {
+                                on_title(t);
                             }
                         }
                     }
