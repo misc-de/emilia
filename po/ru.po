@@ -1791,3 +1791,44 @@ msgstr "Без группировки"
 
 msgid "Remove this source?"
 msgstr "Удалить этот источник?"
+
+# Menu section descriptions + YouTube settings text (added 2026-06-07).
+
+msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "Для YouTube нужен инструмент yt-dlp, загружаемый сюда в папку данных приложения (не входит в комплект). Сам раздел YouTube включается в Меню. В некоторых странах может быть ограничено."
+
+msgid "Quick access to the tracks, albums and artists you starred."
+msgstr "Быстрый доступ к трекам, альбомам и исполнителям, отмеченным звёздочкой."
+
+msgid "Browse your music folder — and any extra sources — as a file tree."
+msgstr "Просмотр папки с музыкой — и дополнительных источников — в виде дерева файлов."
+
+msgid "Every artist in your library, each opening to their albums and tracks."
+msgstr "Каждый исполнитель в вашей библиотеке с его альбомами и треками."
+
+msgid "Every album in your library, sortable and grouped by initial or year."
+msgstr "Каждый альбом в библиотеке, с сортировкой и группировкой по букве или году."
+
+msgid "Live and concert recordings you marked, kept apart from your albums."
+msgstr "Отмеченные вами концертные и живые записи, отдельно от альбомов."
+
+msgid "Subscribe to podcast feeds and play or download their episodes."
+msgstr "Подписывайтесь на подкасты и слушайте или скачивайте их выпуски."
+
+msgid "Internet radio stations, with an optional buffer to record what just played."
+msgstr "Интернет-радиостанции с необязательным буфером для записи только что прозвучавшего."
+
+msgid "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool."
+msgstr "Поиск и воспроизведение YouTube, подписка на каналы и офлайн-видео. Нужен инструмент yt-dlp."
+
+msgid "Albums, folders or tracks you marked as audiobooks, resuming where you left off."
+msgstr "Альбомы, папки или треки, отмеченные как аудиокниги, с продолжением с места остановки."
+
+msgid "Your own playlists, arranged in any order you like."
+msgstr "Ваши собственные плейлисты в любом порядке."
+
+msgid "Quick voice notes recorded with the microphone."
+msgstr "Быстрые голосовые заметки, записанные с микрофона."
+
+msgid "Listening statistics and your most-played artists and tracks."
+msgstr "Статистика прослушивания и ваши самые проигрываемые исполнители и треки."

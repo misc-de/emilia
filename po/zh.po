@@ -1761,3 +1761,44 @@ msgstr "不分组"
 
 msgid "Remove this source?"
 msgstr "移除此来源？"
+
+# Menu section descriptions + YouTube settings text (added 2026-06-07).
+
+msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube 需要 yt-dlp 工具，将在此下载到应用数据文件夹（未内置）。在“菜单”中开启 YouTube 板块本身。某些国家或地区可能受限。"
+
+msgid "Quick access to the tracks, albums and artists you starred."
+msgstr "快速访问你加星标的曲目、专辑和艺术家。"
+
+msgid "Browse your music folder — and any extra sources — as a file tree."
+msgstr "以文件树方式浏览你的音乐文件夹以及任何额外来源。"
+
+msgid "Every artist in your library, each opening to their albums and tracks."
+msgstr "媒体库中的每位艺术家，点开即见其专辑和曲目。"
+
+msgid "Every album in your library, sortable and grouped by initial or year."
+msgstr "媒体库中的每张专辑，可排序并按首字母或年份分组。"
+
+msgid "Live and concert recordings you marked, kept apart from your albums."
+msgstr "你标记的演唱会和现场录音，与普通专辑分开。"
+
+msgid "Subscribe to podcast feeds and play or download their episodes."
+msgstr "订阅播客源，播放或下载其剧集。"
+
+msgid "Internet radio stations, with an optional buffer to record what just played."
+msgstr "网络电台，可选缓冲以录制刚刚播放的内容。"
+
+msgid "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool."
+msgstr "搜索并播放 YouTube、关注频道并离线保存视频。需要 yt-dlp 工具。"
+
+msgid "Albums, folders or tracks you marked as audiobooks, resuming where you left off."
+msgstr "你标记为有声书的专辑、文件夹或曲目，可从上次位置继续。"
+
+msgid "Your own playlists, arranged in any order you like."
+msgstr "你自己的播放列表，可按任意顺序排列。"
+
+msgid "Quick voice notes recorded with the microphone."
+msgstr "用麦克风录制的快速语音备忘。"
+
+msgid "Listening statistics and your most-played artists and tracks."
+msgstr "收听统计以及你最常播放的艺术家和曲目。"

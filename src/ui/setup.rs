@@ -520,6 +520,7 @@ impl SetupPage {
         for (name, label, icon) in SECTIONS {
             let row = adw::SwitchRow::builder()
                 .title(gettext(label))
+                .subtitle(gettext(crate::ui::app::section_description(name)))
                 .active(self.enabled.contains(name))
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name(icon));

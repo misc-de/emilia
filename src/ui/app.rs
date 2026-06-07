@@ -106,6 +106,27 @@ pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
         .map(|(_, label, icon)| (*label, *icon))
 }
 
+/// One- to two-sentence description of a menu section (English `msgid`; translate
+/// at the display site with `gettext()`). Shown as the secondary text of each row
+/// in the setup assistant and the Settings → Menu list.
+pub(crate) fn section_description(name: &str) -> &'static str {
+    match name {
+        "favorites" => "Quick access to the tracks, albums and artists you starred.",
+        "files" => "Browse your music folder — and any extra sources — as a file tree.",
+        "artists" => "Every artist in your library, each opening to their albums and tracks.",
+        "albums" => "Every album in your library, sortable and grouped by initial or year.",
+        "concerts" => "Live and concert recordings you marked, kept apart from your albums.",
+        "podcasts" => "Subscribe to podcast feeds and play or download their episodes.",
+        "streaming" => "Internet radio stations, with an optional buffer to record what just played.",
+        "youtube" => "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.",
+        "audiobooks" => "Albums, folders or tracks you marked as audiobooks, resuming where you left off.",
+        "playlists" => "Your own playlists, arranged in any order you like.",
+        "memo" => "Quick voice notes recorded with the microphone.",
+        "stats" => "Listening statistics and your most-played artists and tracks.",
+        _ => "",
+    }
+}
+
 /// Safety prompt before destructive actions (delete/remove). Shows a
 /// confirmation dialog relative to `parent` (any widget in the window) and
 /// sends `msg` only after confirmation. `confirm_label` labels the

@@ -1785,3 +1785,44 @@ msgstr "Bila kupanga makundi"
 
 msgid "Remove this source?"
 msgstr "Ondoa chanzo hiki?"
+
+# Menu section descriptions + YouTube settings text (added 2026-06-07).
+
+msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube inahitaji zana ya yt-dlp, inayopakuliwa hapa kwenye folda ya data ya programu (haijajumuishwa). Washa sehemu ya YouTube yenyewe kwenye Menyu. Inaweza kuzuiwa katika baadhi ya nchi."
+
+msgid "Quick access to the tracks, albums and artists you starred."
+msgstr "Ufikiaji wa haraka wa nyimbo, albamu na wasanii uliowekea nyota."
+
+msgid "Browse your music folder — and any extra sources — as a file tree."
+msgstr "Vinjari folda yako ya muziki — na vyanzo vyovyote vya ziada — kama mti wa faili."
+
+msgid "Every artist in your library, each opening to their albums and tracks."
+msgstr "Kila msanii katika maktaba yako, akifungua albamu na nyimbo zake."
+
+msgid "Every album in your library, sortable and grouped by initial or year."
+msgstr "Kila albamu katika maktaba yako, inayopangika na kupangwa kwa herufi au mwaka."
+
+msgid "Live and concert recordings you marked, kept apart from your albums."
+msgstr "Rekodi za matamasha na za moja kwa moja ulizoweka alama, zikitenganishwa na albamu zako."
+
+msgid "Subscribe to podcast feeds and play or download their episodes."
+msgstr "Jisajili kwa milisho ya podikasti na ucheze au upakue vipindi vyake."
+
+msgid "Internet radio stations, with an optional buffer to record what just played."
+msgstr "Vituo vya redio ya mtandao, na hifadhi ya hiari ya kurekodi kilichocheza punde."
+
+msgid "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool."
+msgstr "Tafuta na ucheze YouTube, fuata chaneli na uhifadhi video nje ya mtandao. Inahitaji zana ya yt-dlp."
+
+msgid "Albums, folders or tracks you marked as audiobooks, resuming where you left off."
+msgstr "Albamu, folda au nyimbo ulizoweka alama kama vitabu vya sauti, vikiendelea pale ulipoishia."
+
+msgid "Your own playlists, arranged in any order you like."
+msgstr "Orodha zako za kucheza, katika mpangilio wowote upendao."
+
+msgid "Quick voice notes recorded with the microphone."
+msgstr "Maelezo ya sauti ya haraka yaliyorekodiwa kwa maikrofoni."
+
+msgid "Listening statistics and your most-played artists and tracks."
+msgstr "Takwimu za kusikiliza na wasanii na nyimbo unazocheza zaidi."

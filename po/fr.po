@@ -1796,3 +1796,44 @@ msgstr "Sans regroupement"
 
 msgid "Remove this source?"
 msgstr "Supprimer cette source ?"
+
+# Menu section descriptions + YouTube settings text (added 2026-06-07).
+
+msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube nécessite l'outil yt-dlp, téléchargé ici dans le dossier de données de l'application (non inclus). Activez la section YouTube elle-même dans Menu. Peut être restreint dans certains pays."
+
+msgid "Quick access to the tracks, albums and artists you starred."
+msgstr "Accès rapide aux titres, albums et artistes que vous avez mis en favori."
+
+msgid "Browse your music folder — and any extra sources — as a file tree."
+msgstr "Parcourez votre dossier de musique — et toute source supplémentaire — sous forme d'arborescence."
+
+msgid "Every artist in your library, each opening to their albums and tracks."
+msgstr "Chaque artiste de votre bibliothèque, ouvrant sur ses albums et ses titres."
+
+msgid "Every album in your library, sortable and grouped by initial or year."
+msgstr "Chaque album de votre bibliothèque, triable et groupé par initiale ou par année."
+
+msgid "Live and concert recordings you marked, kept apart from your albums."
+msgstr "Enregistrements de concerts et de lives que vous avez marqués, séparés de vos albums."
+
+msgid "Subscribe to podcast feeds and play or download their episodes."
+msgstr "Abonnez-vous à des flux de podcasts et lisez ou téléchargez leurs épisodes."
+
+msgid "Internet radio stations, with an optional buffer to record what just played."
+msgstr "Stations de radio Internet, avec un tampon facultatif pour enregistrer ce qui vient d'être diffusé."
+
+msgid "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool."
+msgstr "Rechercher et lire YouTube, suivre des chaînes et garder des vidéos hors ligne. Nécessite l'outil yt-dlp."
+
+msgid "Albums, folders or tracks you marked as audiobooks, resuming where you left off."
+msgstr "Albums, dossiers ou titres marqués comme livres audio, en reprenant là où vous vous êtes arrêté."
+
+msgid "Your own playlists, arranged in any order you like."
+msgstr "Vos propres listes de lecture, dans l'ordre de votre choix."
+
+msgid "Quick voice notes recorded with the microphone."
+msgstr "Notes vocales rapides enregistrées avec le microphone."
+
+msgid "Listening statistics and your most-played artists and tracks."
+msgstr "Statistiques d'écoute et vos artistes et titres les plus écoutés."

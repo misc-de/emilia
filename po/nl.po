@@ -1784,3 +1784,44 @@ msgstr "Zonder groepering"
 
 msgid "Remove this source?"
 msgstr "Deze bron verwijderen?"
+
+# Menu section descriptions + YouTube settings text (added 2026-06-07).
+
+msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "YouTube heeft het hulpprogramma yt-dlp nodig, hier gedownload naar de app-gegevensmap (niet meegeleverd). Schakel de YouTube-sectie zelf in onder Menu. Kan in sommige landen beperkt zijn."
+
+msgid "Quick access to the tracks, albums and artists you starred."
+msgstr "Snelle toegang tot de nummers, albums en artiesten die je met een ster markeerde."
+
+msgid "Browse your music folder — and any extra sources — as a file tree."
+msgstr "Blader door je muziekmap — en eventuele extra bronnen — als een bestandsboom."
+
+msgid "Every artist in your library, each opening to their albums and tracks."
+msgstr "Elke artiest in je bibliotheek, die hun albums en nummers opent."
+
+msgid "Every album in your library, sortable and grouped by initial or year."
+msgstr "Elk album in je bibliotheek, sorteerbaar en gegroepeerd op beginletter of jaar."
+
+msgid "Live and concert recordings you marked, kept apart from your albums."
+msgstr "Concert- en live-opnames die je hebt gemarkeerd, los van je albums."
+
+msgid "Subscribe to podcast feeds and play or download their episodes."
+msgstr "Abonneer je op podcastfeeds en speel of download hun afleveringen."
+
+msgid "Internet radio stations, with an optional buffer to record what just played."
+msgstr "Internetradiozenders, met een optionele buffer om op te nemen wat net speelde."
+
+msgid "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool."
+msgstr "Zoek en speel YouTube, volg kanalen en bewaar video's offline. Heeft yt-dlp nodig."
+
+msgid "Albums, folders or tracks you marked as audiobooks, resuming where you left off."
+msgstr "Albums, mappen of nummers die je als luisterboek markeerde, hervat waar je gebleven was."
+
+msgid "Your own playlists, arranged in any order you like."
+msgstr "Je eigen afspeellijsten, in de volgorde die je wilt."
+
+msgid "Quick voice notes recorded with the microphone."
+msgstr "Snelle spraaknotities opgenomen met de microfoon."
+
+msgid "Listening statistics and your most-played artists and tracks."
+msgstr "Luisterstatistieken en je meest afgespeelde artiesten en nummers."

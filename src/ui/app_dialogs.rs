@@ -1173,7 +1173,7 @@ impl App {
         let yt_group = adw::PreferencesGroup::builder()
             .title(gettext("YouTube"))
             .description(gettext(
-                "Search and play YouTube, follow channels, add videos/playlists to your music or keep them offline. May be restricted in some countries.",
+                "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries.",
             ))
             .build();
 
@@ -1485,7 +1485,11 @@ fn rebuild_section_rows(
         let Some((label, _icon)) = crate::ui::app::section_meta(name) else {
             continue;
         };
-        let row = adw::ActionRow::builder().title(label).build();
+        let row = adw::ActionRow::builder()
+            .title(gettext(label))
+            .subtitle(gettext(crate::ui::app::section_description(name)))
+            .build();
+        row.set_subtitle_lines(2);
 
         // Drag handle on the left (a hint); the whole row is dragged.
         let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");

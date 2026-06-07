@@ -1807,3 +1807,44 @@ msgstr "بدون تجميع"
 
 msgid "Remove this source?"
 msgstr "إزالة هذا المصدر؟"
+
+# Menu section descriptions + YouTube settings text (added 2026-06-07).
+
+msgid "YouTube needs the yt-dlp tool, downloaded here into the app data folder (not bundled). Turn the YouTube section itself on under Menu. May be restricted in some countries."
+msgstr "يحتاج يوتيوب إلى أداة yt-dlp، التي تُنزَّل هنا إلى مجلد بيانات التطبيق (غير مضمّنة). فعِّل قسم يوتيوب نفسه من القائمة. قد يكون مقيّدًا في بعض البلدان."
+
+msgid "Quick access to the tracks, albums and artists you starred."
+msgstr "وصول سريع إلى المقاطع والألبومات والفنانين الذين وضعت لهم نجمة."
+
+msgid "Browse your music folder — and any extra sources — as a file tree."
+msgstr "تصفّح مجلد الموسيقى — وأي مصادر إضافية — كشجرة ملفات."
+
+msgid "Every artist in your library, each opening to their albums and tracks."
+msgstr "كل فنان في مكتبتك، يفتح على ألبوماته ومقاطعه."
+
+msgid "Every album in your library, sortable and grouped by initial or year."
+msgstr "كل ألبوم في مكتبتك، قابل للفرز والتجميع حسب الحرف الأول أو السنة."
+
+msgid "Live and concert recordings you marked, kept apart from your albums."
+msgstr "تسجيلات الحفلات والعروض الحية التي وضعت لها علامة، منفصلة عن ألبوماتك."
+
+msgid "Subscribe to podcast feeds and play or download their episodes."
+msgstr "اشترك في خلاصات البودكاست وشغّل حلقاتها أو نزّلها."
+
+msgid "Internet radio stations, with an optional buffer to record what just played."
+msgstr "محطات راديو الإنترنت، مع ذاكرة مؤقتة اختيارية لتسجيل ما تم تشغيله للتو."
+
+msgid "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool."
+msgstr "ابحث وشغّل يوتيوب، تابع القنوات واحتفظ بالفيديوهات دون اتصال. يحتاج إلى أداة yt-dlp."
+
+msgid "Albums, folders or tracks you marked as audiobooks, resuming where you left off."
+msgstr "الألبومات أو المجلدات أو المقاطع التي وضعت لها علامة ككتب صوتية، مع المتابعة من حيث توقفت."
+
+msgid "Your own playlists, arranged in any order you like."
+msgstr "قوائم التشغيل الخاصة بك، بأي ترتيب تريده."
+
+msgid "Quick voice notes recorded with the microphone."
+msgstr "ملاحظات صوتية سريعة مسجَّلة بالميكروفون."
+
+msgid "Listening statistics and your most-played artists and tracks."
+msgstr "إحصاءات الاستماع وأكثر الفنانين والمقاطع تشغيلًا لديك."
