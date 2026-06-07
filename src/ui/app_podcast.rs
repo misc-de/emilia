@@ -807,9 +807,18 @@ impl App {
         list.set_visible(true);
 
         if self.podcasts.podcast_search_results.is_empty() {
-            let row = adw::ActionRow::builder()
-                .title(gettext("No podcasts found"))
-                .build();
+            let row = if self.podcasts.podcast_search_failed {
+                let r = adw::ActionRow::builder()
+                    .title(gettext("Search service unreachable"))
+                    .subtitle(gettext("Check your connection and try again"))
+                    .build();
+                r.set_subtitle_lines(2);
+                r
+            } else {
+                adw::ActionRow::builder()
+                    .title(gettext("No podcasts found"))
+                    .build()
+            };
             row.set_sensitive(false);
             list.append(&row);
             // Compact height – only the search and address field plus a hint row.

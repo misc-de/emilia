@@ -549,6 +549,9 @@ pub(crate) struct StreamingState {
     pub(crate) streams_list: gtk::ListBox,
     /// Hits of the last station search (Radio Browser), for the add dialog.
     pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
+    /// The last station search hit a network/service error (vs. simply no hits):
+    /// drives a "service unreachable" hint instead of "no results".
+    pub(crate) stream_search_failed: bool,
     /// While the add dialog is open: (dialog, hit list), so that asynchronously
     /// arriving hits fit into the already shown list.
     pub(crate) stream_search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
@@ -589,6 +592,8 @@ pub(crate) struct PodcastsState {
     pub(crate) newest_list: gtk::Box,
     /// Hits of the last podcast search (iTunes), for the subscribe dialog.
     pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
+    /// The last podcast search hit a network/service error (vs. no hits).
+    pub(crate) podcast_search_failed: bool,
     /// While the subscribe search dialog is open: (dialog, hit list), so that
     /// asynchronously arriving hits can be inserted into the shown list.
     pub(crate) podcast_search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
@@ -649,6 +654,8 @@ pub(crate) struct YoutubeState {
     pub(crate) recent_list: gtk::Box,
     /// Hits of the last search, for the subscribe/search dialog.
     pub(crate) search_results: Vec<crate::core::youtube::YtResult>,
+    /// The last YouTube search hit a network/service error (vs. no hits).
+    pub(crate) search_failed: bool,
     /// While the search dialog is open: (dialog, hit list, spinner box), so
     /// asynchronously arriving hits can be inserted into the shown list and the
     /// busy spinner shown during the search can be hidden again.
@@ -1201,6 +1208,9 @@ pub enum Msg {
     /// cached version at handling time, so the button works even before the
     /// background version probe has resolved.
     FetchYtDlp,
+    /// Background tick (startup + slow timer): silently re-download the managed
+    /// yt-dlp when it has gone stale, so YouTube keeps working hands-off.
+    YtDlpAutoUpdate,
     /// Open the YouTube search/subscribe dialog.
     YtSubscribe,
     /// Search YouTube for this term + kind filter (background).
@@ -1463,6 +1473,8 @@ pub enum Cmd {
     },
     /// Hits of the podcast search (for the open subscribe dialog).
     PodcastSearchResults(Vec<crate::core::podcast::PodcastSearchResult>),
+    /// The podcast search failed (service unreachable) → show a hint, not "empty".
+    PodcastSearchFailed,
     /// Cover thumbnails of the search hits are cached → redraw the hit list.
     PodcastSearchCoversReady,
     /// Rebuild the podcast list (e.g. after feed images were cached).
@@ -1470,12 +1482,18 @@ pub enum Cmd {
     /// yt-dlp install/update/startup-check finished: the version on success,
     /// or an error message. Drives the settings status and `youtube.ytdlp_version`.
     YtDlpReady(Result<String, String>),
+    /// Silent background yt-dlp auto-update finished (the version on success, or
+    /// an error message). Unlike [`Cmd::YtDlpReady`] it never toasts: a routine
+    /// refresh — or a failure while offline — must not nag the user.
+    YtDlpAutoUpdated(Result<String, String>),
     /// Background yt-dlp version probe (opened settings) finished: `Some(v)` if a
     /// usable yt-dlp is present, `None` otherwise. Caches the result and refreshes
     /// the settings row without ever blocking the UI thread on the subprocess.
     YtDlpChecked(Option<String>),
     /// Hits of the YouTube search (for the open search dialog).
     YtSearchResults(Vec<crate::core::youtube::YtResult>),
+    /// The YouTube search failed (service unreachable / yt-dlp broken) → hint.
+    YtSearchFailed,
     /// Thumbnails of the search hits cached → redraw the hit list.
     YtSearchThumbsReady,
     /// Channel subscribed/refreshed: `Some(title)` on success, otherwise `None`.
@@ -1532,6 +1550,8 @@ pub enum Cmd {
     YtPlaylistCoversReady,
     /// Hits of the station search (for the open add dialog).
     StreamSearchResults(Vec<crate::core::streaming::StationResult>),
+    /// The station search failed (service unreachable) → show a hint.
+    StreamSearchFailed,
     /// Logos of the search hits are cached → redraw the hit list.
     StreamSearchCoversReady,
     /// Rebuild the station list (e.g. after logos were cached).
@@ -3007,6 +3027,18 @@ impl Component for App {
             });
         }
 
+        // Keep the managed yt-dlp fresh hands-off: check once at startup and then
+        // every 12 h. The handler is a no-op unless YouTube is on and the copy is
+        // actually stale (so it costs nothing on most ticks).
+        {
+            let sender = sender.clone();
+            sender.input(Msg::YtDlpAutoUpdate);
+            gtk::glib::timeout_add_seconds_local(12 * 60 * 60, move || {
+                sender.input(Msg::YtDlpAutoUpdate);
+                gtk::glib::ControlFlow::Continue
+            });
+        }
+
         // Start the MPRIS service: commands from the lock screen/from media keys
         // are fed into the component as Msg::Mpris.
         let mpris = crate::core::mpris::Mpris::start({
@@ -3180,6 +3212,7 @@ impl Component for App {
                 newest_items: Vec::new(),
                 newest_list: newest_list.clone(),
                 podcast_search_results: Vec::new(),
+                podcast_search_failed: false,
                 podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 playing_episode_url: None,
                 episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
@@ -3192,6 +3225,7 @@ impl Component for App {
                 stream_items: Vec::new(),
                 streams_list: streams_list.clone(),
                 stream_search_results: Vec::new(),
+                stream_search_failed: false,
                 stream_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 playing_stream: None,
                 stream_title: None,
@@ -3220,6 +3254,7 @@ impl Component for App {
                 recent_items: Vec::new(),
                 recent_list: yt_recent_list.clone(),
                 search_results: Vec::new(),
+                search_failed: false,
                 search: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 playing_video_id: None,
                 video_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
@@ -3604,8 +3639,13 @@ impl Component for App {
                 if !term.is_empty() {
                     self.toast(&gettext("Searching …"));
                     sender.spawn_command(move |out| {
-                        let results =
-                            crate::core::podcast::search_podcasts(&term).unwrap_or_default();
+                        let results = match crate::core::podcast::search_podcasts(&term) {
+                            Ok(r) => r,
+                            Err(_) => {
+                                let _ = out.send(Cmd::PodcastSearchFailed);
+                                return;
+                            }
+                        };
                         // Show hits immediately (still without covers) …
                         let _ = out.send(Cmd::PodcastSearchResults(results.clone()));
                         // … and fetch the cover thumbnails afterwards in the background.
@@ -3850,13 +3890,19 @@ impl Component for App {
                 let update = self.youtube.ytdlp_version.is_some();
                 self.start_ytdlp_fetch(update, &sender);
             }
+            Msg::YtDlpAutoUpdate => self.maybe_auto_update_ytdlp(&sender),
             Msg::YtSubscribe => self.open_youtube_search_dialog(root, &sender),
             Msg::YtSearch(term, kind) => {
                 let term = term.trim().to_string();
                 if !term.is_empty() {
                     sender.spawn_command(move |out| {
-                        let results =
-                            crate::core::youtube::search(&term, kind, 25).unwrap_or_default();
+                        let results = match crate::core::youtube::search(&term, kind, 25) {
+                            Ok(r) => r,
+                            Err(_) => {
+                                let _ = out.send(Cmd::YtSearchFailed);
+                                return;
+                            }
+                        };
                         let _ = out.send(Cmd::YtSearchResults(results.clone()));
                         for r in &results {
                             if let Some(t) = r.thumbnail.as_deref() {
@@ -4406,7 +4452,13 @@ impl Component for App {
                 }
             }
             Cmd::PodcastSearchResults(results) => {
+                self.podcasts.podcast_search_failed = false;
                 self.podcasts.podcast_search_results = results;
+                self.rebuild_podcast_search_results(&sender);
+            }
+            Cmd::PodcastSearchFailed => {
+                self.podcasts.podcast_search_failed = true;
+                self.podcasts.podcast_search_results.clear();
                 self.rebuild_podcast_search_results(&sender);
             }
             Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
@@ -4429,12 +4481,28 @@ impl Component for App {
                 }
                 self.refresh_ytdlp_status_label();
             }
+            Cmd::YtDlpAutoUpdated(result) => {
+                self.youtube.ytdlp_busy = false;
+                match result {
+                    // Silent on success (version label only) and on failure (just
+                    // log) — an auto-update must not interrupt with toasts.
+                    Ok(v) => self.youtube.ytdlp_version = Some(v),
+                    Err(e) => tracing::debug!("yt-dlp auto-update skipped: {e}"),
+                }
+                self.refresh_ytdlp_status_label();
+            }
             Cmd::YtDlpChecked(version) => {
                 self.youtube.ytdlp_version = version;
                 self.refresh_ytdlp_status_label();
             }
             Cmd::YtSearchResults(results) => {
+                self.youtube.search_failed = false;
                 self.youtube.search_results = results;
+                self.rebuild_youtube_search_results(&sender);
+            }
+            Cmd::YtSearchFailed => {
+                self.youtube.search_failed = true;
+                self.youtube.search_results.clear();
                 self.rebuild_youtube_search_results(&sender);
             }
             Cmd::YtSearchThumbsReady => self.rebuild_youtube_search_results(&sender),
@@ -4502,7 +4570,13 @@ impl Component for App {
             }
             Cmd::YtPlaylistCoversReady => self.on_cmd_yt_playlist_covers_ready(),
             Cmd::StreamSearchResults(results) => {
+                self.streaming.stream_search_failed = false;
                 self.streaming.stream_search_results = results;
+                self.rebuild_stream_search_results(&sender);
+            }
+            Cmd::StreamSearchFailed => {
+                self.streaming.stream_search_failed = true;
+                self.streaming.stream_search_results.clear();
                 self.rebuild_stream_search_results(&sender);
             }
             Cmd::StreamSearchCoversReady => self.rebuild_stream_search_results(&sender),

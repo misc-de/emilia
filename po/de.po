@@ -2299,3 +2299,20 @@ msgstr "Finde Interpreten, Alben, Lieder, Stationen, Aufnahmen, Videos und Memos
 
 msgid "Artist, album, song, station, video, memo …"
 msgstr "Interpret, Album, Lied, Station, Video, Memo …"
+
+# Per-source "service unreachable" hints in the search dialogs (added 2026-06-07).
+
+msgid "Station service unreachable"
+msgstr "Stationsdienst nicht erreichbar"
+
+msgid "Search service unreachable"
+msgstr "Suchdienst nicht erreichbar"
+
+msgid "YouTube unreachable"
+msgstr "YouTube nicht erreichbar"
+
+msgid "Check your connection and try again"
+msgstr "Prüfe deine Verbindung und versuche es erneut"
+
+msgid "Check your connection, or update yt-dlp in the settings"
+msgstr "Prüfe deine Verbindung oder aktualisiere yt-dlp in den Einstellungen"

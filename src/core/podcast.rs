@@ -445,11 +445,13 @@ pub fn search_podcasts(term: &str) -> Result<Vec<PodcastSearchResult>> {
         .timeout_connect(Duration::from_secs(8))
         .timeout_read(Duration::from_secs(20))
         .build();
+    // Defensive retry/backoff so a transient hiccup doesn't blank the search.
+    let Some(resp) = crate::core::net::get_with_retry(&agent, &url, None, "itunes.apple.com")?
+    else {
+        return Ok(Vec::new());
+    };
     let mut bytes = Vec::new();
-    agent
-        .get(&url)
-        .call()?
-        .into_reader()
+    resp.into_reader()
         .take(4 * 1024 * 1024) // Cap against unexpectedly large responses.
         .read_to_end(&mut bytes)?;
     parse_search(&bytes)

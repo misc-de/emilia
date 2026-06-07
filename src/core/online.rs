@@ -28,13 +28,6 @@ const USER_AGENT: &str = "Emilia/0.1.38 ( https://cais.de )";
 
 /// MusicBrainz policy: at most one request per second.
 pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
-/// On a server-side rate limit (HTTP 429/503), retry this many times with a
-/// pause before a real error is reported.
-const RL_MAX_RETRIES: usize = 4;
-/// First backoff pause on a rate limit (doubles per attempt, capped).
-const RL_BASE_BACKOFF: Duration = Duration::from_millis(1500);
-/// Upper bound of the backoff pause.
-const RL_MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Number of parallel fetches for artist photos (Deezer handles this well).
 pub const ARTIST_FETCH_THREADS: usize = 8;
 
@@ -130,42 +123,14 @@ impl OnlineClient {
         Self { agent }
     }
 
-    /// GET that handles rate limits politely: on `429`/`503` it **pauses and
-    /// retries** – for as long as specified by `Retry-After`, otherwise by backoff –
-    /// instead of failing immediately. This way a temporary limit doesn't abort the
-    /// run, nor does it consume a "failed attempt". `404` yields `Ok(None)` (no
-    /// content). Other errors – and a persistent limit after all attempts – are
-    /// passed through. Always sets our User-Agent (tolerated by all services).
+    /// GET with defensive retry + backoff (transient transport errors, `5xx`,
+    /// and rate limits honouring `Retry-After`); `404` yields `Ok(None)`. See
+    /// [`crate::core::net::get_with_retry`]. Always sets our User-Agent.
     fn call_get(&self, url: &str) -> Result<Option<ureq::Response>> {
-        let mut backoff = RL_BASE_BACKOFF;
-        let mut attempt = 0usize;
-        loop {
-            match self.agent.get(url).set("User-Agent", USER_AGENT).call() {
-                Ok(resp) => return Ok(Some(resp)),
-                // No content stored (404) – not an error.
-                Err(ureq::Error::Status(404, _)) => return Ok(None),
-                // Rate limit: pause and – up to the limit – retry.
-                Err(ureq::Error::Status(code, resp)) if code == 429 || code == 503 => {
-                    attempt += 1;
-                    if attempt > RL_MAX_RETRIES {
-                        return Err(ureq::Error::Status(code, resp).into());
-                    }
-                    let wait = resp
-                        .header("Retry-After")
-                        .and_then(|s| s.trim().parse::<u64>().ok())
-                        .map(Duration::from_secs)
-                        .unwrap_or(backoff)
-                        .min(RL_MAX_BACKOFF);
-                    // Log only the part before '?' – the query string can carry
-                    // an API key (fanart `api_key`, AcoustID `client_key`).
-                    let safe_url = url.split('?').next().unwrap_or(url);
-                    tracing::debug!("Rate-limited ({code}) on {safe_url}; pausing {wait:?}");
-                    std::thread::sleep(wait);
-                    backoff = (backoff * 2).min(RL_MAX_BACKOFF);
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
+        // Log only the part before '?' – the query string can carry an API key
+        // (fanart `api_key`, AcoustID `client_key`).
+        let safe_url = url.split('?').next().unwrap_or(url);
+        crate::core::net::get_with_retry(&self.agent, url, Some(USER_AGENT), safe_url)
     }
 
     /// Finds the best-matching MusicBrainz release for (artist, album).

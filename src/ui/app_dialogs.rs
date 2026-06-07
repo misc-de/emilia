@@ -572,7 +572,9 @@ impl App {
                 for s in &res.streams {
                     let row = adw::ActionRow::builder()
                         .title(gtk::glib::markup_escape_text(&s.name))
-                        .subtitle(gtk::glib::markup_escape_text(s.tags.as_deref().unwrap_or("")))
+                        .subtitle(gtk::glib::markup_escape_text(
+                            s.tags.as_deref().unwrap_or(""),
+                        ))
                         .activatable(true)
                         .build();
                     row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
@@ -591,7 +593,11 @@ impl App {
             // --- Recordings (timeshift; tap = play) ---
             if !res.recordings.is_empty() {
                 let group = adw::PreferencesGroup::builder()
-                    .title(format!("{} ({})", gettext("Recordings"), res.recordings.len()))
+                    .title(format!(
+                        "{} ({})",
+                        gettext("Recordings"),
+                        res.recordings.len()
+                    ))
                     .build();
                 for r in &res.recordings {
                     let mut parts: Vec<String> = Vec::new();
@@ -630,7 +636,9 @@ impl App {
                         .title(gtk::glib::markup_escape_text(&m.title))
                         .activatable(true)
                         .build();
-                    row.add_prefix(&gtk::Image::from_icon_name("audio-input-microphone-symbolic"));
+                    row.add_prefix(&gtk::Image::from_icon_name(
+                        "audio-input-microphone-symbolic",
+                    ));
                     row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
                     let sender = sender.clone();
                     let dlg = dlg.clone();
@@ -647,7 +655,11 @@ impl App {
             // --- YouTube channels (tap = open the channel's videos) ---
             if !res.yt_channels.is_empty() {
                 let group = adw::PreferencesGroup::builder()
-                    .title(format!("{} ({})", gettext("Channels"), res.yt_channels.len()))
+                    .title(format!(
+                        "{} ({})",
+                        gettext("Channels"),
+                        res.yt_channels.len()
+                    ))
                     .build();
                 for c in &res.yt_channels {
                     let row = adw::ActionRow::builder()
@@ -685,11 +697,12 @@ impl App {
                         .subtitle(gtk::glib::markup_escape_text(&v.channel_title))
                         .activatable(true)
                         .build();
-                    let cover = crate::core::online::youtube_cover_path(&v.video_id).or_else(|| {
-                        crate::core::online::youtube_thumb_path(
-                            &crate::core::youtube::thumbnail_url(&v.video_id),
-                        )
-                    });
+                    let cover =
+                        crate::core::online::youtube_cover_path(&v.video_id).or_else(|| {
+                            crate::core::online::youtube_thumb_path(
+                                &crate::core::youtube::thumbnail_url(&v.video_id),
+                            )
+                        });
                     row.add_prefix(&crate::ui::app::cover_widget(
                         cover.as_deref(),
                         "video-x-generic-symbolic",

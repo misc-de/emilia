@@ -19,7 +19,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
@@ -123,6 +123,15 @@ pub fn download_ytdlp() -> Result<String> {
 /// site / intent at the UI layer.
 pub fn update_ytdlp() -> Result<String> {
     download_ytdlp()
+}
+
+/// Age of the **managed** (app-downloaded) `yt-dlp` copy since it was last
+/// written, or `None` when there is no managed copy. A system/Flatpak `yt-dlp`
+/// on `PATH` is intentionally not reported here — it is not ours to update, so
+/// the auto-updater leaves it alone.
+pub fn managed_age() -> Option<Duration> {
+    let modified = std::fs::metadata(ytdlp_path()).ok()?.modified().ok()?;
+    SystemTime::now().duration_since(modified).ok()
 }
 
 #[cfg(unix)]

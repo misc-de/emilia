@@ -25,6 +25,9 @@ use crate::ui::app::{App, Msg};
 pub(crate) const CHANNEL_VIDEO_LIMIT: usize = 30;
 /// Upper bound of videos indexed when adding a whole playlist to the collection.
 const PLAYLIST_INDEX_LIMIT: usize = 200;
+/// Re-download the managed yt-dlp when it is at least this old (it breaks as
+/// YouTube changes, so a weekly refresh keeps the feature working hands-off).
+const YTDLP_AUTO_UPDATE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Outcome of a library-add attempt: the file was written, or the destination
 /// already holds a (different) file and the user must decide whether to
@@ -780,9 +783,20 @@ impl App {
         list.set_visible(true);
 
         if self.youtube.search_results.is_empty() {
-            let row = adw::ActionRow::builder()
-                .title(gettext("Nothing found"))
-                .build();
+            let row = if self.youtube.search_failed {
+                let r = adw::ActionRow::builder()
+                    .title(gettext("YouTube unreachable"))
+                    .subtitle(gettext(
+                        "Check your connection, or update yt-dlp in the settings",
+                    ))
+                    .build();
+                r.set_subtitle_lines(2);
+                r
+            } else {
+                adw::ActionRow::builder()
+                    .title(gettext("Nothing found"))
+                    .build()
+            };
             row.set_sensitive(false);
             list.append(&row);
             dialog.set_content_height(320);
@@ -1912,6 +1926,29 @@ impl App {
             }
             .map_err(|e| e.to_string());
             let _ = out.send(crate::ui::app::Cmd::YtDlpReady(result));
+        });
+    }
+
+    /// Background auto-update of the **managed** yt-dlp copy (fired at startup and
+    /// on a slow timer). Re-downloads the latest only when YouTube is enabled, a
+    /// managed copy exists and is older than [`YTDLP_AUTO_UPDATE_AGE`], and no
+    /// fetch is already running. Silent (the result lands in
+    /// `Cmd::YtDlpAutoUpdated`, which never toasts) so a routine refresh — or a
+    /// failure while offline — does not nag the user. A system/Flatpak yt-dlp is
+    /// left untouched (it has no managed age).
+    pub(crate) fn maybe_auto_update_ytdlp(&mut self, sender: &ComponentSender<Self>) {
+        if !self.youtube.enabled || self.youtube.ytdlp_busy {
+            return;
+        }
+        match youtube::managed_age() {
+            Some(age) if age >= YTDLP_AUTO_UPDATE_AGE => {}
+            _ => return, // no managed copy, or still fresh
+        }
+        self.youtube.ytdlp_busy = true;
+        self.refresh_ytdlp_status_label();
+        sender.spawn_command(move |out| {
+            let result = youtube::update_ytdlp().map_err(|e| e.to_string());
+            let _ = out.send(crate::ui::app::Cmd::YtDlpAutoUpdated(result));
         });
     }
 

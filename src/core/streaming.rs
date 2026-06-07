@@ -42,16 +42,14 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
         .timeout_connect(Duration::from_secs(8))
         .timeout_read(Duration::from_secs(20))
         .build();
+    // The API asks for a meaningful User-Agent.
+    let ua = format!("Emilia/{}", env!("CARGO_PKG_VERSION"));
+    // Defensive retry/backoff so a transient hiccup doesn't blank the search.
+    let Some(resp) = crate::core::net::get_with_retry(&agent, &url, Some(&ua), API_BASE)? else {
+        return Ok(Vec::new());
+    };
     let mut bytes = Vec::new();
-    agent
-        .get(&url)
-        // The API asks for a meaningful User-Agent.
-        .set(
-            "User-Agent",
-            &format!("Emilia/{}", env!("CARGO_PKG_VERSION")),
-        )
-        .call()?
-        .into_reader()
+    resp.into_reader()
         .take(8 * 1024 * 1024) // Cap against unexpectedly large responses.
         .read_to_end(&mut bytes)?;
     parse_stations(&bytes)

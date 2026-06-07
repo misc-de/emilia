@@ -9,8 +9,73 @@
 //!    omits or *lies about* `Content-Length` (e.g. chunked transfer).
 
 use std::io::{Read, Write};
+use std::time::Duration;
 
 use anyhow::{bail, Result};
+
+/// Max attempts before a transient-failure retry gives up (see [`get_with_retry`]).
+const RETRY_MAX: usize = 4;
+/// First backoff delay; doubles each retry, capped at [`RETRY_MAX_BACKOFF`].
+const RETRY_BASE_BACKOFF: Duration = Duration::from_millis(1500);
+const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Runs a `GET url` on `agent` with defensive retry + exponential backoff
+/// against **transient** failures: network/transport errors, server `5xx`, and
+/// rate limits (`429`/`503`, honouring `Retry-After`). A `404` maps to
+/// `Ok(None)` (no content). Non-transient errors, and a persistent failure after
+/// [`RETRY_MAX`] attempts, are returned. When `user_agent` is set it is sent on
+/// every attempt. `label` is for logging only — pass a value **without** a query
+/// string (it may carry API keys). Performs the request itself (rather than via
+/// a closure) so the large `ureq::Error` never crosses a closure boundary.
+pub fn get_with_retry(
+    agent: &ureq::Agent,
+    url: &str,
+    user_agent: Option<&str>,
+    label: &str,
+) -> Result<Option<ureq::Response>> {
+    let mut backoff = RETRY_BASE_BACKOFF;
+    let mut attempt = 0usize;
+    loop {
+        let mut req = agent.get(url);
+        if let Some(ua) = user_agent {
+            req = req.set("User-Agent", ua);
+        }
+        match req.call() {
+            Ok(resp) => return Ok(Some(resp)),
+            // No content (404) – not an error, and not worth retrying.
+            Err(ureq::Error::Status(404, _)) => return Ok(None),
+            Err(e) => {
+                let retryable = match &e {
+                    // Connection refused, timeout, DNS, reset, … – usually transient.
+                    ureq::Error::Transport(_) => true,
+                    // Server-side / rate-limit codes; client 4xx (except those
+                    // above) are not retried – they won't change on a retry.
+                    ureq::Error::Status(code, _) => matches!(code, 429 | 500 | 502 | 503 | 504),
+                };
+                attempt += 1;
+                if !retryable || attempt > RETRY_MAX {
+                    return Err(e.into());
+                }
+                // Honour Retry-After on rate limits; otherwise exponential backoff.
+                let wait = match &e {
+                    ureq::Error::Status(_, resp) => resp
+                        .header("Retry-After")
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .map(Duration::from_secs)
+                        .unwrap_or(backoff),
+                    _ => backoff,
+                }
+                .min(RETRY_MAX_BACKOFF);
+                tracing::debug!(
+                    "transient error on {label} (attempt {attempt}/{RETRY_MAX}); \
+                     retrying in {wait:?}: {e}"
+                );
+                std::thread::sleep(wait);
+                backoff = (backoff * 2).min(RETRY_MAX_BACKOFF);
+            }
+        }
+    }
+}
 
 /// Ceiling for a single downloaded media file (2 GiB). Generous enough for long
 /// / lossless podcast episodes and large remote tracks, but bounds a runaway or

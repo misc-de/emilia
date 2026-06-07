@@ -467,9 +467,18 @@ impl App {
         list.set_visible(true);
 
         if self.streaming.stream_search_results.is_empty() {
-            let row = adw::ActionRow::builder()
-                .title(gettext("No stations found"))
-                .build();
+            let row = if self.streaming.stream_search_failed {
+                let r = adw::ActionRow::builder()
+                    .title(gettext("Station service unreachable"))
+                    .subtitle(gettext("Check your connection and try again"))
+                    .build();
+                r.set_subtitle_lines(2);
+                r
+            } else {
+                adw::ActionRow::builder()
+                    .title(gettext("No stations found"))
+                    .build()
+            };
             row.set_sensitive(false);
             list.append(&row);
             dialog.set_content_height(300);
@@ -1315,7 +1324,13 @@ impl App {
         if !term.is_empty() {
             self.toast(&gettext("Searching …"));
             sender.spawn_command(move |out| {
-                let results = crate::core::streaming::search_stations(&term).unwrap_or_default();
+                let results = match crate::core::streaming::search_stations(&term) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let _ = out.send(Cmd::StreamSearchFailed);
+                        return;
+                    }
+                };
                 // Show hits immediately (still without logos) …
                 let _ = out.send(Cmd::StreamSearchResults(results.clone()));
                 // … and fetch the logos afterwards in the background.

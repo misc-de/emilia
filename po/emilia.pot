@@ -1933,3 +1933,18 @@ msgstr ""
 
 msgid "Artist, album, song, station, video, memo …"
 msgstr ""
+
+msgid "Station service unreachable"
+msgstr ""
+
+msgid "Search service unreachable"
+msgstr ""
+
+msgid "YouTube unreachable"
+msgstr ""
+
+msgid "Check your connection and try again"
+msgstr ""
+
+msgid "Check your connection, or update yt-dlp in the settings"
+msgstr ""
