@@ -1263,22 +1263,16 @@ impl Library {
             }
         }
 
-        // --- The user's own collections: radio stations, timeshift recordings,
-        //     voice memos and the cached YouTube channels/videos. These lists are
-        //     personal and small, so they are filtered in memory (case-insensitive
-        //     substring) rather than via separate SQL. ---
+        // --- The user's own local collections: timeshift recordings and voice
+        //     memos. These lists are personal and small, so they are filtered in
+        //     memory (case-insensitive substring) rather than via separate SQL.
+        //     Streaming stations and YouTube content are intentionally not part of
+        //     the library search (they have their own dedicated sections). ---
         let ql = q.to_lowercase();
         let hit = |s: &str| s.to_lowercase().contains(&ql);
         let ohit =
             |s: &Option<String>| s.as_deref().is_some_and(|x| x.to_lowercase().contains(&ql));
 
-        let streams: Vec<_> = self
-            .streams()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|s| hit(&s.name) || ohit(&s.tags) || ohit(&s.country))
-            .take(limit)
-            .collect();
         let recordings: Vec<_> = self
             .recordings()
             .unwrap_or_default()
@@ -1293,31 +1287,13 @@ impl Library {
             .filter(|m| hit(&m.title))
             .take(limit)
             .collect();
-        let yt_channels: Vec<_> = self
-            .channels()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(_, title, _, _, _)| hit(title))
-            .take(limit)
-            .map(|(id, title, _url, thumb, _n)| crate::model::YtChannelHit { id, title, thumb })
-            .collect();
-        let yt_videos: Vec<_> = self
-            .all_videos()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|v| hit(&v.title) || hit(&v.channel_title))
-            .take(limit)
-            .collect();
 
         Ok(SearchResults {
             artists,
             albums,
             songs,
-            streams,
             recordings,
             memos,
-            yt_channels,
-            yt_videos,
         })
     }
 

@@ -22,11 +22,17 @@ impl App {
         let mut items = self.expand_area_items(raw);
         self.sort_entries("concerts", &mut items);
         self.concerts.concert_items = items.clone();
+        // Alphabetical section headings (by name) – shared by the list and the
+        // gallery, exactly like the albums overview.
+        let headers = self.entry_section_headers("concerts", &items);
+        *self.libview.concert_headers.borrow_mut() = headers.clone();
         if self.libview.gallery_view {
             let tiles = self.entry_gallery_items(&items);
-            self.fill_gallery(
+            self.fill_sectioned_gallery(
+                &self.concerts.concerts_gallery_box,
                 &self.concerts.concerts_gallery,
                 &tiles,
+                headers.as_deref(),
                 Msg::OpenConcertEntry,
                 Msg::ShowConcertDetail,
             );
@@ -44,6 +50,8 @@ impl App {
                 false,
                 true,
             );
+            // Refresh the section headings for the rebuilt rows (or clear them).
+            self.concerts.concerts_list.invalidate_headers();
         }
     }
 

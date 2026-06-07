@@ -387,11 +387,16 @@ impl App {
             {
                 let id = s.id;
                 let sender = sender.clone();
-                del.connect_clicked(move |_| {
-                    if let Ok(lib) = Library::open() {
-                        let _ = lib.delete_source(id);
-                    }
-                    sender.input(Msg::SourcesChanged);
+                // Confirm before removing – a Nextcloud source in particular is
+                // costly to re-add (login/QR), so don't drop it on a stray tap.
+                del.connect_clicked(move |b| {
+                    crate::ui::app::confirm_destructive(
+                        b,
+                        &gettext("Remove this source?"),
+                        &gettext("Remove"),
+                        sender.clone(),
+                        Msg::DeleteSource(id),
+                    );
                 });
             }
             row.add_suffix(&del);
@@ -564,31 +569,10 @@ impl App {
                 results.append(&group);
             }
 
-            // --- Streaming stations (tap = play/pause, like in the section) ---
-            if !res.streams.is_empty() {
-                let group = adw::PreferencesGroup::builder()
-                    .title(format!("{} ({})", gettext("Stations"), res.streams.len()))
-                    .build();
-                for s in &res.streams {
-                    let row = adw::ActionRow::builder()
-                        .title(gtk::glib::markup_escape_text(&s.name))
-                        .subtitle(gtk::glib::markup_escape_text(
-                            s.tags.as_deref().unwrap_or(""),
-                        ))
-                        .activatable(true)
-                        .build();
-                    row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
-                    let sender = sender.clone();
-                    let dlg = dlg.clone();
-                    let id = s.id;
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::ToggleStream(id));
-                        dlg.close();
-                    });
-                    group.add(&row);
-                }
-                results.append(&group);
-            }
+            // Streaming stations and YouTube channels/videos are intentionally
+            // *not* listed here – the global library search covers the local
+            // collection (artists, albums, songs, recordings, memos). YouTube has
+            // its own dedicated search (which also accepts a pasted link).
 
             // --- Recordings (timeshift; tap = play) ---
             if !res.recordings.is_empty() {
@@ -645,78 +629,6 @@ impl App {
                     let path = m.path.clone();
                     row.connect_activated(move |_| {
                         sender.input(Msg::PlayRecording(path.clone()));
-                        dlg.close();
-                    });
-                    group.add(&row);
-                }
-                results.append(&group);
-            }
-
-            // --- YouTube channels (tap = open the channel's videos) ---
-            if !res.yt_channels.is_empty() {
-                let group = adw::PreferencesGroup::builder()
-                    .title(format!(
-                        "{} ({})",
-                        gettext("Channels"),
-                        res.yt_channels.len()
-                    ))
-                    .build();
-                for c in &res.yt_channels {
-                    let row = adw::ActionRow::builder()
-                        .title(gtk::glib::markup_escape_text(&c.title))
-                        .activatable(true)
-                        .build();
-                    let cover = c
-                        .thumb
-                        .as_deref()
-                        .and_then(crate::core::online::youtube_thumb_path);
-                    row.add_prefix(&crate::ui::app::cover_widget(
-                        cover.as_deref(),
-                        "avatar-default-symbolic",
-                    ));
-                    let sender = sender.clone();
-                    let dlg = dlg.clone();
-                    let id = c.id;
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::YtOpenChannel(id));
-                        dlg.close();
-                    });
-                    group.add(&row);
-                }
-                results.append(&group);
-            }
-
-            // --- YouTube videos (cached, of subscribed channels; tap = play) ---
-            if !res.yt_videos.is_empty() {
-                let group = adw::PreferencesGroup::builder()
-                    .title(format!("{} ({})", gettext("Videos"), res.yt_videos.len()))
-                    .build();
-                for v in &res.yt_videos {
-                    let row = adw::ActionRow::builder()
-                        .title(gtk::glib::markup_escape_text(&v.title))
-                        .subtitle(gtk::glib::markup_escape_text(&v.channel_title))
-                        .activatable(true)
-                        .build();
-                    let cover =
-                        crate::core::online::youtube_cover_path(&v.video_id).or_else(|| {
-                            crate::core::online::youtube_thumb_path(
-                                &crate::core::youtube::thumbnail_url(&v.video_id),
-                            )
-                        });
-                    row.add_prefix(&crate::ui::app::cover_widget(
-                        cover.as_deref(),
-                        "video-x-generic-symbolic",
-                    ));
-                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
-                    let sender = sender.clone();
-                    let dlg = dlg.clone();
-                    let video_id = v.video_id.clone();
-                    let title = v.title.clone();
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::YtPlayVideo {
-                            video_id: video_id.clone(),
-                            title: title.clone(),
-                        });
                         dlg.close();
                     });
                     group.add(&row);
@@ -788,11 +700,9 @@ impl App {
         // --- Other sources (second local folder / Nextcloud) ---
         // Its own connection to the DB (like everywhere in the code via `Library::open`),
         // so this dialog can maintain the list itself; the main window is
-        // informed about changes via `Msg::SourcesChanged`.
-        let src_group = adw::PreferencesGroup::builder()
-            .title(gettext("Other sources"))
-            .description(gettext("Shown as tabs in the file view"))
-            .build();
+        // informed about changes via `Msg::SourcesChanged`. No heading/description
+        // here (kept deliberately bare); the list + "Add local folder" stand alone.
+        let src_group = adw::PreferencesGroup::builder().build();
         let src_list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
@@ -910,6 +820,40 @@ impl App {
         }
         eq_group.add(&eq_row);
         page.add(&eq_group);
+
+        // Track transitions (gapless / crossfade). Only for sequential local
+        // queues (albums, concerts, audiobooks); streams keep a hard cut.
+        let playback_group = adw::PreferencesGroup::builder()
+            .title(gettext("Playback"))
+            .description(gettext(
+                "Transitions between tracks of local albums, concerts and audiobooks.",
+            ))
+            .build();
+        let gapless_row = adw::SwitchRow::builder()
+            .title(gettext("Gapless playback"))
+            .subtitle(gettext("No gap between consecutive tracks"))
+            .active(self.settings.gapless)
+            .build();
+        {
+            let sender = sender.clone();
+            gapless_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetGapless(r.is_active()));
+            });
+        }
+        playback_group.add(&gapless_row);
+        let xfade_row = adw::SpinRow::with_range(0.0, 12.0, 1.0);
+        xfade_row.set_title(&gettext("Crossfade"));
+        xfade_row.set_subtitle(&gettext("Seconds to overlap tracks (0 = off)"));
+        xfade_row.set_value(self.settings.crossfade_secs);
+        {
+            let sender = sender.clone();
+            xfade_row.connect_value_notify(move |r| {
+                sender.input(Msg::SetCrossfade(r.value()));
+            });
+        }
+        playback_group.add(&xfade_row);
+        page.add(&playback_group);
+
         let sound_page = page;
 
         // --- Category: Search (read online metadata) ---
@@ -1154,6 +1098,10 @@ impl App {
                 0.0,
             ))
             .build();
+        // Don't auto-focus the spin button when the "Cache" page is shown – on
+        // mobile that immediately pops the on-screen keyboard (SpinRow is a
+        // GtkEditable; the field is refocused on the first tap).
+        crate::ui::widgets::no_autofocus(&buffer_row);
         {
             let sender = sender.clone();
             buffer_row.connect_value_notify(move |r| {
@@ -1219,33 +1167,20 @@ impl App {
         // YouTube (optional feature; the extractor yt-dlp is downloaded at
         // runtime, never bundled, and the feature is off by default). Lives on
         // the "Library" page (added to `lib_page` below).
+        // Enabling/disabling the YouTube *section* is done via the menu settings
+        // (the "youtube" menu switch doubles as the feature toggle), so there is no
+        // separate "Enable YouTube" switch here – only the yt-dlp tool management.
         let yt_group = adw::PreferencesGroup::builder()
             .title(gettext("YouTube"))
             .description(gettext(
                 "Search and play YouTube, follow channels, add videos/playlists to your music or keep them offline. May be restricted in some countries.",
             ))
             .build();
-        let yt_enable = adw::SwitchRow::builder()
-            .title(gettext("Enable YouTube"))
-            .subtitle(gettext(
-                "Adds a YouTube section. Requires downloading yt-dlp below.",
-            ))
-            .active(self.youtube.enabled)
-            .build();
-        {
-            let sender = sender.clone();
-            yt_enable.connect_active_notify(move |r| {
-                sender.input(Msg::SetYoutubeEnabled(r.is_active()));
-            });
-        }
-        yt_group.add(&yt_enable);
 
-        let ytdlp_row = adw::ActionRow::builder()
-            .title("yt-dlp")
-            .subtitle(gettext(
-                "Required tool – downloaded into the app data folder (not bundled).",
-            ))
-            .build();
+        // The status (version / progress) goes into the row **subtitle** – a
+        // second line below the "yt-dlp" title – instead of a suffix label next to
+        // the button. On narrow (mobile) screens a suffix label crowded the button;
+        // a subtitle wraps cleanly under the title.
         // Probing the installed version spawns `yt-dlp --version` (a Python zipapp
         // whose import takes a second or more on a phone). NEVER do that on the UI
         // thread while building the dialog – it would freeze the settings open for
@@ -1253,12 +1188,13 @@ impl App {
         // background; `Cmd::YtDlpChecked` updates the row when it finishes. (Reuses
         // the already-translated "Working …" string rather than a new one.)
         let cached = self.youtube.ytdlp_version.clone();
-        let status = gtk::Label::builder().css_classes(["dim-label"]).build();
-        status.set_text(&match &cached {
-            Some(v) => gettext_f("Installed (version {v})", &[("v", v)]),
-            None => gettext("Working …"),
-        });
-        ytdlp_row.add_suffix(&status);
+        let ytdlp_row = adw::ActionRow::builder()
+            .title("yt-dlp")
+            .subtitle(match &cached {
+                Some(v) => gettext_f("Installed (version {v})", &[("v", v)]),
+                None => gettext("Working …"),
+            })
+            .build();
         let dl_label = if cached.is_some() {
             gettext("Update")
         } else {
@@ -1279,9 +1215,9 @@ impl App {
         yt_group.add(&ytdlp_row);
         // The YouTube group lives at the bottom of the "Library" page.
         lib_page.add(&yt_group);
-        // Remember the status label + button so a finished probe/download/update
+        // Remember the status row + button so a finished probe/download/update
         // refreshes them (see `refresh_ytdlp_status_label`).
-        *self.youtube.settings_status.borrow_mut() = Some(status);
+        *self.youtube.settings_status.borrow_mut() = Some(ytdlp_row.clone());
         *self.youtube.settings_dl_btn.borrow_mut() = Some(dl_btn);
         {
             let status_slot = self.youtube.settings_status.clone();

@@ -34,6 +34,7 @@ pub(crate) struct InitState {
     pub repeat_on: bool,
     pub ui_language: String,
     pub sort: std::collections::HashMap<&'static str, (SortCrit, bool)>,
+    pub no_group: std::collections::HashMap<&'static str, bool>,
     pub gallery_view: bool,
     pub gallery_columns: u32,
     pub recording_buffer_minutes: u32,
@@ -206,6 +207,21 @@ impl App {
                 sort.insert(section, (crit.unwrap_or(SortCrit::Name), desc));
             }
         }
+        // Per-section "no grouping" flag ("nogroup_<section>"); default grouped.
+        let mut no_group: std::collections::HashMap<&'static str, bool> =
+            std::collections::HashMap::new();
+        for &section in SORTABLE_SECTIONS {
+            if matches!(
+                library
+                    .get_setting(&format!("nogroup_{section}"))
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+                Some("1")
+            ) {
+                no_group.insert(section, true);
+            }
+        }
         // Gallery view (default: off) and tiles/row (default: 3 mobile / 4 desktop).
         let gallery_view = matches!(
             library
@@ -256,6 +272,7 @@ impl App {
             repeat_on,
             ui_language,
             sort,
+            no_group,
             gallery_view,
             gallery_columns,
             recording_buffer_minutes,
@@ -287,6 +304,8 @@ impl App {
         self.rebuild_source_tabs();
         // Build the sleep-timer popover (presets) onto the header zzz button.
         self.setup_sleep_button(&widgets.sleep_btn, sender);
+        // Wire the inline list-filter button + search bar.
+        self.setup_inline_filter(widgets, sender);
 
         // Hover over the seek bar → temporarily show the hovered chapter below the
         // title; on leaving, back to the current chapter (at the
@@ -580,6 +599,14 @@ impl App {
             .artists
             .widget()
             .set_header_func(header_func(self.libview.artist_headers.clone()));
+        // Concert & audiobook entry lists: same alphabetical headings (by name)
+        // as the albums; the labels are filled in `load_concerts`/`load_audiobooks`.
+        self.concerts
+            .concerts_list
+            .set_header_func(header_func(self.libview.concert_headers.clone()));
+        self.favorites
+            .audiobooks_list
+            .set_header_func(header_func(self.libview.audiobook_headers.clone()));
 
         // Set the active button to match the visible stack page and show the name
         // of the menu item discreetly as the subtitle of the header.

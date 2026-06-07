@@ -177,6 +177,57 @@ pub fn watch_url(video_id: &str) -> String {
     format!("https://www.youtube.com/watch?v={video_id}")
 }
 
+/// Extracts the 11-character video id from a pasted YouTube **video** URL
+/// (`watch?v=`, `youtu.be/<id>`, `shorts/<id>`, `embed/<id>`, `live/<id>`),
+/// tolerating `www.`/`m.`/`music.` hosts and extra query parameters. Returns
+/// `None` for non-URL search terms and for playlist/channel URLs – so the search
+/// box can resolve a direct link to that exact video instead of running it as a
+/// free-text query.
+pub fn video_id_from_url(s: &str) -> Option<String> {
+    let s = s.trim();
+    let after = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))?;
+    let (host, rest) = after.split_once('/').unwrap_or((after, ""));
+    let host = host.to_ascii_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+
+    // youtu.be/<id>[?…]
+    if host == "youtu.be" {
+        return clean_video_id(rest);
+    }
+    if !(host == "youtube.com" || host == "m.youtube.com" || host == "music.youtube.com") {
+        return None;
+    }
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    // Path-based players: /shorts/<id>, /embed/<id>, /live/<id>, /v/<id>.
+    for prefix in ["shorts/", "embed/", "live/", "v/"] {
+        if let Some(id) = path.strip_prefix(prefix) {
+            return clean_video_id(id);
+        }
+    }
+    // /watch?v=<id>
+    if path == "watch" {
+        return query
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("v="))
+            .and_then(clean_video_id);
+    }
+    None
+}
+
+/// Takes the leading run of valid YouTube-id characters and accepts it only when
+/// it yields the canonical 11-character id (so trailing path/query bits are
+/// ignored, and a too-short fragment is rejected).
+fn clean_video_id(s: &str) -> Option<String> {
+    let id: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(11)
+        .collect();
+    (id.len() == 11).then_some(id)
+}
+
 /// Normalises a channel/uploader name into an artist name: YouTube Music
 /// auto-channels are `"<Artist> - Topic"` and official channels often end in
 /// `"VEVO"` – strip both so the external-DB (Deezer/MusicBrainz) query matches.
@@ -286,6 +337,12 @@ pub fn search(query: &str, kind: YtKind, n: usize) -> Result<Vec<YtResult>> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
+    }
+    // A pasted video link resolves to that exact video instead of being run as a
+    // free-text search – regardless of the selected kind, since a watch link is
+    // unambiguously a single video.
+    if let Some(id) = video_id_from_url(query) {
+        return Ok(vec![video_meta(&id)?]);
     }
     let n = n.clamp(1, 50);
     let source = match kind {
@@ -572,6 +629,40 @@ mod tests {
         let (artist, _, title) = split_title("Twenty-One Pilots - Stressed Out", None);
         assert_eq!(artist.as_deref(), Some("Twenty-One Pilots"));
         assert_eq!(title, "Stressed Out");
+    }
+
+    #[test]
+    fn video_id_from_url_handles_common_link_forms() {
+        let id = "dQw4w9WgXcQ";
+        assert_eq!(
+            video_id_from_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ").as_deref(),
+            Some(id)
+        );
+        // Extra query params and a different host.
+        assert_eq!(
+            video_id_from_url("https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&t=42s")
+                .as_deref(),
+            Some(id)
+        );
+        // Short link, shorts and youtu.be with trailing query.
+        assert_eq!(
+            video_id_from_url("https://youtu.be/dQw4w9WgXcQ?si=abc").as_deref(),
+            Some(id)
+        );
+        assert_eq!(
+            video_id_from_url("https://www.youtube.com/shorts/dQw4w9WgXcQ").as_deref(),
+            Some(id)
+        );
+        // Not a video link → no id (plain search term, channel/playlist URL).
+        assert_eq!(video_id_from_url("daft punk get lucky"), None);
+        assert_eq!(
+            video_id_from_url("https://www.youtube.com/@SomeChannel"),
+            None
+        );
+        assert_eq!(
+            video_id_from_url("https://www.youtube.com/playlist?list=PL123"),
+            None
+        );
     }
 
     #[test]

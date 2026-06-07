@@ -1768,3 +1768,18 @@ msgstr "Mais tarde"
 
 msgid "Restart now"
 msgstr "Reiniciar agora"
+
+# Mini-player: tap the song display to open the track detail view (added 2026-06-07).
+
+msgid "Show details of the current track"
+msgstr "Mostrar detalhes da faixa atual"
+
+# Sort popover: discreet toggle to sort without section headings (added 2026-06-07).
+
+msgid "Without grouping"
+msgstr "Sem agrupamento"
+
+# Settings → Library: confirm before removing an extra source (added 2026-06-07).
+
+msgid "Remove this source?"
+msgstr "Remover esta fonte?"

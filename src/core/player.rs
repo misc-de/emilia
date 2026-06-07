@@ -1,4 +1,24 @@
-//! GStreamer playback via `playbin3`.
+//! GStreamer playback via two `playbin3` **decks**.
+//!
+//! A single deck is the normal path (streams, podcasts, YouTube, explicit
+//! plays). The second deck enables two features for sequential **local** queues
+//! (albums / concerts / audiobooks):
+//!
+//! * **Gapless** — the active deck's `about-to-finish` signal hands the next
+//!   track's URI to the *same* `playbin3`, which concatenates the decoded
+//!   streams seamlessly. The app learns of the switch from the `STREAM_START`
+//!   bus message and advances its own state to match.
+//! * **Crossfade** — app-driven: the next track starts on the *idle* deck at
+//!   volume 0 and the two decks' volumes ramp over a configurable window before
+//!   the outgoing deck stops and the idle deck becomes active.
+//!
+//! Everything that queries or controls "the player" targets the **active** deck.
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use gstreamer as gst;
@@ -19,6 +39,14 @@ fn is_allowed_remote_uri(uri: &str) -> bool {
         scheme.as_str(),
         "http" | "https" | "rtsp" | "rtmp" | "rtmps" | "mms" | "mmsh" | "mmst"
     )
+}
+
+/// `file://` URI for a local path, or `None` if it can't be represented (used to
+/// arm the next gapless track from the app side).
+pub fn file_uri(path: &str) -> Option<String> {
+    gst::glib::filename_to_uri(path, None)
+        .ok()
+        .map(|g| g.to_string())
 }
 
 /// Combines the available audio-filter elements (scaletempo, equalizer) into a
@@ -68,7 +96,7 @@ fn rate_seek(playbin: &gst::Element, rate: f64, pos: gst::ClockTime) {
 /// A cheap, cloneable handle to query the live playback state from the UI
 /// without going through the 1 s `Tick` — used by the recording editor to keep
 /// its timeline and waveform playhead in sync with the audio. Holds a clone of
-/// the `playbin` element; all methods must be called on the GTK main thread.
+/// the active `playbin` element; all methods must be called on the GTK main thread.
 #[derive(Clone)]
 pub struct PlaybackProbe {
     playbin: gst::Element,
@@ -108,72 +136,123 @@ impl PlaybackProbe {
     }
 }
 
-pub struct Player {
-    playbin: gst::Element,
-    /// 10-band equalizer (lives inside the `audio-filter` chain if available).
+/// One playback deck: a `playbin3`, its (optional) equalizer and the per-deck
+/// preroll bookkeeping read by the bus watch.
+struct Deck {
+    bin: gst::Element,
+    /// 10-band equalizer inside this deck's `audio-filter` chain, if available.
     equalizer: Option<gst::Element>,
-    /// Current playback rate (speed). Applied via a rate-seek and re-applied
-    /// after each track load (a new segment always starts at 1.0). 1.0 = normal.
-    rate: std::rc::Rc<std::cell::Cell<f64>>,
-    /// A fresh track was just loaded → the bus watch re-applies `rate` once the
-    /// pipeline has prerolled.
-    fresh_load: std::rc::Rc<std::cell::Cell<bool>>,
-    /// Keeps the bus watch alive. `add_watch_local` returns a guard
-    /// that **removes** the watch again when dropped – without holding
-    /// onto it, an EOS would never arrive (no automatic advancing).
-    bus_watch: std::cell::RefCell<Option<gst::bus::BusWatchGuard>>,
-    /// Resume position (ms) to seek to once the freshly loaded pipeline has
-    /// prerolled (signalled by `AsyncDone` on the bus). `0` = none. This lets
-    /// `play_file`/`play_uri` arm a resume and return immediately instead of
-    /// **blocking the UI thread** for up to several seconds waiting on preroll.
-    /// Shared with the bus-watch closure (single-threaded, main loop).
-    pending_seek_ms: std::rc::Rc<std::cell::Cell<i64>>,
+    /// A fresh track was just **explicitly** loaded on this deck → the bus watch
+    /// re-applies the rate once prerolled, and a `STREAM_START` is *not* treated
+    /// as a gapless auto-advance.
+    fresh_load: Rc<Cell<bool>>,
+    /// Resume position (ms) to seek to once this deck has prerolled (`AsyncDone`).
+    pending_seek_ms: Rc<Cell<i64>>,
+}
+
+impl Deck {
+    fn make() -> Result<Self> {
+        let bin = gst::ElementFactory::make("playbin3")
+            .build()
+            .map_err(|_| anyhow!("playbin3 unavailable – is gstreamer installed?"))?;
+        // Audio-filter chain: scaletempo (pitch-preserving speed change) then the
+        // 10-band equalizer. Each element is optional – the chain adapts.
+        let scaletempo = gst::ElementFactory::make("scaletempo").build().ok();
+        let equalizer = gst::ElementFactory::make("equalizer-10bands").build().ok();
+        if let Some(filter) = build_audio_filter(scaletempo.as_ref(), equalizer.as_ref()) {
+            bin.set_property("audio-filter", &filter);
+        }
+        Ok(Self {
+            bin,
+            equalizer,
+            fresh_load: Rc::new(Cell::new(false)),
+            pending_seek_ms: Rc::new(Cell::new(0)),
+        })
+    }
+}
+
+pub struct Player {
+    /// Two decks; `active` selects the one the player queries / controls.
+    decks: [Deck; 2],
+    /// Index (0/1) of the active deck. `Arc<Atomic>` because the `about-to-finish`
+    /// signal closure (a GStreamer streaming thread) reads it.
+    active: Arc<AtomicUsize>,
+    /// Current playback rate (speed); re-applied after each load. Main thread only.
+    rate: Rc<Cell<f64>>,
+    /// Gapless enabled (sequential local queues continue without a gap).
+    gapless: Arc<AtomicBool>,
+    /// Crossfade length in milliseconds (0 = off). When > 0, the gapless
+    /// `about-to-finish` continuation is suppressed and the app drives crossfades.
+    crossfade_ms: Arc<AtomicU64>,
+    /// URI the active deck's `about-to-finish` will continue into (gapless).
+    /// Set by the app, consumed on the streaming thread → `Arc<Mutex>`.
+    next_uri: Arc<Mutex<Option<String>>>,
+    /// The running crossfade ramp timer (so a new transition can cancel it).
+    fade_source: Rc<RefCell<Option<gst::glib::SourceId>>>,
+    /// Keeps the per-deck bus watches alive.
+    bus_watches: RefCell<Vec<gst::bus::BusWatchGuard>>,
 }
 
 impl Player {
     pub fn new() -> Result<Self> {
         gst::init()?;
-        let playbin = gst::ElementFactory::make("playbin3")
-            .build()
-            .map_err(|_| anyhow!("playbin3 unavailable – is gstreamer installed?"))?;
-
-        // Audio-filter chain: scaletempo (pitch-preserving speed change) followed
-        // by the 10-band equalizer. Each element is optional – the chain adapts to
-        // whatever plugins are present.
-        let scaletempo = gst::ElementFactory::make("scaletempo").build().ok();
-        if scaletempo.is_none() {
-            tracing::warn!("scaletempo unavailable – speed changes would alter pitch");
-        }
-        let equalizer = gst::ElementFactory::make("equalizer-10bands").build().ok();
-        if equalizer.is_none() {
+        let d0 = Deck::make()?;
+        let d1 = Deck::make()?;
+        if d0.equalizer.is_none() {
             tracing::warn!("equalizer-10bands unavailable – EQ disabled");
         }
-        if let Some(filter) = build_audio_filter(scaletempo.as_ref(), equalizer.as_ref()) {
-            playbin.set_property("audio-filter", &filter);
-        }
-
         Ok(Self {
-            playbin,
-            equalizer,
-            rate: std::rc::Rc::new(std::cell::Cell::new(1.0)),
-            fresh_load: std::rc::Rc::new(std::cell::Cell::new(false)),
-            bus_watch: std::cell::RefCell::new(None),
-            pending_seek_ms: std::rc::Rc::new(std::cell::Cell::new(0)),
+            decks: [d0, d1],
+            active: Arc::new(AtomicUsize::new(0)),
+            rate: Rc::new(Cell::new(1.0)),
+            gapless: Arc::new(AtomicBool::new(true)),
+            crossfade_ms: Arc::new(AtomicU64::new(0)),
+            next_uri: Arc::new(Mutex::new(None)),
+            fade_source: Rc::new(RefCell::new(None)),
+            bus_watches: RefCell::new(Vec::new()),
         })
     }
 
-    /// Sets the linear output volume (0.0–1.0) on the pipeline. Used by the
-    /// sleep-timer fade-out (and crossfading). `playbin` exposes a stream-volume
-    /// `volume` property, so this affects whatever is currently playing without
-    /// touching the system mixer.
-    pub fn set_volume(&self, vol: f64) {
-        self.playbin
-            .set_property("volume", vol.clamp(0.0, 1.0));
+    /// The active deck's `playbin3`.
+    fn cur(&self) -> &gst::Element {
+        &self.decks[self.active.load(Ordering::Relaxed)].bin
     }
 
-    /// Sets the 10 band gains (dB, each −24…+12) live.
+    /// The active deck.
+    fn cur_deck(&self) -> &Deck {
+        &self.decks[self.active.load(Ordering::Relaxed)]
+    }
+
+    // --- Configuration -----------------------------------------------------
+
+    /// Enables/disables gapless continuation (default on).
+    pub fn set_gapless(&self, on: bool) {
+        self.gapless.store(on, Ordering::Relaxed);
+    }
+
+    /// Sets the crossfade window in seconds (0 = off).
+    pub fn set_crossfade_secs(&self, secs: f64) {
+        self.crossfade_ms
+            .store((secs.max(0.0) * 1000.0) as u64, Ordering::Relaxed);
+    }
+
+    /// The crossfade window in seconds (0 = off).
+    pub fn crossfade_secs(&self) -> f64 {
+        self.crossfade_ms.load(Ordering::Relaxed) as f64 / 1000.0
+    }
+
+    /// Arms (or clears) the URI the active deck's `about-to-finish` will continue
+    /// into for gapless playback. The app sets it to the next sequential **local**
+    /// track, or `None` to fall back to the normal end-of-track path.
+    pub fn arm_next_gapless(&self, uri: Option<String>) {
+        if let Ok(mut g) = self.next_uri.lock() {
+            *g = uri;
+        }
+    }
+
+    /// Sets the 10 band gains (dB, each −24…+12) on the active deck live.
     pub fn set_eq_bands(&self, bands: &[f64; 10]) {
-        let Some(eq) = &self.equalizer else {
+        let Some(eq) = &self.cur_deck().equalizer else {
             return;
         };
         for (i, gain) in bands.iter().enumerate() {
@@ -181,91 +260,225 @@ impl Player {
         }
     }
 
-    /// Loads a local file and starts playback. If `resume_ms > 0`,
-    /// it seeks to that position before starting (resume for audio dramas).
+    /// Sets the linear output volume (0.0–1.0) on the active deck. Used by the
+    /// sleep-timer fade-out; crossfading drives both decks' volumes directly.
+    pub fn set_volume(&self, vol: f64) {
+        self.cur().set_property("volume", vol.clamp(0.0, 1.0));
+    }
+
+    // --- Loading / playback ------------------------------------------------
+
+    /// Loads a local file and starts playback on the active deck. If
+    /// `resume_ms > 0`, it seeks there before starting (resume for audio dramas).
     pub fn play_file(&self, path: &str, resume_ms: i64) -> Result<()> {
         let uri = gst::glib::filename_to_uri(path, None)
             .map_err(|e| anyhow!("Invalid path {path}: {e}"))?;
-        // playbin3 only re-reads the `uri` on a state change – if a track is
-        // already playing, the pipeline must first be reset, otherwise the
-        // old track keeps playing.
-        self.playbin
-            .set_state(gst::State::Ready)
-            .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
-        self.playbin.set_property("uri", uri.as_str());
-        self.start(resume_ms)
+        self.hard_load(uri.as_str(), resume_ms)
     }
 
-    /// Plays an arbitrary URI (e.g. an http podcast episode). Unlike
-    /// `play_file`, the URI is taken as-is (not a file path).
-    /// `resume_ms > 0` seeks to the saved position after the preroll (provided
-    /// the source is seekable – podcast hosts usually support ranges).
+    /// Plays an arbitrary network URI (e.g. an http podcast episode) on the
+    /// active deck. Unlike `play_file`, the URI is taken as-is.
     pub fn play_uri(&self, uri: &str, resume_ms: i64) -> Result<()> {
         if !is_allowed_remote_uri(uri) {
             return Err(anyhow!("Refusing to play non-network URI: {uri}"));
         }
-        self.playbin
-            .set_state(gst::State::Ready)
+        self.hard_load(uri, resume_ms)
+    }
+
+    /// Explicit (user-initiated) load on the active deck: cancels any crossfade,
+    /// silences/stops the idle deck and resets the active deck to the new URI.
+    /// `playbin3` only re-reads `uri` on a state change, so the deck is reset to
+    /// `Ready` first.
+    fn hard_load(&self, uri: &str, resume_ms: i64) -> Result<()> {
+        self.cancel_crossfade();
+        // The playback context just changed – drop any armed gapless follow.
+        self.arm_next_gapless(None);
+        let cur = self.cur();
+        cur.set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
-        self.playbin.set_property("uri", uri);
+        cur.set_property("volume", 1.0_f64);
+        cur.set_property("uri", uri);
         self.start(resume_ms)
     }
 
-    /// Starts the freshly-set pipeline. For a resume (`resume_ms > 0`) we go to
+    /// Starts the freshly-set active deck. For a resume (`resume_ms > 0`) we go to
     /// PAUSED and **arm** the seek; the bus watch performs it on `AsyncDone`
     /// (preroll complete) and only then starts playback — so the UI thread never
     /// blocks waiting for preroll and audio never briefly plays from 0:00.
     fn start(&self, resume_ms: i64) -> Result<()> {
-        // A new segment starts at rate 1.0 – let the bus watch re-apply our rate
-        // once the pipeline has prerolled.
-        self.fresh_load.set(true);
+        let deck = self.cur_deck();
+        deck.fresh_load.set(true);
         if resume_ms > 0 {
-            self.pending_seek_ms.set(resume_ms);
-            self.playbin
+            deck.pending_seek_ms.set(resume_ms);
+            deck.bin
                 .set_state(gst::State::Paused)
                 .map_err(|e| anyhow!("Failed to prepare pipeline: {e}"))?;
         } else {
-            self.pending_seek_ms.set(0);
-            self.playbin
+            deck.pending_seek_ms.set(0);
+            deck.bin
                 .set_state(gst::State::Playing)
                 .map_err(|e| anyhow!("Failed to start playback: {e}"))?;
         }
         Ok(())
     }
 
-    /// Registers callbacks for the bus events: `on_eos` at track end (for
-    /// advancing in the queue) and `on_title` on a
-    /// title tag. For streams (internet radio), `playbin3` delivers the
-    /// **currently playing track** as a tag via the ICY metadata – this lets
-    /// us show "Now Playing" without opening a second connection. Runs in the
-    /// main loop.
-    pub fn connect_bus_events<E, T, R, A>(&self, on_eos: E, on_title: T, on_error: R, on_ready: A)
-    where
+    /// Starts a crossfade to `uri` over the configured window: the next track
+    /// begins on the idle deck at volume 0, that deck becomes active immediately
+    /// (so the UI tracks the incoming song), and a ramp fades the outgoing deck
+    /// out / the incoming deck in before stopping the outgoing one. Falls back to
+    /// a hard load when crossfade is off. `resume_ms` seeks the incoming track
+    /// (normally 0 for a sequential advance).
+    pub fn crossfade_to(&self, uri: &str, resume_ms: i64) -> Result<()> {
+        let secs = self.crossfade_secs();
+        if secs <= 0.0 {
+            return self.hard_load(uri, resume_ms);
+        }
+        self.cancel_crossfade();
+        let from = self.active.load(Ordering::Relaxed);
+        let to = 1 - from;
+        let in_deck = &self.decks[to];
+        in_deck
+            .bin
+            .set_state(gst::State::Ready)
+            .map_err(|e| anyhow!("Failed to reset crossfade deck: {e}"))?;
+        in_deck.bin.set_property("volume", 0.0_f64);
+        in_deck.bin.set_property("uri", uri);
+        in_deck.fresh_load.set(true);
+        in_deck.pending_seek_ms.set(resume_ms.max(0));
+        in_deck
+            .bin
+            .set_state(gst::State::Playing)
+            .map_err(|e| anyhow!("Failed to start crossfade deck: {e}"))?;
+        // The incoming deck is now the one the app queries / controls.
+        self.active.store(to, Ordering::Relaxed);
+        self.start_fade_ramp(from, to, secs);
+        Ok(())
+    }
+
+    /// Drives the crossfade volume ramp on the main loop (~50 ms steps).
+    fn start_fade_ramp(&self, from: usize, to: usize, secs: f64) {
+        let total_ms = ((secs * 1000.0) as u64).max(1);
+        let step_ms = 50u64;
+        let from_bin = self.decks[from].bin.clone();
+        let to_bin = self.decks[to].bin.clone();
+        let fade_source = self.fade_source.clone();
+        let elapsed = Cell::new(0u64);
+        let id = gst::glib::timeout_add_local(Duration::from_millis(step_ms), move || {
+            let e = elapsed.get() + step_ms;
+            elapsed.set(e);
+            let t = (e as f64 / total_ms as f64).min(1.0);
+            from_bin.set_property("volume", (1.0 - t).clamp(0.0, 1.0));
+            to_bin.set_property("volume", t.clamp(0.0, 1.0));
+            if t >= 1.0 {
+                let _ = from_bin.set_state(gst::State::Null);
+                from_bin.set_property("volume", 1.0_f64);
+                *fade_source.borrow_mut() = None;
+                gst::glib::ControlFlow::Break
+            } else {
+                gst::glib::ControlFlow::Continue
+            }
+        });
+        *self.fade_source.borrow_mut() = Some(id);
+    }
+
+    /// Stops a running crossfade ramp and the idle deck, restoring full volume on
+    /// both decks. Safe to call when no crossfade is active.
+    fn cancel_crossfade(&self) {
+        if let Some(id) = self.fade_source.borrow_mut().take() {
+            id.remove();
+        }
+        let idle = 1 - self.active.load(Ordering::Relaxed);
+        let _ = self.decks[idle].bin.set_state(gst::State::Null);
+        self.decks[idle].bin.set_property("volume", 1.0_f64);
+        self.cur().set_property("volume", 1.0_f64);
+    }
+
+    /// Registers the per-deck bus watches and `about-to-finish` handlers.
+    /// `on_eos` fires at the active deck's end (advance / stop), `on_title` on a
+    /// title tag (ICY "now playing" for stations), `on_stream_start` when the
+    /// active deck begins a **gapless** continuation (so the app advances its
+    /// state to match). Runs on the main loop.
+    pub fn connect_bus_events<E, T, R, A, S>(
+        &self,
+        on_eos: E,
+        on_title: T,
+        on_error: R,
+        on_ready: A,
+        on_stream_start: S,
+    ) where
         E: Fn() + 'static,
         T: Fn(String) + 'static,
         R: Fn() + 'static,
         A: Fn() + 'static,
+        S: Fn() + 'static,
     {
-        if let Some(bus) = self.playbin.bus() {
-            let playbin = self.playbin.clone();
-            let pending_seek = self.pending_seek_ms.clone();
+        let on_eos = Rc::new(on_eos);
+        let on_title = Rc::new(on_title);
+        let on_error = Rc::new(on_error);
+        let on_ready = Rc::new(on_ready);
+        let on_stream_start = Rc::new(on_stream_start);
+
+        for idx in 0..self.decks.len() {
+            let deck = &self.decks[idx];
+
+            // Gapless continuation: hand the armed next URI to this deck.
+            {
+                let next_uri = self.next_uri.clone();
+                let gapless = self.gapless.clone();
+                let crossfade_ms = self.crossfade_ms.clone();
+                let active = self.active.clone();
+                deck.bin.connect("about-to-finish", false, move |vals| {
+                    if gapless.load(Ordering::Relaxed)
+                        && crossfade_ms.load(Ordering::Relaxed) == 0
+                        && active.load(Ordering::Relaxed) == idx
+                    {
+                        if let Some(uri) = next_uri.lock().ok().and_then(|mut g| g.take()) {
+                            if let Ok(bin) = vals[0].get::<gst::Element>() {
+                                bin.set_property("uri", uri);
+                            }
+                        }
+                    }
+                    None
+                });
+            }
+
+            let Some(bus) = deck.bin.bus() else {
+                continue;
+            };
+            let bin = deck.bin.clone();
+            let pending_seek = deck.pending_seek_ms.clone();
+            let fresh_load = deck.fresh_load.clone();
             let rate = self.rate.clone();
-            let fresh_load = self.fresh_load.clone();
+            let active = self.active.clone();
+            let on_eos = on_eos.clone();
+            let on_title = on_title.clone();
+            let on_error = on_error.clone();
+            let on_ready = on_ready.clone();
+            let on_stream_start = on_stream_start.clone();
             let guard = bus.add_watch_local(move |_, msg| {
+                let is_active = active.load(Ordering::Relaxed) == idx;
                 match msg.view() {
-                    gst::MessageView::Eos(_) => on_eos(),
+                    gst::MessageView::Eos(_) => {
+                        if is_active {
+                            on_eos();
+                        }
+                    }
+                    gst::MessageView::StreamStart(_) => {
+                        // A gapless continuation just began on the active deck
+                        // (the app didn't explicitly load it → `fresh_load` is
+                        // false). Explicit loads set `fresh_load` and are skipped.
+                        if is_active && !fresh_load.get() {
+                            on_stream_start();
+                        }
+                    }
                     gst::MessageView::AsyncDone(_) => {
                         // Preroll finished. Apply an armed resume seek and/or the
                         // current playback rate (a freshly loaded segment always
                         // starts at 1.0). Our own flush-seek posts another
-                        // AsyncDone, but the armed values are already cleared, so
-                        // it is a no-op.
+                        // AsyncDone, but the armed values are already cleared.
                         let target = pending_seek.replace(0);
                         let fresh = fresh_load.replace(false);
-                        // A freshly loaded pipeline just prerolled (buffered enough
-                        // to start) → the track is ready to play. Used to clear the
-                        // "loading" spinner for slow sources (Nextcloud/YouTube).
-                        if fresh {
+                        if fresh && is_active {
                             on_ready();
                         }
                         let r = rate.get();
@@ -273,34 +486,34 @@ impl Player {
                         if target > 0 {
                             let pos = gst::ClockTime::from_mseconds(target.max(0) as u64);
                             if want_rate {
-                                rate_seek(&playbin, r, pos);
+                                rate_seek(&bin, r, pos);
                             } else {
-                                let _ = playbin.seek_simple(
+                                let _ = bin.seek_simple(
                                     gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
                                     pos,
                                 );
                             }
-                            let _ = playbin.set_state(gst::State::Playing);
+                            let _ = bin.set_state(gst::State::Playing);
                         } else if fresh && want_rate {
-                            let pos = playbin
+                            let pos = bin
                                 .query_position::<gst::ClockTime>()
                                 .unwrap_or(gst::ClockTime::ZERO);
-                            rate_seek(&playbin, r, pos);
+                            rate_seek(&bin, r, pos);
                         }
                     }
                     gst::MessageView::Error(err) => {
                         tracing::error!("GStreamer error: {} ({:?})", err.error(), err.debug());
-                        // The current track can't be played (missing file/mount,
-                        // unreachable Nextcloud, decode error) → let the app skip.
-                        on_error();
+                        if is_active {
+                            on_error();
+                        }
                     }
                     gst::MessageView::Tag(tag) => {
-                        // ICY "StreamTitle" (or file title) → report to the UI.
-                        // The caller decides whether to use it (only for stations).
-                        if let Some(title) = tag.tags().get::<gst::tags::Title>() {
-                            let t = title.get().to_string();
-                            if !t.trim().is_empty() {
-                                on_title(t);
+                        if is_active {
+                            if let Some(title) = tag.tags().get::<gst::tags::Title>() {
+                                let t = title.get().to_string();
+                                if !t.trim().is_empty() {
+                                    on_title(t);
+                                }
                             }
                         }
                     }
@@ -308,49 +521,53 @@ impl Player {
                 }
                 gst::glib::ControlFlow::Continue
             });
-            // Hold onto the guard – otherwise the watch is removed again right
-            // away and an EOS would never arrive (no automatic advancing).
-            *self.bus_watch.borrow_mut() = guard.ok();
+            if let Ok(guard) = guard {
+                self.bus_watches.borrow_mut().push(guard);
+            }
         }
     }
 
     pub fn pause(&self) {
-        let _ = self.playbin.set_state(gst::State::Paused);
+        // Pausing mid-crossfade would leave the outgoing deck playing → snap to
+        // the active deck first.
+        if self.fade_source.borrow().is_some() {
+            self.cancel_crossfade();
+        }
+        let _ = self.cur().set_state(gst::State::Paused);
     }
 
     pub fn resume(&self) {
-        let _ = self.playbin.set_state(gst::State::Playing);
+        let _ = self.cur().set_state(gst::State::Playing);
     }
 
     pub fn stop(&self) {
-        let _ = self.playbin.set_state(gst::State::Null);
+        self.cancel_crossfade();
+        let _ = self.cur().set_state(gst::State::Null);
     }
 
     pub fn position_ms(&self) -> Option<i64> {
-        self.playbin
+        self.cur()
             .query_position::<gst::ClockTime>()
             .map(|t| t.mseconds() as i64)
     }
 
-    /// A cheap, cloneable view onto the running pipeline for live UI probing
-    /// (the recording editor's timeline polls it ~20×/s). All queries run on the
-    /// GTK main thread; the wrapped `playbin` is internally refcounted, so a
-    /// clone is just a handle to the same element.
+    /// A cheap, cloneable view onto the active pipeline for live UI probing
+    /// (the recording editor's timeline polls it ~20×/s).
     pub fn probe(&self) -> PlaybackProbe {
         PlaybackProbe {
-            playbin: self.playbin.clone(),
+            playbin: self.cur().clone(),
         }
     }
 
     pub fn duration_ms(&self) -> Option<i64> {
-        self.playbin
+        self.cur()
             .query_duration::<gst::ClockTime>()
             .map(|t| t.mseconds() as i64)
     }
 
-    /// Seeks to the given position (e.g. for resume in audio dramas).
+    /// Seeks the active deck to the given position (e.g. for resume).
     pub fn seek_ms(&self, ms: i64) -> Result<()> {
-        self.playbin
+        self.cur()
             .seek_simple(
                 gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
                 gst::ClockTime::from_mseconds(ms.max(0) as u64),
@@ -360,14 +577,25 @@ impl Player {
     }
 
     /// Sets the playback speed (clamped to 0.25–2.0; pitch preserved via
-    /// scaletempo). Applies to the current track immediately and persists across
-    /// tracks in the session (re-applied after each load). A failing rate-seek
-    /// (e.g. a non-seekable live stream) is ignored.
+    /// scaletempo) on the active deck. Persists across tracks in the session
+    /// (re-applied after each load). A failing rate-seek is ignored.
     pub fn set_rate(&self, rate: f64) {
         let rate = rate.clamp(0.25, 2.0);
         self.rate.set(rate);
-        if let Some(pos) = self.playbin.query_position::<gst::ClockTime>() {
-            rate_seek(&self.playbin, rate, pos);
+        if let Some(pos) = self.cur().query_position::<gst::ClockTime>() {
+            rate_seek(self.cur(), rate, pos);
+        }
+    }
+
+    /// Re-applies the stored rate to the active deck at its current position.
+    /// Used after a gapless continuation (a new segment starts at rate 1.0).
+    pub fn reapply_rate(&self) {
+        let r = self.rate.get();
+        if (r - 1.0).abs() <= 1e-3 {
+            return;
+        }
+        if let Some(pos) = self.cur().query_position::<gst::ClockTime>() {
+            rate_seek(self.cur(), r, pos);
         }
     }
 }

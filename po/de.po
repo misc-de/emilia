@@ -2316,3 +2316,70 @@ msgstr "Prüfe deine Verbindung und versuche es erneut"
 
 msgid "Check your connection, or update yt-dlp in the settings"
 msgstr "Prüfe deine Verbindung oder aktualisiere yt-dlp in den Einstellungen"
+
+# Sleep timer + inline list filter (added 2026-06-07).
+
+msgid "Sleep timer"
+msgstr "Einschlaf-Timer"
+
+msgid "min"
+msgstr "Min"
+
+msgid "End of current track"
+msgstr "Ende des aktuellen Titels"
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "Pauses in"
+msgstr "Pause in"
+
+msgid "Pauses at end of current track"
+msgstr "Pause am Ende des aktuellen Titels"
+
+msgid "Sleep timer: playback paused"
+msgstr "Einschlaf-Timer: Wiedergabe pausiert"
+
+msgid "Sleep timer: playback stopped"
+msgstr "Einschlaf-Timer: Wiedergabe gestoppt"
+
+msgid "Filter list"
+msgstr "Liste filtern"
+
+msgid "Filter the list …"
+msgstr "Liste filtern …"
+
+# Gapless / crossfade playback settings (added 2026-06-07).
+
+msgid "Playback"
+msgstr "Wiedergabe"
+
+msgid "Transitions between tracks of local albums, concerts and audiobooks."
+msgstr "Übergänge zwischen Titeln lokaler Alben, Konzerte und Hörbücher."
+
+msgid "Gapless playback"
+msgstr "Lückenlose Wiedergabe"
+
+msgid "No gap between consecutive tracks"
+msgstr "Keine Lücke zwischen aufeinanderfolgenden Titeln"
+
+msgid "Crossfade"
+msgstr "Überblendung"
+
+msgid "Seconds to overlap tracks (0 = off)"
+msgstr "Sekunden Überlappung zwischen Titeln (0 = aus)"
+
+# Mini-player: tap the song display to open the track detail view (added 2026-06-07).
+
+msgid "Show details of the current track"
+msgstr "Details zum laufenden Titel anzeigen"
+
+# Sort popover: discreet toggle to sort without section headings (added 2026-06-07).
+
+msgid "Without grouping"
+msgstr "Ohne Einteilung"
+
+# Settings → Library: confirm before removing an extra source (added 2026-06-07).
+
+msgid "Remove this source?"
+msgstr "Diese Quelle entfernen?"

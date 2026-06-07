@@ -273,13 +273,13 @@ impl SortCrit {
 pub(crate) const SORTABLE_SECTIONS: &[&str] = &["artists", "albums", "concerts", "audiobooks"];
 
 /// The criteria a given section offers, in popover order. Category-appropriate:
-/// only albums carry a release year, so the rest omit [`SortCrit::Release`].
+/// artists carry no single release year, so they omit [`SortCrit::Release`];
+/// albums/concerts/audiobooks derive a year from their tracks' tag metadata.
 pub(crate) fn section_sort_criteria(section: &str) -> &'static [SortCrit] {
     use SortCrit::*;
     match section {
-        "albums" => &[Name, Length, Release, Songs],
+        "albums" | "concerts" | "audiobooks" => &[Name, Length, Release, Songs],
         "artists" => &[Name, Songs, Length],
-        "concerts" | "audiobooks" => &[Name, Length, Songs],
         _ => &[],
     }
 }
@@ -328,10 +328,19 @@ pub(crate) struct LibView {
     /// Artist overview (same order); index resolution for the gallery.
     pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
     pub(crate) artist_count: usize,
+    /// Per-row alphabetical section headings of the concert/audiobook **lists**
+    /// (sorted order) when sorting by name; drive their `set_header_func`. `None`
+    /// = no grouping. Mirrors [`Self::album_headers`] for those entry lists.
+    pub(crate) concert_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(crate) audiobook_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     /// Per-section sort state (criterion + `desc` direction), keyed by the
     /// view-stack section name. Only the [`SORTABLE_SECTIONS`] have an entry;
     /// a missing entry means the default (by name, ascending).
     pub(crate) sort: std::collections::HashMap<&'static str, (SortCrit, bool)>,
+    /// Per-section "no grouping" flag: when set, the overview is sorted but not
+    /// split into section headings (the flat look from before grouping existed).
+    /// Keyed like [`Self::sort`]; a missing/`false` entry means grouped.
+    pub(crate) no_group: std::collections::HashMap<&'static str, bool>,
     /// Show lists as a gallery (cover grid) instead of a list.
     pub(crate) gallery_view: bool,
     /// Number of tiles per row in the gallery view (2–8).
@@ -362,6 +371,12 @@ impl LibView {
             .get(section)
             .copied()
             .unwrap_or((SortCrit::Name, false))
+    }
+
+    /// Whether the user disabled section grouping for `section` (sort the rows
+    /// but don't split them under headings). Defaults to grouped.
+    pub(crate) fn grouping_off(&self, section: &str) -> bool {
+        self.no_group.get(section).copied().unwrap_or(false)
     }
 }
 
@@ -520,6 +535,12 @@ pub(crate) struct NavState {
     /// Title-bar sort button; its popover is (re)built per section in
     /// [`App::rebuild_sort_menu`], and it's hidden on non-sortable sections.
     pub(crate) sort_btn: gtk::MenuButton,
+    /// Inline list filter: the title-bar toggle button, its search bar and the
+    /// search entry. Shown only on list sections (Files / Artists / Albums in
+    /// list mode); filters the visible `ListBox` live (see [`crate::ui::app_filter`]).
+    pub(crate) filter_btn: gtk::ToggleButton,
+    pub(crate) filter_bar: gtk::SearchBar,
+    pub(crate) filter_entry: gtk::SearchEntry,
     /// Navigation container for the subpages (artist → albums → album).
     pub(crate) nav_view: adw::NavigationView,
     /// Navigation containers (sidebar, top bar) for reordering.
@@ -660,9 +681,10 @@ pub(crate) struct YoutubeState {
     /// Installed `yt-dlp` version (cached for the settings status; `None` if not
     /// installed/runnable).
     pub(crate) ytdlp_version: Option<String>,
-    /// Status label of the yt-dlp row in the open settings dialog (download /
-    /// update progress + version), refreshed via `Cmd::YtDlpReady`.
-    pub(crate) settings_status: std::rc::Rc<std::cell::RefCell<Option<gtk::Label>>>,
+    /// The yt-dlp row in the open settings dialog. Its **subtitle** carries the
+    /// status (download / update progress + version) as a second line below the
+    /// "yt-dlp" title, refreshed via `Cmd::YtDlpReady`.
+    pub(crate) settings_status: std::rc::Rc<std::cell::RefCell<Option<adw::ActionRow>>>,
     /// Download/update button of the yt-dlp row in the open settings dialog. Its
     /// label flips between "Download" and "Update" once the background version
     /// probe resolves (`Cmd::YtDlpChecked`).
@@ -746,8 +768,11 @@ pub(crate) struct FavoritesState {
     /// Audiobooks: (scope, key, title, is_dir).
     pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
     pub(crate) audiobooks_list: gtk::ListBox,
-    /// Gallery variant of the audiobooks (cover grid).
+    /// Gallery variant of the audiobooks (cover grid). The box is the scrolled
+    /// child and holds either the single grid or alphabetically grouped sections
+    /// (see [`App::fill_sectioned_gallery`]); the flow box is the reusable grid.
     pub(crate) audiobooks_gallery: gtk::FlowBox,
+    pub(crate) audiobooks_gallery_box: gtk::Box,
 }
 
 /// Playlists page state, grouped off the `App` god-object.
@@ -762,8 +787,11 @@ pub(crate) struct ConcertsState {
     /// Concerts/audiobooks entries: (scope, key, title, is_dir) – like favorites.
     pub(crate) concert_items: Vec<(String, String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
-    /// Gallery variant of the concerts (cover grid).
+    /// Gallery variant of the concerts (cover grid). The box is the scrolled
+    /// child and holds either the single grid or alphabetically grouped sections
+    /// (see [`App::fill_sectioned_gallery`]); the flow box is the reusable grid.
     pub(crate) concerts_gallery: gtk::FlowBox,
+    pub(crate) concerts_gallery_box: gtk::Box,
     pub(crate) concert_hint_dismissed: bool,
 }
 
@@ -788,6 +816,10 @@ pub(crate) struct Settings {
     pub(crate) ui_language: String,
     /// Currently active audio output (PipeWire sink), for the EQ resolution.
     pub(crate) active_output: String,
+    /// Gapless playback for sequential local queues (default on).
+    pub(crate) gapless: bool,
+    /// Crossfade window in seconds between tracks (0 = off, default off).
+    pub(crate) crossfade_secs: f64,
 }
 
 pub struct App {
@@ -939,6 +971,9 @@ pub enum Msg {
     /// The sync component imported metadata → reload the affected views.
     SyncImported,
     TrackFinished,
+    /// The active deck moved to the next queue track **gaplessly** (driven by
+    /// `playbin3`'s `about-to-finish`); advance the app's state to match.
+    GaplessAdvanced,
     /// Periodic tick: save the resume position of the running track.
     PersistResume,
     /// Command from the lock screen / from media keys (MPRIS).
@@ -988,6 +1023,8 @@ pub enum Msg {
     OpenSettings,
     /// Set or clear the sleep timer (from the header zzz popover).
     SetSleepTimer(SleepChoice),
+    /// Live inline-filter text changed (filters the visible list).
+    InlineFilter(String),
     /// Open the library search dialog (title-bar search icon).
     OpenSearch,
     /// A song hit of the search was activated → play it (close the dialog).
@@ -1048,6 +1085,9 @@ pub enum Msg {
     /// The source list has changed (added/removed in the settings dialog)
     /// – reload sources and update the tab bar.
     SourcesChanged,
+    /// Remove an extra source (local folder / Nextcloud) by id, after the user
+    /// confirmed it in the settings list. Then reloads sources + tabs.
+    DeleteSource(i64),
     /// Check reachability of the Nextcloud sources (periodically + at startup).
     CheckSources,
     /// Open the Nextcloud setup dialog (QR scan or manual).
@@ -1077,6 +1117,10 @@ pub enum Msg {
     SetLanguage(String),
     /// Change the color scheme ("system"/"dark"/"light"); takes effect immediately.
     SetColorScheme(String),
+    /// Gapless playback on/off (settings); persisted + pushed to the player.
+    SetGapless(bool),
+    /// Crossfade window in seconds (settings); persisted + pushed to the player.
+    SetCrossfade(f64),
     /// Gallery view (cover grid) on/off; rebuilds the lists.
     SetGalleryView(bool),
     /// Tiles per row in the gallery view (2–8); rebuilds the lists.
@@ -1088,6 +1132,8 @@ pub enum Msg {
     SetSortCrit(SortCrit),
     /// Change the sort direction of the current section (`true` = descending).
     SetSortDir(bool),
+    /// Toggle section grouping for the current section (`true` = no grouping).
+    SetSortNoGroup(bool),
     /// Set a property of a level (or with `None` reset to "inherit").
     /// Set the areas (properties) of a level; empty value = hidden.
     SetAreas {
@@ -1239,10 +1285,8 @@ pub enum Msg {
     },
     /// Detail view/management of a subscription (podcast id) – refresh/remove.
     ShowPodcastDetail(i64),
-    // YouTube (optional feature)
-    /// Toggle the YouTube feature on/off (settings switch). Shows/hides the
-    /// section and persists the setting.
-    SetYoutubeEnabled(bool),
+    // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
+    // menu switch (see `Msg::SetSectionVisible`), not a dedicated settings toggle.
     /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
     /// when one is already present. The download/update choice is decided from the
     /// cached version at handling time, so the button works even before the
@@ -1708,6 +1752,17 @@ impl Component for App {
                             set_visible: false,
                             connect_clicked => Msg::OpenSettings,
                         },
+                        // Inline list filter: reveals the search bar below the
+                        // header to filter the visible list (Files / Artists /
+                        // Albums). Only shown on list sections; wired in
+                        // `setup_inline_filter`. Separate from the global search
+                        // dialog (the magnifier on the left).
+                        #[name = "filter_btn"]
+                        pack_end = &gtk::ToggleButton {
+                            set_icon_name: "emilia-filter-symbolic",
+                            set_tooltip_text: Some(&gettext("Filter list")),
+                            set_visible: false,
+                        },
                         // Per-category sorting. The popover (criteria + direction)
                         // is built per section in `rebuild_sort_menu`; the button
                         // is hidden on sections without a sort control.
@@ -1778,6 +1833,19 @@ impl Component for App {
                             // Center the icon strip when it fits; it still scrolls
                             // (left-aligned) once the icons overflow the width.
                             set_halign: gtk::Align::Center,
+                        },
+                    },
+
+                    // Inline filter bar: revealed by the header filter button on
+                    // list sections to filter the visible list live. Collapsed
+                    // (zero height) while inactive, so it costs nothing elsewhere.
+                    #[name = "filter_bar"]
+                    add_top_bar = &gtk::SearchBar {
+                        #[wrap(Some)]
+                        #[name = "filter_entry"]
+                        set_child = &gtk::SearchEntry {
+                            set_hexpand: true,
+                            set_placeholder_text: Some(&gettext("Filter the list …")),
                         },
                     },
 
@@ -1984,13 +2052,17 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Gallery variant of the concerts
+                                    // Gallery variant of the concerts. The box holds
+                                    // either a single grid or alphabetically grouped
+                                    // sections (name sort).
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: !model.concerts.concert_items.is_empty() && model.libview.gallery_view,
                                         #[local_ref]
-                                        concerts_gallery -> gtk::FlowBox {
+                                        concerts_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
@@ -2454,13 +2526,17 @@ impl Component for App {
                                             set_css_classes: &["boxed-list"],
                                         },
                                     },
-                                    // Gallery variant of the audiobooks
+                                    // Gallery variant of the audiobooks. The box holds
+                                    // either a single grid or alphabetically grouped
+                                    // sections (name sort).
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
                                         set_visible: !model.favorites.audiobook_items.is_empty() && model.libview.gallery_view,
                                         #[local_ref]
-                                        audiobooks_gallery -> gtk::FlowBox {
+                                        audiobooks_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
@@ -2592,15 +2668,18 @@ impl Component for App {
 
                         gtk::Button {
                             add_css_class: "flat",
-                            set_tooltip_text: Some(&gettext("Long press for details of the current track")),
+                            set_tooltip_text: Some(&gettext("Show details of the current track")),
                             // Place song/artist a bit lower (more compact bar).
                             set_margin_top: 5,
                             // Without a selected track, hide entirely (frees up space).
                             #[watch]
                             set_visible: model.mini.now_playing.is_some(),
-                            // Long press (not a short tap) opens the track detail view –
-                            // consistent with the album/artist/track rows and so an
-                            // accidental tap on the bar no longer pops the detail sheet.
+                            // A plain tap on the song display opens the track detail view.
+                            connect_clicked[sender] => move |_| {
+                                sender.input(Msg::OpenNowPlaying);
+                            },
+                            // Long press (touch) keeps working too; it claims the sequence
+                            // so the button's own click won't also fire.
                             add_controller = gtk::GestureLongPress {
                                 connect_pressed[sender] => move |gesture, _, _| {
                                     gesture.set_state(gtk::EventSequenceState::Claimed);
@@ -2982,6 +3061,7 @@ impl Component for App {
             repeat_on,
             ui_language,
             sort,
+            no_group,
             gallery_view,
             gallery_columns,
             recording_buffer_minutes,
@@ -3032,7 +3112,11 @@ impl Component for App {
                     let sender = sender.clone();
                     move || sender.input(Msg::PlaybackError)
                 },
-                move || sender.input(Msg::PlaybackReady),
+                {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::PlaybackReady)
+                },
+                move || sender.input(Msg::GaplessAdvanced),
             );
         }
 
@@ -3143,6 +3227,23 @@ impl Component for App {
             },
         );
 
+        // Gapless / crossfade preferences (read before `library` is moved into
+        // the model). Gapless defaults on; crossfade defaults off (0 s).
+        let gapless = !matches!(
+            library.get_setting("gapless").ok().flatten().as_deref(),
+            Some("0")
+        );
+        let crossfade_secs = library
+            .get_setting("crossfade_secs")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0)
+            .clamp(0.0, 12.0);
+        // Apply to the player up front so the very first track honors them.
+        player.set_gapless(gapless);
+        player.set_crossfade_secs(crossfade_secs);
+
         let mut model = App {
             library,
             player,
@@ -3162,7 +3263,10 @@ impl Component for App {
                 artist_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 artists_overview: Vec::new(),
                 artist_count: 0,
+                concert_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                audiobook_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 sort,
+                no_group,
                 gallery_view,
                 gallery_columns,
                 loading: false,
@@ -3182,6 +3286,8 @@ impl Component for App {
             settings: Settings {
                 ui_language,
                 active_output,
+                gapless,
+                crossfade_secs,
             },
             files: FilesState {
                 music_dir,
@@ -3247,6 +3353,7 @@ impl Component for App {
                 concert_items: Vec::new(),
                 concerts_list: concerts_list.clone(),
                 concerts_gallery: gtk::FlowBox::new(),
+                concerts_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
                 concert_hint_dismissed,
             },
             favorites: FavoritesState {
@@ -3255,6 +3362,7 @@ impl Component for App {
                 audiobook_items: Vec::new(),
                 audiobooks_list: audiobooks_list.clone(),
                 audiobooks_gallery: gtk::FlowBox::new(),
+                audiobooks_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
             },
             playlists: PlaylistsState {
                 playlist_items: Vec::new(),
@@ -3331,6 +3439,9 @@ impl Component for App {
                 split: adw::OverlaySplitView::new(),
                 view_stack: adw::ViewStack::new(),
                 sort_btn: gtk::MenuButton::new(),
+                filter_btn: gtk::ToggleButton::new(),
+                filter_bar: gtk::SearchBar::new(),
+                filter_entry: gtk::SearchEntry::new(),
                 nav_view: adw::NavigationView::new(),
                 sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
                 top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
@@ -3523,8 +3634,8 @@ impl Component for App {
         let artists_box = model.libview.artists.widget();
         let albums_gallery_box = model.libview.albums_gallery_box.clone();
         let artists_gallery_box = model.libview.artists_gallery_box.clone();
-        let concerts_gallery = model.concerts.concerts_gallery.clone();
-        let audiobooks_gallery = model.favorites.audiobooks_gallery.clone();
+        let concerts_gallery_box = model.concerts.concerts_gallery_box.clone();
+        let audiobooks_gallery_box = model.favorites.audiobooks_gallery_box.clone();
         let podcasts_gallery = model.podcasts.podcasts_gallery.clone();
         let yt_channels_gallery = model.youtube.channels_gallery.clone();
         let widgets = view_output!();
@@ -3941,7 +4052,6 @@ impl Component for App {
             }
             Msg::ShowPodcastDetail(id) => self.open_podcast_detail(root, &sender, id),
             // --- YouTube ---
-            Msg::SetYoutubeEnabled(on) => self.set_youtube_enabled(on, &sender),
             Msg::FetchYtDlp => {
                 let update = self.youtube.ytdlp_version.is_some();
                 self.start_ytdlp_fetch(update, &sender);
@@ -4107,6 +4217,7 @@ impl Component for App {
                 self.reload_library_overviews();
             }
             Msg::TrackFinished => self.on_track_finished(),
+            Msg::GaplessAdvanced => self.on_gapless_advanced(),
             Msg::PersistResume => self.on_persist_resume(),
             Msg::Tick => self.on_tick(&sender),
             Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
@@ -4158,6 +4269,8 @@ impl Component for App {
                     self.rebuild_shuffle_order();
                 }
                 self.mpris.set_shuffle(self.transport.shuffle);
+                // Shuffle changes the "next" track → re-arm (or clear) gapless.
+                self.arm_gapless();
             }
             Msg::ToggleRepeat => {
                 self.transport.repeat = !self.transport.repeat;
@@ -4171,6 +4284,7 @@ impl Component for App {
             Msg::Refresh => self.on_refresh(&sender),
             Msg::OpenSettings => self.open_settings(root, &sender),
             Msg::SetSleepTimer(choice) => self.on_set_sleep_timer(choice),
+            Msg::InlineFilter(text) => self.apply_inline_filter(&text),
             Msg::OpenSearch => self.open_search_dialog(root, &sender),
             Msg::SearchPlayTrack(path) => self.on_search_play_track(path, &sender),
             Msg::SearchOpenAlbum(album) => self.open_album_by_name(&sender, &album),
@@ -4233,6 +4347,10 @@ impl Component for App {
                 }
             }
             Msg::SourcesChanged => self.on_sources_changed(&sender),
+            Msg::DeleteSource(id) => {
+                let _ = self.library.delete_source(id);
+                self.on_sources_changed(&sender);
+            }
             Msg::CheckSources => self.on_check_sources(&sender),
             Msg::AddCloudSource => {
                 use crate::ui::cloud_page::CloudInput;
@@ -4271,6 +4389,20 @@ impl Component for App {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
             }
+            Msg::SetGapless(on) => {
+                self.settings.gapless = on;
+                let _ = self
+                    .library
+                    .set_setting("gapless", if on { "1" } else { "0" });
+                self.apply_playback_prefs();
+            }
+            Msg::SetCrossfade(secs) => {
+                self.settings.crossfade_secs = secs.clamp(0.0, 12.0);
+                let _ = self
+                    .library
+                    .set_setting("crossfade_secs", &self.settings.crossfade_secs.to_string());
+                self.apply_playback_prefs();
+            }
             Msg::SortMenuRefresh => self.rebuild_sort_menu(),
             Msg::SetSortCrit(crit) => {
                 let Some(section) = self.current_section() else {
@@ -4290,12 +4422,23 @@ impl Component for App {
                     self.set_section_sort(&section, crit, desc, &sender);
                 }
             }
+            Msg::SetSortNoGroup(off) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                if self.libview.grouping_off(&section) != off {
+                    self.set_section_grouping(&section, off, &sender);
+                }
+            }
             Msg::SetGalleryView(on) => {
                 self.libview.gallery_view = on;
                 let _ = self
                     .library
                     .set_setting("gallery_view", if on { "1" } else { "0" });
                 self.rebuild_all_lists(&sender);
+                // Artists/Albums gallery tiles aren't filtered → update the
+                // funnel button's visibility for the new (list/gallery) mode.
+                self.update_filter_chrome();
             }
             Msg::SetGalleryColumns(n) => {
                 self.libview.gallery_columns = n.clamp(2, 8);
@@ -4362,7 +4505,16 @@ impl Component for App {
                 }
             }
             Msg::SetSectionVisible { section, visible } => {
-                self.set_section_visible(section, visible);
+                // The YouTube section is the opt-in feature; its menu switch is now
+                // the single enable/disable control, so route it through
+                // `set_youtube_enabled` (keeps the `youtube_enabled` flag + the
+                // background channel load in step). All other sections just toggle
+                // their menu visibility.
+                if section == "youtube" {
+                    self.set_youtube_enabled(visible, &sender);
+                } else {
+                    self.set_section_visible(section, visible);
+                }
             }
             Msg::MoveSection { from, to } => {
                 if from < self.nav.section_order.len()

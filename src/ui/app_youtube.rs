@@ -1959,7 +1959,7 @@ impl App {
     /// in the background via `Cmd::YtDlpChecked`).
     pub(crate) fn refresh_ytdlp_status_label(&self) {
         let installed = self.youtube.ytdlp_version.is_some();
-        if let Some(label) = self.youtube.settings_status.borrow().as_ref() {
+        if let Some(row) = self.youtube.settings_status.borrow().as_ref() {
             let text = if self.youtube.ytdlp_busy {
                 gettext("Working …")
             } else {
@@ -1968,7 +1968,7 @@ impl App {
                     None => gettext("Not installed"),
                 }
             };
-            label.set_text(&text);
+            row.set_subtitle(&text);
         }
         if let Some(btn) = self.youtube.settings_dl_btn.borrow().as_ref() {
             btn.set_label(&if installed {

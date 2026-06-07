@@ -70,6 +70,9 @@ impl App {
         self.refresh_yt_icons();
         // …and of the saved-recording rows.
         self.refresh_recording_icons();
+        // The queue/next track may have changed (add/remove/reorder) → keep the
+        // armed gapless follow in step with the new "next".
+        self.arm_gapless();
     }
 
     /// Credentials of the currently active WebDAV source (if one is active).
@@ -846,6 +849,9 @@ impl App {
                 {
                     let _ = self.input.send(Msg::FingerprintCurrent(path.clone()));
                 }
+                // Arm the next track for gapless continuation (no-op when the
+                // next entry isn't a sequential local file or gapless is off).
+                self.arm_gapless();
             }
             Err(e) => {
                 // Synchronous failure (e.g. Nextcloud source without credentials)
@@ -1283,6 +1289,9 @@ impl App {
                     cs.3 = s.duration_ms;
                 }
             }
+            // Crossfade into the next track once we're inside the fade window
+            // (no-op when crossfade is off or the next entry isn't eligible).
+            self.maybe_crossfade();
         }
     }
 

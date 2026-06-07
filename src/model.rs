@@ -328,35 +328,20 @@ pub struct AlbumHit {
     pub year: Option<i32>,
 }
 
-/// One subscribed-YouTube-channel hit of the search.
-#[derive(Debug, Clone)]
-pub struct YtChannelHit {
-    pub id: i64,
-    pub title: String,
-    /// Channel avatar (URL); resolved to a cached path for display.
-    pub thumb: Option<String>,
-}
-
-/// Grouped result of the title-bar search. Besides the music library (artists,
-/// albums, songs) it also spans the user's own collections: saved radio
-/// stations, timeshift recordings, voice memos and the cached
-/// channels/videos of subscribed YouTube channels. Each group is capped.
-/// See [`crate::core::db::Library::search_library`].
+/// Grouped result of the title-bar search. It spans the local music library
+/// (artists, albums, songs) and the user's own local collections: timeshift
+/// recordings and voice memos. Streaming stations and YouTube channels/videos
+/// are deliberately excluded – they have their own dedicated sections. Each
+/// group is capped. See [`crate::core::db::Library::search_library`].
 #[derive(Debug, Clone, Default)]
 pub struct SearchResults {
     pub artists: Vec<String>,
     pub albums: Vec<AlbumHit>,
     pub songs: Vec<SongHit>,
-    /// Saved internet-radio stations (name/tags/country match).
-    pub streams: Vec<StreamItem>,
     /// Timeshift recordings (title/artist/station match).
     pub recordings: Vec<RecordingItem>,
     /// Voice memos (title match).
     pub memos: Vec<MemoItem>,
-    /// Subscribed YouTube channels (title match).
-    pub yt_channels: Vec<YtChannelHit>,
-    /// Cached videos of subscribed YouTube channels (title/channel match).
-    pub yt_videos: Vec<YtVideoRef>,
 }
 
 impl SearchResults {
@@ -364,10 +349,7 @@ impl SearchResults {
         self.artists.is_empty()
             && self.albums.is_empty()
             && self.songs.is_empty()
-            && self.streams.is_empty()
             && self.recordings.is_empty()
             && self.memos.is_empty()
-            && self.yt_channels.is_empty()
-            && self.yt_videos.is_empty()
     }
 }

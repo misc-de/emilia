@@ -120,6 +120,8 @@ modules:
         /app/share/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/emilia-sleep-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/emilia-sleep-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/emilia-filter-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/emilia-filter-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/im-youtube-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/im-youtube-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/ticket-special-symbolic.svg
