@@ -143,6 +143,13 @@ fn file_name_of(path: &str) -> String {
 /// concurrent first opens cannot race on the `ALTER TABLE` statements.
 static FILE_DB_MIGRATED: Once = Once::new();
 
+/// Highest schema version this build knows how to run. The idempotent column
+/// probes in [`Library::migrate`] remain the source of truth for the actual
+/// shape; this number is only a forward marker stamped via `PRAGMA user_version`
+/// and a downgrade guard (refuse a DB written by a newer build). Bump it
+/// whenever a future migration would break an older binary that opened the DB.
+const SCHEMA_VERSION: i32 = 1;
+
 impl Library {
     pub fn open() -> Result<Self> {
         let conn = Connection::open(db_path())?;
@@ -187,6 +194,20 @@ impl Library {
     }
 
     fn migrate(&self) -> Result<()> {
+        // Downgrade guard: refuse a DB written by a newer build instead of
+        // letting a later schema change surface as a cryptic SQL error mid-run.
+        // Fresh DBs report 0; the version is stamped at the end of this method.
+        let found: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0);
+        if found > SCHEMA_VERSION as i64 {
+            anyhow::bail!(
+                "library database schema version {found} is newer than this build supports \
+                 (max {SCHEMA_VERSION}); please update Emilia"
+            );
+        }
+
         self.conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS track (
@@ -570,8 +591,12 @@ impl Library {
             .unwrap_or(0)
             > 0;
         if !has_output {
+            // Atomic table rebuild: a crash mid-way must not leave the renamed
+            // `_old` table without its replacement (which would break the next
+            // start). BEGIN/COMMIT make it all-or-nothing.
             self.conn.execute_batch(
                 r#"
+                BEGIN;
                 ALTER TABLE eq_setting RENAME TO eq_setting_old;
                 CREATE TABLE eq_setting (
                     output TEXT NOT NULL DEFAULT '',
@@ -583,6 +608,7 @@ impl Library {
                 INSERT INTO eq_setting (output, scope, key, bands)
                     SELECT '', scope, key, bands FROM eq_setting_old;
                 DROP TABLE eq_setting_old;
+                COMMIT;
                 "#,
             )?;
         }
@@ -819,16 +845,24 @@ impl Library {
             .map(|s| s.contains("CHECK(scope"))
             .unwrap_or(false);
         if has_old_check {
+            // Atomic rebuild (see the eq_setting migration above).
             self.conn.execute_batch(
-                "ALTER TABLE category RENAME TO category_old;
+                "BEGIN;
+                 ALTER TABLE category RENAME TO category_old;
                  CREATE TABLE category (
                      scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
                      PRIMARY KEY (scope, key)
                  );
                  INSERT INTO category SELECT * FROM category_old;
-                 DROP TABLE category_old;",
+                 DROP TABLE category_old;
+                 COMMIT;",
             )?;
         }
+
+        // All migrations applied → stamp the schema version (read back by the
+        // downgrade guard at the top). PRAGMA takes no bind parameters.
+        self.conn
+            .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
         Ok(())
     }
 
@@ -1208,10 +1242,61 @@ impl Library {
             }
         }
 
+        // --- The user's own collections: radio stations, timeshift recordings,
+        //     voice memos and the cached YouTube channels/videos. These lists are
+        //     personal and small, so they are filtered in memory (case-insensitive
+        //     substring) rather than via separate SQL. ---
+        let ql = q.to_lowercase();
+        let hit = |s: &str| s.to_lowercase().contains(&ql);
+        let ohit =
+            |s: &Option<String>| s.as_deref().is_some_and(|x| x.to_lowercase().contains(&ql));
+
+        let streams: Vec<_> = self
+            .streams()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| hit(&s.name) || ohit(&s.tags) || ohit(&s.country))
+            .take(limit)
+            .collect();
+        let recordings: Vec<_> = self
+            .recordings()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| hit(&r.title) || ohit(&r.artist) || ohit(&r.station))
+            .take(limit)
+            .collect();
+        let memos: Vec<_> = self
+            .memos()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| hit(&m.title))
+            .take(limit)
+            .collect();
+        let yt_channels: Vec<_> = self
+            .channels()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, title, _, _, _)| hit(title))
+            .take(limit)
+            .map(|(id, title, _url, thumb, _n)| crate::model::YtChannelHit { id, title, thumb })
+            .collect();
+        let yt_videos: Vec<_> = self
+            .all_videos()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| hit(&v.title) || hit(&v.channel_title))
+            .take(limit)
+            .collect();
+
         Ok(SearchResults {
             artists,
             albums,
             songs,
+            streams,
+            recordings,
+            memos,
+            yt_channels,
+            yt_videos,
         })
     }
 
@@ -1526,6 +1611,26 @@ mod tests {
             duration_ms: Some(60_000),
             resume_ms: 0,
         }
+    }
+
+    #[test]
+    fn migrate_stamps_schema_version() {
+        let lib = Library::open_in_memory().unwrap();
+        let v: i64 = lib
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION as i64);
+    }
+
+    #[test]
+    fn migrate_refuses_newer_schema() {
+        let lib = Library::open_in_memory().unwrap();
+        // Simulate a DB written by a future build.
+        lib.conn
+            .execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 1))
+            .unwrap();
+        assert!(lib.migrate().is_err());
     }
 
     #[test]
