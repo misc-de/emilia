@@ -505,6 +505,18 @@ impl Library {
                 title    TEXT NOT NULL,
                 duration INTEGER
             );
+
+            -- Lyrics cache, keyed by track path. `source` distinguishes embedded
+            -- tags from an online (LRCLIB) fetch; a row with source='none' is a
+            -- negative result (don't refetch for a while). `synced` holds the raw
+            -- LRC text. Like all online metadata, never written back to tags.
+            CREATE TABLE IF NOT EXISTS lyrics_cache (
+                path      TEXT PRIMARY KEY,
+                plain     TEXT,
+                synced    TEXT,
+                source    TEXT NOT NULL,
+                cached_at INTEGER NOT NULL
+            );
             "#,
         )?;
 
@@ -1184,6 +1196,56 @@ impl Library {
             );
         }
         Ok(removed)
+    }
+
+    /// Returns cached lyrics for a track path, or `None` when nothing positive
+    /// is cached (a negative result is also reported as `None`).
+    pub fn get_cached_lyrics(&self, path: &str) -> Option<crate::core::lyrics::Lyrics> {
+        let (plain, synced, source) = self
+            .conn
+            .query_row(
+                "SELECT plain, synced, source FROM lyrics_cache WHERE path = ?1",
+                [path],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .ok()?;
+        if source == "none" {
+            return None;
+        }
+        let lyr = crate::core::lyrics::Lyrics::from_parts(plain, synced);
+        lyr.has_any().then_some(lyr)
+    }
+
+    /// Whether a **recent** negative result is cached for this path – used to
+    /// avoid hammering the online service for tracks that genuinely have no
+    /// lyrics. Stale negatives (older than ~14 days) report `false` so the
+    /// lookup is retried eventually.
+    pub fn lyrics_recently_missing(&self, path: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM lyrics_cache \
+                 WHERE path = ?1 AND source = 'none' \
+                   AND cached_at > strftime('%s','now') - 1209600",
+                [path],
+                |_| Ok(()),
+            )
+            .is_ok()
+    }
+
+    /// Stores (or replaces) the lyrics cache entry for a path. Pass
+    /// `source = "none"` with empty texts to record a negative result.
+    pub fn store_lyrics(&self, path: &str, plain: Option<&str>, synced: Option<&str>, source: &str) {
+        let _ = self.conn.execute(
+            "INSERT OR REPLACE INTO lyrics_cache(path, plain, synced, source, cached_at) \
+             VALUES(?1, ?2, ?3, ?4, strftime('%s','now'))",
+            rusqlite::params![path, plain, synced, source],
+        );
     }
 
     /// Stores the resume position by path. The
@@ -2129,5 +2191,32 @@ mod tests {
         // Re-running upserts (no duplicates, ON CONFLICT path).
         assert_eq!(lib.upsert_tracks(&batch).unwrap(), 3);
         assert_eq!(lib.all_tracks().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn lyrics_cache_roundtrip_and_negative() {
+        let lib = Library::open_in_memory().unwrap();
+        // Nothing cached yet.
+        assert!(lib.get_cached_lyrics("/m/song.mp3").is_none());
+        assert!(!lib.lyrics_recently_missing("/m/song.mp3"));
+
+        // Store synced lyrics → parsed back with timed lines.
+        lib.store_lyrics(
+            "/m/song.mp3",
+            Some("line one\nline two"),
+            Some("[00:01.00]line one\n[00:03.50]line two"),
+            "lrclib",
+        );
+        let cached = lib.get_cached_lyrics("/m/song.mp3").expect("hit");
+        assert!(cached.has_synced());
+        assert_eq!(cached.synced.len(), 2);
+        assert_eq!(cached.active_line(2000), Some(0));
+        // A positive hit is not a "recent miss".
+        assert!(!lib.lyrics_recently_missing("/m/song.mp3"));
+
+        // Negative result is remembered and reported, but never as a hit.
+        lib.store_lyrics("/m/inst.mp3", None, None, "none");
+        assert!(lib.get_cached_lyrics("/m/inst.mp3").is_none());
+        assert!(lib.lyrics_recently_missing("/m/inst.mp3"));
     }
 }

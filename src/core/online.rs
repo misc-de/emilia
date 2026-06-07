@@ -264,6 +264,84 @@ impl OnlineClient {
         }
     }
 
+    /// Looks up lyrics for a track on [LRCLIB](https://lrclib.net) – a free,
+    /// key-less service returning plain and synchronized (`.lrc`) text.
+    ///
+    /// Tries the exact `/api/get` first (matches on artist+title+duration, so it
+    /// is precise) and falls back to the fuzzy `/api/search`, preferring a hit
+    /// that carries synchronized lyrics. Returns `Ok(None)` when nothing usable
+    /// is found (incl. instrumentals).
+    pub fn fetch_lyrics(
+        &self,
+        artist: &str,
+        title: &str,
+        album: Option<&str>,
+        duration_secs: Option<u64>,
+    ) -> Result<Option<crate::core::lyrics::Lyrics>> {
+        use crate::core::lyrics::Lyrics;
+        let artist = artist.trim();
+        let title = title.trim();
+        if artist.is_empty() || title.is_empty() {
+            return Ok(None);
+        }
+
+        // Exact lookup: needs the duration (matched within a small tolerance).
+        if let Some(dur) = duration_secs.filter(|d| *d > 0) {
+            let mut url = format!(
+                "https://lrclib.net/api/get?artist_name={}&track_name={}&duration={}",
+                percent_encode(artist),
+                percent_encode(title),
+                dur
+            );
+            if let Some(al) = album.map(str::trim).filter(|s| !s.is_empty()) {
+                url.push_str(&format!("&album_name={}", percent_encode(al)));
+            }
+            if let Some(resp) = self.call_get(&url)? {
+                let r: LrcLibItem = resp.into_json()?;
+                let lyr = Lyrics::from_parts(r.plain_lyrics, r.synced_lyrics);
+                if lyr.has_any() {
+                    return Ok(Some(lyr));
+                }
+                // Known instrumental → no point searching further.
+                if r.instrumental {
+                    return Ok(None);
+                }
+            }
+        }
+
+        // Fuzzy fallback: take the best hit, preferring synchronized lyrics.
+        let url = format!(
+            "https://lrclib.net/api/search?artist_name={}&track_name={}",
+            percent_encode(artist),
+            percent_encode(title)
+        );
+        let hits: Vec<LrcLibItem> = match self.call_get(&url)? {
+            Some(resp) => resp.into_json().unwrap_or_default(),
+            None => return Ok(None),
+        };
+        let has_synced = |h: &&LrcLibItem| {
+            h.synced_lyrics
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+        };
+        let has_plain = |h: &&LrcLibItem| {
+            h.plain_lyrics
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+        };
+        let best = hits
+            .iter()
+            .find(has_synced)
+            .or_else(|| hits.iter().find(has_plain));
+        match best {
+            Some(h) => {
+                let lyr = Lyrics::from_parts(h.plain_lyrics.clone(), h.synced_lyrics.clone());
+                Ok(lyr.has_any().then_some(lyr))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Searches for the album cover on Deezer (no API key needed) for (artist, title)
     /// and returns `(image bytes, album name)`. For subsequently tagging a
     /// recording with the cover of the single/album.
@@ -1153,6 +1231,18 @@ struct MbReleaseGroup {
 struct DzSearch {
     #[serde(default)]
     data: Vec<DzArtist>,
+}
+
+/// One LRCLIB result (shape is identical for `/api/get` and `/api/search`).
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct LrcLibItem {
+    #[serde(default)]
+    plain_lyrics: Option<String>,
+    #[serde(default)]
+    synced_lyrics: Option<String>,
+    #[serde(default)]
+    instrumental: bool,
 }
 
 #[derive(Deserialize)]

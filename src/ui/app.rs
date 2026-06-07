@@ -408,6 +408,41 @@ pub(crate) struct MiniState {
     pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
+/// Lyrics for the currently playing track + the open karaoke view, grouped off
+/// the `App` god-object. See [`crate::ui::app_lyrics`].
+pub(crate) struct LyricsState {
+    /// Parsed lyrics of the running track, once loaded (embedded/cache/online).
+    pub(crate) current: Option<crate::core::lyrics::Lyrics>,
+    /// Path the `current` lyrics belong to – guards against stale async results
+    /// arriving after the track has already changed.
+    pub(crate) for_path: Option<String>,
+    /// Live karaoke view while the lyrics dialog is open.
+    pub(crate) view: Option<LyricsView>,
+    /// Pending lyrics pulldown in an open file-info dialog, filled when an online
+    /// fetch for that file returns: the path it was opened for plus the (hidden)
+    /// label + group to reveal. `Rc<RefCell>` because the dialog is built from a
+    /// `&self` method.
+    pub(crate) file_pending:
+        std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Label, adw::PreferencesGroup)>>>,
+}
+
+/// Widgets of the open karaoke dialog, kept so each tick can move the highlight
+/// and auto-scroll without rebuilding anything.
+pub(crate) struct LyricsView {
+    /// One label per synced line (same order/length as `current.synced`).
+    pub(crate) lines: Vec<gtk::Label>,
+    /// Scroller around the lines (for auto-scrolling the active line into view).
+    pub(crate) scroller: gtk::ScrolledWindow,
+    /// Vertical box holding the line labels (parent for bounds computation).
+    pub(crate) container: gtk::Box,
+    /// Currently highlighted line index (skip redundant updates).
+    pub(crate) active: Option<usize>,
+    /// Fine-grained timer driving the highlight; removed when the dialog closes.
+    pub(crate) timer: Option<gtk::glib::SourceId>,
+    /// The dialog itself, so reopening can close a stale one.
+    pub(crate) dialog: adw::Dialog,
+}
+
 /// Navigation + layout chrome, grouped off the `App` god-object.
 pub(crate) struct NavState {
     /// Main split view – collapsed (`is_collapsed`) means narrow/mobile mode.
@@ -700,6 +735,8 @@ pub struct App {
     pub(crate) transport: TransportState,
     /// Mini-player / now-playing strip state.
     pub(crate) mini: MiniState,
+    /// Lyrics of the running track + open karaoke view.
+    pub(crate) lyrics: LyricsState,
     pub(crate) toast_overlay: adw::ToastOverlay,
     /// Concerts page state (live-recording collection).
     pub(crate) concerts: ConcertsState,
@@ -826,6 +863,21 @@ pub enum Msg {
     /// On-demand fingerprint track recognition for the **just started**
     /// track without usable metadata (AcoustID), triggered on play.
     FingerprintCurrent(PathBuf),
+    /// Load lyrics for the just-started track: check embedded tags + the DB
+    /// cache, then fetch from LRCLIB in the background if needed.
+    LoadLyrics(PathBuf),
+    /// Open the karaoke dialog for the running track's synced lyrics.
+    ShowLyrics,
+    /// Fine-grained karaoke tick: refresh the highlighted line while the dialog
+    /// is open (no-op otherwise).
+    LyricsTick,
+    /// The karaoke dialog was closed: stop its timer and drop the view.
+    LyricsClosed,
+    /// Online lyrics for an open file-info dialog returned (path + lyrics).
+    FileLyricsFetched {
+        path: String,
+        lyrics: Option<crate::core::lyrics::Lyrics>,
+    },
     /// Jump to a position (ms) by dragging/clicking the seek bar.
     Seek(i64),
     Next,
@@ -1399,6 +1451,12 @@ pub enum Cmd {
     /// All YouTube subscriptions finished refreshing (manual refresh) → rebuild
     /// the overview and clear one slot of the refresh spinner.
     ChannelsRefreshed,
+    /// Background LRCLIB lookup for the running track finished. Carries the path
+    /// it was started for (to ignore stale results) and the lyrics if found.
+    LyricsLoaded {
+        path: String,
+        lyrics: Option<crate::core::lyrics::Lyrics>,
+    },
 }
 
 #[relm4::component(pub)]
@@ -2524,6 +2582,19 @@ impl Component for App {
                             set_end_widget = &gtk::Box {
                                 set_spacing: 6,
                                 set_valign: gtk::Align::Center,
+                                // Lyrics/karaoke: shown only when the running
+                                // track has synchronized (.lrc) lyrics. Opens the
+                                // karaoke view with the current line highlighted.
+                                gtk::Button {
+                                    set_icon_name: "media-view-subtitles-symbolic",
+                                    set_tooltip_text: Some(&gettext("Lyrics")),
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_visible: model.lyrics.current.as_ref()
+                                        .is_some_and(|l| l.has_synced()),
+                                    connect_clicked => Msg::ShowLyrics,
+                                },
                                 // Repeat (loop): at the end of the queue or
                                 // of the single track, start over. Active = white, off = gray.
                                 gtk::ToggleButton {
@@ -2597,7 +2668,9 @@ impl Component for App {
                  progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
                  label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
                  flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\
-                 flowbox.emilia-gallery > flowboxchild:selected { background: none; }",
+                 flowbox.emilia-gallery > flowboxchild:selected { background: none; }\
+                 label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\
+                 label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -3052,6 +3125,12 @@ impl Component for App {
                 chapter_label: gtk::Label::default(),
                 chapters: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
+            },
+            lyrics: LyricsState {
+                current: None,
+                for_path: None,
+                view: None,
+                file_pending: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
             toast_overlay: toast_overlay.clone(),
             concerts: ConcertsState {
@@ -4233,6 +4312,11 @@ impl Component for App {
                 }
             }
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
+            Msg::LoadLyrics(path) => self.load_lyrics(&sender, path),
+            Msg::ShowLyrics => self.show_lyrics(),
+            Msg::LyricsTick => self.update_lyrics_highlight(),
+            Msg::LyricsClosed => self.close_lyrics_view(),
+            Msg::FileLyricsFetched { path, lyrics } => self.on_file_lyrics_fetched(path, lyrics),
             Msg::Seek(ms) => {
                 let ms = ms.max(0);
                 self.mini.position_ms = ms;
@@ -5188,6 +5272,7 @@ impl Component for App {
                 self.refresh_done();
                 self.reload_channels(&sender);
             }
+            Cmd::LyricsLoaded { path, lyrics } => self.on_lyrics_loaded(path, lyrics),
             Cmd::YtVideoMeta {
                 video_id,
                 uploader,

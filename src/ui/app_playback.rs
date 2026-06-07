@@ -722,6 +722,10 @@ impl App {
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
                 self.set_chapters(Vec::new());
+                // No lyrics for a (just-resolving) stream; drop the old track's.
+                self.close_lyrics_view();
+                self.lyrics.current = None;
+                self.lyrics.for_path = None;
                 self.mpris.set_metadata(0, &name, None, None, None, None);
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
@@ -802,6 +806,10 @@ impl App {
                     Some((self.transport.queue.clone(), self.transport.queue_pos));
                 // Tracks have no chapters → clear markers/hover list.
                 self.set_chapters(Vec::new());
+                // Load lyrics for the new track (embedded/cache instantly, then
+                // LRCLIB in the background) – shows the karaoke button when synced
+                // lyrics exist.
+                let _ = self.input.send(Msg::LoadLyrics(path.clone()));
                 // If usable tags are missing (artist/album), let the track be
                 // identified in the background via fingerprint – instead of a bulk
                 // run, only what is actually played. The actual gating checks (key,

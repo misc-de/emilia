@@ -4,6 +4,7 @@ pub mod concert;
 pub mod cover;
 pub mod db;
 pub mod fingerprint;
+pub mod lyrics;
 pub mod mpris;
 pub mod net;
 pub mod online;
