@@ -19,7 +19,6 @@ pub(crate) use crate::ui::app_helpers::{
     unix_now,
 };
 use crate::ui::app_init::InitState;
-use crate::ui::app_podcast::fetch_and_store_podcast;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};
 use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow};
 
@@ -655,42 +654,15 @@ pub(crate) struct StreamingState {
     pub(crate) rec_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
 }
 
-/// Podcasts page state, grouped off the `App` god-object.
+/// Podcast playback state owned by the transport. The podcast *page* (lists,
+/// dialogs, search, downloads) now lives in [`crate::ui::podcasts_page`]; the
+/// only thing the transport still owns is which episode is currently loaded.
 pub(crate) struct PodcastsState {
-    /// (id, title, image URL, episode count) per podcast.
-    pub(crate) podcast_items: Vec<(i64, String, Option<String>, i64)>,
-    pub(crate) podcasts_list: gtk::ListBox,
-    /// Gallery variant of the podcast overview (cover grid).
-    pub(crate) podcasts_gallery: gtk::FlowBox,
-    /// Which podcast view is visible: newest episodes or subscription overview.
-    pub(crate) podcast_view: PodcastView,
-    /// Newest episodes across all subscriptions (for the "Newest" view).
-    pub(crate) newest_items: Vec<crate::model::EpisodeRef>,
-    /// Container of the "Newest" list (filled imperatively in `reload_newest`).
-    pub(crate) newest_list: gtk::Box,
-    /// Hits of the last podcast search (iTunes), for the subscribe dialog.
-    pub(crate) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
-    /// The last podcast search hit a network/service error (vs. no hits).
-    pub(crate) podcast_search_failed: bool,
-    /// While the subscribe search dialog is open: (dialog, hit list), so that
-    /// asynchronously arriving hits can be inserted into the shown list.
-    pub(crate) podcast_search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    /// URL of the currently loaded podcast episode (play/pause row marker);
-    /// `None` when music is playing or no episode is running.
+    /// URL of the currently loaded podcast episode (the canonical "an episode is
+    /// playing" marker, read across the transport); `None` when music/another
+    /// source is playing or no episode is running. The page keeps a mirror of
+    /// this (pushed via `PodcastsInput::PlaybackStateChanged`) for its row icons.
     pub(crate) playing_episode_url: Option<String>,
-    /// Play/pause buttons of the visible episode rows (audio URL → button), to
-    /// refresh their icon on playback-state changes.
-    pub(crate) episode_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
-    /// "Play" row of an open episode detail dialog (row, audio URL) – hidden
-    /// while exactly this episode is playing.
-    pub(crate) ctx_episode_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
-    /// "Download" column of an open episode detail dialog: (value label, audio
-    /// URL). The label text reflects the offline state and is refreshed when a
-    /// background download starts or finishes.
-    pub(crate) ctx_episode_download: std::rc::Rc<std::cell::RefCell<Option<(gtk::Label, String)>>>,
-    /// Audio URLs of episodes whose download is currently running (to show a
-    /// spinner and ignore repeated taps).
-    pub(crate) downloading_episodes: std::collections::HashSet<String>,
 }
 
 /// YouTube page state, grouped off the `App` god-object. The whole section is
@@ -908,6 +880,13 @@ pub struct App {
     pub(crate) sync_connected: bool,
     /// Nextcloud setup dialog, extracted into its own relm4 component.
     pub(crate) cloud_page: relm4::Controller<crate::ui::cloud_page::CloudPage>,
+    /// Podcasts page, extracted into its own relm4 component (list + dialogs +
+    /// feed workers). Playback stays in the parent transport; the page reaches it
+    /// via `PodcastsOutput` and is told the state back via `PlaybackStateChanged`.
+    pub(crate) podcasts_page: relm4::Controller<crate::ui::podcasts_page::PodcastsPage>,
+    /// Hand-off slot for episode subpages built by the PodcastsPage component
+    /// (read in `Msg::PushPodcastSubpage`, then pushed onto the shared nav).
+    pub(crate) podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
     /// First-run setup assistant, shown once on the very first launch.
     pub(crate) setup_page: relm4::Controller<crate::ui::setup::SetupPage>,
 }
@@ -1254,58 +1233,36 @@ pub enum Msg {
         id: i64,
         name: String,
     },
-    // Podcasts
-    /// Open the subscribe dialog (search + feed address).
-    PodcastSubscribe,
-    /// Search for podcasts matching this search term (iTunes directory, in the background).
-    PodcastSearch(String),
-    /// Subscribe to the feed at this address (fetch in the background).
-    PodcastSubscribeUrl(String),
-    /// Open the episodes subpage of a podcast.
-    OpenPodcast(i64),
-    /// Open gallery podcast (index in `podcast_items`) → `OpenPodcast`.
-    OpenPodcastAt(usize),
-    /// Subscription detail of a gallery podcast (index in `podcast_items`) → `ShowPodcastDetail`.
-    ShowPodcastDetailAt(usize),
-    /// Remove a podcast (undo toast; deferred to `PodcastDeleteConfirmed`).
-    PodcastDelete(i64),
-    /// Actually remove a podcast (after the undo toast expires).
-    PodcastDeleteConfirmed(i64),
-    /// Reload the feed of a podcast.
-    PodcastRefresh(i64),
-    /// Toggle an entry (episode): start or – if already the running one –
-    /// pause/resume. From tapping the row and from the play/pause button.
+    // Podcasts (episode playback only; the page lives in the PodcastsPage
+    // component — these two are mapped from its `Output`).
+    /// Toggle an episode: start or – if already the running one – pause/resume.
     ToggleEpisode {
         url: String,
         title: String,
     },
-    /// Switch the podcast view (Newest / Overview).
-    SetPodcastView(PodcastView),
     /// Switch the streaming view (channels/recordings).
     SetStreamView(StreamView),
-    /// Detail view of an entry (episode) from the "Newest" list (index).
-    ShowEpisodeDetail(usize),
-    /// Detail view of an episode from the episode list of a podcast.
-    ShowPodcastEpisodeDetail {
-        podcast_id: i64,
-        index: usize,
-    },
-    /// Click on a time-jump mark in the show notes: jump to the spot
-    /// (start the episode there if needed).
+    /// Click on a time-jump mark in the show notes: jump to the spot (start the
+    /// episode there if needed).
     EpisodeSeekTo {
         url: String,
         title: String,
         ms: i64,
     },
-    /// Download row in the episode detail: if not downloaded, fetch the audio
-    /// for offline playback (background); if already downloaded, delete the
-    /// local copy. `title` is only used for the toast.
-    ToggleEpisodeDownload {
-        url: String,
-        title: String,
-    },
-    /// Detail view/management of a subscription (podcast id) – refresh/remove.
-    ShowPodcastDetail(i64),
+    // --- Bridge from the PodcastsPage component to the shared parent chrome ---
+    /// The page parked a built episode subpage in `podcast_subpage`; push it onto
+    /// the shared NavigationView. Unit so `Msg` stays `Send` (the `!Send` widget
+    /// travels through the shared slot, not the message).
+    PushPodcastSubpage,
+    /// Informational toast requested by the page.
+    PodcastToast(String),
+    /// The page confirmed a removal → show the "Podcast removed" undo toast.
+    PodcastUndoToast(i64),
+    /// Undo window elapsed → tell the page to actually delete the podcast.
+    PodcastReallyDelete(i64),
+    /// The page started/finished a "refresh all" worker → drive the spinner.
+    PodcastRefreshStarted(bool),
+    PodcastRefreshFinished,
     // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
     // menu switch (see `Msg::SetSectionVisible`), not a dedicated settings toggle.
     /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
@@ -1568,22 +1525,6 @@ pub enum Cmd {
     },
     /// Found concert candidates (for the import dialog).
     Candidates(Vec<crate::core::concert::Candidate>),
-    /// Podcast feed fetched: `Some(title)` on success, otherwise `None`.
-    PodcastFetched(Option<String>),
-    /// An episode download finished: the audio URL and the local path on
-    /// success, or an error message.
-    EpisodeDownloaded {
-        url: String,
-        result: Result<String, String>,
-    },
-    /// Hits of the podcast search (for the open subscribe dialog).
-    PodcastSearchResults(Vec<crate::core::podcast::PodcastSearchResult>),
-    /// The podcast search failed (service unreachable) → show a hint, not "empty".
-    PodcastSearchFailed,
-    /// Cover thumbnails of the search hits are cached → redraw the hit list.
-    PodcastSearchCoversReady,
-    /// Rebuild the podcast list (e.g. after feed images were cached).
-    ReloadPodcasts,
     /// yt-dlp install/update/startup-check finished: the version on success,
     /// or an error message. Drives the settings status and `youtube.ytdlp_version`.
     YtDlpReady(Result<String, String>),
@@ -1671,9 +1612,6 @@ pub enum Cmd {
     CloudReindexed {
         manual: bool,
     },
-    /// All podcast feeds finished refreshing (manual refresh) → rebuild the
-    /// overview and clear one slot of the refresh spinner.
-    PodcastsRefreshed,
     /// All YouTube subscriptions finished refreshing (manual refresh) → rebuild
     /// the overview and clear one slot of the refresh spinner.
     ChannelsRefreshed,
@@ -2166,108 +2104,11 @@ impl Component for App {
                                     // playlists are created from a track's "Add to
                                     // playlist" options (which can create one inline).
                                 },
+                            // Podcasts live in their own relm4 component.
                             add_titled_with_icon[Some("podcasts"), &gettext("Podcasts"), "podcast-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-
-                                    // Header: linked tab switcher "Newest" / "Overview"
-                                    // (same style as the Streaming tab) and "+" to subscribe.
-                                    gtk::Box {
-                                        set_orientation: gtk::Orientation::Horizontal,
-                                        set_spacing: 6,
-                                        set_margin_top: 2,
-                                        // A bit of (sparse) space below the switches; the first
-                                        // section heading thus sits ~10px higher.
-                                        set_margin_bottom: 4,
-                                        set_margin_start: 12,
-                                        set_margin_end: 12,
-                                        add_css_class: "linked",
-
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Newest"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.podcasts.podcast_view == PodcastView::Newest,
-                                            connect_clicked => Msg::SetPodcastView(PodcastView::Newest),
-                                        },
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Overview"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.podcasts.podcast_view == PodcastView::Overview,
-                                            connect_clicked => Msg::SetPodcastView(PodcastView::Overview),
-                                        },
-                                        gtk::Button {
-                                            set_icon_name: "list-add-symbolic",
-                                            set_tooltip_text: Some(&gettext("Subscribe to podcast")),
-                                            add_css_class: "flat",
-                                            connect_clicked => Msg::PodcastSubscribe,
-                                        },
-                                    },
-
-                                    // "Newest": newest episodes across all subscriptions.
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Newest && !model.podcasts.newest_items.is_empty(),
-                                        #[local_ref]
-                                        newest_list -> gtk::Box {
-                                            set_orientation: gtk::Orientation::Vertical,
-                                            set_spacing: 6,
-                                            set_valign: gtk::Align::Start,
-                                            // First heading closer to the switchers (≈10px higher).
-                                            set_margin_top: 0,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("podcast-symbolic"),
-                                        set_title: &gettext("No episodes"),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Newest && model.podcasts.newest_items.is_empty(),
-                                    },
-
-                                    // "Overview": subscribed podcasts.
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && !model.libview.gallery_view,
-                                        #[local_ref]
-                                        podcasts_list -> gtk::ListBox {
-                                            set_valign: gtk::Align::Start,
-                                            // 10px space down to the content (not stuck to the switcher).
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
-                                        },
-                                    },
-                                    // Gallery variant of the subscription overview
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && !model.podcasts.podcast_items.is_empty() && model.libview.gallery_view,
-                                        #[local_ref]
-                                        podcasts_gallery -> gtk::FlowBox {
-                                            set_valign: gtk::Align::Start,
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("podcast-symbolic"),
-                                        set_title: &gettext("No podcasts"),
-                                        set_description: Some(&gettext("Subscribe to a podcast via its feed address (RSS).")),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.podcasts.podcast_view == PodcastView::Overview && model.podcasts.podcast_items.is_empty(),
-                                    },
+                                    append: model.podcasts_page.widget(),
                                 },
                             add_titled_with_icon[Some("streaming"), &gettext("Streaming"), "internet-radio-symbolic"] =
                                 &gtk::Box {
@@ -3207,11 +3048,9 @@ impl Component for App {
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
-        let podcasts_list = gtk::ListBox::new();
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
         let memos_list = gtk::ListBox::new();
-        let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let yt_channels_list = gtk::ListBox::new();
         let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let yt_recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -3232,6 +3071,25 @@ impl Component for App {
             .forward(sender.input_sender(), |out| match out {
                 crate::ui::cloud_page::CloudOutput::SourcesChanged => Msg::SourcesChanged,
                 crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
+            });
+        // Shared hand-off slot for episode subpages built by the component (its
+        // `!Send` widget can't ride on the parent's `Send` `Msg`).
+        let podcast_subpage: std::rc::Rc<
+            std::cell::RefCell<Option<(String, gtk::Box)>>,
+        > = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let podcasts_page = crate::ui::podcasts_page::PodcastsPage::builder()
+            .launch(podcast_subpage.clone())
+            .forward(sender.input_sender(), |out| {
+                use crate::ui::podcasts_page::PodcastsOutput as O;
+                match out {
+                    O::ToggleEpisode { url, title } => Msg::ToggleEpisode { url, title },
+                    O::EpisodeSeekTo { url, title, ms } => Msg::EpisodeSeekTo { url, title, ms },
+                    O::PushSubpage => Msg::PushPodcastSubpage,
+                    O::Toast(s) => Msg::PodcastToast(s),
+                    O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
+                    O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
+                    O::RefreshFinished => Msg::PodcastRefreshFinished,
+                }
             });
         let setup_page = crate::ui::setup::SetupPage::builder().launch(()).forward(
             sender.input_sender(),
@@ -3390,20 +3248,7 @@ impl Component for App {
                 playlists_list: playlists_list.clone(),
             },
             podcasts: PodcastsState {
-                podcast_items: Vec::new(),
-                podcasts_list: podcasts_list.clone(),
-                podcasts_gallery: gtk::FlowBox::new(),
-                podcast_view: PodcastView::Newest,
-                newest_items: Vec::new(),
-                newest_list: newest_list.clone(),
-                podcast_search_results: Vec::new(),
-                podcast_search_failed: false,
-                podcast_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 playing_episode_url: None,
-                episode_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-                ctx_episode_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                ctx_episode_download: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                downloading_episodes: std::collections::HashSet::new(),
             },
             streaming: StreamingState {
                 stream_view: StreamView::Channels,
@@ -3479,6 +3324,8 @@ impl Component for App {
             sync_page,
             sync_connected: false,
             cloud_page,
+            podcasts_page,
+            podcast_subpage,
             setup_page,
         };
 
@@ -3555,7 +3402,19 @@ impl Component for App {
         model.load_favorites(&sender);
         model.load_audiobooks(&sender);
         model.reload_playlists(&sender);
-        model.reload_podcasts(&sender);
+        // Bring the PodcastsPage component up to the current chrome state. The
+        // final `SetGalleryView` triggers exactly one (correctly-moded) reload.
+        {
+            use crate::ui::podcasts_page::PodcastsInput as PI;
+            model.podcasts_page.emit(PI::SetWindow(root.clone()));
+            model.podcasts_page.emit(PI::SetMobile(model.is_mobile()));
+            model
+                .podcasts_page
+                .emit(PI::SetGalleryColumns(model.libview.gallery_columns));
+            model
+                .podcasts_page
+                .emit(PI::SetGalleryView(model.libview.gallery_view));
+        }
         model.reload_streams(&sender);
         model.reload_recordings(&sender);
         // Seed the starter memo categories once (localized; i18n is ready here),
@@ -3588,20 +3447,9 @@ impl Component for App {
         }
         model.reload_memo_categories(&sender);
         model.reload_memos(&sender);
-        // (Statistics build themselves in the StatsPage component's init.)
-        // Cache the podcast feed images once in the background, then rebuild
-        // the list so that the covers appear (no UI block at startup).
-        sender.spawn_oneshot_command(|| {
-            if let Ok(lib) = Library::open() {
-                for (_, _, image, _) in lib.podcasts().unwrap_or_default() {
-                    if let Some(url) = image {
-                        crate::core::online::cache_podcast_image(&url);
-                    }
-                }
-            }
-            Cmd::ReloadPodcasts
-        });
-        // Likewise cache the station logos once in the background.
+        // (Statistics build themselves in the StatsPage component's init, and the
+        // podcast feed-image cache runs in the PodcastsPage component's init.)
+        // Cache the station logos once in the background.
         sender.spawn_oneshot_command(|| {
             if let Ok(lib) = Library::open() {
                 for st in lib.streams().unwrap_or_default() {
@@ -3657,7 +3505,6 @@ impl Component for App {
         let artists_gallery_box = model.libview.artists_gallery_box.clone();
         let concerts_gallery_box = model.concerts.concerts_gallery_box.clone();
         let audiobooks_gallery_box = model.favorites.audiobooks_gallery_box.clone();
-        let podcasts_gallery = model.podcasts.podcasts_gallery.clone();
         let yt_channels_gallery = model.youtube.channels_gallery.clone();
         let widgets = view_output!();
         model.finish_init(
@@ -3820,80 +3667,6 @@ impl Component for App {
                     let _ = self.library.rename_playlist(id, name);
                     self.reload_playlists(&sender);
                 }
-            }
-            Msg::PodcastSubscribe => self.open_subscribe_podcast_dialog(root, &sender),
-            Msg::PodcastSearch(term) => {
-                let term = term.trim().to_string();
-                if !term.is_empty() {
-                    self.toast(&gettext("Searching …"));
-                    sender.spawn_command(move |out| {
-                        let results = match crate::core::podcast::search_podcasts(&term) {
-                            Ok(r) => r,
-                            Err(_) => {
-                                let _ = out.send(Cmd::PodcastSearchFailed);
-                                return;
-                            }
-                        };
-                        // Show hits immediately (still without covers) …
-                        let _ = out.send(Cmd::PodcastSearchResults(results.clone()));
-                        // … and fetch the cover thumbnails afterwards in the background.
-                        for r in &results {
-                            if let Some(img) = r.image_url.as_deref() {
-                                crate::core::online::cache_podcast_image(img);
-                            }
-                        }
-                        let _ = out.send(Cmd::PodcastSearchCoversReady);
-                    });
-                }
-            }
-            Msg::PodcastSubscribeUrl(url) => {
-                let url = url.trim().to_string();
-                if !url.is_empty() {
-                    self.toast(&gettext("Loading feed …"));
-                    sender.spawn_command(move |out| {
-                        let _ = out.send(Cmd::PodcastFetched(fetch_and_store_podcast(&url)));
-                    });
-                }
-            }
-            Msg::PodcastRefresh(id) => {
-                if let Ok(Some(url)) = self.library.podcast_feed_url(id) {
-                    self.toast(&gettext("Updating feed …"));
-                    sender.spawn_command(move |out| {
-                        let _ = out.send(Cmd::PodcastFetched(fetch_and_store_podcast(&url)));
-                    });
-                }
-            }
-            Msg::OpenPodcast(id) => {
-                if let Some((_, title, _, _)) = self
-                    .podcasts
-                    .podcast_items
-                    .iter()
-                    .find(|(pid, _, _, _)| *pid == id)
-                    .cloned()
-                {
-                    self.open_podcast(&sender, id, &title);
-                }
-            }
-            Msg::OpenPodcastAt(index) => {
-                if let Some(id) = self.podcasts.podcast_items.get(index).map(|p| p.0) {
-                    sender.input(Msg::OpenPodcast(id));
-                }
-            }
-            Msg::ShowPodcastDetailAt(index) => {
-                if let Some(id) = self.podcasts.podcast_items.get(index).map(|p| p.0) {
-                    sender.input(Msg::ShowPodcastDetail(id));
-                }
-            }
-            Msg::PodcastDelete(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Podcast removed"),
-                    Msg::PodcastDeleteConfirmed(id),
-                );
-            }
-            Msg::PodcastDeleteConfirmed(id) => {
-                let _ = self.library.delete_podcast(id);
-                self.reload_podcasts(&sender);
             }
             // --- Streaming (internet radio) ---
             Msg::StreamAdd => self.open_add_stream_dialog(root, &sender),
@@ -4062,16 +3835,34 @@ impl Component for App {
             }
             Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
-            Msg::ToggleEpisodeDownload { url, title } => {
-                self.toggle_episode_download(&sender, url, title)
-            }
-            Msg::SetPodcastView(view) => self.podcasts.podcast_view = view,
             Msg::SetStreamView(view) => self.streaming.stream_view = view,
-            Msg::ShowEpisodeDetail(index) => self.open_episode_detail(root, &sender, index),
-            Msg::ShowPodcastEpisodeDetail { podcast_id, index } => {
-                self.open_podcast_episode_detail(root, &sender, podcast_id, index)
+            Msg::PushPodcastSubpage => {
+                if let Some((title, content)) = self.podcast_subpage.borrow_mut().take() {
+                    self.push_subpage(&title, &content);
+                    // The episode rows are now realized → let the page set their
+                    // play/pause icons to the current state.
+                    self.podcasts_page.emit(
+                        crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
+                            playing_url: self.podcasts.playing_episode_url.clone(),
+                            playing: self.mini.playing,
+                        },
+                    );
+                }
             }
-            Msg::ShowPodcastDetail(id) => self.open_podcast_detail(root, &sender, id),
+            Msg::PodcastToast(s) => self.toast(&s),
+            Msg::PodcastUndoToast(id) => {
+                self.undo_toast(&sender, &gettext("Podcast removed"), Msg::PodcastReallyDelete(id));
+            }
+            Msg::PodcastReallyDelete(id) => {
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::DeleteConfirmed(id));
+            }
+            Msg::PodcastRefreshStarted(started) => {
+                if started {
+                    self.refresh_pending += 1;
+                }
+            }
+            Msg::PodcastRefreshFinished => self.refresh_done(),
             // --- YouTube ---
             Msg::FetchYtDlp => {
                 let update = self.youtube.ytdlp_version.is_some();
@@ -4232,7 +4023,8 @@ impl Component for App {
             Msg::SyncImported => {
                 self.load_favorites(&sender);
                 self.reload_playlists(&sender);
-                self.reload_podcasts(&sender);
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::Reload);
                 // Received audio files were indexed into the `track` table as they
                 // arrived → rebuild the artist/album overviews so they show up.
                 self.reload_library_overviews();
@@ -4457,6 +4249,8 @@ impl Component for App {
                     .library
                     .set_setting("gallery_view", if on { "1" } else { "0" });
                 self.rebuild_all_lists(&sender);
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryView(on));
                 // Artists/Albums gallery tiles aren't filtered → update the
                 // funnel button's visibility for the new (list/gallery) mode.
                 self.update_filter_chrome();
@@ -4469,6 +4263,10 @@ impl Component for App {
                 if self.libview.gallery_view {
                     self.rebuild_all_lists(&sender);
                 }
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryColumns(
+                        self.libview.gallery_columns,
+                    ));
             }
             Msg::SetAreas { scope, key, value } => self.set_areas(&sender, scope, key, value),
             Msg::SetEq {
@@ -4663,40 +4461,6 @@ impl Component for App {
                     self.open_concert_import_dialog(root, &sender, candidates);
                 }
             }
-            Cmd::PodcastFetched(title) => {
-                self.reload_podcasts(&sender);
-                match title {
-                    Some(t) => self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)])),
-                    None => self.toast(&gettext("Could not load feed")),
-                }
-            }
-            Cmd::EpisodeDownloaded { url, result } => {
-                self.podcasts.downloading_episodes.remove(&url);
-                self.refresh_download_row();
-                match result {
-                    Ok(_) => self.toast(&gettext("Episode downloaded")),
-                    Err(e) => {
-                        tracing::warn!("Episode download failed: {e}");
-                        self.toast(&gettext("Download failed"));
-                    }
-                }
-            }
-            Cmd::PodcastSearchResults(results) => {
-                self.podcasts.podcast_search_failed = false;
-                self.podcasts.podcast_search_results = results;
-                self.rebuild_podcast_search_results(&sender);
-            }
-            Cmd::PodcastSearchFailed => {
-                self.podcasts.podcast_search_failed = true;
-                self.podcasts.podcast_search_results.clear();
-                self.rebuild_podcast_search_results(&sender);
-            }
-            Cmd::PodcastSearchCoversReady => self.rebuild_podcast_search_results(&sender),
-            Cmd::ReloadPodcasts => self.reload_podcasts(&sender),
-            Cmd::PodcastsRefreshed => {
-                self.refresh_done();
-                self.reload_podcasts(&sender);
-            }
             Cmd::YtDlpReady(result) => {
                 self.youtube.ytdlp_busy = false;
                 match result {
@@ -4869,7 +4633,8 @@ impl App {
         self.load_favorites(sender);
         self.load_audiobooks(sender);
         self.load_concerts(sender);
-        self.reload_podcasts(sender);
+        // Podcasts rebuild themselves in their component (told via
+        // `PodcastsInput::SetGalleryView` from the gallery toggle).
     }
 
     /// Narrow (mobile) mode? Driven purely by the width breakpoint – not by the

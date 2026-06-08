@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use gtk::prelude::GtkWindowExt;
-use relm4::{adw, gtk, ComponentSender};
+use relm4::{adw, gtk, ComponentController, ComponentSender};
 
 use crate::core::scanner;
 use crate::core::webdav::{self, Creds};
@@ -64,8 +64,13 @@ impl App {
         }
         // Sync the play row of an open detail dialog with the playback state.
         self.refresh_ctx_play();
-        // Play/pause icons of the podcast episodes (and the detail "Play" row).
-        self.refresh_episode_icons();
+        // Play/pause icons of the podcast episodes (and the detail "Play" row)
+        // live in the PodcastsPage component now → push it the current state.
+        self.podcasts_page
+            .emit(crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
+                playing_url: self.podcasts.playing_episode_url.clone(),
+                playing: self.mini.playing,
+            });
         // …and of the YouTube video rows.
         self.refresh_yt_icons();
         // …and of the saved-recording rows.

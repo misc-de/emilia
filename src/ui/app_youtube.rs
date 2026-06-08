@@ -3,7 +3,7 @@
 //! glue. The extractor (`yt-dlp`) is downloaded at runtime, never bundled, and
 //! the whole section is gated behind the `youtube_enabled` setting.
 //!
-//! Mirrors the podcast feature (`app_podcast.rs`): channels ≙ subscriptions,
+//! Mirrors the podcast feature (`podcasts_page.rs`): channels ≙ subscriptions,
 //! videos ≙ episodes. "Add to my music" reuses the synthetic-path scheme
 //! (`yt:<video_id>`) the way Nextcloud uses `nc:<id>:<rel>`; "available offline"
 //! mirrors the episode download.
@@ -223,7 +223,7 @@ pub(crate) fn fmt_duration(secs: i64) -> String {
 
 /// Subscribes to a channel and caches its newest videos (worker thread, own DB
 /// connection). Returns the channel title on success. Mirrors
-/// [`crate::ui::app_podcast::fetch_and_store_podcast`].
+/// [`crate::ui::podcasts_page::fetch_and_store_podcast`].
 pub(crate) fn fetch_and_store_channel(
     channel_id: &str,
     title: &str,

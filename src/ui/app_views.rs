@@ -2944,9 +2944,11 @@ impl App {
         // podcast feed and every YouTube channel (background workers;
         // both need a connection, so skip them when offline).
         if online_available() {
-            if self.refresh_all_podcasts(sender) {
-                pending += 1;
-            }
+            // Podcasts refresh in their own component; it reports back whether a
+            // worker started (`PodcastRefreshStarted`) and when it finished
+            // (`PodcastRefreshFinished`), which adjust `refresh_pending` then.
+            self.podcasts_page
+                .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
             if self.refresh_all_channels(sender) {
                 pending += 1;
             }
