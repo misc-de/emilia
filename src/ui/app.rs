@@ -1614,7 +1614,8 @@ impl Component for App {
                         #[name = "top_nav"]
                         set_child = &gtk::Box {
                             set_spacing: 3,
-                            set_margin_top: 2,
+                            // Sit the mobile menu strip 10px lower (top 2 → 12).
+                            set_margin_top: 12,
                             set_margin_bottom: 2,
                             // Center the icon strip when it fits; it still scrolls
                             // (left-aligned) once the icons overflow the width.
@@ -2129,17 +2130,22 @@ impl Component for App {
                     // transport buttons are grayed out.
                     add_bottom_bar = &gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
-                        set_spacing: 2,
-                        set_margin_top: 4,
-                        set_margin_bottom: 6,
+                        // Tighter bar: the vertical space above/below the song line
+                        // is halved (spacing 2→1, top 4→2, bottom 6→3, song top 5→2).
+                        set_spacing: 1,
+                        set_margin_top: 2,
+                        set_margin_bottom: 3,
                         set_margin_start: 10,
                         set_margin_end: 10,
 
                         gtk::Button {
                             add_css_class: "flat",
+                            // Trim ~5px of vertical padding above/below the song line
+                            // (CSS, see `init`), on top of the small top margin.
+                            add_css_class: "emilia-songline",
                             set_tooltip_text: Some(&gettext("Show details of the current track")),
-                            // Place song/artist a bit lower (more compact bar).
-                            set_margin_top: 5,
+                            // Slight offset above the song line (halved from 5).
+                            set_margin_top: 2,
                             // Without a selected track, hide entirely (frees up space).
                             #[watch]
                             set_visible: model.mini.now_playing.is_some(),
@@ -2311,6 +2317,22 @@ impl Component for App {
                                     set_opacity: if model.transport.shuffle { 1.0 } else { 0.4 },
                                     connect_clicked => Msg::ToggleShuffle,
                                 },
+                                // Repeat (loop): at the end of the queue or of the
+                                // single track, start over. Active = white, off = gray.
+                                // Sits on the left next to shuffle.
+                                gtk::ToggleButton {
+                                    set_icon_name: "media-playlist-repeat-symbolic",
+                                    set_tooltip_text: Some(&gettext("Repeat")),
+                                    set_valign: gtk::Align::Center,
+                                    add_css_class: "flat",
+                                    #[watch]
+                                    set_sensitive: model.mini.now_playing.is_some(),
+                                    #[watch]
+                                    set_active: model.transport.repeat,
+                                    #[watch]
+                                    set_opacity: if model.transport.repeat { 1.0 } else { 0.4 },
+                                    connect_clicked => Msg::ToggleRepeat,
+                                },
                             },
                             #[wrap(Some)]
                             set_center_widget = &gtk::Box {
@@ -2410,8 +2432,8 @@ impl Component for App {
                                     connect_clicked => Msg::Next,
                                 },
                             },
-                            // Bottom right: repeat (centered between "next" and the
-                            // queue) and the queue.
+                            // Bottom right: lyrics, the album shortcut and the queue.
+                            // (Repeat moved to the left, next to shuffle.)
                             #[wrap(Some)]
                             set_end_widget = &gtk::Box {
                                 set_spacing: 6,
@@ -2429,21 +2451,6 @@ impl Component for App {
                                     set_visible: model.lyrics.current.as_ref()
                                         .is_some_and(|l| l.has_any()),
                                     connect_clicked => Msg::ShowLyrics,
-                                },
-                                // Repeat (loop): at the end of the queue or
-                                // of the single track, start over. Active = white, off = gray.
-                                gtk::ToggleButton {
-                                    set_icon_name: "media-playlist-repeat-symbolic",
-                                    set_tooltip_text: Some(&gettext("Repeat")),
-                                    set_valign: gtk::Align::Center,
-                                    add_css_class: "flat",
-                                    #[watch]
-                                    set_sensitive: model.mini.now_playing.is_some(),
-                                    #[watch]
-                                    set_active: model.transport.repeat,
-                                    #[watch]
-                                    set_opacity: if model.transport.repeat { 1.0 } else { 0.4 },
-                                    connect_clicked => Msg::ToggleRepeat,
                                 },
                                 // Album shortcut: only while a local album track
                                 // plays. Opens the album's song page (back returns).

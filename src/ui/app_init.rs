@@ -410,6 +410,45 @@ impl App {
             });
         }
 
+        // Content-header title, centralised so the breakpoint and every
+        // navigation callback stay in sync. Desktop: "Emilia" + the section name
+        // on the main page, or a pushed subpage's title. Mobile (narrow): the
+        // whole title bar is kept blank — no app name and no section/track text.
+        let refresh_title: std::rc::Rc<dyn Fn()> = {
+            let win_title = widgets.win_title.clone();
+            let nav_view = widgets.nav_view.clone();
+            let stack = widgets.view_stack.clone();
+            let narrow = self.nav.narrow.clone();
+            std::rc::Rc::new(move || {
+                if narrow.get() {
+                    win_title.set_title("");
+                    win_title.set_subtitle("");
+                    return;
+                }
+                let on_main = nav_view
+                    .visible_page()
+                    .and_then(|p| p.tag())
+                    .is_some_and(|t| t == "main");
+                if on_main {
+                    win_title.set_title("Emilia");
+                    let cur = stack.visible_child_name();
+                    let cur = cur.as_deref().unwrap_or("files");
+                    win_title.set_subtitle(
+                        &section_meta(cur)
+                            .map(|(l, _)| gettext(l))
+                            .unwrap_or_default(),
+                    );
+                } else {
+                    let t = nav_view
+                        .visible_page()
+                        .map(|p| p.title().to_string())
+                        .unwrap_or_default();
+                    win_title.set_title(&t);
+                    win_title.set_subtitle("");
+                }
+            })
+        };
+
         // Adaptive: only at mobile (narrow) width collapse the sidebar and
         // show the top nav. On the desktop the left sidebar remains initially.
         let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
@@ -457,12 +496,14 @@ impl App {
         {
             let narrow = self.nav.narrow.clone();
             let apply = apply_chrome.clone();
+            let rt = refresh_title.clone();
             let pods = self.podcasts_page.sender().clone();
             let yt = self.yt_page.sender().clone();
             let stream = self.stream_page.sender().clone();
             breakpoint.connect_apply(move |_| {
                 narrow.set(true);
                 apply();
+                rt();
                 let _ = pods.send(crate::ui::podcasts_page::PodcastsInput::SetMobile(true));
                 let _ = yt.send(crate::ui::yt_page::YtInput::SetMobile(true));
                 let _ = stream.send(crate::ui::stream_page::StreamInput::SetMobile(true));
@@ -471,12 +512,14 @@ impl App {
         {
             let narrow = self.nav.narrow.clone();
             let apply = apply_chrome.clone();
+            let rt = refresh_title.clone();
             let pods = self.podcasts_page.sender().clone();
             let yt = self.yt_page.sender().clone();
             let stream = self.stream_page.sender().clone();
             breakpoint.connect_unapply(move |_| {
                 narrow.set(false);
                 apply();
+                rt();
                 let _ = pods.send(crate::ui::podcasts_page::PodcastsInput::SetMobile(false));
                 let _ = yt.send(crate::ui::yt_page::YtInput::SetMobile(false));
                 let _ = stream.send(crate::ui::stream_page::StreamInput::SetMobile(false));
@@ -515,10 +558,12 @@ impl App {
                     btn.set_child(Some(&inner));
                     btn.set_hexpand(true);
                 } else {
-                    // Mobile top bar: icon only, noticeably larger (≈1.6×) than the
-                    // default size – never smaller than now.
+                    // Mobile top bar: icon only, enlarged a further ~30% (26 → 34px,
+                    // ≈2.1× the default) so the menu items are easier to hit on a
+                    // phone. The strip lives in a horizontal scroller, so wider
+                    // icons just scroll instead of overflowing.
                     let img = gtk::Image::from_icon_name(icon);
-                    img.set_pixel_size(26);
+                    img.set_pixel_size(34);
                     btn.set_child(Some(&img));
                     btn.set_tooltip_text(Some(&gettext(label)));
                 }
@@ -622,19 +667,13 @@ impl App {
 
         // Set the active button to match the visible stack page and show the name
         // of the menu item discreetly as the subtitle of the header.
-        let win_title = widgets.win_title.clone();
         let sync_active =
-            move |stack: &adw::ViewStack, buttons: &[(&'static str, bool, gtk::ToggleButton)]| {
+            |stack: &adw::ViewStack, buttons: &[(&'static str, bool, gtk::ToggleButton)]| {
                 let cur = stack.visible_child_name();
                 let cur = cur.as_deref().unwrap_or("files");
                 for (name, _is_sidebar, btn) in buttons {
                     btn.set_active(*name == cur);
                 }
-                win_title.set_subtitle(
-                    &section_meta(cur)
-                        .map(|(l, _)| gettext(l))
-                        .unwrap_or_default(),
-                );
             };
         // Restore the most recently open navigation item – but not a
         // hidden one. As a fallback, fall to the first visible menu item (in the
@@ -653,15 +692,18 @@ impl App {
             widgets.view_stack.set_visible_child_name(section);
         }
         sync_active(&widgets.view_stack, &nav_buttons);
+        refresh_title();
         // Build the sort popover for the section shown at startup.
         self.rebuild_sort_menu();
         {
             let stats_sender = self.stats_page.sender().clone();
             let sender = sender.clone();
+            let rt = refresh_title.clone();
             widgets
                 .view_stack
                 .connect_visible_child_notify(move |stack| {
                     sync_active(stack, &nav_buttons);
+                    rt();
                     // Rebuild (or hide) the title-bar sort control for the section.
                     sender.input(Msg::SortMenuRefresh);
                     // Recompute the statistics fresh when opening the section.
@@ -676,32 +718,15 @@ impl App {
         // hides and the section name returns as the subtitle. Keeps the top/bottom
         // navigation visible across subpages.
         {
-            let win_title = widgets.win_title.clone();
             let back_btn = widgets.nav_back_btn.clone();
-            let stack = widgets.view_stack.clone();
+            let rt = refresh_title.clone();
             widgets.nav_view.connect_visible_page_notify(move |nv| {
                 let on_main = nv
                     .visible_page()
                     .and_then(|p| p.tag())
                     .is_some_and(|t| t == "main");
                 back_btn.set_visible(!on_main);
-                if on_main {
-                    win_title.set_title("Emilia");
-                    let cur = stack.visible_child_name();
-                    let cur = cur.as_deref().unwrap_or("files");
-                    win_title.set_subtitle(
-                        &section_meta(cur)
-                            .map(|(l, _)| gettext(l))
-                            .unwrap_or_default(),
-                    );
-                } else {
-                    let t = nv
-                        .visible_page()
-                        .map(|p| p.title().to_string())
-                        .unwrap_or_default();
-                    win_title.set_title(&t);
-                    win_title.set_subtitle("");
-                }
+                rt();
             });
         }
 
@@ -994,6 +1019,7 @@ impl App {
                  button.sync-connected { color: @success_color; }\
                  button.sleep-armed { color: @accent_color; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
+                 button.emilia-songline { min-height: 0px; padding-top: 1px; padding-bottom: 1px; }\
                  button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\
                  button.emilia-record-dot image { color: @error_color; }\
                  image.emilia-record-dot { color: @error_color; }\
