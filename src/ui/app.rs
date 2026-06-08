@@ -617,21 +617,12 @@ pub(crate) struct FilesState {
     pub(crate) playing_remote: bool,
 }
 
-/// Streaming (internet radio) + timeshift-recording page state.
+/// Streaming transport + timeshift-recording state owned by `App`. The
+/// internet-radio *page* (station list, dialogs, search, recordings list) lives
+/// in the [`crate::ui::stream_page`] component; what stays here is the running
+/// station + the background timeshift recorder, which the player bar, the 1-s
+/// tick and the replay subpage all reach.
 pub(crate) struct StreamingState {
-    /// Which streaming view is visible: channels or recordings.
-    pub(crate) stream_view: StreamView,
-    /// Saved stations.
-    pub(crate) stream_items: Vec<crate::model::StreamItem>,
-    pub(crate) streams_list: gtk::ListBox,
-    /// Hits of the last station search (Radio Browser), for the add dialog.
-    pub(crate) stream_search_results: Vec<crate::core::streaming::StationResult>,
-    /// The last station search hit a network/service error (vs. simply no hits):
-    /// drives a "service unreachable" hint instead of "no results".
-    pub(crate) stream_search_failed: bool,
-    /// While the add dialog is open: (dialog, hit list), so that asynchronously
-    /// arriving hits fit into the already shown list.
-    pub(crate) stream_search: std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// ID of the currently running station; `None` when nothing/other is running.
     pub(crate) playing_stream: Option<i64>,
     /// Currently running track of the station (ICY metadata) for "Now Playing".
@@ -643,15 +634,6 @@ pub(crate) struct StreamingState {
     pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
     /// Size of the timeshift buffer in minutes (0 = off, max. 60).
     pub(crate) recording_buffer_minutes: u32,
-    /// Saved timeshift recordings.
-    pub(crate) recording_items: Vec<crate::model::RecordingItem>,
-    pub(crate) recordings_list: gtk::ListBox,
-    /// Play/pause buttons of the station rows (station id → button), for
-    /// refreshing the icon when the playback state changes.
-    pub(crate) stream_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(i64, gtk::Button)>>>,
-    /// Play/pause buttons of the recording rows (file path → button), same
-    /// purpose as [`Self::stream_play_buttons`].
-    pub(crate) rec_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
 }
 
 /// Podcast playback state owned by the transport. The podcast *page* (lists,
@@ -837,6 +819,9 @@ pub struct App {
     pub(crate) yt_page: relm4::Controller<crate::ui::yt_page::YtPage>,
     /// Hand-off slot for subpages built by the YtPage component.
     pub(crate) yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
+    /// Internet-radio page, extracted into its own relm4 component. The timeshift
+    /// recorder and playback stay on `App` (see `app_streaming.rs`).
+    pub(crate) stream_page: relm4::Controller<crate::ui::stream_page::StreamPage>,
     /// First-run setup assistant, shown once on the very first launch.
     pub(crate) setup_page: relm4::Controller<crate::ui::setup::SetupPage>,
 }
@@ -1190,8 +1175,6 @@ pub enum Msg {
         url: String,
         title: String,
     },
-    /// Switch the streaming view (channels/recordings).
-    SetStreamView(StreamView),
     /// Click on a time-jump mark in the show notes: jump to the spot (start the
     /// episode there if needed).
     EpisodeSeekTo {
@@ -1292,15 +1275,8 @@ pub enum Msg {
     /// The page started/finished a "refresh all" worker → drive the spinner.
     YtRefreshStarted(bool),
     YtRefreshFinished,
-    // Streaming (internet radio)
-    /// Open the add dialog (search + stream address).
-    StreamAdd,
-    /// Search for stations matching this search term (Radio Browser, in the background).
-    StreamSearch(String),
-    /// Save a search hit (index in `stream_search_results`) as a station.
-    StreamAddResult(usize),
-    /// Save a stream address manually as a station.
-    StreamAddUrl(String),
+    // Streaming (internet radio) — transport; the page lives in the StreamPage
+    // component and reaches the transport through these.
     /// Tap a station: starts it, toggle pause/resume on a running station.
     ToggleStream(i64),
     /// Record button of a station row: starts/stops the continuous recording.
@@ -1310,18 +1286,7 @@ pub enum Msg {
     RecordToggle,
     /// Title tag from the playback (for stations: the running ICY title).
     StreamTitle(String),
-    /// Open the detail page of a station.
-    OpenStream(i64),
-    /// Open the rename dialog of a station.
-    StreamRenameDialog(i64),
-    /// Rename a station.
-    StreamRename {
-        id: i64,
-        name: String,
-    },
-    /// Remove a station (undo toast; deferred to `StreamDeleteConfirmed`).
-    StreamDelete(i64),
-    /// Actually remove a station (after the undo toast expires).
+    /// Actually remove a station (after the undo toast; stops the player/recorder).
     StreamDeleteConfirmed(i64),
     // Recording (timeshift)
     /// Stop the running recording.
@@ -1341,14 +1306,17 @@ pub enum Msg {
     },
     /// Play a saved recording (path).
     PlayRecording(String),
-    /// Open the detail page of a recording (id) – via long press.
-    OpenRecording(i64),
-    /// Delete a recording (id) – undo toast; deferred to `RecordingDeleteConfirmed`.
-    RecordingDelete(i64),
-    /// Actually delete a recording (after the undo toast expires).
-    RecordingDeleteConfirmed(i64),
-    /// Copy a recording (id) into the music library so it appears as a track.
-    AddRecordingToLibrary(i64),
+    // --- bridge from the StreamPage component to the shared parent chrome ---
+    /// The page confirmed a station removal → show the "station removed" undo toast.
+    StreamDeleteUndo(i64),
+    /// The page confirmed a recording deletion → show the "recording deleted" undo toast.
+    RecordingDeleteUndo(i64),
+    /// Undo window elapsed → tell the page to actually delete the recording.
+    StreamRecordingReallyDelete(i64),
+    /// A recording was copied into the music library → reload artist/album views.
+    StreamLibraryChanged,
+    /// Informational toast requested by the page.
+    StreamToast(String),
     /// Open the waveform editor subpage for a recording (id).
     EditRecording(i64),
     /// Open the waveform editor subpage for a voice memo (id).
@@ -1463,15 +1431,8 @@ pub enum Cmd {
     },
     /// Startup background refresh finished → tell the YtPage component to reload.
     YtReload,
-    /// Hits of the station search (for the open add dialog).
-    StreamSearchResults(Vec<crate::core::streaming::StationResult>),
-    /// The station search failed (service unreachable) → show a hint.
-    StreamSearchFailed,
-    /// Logos of the search hits are cached → redraw the hit list.
-    StreamSearchCoversReady,
-    /// Rebuild the station list (e.g. after logos were cached).
-    ReloadStreams,
-    /// Rebuild the recordings list (e.g. after a recording cover was cached).
+    /// A timeshift recording's cover/segment finished (worker) → tell the
+    /// StreamPage component to rebuild the recordings list.
     ReloadRecordings,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
@@ -1976,90 +1937,11 @@ impl Component for App {
                                     set_orientation: gtk::Orientation::Vertical,
                                     append: model.podcasts_page.widget(),
                                 },
+                            // Internet radio lives in its own relm4 component.
                             add_titled_with_icon[Some("streaming"), &gettext("Streaming"), "internet-radio-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-
-                                    // Tab switcher: channels / recordings + "+" for a new channel.
-                                    gtk::Box {
-                                        set_spacing: 6,
-                                        // Same spacing above/below the tab menu as the YouTube tabs.
-                                        set_margin_top: 2,
-                                        set_margin_bottom: 4,
-                                        set_margin_start: 12,
-                                        set_margin_end: 12,
-                                        add_css_class: "linked",
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Stations"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.streaming.stream_view == StreamView::Channels,
-                                            connect_clicked => Msg::SetStreamView(StreamView::Channels),
-                                        },
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Recordings"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.streaming.stream_view == StreamView::Recordings,
-                                            connect_clicked => Msg::SetStreamView(StreamView::Recordings),
-                                        },
-                                        gtk::Button {
-                                            set_icon_name: "list-add-symbolic",
-                                            set_tooltip_text: Some(&gettext("Add station")),
-                                            add_css_class: "flat",
-                                            connect_clicked => Msg::StreamAdd,
-                                        },
-                                    },
-
-                                    // Channels.
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.streaming.stream_view == StreamView::Channels && !model.streaming.stream_items.is_empty(),
-                                        #[local_ref]
-                                        streams_list -> gtk::ListBox {
-                                            set_valign: gtk::Align::Start,
-                                            // Same gap below the tab menu as the YouTube/Channels lists.
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("internet-radio-symbolic"),
-                                        set_title: &gettext("No stations"),
-                                        set_description: Some(&gettext("Add a stream address or search for a station worldwide.")),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.streaming.stream_view == StreamView::Channels && model.streaming.stream_items.is_empty(),
-                                    },
-
-                                    // Recordings.
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.streaming.stream_view == StreamView::Recordings && (!model.streaming.recording_items.is_empty() || model.streaming.record_state.is_some()),
-                                        #[local_ref]
-                                        recordings_list -> gtk::ListBox {
-                                            set_valign: gtk::Align::Start,
-                                            // Same gap below the tab menu as the YouTube/Channels lists.
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("media-record-symbolic"),
-                                        set_title: &gettext("No recordings"),
-                                        set_description: Some(&gettext("Record the current song while a station plays.")),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.streaming.stream_view == StreamView::Recordings && model.streaming.recording_items.is_empty() && model.streaming.record_state.is_none(),
-                                    },
+                                    append: model.stream_page.widget(),
                                 },
                             add_titled_with_icon[Some("favorites"), &gettext("Favorites"), "emilia-favorite-symbolic"] =
                                 &gtk::Box {
@@ -2773,8 +2655,6 @@ impl Component for App {
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
-        let streams_list = gtk::ListBox::new();
-        let recordings_list = gtk::ListBox::new();
         let memos_list = gtk::ListBox::new();
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
@@ -2849,6 +2729,21 @@ impl Component for App {
                     O::DeleteChannelUndo(id) => Msg::YtChannelUndo(id),
                     O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
                     O::RefreshFinished => Msg::YtRefreshFinished,
+                }
+            });
+        let stream_page = crate::ui::stream_page::StreamPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |out| {
+                use crate::ui::stream_page::StreamOutput as O;
+                match out {
+                    O::ToggleStream(id) => Msg::ToggleStream(id),
+                    O::PlayRecording(path) => Msg::PlayRecording(path),
+                    O::OpenReplay(id) => Msg::OpenStreamReplay(id),
+                    O::EditRecording(id) => Msg::EditRecording(id),
+                    O::StreamDeleteUndo(id) => Msg::StreamDeleteUndo(id),
+                    O::RecordingDeleteUndo(id) => Msg::RecordingDeleteUndo(id),
+                    O::LibraryChanged => Msg::StreamLibraryChanged,
+                    O::Toast(s) => Msg::StreamToast(s),
                 }
             });
         let setup_page = crate::ui::setup::SetupPage::builder().launch(()).forward(
@@ -3011,21 +2906,11 @@ impl Component for App {
                 playing_episode_url: None,
             },
             streaming: StreamingState {
-                stream_view: StreamView::Channels,
-                stream_items: Vec::new(),
-                streams_list: streams_list.clone(),
-                stream_search_results: Vec::new(),
-                stream_search_failed: false,
-                stream_search: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 playing_stream: None,
                 stream_title: None,
                 recorder: None,
                 record_state: None,
                 recording_buffer_minutes,
-                recording_items: Vec::new(),
-                recordings_list: recordings_list.clone(),
-                stream_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-                rec_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             },
             memo: crate::ui::app_memo::MemoState::new(memos_list.clone()),
             youtube: YoutubeState {
@@ -3069,6 +2954,7 @@ impl Component for App {
             podcast_subpage,
             yt_page,
             yt_subpage,
+            stream_page,
             setup_page,
         };
 
@@ -3170,8 +3056,17 @@ impl Component for App {
                 .yt_page
                 .emit(YI::SetGalleryView(model.libview.gallery_view));
         }
-        model.reload_streams(&sender);
-        model.reload_recordings(&sender);
+        // Bring the StreamPage component up to the current chrome state + load.
+        {
+            use crate::ui::stream_page::StreamInput as SI;
+            model.stream_page.emit(SI::SetWindow(root.clone()));
+            model.stream_page.emit(SI::SetMobile(model.is_mobile()));
+            model
+                .stream_page
+                .emit(SI::SetBufferMinutes(model.streaming.recording_buffer_minutes));
+            model.stream_page.emit(SI::Reload);
+            model.stream_page.emit(SI::ReloadRecordings);
+        }
         // Seed the starter memo categories once (localized; i18n is ready here),
         // then load categories + memos for the Memo page.
         {
@@ -3202,19 +3097,9 @@ impl Component for App {
         }
         model.reload_memo_categories(&sender);
         model.reload_memos(&sender);
-        // (Statistics build themselves in the StatsPage component's init, and the
-        // podcast feed-image cache runs in the PodcastsPage component's init.)
-        // Cache the station logos once in the background.
-        sender.spawn_oneshot_command(|| {
-            if let Ok(lib) = Library::open() {
-                for st in lib.streams().unwrap_or_default() {
-                    if let Some(url) = st.favicon {
-                        crate::core::online::cache_station_image(&url);
-                    }
-                }
-            }
-            Cmd::ReloadStreams
-        });
+        // (Statistics build themselves in the StatsPage component's init; the
+        // podcast feed-image cache runs in the PodcastsPage component's init; the
+        // station-logo cache runs in the StreamPage component's init.)
         // YouTube (optional, opt-in): load subscribed channels, and – on a
         // connection – verify/refresh yt-dlp and the newest videos in the
         // background. yt-dlp is re-fetched once per new app version (YouTube
@@ -3425,10 +3310,7 @@ impl Component for App {
                 }
             }
             // --- Streaming (internet radio) ---
-            Msg::StreamAdd => self.open_add_stream_dialog(root, &sender),
-            Msg::StreamSearch(term) => self.stream_search(&sender, term),
-            Msg::StreamAddResult(index) => self.add_stream_result(&sender, index),
-            Msg::StreamAddUrl(url) => self.stream_add_url(&sender, url),
+            // --- Streaming transport (requested by the StreamPage component) ---
             Msg::ToggleStream(id) => self.toggle_stream(id),
             Msg::StreamRecordToggle(id) => self.stream_record_toggle(&sender, id),
             Msg::RecordToggle => {
@@ -3442,23 +3324,7 @@ impl Component for App {
                 }
             }
             Msg::StreamTitle(title) => self.stream_title(title),
-            Msg::OpenStream(id) => self.open_stream(root, &sender, id),
-            Msg::StreamRenameDialog(id) => self.open_rename_stream_dialog(root, &sender, id),
-            Msg::StreamRename { id, name } => {
-                let name = name.trim();
-                if !name.is_empty() {
-                    let _ = self.library.rename_stream(id, name);
-                    self.reload_streams(&sender);
-                }
-            }
-            Msg::StreamDelete(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Station removed"),
-                    Msg::StreamDeleteConfirmed(id),
-                );
-            }
-            Msg::StreamDeleteConfirmed(id) => self.stream_delete_confirmed(&sender, id),
+            Msg::StreamDeleteConfirmed(id) => self.stream_delete_confirmed(id),
             // --- Recording (timeshift) ---
             Msg::RecordStop => {
                 if self.streaming.record_state.is_some() {
@@ -3466,28 +3332,29 @@ impl Component for App {
                     self.finalize_recording(&sender);
                     self.streaming.record_state = None;
                     self.toast(&gettext("Recording stopped"));
-                    self.reload_recordings(&sender);
+                    self.sync_live_recording();
                 }
             }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::ReplayPlay { start, end } => self.replay_play(start, end),
             Msg::ReplaySave { start, end, title } => self.replay_save(&sender, start, end, title),
             Msg::PlayRecording(path) => self.play_recording(path),
-            Msg::OpenRecording(id) => self.open_recording(root, &sender, id),
-            Msg::RecordingDelete(id) => {
+            // --- bridge from the StreamPage component to the shared parent chrome ---
+            Msg::StreamDeleteUndo(id) => {
+                self.undo_toast(&sender, &gettext("Station removed"), Msg::StreamDeleteConfirmed(id));
+            }
+            Msg::RecordingDeleteUndo(id) => {
                 self.undo_toast(
                     &sender,
                     &gettext("Recording deleted"),
-                    Msg::RecordingDeleteConfirmed(id),
+                    Msg::StreamRecordingReallyDelete(id),
                 );
             }
-            Msg::RecordingDeleteConfirmed(id) => {
-                if let Ok(Some(path)) = self.library.delete_recording(id) {
-                    let _ = std::fs::remove_file(&path);
-                }
-                self.reload_recordings(&sender);
-            }
-            Msg::AddRecordingToLibrary(id) => self.add_recording_to_library(id),
+            Msg::StreamRecordingReallyDelete(id) => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::RecordingDeleteConfirmed(id)),
+            Msg::StreamLibraryChanged => self.reload_library_overviews(),
+            Msg::StreamToast(s) => self.toast(&s),
             Msg::EditRecording(id) => self.open_recording_edit(&sender, EditKind::Recording, id),
             Msg::EditMemo(id) => self.open_recording_edit(&sender, EditKind::Memo, id),
             Msg::RecordingPlayFrom { path, ms } => {
@@ -3526,7 +3393,8 @@ impl Component for App {
                                 &self.library,
                                 std::path::Path::new(&p),
                             );
-                            self.reload_recordings(&sender);
+                            self.stream_page
+                                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings);
                             self.reload_library_overviews();
                             self.toast(&gettext("Recording edited"));
                         }
@@ -3545,6 +3413,10 @@ impl Component for App {
                     "recording_buffer_minutes",
                     &self.streaming.recording_buffer_minutes.to_string(),
                 );
+                self.stream_page
+                    .emit(crate::ui::stream_page::StreamInput::SetBufferMinutes(
+                        self.streaming.recording_buffer_minutes,
+                    ));
             }
             // --- Voice memos ---
             Msg::MemoRecordSaved { path, duration_ms } => match path {
@@ -3591,7 +3463,6 @@ impl Component for App {
             }
             Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
-            Msg::SetStreamView(view) => self.streaming.stream_view = view,
             Msg::PushPodcastSubpage => {
                 if let Some((title, content)) = self.podcast_subpage.borrow_mut().take() {
                     self.push_subpage(&title, &content);
@@ -4170,19 +4041,9 @@ impl Component for App {
                 items,
                 total_duration,
             } => self.on_cmd_yt_playlist_start(url, title, items, total_duration, &sender),
-            Cmd::StreamSearchResults(results) => {
-                self.streaming.stream_search_failed = false;
-                self.streaming.stream_search_results = results;
-                self.rebuild_stream_search_results(&sender);
-            }
-            Cmd::StreamSearchFailed => {
-                self.streaming.stream_search_failed = true;
-                self.streaming.stream_search_results.clear();
-                self.rebuild_stream_search_results(&sender);
-            }
-            Cmd::StreamSearchCoversReady => self.rebuild_stream_search_results(&sender),
-            Cmd::ReloadStreams => self.reload_streams(&sender),
-            Cmd::ReloadRecordings => self.reload_recordings(&sender),
+            Cmd::ReloadRecordings => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings),
             Cmd::SourceStatus(status) => {
                 let mut changed = false;
                 for (id, ok) in status {

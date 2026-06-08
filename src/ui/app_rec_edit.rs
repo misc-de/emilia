@@ -225,12 +225,15 @@ impl App {
         // Look up the file path of the item being edited; the editor body itself
         // is generic and only needs the path.
         let path = match kind {
+            // The recordings list now lives in the StreamPage component, so look
+            // the path up straight from the DB.
             EditKind::Recording => self
-                .streaming
-                .recording_items
-                .iter()
+                .library
+                .recordings()
+                .unwrap_or_default()
+                .into_iter()
                 .find(|r| r.id == id)
-                .map(|r| r.path.clone()),
+                .map(|r| r.path),
             EditKind::Memo => self
                 .memo
                 .memo_items
@@ -869,11 +872,11 @@ impl App {
         // (path, artist, album, title) of the item; memos carry no artist/album.
         let meta = match kind {
             EditKind::Recording => self
-                .streaming
-                .recording_items
-                .iter()
+                .library
+                .recordings()
+                .unwrap_or_default()
+                .into_iter()
                 .find(|r| r.id == id)
-                .cloned()
                 .map(|rec| {
                     let src = std::path::PathBuf::from(&rec.path);
                     // Album from the embedded tag, artist from the DB row (tag fallback).

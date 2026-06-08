@@ -80,7 +80,7 @@ impl App {
             });
         self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshBroken);
         // …and of the saved-recording rows.
-        self.refresh_recording_icons();
+        self.sync_stream_page_icons();
         // The queue/next track may have changed (add/remove/reorder) → keep the
         // armed gapless follow in step with the new "next".
         self.arm_gapless();
@@ -1265,7 +1265,7 @@ impl App {
             self.drive_recording(sender);
         }
         // Sync the play/pause and record icons of the station rows.
-        self.refresh_stream_icons();
+        self.sync_stream_page_icons();
         if self.mini.playing {
             // Advance the sleep-timer countdown / fade-out (only while playing).
             self.sleep_tick();
@@ -1360,6 +1360,6 @@ impl App {
         self.mpris.set_playing(self.mini.playing);
         // Adjust the play/pause icon of the active track in the list.
         self.refresh_queue_icons();
-        self.refresh_stream_icons();
+        self.sync_stream_page_icons();
     }
 }

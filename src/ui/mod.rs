@@ -28,6 +28,7 @@ pub mod fs_row;
 pub mod podcasts_page;
 pub mod setup;
 pub mod stats_page;
+pub mod stream_page;
 pub mod sync_page;
 pub mod sync_share_ui;
 pub mod widgets;
