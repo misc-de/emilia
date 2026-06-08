@@ -2676,9 +2676,8 @@ impl Component for App {
             });
         // Shared hand-off slot for episode subpages built by the component (its
         // `!Send` widget can't ride on the parent's `Send` `Msg`).
-        let podcast_subpage: std::rc::Rc<
-            std::cell::RefCell<Option<(String, gtk::Box)>>,
-        > = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
         let podcasts_page = crate::ui::podcasts_page::PodcastsPage::builder()
             .launch(podcast_subpage.clone())
             .forward(sender.input_sender(), |out| {
@@ -3061,9 +3060,9 @@ impl Component for App {
             use crate::ui::stream_page::StreamInput as SI;
             model.stream_page.emit(SI::SetWindow(root.clone()));
             model.stream_page.emit(SI::SetMobile(model.is_mobile()));
-            model
-                .stream_page
-                .emit(SI::SetBufferMinutes(model.streaming.recording_buffer_minutes));
+            model.stream_page.emit(SI::SetBufferMinutes(
+                model.streaming.recording_buffer_minutes,
+            ));
             model.stream_page.emit(SI::Reload);
             model.stream_page.emit(SI::ReloadRecordings);
         }
@@ -3105,9 +3104,7 @@ impl Component for App {
         // background. yt-dlp is re-fetched once per new app version (YouTube
         // changes frequently break older versions).
         if model.youtube.enabled {
-            model
-                .yt_page
-                .emit(crate::ui::yt_page::YtInput::Reload);
+            model.yt_page.emit(crate::ui::yt_page::YtInput::Reload);
             let online = online_available();
             sender.spawn_oneshot_command(move || {
                 let Ok(lib) = Library::open() else {
@@ -3341,7 +3338,11 @@ impl Component for App {
             Msg::PlayRecording(path) => self.play_recording(path),
             // --- bridge from the StreamPage component to the shared parent chrome ---
             Msg::StreamDeleteUndo(id) => {
-                self.undo_toast(&sender, &gettext("Station removed"), Msg::StreamDeleteConfirmed(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Station removed"),
+                    Msg::StreamDeleteConfirmed(id),
+                );
             }
             Msg::RecordingDeleteUndo(id) => {
                 self.undo_toast(
@@ -3478,7 +3479,11 @@ impl Component for App {
             }
             Msg::PodcastToast(s) => self.toast(&s),
             Msg::PodcastUndoToast(id) => {
-                self.undo_toast(&sender, &gettext("Podcast removed"), Msg::PodcastReallyDelete(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Podcast removed"),
+                    Msg::PodcastReallyDelete(id),
+                );
             }
             Msg::PodcastReallyDelete(id) => {
                 self.podcasts_page
@@ -3543,7 +3548,11 @@ impl Component for App {
                 }
             }
             Msg::YtChannelUndo(id) => {
-                self.undo_toast(&sender, &gettext("Channel removed"), Msg::YtChannelReallyDelete(id));
+                self.undo_toast(
+                    &sender,
+                    &gettext("Channel removed"),
+                    Msg::YtChannelReallyDelete(id),
+                );
             }
             Msg::YtChannelReallyDelete(id) => {
                 self.yt_page
@@ -3807,10 +3816,11 @@ impl Component for App {
                 if self.libview.gallery_view {
                     self.rebuild_all_lists(&sender);
                 }
-                self.podcasts_page
-                    .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryColumns(
+                self.podcasts_page.emit(
+                    crate::ui::podcasts_page::PodcastsInput::SetGalleryColumns(
                         self.libview.gallery_columns,
-                    ));
+                    ),
+                );
                 self.yt_page
                     .emit(crate::ui::yt_page::YtInput::SetGalleryColumns(
                         self.libview.gallery_columns,

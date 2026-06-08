@@ -2952,8 +2952,7 @@ impl App {
             // YouTube refreshes in its own component too (reports start/finish via
             // `YtRefreshStarted`/`YtRefreshFinished`, which adjust the spinner).
             if self.youtube.enabled {
-                self.yt_page
-                    .emit(crate::ui::yt_page::YtInput::RefreshAll);
+                self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshAll);
             }
         }
         self.refresh_pending = pending;

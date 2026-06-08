@@ -150,7 +150,8 @@ impl App {
         self.sleep.remaining_s = Some(rem);
         // Gentle fade over the final stretch (leave full volume before that).
         if (rem as f64) < SLEEP_FADE_S {
-            self.player.set_volume((rem as f64 / SLEEP_FADE_S).clamp(0.0, 1.0));
+            self.player
+                .set_volume((rem as f64 / SLEEP_FADE_S).clamp(0.0, 1.0));
         }
         self.refresh_sleep_ui();
     }

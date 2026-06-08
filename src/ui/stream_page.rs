@@ -149,7 +149,10 @@ pub(crate) enum StreamInput {
     AddUrl(String),
     OpenStream(i64),
     RenameDialog(i64),
-    Rename { id: i64, name: String },
+    Rename {
+        id: i64,
+        name: String,
+    },
     Delete(i64),
     OpenRecording(i64),
     RecordingDelete(i64),
@@ -827,7 +830,10 @@ impl StreamPage {
         ) {
             Ok(_) => {
                 self.reload_streams(sender);
-                let _ = sender.output(StreamOutput::Toast(gettext_f("Added: {n}", &[("n", &r.name)])));
+                let _ = sender.output(StreamOutput::Toast(gettext_f(
+                    "Added: {n}",
+                    &[("n", &r.name)],
+                )));
                 if let Some(fav) = r.favicon.clone() {
                     sender.spawn_command(move |out| {
                         crate::core::online::cache_station_image(&fav);
@@ -866,7 +872,8 @@ impl StreamPage {
         self.recording_items = self.library.recordings().unwrap_or_default();
         for rec in &mut self.recording_items {
             if rec.duration_ms <= 0 {
-                let ms = crate::core::scanner::duration_secs(std::path::Path::new(&rec.path)) as i64
+                let ms = crate::core::scanner::duration_secs(std::path::Path::new(&rec.path))
+                    as i64
                     * 1000;
                 if ms > 0 {
                     let _ = self.library.set_recording_duration(rec.id, ms);

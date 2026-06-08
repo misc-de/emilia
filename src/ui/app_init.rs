@@ -580,30 +580,29 @@ impl App {
         // sorting by name, year strings by date). `None` means no grouping, so
         // every row's header is cleared; otherwise a header is shown whenever a
         // row's label differs from the row above it.
-        let header_func =
-            |labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>| {
-                move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
-                    let guard = labels.borrow();
-                    let Some(labels) = guard.as_ref() else {
-                        row.set_header(None::<&gtk::Widget>);
-                        return;
-                    };
-                    let i = row.index();
-                    if i < 0 {
-                        row.set_header(None::<&gtk::Widget>);
-                        return;
-                    }
-                    let i = i as usize;
-                    let cur = labels.get(i);
-                    let prev = i.checked_sub(1).and_then(|p| labels.get(p));
-                    match cur {
-                        Some(cur) if i == 0 || prev != Some(cur) => {
-                            row.set_header(Some(&crate::ui::app_gallery::section_header_label(cur)));
-                        }
-                        _ => row.set_header(None::<&gtk::Widget>),
-                    }
+        let header_func = |labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>| {
+            move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
+                let guard = labels.borrow();
+                let Some(labels) = guard.as_ref() else {
+                    row.set_header(None::<&gtk::Widget>);
+                    return;
+                };
+                let i = row.index();
+                if i < 0 {
+                    row.set_header(None::<&gtk::Widget>);
+                    return;
                 }
-            };
+                let i = i as usize;
+                let cur = labels.get(i);
+                let prev = i.checked_sub(1).and_then(|p| labels.get(p));
+                match cur {
+                    Some(cur) if i == 0 || prev != Some(cur) => {
+                        row.set_header(Some(&crate::ui::app_gallery::section_header_label(cur)));
+                    }
+                    _ => row.set_header(None::<&gtk::Widget>),
+                }
+            }
+        };
         self.libview
             .albums
             .widget()

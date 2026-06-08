@@ -330,7 +330,15 @@ fn run(
             // Cleared title that has persisted long enough → end the running song
             // at the (refined) clear point and start an untitled gap segment (the
             // talk/ads between songs, saved to its own file, not identified).
-            let at = refine_marker(buffer_path, cap, bytes_per_sec, ext, empty_off, prev_off, total);
+            let at = refine_marker(
+                buffer_path,
+                cap,
+                bytes_per_sec,
+                ext,
+                empty_off,
+                prev_off,
+                total,
+            );
             let mut s = shared.lock_or_recover();
             s.markers.push(Marker {
                 offset: at,

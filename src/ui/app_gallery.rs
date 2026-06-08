@@ -166,7 +166,6 @@ pub(crate) fn section_header_label(text: &str) -> gtk::Label {
     label
 }
 
-
 impl App {
     /// Fills `container` as a gallery, optionally split into labelled sections.
     /// `labels` (one per item, same order/length as `items`) groups consecutive

@@ -10,7 +10,6 @@ use crate::i18n::{gettext, gettext_f};
 use crate::model::StreamItem;
 use crate::ui::app::{App, Cmd, Msg};
 
-
 /// State of a running continuous recording (state machine, driven by the 1 s
 /// tick; saves complete songs until manually stopped).
 pub(crate) struct RecordState {
@@ -26,7 +25,6 @@ pub(crate) struct RecordState {
     pub cover_fetch_for: Option<String>,
 }
 
-
 /// Storage folder for saved recordings: `<Music>/Streaming`.
 pub(crate) fn recordings_dir() -> std::path::PathBuf {
     let mut dir = dirs::audio_dir()
@@ -35,8 +33,6 @@ pub(crate) fn recordings_dir() -> std::path::PathBuf {
     dir.push("Streaming");
     dir
 }
-
-
 
 impl App {
     /// Starts a saved station (replaces the current playback).
@@ -593,7 +589,8 @@ impl App {
             self.stop_recorder();
         }
         let _ = self.library.delete_stream(id);
-        self.stream_page.emit(crate::ui::stream_page::StreamInput::Reload);
+        self.stream_page
+            .emit(crate::ui::stream_page::StreamInput::Reload);
     }
 
     /// Play a buffer segment `[start, end)` as a temporary "replay".

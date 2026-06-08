@@ -159,8 +159,14 @@ pub(crate) enum PodcastsInput {
     ShowPodcastDetail(i64),
     ShowPodcastDetailAt(usize),
     ShowEpisodeDetail(usize),
-    ShowPodcastEpisodeDetail { podcast_id: i64, index: usize },
-    ToggleDownload { url: String, title: String },
+    ShowPodcastEpisodeDetail {
+        podcast_id: i64,
+        index: usize,
+    },
+    ToggleDownload {
+        url: String,
+        title: String,
+    },
     /// "Remove podcast" tapped → show the confirmation alert.
     Delete(i64),
     /// Undo window elapsed → actually remove the podcast.
@@ -496,8 +502,8 @@ impl Component for PodcastsPage {
                         )));
                     }
                     None => {
-                        let _ = sender
-                            .output(PodcastsOutput::Toast(gettext("Could not load feed")));
+                        let _ =
+                            sender.output(PodcastsOutput::Toast(gettext("Could not load feed")));
                     }
                 }
             }

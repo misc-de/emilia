@@ -352,8 +352,13 @@ pub fn search(query: &str, kind: YtKind, n: usize) -> Result<Vec<YtResult>> {
         YtKind::Channel => search_results_url(query, "EgIQAg%3D%3D"),
         YtKind::Playlist => search_results_url(query, "EgIQAw%3D%3D"),
     };
-    let entries =
-        dump_entries(&["--flat-playlist", "--playlist-end", &n.to_string(), "--", &source])?;
+    let entries = dump_entries(&[
+        "--flat-playlist",
+        "--playlist-end",
+        &n.to_string(),
+        "--",
+        &source,
+    ])?;
     Ok(entries
         .into_iter()
         .filter_map(|e| e.into_result())
@@ -739,8 +744,13 @@ pub fn video_meta(video_id_or_url: &str) -> Result<YtResult> {
 /// collection"). Unlike [`list_entries`] the URL is taken as-is. **Network.**
 pub fn list_playlist(url: &str, limit: usize) -> Result<Vec<YtResult>> {
     let limit = limit.clamp(1, 500);
-    let entries =
-        dump_entries(&["--flat-playlist", "--playlist-end", &limit.to_string(), "--", url])?;
+    let entries = dump_entries(&[
+        "--flat-playlist",
+        "--playlist-end",
+        &limit.to_string(),
+        "--",
+        url,
+    ])?;
     Ok(entries
         .into_iter()
         .filter_map(|e| e.into_result())

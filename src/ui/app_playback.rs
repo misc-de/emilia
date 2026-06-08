@@ -66,11 +66,12 @@ impl App {
         self.refresh_ctx_play();
         // Play/pause icons of the podcast episodes (and the detail "Play" row)
         // live in the PodcastsPage component now → push it the current state.
-        self.podcasts_page
-            .emit(crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
+        self.podcasts_page.emit(
+            crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
                 playing_url: self.podcasts.playing_episode_url.clone(),
                 playing: self.mini.playing,
-            });
+            },
+        );
         // …and of the YouTube video rows (now in the YtPage component). Also
         // re-check the yt-dlp "broken" banner (a failed stream resolve flips it).
         self.yt_page
@@ -78,7 +79,8 @@ impl App {
                 playing_video_id: self.youtube.playing_video_id.clone(),
                 playing: self.mini.playing,
             });
-        self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshBroken);
+        self.yt_page
+            .emit(crate::ui::yt_page::YtInput::RefreshBroken);
         // …and of the saved-recording rows.
         self.sync_stream_page_icons();
         // The queue/next track may have changed (add/remove/reorder) → keep the

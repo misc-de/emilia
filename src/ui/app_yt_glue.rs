@@ -21,8 +21,7 @@ use crate::ui::yt_page::YtInput;
 
 /// Re-download the managed yt-dlp when it is at least this old (it breaks as
 /// YouTube changes, so a weekly refresh keeps the feature working hands-off).
-const YTDLP_AUTO_UPDATE_AGE: std::time::Duration =
-    std::time::Duration::from_secs(7 * 24 * 60 * 60);
+const YTDLP_AUTO_UPDATE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
 impl App {
     // ---- recent logging + enrichment -------------------------------------
@@ -59,7 +58,9 @@ impl App {
                 .as_deref()
                 .and_then(|a| crate::core::online::track_cover(a, &t))
                 .and_then(|(bytes, _album)| crate::core::online::store_youtube_cover(&vid, &bytes))
-                .or_else(|| crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid)));
+                .or_else(|| {
+                    crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid))
+                });
             let _ = input.send(Msg::YtEnriched {
                 video_id: vid,
                 artist,
@@ -101,7 +102,9 @@ impl App {
         let mut queue = Vec::with_capacity(videos.len());
         for v in videos {
             let _ = self.library.set_yt_title(&v.video_id, &v.title);
-            self.youtube.video_titles.insert(v.video_id.clone(), v.title);
+            self.youtube
+                .video_titles
+                .insert(v.video_id.clone(), v.title);
             queue.push(PathBuf::from(youtube::yt_path(&v.video_id)));
         }
         self.transport.queue = queue;
@@ -134,12 +137,21 @@ impl App {
     }
 
     /// Resolve a playlist URL to its videos (yt-dlp) and start playing it.
-    pub(crate) fn yt_start_playlist(&mut self, sender: &ComponentSender<Self>, url: String, title: String) {
-        self.toast(&gettext_f("Starting playlist “{title}” …", &[("title", &title)]));
+    pub(crate) fn yt_start_playlist(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+    ) {
+        self.toast(&gettext_f(
+            "Starting playlist “{title}” …",
+            &[("title", &title)],
+        ));
         sender.spawn_command(move |out| {
             let videos = youtube::list_playlist(&url, 200).unwrap_or_default();
             let total: i64 = videos.iter().filter_map(|v| v.duration).sum();
-            let items: Vec<(String, String)> = videos.into_iter().map(|v| (v.id, v.title)).collect();
+            let items: Vec<(String, String)> =
+                videos.into_iter().map(|v| (v.id, v.title)).collect();
             let _ = out.send(crate::ui::app::Cmd::YtPlaylistStart {
                 url,
                 title,
@@ -248,9 +260,9 @@ impl App {
                 queue.push(PathBuf::from(p));
             }
             self.youtube.playing_playlist = true;
-            let _ = self
-                .library
-                .add_recent_playlist(&url, &title, items.len() as i64, total_duration);
+            let _ =
+                self.library
+                    .add_recent_playlist(&url, &title, items.len() as i64, total_duration);
             if let Some((id, _)) = items.first() {
                 let _ = self
                     .library
@@ -262,7 +274,8 @@ impl App {
             self.play_current();
             self.reload_playlists(sender);
             self.yt_page.emit(YtInput::ReloadRecent);
-            self.yt_page.emit(YtInput::SetView(crate::ui::app::YtView::Recent));
+            self.yt_page
+                .emit(YtInput::SetView(crate::ui::app::YtView::Recent));
         }
     }
 

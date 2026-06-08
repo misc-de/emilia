@@ -302,8 +302,7 @@ pub(crate) struct YtPage {
     video_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
     ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
     ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
-    ctx_video_meta:
-        Rc<RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>>,
+    ctx_video_meta: Rc<RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>>,
     downloading_videos: HashSet<String>,
     playlist_songs_cache: HashMap<String, Vec<YtResult>>,
     pl_cover_slots: Vec<(String, adw::Bin)>,
@@ -385,11 +384,17 @@ pub(crate) enum YtInput {
 #[derive(Debug)]
 pub(crate) enum YtOutput {
     /// Transport: play/pause this single video.
-    PlayVideo { video_id: String, title: String },
+    PlayVideo {
+        video_id: String,
+        title: String,
+    },
     /// Transport: play a subscribed channel's videos as the queue.
     PlayChannel(i64),
     /// Transport: resolve a playlist URL and start playing it.
-    StartPlaylist { url: String, title: String },
+    StartPlaylist {
+        url: String,
+        title: String,
+    },
     /// Transport: play the (already-resolved) playlist videos starting at `index`.
     StartPlaylistAt {
         url: String,
@@ -399,9 +404,15 @@ pub(crate) enum YtOutput {
         videos: Vec<(String, String, Option<i64>)>,
     },
     /// Open the equalizer dialog for a `yt:<id>` track.
-    OpenTrackEq { path: String, title: String },
+    OpenTrackEq {
+        path: String,
+        title: String,
+    },
     /// Open a mirrored playlist in the Playlists section.
-    OpenPlaylist { id: i64, name: String },
+    OpenPlaylist {
+        id: i64,
+        name: String,
+    },
     /// Open the settings dialog (yt-dlp banner button).
     OpenSettings,
     /// Informational toast.
@@ -946,8 +957,8 @@ impl Component for YtPage {
                     }
                     Err(e) => {
                         tracing::warn!("yt playlist save failed: {e}");
-                        let _ =
-                            sender.output(YtOutput::ProgressDone(gettext("Could not save playlist")));
+                        let _ = sender
+                            .output(YtOutput::ProgressDone(gettext("Could not save playlist")));
                     }
                 }
             }
@@ -1531,7 +1542,8 @@ impl YtPage {
             }
             {
                 let (sender, dialog) = (sender.clone(), dialog.clone());
-                let (kind, url, vid, title) = (r.kind, r.url.clone(), r.id.clone(), r.title.clone());
+                let (kind, url, vid, title) =
+                    (r.kind, r.url.clone(), r.id.clone(), r.title.clone());
                 row.connect_activated(move |_| {
                     match kind {
                         YtKind::Channel => sender.input(YtInput::SubscribeChannel(url.clone())),
@@ -1774,7 +1786,11 @@ impl YtPage {
         info.add(&title_row);
         let duration_row = adw::ActionRow::builder()
             .title(gettext("Duration"))
-            .subtitle(stored_duration.map(fmt_duration).unwrap_or_else(|| "…".into()))
+            .subtitle(
+                stored_duration
+                    .map(fmt_duration)
+                    .unwrap_or_else(|| "…".into()),
+            )
             .build();
         info.add(&duration_row);
         content.append(&info);
@@ -1902,8 +1918,12 @@ impl YtPage {
         let actions = adw::PreferencesGroup::new();
         let start = action_row(&gettext("Start Playlist"), "media-playback-start-symbolic");
         {
-            let (sender, dialog, u, t) =
-                (sender.clone(), dialog.clone(), url.to_string(), title.to_string());
+            let (sender, dialog, u, t) = (
+                sender.clone(),
+                dialog.clone(),
+                url.to_string(),
+                title.to_string(),
+            );
             start.connect_activated(move |_| {
                 let _ = sender.output(YtOutput::StartPlaylist {
                     url: u.clone(),
@@ -1915,8 +1935,12 @@ impl YtPage {
         actions.add(&start);
         let save = action_row(&gettext("Add to Playlists"), "view-list-symbolic");
         {
-            let (sender, dialog, u, t) =
-                (sender.clone(), dialog.clone(), url.to_string(), title.to_string());
+            let (sender, dialog, u, t) = (
+                sender.clone(),
+                dialog.clone(),
+                url.to_string(),
+                title.to_string(),
+            );
             save.connect_activated(move |_| {
                 sender.input(YtInput::SavePlaylist {
                     url: u.clone(),
@@ -1928,8 +1952,12 @@ impl YtPage {
         actions.add(&save);
         let add = action_row(&gettext("Add to library"), "list-add-symbolic");
         {
-            let (sender, dialog, u, t) =
-                (sender.clone(), dialog.clone(), url.to_string(), title.to_string());
+            let (sender, dialog, u, t) = (
+                sender.clone(),
+                dialog.clone(),
+                url.to_string(),
+                title.to_string(),
+            );
             add.connect_activated(move |_| {
                 sender.input(YtInput::PlaylistToLibrary {
                     url: u.clone(),
@@ -1955,7 +1983,12 @@ impl YtPage {
 
     /// Loads a (not locally mirrored) playlist's videos, then opens them as a
     /// song-list subpage.
-    fn yt_open_playlist_songs(&mut self, sender: &ComponentSender<Self>, url: String, title: String) {
+    fn yt_open_playlist_songs(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+    ) {
         let _ = sender.output(YtOutput::SetLoading(Some(gettext_f(
             "Loading “{title}” …",
             &[("title", &title)],
@@ -2215,7 +2248,10 @@ impl YtPage {
         let vid = video_id;
         sender.spawn_command(move |out| {
             let cover = crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid));
-            let _ = out.send(YtCmd::RecentEnriched { video_id: vid, cover });
+            let _ = out.send(YtCmd::RecentEnriched {
+                video_id: vid,
+                cover,
+            });
         });
     }
 
@@ -2265,12 +2301,7 @@ impl YtPage {
     }
 
     /// Adds all videos of a playlist to the on-disk music library (background).
-    fn yt_playlist_to_library(
-        &self,
-        sender: &ComponentSender<Self>,
-        url: String,
-        title: String,
-    ) {
+    fn yt_playlist_to_library(&self, sender: &ComponentSender<Self>, url: String, title: String) {
         let Some(music) = self.library.get_setting("music_dir").ok().flatten() else {
             let _ = sender.output(YtOutput::Toast(gettext(
                 "Set a music folder in settings first",
@@ -2283,8 +2314,8 @@ impl YtPage {
         )));
         sender.spawn_command(move |out| {
             let r = (|| -> Result<usize, String> {
-                let videos =
-                    youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT).map_err(|e| e.to_string())?;
+                let videos = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
+                    .map_err(|e| e.to_string())?;
                 let total = videos.len();
                 let mut n = 0;
                 let _ = out.send(YtCmd::LibraryProgress { done: 0, total });
@@ -2314,8 +2345,8 @@ impl YtPage {
         )));
         sender.spawn_command(move |out| {
             let r = (|| -> Result<usize, String> {
-                let videos =
-                    youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT).map_err(|e| e.to_string())?;
+                let videos = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
+                    .map_err(|e| e.to_string())?;
                 let lib = Library::open().map_err(|e| e.to_string())?;
                 let mut paths = Vec::with_capacity(videos.len());
                 for v in &videos {
@@ -2399,7 +2430,8 @@ impl YtPage {
         let _ = sender.output(YtOutput::SetLoading(None));
         match result {
             Ok(videos) => {
-                self.playlist_songs_cache.insert(url.clone(), videos.clone());
+                self.playlist_songs_cache
+                    .insert(url.clone(), videos.clone());
                 self.show_yt_playlist_songs(sender, &url, &title, videos);
             }
             Err(e) => {
