@@ -41,13 +41,27 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
   among several cover/photo candidates (swipe the carousel or **tap the dots** to
   jump straight to one), or upload your own image. Choosing an artist photo never
   changes the album covers.
-- **Playback** – play/pause, next/previous, shuffle, repeat, a queue, and a
-  bottom mini-player with a **seek bar** (scrub through long tracks).
-  once a track ends it starts from the beginning again.
+- **Playback** – play/pause, next/previous, shuffle, a whole-queue **repeat**
+  toggle (at the end of the queue it starts over), a queue, and a bottom
+  mini-player with a **seek bar** (scrub through long tracks).
+- **Gapless & crossfade** – seamless transitions for sequential local queues
+  (albums, concerts, audiobooks); an optional, configurable **crossfade** overlaps
+  the end of one track with the start of the next. Streams, podcasts, YouTube,
+  Nextcloud and shuffle keep the normal end-of-track path.
+- **Sleep timer** – the header "zzz" button starts a countdown from a preset; the
+  volume gently **fades out** over the final two minutes before playback stops.
+- **Quick filter** – a funnel button reveals an inline search bar that filters the
+  list you're looking at (Files / Artists / Albums) live, separate from the global
+  search dialog.
 - **Lock screen & media keys** – control via **MPRIS** (play/pause, next/previous,
   seek) including title/album display.
 - **Playlists** – create your own playlists, add tracks/albums/folders via the
   options, play, rename and remove individual tracks.
+- **Lyrics & karaoke** – lyrics are read from the file's tags, then the local
+  cache, then looked up online at **LRCLIB**. A pulldown on the file-info page
+  shows them; for time-synced lyrics a **karaoke view** highlights and scrolls the
+  active line. Fetched lyrics are only cached in the database, never written back
+  into the audio files.
 - **Podcasts** – subscribe to feeds by RSS address or search the iTunes directory;
   episodes are **streamed** directly, with show notes, chapter marks
   and resume. 
@@ -64,6 +78,10 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
     out with the scissors, zoom (+/− or scroll) and pan, scrub a timeline and play
     from the playhead (*Save re-encodes and overwrites the file*) – or **add a
     recording to your music library** as a regular track.
+- **Voice memos** – record from the microphone with the player-bar record button;
+  memos collect in their own **Memo** section with **Recent** and **Category** tabs
+  (organise them into freely named categories). A memo can be trimmed in the same
+  waveform editor as a recording (saved as Ogg/Opus).
 - **YouTube** – search for tracks and play them in-app, or **add a track to your
   library**. The section can be hidden in the navigation if you don't need it.
 - **Nextcloud** – connect a Nextcloud (login QR code or manual), then **index its
@@ -261,36 +279,56 @@ header of the manifest.
 ```
 src/
   main.rs            App start (Adw::Application, app ID de.cais.Emilia)
-  model.rs           Data models (Track, AlbumMeta, ArtistMeta, …)
+  model.rs           Data models (Track, AlbumMeta, ArtistMeta, MemoItem, …)
+  i18n.rs            Internationalization (gettext)
   ui/
-    app.rs           Root component (init/update/view!), navigation, player
-    app_views.rs     Loading/grouping, subpages, ctx/cover helpers
-    app_playback.rs  Playback, queue, resume (local & remote)
+    app.rs           Root component (init/update/view!), navigation, player bar
+    app_init.rs      Post-view_output!() wiring split out of init()
+    setup.rs         First-run setup assistant (standalone component)
+    app_views.rs     Load/group folder/album/artist, subpages, ctx/cover helpers
+    app_sort.rs      Per-category sorting of the library overviews
+    app_filter.rs    Inline list filter (funnel button + live search bar)
+    app_favorites.rs Favorites / audiobooks / concerts unified lists
+    app_concert.rs   Concerts (detect & collect live recordings)
+    app_gallery.rs   Cover/photo gallery carousel (dot navigation, upload)
+    app_playback.rs  Playback, queue, resume (local & remote), running EQ
+    app_queue.rs     Explicit user-queue dialog ("Add to queue")
+    app_gapless.rs   Gapless + crossfade integration (sequential local queues)
+    app_sleep.rs     Sleep timer (header "zzz" button, countdown, fade-out)
+    app_lyrics.rs    Lyrics & karaoke (embedded → DB → LRCLIB, live highlight)
     app_playlist.rs  Playlists (list, subpage, dialogs)
-    app_podcast.rs   Podcasts (subscribe to feeds, stream episodes)
-    app_streaming.rs Internet radio (stations, timeshift recording, replay)
-    app_rec_edit.rs  Recording waveform editor (mark/cut, zoom/pan, overwrite)
-    app_youtube.rs   YouTube source (search, play, add to library)
+    podcasts_page.rs Podcasts page component (feeds, episodes, detail dialogs)
+    app_episode_playback.rs  Podcast-episode playback on the shared transport
+    stream_page.rs   Internet-radio page component (stations, recordings)
+    app_streaming.rs Streaming/timeshift transport (ICY, ring buffer, replay)
+    app_rec_edit.rs  Recording/memo waveform editor (mark/cut, zoom/pan, overwrite)
+    yt_page.rs       YouTube page component (search, lists, dialogs)
+    app_yt_glue.rs   YouTube transport + yt-dlp/settings glue on App
+    app_memo.rs      Voice-memo page (Recent/Category tabs, mic record button)
     cloud_page.rs    Nextcloud connect dialog (QR camera + manual)
     sync_page.rs     Device sync UI (QR pairing, optional webcam)
+    sync_share_ui.rs Sync share flow (size confirm + receiver review)
     stats_page.rs    Listening statistics component
     app_eq.rs        Equalizer editor + property dialogs
-    app_dialogs.rs   Context menu, share, settings
-    app_concert.rs   Concerts
+    app_dialogs.rs   Action menu (long press), share, settings
     enrich.rs        Online enrichment worker (background)
     artist_row.rs    Artist card (with photo)
     album_row.rs     Album card (with cover)
+    track_row.rs     Track row (relm4 factory)
     fs_row.rs        File-system row
+    app_helpers.rs   Small shared App helpers
     widgets.rs       Shared UI helpers (cover frames, thumbnails)
   core/
     scanner.rs       Directory scan + lofty metadata → DB (background worker)
     db/              SQLite (rusqlite, bundled) + queries (split into submodules)
-    player.rs        GStreamer wrapper (playbin3 + equalizer-10bands)
-    waveform.rs      Recording waveform decode + region cut/re-encode
+    player.rs        GStreamer wrapper (playbin3, equalizer-10bands, gapless/crossfade)
+    waveform.rs      Recording/memo waveform decode + region cut/re-encode
     online.rs        Online enrichment (MusicBrainz/CAA/Deezer/AcoustID/fanart)
+    lyrics.rs        LRC parsing + lyrics model (LRCLIB lookup)
     podcast.rs       Read podcast feeds (RSS), provide episodes
     streaming.rs     Station search (Radio-Browser API)
     recorder.rs      Timeshift ring buffer + ICY reader for recording
+    mic.rs           Microphone capture for voice memos (Ogg/Opus)
     webdav.rs        Nextcloud/WebDAV: list, read tags, index, stream
     source.rs        Add local/WebDAV sources and secret-backed credentials
     secrets.rs       Secret Service bridge for app passwords
