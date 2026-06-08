@@ -2949,8 +2949,11 @@ impl App {
             // (`PodcastRefreshFinished`), which adjust `refresh_pending` then.
             self.podcasts_page
                 .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
-            if self.refresh_all_channels(sender) {
-                pending += 1;
+            // YouTube refreshes in its own component too (reports start/finish via
+            // `YtRefreshStarted`/`YtRefreshFinished`, which adjust the spinner).
+            if self.youtube.enabled {
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::RefreshAll);
             }
         }
         self.refresh_pending = pending;
@@ -3040,7 +3043,8 @@ impl App {
                     .filter(|t| !t.trim().is_empty())
                     .or_else(|| self.mini.now_playing.clone())
                     .unwrap_or_else(|| video_id.clone());
-                self.show_video_detail(root, sender, &video_id, &title);
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::ShowVideoDetail { video_id, title });
             } else {
                 // Detail view of the running track (as a file entry).
                 self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));

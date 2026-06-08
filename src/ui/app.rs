@@ -665,92 +665,37 @@ pub(crate) struct PodcastsState {
     pub(crate) playing_episode_url: Option<String>,
 }
 
-/// YouTube page state, grouped off the `App` god-object. The whole section is
-/// gated behind the `youtube_enabled` setting; the extractor (`yt-dlp`) is
-/// downloaded at runtime, never bundled (see [`crate::core::youtube`]).
+/// YouTube transport + yt-dlp/settings state owned by `App`. The YouTube *page*
+/// (lists, dialogs, search, downloads) lives in the [`crate::ui::yt_page`]
+/// component; what stays here is the transport's "now playing" markers and the
+/// yt-dlp installation/settings state (driven by the settings dialog). The whole
+/// section is gated behind the `youtube_enabled` setting.
 pub(crate) struct YoutubeState {
     /// Whether the user enabled the YouTube feature (off by default).
     pub(crate) enabled: bool,
     /// Installed `yt-dlp` version (cached for the settings status; `None` if not
     /// installed/runnable).
     pub(crate) ytdlp_version: Option<String>,
-    /// The yt-dlp row in the open settings dialog. Its **subtitle** carries the
-    /// status (download / update progress + version) as a second line below the
-    /// "yt-dlp" title, refreshed via `Cmd::YtDlpReady`.
+    /// The yt-dlp row in the open settings dialog (status subtitle).
     pub(crate) settings_status: std::rc::Rc<std::cell::RefCell<Option<adw::ActionRow>>>,
-    /// Download/update button of the yt-dlp row in the open settings dialog. Its
-    /// label flips between "Download" and "Update" once the background version
-    /// probe resolves (`Cmd::YtDlpChecked`).
+    /// Download/update button of the yt-dlp row in the open settings dialog.
     pub(crate) settings_dl_btn: std::rc::Rc<std::cell::RefCell<Option<gtk::Button>>>,
     /// Whether a yt-dlp download/update is currently running (ignore repeat taps).
     pub(crate) ytdlp_busy: bool,
-    /// Whether the last YouTube extraction looked broken (yt-dlp can't parse
-    /// YouTube anymore). Mirrors [`crate::core::youtube::extraction_broken`] into
-    /// the model so a warning banner can `#[watch]` it. Refreshed when entering
-    /// the YouTube view and after each extraction result.
-    pub(crate) ytdlp_broken: bool,
-    /// Which YouTube view is visible: newest videos or channel overview.
-    pub(crate) yt_view: YtView,
-    /// (id, title, url, thumbnail, video count) per subscribed channel.
-    pub(crate) channel_items: Vec<(i64, String, String, Option<String>, i64)>,
-    pub(crate) channels_list: gtk::ListBox,
-    /// Gallery variant of the channel overview (thumbnail grid).
-    pub(crate) channels_gallery: gtk::FlowBox,
-    /// Newest videos across all subscriptions (for the "Newest" view).
-    pub(crate) newest_items: Vec<crate::model::YtVideoRef>,
-    /// Container of the "Newest videos" list (filled imperatively).
-    pub(crate) newest_list: gtk::Box,
-    /// Recently played videos (history) and its list container.
-    pub(crate) recent_items: Vec<crate::model::YtRecent>,
-    pub(crate) recent_list: gtk::Box,
-    /// Hits of the last search, for the subscribe/search dialog.
-    pub(crate) search_results: Vec<crate::core::youtube::YtResult>,
-    /// The last YouTube search hit a network/service error (vs. no hits).
-    pub(crate) search_failed: bool,
-    /// While the search dialog is open: (dialog, hit list, spinner box), so
-    /// asynchronously arriving hits can be inserted into the shown list and the
-    /// busy spinner shown during the search can be hidden again.
-    pub(crate) search:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::Dialog, gtk::ListBox, gtk::Box)>>>,
-    /// Video id currently loaded/playing (play/pause row marker); `None` when
-    /// music/other is playing or nothing is running.
+    /// Video id currently loaded/playing (the canonical "a video is playing"
+    /// marker, read across the transport). The page keeps a mirror (pushed via
+    /// `YtInput::PlaybackStateChanged`) for its row icons.
     pub(crate) playing_video_id: Option<String>,
-    /// Play/pause buttons of visible video rows (video id → button), to refresh
-    /// their icon on playback-state changes.
-    pub(crate) video_play_buttons: std::rc::Rc<std::cell::RefCell<Vec<(String, gtk::Button)>>>,
-    /// "Play" row of an open video detail dialog (row, video id) – hidden while
-    /// exactly this video is playing.
-    pub(crate) ctx_video_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
-    /// Offline/library action row of an open video detail dialog + its video id;
-    /// its title reflects the state and is refreshed on download start/finish.
-    pub(crate) ctx_video_download:
-        std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, String)>>>,
-    /// Open video detail dialog awaiting async metadata: (video id, cover box,
-    /// artist row, duration row, artist-came-from-title), filled in by
-    /// `Cmd::YtVideoMeta`. The bool gates the artist fallback: the async channel
-    /// only fills the artist row when the title itself did not yield an artist.
-    pub(crate) ctx_video_meta: std::rc::Rc<
-        std::cell::RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>,
-    >,
-    /// Video ids whose download is currently running (spinner + dedupe taps).
-    pub(crate) downloading_videos: std::collections::HashSet<String>,
     /// Titles for the videos in the current play context (video id → title), so
-    /// `yt:` tracks not in the library show a name instead of their id. Cleared
-    /// and repopulated when a video or playlist is started.
+    /// `yt:` tracks not in the library show a name instead of their id.
     pub(crate) video_titles: std::collections::HashMap<String, String>,
     /// Whether the current play context is a YouTube playlist – then individual
     /// videos are not logged to "Recent" (the playlist is logged as one entry).
     pub(crate) playing_playlist: bool,
-    /// Live progress toast shown while adding video(s) to the on-disk library.
+    /// Live progress toast shown while adding video(s) to the on-disk library
+    /// (the page requests it via `YtOutput::Progress`; the toast lives on the
+    /// parent overlay).
     pub(crate) progress_toast: std::rc::Rc<std::cell::RefCell<Option<adw::Toast>>>,
-    /// Session cache of fetched playlist song lists (playlist URL → its videos),
-    /// so reopening a recent playlist is instant instead of re-running yt-dlp.
-    pub(crate) playlist_songs_cache:
-        std::collections::HashMap<String, Vec<crate::core::youtube::YtResult>>,
-    /// Cover frames of the currently shown playlist-songs subpage that still need
-    /// their thumbnail (thumbnail URL → frame), filled in once pre-cached in the
-    /// background so the list shows immediately and covers fill in afterwards.
-    pub(crate) pl_cover_slots: Vec<(String, adw::Bin)>,
 }
 
 /// Favorites + audiobooks page state, grouped off the `App` god-object.
@@ -887,6 +832,11 @@ pub struct App {
     /// Hand-off slot for episode subpages built by the PodcastsPage component
     /// (read in `Msg::PushPodcastSubpage`, then pushed onto the shared nav).
     pub(crate) podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
+    /// YouTube page, extracted into its own relm4 component. Transport + yt-dlp
+    /// settings stay on `App` (see `app_yt_glue.rs`).
+    pub(crate) yt_page: relm4::Controller<crate::ui::yt_page::YtPage>,
+    /// Hand-off slot for subpages built by the YtPage component.
+    pub(crate) yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
     /// First-run setup assistant, shown once on the very first launch.
     pub(crate) setup_page: relm4::Controller<crate::ui::setup::SetupPage>,
 }
@@ -1273,72 +1223,22 @@ pub enum Msg {
     /// Background tick (startup + slow timer): silently re-download the managed
     /// yt-dlp when it has gone stale, so YouTube keeps working hands-off.
     YtDlpAutoUpdate,
-    /// Open the YouTube search/subscribe dialog.
-    YtSubscribe,
-    /// Search YouTube for this term + kind filter (background).
-    YtSearch(String, crate::core::youtube::YtKind),
-    /// Subscribe to the channel at this URL (the "bell"; fetch newest in background).
-    YtSubscribeChannel(String),
-    /// Open the videos subpage of a subscribed channel (DB id).
-    YtOpenChannel(i64),
-    /// Open gallery channel (index in `channel_items`) → `YtOpenChannel`.
-    YtOpenChannelAt(usize),
-    /// Subscription detail of a channel (DB id) – refresh/remove.
-    YtShowChannelDetail(i64),
-    /// Subscription detail of a gallery channel (index) → `YtShowChannelDetail`.
-    YtShowChannelDetailAt(usize),
-    /// Refresh a channel's newest videos (DB id).
-    YtRefreshChannel(i64),
-    /// Remove a channel subscription (undo toast; deferred to confirmed).
-    YtDeleteChannel(i64),
-    /// Actually remove a channel subscription (after the undo toast expires).
-    YtDeleteChannelConfirmed(i64),
+    // --- transport, requested by the YtPage component (or a worker result) ---
     /// Play a subscribed channel's cached videos as the queue.
     YtPlayChannel(i64),
-    /// Remove an item (video id or playlist URL) from the "Recent" history.
-    YtRemoveRecent(String),
-    /// "+" on a search result: list this video in "Recent" as the newest entry
-    /// (no download, no playback).
-    YtAddRecent {
-        video_id: String,
-        title: String,
-    },
-    /// Detail view of a video (play / add to collection / offline).
-    YtShowVideoDetail {
-        video_id: String,
-        title: String,
-    },
-    /// Detail view of a video from the "Newest" list (index in `newest_items`).
-    YtShowNewestDetail(usize),
-    /// Detail/contents of a playlist (start / offline / add to library).
-    YtShowPlaylistDetail {
-        url: String,
-        title: String,
-    },
     /// Start playing a whole playlist (loads its videos as the queue).
     YtStartPlaylist {
         url: String,
         title: String,
     },
-    /// Play a cached playlist (by URL) starting at the given song index. Plays the
-    /// whole playlist as the queue (so the songs are not logged to "Recent"
-    /// individually). `close` pops the song-list subpage afterwards (row tap), a
-    /// play-button click keeps it open.
-    YtPlayPlaylistAt {
+    /// Play a cached playlist (videos handed in) starting at `index`; `close`
+    /// pops the song-list subpage afterwards.
+    YtStartPlaylistAt {
         url: String,
         title: String,
         index: usize,
         close: bool,
-    },
-    /// Save a found playlist into the Playlists section (without playing it).
-    YtSavePlaylist {
-        url: String,
-        title: String,
-    },
-    /// Open a recent playlist's song list (the mirrored local playlist).
-    YtOpenRecentPlaylist {
-        url: String,
-        title: String,
+        videos: Vec<(String, String, Option<i64>)>,
     },
     /// Play a video: resolves the stream URL asynchronously (or plays the
     /// offline copy), then starts playback.
@@ -1359,25 +1259,39 @@ pub enum Msg {
         artist: Option<String>,
         cover: Option<String>,
     },
-    /// Switch the YouTube view (Newest / Channels).
-    SetYtView(YtView),
-    /// Add a video to the on-disk music library: download + transcode + index
-    /// in one step (background). Skips (and asks) if the target already exists.
-    YtAddToLibrary {
+    // --- bridge from the YtPage component to the shared parent chrome ---
+    /// Open a mirrored playlist in the Playlists section.
+    YtOpenPlaylist {
+        id: i64,
+        name: String,
+    },
+    /// Open a video's detail dialog (from a playlist row or the now-playing bar,
+    /// which only have the parent's sender) → forwarded to the YtPage component.
+    YtShowVideoDetail {
         video_id: String,
         title: String,
     },
-    /// Like [`Msg::YtAddToLibrary`] but after the user confirmed overwriting an
-    /// existing file (from the collision dialog).
-    YtAddToLibraryConfirmed {
-        video_id: String,
-        title: String,
-    },
-    /// Add a whole playlist to the on-disk music library (download + transcode).
-    YtPlaylistToLibrary {
-        url: String,
-        title: String,
-    },
+    /// Informational toast requested by the page.
+    YtToast(String),
+    /// Show/update the persistent add-to-library progress toast.
+    YtProgress(String),
+    /// Finish the progress toast with a short final message.
+    YtProgressDone(String),
+    /// Set/clear the central loading overlay.
+    YtSetLoading(Option<String>),
+    /// A track/playlist was added → reload artist/album overviews.
+    YtLibraryChanged,
+    /// A playlist was saved → reload the Playlists section.
+    YtPlaylistsChanged,
+    /// The page parked a built subpage in `yt_subpage`; push it onto the nav.
+    PushYtSubpage,
+    /// The page confirmed a channel removal → show the "channel removed" undo toast.
+    YtChannelUndo(i64),
+    /// Undo window elapsed → tell the page to actually delete the channel.
+    YtChannelReallyDelete(i64),
+    /// The page started/finished a "refresh all" worker → drive the spinner.
+    YtRefreshStarted(bool),
+    YtRefreshFinished,
     // Streaming (internet radio)
     /// Open the add dialog (search + stream address).
     StreamAdd,
@@ -1536,25 +1450,9 @@ pub enum Cmd {
     /// usable yt-dlp is present, `None` otherwise. Caches the result and refreshes
     /// the settings row without ever blocking the UI thread on the subprocess.
     YtDlpChecked(Option<String>),
-    /// Hits of the YouTube search (for the open search dialog).
-    YtSearchResults(Vec<crate::core::youtube::YtResult>),
-    /// The YouTube search failed (service unreachable / yt-dlp broken) → hint.
-    YtSearchFailed,
-    /// Thumbnails of the search hits cached → redraw the hit list.
-    YtSearchThumbsReady,
-    /// Channel subscribed/refreshed: `Some(title)` on success, otherwise `None`.
-    YtChannelFetched(Option<String>),
-    /// Rebuild the channel list / newest-videos list.
-    ReloadChannels,
-    /// A found playlist was saved into the Playlists section (count) or error.
-    YtPlaylistSaved(Result<usize, String>),
-    /// Progress while adding videos to the library: `done` of `total` finished.
-    YtLibraryProgress {
-        done: usize,
-        total: usize,
-    },
     /// A playlist's videos were listed → start playing them, log the playlist to
-    /// "Recent", and mirror it into the Playlists section.
+    /// "Recent", and mirror it into the Playlists section. (Transport; the page
+    /// requests it via `YtOutput::StartPlaylist`.)
     YtPlaylistStart {
         url: String,
         title: String,
@@ -1563,37 +1461,8 @@ pub enum Cmd {
         /// when no durations were available.
         total_duration: Option<i64>,
     },
-    /// Async metadata (channel/duration/cover) for an open video detail dialog.
-    YtVideoMeta {
-        video_id: String,
-        uploader: Option<String>,
-        duration: Option<i64>,
-        cover: Option<String>,
-    },
-    /// Video(s) transcoded into the on-disk library (count) or an error → rebuild
-    /// views. `video_id` is set for a single video (to clear its busy marker),
-    /// `None` for a whole playlist.
-    YtLibraryAdded {
-        video_id: Option<String>,
-        result: Result<usize, String>,
-    },
-    /// A single library-add hit an existing file at `dest` → ask the user whether
-    /// to overwrite it (the add was not performed).
-    YtLibraryExists {
-        video_id: String,
-        title: String,
-        dest: String,
-    },
-    /// The videos of a (not locally mirrored) YouTube playlist were fetched → cache
-    /// and open them as a song-list subpage.
-    YtPlaylistSongs {
-        url: String,
-        title: String,
-        result: Result<Vec<crate::core::youtube::YtResult>, String>,
-    },
-    /// The thumbnails of the open playlist-songs subpage finished pre-caching in
-    /// the background → fill the pending cover frames.
-    YtPlaylistCoversReady,
+    /// Startup background refresh finished → tell the YtPage component to reload.
+    YtReload,
     /// Hits of the station search (for the open add dialog).
     StreamSearchResults(Vec<crate::core::streaming::StationResult>),
     /// The station search failed (service unreachable) → show a hint.
@@ -1612,9 +1481,6 @@ pub enum Cmd {
     CloudReindexed {
         manual: bool,
     },
-    /// All YouTube subscriptions finished refreshing (manual refresh) → rebuild
-    /// the overview and clear one slot of the refresh spinner.
-    ChannelsRefreshed,
     /// Background LRCLIB lookup for the running track finished. Carries the path
     /// it was started for (to ignore stale results) and the lyrics if found.
     LyricsLoaded {
@@ -2223,152 +2089,11 @@ impl Component for App {
                                         set_visible: model.favorites.favorite_items.is_empty(),
                                     },
                                 },
+                            // YouTube lives in its own relm4 component.
                             add_titled_with_icon[Some("youtube"), &gettext("YouTube"), "im-youtube-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
-
-                                    // Warning when yt-dlp can no longer parse YouTube (the recurring
-                                    // "cat and mouse" breakage); refreshed on entering the section and
-                                    // after each extraction. The button opens the settings (yt-dlp update).
-                                    adw::Banner {
-                                        // Fully hidden (not just collapsed) when fine, so its
-                                        // intrinsic min width doesn't widen the view stack on a phone.
-                                        #[watch]
-                                        set_visible: model.youtube.ytdlp_broken,
-                                        #[watch]
-                                        set_revealed: model.youtube.ytdlp_broken,
-                                        set_title: &gettext("YouTube isn't working right now – update yt-dlp in the settings, or wait for a newer release."),
-                                        set_button_label: Some(&gettext("Settings")),
-                                        connect_button_clicked => Msg::OpenSettings,
-                                    },
-
-                                    // Header: "Newest videos" / "Channels" switcher + "+" to search/subscribe.
-                                    gtk::Box {
-                                        set_orientation: gtk::Orientation::Horizontal,
-                                        set_spacing: 6,
-                                        set_margin_top: 2,
-                                        set_margin_bottom: 4,
-                                        set_margin_start: 12,
-                                        set_margin_end: 12,
-                                        add_css_class: "linked",
-
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Recent"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.youtube.yt_view == YtView::Recent,
-                                            connect_clicked => Msg::SetYtView(YtView::Recent),
-                                        },
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Newest"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.youtube.yt_view == YtView::Newest,
-                                            connect_clicked => Msg::SetYtView(YtView::Newest),
-                                        },
-                                        gtk::ToggleButton {
-                                            set_label: &gettext("Subscriptions"),
-                                            set_hexpand: true,
-                                            #[watch]
-                                            set_active: model.youtube.yt_view == YtView::Channels,
-                                            connect_clicked => Msg::SetYtView(YtView::Channels),
-                                        },
-                                        gtk::Button {
-                                            set_icon_name: "list-add-symbolic",
-                                            set_tooltip_text: Some(&gettext("Search YouTube")),
-                                            add_css_class: "flat",
-                                            connect_clicked => Msg::YtSubscribe,
-                                        },
-                                    },
-
-                                    // "Newest": newest across all subscribed channels.
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Newest && !model.youtube.newest_items.is_empty(),
-                                        #[local_ref]
-                                        yt_newest_list -> gtk::Box {
-                                            set_orientation: gtk::Orientation::Vertical,
-                                            set_spacing: 6,
-                                            set_valign: gtk::Align::Start,
-                                            // Same gap below the tab switcher as the Channels list.
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("video-x-generic-symbolic"),
-                                        set_title: &gettext("No videos yet"),
-                                        set_description: Some(&gettext("Subscribe to a channel to follow its newest videos.")),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Newest && model.youtube.newest_items.is_empty(),
-                                    },
-
-                                    // "Recent": recently played videos (history).
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Recent && !model.youtube.recent_items.is_empty(),
-                                        #[local_ref]
-                                        yt_recent_list -> gtk::Box {
-                                            set_orientation: gtk::Orientation::Vertical,
-                                            set_spacing: 6,
-                                            set_valign: gtk::Align::Start,
-                                            // Same gap below the tab switcher as the Channels list.
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("document-open-recent-symbolic"),
-                                        set_title: &gettext("Nothing played yet"),
-                                        set_description: Some(&gettext("Videos you play appear here.")),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Recent && model.youtube.recent_items.is_empty(),
-                                    },
-
-                                    // "Channels": subscribed channels (list / gallery).
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Channels && !model.youtube.channel_items.is_empty() && !model.libview.gallery_view,
-                                        #[local_ref]
-                                        yt_channels_list -> gtk::ListBox {
-                                            set_valign: gtk::Align::Start,
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
-                                        },
-                                    },
-                                    gtk::ScrolledWindow {
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Channels && !model.youtube.channel_items.is_empty() && model.libview.gallery_view,
-                                        #[local_ref]
-                                        yt_channels_gallery -> gtk::FlowBox {
-                                            set_valign: gtk::Align::Start,
-                                            set_margin_top: 10,
-                                            set_margin_bottom: 12,
-                                            set_margin_start: 12,
-                                            set_margin_end: 12,
-                                        },
-                                    },
-                                    adw::StatusPage {
-                                        set_icon_name: Some("video-x-generic-symbolic"),
-                                        set_title: &gettext("No subscriptions"),
-                                        set_description: Some(&gettext("Search YouTube and subscribe to a channel.")),
-                                        set_vexpand: true,
-                                        #[watch]
-                                        set_visible: model.youtube.yt_view == YtView::Channels && model.youtube.channel_items.is_empty(),
-                                    },
+                                    append: model.yt_page.widget(),
                                 },
                             add_titled_with_icon[Some("audiobooks"), &gettext("Audiobooks"), "emilia-audiobook-symbolic"] =
                                 &gtk::Box {
@@ -3051,9 +2776,6 @@ impl Component for App {
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
         let memos_list = gtk::ListBox::new();
-        let yt_channels_list = gtk::ListBox::new();
-        let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let yt_recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
@@ -3089,6 +2811,44 @@ impl Component for App {
                     O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
                     O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
                     O::RefreshFinished => Msg::PodcastRefreshFinished,
+                }
+            });
+        let yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+        let yt_page = crate::ui::yt_page::YtPage::builder()
+            .launch(yt_subpage.clone())
+            .forward(sender.input_sender(), |out| {
+                use crate::ui::yt_page::YtOutput as O;
+                match out {
+                    O::PlayVideo { video_id, title } => Msg::YtPlayVideo { video_id, title },
+                    O::PlayChannel(id) => Msg::YtPlayChannel(id),
+                    O::StartPlaylist { url, title } => Msg::YtStartPlaylist { url, title },
+                    O::StartPlaylistAt {
+                        url,
+                        title,
+                        index,
+                        close,
+                        videos,
+                    } => Msg::YtStartPlaylistAt {
+                        url,
+                        title,
+                        index,
+                        close,
+                        videos,
+                    },
+                    O::OpenTrackEq { path, title } => Msg::OpenTrackEq { path, title },
+                    O::OpenPlaylist { id, name } => Msg::YtOpenPlaylist { id, name },
+                    O::OpenSettings => Msg::OpenSettings,
+                    O::Toast(s) => Msg::YtToast(s),
+                    O::Progress(s) => Msg::YtProgress(s),
+                    O::ProgressDone(s) => Msg::YtProgressDone(s),
+                    O::SetLoading(o) => Msg::YtSetLoading(o),
+                    O::LibraryChanged => Msg::YtLibraryChanged,
+                    O::PlaylistsChanged => Msg::YtPlaylistsChanged,
+                    O::PushSubpage => Msg::PushYtSubpage,
+                    O::DeleteChannelUndo(id) => Msg::YtChannelUndo(id),
+                    O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
+                    O::RefreshFinished => Msg::YtRefreshFinished,
                 }
             });
         let setup_page = crate::ui::setup::SetupPage::builder().launch(()).forward(
@@ -3274,29 +3034,10 @@ impl Component for App {
                 settings_status: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 settings_dl_btn: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ytdlp_busy: false,
-                ytdlp_broken: false,
-                yt_view: YtView::Recent,
-                channel_items: Vec::new(),
-                channels_list: yt_channels_list.clone(),
-                channels_gallery: gtk::FlowBox::new(),
-                newest_items: Vec::new(),
-                newest_list: yt_newest_list.clone(),
-                recent_items: Vec::new(),
-                recent_list: yt_recent_list.clone(),
-                search_results: Vec::new(),
-                search_failed: false,
-                search: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 playing_video_id: None,
-                video_play_buttons: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-                ctx_video_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                ctx_video_download: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                ctx_video_meta: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                downloading_videos: std::collections::HashSet::new(),
                 video_titles: std::collections::HashMap::new(),
                 playing_playlist: false,
                 progress_toast: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                playlist_songs_cache: std::collections::HashMap::new(),
-                pl_cover_slots: Vec::new(),
             },
             settings_src_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
@@ -3326,6 +3067,8 @@ impl Component for App {
             cloud_page,
             podcasts_page,
             podcast_subpage,
+            yt_page,
+            yt_subpage,
             setup_page,
         };
 
@@ -3415,6 +3158,18 @@ impl Component for App {
                 .podcasts_page
                 .emit(PI::SetGalleryView(model.libview.gallery_view));
         }
+        // Same for the YtPage component.
+        {
+            use crate::ui::yt_page::YtInput as YI;
+            model.yt_page.emit(YI::SetWindow(root.clone()));
+            model.yt_page.emit(YI::SetMobile(model.is_mobile()));
+            model
+                .yt_page
+                .emit(YI::SetGalleryColumns(model.libview.gallery_columns));
+            model
+                .yt_page
+                .emit(YI::SetGalleryView(model.libview.gallery_view));
+        }
         model.reload_streams(&sender);
         model.reload_recordings(&sender);
         // Seed the starter memo categories once (localized; i18n is ready here),
@@ -3465,11 +3220,13 @@ impl Component for App {
         // background. yt-dlp is re-fetched once per new app version (YouTube
         // changes frequently break older versions).
         if model.youtube.enabled {
-            model.reload_channels(&sender);
+            model
+                .yt_page
+                .emit(crate::ui::yt_page::YtInput::Reload);
             let online = online_available();
             sender.spawn_oneshot_command(move || {
                 let Ok(lib) = Library::open() else {
-                    return Cmd::ReloadChannels;
+                    return Cmd::YtReload;
                 };
                 let prev = lib.get_setting("yt_dlp_app_version").ok().flatten();
                 let cur = env!("CARGO_PKG_VERSION");
@@ -3482,10 +3239,10 @@ impl Component for App {
                         if let Some(t) = thumb.as_deref() {
                             crate::core::online::cache_youtube_thumb(t);
                         }
-                        let _ = crate::ui::app_youtube::refresh_channel_videos(id, &title, &url);
+                        let _ = crate::ui::yt_page::refresh_channel_videos(id, &title, &url);
                     }
                 }
-                Cmd::ReloadChannels
+                Cmd::YtReload
             });
         }
         // Automatically read the library at startup and – on Wi-Fi/LAN and
@@ -3505,7 +3262,6 @@ impl Component for App {
         let artists_gallery_box = model.libview.artists_gallery_box.clone();
         let concerts_gallery_box = model.concerts.concerts_gallery_box.clone();
         let audiobooks_gallery_box = model.favorites.audiobooks_gallery_box.clone();
-        let yt_channels_gallery = model.youtube.channels_gallery.clone();
         let widgets = view_output!();
         model.finish_init(
             &widgets,
@@ -3869,150 +3625,65 @@ impl Component for App {
                 self.start_ytdlp_fetch(update, &sender);
             }
             Msg::YtDlpAutoUpdate => self.maybe_auto_update_ytdlp(&sender),
-            Msg::YtSubscribe => self.open_youtube_search_dialog(root, &sender),
-            Msg::YtSearch(term, kind) => {
-                let term = term.trim().to_string();
-                if !term.is_empty() {
-                    sender.spawn_command(move |out| {
-                        let results = match crate::core::youtube::search(&term, kind, 25) {
-                            Ok(r) => r,
-                            Err(_) => {
-                                let _ = out.send(Cmd::YtSearchFailed);
-                                return;
-                            }
-                        };
-                        let _ = out.send(Cmd::YtSearchResults(results.clone()));
-                        for r in &results {
-                            if let Some(t) = r.thumbnail.as_deref() {
-                                crate::core::online::cache_youtube_thumb(t);
-                            }
-                        }
-                        let _ = out.send(Cmd::YtSearchThumbsReady);
-                    });
-                }
-            }
-            Msg::YtSubscribeChannel(url) => {
-                if let Some(r) = self
-                    .youtube
-                    .search_results
-                    .iter()
-                    .find(|r| r.url == url && r.kind == crate::core::youtube::YtKind::Channel)
-                    .cloned()
-                {
-                    // Central loading overlay (same spinner as library/playlist
-                    // loads) while yt-dlp fetches the channel; cleared in
-                    // `Cmd::YtChannelFetched`.
-                    self.libview.loading_label =
-                        Some(gettext_f("Subscribing to {t} …", &[("t", &r.title)]));
-                    self.libview.loading = true;
-                    sender.spawn_command(move |out| {
-                        let t = crate::ui::app_youtube::fetch_and_store_channel(
-                            &r.id,
-                            &r.title,
-                            &r.url,
-                            r.thumbnail.as_deref(),
-                        );
-                        let _ = out.send(Cmd::YtChannelFetched(t));
-                    });
-                }
-            }
-            Msg::YtOpenChannel(id) => {
-                if let Some((_, title, _, _, _)) = self
-                    .youtube
-                    .channel_items
-                    .iter()
-                    .find(|(cid, _, _, _, _)| *cid == id)
-                    .cloned()
-                {
-                    self.open_channel(&sender, id, &title);
-                }
-            }
-            Msg::YtOpenChannelAt(index) => {
-                if let Some(id) = self.youtube.channel_items.get(index).map(|c| c.0) {
-                    sender.input(Msg::YtOpenChannel(id));
-                }
-            }
-            Msg::YtShowChannelDetail(id) => self.open_channel_detail(root, &sender, id),
-            Msg::YtShowChannelDetailAt(index) => {
-                if let Some(id) = self.youtube.channel_items.get(index).map(|c| c.0) {
-                    sender.input(Msg::YtShowChannelDetail(id));
-                }
-            }
-            Msg::YtRefreshChannel(id) => {
-                if let Some((_, title, url, _, _)) = self
-                    .youtube
-                    .channel_items
-                    .iter()
-                    .find(|(cid, _, _, _, _)| *cid == id)
-                    .cloned()
-                {
-                    self.toast(&gettext("Refreshing …"));
-                    sender.spawn_command(move |out| {
-                        let t = crate::ui::app_youtube::refresh_channel_videos(id, &title, &url);
-                        let _ = out.send(Cmd::YtChannelFetched(t));
-                    });
-                }
-            }
-            Msg::YtDeleteChannel(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Channel removed"),
-                    Msg::YtDeleteChannelConfirmed(id),
-                );
-            }
-            Msg::YtDeleteChannelConfirmed(id) => {
-                let _ = self.library.delete_channel(id);
-                self.reload_channels(&sender);
-            }
+            // --- transport (requested by the YtPage component / worker results) ---
             Msg::YtPlayChannel(id) => self.yt_play_channel(id),
-            Msg::YtRemoveRecent(key) => {
-                let _ = self.library.delete_recent(&key);
-                self.reload_yt_recent(&sender);
-            }
-            Msg::YtAddRecent { video_id, title } => self.yt_add_recent(&sender, video_id, title),
-            Msg::YtShowVideoDetail { video_id, title } => {
-                self.show_video_detail(root, &sender, &video_id, &title)
-            }
-            Msg::YtShowNewestDetail(index) => {
-                if let Some(v) = self.youtube.newest_items.get(index).cloned() {
-                    self.show_video_detail(root, &sender, &v.video_id, &v.title);
-                }
-            }
-            Msg::YtShowPlaylistDetail { url, title } => {
-                self.show_playlist_detail(root, &sender, &url, &title)
-            }
-            Msg::SetYtView(view) => self.youtube.yt_view = view,
-            Msg::YtEnriched {
-                video_id,
-                artist,
-                cover,
-            } => self.yt_enriched(&sender, video_id, artist, cover),
-            Msg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
-            Msg::YtPlayPlaylistAt {
+            Msg::YtStartPlaylist { url, title } => self.yt_start_playlist(&sender, url, title),
+            Msg::YtStartPlaylistAt {
                 url,
                 title,
                 index,
                 close,
-            } => self.yt_play_playlist_at(&sender, url, title, index, close),
-            Msg::YtStartPlaylist { url, title } => self.yt_start_playlist(&sender, url, title),
+                videos,
+            } => self.yt_start_playlist_at(url, title, index, close, videos),
+            Msg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
             Msg::YtStreamResolved {
                 video_id,
                 resume,
                 result,
             } => self.yt_stream_resolved(&sender, video_id, resume, result),
-            Msg::YtAddToLibrary { video_id, title } => {
-                self.yt_add_video_to_library(video_id, title, &sender, false)
+            Msg::YtEnriched {
+                video_id,
+                artist,
+                cover,
+            } => self.yt_enriched(video_id, artist, cover),
+            // --- bridge from the YtPage component to the shared parent chrome ---
+            Msg::YtOpenPlaylist { id, name } => self.open_playlist(&sender, id, &name),
+            Msg::YtShowVideoDetail { video_id, title } => self
+                .yt_page
+                .emit(crate::ui::yt_page::YtInput::ShowVideoDetail { video_id, title }),
+            Msg::YtToast(s) => self.toast(&s),
+            Msg::YtProgress(s) => self.yt_progress(&s),
+            Msg::YtProgressDone(s) => self.yt_progress_done(&s),
+            Msg::YtSetLoading(o) => {
+                self.libview.loading = o.is_some();
+                self.libview.loading_label = o;
             }
-            Msg::YtAddToLibraryConfirmed { video_id, title } => {
-                self.yt_add_video_to_library(video_id, title, &sender, true)
+            Msg::YtLibraryChanged => self.reload_library_overviews(),
+            Msg::YtPlaylistsChanged => self.reload_playlists(&sender),
+            Msg::PushYtSubpage => {
+                if let Some((title, content)) = self.yt_subpage.borrow_mut().take() {
+                    self.push_subpage(&title, &content);
+                    // The video rows are now realized → set their play/pause icons.
+                    self.yt_page
+                        .emit(crate::ui::yt_page::YtInput::PlaybackStateChanged {
+                            playing_video_id: self.youtube.playing_video_id.clone(),
+                            playing: self.mini.playing,
+                        });
+                }
             }
-            Msg::YtPlaylistToLibrary { url, title } => {
-                self.yt_playlist_to_library(url, title, &sender)
+            Msg::YtChannelUndo(id) => {
+                self.undo_toast(&sender, &gettext("Channel removed"), Msg::YtChannelReallyDelete(id));
             }
-            Msg::YtSavePlaylist { url, title } => self.yt_save_playlist(url, title, &sender),
-            Msg::YtOpenRecentPlaylist { url, title } => {
-                self.yt_open_recent_playlist(&sender, url, title)
+            Msg::YtChannelReallyDelete(id) => {
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::DeleteChannelConfirmed(id));
             }
+            Msg::YtRefreshStarted(started) => {
+                if started {
+                    self.refresh_pending += 1;
+                }
+            }
+            Msg::YtRefreshFinished => self.refresh_done(),
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.on_ctx_share(root),
             Msg::OpenSync => {
@@ -4251,6 +3922,8 @@ impl Component for App {
                 self.rebuild_all_lists(&sender);
                 self.podcasts_page
                     .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryView(on));
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::SetGalleryView(on));
                 // Artists/Albums gallery tiles aren't filtered → update the
                 // funnel button's visibility for the new (list/gallery) mode.
                 self.update_filter_chrome();
@@ -4265,6 +3938,10 @@ impl Component for App {
                 }
                 self.podcasts_page
                     .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryColumns(
+                        self.libview.gallery_columns,
+                    ));
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::SetGalleryColumns(
                         self.libview.gallery_columns,
                     ));
             }
@@ -4407,10 +4084,6 @@ impl Component for App {
         sender: ComponentSender<Self>,
         root: &Self::Root,
     ) {
-        // Mirror the (worker-thread) extraction-broken flag into the model after
-        // every command, so the YouTube warning banner reflects the latest
-        // yt-dlp result (and is correct when the section is next opened).
-        self.youtube.ytdlp_broken = crate::core::youtube::extraction_broken();
         match msg {
             Cmd::Entries(entries) => self.on_cmd_entries(entries),
             Cmd::RemoteEntries(result, source, rel) => {
@@ -4489,80 +4162,14 @@ impl Component for App {
                 self.youtube.ytdlp_version = version;
                 self.refresh_ytdlp_status_label();
             }
-            Cmd::YtSearchResults(results) => {
-                self.youtube.search_failed = false;
-                self.youtube.search_results = results;
-                self.rebuild_youtube_search_results(&sender);
-            }
-            Cmd::YtSearchFailed => {
-                self.youtube.search_failed = true;
-                self.youtube.search_results.clear();
-                self.rebuild_youtube_search_results(&sender);
-            }
-            Cmd::YtSearchThumbsReady => self.rebuild_youtube_search_results(&sender),
-            Cmd::YtChannelFetched(title) => {
-                self.libview.loading = false;
-                self.libview.loading_label = None;
-                self.reload_channels(&sender);
-                match title {
-                    Some(t) => {
-                        // A new subscription landed → show it: switch the YouTube
-                        // section to the channels ("Subscriptions") view.
-                        self.youtube.yt_view = YtView::Channels;
-                        self.toast(&gettext_f("Subscribed: {t}", &[("t", &t)]));
-                    }
-                    None => self.toast(&gettext("Could not load channel")),
-                }
-            }
-            Cmd::ReloadChannels => self.reload_channels(&sender),
-            Cmd::ChannelsRefreshed => {
-                self.refresh_done();
-                self.reload_channels(&sender);
-            }
+            Cmd::YtReload => self.yt_page.emit(crate::ui::yt_page::YtInput::Reload),
             Cmd::LyricsLoaded { path, lyrics } => self.on_lyrics_loaded(path, lyrics),
-            Cmd::YtVideoMeta {
-                video_id,
-                uploader,
-                duration,
-                cover,
-            } => self.apply_video_meta(&video_id, uploader, duration, cover),
             Cmd::YtPlaylistStart {
                 url,
                 title,
                 items,
                 total_duration,
             } => self.on_cmd_yt_playlist_start(url, title, items, total_duration, &sender),
-            Cmd::YtPlaylistSaved(result) => match result {
-                Ok(n) => {
-                    self.reload_playlists(&sender);
-                    self.yt_progress_done(&gettext_f(
-                        "Saved {n} track(s) to Playlists",
-                        &[("n", &n.to_string())],
-                    ));
-                }
-                Err(e) => {
-                    tracing::warn!("yt save playlist failed: {e}");
-                    self.yt_progress_done(&gettext("Could not save playlist"));
-                }
-            },
-            Cmd::YtLibraryProgress { done, total } => {
-                self.yt_progress(&gettext_f(
-                    "Adding to library {done}/{total} …",
-                    &[("done", &done.to_string()), ("total", &total.to_string())],
-                ));
-            }
-            Cmd::YtLibraryAdded { video_id, result } => {
-                self.on_cmd_yt_library_added(video_id, result)
-            }
-            Cmd::YtLibraryExists {
-                video_id,
-                title,
-                dest,
-            } => self.on_cmd_yt_library_exists(video_id, title, dest, root, &sender),
-            Cmd::YtPlaylistSongs { url, title, result } => {
-                self.on_cmd_yt_playlist_songs(url, title, result, &sender)
-            }
-            Cmd::YtPlaylistCoversReady => self.on_cmd_yt_playlist_covers_ready(),
             Cmd::StreamSearchResults(results) => {
                 self.streaming.stream_search_failed = false;
                 self.streaming.stream_search_results = results;

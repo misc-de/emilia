@@ -458,20 +458,24 @@ impl App {
             let narrow = self.nav.narrow.clone();
             let apply = apply_chrome.clone();
             let pods = self.podcasts_page.sender().clone();
+            let yt = self.yt_page.sender().clone();
             breakpoint.connect_apply(move |_| {
                 narrow.set(true);
                 apply();
                 let _ = pods.send(crate::ui::podcasts_page::PodcastsInput::SetMobile(true));
+                let _ = yt.send(crate::ui::yt_page::YtInput::SetMobile(true));
             });
         }
         {
             let narrow = self.nav.narrow.clone();
             let apply = apply_chrome.clone();
             let pods = self.podcasts_page.sender().clone();
+            let yt = self.yt_page.sender().clone();
             breakpoint.connect_unapply(move |_| {
                 narrow.set(false);
                 apply();
                 let _ = pods.send(crate::ui::podcasts_page::PodcastsInput::SetMobile(false));
+                let _ = yt.send(crate::ui::yt_page::YtInput::SetMobile(false));
             });
         }
         root.add_breakpoint(breakpoint);

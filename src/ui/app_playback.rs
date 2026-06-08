@@ -71,8 +71,14 @@ impl App {
                 playing_url: self.podcasts.playing_episode_url.clone(),
                 playing: self.mini.playing,
             });
-        // …and of the YouTube video rows.
-        self.refresh_yt_icons();
+        // …and of the YouTube video rows (now in the YtPage component). Also
+        // re-check the yt-dlp "broken" banner (a failed stream resolve flips it).
+        self.yt_page
+            .emit(crate::ui::yt_page::YtInput::PlaybackStateChanged {
+                playing_video_id: self.youtube.playing_video_id.clone(),
+                playing: self.mini.playing,
+            });
+        self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshBroken);
         // …and of the saved-recording rows.
         self.refresh_recording_icons();
         // The queue/next track may have changed (add/remove/reorder) → keep the
