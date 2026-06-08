@@ -18,7 +18,7 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
 - [x] Reverse-DNS-App-ID, MetaInfo/Desktop/Icon valide, OARS, GPL-3.0-or-later
 - [x] Screenshots im `<screenshots>`-Block (`data/screenshots/`, Raw-URLs auf `main`)
 - [x] Offline-Build via `generated-sources.json` (verifiziert: baut ohne Netz)
-- [ ] **App-Quelle auf `type: git` + Tag** → `de.cais.Emilia.flathub.yaml` (Tag muss noch gesetzt werden)
+- [x] **App-Quelle auf `type: git` + Tag** → `de.cais.Emilia.flathub.yaml` (`tag: v0.5.1` + `commit:` gesetzt; Tag muss noch gepusht werden)
 
 ## Schritte für die Einreichung
 
@@ -28,9 +28,11 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
    - `data/de.cais.Emilia.metainfo.xml` (mit `<screenshots>`)
    - `de.cais.Emilia.flathub.yaml`
 
-   > Hinweis: Die Tag-Version (Schritt 3) muss zur **finalen** Version in
-   > `Cargo.toml` passen. Die MetaInfo sollte denselben Stand als obersten
-   > `<release>`-Eintrag enthalten (aktuell: 0.3.2).
+   > Hinweis: Die Tag-Version (Schritt 3) muss zum obersten `<release>`-Eintrag
+   > der MetaInfo passen – die **Marketing-Version**, die du selbst setzt (aktuell:
+   > 0.5.1). Das ist NICHT die `version` in `Cargo.toml`: die zählt ein
+   > pre-commit-Hook bei jedem Commit automatisch hoch (reiner Commit-Zähler) und
+   > weicht daher bewusst ab.
 
 2. **Pushen** nach `main` (sonst sind die Screenshot-Raw-URLs und der Tag für
    Flathub nicht erreichbar):
@@ -39,15 +41,15 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
    git push origin main
    ```
 
-3. **Tag setzen und pushen** (Version an die finale `Cargo.toml` anpassen):
+3. **Tag setzen und pushen** (Version = oberster MetaInfo-`<release>`):
 
    ```sh
-   git tag v0.3.2        # = Version aus Cargo.toml
-   git push origin v0.3.2
+   git tag v0.5.1 d333ff9   # Release-Commit (MetaInfo-Top-Release)
+   git push origin v0.5.1
    ```
 
    Dann in `de.cais.Emilia.flathub.yaml` `tag:` auf denselben Wert setzen und
-   optional `commit:` mit dem SHA (`git rev-parse v0.3.2`) ergänzen.
+   `commit:` mit dem SHA (`git rev-parse v0.5.1`) ergänzen.
 
 4. **Lokal gegen den getaggten Stand testen** (baut jetzt wirklich aus Git):
 
@@ -126,8 +128,8 @@ und was nicht:
   dorthin; ggf. genügt ein Link von cais.de aufs Repo oder umgekehrt). ⚠️
 - `metadata_license: CC0-1.0`, `project_license: GPL-3.0-or-later`, OARS-
   `content_rating`, Screenshots, `<developer>`, Release-Notes — alle vorhanden. ✅
-  Der oberste `<release>`-Eintrag in der MetaInfo ist aktuell `0.3.2` und muss
-  bei der Einreichung zum finalen Git-Tag passen.
+  Der oberste `<release>`-Eintrag in der MetaInfo ist aktuell `0.5.1` und passt
+  zum Git-Tag `v0.5.1`.
 - Alte Release-Note 0.1.4 nennt „in-app self-update / Selbst-Aktualisierung".
   Im Code gibt es **keinen** Binary-Updater — gemeint ist der App-Neustart nach
   Sprachwechsel (`current_exe().spawn()` in `src/ui/app.rs`). Formulierung

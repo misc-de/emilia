@@ -9,7 +9,7 @@
 #
 # Voraussetzungen, bevor das hier baut (siehe FLATHUB.md):
 #   1. generated-sources.json, data/screenshots/ und alle Daten sind committet.
-#   2. Ein Tag (z. B. v0.3.2) zeigt auf genau diesen Commit und ist gepusht.
+#   2. Ein Tag (z. B. v0.5.1) zeigt auf genau diesen Commit und ist gepusht.
 #   3. `tag:` unten (und idealerweise `commit:`) auf diesen Tag gesetzt.
 #
 # Lokal testen (nachdem Tag gepusht ist):
@@ -49,6 +49,11 @@ finish-args:
   # Keys/Tokens wie AcoustID/fanart.tv) werden, wenn verfügbar, über libsecret
   # im Secret Service statt in der lokalen SQLite-Datenbank gespeichert.
   - --talk-name=org.freedesktop.secrets
+  # Übersetzungskataloge liegen privat unter /app (nicht in der Locale-Extension,
+  # die nur die Gerätesprachen installiert), damit der eingebaute Sprachwähler
+  # jede Sprache laden kann – unabhängig von der Systemsprache. Muss zum
+  # Installationspfad im emilia-Modul unten passen.
+  - --env=EMILIA_LOCALEDIR=/app/share/emilia/translations
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
@@ -83,10 +88,16 @@ modules:
       - cargo build --release --offline
       - install -Dm755 target/release/emilia /app/bin/emilia
       # Übersetzungskataloge (.po → .mo) für alle Sprachen aus po/LINGUAS bauen.
+      # Bewusst NICHT nach /app/share/locale: flatpak-builder lagert dort liegende
+      # Kataloge automatisch in die Locale-Extension (de.cais.Emilia.Locale) aus,
+      # die nur die auf dem Gerät konfigurierten Sprachen installiert – auf einem
+      # en-only-System fehlt damit der deutsche Katalog komplett. Emilia hat einen
+      # eigenen Sprachwähler, also müssen ALLE Kataloge immer vorhanden sein:
+      # privater Pfad + EMILIA_LOCALEDIR (siehe finish-args, src/i18n.rs).
       - |
         for lang in $(grep -v '^#' po/LINGUAS); do
-          install -d /app/share/locale/$lang/LC_MESSAGES
-          msgfmt --check po/$lang.po -o /app/share/locale/$lang/LC_MESSAGES/emilia.mo
+          install -d /app/share/emilia/translations/$lang/LC_MESSAGES
+          msgfmt --check po/$lang.po -o /app/share/emilia/translations/$lang/LC_MESSAGES/emilia.mo
         done
       - install -Dm644 data/de.cais.Emilia.desktop
         /app/share/applications/de.cais.Emilia.desktop
@@ -122,12 +133,12 @@ modules:
         /app/share/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
     sources:
       # App-Quelle aus dem getaggten Git-Stand (Flathub baut nur hieraus).
-      # TODO vor Einreichung: tag auf den gepushten Release-Tag setzen; optional
-      # commit mit dem zugehörigen SHA ergänzen (von Flathub empfohlen).
+      # Release 0.5.1 == MetaInfo-Top-Release; der Tag zeigt auf den Release-
+      # Commit. Bei einem neuen Release: tag + commit gemeinsam hochziehen.
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.5.0
-        # commit: <SHA des Tags v0.3.21>
+        tag: v0.5.1
+        commit: d333ff95ebf099a9bbd69c70040516a32b69008b
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json
