@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 0 16 16" width="16px">
+<svg xmlns="http://www.w3.org/2000/svg" width="16px" height="16px" viewBox="0 0 16 16">
+  <!-- Three rising "Z" glyphs (iibadwaida sleep icon). Drawn as FILLED paths
+       (two bars + a slanted bar per Z), not strokes, because GTK recolors
+       symbolic icons by filling shapes; smaller, higher Z's fade for depth. -->
   <g fill="#222222">
-    <!-- Crescent moon (lower-left), carved by an offset circle (even-odd). -->
-    <path fill-rule="evenodd" d="M1.6 9.3 a5.4 5.4 0 1 0 10.8 0 a5.4 5.4 0 1 0 -10.8 0 z M5.7 4.9 a5 5 0 1 0 10 0 a5 5 0 1 0 -10 0 z"/>
-  </g>
-  <!-- "zzz" in the free upper-right corner. -->
-  <g fill="none" stroke="#222222" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M9.9 4.6 h2.5 l-2.5 2.0 h2.5"/>
-    <path d="M12.5 1.6 h1.9 l-1.9 1.5 h1.9"/>
+    <path d="M2.4 10.2 H6.4 V11.45 H2.4 Z M2.4 12.95 H6.4 V14.2 H2.4 Z M5.15 10.2 L6.4 10.2 L3.65 14.2 L2.4 14.2 Z"/>
+    <path opacity="0.82" d="M6.6 6.3 H10 V7.35 H6.6 Z M6.6 8.65 H10 V9.7 H6.6 Z M8.95 6.3 L10 6.3 L7.65 9.7 L6.6 9.7 Z"/>
+    <path opacity="0.64" d="M10.2 2.6 H13 V3.45 H10.2 Z M10.2 4.55 H13 V5.4 H10.2 Z M12.15 2.6 L13 2.6 L11.05 5.4 L10.2 5.4 Z"/>
   </g>
 </svg>
