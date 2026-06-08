@@ -352,7 +352,8 @@ pub fn search(query: &str, kind: YtKind, n: usize) -> Result<Vec<YtResult>> {
         YtKind::Channel => search_results_url(query, "EgIQAg%3D%3D"),
         YtKind::Playlist => search_results_url(query, "EgIQAw%3D%3D"),
     };
-    let entries = dump_entries(&["--flat-playlist", "--playlist-end", &n.to_string(), &source])?;
+    let entries =
+        dump_entries(&["--flat-playlist", "--playlist-end", &n.to_string(), "--", &source])?;
     Ok(entries
         .into_iter()
         .filter_map(|e| e.into_result())
@@ -372,6 +373,7 @@ pub fn list_entries(url: &str, limit: usize) -> Result<Vec<YtResult>> {
         "--flat-playlist",
         "--playlist-end",
         &limit.to_string(),
+        "--",
         &target,
     ])?;
     Ok(entries
@@ -396,6 +398,7 @@ pub fn resolve_audio_url(video_id_or_url: &str) -> Result<String> {
             "bestaudio/best",
             "-g",
         ])
+        .arg("--")
         .arg(&url)
         .output()?;
     if !out.status.success() {
@@ -433,6 +436,7 @@ pub fn download_audio(video_id: &str) -> Result<PathBuf> {
             "-o",
         ])
         .arg(&template)
+        .arg("--")
         .arg(watch_url(video_id))
         .status()?;
     if !status.success() {
@@ -723,7 +727,7 @@ fn local_atom_name(qname: &[u8]) -> String {
 pub fn video_meta(video_id_or_url: &str) -> Result<YtResult> {
     let url = to_url(video_id_or_url);
     // No `--flat-playlist`: a full single-video dump carries uploader/duration.
-    let entries = dump_entries(&["--no-playlist", &url])?;
+    let entries = dump_entries(&["--no-playlist", "--", &url])?;
     entries
         .into_iter()
         .next()
@@ -735,7 +739,8 @@ pub fn video_meta(video_id_or_url: &str) -> Result<YtResult> {
 /// collection"). Unlike [`list_entries`] the URL is taken as-is. **Network.**
 pub fn list_playlist(url: &str, limit: usize) -> Result<Vec<YtResult>> {
     let limit = limit.clamp(1, 500);
-    let entries = dump_entries(&["--flat-playlist", "--playlist-end", &limit.to_string(), url])?;
+    let entries =
+        dump_entries(&["--flat-playlist", "--playlist-end", &limit.to_string(), "--", url])?;
     Ok(entries
         .into_iter()
         .filter_map(|e| e.into_result())

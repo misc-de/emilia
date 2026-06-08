@@ -15,6 +15,22 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
+/// Locking that recovers from poisoning instead of panicking. The worker thread
+/// and the GTK main thread share these mutexes; the main loop calls `snapshot()`
+/// on a 1-second tick, so a panic *inside* the lock on the worker would poison
+/// the mutex and otherwise take the whole app down at the next tick. The guarded
+/// data is only ever simple field assignments (always left consistent), so
+/// recovering the inner value is safe.
+trait LockExt<T> {
+    fn lock_or_recover(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> LockExt<T> for Mutex<T> {
+    fn lock_or_recover(&self) -> std::sync::MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// A song detected in the buffer (boundary to boundary).
 #[derive(Debug, Clone)]
 pub struct BufferedSong {
@@ -99,7 +115,7 @@ impl Recorder {
                 if let Err(e) = run(&url, cap_minutes, &buffer_path, &shared, &stop, &ext) {
                     tracing::info!("Stream recorder ended: {e}");
                 }
-                shared.lock().unwrap().ended = true;
+                shared.lock_or_recover().ended = true;
             });
         }
 
@@ -113,7 +129,7 @@ impl Recorder {
 
     /// Snapshot of the buffer state for the UI.
     pub fn snapshot(&self) -> Snapshot {
-        let s = self.shared.lock().unwrap();
+        let s = self.shared.lock_or_recover();
         let avail = s.total.saturating_sub(s.cap);
         let mut songs: Vec<BufferedSong> = Vec::new();
         for (i, m) in s.markers.iter().enumerate() {
@@ -145,9 +161,9 @@ impl Recorder {
         title: &str,
         dest_dir: &Path,
     ) -> Result<PathBuf> {
-        let cap = self.shared.lock().unwrap().cap;
+        let cap = self.shared.lock_or_recover().cap;
         let avail = {
-            let s = self.shared.lock().unwrap();
+            let s = self.shared.lock_or_recover();
             s.total.saturating_sub(s.cap)
         };
         let start = start.max(avail);
@@ -157,7 +173,7 @@ impl Recorder {
         let data = read_ring(&self.buffer_path, cap, start, end)?;
         std::fs::create_dir_all(dest_dir)?;
         let base = sanitize_filename(artist, title);
-        let ext = self.ext.lock().unwrap().clone();
+        let ext = self.ext.lock_or_recover().clone();
         let path = unique_path(dest_dir, &base, &ext);
         std::fs::write(&path, &data)?;
         tag_file(&path, artist, title);
@@ -167,14 +183,14 @@ impl Recorder {
     /// Cuts `[start, end)` into a **temporary** file (for previewing in the
     /// replay) and returns its path.
     pub fn extract_temp(&self, start: u64, end: u64) -> Result<PathBuf> {
-        let cap = self.shared.lock().unwrap().cap;
-        let avail = self.shared.lock().unwrap().total.saturating_sub(cap);
+        let cap = self.shared.lock_or_recover().cap;
+        let avail = self.shared.lock_or_recover().total.saturating_sub(cap);
         let start = start.max(avail);
         if end <= start {
             return Err(anyhow!("nothing buffered for this segment"));
         }
         let data = read_ring(&self.buffer_path, cap, start, end)?;
-        let ext = self.ext.lock().unwrap().clone();
+        let ext = self.ext.lock_or_recover().clone();
         let mut path = std::env::temp_dir();
         let n = BUFFER_SEQ.fetch_add(1, Ordering::Relaxed);
         path.push(format!("emilia_replay_{}_{n}.{ext}", std::process::id()));
@@ -218,7 +234,7 @@ fn run(
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     let ext = ext_from_content_type(resp.header("Content-Type"));
-    *ext_out.lock().unwrap() = ext.to_string();
+    *ext_out.lock_or_recover() = ext.to_string();
     // Derive buffer capacity in bytes from the bitrate (default 256 kbit/s).
     let br_kbps: u64 = resp
         .header("icy-br")
@@ -228,7 +244,7 @@ fn run(
         .unwrap_or(256);
     let bytes_per_sec = (br_kbps * 1000 / 8).max(8_000);
     let cap = (cap_minutes as u64 * 60 * bytes_per_sec).max(bytes_per_sec * 10);
-    shared.lock().unwrap().cap = cap;
+    shared.lock_or_recover().cap = cap;
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -281,7 +297,7 @@ fn run(
         // iteration (a non-empty title clears `empty_since`; an empty one clears
         // `pending`), so at most one fires here.
         let (commit_new, commit_gap, prev_off) = {
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock_or_recover();
             s.total = total;
             let commit_new = pending
                 .as_ref()
@@ -299,7 +315,7 @@ fn run(
         if let Some((off, title)) = commit_new {
             // Snap the raw ICY boundary onto the real silence gap nearby.
             let at = refine_marker(buffer_path, cap, bytes_per_sec, ext, off, prev_off, total);
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock_or_recover();
             s.markers.push(Marker {
                 offset: at,
                 title: title.clone(),
@@ -315,7 +331,7 @@ fn run(
             // at the (refined) clear point and start an untitled gap segment (the
             // talk/ads between songs, saved to its own file, not identified).
             let at = refine_marker(buffer_path, cap, bytes_per_sec, ext, empty_off, prev_off, total);
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock_or_recover();
             s.markers.push(Marker {
                 offset: at,
                 title: String::new(),
@@ -327,7 +343,7 @@ fn run(
             prune_markers(&mut s);
             empty_since = None;
         } else {
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock_or_recover();
             prune_markers(&mut s);
         }
 
@@ -354,7 +370,7 @@ fn run(
                     pending = None;
                 } else {
                     empty_since = None; // a title is present again
-                    let current = shared.lock().unwrap().current_title.clone();
+                    let current = shared.lock_or_recover().current_title.clone();
                     if current.as_deref() == Some(title.as_str()) {
                         // Back to the running song (e.g. after an insertion)
                         // → discard candidate, no new song.
