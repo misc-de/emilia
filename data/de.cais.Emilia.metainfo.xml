@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.5.3" date="2026-06-09">
+      <description>
+        <p>Small mobile spacing refinements: the navigation menu sits slightly higher with a little more room beneath it, and the song name in the player bar gets a touch more space above it.</p>
+        <p xml:lang="de">Kleine Abstandskorrekturen auf dem Smartphone: Das Navigationsmenü sitzt etwas höher mit etwas mehr Platz darunter, und der Liedname in der Wiedergabeleiste bekommt etwas mehr Abstand nach oben.</p>
+      </description>
+    </release>
     <release version="0.5.2" date="2026-06-08">
       <description>
         <p>Mobile polish: the header bar is kept clear of the app name and section text for a cleaner look, the navigation icons are larger and easier to tap, and the bottom player bar is more compact around the song line. The repeat button now sits next to shuffle.</p>

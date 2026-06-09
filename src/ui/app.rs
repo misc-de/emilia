@@ -1614,9 +1614,10 @@ impl Component for App {
                         #[name = "top_nav"]
                         set_child = &gtk::Box {
                             set_spacing: 3,
-                            // Sit the mobile menu strip 10px lower (top 2 → 12).
-                            set_margin_top: 12,
-                            set_margin_bottom: 2,
+                            // Mobile menu strip: 5px higher than before (top 12 → 7)
+                            // with 5px more breathing room below (bottom 2 → 7).
+                            set_margin_top: 7,
+                            set_margin_bottom: 7,
                             // Center the icon strip when it fits; it still scrolls
                             // (left-aligned) once the icons overflow the width.
                             set_halign: gtk::Align::Center,
@@ -2144,8 +2145,8 @@ impl Component for App {
                             // (CSS, see `init`), on top of the small top margin.
                             add_css_class: "emilia-songline",
                             set_tooltip_text: Some(&gettext("Show details of the current track")),
-                            // Slight offset above the song line (halved from 5).
-                            set_margin_top: 2,
+                            // 5px more breathing room above the song name (2 → 7).
+                            set_margin_top: 7,
                             // Without a selected track, hide entirely (frees up space).
                             #[watch]
                             set_visible: model.mini.now_playing.is_some(),
