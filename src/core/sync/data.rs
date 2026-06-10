@@ -420,6 +420,32 @@ pub(crate) fn export_stations(lib: &Library, ids: &[i64]) -> Vec<StationRec> {
         .collect()
 }
 
+/// Registers received timeshift recordings (their audio already arrived as
+/// files under `<Music>/Streaming`). Only rows whose file actually landed are
+/// added, so a partial transfer leaves no dangling recording.
+pub(crate) fn import_recordings(lib: &Library, base: &str, recs: &[RecordingRec]) -> usize {
+    let mut n = 0;
+    for r in recs {
+        let path = resolve(&r.rel_path, base);
+        if !std::path::Path::new(&path).exists() {
+            continue;
+        }
+        if lib
+            .add_recording(
+                &path,
+                r.artist.as_deref(),
+                &r.title,
+                r.station.as_deref(),
+                r.incomplete,
+            )
+            .is_ok()
+        {
+            n += 1;
+        }
+    }
+    n
+}
+
 pub(crate) fn import_stations(lib: &Library, recs: &[StationRec]) -> usize {
     let mut n = 0;
     for s in recs {

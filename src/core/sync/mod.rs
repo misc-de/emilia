@@ -97,6 +97,9 @@ pub struct ImportStats {
     /// Artist photos / album covers + years applied.
     #[serde(default)]
     pub meta: usize,
+    /// Timeshift recordings registered (their audio rode along as files).
+    #[serde(default)]
+    pub recordings: usize,
 }
 
 /// Current Unix timestamp in seconds.

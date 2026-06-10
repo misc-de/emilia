@@ -1114,6 +1114,18 @@ impl StreamPage {
             });
         }
         actions.add(&edit);
+        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            share.connect_activated(move |_| {
+                let _ = sender.output(StreamOutput::Share(crate::core::sync::share::Selection {
+                    recordings: vec![id],
+                    ..Default::default()
+                }));
+                dialog.close();
+            });
+        }
+        actions.add(&share);
         let remove = action_row(&gettext("Delete recording"), "user-trash-symbolic");
         {
             let (sender, dialog, root) = (sender.clone(), dialog.clone(), root.clone());

@@ -15,7 +15,7 @@ use crate::core::sync::data;
 use crate::core::sync::hash::quick_hash;
 use crate::core::sync::protocol::{
     CategoryRec, EqRec, FavoriteRec, MetaAlbumRec, MetaArtistRec, PlaylistRec, PodcastRec,
-    StationRec, SCHEMA_VERSION,
+    RecordingRec, StationRec, SCHEMA_VERSION,
 };
 use crate::core::sync::ImportStats;
 use crate::core::youtube;
@@ -107,6 +107,9 @@ pub struct ShareManifest {
     /// Saved radio stations being shared.
     #[serde(default)]
     pub stations: Vec<StationRec>,
+    /// Timeshift recordings being shared (their audio rides along in `files`).
+    #[serde(default)]
+    pub recordings: Vec<RecordingRec>,
     pub total_size: u64,
 }
 
@@ -165,6 +168,8 @@ pub struct Selection {
     pub concerts: bool,
     /// Saved radio station db ids to share.
     pub stations: Vec<i64>,
+    /// Timeshift recording db ids to share (audio + library row).
+    pub recordings: Vec<i64>,
     /// Specific podcast feed URLs to share (incl. feed + episodes).
     pub podcast_feeds: Vec<String>,
     /// Specific user-playlist ids to share; their local tracks are added to the
@@ -197,6 +202,7 @@ impl Selection {
             && !self.audiobooks
             && !self.concerts
             && self.stations.is_empty()
+            && self.recordings.is_empty()
             && self.podcast_feeds.is_empty()
             && self.playlist_ids.is_empty()
             && self.yt_channels.is_empty()
@@ -249,6 +255,25 @@ pub fn build_manifest(
             if crate::core::youtube::parse_yt_path(&p).is_none() {
                 paths.insert(p);
             }
+        }
+    }
+    // Timeshift recordings: their audio (under <Music>/Streaming) rides along as
+    // a normal file; the row below makes it land in the recordings list.
+    let mut recordings = Vec::new();
+    if !sel.recordings.is_empty() {
+        let want: std::collections::HashSet<i64> = sel.recordings.iter().copied().collect();
+        for r in lib.recordings().unwrap_or_default() {
+            if !want.contains(&r.id) {
+                continue;
+            }
+            paths.insert(r.path.clone());
+            recordings.push(RecordingRec {
+                rel_path: data::relativize(&r.path, &base),
+                artist: r.artist,
+                title: r.title,
+                station: r.station,
+                incomplete: r.incomplete,
+            });
         }
     }
 
@@ -394,6 +419,7 @@ pub fn build_manifest(
         meta_artists,
         meta_albums,
         stations,
+        recordings,
         total_size,
     })
 }
@@ -551,6 +577,9 @@ pub fn apply_manifest(
     // Saved radio stations.
     stats.stations = data::import_stations(lib, &manifest.stations);
 
+    // Timeshift recordings: register the rows for the audio that just arrived.
+    stats.recordings = data::import_recordings(lib, &base, &manifest.recordings);
+
     // YouTube only if this device has it enabled.
     let yt_enabled = lib.get_setting("youtube_enabled").ok().flatten().as_deref() == Some("1");
     if yt_enabled {
@@ -680,6 +709,33 @@ mod tests {
         assert!(m.total_size > 0);
         assert!(m.yt.is_empty(), "YT dropped when peer has it disabled");
         assert!(m.library.favorites.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recording_share_includes_file_and_row() {
+        let dir = music_dir_with("rec", &[("Streaming/r.opus", b"recording-bytes")]);
+        let base = dir.to_string_lossy().to_string();
+        let lib = Library::open_in_memory().unwrap();
+        lib.set_setting("music_dir", &base).unwrap();
+        let rec_path = dir.join("Streaming/r.opus").to_string_lossy().into_owned();
+        lib.add_recording(&rec_path, Some("Artist"), "Song", Some("Radio"), false)
+            .unwrap();
+        let rid = lib.recordings().unwrap()[0].id;
+        let m = build_manifest(
+            &lib,
+            &Selection {
+                recordings: vec![rid],
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(m.recordings.len(), 1);
+        assert_eq!(m.recordings[0].rel_path, "Streaming/r.opus");
+        assert_eq!(m.recordings[0].title, "Song");
+        // The audio rides along as a normal file.
+        assert!(m.files.iter().any(|f| f.rel_path == "Streaming/r.opus"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

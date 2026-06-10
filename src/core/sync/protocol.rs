@@ -167,6 +167,22 @@ pub struct StationRec {
     pub genre: Option<String>,
 }
 
+/// A timeshift recording's library row. The audio travels as a normal file
+/// (recordings live under `<Music>/Streaming`, inside the music folder), keyed
+/// by `rel_path`; this row makes it show up in the Streaming → recordings list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingRec {
+    /// Path relative to the music folder (matches the transferred file entry).
+    pub rel_path: String,
+    #[serde(default)]
+    pub artist: Option<String>,
+    pub title: String,
+    #[serde(default)]
+    pub station: Option<String>,
+    #[serde(default)]
+    pub incomplete: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRec {
     /// Path relative to the music folder of the sending device.
