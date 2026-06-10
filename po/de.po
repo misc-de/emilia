@@ -2479,3 +2479,25 @@ msgstr "Loudness"
 
 msgid "Soft"
 msgstr "Soft"
+
+# --- Token (cut&paste) pairing ---
+msgid "Copy code"
+msgstr "Code kopieren"
+
+msgid "Connect"
+msgstr "Verbinden"
+
+msgid "Invalid or expired pairing code."
+msgstr "Ungültiger oder abgelaufener Kopplungscode."
+
+msgid "Pairing code …"
+msgstr "Kopplungscode …"
+
+msgid "Paste pairing code …"
+msgstr "Kopplungscode einfügen …"
+
+msgid "Scan this code on the other device — or copy the code below and paste it there."
+msgstr "Diesen Code auf dem anderen Gerät scannen – oder den Code unten kopieren und dort einfügen."
+
+msgid "Point the camera at the QR code — or paste a pairing code below."
+msgstr "Die Kamera auf den QR-Code richten – oder unten einen Kopplungscode einfügen."

@@ -132,6 +132,41 @@ pub struct EqRec {
     pub bands: [f64; 10],
 }
 
+/// Collected (online-enriched) metadata of a shared artist: the photo travels
+/// inline as base64 so the receiver does not have to re-fetch it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetaArtistRec {
+    pub name: String,
+    /// Base64 of the cached artist photo (PNG/JPEG bytes), if any.
+    #[serde(default)]
+    pub image: Option<String>,
+}
+
+/// Collected metadata of a shared album: cover (base64) and release year.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetaAlbumRec {
+    pub artist: String,
+    pub album: String,
+    #[serde(default)]
+    pub year: Option<i32>,
+    /// Base64 of the cached cover image (PNG/JPEG bytes), if any.
+    #[serde(default)]
+    pub cover: Option<String>,
+}
+
+/// A saved internet-radio station (name + stream URL + optional logo url/genre).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StationRec {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub favicon: Option<String>,
+    #[serde(default)]
+    pub homepage: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRec {
     /// Path relative to the music folder of the sending device.

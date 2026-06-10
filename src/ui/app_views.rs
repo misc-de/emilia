@@ -1605,6 +1605,9 @@ impl App {
             .collect();
         crate::core::sync::share::Selection {
             song_paths,
+            // Carry the collected metadata (artist photos, album covers + year,
+            // categories) of the shared music along with the audio files.
+            include_metadata: true,
             ..Default::default()
         }
     }

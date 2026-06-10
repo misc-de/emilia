@@ -91,6 +91,12 @@ pub struct ImportStats {
     pub categories: usize,
     pub eq: usize,
     pub files: usize,
+    /// Saved radio stations imported.
+    #[serde(default)]
+    pub stations: usize,
+    /// Artist photos / album covers + years applied.
+    #[serde(default)]
+    pub meta: usize,
 }
 
 /// Current Unix timestamp in seconds.

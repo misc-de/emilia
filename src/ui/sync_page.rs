@@ -64,6 +64,9 @@ pub(crate) struct SyncPage {
     /// whole flow. `None` while no window is shown (the connection may still live).
     sub: Option<adw::Dialog>,
     qr: Option<gtk::Picture>,
+    /// Offer side: read-only entry showing the pairing code as copyable text
+    /// (the same `emilia://pair?…` URL the QR encodes), for cut&paste pairing.
+    code_field: Option<gtk::Entry>,
     cam: Option<gtk::Picture>,
     /// Status label (pairing, import, transfer) of the current flow content.
     status: Option<gtk::Label>,
@@ -106,6 +109,8 @@ pub(crate) enum SyncInput {
     StartServer,
     StartScan,
     QrDecoded(String),
+    /// A pairing code pasted/typed as text (cut&paste alternative to scanning).
+    PasteCode(String),
     /// Share a concrete selection built from a detail view with the connected
     /// peer: resolve it to a manifest off-thread, then show the size confirmation.
     ShareSelection {
@@ -166,6 +171,7 @@ impl Component for SyncPage {
             connected: false,
             sub: None,
             qr: None,
+            code_field: None,
             cam: None,
             status: None,
             server_status: None,
@@ -195,7 +201,8 @@ impl Component for SyncPage {
             }
             SyncInput::StartServer => self.start_server(&sender),
             SyncInput::StartScan => self.start_scan(&sender),
-            SyncInput::QrDecoded(url) => self.handle_qr(&url, &sender),
+            SyncInput::QrDecoded(url) => self.handle_qr(&url, false, &sender),
+            SyncInput::PasteCode(text) => self.handle_qr(text.trim(), true, &sender),
             SyncInput::ShareSelection { window, selection } => {
                 self.window = Some(window);
                 self.share_selection(selection, &sender);
@@ -441,10 +448,40 @@ impl SyncPage {
             .justify(gtk::Justification::Center)
             .build();
         let hint = gtk::Label::builder()
-            .label(gettext("Scan this code on the other device."))
+            .label(gettext(
+                "Scan this code on the other device — or copy the code below and paste it there.",
+            ))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
+        // Copyable pairing code (the same URL the QR encodes) for cut&paste
+        // pairing. Filled in once the server is ready (see `ServerReady`).
+        let code_field = gtk::Entry::builder()
+            .editable(false)
+            .can_focus(true)
+            .hexpand(true)
+            .placeholder_text(gettext("Pairing code …"))
+            .build();
+        let copy_btn = gtk::Button::builder()
+            .icon_name("edit-copy-symbolic")
+            .tooltip_text(gettext("Copy code"))
+            .valign(gtk::Align::Center)
+            .build();
+        {
+            let code_field = code_field.clone();
+            copy_btn.connect_clicked(move |b| {
+                let text = code_field.text();
+                if !text.is_empty() {
+                    b.clipboard().set_text(&text);
+                }
+            });
+        }
+        let code_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .build();
+        code_row.append(&code_field);
+        code_row.append(&copy_btn);
         let status = gtk::Label::builder()
             .wrap(true)
             .justify(gtk::Justification::Center)
@@ -459,11 +496,13 @@ impl SyncPage {
         content.append(&hint);
         content.append(&qr);
         content.append(&server_status);
+        content.append(&code_row);
         content.append(&status);
         content.append(&progress);
         self.set_sub_content(&content);
 
         self.qr = Some(qr);
+        self.code_field = Some(code_field);
         self.server_status = Some(server_status);
         self.status = Some(status);
         self.progress = Some(progress);
@@ -519,10 +558,44 @@ impl SyncPage {
             .halign(gtk::Align::Center)
             .build();
         let hint = gtk::Label::builder()
-            .label(gettext("Point the camera at the QR code."))
+            .label(gettext(
+                "Point the camera at the QR code — or paste a pairing code below.",
+            ))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .build();
+        // Paste-a-code alternative to scanning: the offering device shows the
+        // same code as copyable text.
+        let paste_field = gtk::Entry::builder()
+            .hexpand(true)
+            .placeholder_text(gettext("Paste pairing code …"))
+            .build();
+        crate::ui::widgets::no_autofocus(&paste_field);
+        let connect_btn = gtk::Button::builder()
+            .label(gettext("Connect"))
+            .css_classes(["suggested-action"])
+            .valign(gtk::Align::Center)
+            .build();
+        {
+            let sender = sender.clone();
+            let paste_field = paste_field.clone();
+            connect_btn.connect_clicked(move |_| {
+                sender.input(SyncInput::PasteCode(paste_field.text().to_string()));
+            });
+        }
+        {
+            // Enter in the field connects too.
+            let sender = sender.clone();
+            paste_field.connect_activate(move |e| {
+                sender.input(SyncInput::PasteCode(e.text().to_string()));
+            });
+        }
+        let paste_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .build();
+        paste_row.append(&paste_field);
+        paste_row.append(&connect_btn);
         let status = gtk::Label::builder()
             .wrap(true)
             .justify(gtk::Justification::Center)
@@ -536,6 +609,7 @@ impl SyncPage {
         content.set_valign(gtk::Align::Center);
         content.append(&hint);
         content.append(&cam);
+        content.append(&paste_row);
         content.append(&status);
         content.append(&progress);
         self.set_sub_content(&content);
@@ -569,14 +643,26 @@ impl SyncPage {
         }
     }
 
-    /// A QR code was decoded: validate the URL and start the client sync.
-    fn handle_qr(&mut self, url: &str, sender: &ComponentSender<Self>) {
-        if self.stop.is_some() || self.scanner.is_none() {
-            return; // already being processed / scanner stopped
+    /// A pairing code was decoded (QR) or pasted: validate the URL and start the
+    /// client sync. `from_paste` surfaces a parse error in the status label (a
+    /// scanned frame is just ignored so scanning can continue).
+    fn handle_qr(&mut self, url: &str, from_paste: bool, sender: &ComponentSender<Self>) {
+        // Guard against double processing: already connecting (client worker
+        // spawned) or running as the server. Not gated on the scanner, so a
+        // pasted code works even when the camera is unavailable.
+        if self.client_cmd.is_some() || self.stop.is_some() {
+            return;
         }
         let info = match protocol::parse_pair_url(url, sync::now_unix()) {
             Ok(info) => info,
-            Err(_) => return, // other/invalid code – keep scanning
+            Err(_) => {
+                if from_paste {
+                    if let Some(st) = &self.status {
+                        st.set_text(&gettext("Invalid or expired pairing code."));
+                    }
+                }
+                return; // other/invalid code – keep scanning
+            }
         };
         // Stop the camera once a valid code has been detected.
         self.scanner = None;
@@ -606,6 +692,9 @@ impl SyncPage {
                     if let Ok(tex) = sync::qr::render_qr(&pair_url) {
                         qr.set_paintable(Some(&tex));
                     }
+                }
+                if let Some(field) = &self.code_field {
+                    field.set_text(&pair_url);
                 }
                 if let Some(st) = &self.server_status {
                     st.set_text(&gettext_f(

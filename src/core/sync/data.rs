@@ -4,11 +4,19 @@
 //! File paths are stored relative to the music folder so they can be
 //! resolved against the target device's music folder.
 
+use std::collections::BTreeSet;
+
 use anyhow::Result;
+use base64::Engine;
 
 use crate::core::db::Library;
 use crate::core::sync::protocol::*;
 use crate::core::sync::ImportStats;
+
+/// Base64 engine for inline image bytes in the manifest.
+fn b64() -> base64::engine::GeneralPurpose {
+    base64::engine::general_purpose::STANDARD
+}
 
 /// Reads the configured music folder (empty if not set).
 pub(crate) fn music_dir(lib: &Library) -> String {
@@ -259,6 +267,141 @@ pub(crate) fn import_eq(lib: &Library, base: &str, eqs: &[EqRec]) -> usize {
     n
 }
 
+// --- Metadata (artist photos, album covers + year) ---------------------------
+
+/// Collects the (online-enriched) photo of each named artist, inlining the image
+/// bytes as base64 so the receiver does not re-fetch them.
+pub(crate) fn export_meta_artists(lib: &Library, names: &BTreeSet<String>) -> Vec<MetaArtistRec> {
+    names
+        .iter()
+        .map(|name| {
+            let image = lib
+                .get_artist_meta(name)
+                .ok()
+                .flatten()
+                .and_then(|m| m.image_path)
+                .and_then(|p| std::fs::read(&p).ok())
+                .map(|bytes| b64().encode(bytes));
+            MetaArtistRec {
+                name: name.clone(),
+                image,
+            }
+        })
+        .collect()
+}
+
+/// Collects cover (base64) + release year of each shared album.
+pub(crate) fn export_meta_albums(
+    lib: &Library,
+    albums: &BTreeSet<(String, String)>,
+) -> Vec<MetaAlbumRec> {
+    albums
+        .iter()
+        .filter_map(|(artist, album)| {
+            let meta = lib.get_album_meta(artist, album).ok().flatten()?;
+            let cover = meta
+                .cover_path
+                .as_deref()
+                .and_then(|p| std::fs::read(p).ok())
+                .map(|bytes| b64().encode(bytes));
+            if cover.is_none() && meta.year.is_none() {
+                return None;
+            }
+            Some(MetaAlbumRec {
+                artist: artist.clone(),
+                album: album.clone(),
+                year: meta.year,
+                cover,
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn import_meta_artists(lib: &Library, recs: &[MetaArtistRec]) -> usize {
+    let mut n = 0;
+    for r in recs {
+        let Some(bytes) = r.image.as_ref().and_then(|b| b64().decode(b).ok()) else {
+            continue;
+        };
+        let meta = crate::core::online::store_artist_image(&r.name, Some(bytes), false);
+        if lib.upsert_artist_meta(&meta).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+pub(crate) fn import_meta_albums(lib: &Library, recs: &[MetaAlbumRec]) -> usize {
+    let mut n = 0;
+    for r in recs {
+        let cover_path = r
+            .cover
+            .as_ref()
+            .and_then(|b| b64().decode(b).ok())
+            .and_then(|bytes| {
+                crate::core::online::store_album_cover_bytes(&r.artist, &r.album, &bytes)
+            });
+        if cover_path.is_none() && r.year.is_none() {
+            continue;
+        }
+        let existing = lib.get_album_meta(&r.artist, &r.album).ok().flatten();
+        let meta = crate::model::AlbumMeta {
+            artist: r.artist.clone(),
+            album: r.album.clone(),
+            mbid: existing.as_ref().and_then(|m| m.mbid.clone()),
+            cover_path: cover_path.or_else(|| existing.as_ref().and_then(|m| m.cover_path.clone())),
+            year: r.year.or_else(|| existing.and_then(|m| m.year)),
+            status: "matched".to_string(),
+            track_count: 0,
+            total_duration_ms: None,
+        };
+        if lib.upsert_album_meta(&meta).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+// --- Radio stations ----------------------------------------------------------
+
+/// Exports the stations with the given ids (empty `ids` = all stations).
+pub(crate) fn export_stations(lib: &Library, ids: &[i64]) -> Vec<StationRec> {
+    let want: std::collections::HashSet<i64> = ids.iter().copied().collect();
+    lib.streams()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| want.is_empty() || want.contains(&s.id))
+        .map(|s| StationRec {
+            name: s.name,
+            url: s.url,
+            favicon: s.favicon,
+            homepage: None,
+            genre: s.tags,
+        })
+        .collect()
+}
+
+pub(crate) fn import_stations(lib: &Library, recs: &[StationRec]) -> usize {
+    let mut n = 0;
+    for s in recs {
+        if lib
+            .add_stream(
+                &s.name,
+                &s.url,
+                s.favicon.as_deref(),
+                s.genre.as_deref(),
+                None,
+                None,
+                None,
+            )
+            .is_ok()
+        {
+            n += 1;
+        }
+    }
+    n
+}
+
 /// Assembles the full library export (legacy whole-library path).
 pub fn export_library(lib: &Library) -> Result<LibraryExport> {
     let base = music_dir(lib);
@@ -308,12 +451,60 @@ pub fn import_library(lib: &Library, exp: &LibraryExport) -> Result<ImportStats>
         categories: import_categories(lib, &base, &exp.categories),
         eq: import_eq(lib, &base, &exp.eq),
         files: 0,
+        ..Default::default()
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meta_album_year_and_station_roundtrip() {
+        let src = Library::open_in_memory().unwrap();
+        // Album meta with a year (cover_path None → no cache write needed).
+        src.upsert_album_meta(&crate::model::AlbumMeta {
+            artist: "A".into(),
+            album: "B".into(),
+            mbid: None,
+            cover_path: None,
+            year: Some(1999),
+            status: "matched".into(),
+            track_count: 0,
+            total_duration_ms: None,
+        })
+        .unwrap();
+        let albums: BTreeSet<(String, String)> =
+            [("A".to_string(), "B".to_string())].into_iter().collect();
+        let recs = export_meta_albums(&src, &albums);
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].year, Some(1999));
+
+        let dst = Library::open_in_memory().unwrap();
+        assert_eq!(import_meta_albums(&dst, &recs), 1);
+        assert_eq!(
+            dst.get_album_meta("A", "B").unwrap().unwrap().year,
+            Some(1999)
+        );
+
+        // Saved radio stations roundtrip (by id).
+        src.add_stream(
+            "Radio",
+            "http://x/stream",
+            None,
+            Some("pop"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let sid = src.streams().unwrap()[0].id;
+        let st = export_stations(&src, &[sid]);
+        assert_eq!(st.len(), 1);
+        let dst2 = Library::open_in_memory().unwrap();
+        assert_eq!(import_stations(&dst2, &st), 1);
+        assert_eq!(dst2.streams().unwrap()[0].url, "http://x/stream");
+    }
 
     #[test]
     fn metadata_roundtrip() {

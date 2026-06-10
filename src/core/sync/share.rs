@@ -14,7 +14,8 @@ use crate::core::db::Library;
 use crate::core::sync::data;
 use crate::core::sync::hash::quick_hash;
 use crate::core::sync::protocol::{
-    CategoryRec, EqRec, FavoriteRec, PlaylistRec, PodcastRec, SCHEMA_VERSION,
+    CategoryRec, EqRec, FavoriteRec, MetaAlbumRec, MetaArtistRec, PlaylistRec, PodcastRec,
+    StationRec, SCHEMA_VERSION,
 };
 use crate::core::sync::ImportStats;
 use crate::core::youtube;
@@ -97,6 +98,15 @@ pub struct ShareManifest {
     pub yt: Vec<ManifestYt>,
     #[serde(default)]
     pub library: LibraryBlobs,
+    /// Collected artist photos for the shared files (applied automatically).
+    #[serde(default)]
+    pub meta_artists: Vec<MetaArtistRec>,
+    /// Collected album covers + years for the shared files (applied automatically).
+    #[serde(default)]
+    pub meta_albums: Vec<MetaAlbumRec>,
+    /// Saved radio stations being shared.
+    #[serde(default)]
+    pub stations: Vec<StationRec>,
     pub total_size: u64,
 }
 
@@ -106,6 +116,9 @@ impl ShareManifest {
     pub fn is_empty(&self) -> bool {
         self.files.is_empty()
             && self.yt.is_empty()
+            && self.meta_artists.is_empty()
+            && self.meta_albums.is_empty()
+            && self.stations.is_empty()
             && self.library.favorites.is_none()
             && self.library.playlists.is_none()
             && self.library.podcasts.is_none()
@@ -150,6 +163,11 @@ pub struct Selection {
     pub song_paths: Vec<String>,
     pub audiobooks: bool,
     pub concerts: bool,
+    /// Saved radio station db ids to share.
+    pub stations: Vec<i64>,
+    /// Include the collected metadata (artist photos, album covers + year, and
+    /// the category/area assignments) of the shared music.
+    pub include_metadata: bool,
     /// YouTube channel db ids.
     pub yt_channels: Vec<i64>,
     /// YouTube playlist origin urls.
@@ -270,6 +288,35 @@ pub fn build_manifest(
         }
     }
 
+    // Metadata: artist photos + album covers/years for the shared music. The
+    // involved artists/albums come from the explicit selection plus the tags of
+    // the resolved files (so a shared song carries its album's cover too).
+    let (meta_artists, meta_albums) = if sel.include_metadata {
+        let mut artist_set: BTreeSet<String> = sel.artists.iter().cloned().collect();
+        let mut album_set: BTreeSet<(String, String)> = sel.albums.iter().cloned().collect();
+        for f in &files {
+            if let Some(a) = f.artist.as_deref().filter(|a| !a.trim().is_empty()) {
+                artist_set.insert(a.to_string());
+                if let Some(al) = f.album.as_deref().filter(|al| !al.trim().is_empty()) {
+                    album_set.insert((a.to_string(), al.to_string()));
+                }
+            }
+        }
+        (
+            data::export_meta_artists(lib, &artist_set),
+            data::export_meta_albums(lib, &album_set),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    // Saved radio stations (by id).
+    let stations = if sel.stations.is_empty() {
+        Vec::new()
+    } else {
+        data::export_stations(lib, &sel.stations)
+    };
+
     // Library-data blobs.
     let library = LibraryBlobs {
         favorites: sel
@@ -281,8 +328,7 @@ pub fn build_manifest(
         podcasts: sel
             .include_podcasts
             .then(|| data::export_podcasts(lib).unwrap_or_default()),
-        categories: sel
-            .include_categories
+        categories: (sel.include_categories || sel.include_metadata)
             .then(|| data::export_categories(lib, &base).unwrap_or_default()),
         eq: sel
             .include_eq
@@ -299,6 +345,9 @@ pub fn build_manifest(
         files,
         yt,
         library,
+        meta_artists,
+        meta_albums,
+        stations,
         total_size,
     })
 }
@@ -447,6 +496,14 @@ pub fn apply_manifest(
             stats.eq = data::import_eq(lib, &base, eqs);
         }
     }
+
+    // Metadata (artist photos, album covers + year) — applied automatically: it
+    // only enriches the files that were just transferred, never overwrites audio.
+    stats.meta = data::import_meta_artists(lib, &manifest.meta_artists)
+        + data::import_meta_albums(lib, &manifest.meta_albums);
+
+    // Saved radio stations.
+    stats.stations = data::import_stations(lib, &manifest.stations);
 
     // YouTube only if this device has it enabled.
     let yt_enabled = lib.get_setting("youtube_enabled").ok().flatten().as_deref() == Some("1");
