@@ -6,21 +6,40 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-/// Protocol version of the QR/pairing URL. Bumped to 2 for the selective-share
-/// redesign (offer/review/accept) — a hard cutover, since both ends are the same
-/// app build and [`parse_pair_url`] rejects a mismatched `v`.
+/// Protocol version of the QR/pairing URL. **Kept at 2** so devices with a newer
+/// schema still pair with schema-2 devices (forward/backward compatible). The
+/// *content* a sender includes is negotiated separately via the peer's
+/// [`Capabilities::schema`] — not by rejecting the pairing.
 pub const PROTOCOL_VERSION: u32 = 2;
-/// Version stamp of the share manifest / library payloads.
-pub const SCHEMA_VERSION: u32 = 2;
+/// Version stamp of the share manifest / library payloads. Bumped to **3** for
+/// the per-item detail shares: artist/album metadata (covers, photos, year),
+/// saved radio stations, timeshift recordings and voice memos. All manifest
+/// fields use `#[serde(default)]`, so a schema-2 peer simply ignores the unknown
+/// blocks; a schema-3 sender additionally **omits** them for a schema-2 peer
+/// (see [`Capabilities::accepts_v3`]) to avoid sending content it cannot use.
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// First schema version that understands the v3 content blocks (metadata,
+/// stations, recordings, memos).
+pub const SCHEMA_V3: u32 = 3;
 
 /// Capabilities a device advertises at pair time, so the peer can tailor what it
-/// offers (e.g. only offer YouTube items if the receiver has YouTube enabled).
+/// offers (only offer YouTube items if the receiver has YouTube enabled, and
+/// only the v3 content blocks if the receiver speaks schema 3).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Capabilities {
     #[serde(default)]
     pub schema: u32,
     #[serde(default)]
     pub youtube_enabled: bool,
+}
+
+impl Capabilities {
+    /// Whether the peer understands the schema-3 content (metadata blocks, saved
+    /// stations, recordings and memos). Older peers get only schema-2 content.
+    pub fn accepts_v3(&self) -> bool {
+        self.schema >= SCHEMA_V3
+    }
 }
 
 // --- Pairing handshake (`POST /pair`) ---

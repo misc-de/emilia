@@ -122,6 +122,7 @@ impl ShareManifest {
             && self.meta_artists.is_empty()
             && self.meta_albums.is_empty()
             && self.stations.is_empty()
+            && self.recordings.is_empty()
             && self.library.favorites.is_none()
             && self.library.playlists.is_none()
             && self.library.podcasts.is_none()
@@ -217,12 +218,17 @@ impl Selection {
 }
 
 /// Resolves a [`Selection`] against the local library into a [`ShareManifest`].
-/// `peer_yt_enabled` gates whether YouTube items are included at all.
+/// The peer's [`Capabilities`] gate what is included: YouTube items only when
+/// the peer has YouTube enabled, and the schema-3 content blocks (metadata,
+/// stations, recordings) only when the peer speaks schema 3 — so we never send a
+/// peer content it cannot use.
 pub fn build_manifest(
     lib: &Library,
     sel: &Selection,
-    peer_yt_enabled: bool,
+    peer_caps: &crate::core::sync::protocol::Capabilities,
 ) -> Result<ShareManifest> {
+    let peer_yt_enabled = peer_caps.youtube_enabled;
+    let accepts_v3 = peer_caps.accepts_v3();
     let base = data::music_dir(lib);
     let tracks = lib.all_tracks()?;
     let by_path: HashMap<String, &crate::model::Track> =
@@ -260,7 +266,7 @@ pub fn build_manifest(
     // Timeshift recordings: their audio (under <Music>/Streaming) rides along as
     // a normal file; the row below makes it land in the recordings list.
     let mut recordings = Vec::new();
-    if !sel.recordings.is_empty() {
+    if accepts_v3 && !sel.recordings.is_empty() {
         let want: std::collections::HashSet<i64> = sel.recordings.iter().copied().collect();
         for r in lib.recordings().unwrap_or_default() {
             if !want.contains(&r.id) {
@@ -354,7 +360,7 @@ pub fn build_manifest(
     // Metadata: artist photos + album covers/years for the shared music. The
     // involved artists/albums come from the explicit selection plus the tags of
     // the resolved files (so a shared song carries its album's cover too).
-    let (meta_artists, meta_albums) = if sel.include_metadata {
+    let (meta_artists, meta_albums) = if accepts_v3 && sel.include_metadata {
         let mut artist_set: BTreeSet<String> = sel.artists.iter().cloned().collect();
         let mut album_set: BTreeSet<(String, String)> = sel.albums.iter().cloned().collect();
         for f in &files {
@@ -374,10 +380,10 @@ pub fn build_manifest(
     };
 
     // Saved radio stations (by id).
-    let stations = if sel.stations.is_empty() {
-        Vec::new()
-    } else {
+    let stations = if accepts_v3 && !sel.stations.is_empty() {
         data::export_stations(lib, &sel.stations)
+    } else {
+        Vec::new()
     };
 
     // Library-data blobs.
@@ -656,6 +662,15 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    /// A schema-3 peer with YouTube disabled (so YT is dropped but the v3 content
+    /// blocks are allowed) — the common case for these tests.
+    fn caps() -> crate::core::sync::protocol::Capabilities {
+        crate::core::sync::protocol::Capabilities {
+            schema: SCHEMA_VERSION,
+            youtube_enabled: false,
+        }
+    }
+
     fn music_dir_with(tag: &str, files: &[(&str, &[u8])]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("emilia-share-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -703,12 +718,48 @@ mod tests {
             include_favorites: true,
             ..Default::default()
         };
-        let m = build_manifest(&lib, &sel, false).unwrap();
+        let m = build_manifest(&lib, &sel, &caps()).unwrap();
         assert_eq!(m.files.len(), 2, "both album tracks");
         assert!(m.files.iter().all(|f| !f.rel_path.starts_with('/')));
         assert!(m.total_size > 0);
         assert!(m.yt.is_empty(), "YT dropped when peer has it disabled");
         assert!(m.library.favorites.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn schema2_peer_gets_no_v3_content() {
+        let dir = music_dir_with("v2gate", &[("Streaming/r.opus", b"rec")]);
+        let base = dir.to_string_lossy().to_string();
+        let lib = Library::open_in_memory().unwrap();
+        lib.set_setting("music_dir", &base).unwrap();
+        let rec_path = dir.join("Streaming/r.opus").to_string_lossy().into_owned();
+        lib.add_recording(&rec_path, None, "S", None, false)
+            .unwrap();
+        let rid = lib.recordings().unwrap()[0].id;
+        lib.add_stream("R", "http://x", None, None, None, None, None)
+            .unwrap();
+        let sid = lib.streams().unwrap()[0].id;
+        let sel = Selection {
+            recordings: vec![rid],
+            stations: vec![sid],
+            ..Default::default()
+        };
+        // A schema-2 peer must not receive the v3 content blocks.
+        let v2 = crate::core::sync::protocol::Capabilities {
+            schema: 2,
+            youtube_enabled: false,
+        };
+        let m2 = build_manifest(&lib, &sel, &v2).unwrap();
+        assert!(m2.stations.is_empty(), "no stations for a schema-2 peer");
+        assert!(
+            m2.recordings.is_empty(),
+            "no recordings for a schema-2 peer"
+        );
+        // A schema-3 peer gets them.
+        let m3 = build_manifest(&lib, &sel, &caps()).unwrap();
+        assert_eq!(m3.stations.len(), 1);
+        assert_eq!(m3.recordings.len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -728,7 +779,7 @@ mod tests {
                 recordings: vec![rid],
                 ..Default::default()
             },
-            false,
+            &caps(),
         )
         .unwrap();
         assert_eq!(m.recordings.len(), 1);
@@ -769,7 +820,7 @@ mod tests {
                 whole_library: true,
                 ..Default::default()
             },
-            false,
+            &caps(),
         )
         .unwrap();
 

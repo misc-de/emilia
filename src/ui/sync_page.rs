@@ -902,11 +902,11 @@ impl SyncPage {
             st.set_text(&gettext("Preparing …"));
         }
         if self.is_server {
-            let yt = self.peer_caps.youtube_enabled;
+            let caps = self.peer_caps.clone();
             sender.spawn_oneshot_command(move || {
                 let m = Library::open()
                     .ok()
-                    .and_then(|lib| share::build_manifest(&lib, &sel, yt).ok())
+                    .and_then(|lib| share::build_manifest(&lib, &sel, &caps).ok())
                     .unwrap_or_default();
                 SyncEvent::ManifestReady { manifest: m }
             });
@@ -1158,9 +1158,7 @@ fn run_client_session(
             Ok(ClientCmd::Prepare(sel)) => {
                 let m = Library::open()
                     .ok()
-                    .and_then(|lib| {
-                        share::build_manifest(&lib, &sel, client.peer_caps.youtube_enabled).ok()
-                    })
+                    .and_then(|lib| share::build_manifest(&lib, &sel, &client.peer_caps).ok())
                     .unwrap_or_default();
                 prepared = Some(m.clone());
                 let _ = out.send(SyncEvent::ManifestReady { manifest: m });
