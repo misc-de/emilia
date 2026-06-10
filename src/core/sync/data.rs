@@ -324,7 +324,10 @@ pub(crate) fn import_meta_artists(lib: &Library, recs: &[MetaArtistRec]) -> usiz
             continue;
         };
         let meta = crate::core::online::store_artist_image(&r.name, Some(bytes), false);
-        if lib.upsert_artist_meta(&meta).is_ok() {
+        // Only persist when the photo was actually saved: a failed save leaves
+        // `image_path = None`, which would otherwise null out a good local photo
+        // (`upsert_artist_meta` overwrites `image_path` unconditionally).
+        if meta.image_path.is_some() && lib.upsert_artist_meta(&meta).is_ok() {
             n += 1;
         }
     }
@@ -364,13 +367,18 @@ pub(crate) fn import_meta_albums(lib: &Library, recs: &[MetaAlbumRec]) -> usize 
 
 // --- Radio stations ----------------------------------------------------------
 
-/// Exports the stations with the given ids (empty `ids` = all stations).
+/// Exports the stations with the given ids. An empty `ids` list exports
+/// nothing (not "all"), so a "no stations selected" case can never accidentally
+/// dump the whole station list.
 pub(crate) fn export_stations(lib: &Library, ids: &[i64]) -> Vec<StationRec> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
     let want: std::collections::HashSet<i64> = ids.iter().copied().collect();
     lib.streams()
         .unwrap_or_default()
         .into_iter()
-        .filter(|s| want.is_empty() || want.contains(&s.id))
+        .filter(|s| want.contains(&s.id))
         .map(|s| StationRec {
             name: s.name,
             url: s.url,
@@ -501,6 +509,8 @@ mod tests {
         let sid = src.streams().unwrap()[0].id;
         let st = export_stations(&src, &[sid]);
         assert_eq!(st.len(), 1);
+        // An empty id list exports nothing (never "all").
+        assert!(export_stations(&src, &[]).is_empty());
         let dst2 = Library::open_in_memory().unwrap();
         assert_eq!(import_stations(&dst2, &st), 1);
         assert_eq!(dst2.streams().unwrap()[0].url, "http://x/stream");
