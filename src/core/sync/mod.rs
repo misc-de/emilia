@@ -100,6 +100,9 @@ pub struct ImportStats {
     /// Timeshift recordings registered (their audio rode along as files).
     #[serde(default)]
     pub recordings: usize,
+    /// Voice memos registered (their audio rode along as files).
+    #[serde(default)]
+    pub memos: usize,
 }
 
 /// Current Unix timestamp in seconds.
@@ -132,15 +135,39 @@ fn is_safe_rel(rel: &str) -> bool {
             .all(|c| matches!(c, Component::Normal(_)))
 }
 
+/// Reserved `rel_path` prefix marking a voice-memo file. Memos live **outside**
+/// the music folder (in [`crate::core::mic::memos_dir`]); a `rel_path` starting
+/// with this prefix is transparently resolved against the memo store instead, so
+/// the regular file-transfer endpoints need no special casing. The remainder is
+/// a plain file name validated like any other relative path.
+pub const MEMO_PREFIX: &str = ".emilia-memo/";
+
+/// If `rel` is a memo path (see [`MEMO_PREFIX`]), redirect the base to the memo
+/// store (created on demand) and strip the prefix; otherwise pass through.
+fn memo_redirect<'a>(dir: &'a str, rel: &'a str) -> (std::borrow::Cow<'a, str>, &'a str) {
+    if let Some(name) = rel.strip_prefix(MEMO_PREFIX) {
+        let md = crate::core::mic::memos_dir();
+        let _ = std::fs::create_dir_all(&md);
+        (
+            std::borrow::Cow::Owned(md.to_string_lossy().into_owned()),
+            name,
+        )
+    } else {
+        (std::borrow::Cow::Borrowed(dir), rel)
+    }
+}
+
 /// Resolve `rel` to an **existing** file strictly inside `dir`. The path is
 /// component-validated (no traversal) and both ends are canonicalized, so a
 /// symlink inside `dir` cannot be used to escape it. Returns the canonical
-/// absolute path, or `None` if invalid / outside / missing.
+/// absolute path, or `None` if invalid / outside / missing. A memo `rel`
+/// resolves against the memo store instead (see [`MEMO_PREFIX`]).
 pub fn resolve_existing(dir: &str, rel: &str) -> Option<PathBuf> {
+    let (dir, rel) = memo_redirect(dir, rel);
     if dir.is_empty() || !is_safe_rel(rel) {
         return None;
     }
-    let base = std::fs::canonicalize(dir).ok()?;
+    let base = std::fs::canonicalize(&*dir).ok()?;
     let abs = std::fs::canonicalize(base.join(rel)).ok()?;
     abs.starts_with(&base).then_some(abs)
 }
@@ -151,10 +178,11 @@ pub fn resolve_existing(dir: &str, rel: &str) -> Option<PathBuf> {
 /// cannot redirect the write outside `dir`. Returns the destination path (which
 /// may not exist yet), or `None` if invalid / outside.
 pub fn resolve_new(dir: &str, rel: &str) -> Option<PathBuf> {
+    let (dir, rel) = memo_redirect(dir, rel);
     if dir.is_empty() || !is_safe_rel(rel) {
         return None;
     }
-    let base = std::fs::canonicalize(dir).ok()?;
+    let base = std::fs::canonicalize(&*dir).ok()?;
     let dest = base.join(rel);
     let parent = dest.parent()?;
     std::fs::create_dir_all(parent).ok()?;

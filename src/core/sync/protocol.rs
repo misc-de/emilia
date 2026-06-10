@@ -202,6 +202,19 @@ pub struct RecordingRec {
     pub incomplete: bool,
 }
 
+/// A voice memo's library row. The audio travels as a file with the memo
+/// `rel_path` prefix (`MEMO_PREFIX`), so it lands in the memo store; this row
+/// makes it show up in the Memo list under the right category.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoRec {
+    /// File name (the basename; the transferred file carries the memo prefix).
+    pub name: String,
+    pub title: String,
+    /// Category display name, or `None` for the unassigned ("General") bucket.
+    #[serde(default)]
+    pub category: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRec {
     /// Path relative to the music folder of the sending device.

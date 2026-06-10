@@ -495,6 +495,19 @@ impl App {
             });
         }
         actions.add(&rename);
+        // Share the memo (audio + title + category) over device sync.
+        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            share.connect_activated(move |_| {
+                sender.input(Msg::ShareItems(crate::core::sync::share::Selection {
+                    memos: vec![id],
+                    ..Default::default()
+                }));
+                dialog.close();
+            });
+        }
+        actions.add(&share);
         let remove = action_row(&gettext("Delete memo"), "user-trash-symbolic");
         {
             let sender = sender.clone();

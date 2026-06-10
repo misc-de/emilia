@@ -537,9 +537,12 @@ impl SyncServer {
             Ok(n) => {
                 // Read in and sort the freshly received file into the library from
                 // its own tags (same as the client-as-receiver path), so it is
-                // indexed exactly like a normal scan.
+                // indexed exactly like a normal scan. Memos are not music — they
+                // land in the memo store and are registered by the metadata apply.
                 if let Some(lib) = &lib {
-                    crate::core::scanner::ingest_file(lib, &dest);
+                    if !rel.starts_with(crate::core::sync::MEMO_PREFIX) {
+                        crate::core::scanner::ingest_file(lib, &dest);
+                    }
                 }
                 write_json(
                     stream,

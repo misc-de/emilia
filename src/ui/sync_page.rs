@@ -764,6 +764,15 @@ impl SyncPage {
                 } else {
                     format!("{}\n{}", self.sync_summary, files_line)
                 };
+                // Server-as-receiver: the client's uploaded files only landed now,
+                // so register the file-dependent content (recordings/memos) here —
+                // at accept time the audio wasn't there yet, so it was skipped.
+                if self.is_server {
+                    if let Some(manifest) = &self.incoming_manifest {
+                        let _ = share::apply_files(&self.library, manifest);
+                        let _ = sender.output(SyncOutput::Imported);
+                    }
+                }
                 // Reset the parked offer/decision so the next share starts fresh.
                 if let Some(chan) = &self.share_chan {
                     if let Ok(mut c) = chan.lock() {
@@ -1251,7 +1260,14 @@ fn client_upload(
             total,
             name: transfer_label(f),
         });
-        let abs = data::resolve(&f.rel_path, &base);
+        // A memo lives outside the music folder; locate it in the memo store.
+        let abs = match f.rel_path.strip_prefix(crate::core::sync::MEMO_PREFIX) {
+            Some(name) => crate::core::mic::memos_dir()
+                .join(name)
+                .to_string_lossy()
+                .into_owned(),
+            None => data::resolve(&f.rel_path, &base),
+        };
         if client.upload_file(&f.rel_path, Path::new(&abs)).is_ok() {
             n += 1;
         }
@@ -1290,9 +1306,12 @@ fn client_receive(
             name: transfer_label(f),
         });
         if let Some(dest) = crate::core::sync::resolve_new(&base, &f.rel_path) {
-            if client.download_file(&f.rel_path, &dest).is_ok() {
+            if client.download_file(&f.rel_path, &dest).is_ok()
+                && !f.rel_path.starts_with(crate::core::sync::MEMO_PREFIX)
+            {
                 // Re-read the file we just received so it is indexed and sorted in
-                // from its own tags (not the sender's second-hand metadata).
+                // from its own tags (not the sender's second-hand metadata). Memos
+                // are not music — they are registered by `apply_received` instead.
                 crate::core::scanner::ingest_file(&lib, &dest);
             }
         }

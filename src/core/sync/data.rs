@@ -446,6 +446,41 @@ pub(crate) fn import_recordings(lib: &Library, base: &str, recs: &[RecordingRec]
     n
 }
 
+/// Registers received voice memos (their audio already arrived in the memo
+/// store via the `MEMO_PREFIX` transfer). Only memos whose file actually landed
+/// are added; the category is created on demand and matched by name.
+pub(crate) fn import_memos(lib: &Library, recs: &[crate::core::sync::protocol::MemoRec]) -> usize {
+    let memos_dir = crate::core::mic::memos_dir();
+    // Existing categories by name (lower-cased), so a shared category merges
+    // into an equally-named local one instead of duplicating.
+    let mut by_name: std::collections::HashMap<String, i64> = lib
+        .memo_categories()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| (c.name.to_lowercase(), c.id))
+        .collect();
+    let mut n = 0;
+    for r in recs {
+        let path = memos_dir.join(&r.name);
+        if !path.exists() {
+            continue;
+        }
+        let category_id = r.category.as_deref().map(|name| {
+            *by_name
+                .entry(name.to_lowercase())
+                .or_insert_with(|| lib.add_memo_category(name).unwrap_or(0))
+        });
+        let category_id = category_id.filter(|id| *id > 0);
+        if lib
+            .add_memo(&path.to_string_lossy(), &r.title, category_id, 0)
+            .is_ok()
+        {
+            n += 1;
+        }
+    }
+    n
+}
+
 pub(crate) fn import_stations(lib: &Library, recs: &[StationRec]) -> usize {
     let mut n = 0;
     for s in recs {

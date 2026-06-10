@@ -14,10 +14,11 @@ use crate::core::db::Library;
 use crate::core::sync::data;
 use crate::core::sync::hash::quick_hash;
 use crate::core::sync::protocol::{
-    CategoryRec, EqRec, FavoriteRec, MetaAlbumRec, MetaArtistRec, PlaylistRec, PodcastRec,
+    CategoryRec, EqRec, FavoriteRec, MemoRec, MetaAlbumRec, MetaArtistRec, PlaylistRec, PodcastRec,
     RecordingRec, StationRec, SCHEMA_VERSION,
 };
 use crate::core::sync::ImportStats;
+use crate::core::sync::MEMO_PREFIX;
 use crate::core::youtube;
 use crate::model::YtVideo;
 
@@ -110,6 +111,9 @@ pub struct ShareManifest {
     /// Timeshift recordings being shared (their audio rides along in `files`).
     #[serde(default)]
     pub recordings: Vec<RecordingRec>,
+    /// Voice memos being shared (their audio rides along in `files`, memo-prefixed).
+    #[serde(default)]
+    pub memos: Vec<MemoRec>,
     pub total_size: u64,
 }
 
@@ -123,6 +127,7 @@ impl ShareManifest {
             && self.meta_albums.is_empty()
             && self.stations.is_empty()
             && self.recordings.is_empty()
+            && self.memos.is_empty()
             && self.library.favorites.is_none()
             && self.library.playlists.is_none()
             && self.library.podcasts.is_none()
@@ -171,6 +176,8 @@ pub struct Selection {
     pub stations: Vec<i64>,
     /// Timeshift recording db ids to share (audio + library row).
     pub recordings: Vec<i64>,
+    /// Voice memo db ids to share (audio + library row + category).
+    pub memos: Vec<i64>,
     /// Specific podcast feed URLs to share (incl. feed + episodes).
     pub podcast_feeds: Vec<String>,
     /// Specific user-playlist ids to share; their local tracks are added to the
@@ -204,6 +211,7 @@ impl Selection {
             && !self.concerts
             && self.stations.is_empty()
             && self.recordings.is_empty()
+            && self.memos.is_empty()
             && self.podcast_feeds.is_empty()
             && self.playlist_ids.is_empty()
             && self.yt_channels.is_empty()
@@ -301,6 +309,47 @@ pub fn build_manifest(
             album: meta.and_then(|t| t.album.clone()),
             duration_ms: meta.and_then(|t| t.duration_ms),
         });
+    }
+
+    // Voice memos: their audio lives outside the music folder, so it rides along
+    // as a memo-prefixed file (resolved against the memo store on both ends); the
+    // MemoRec below carries the row + category name.
+    let mut memos = Vec::new();
+    if accepts_v3 && !sel.memos.is_empty() {
+        let want: std::collections::HashSet<i64> = sel.memos.iter().copied().collect();
+        let cat_names: HashMap<i64, String> = lib
+            .memo_categories()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| (c.id, c.name))
+            .collect();
+        for m in lib.memos().unwrap_or_default() {
+            if !want.contains(&m.id) {
+                continue;
+            }
+            let p = Path::new(&m.path);
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let Ok((size, hash)) = quick_hash(p) else {
+                continue;
+            };
+            total_size += size;
+            files.push(ManifestFile {
+                rel_path: format!("{MEMO_PREFIX}{name}"),
+                size,
+                quick_hash: hash,
+                title: m.title.clone(),
+                artist: None,
+                album: None,
+                duration_ms: Some(m.duration_ms),
+            });
+            memos.push(MemoRec {
+                name: name.to_string(),
+                title: m.title,
+                category: m.category_id.and_then(|cid| cat_names.get(&cid).cloned()),
+            });
+        }
     }
 
     // YouTube items (only if the peer can use them).
@@ -426,6 +475,7 @@ pub fn build_manifest(
         meta_albums,
         stations,
         recordings,
+        memos,
         total_size,
     })
 }
@@ -541,6 +591,18 @@ pub fn review_files(lib: &Library, manifest: &ShareManifest) -> Vec<FileReview> 
 /// transferred to the music folder by the worker; this applies the library-data
 /// blobs (gated per facet by `decision`) and the YouTube items (only when local
 /// YouTube is enabled). `decision.files` is honoured by the worker, not here.
+/// Registers the **file-dependent** content (timeshift recordings + voice
+/// memos) whose audio has already landed locally. Idempotent (skips rows whose
+/// file is missing, and the DB inserts dedupe), so it is safe to call twice:
+/// the server-as-receiver applies the rest of the manifest at accept time but
+/// re-runs this once the peer's upload finished. Returns `(recordings, memos)`.
+pub fn apply_files(lib: &Library, manifest: &ShareManifest) -> (usize, usize) {
+    let base = data::music_dir(lib);
+    let recordings = data::import_recordings(lib, &base, &manifest.recordings);
+    let memos = data::import_memos(lib, &manifest.memos);
+    (recordings, memos)
+}
+
 pub fn apply_manifest(
     lib: &Library,
     manifest: &ShareManifest,
@@ -583,8 +645,13 @@ pub fn apply_manifest(
     // Saved radio stations.
     stats.stations = data::import_stations(lib, &manifest.stations);
 
-    // Timeshift recordings: register the rows for the audio that just arrived.
-    stats.recordings = data::import_recordings(lib, &base, &manifest.recordings);
+    // File-dependent content (timeshift recordings, voice memos): only registers
+    // the rows whose audio already arrived. On the client-as-receiver that is
+    // true here (files downloaded first); the server-as-receiver re-runs
+    // [`apply_files`] once the upload finished (see the TransferDone handler).
+    let (rec, memo) = apply_files(lib, manifest);
+    stats.recordings = rec;
+    stats.memos = memo;
 
     // YouTube only if this device has it enabled.
     let yt_enabled = lib.get_setting("youtube_enabled").ok().flatten().as_deref() == Some("1");
@@ -787,6 +854,37 @@ mod tests {
         assert_eq!(m.recordings[0].title, "Song");
         // The audio rides along as a normal file.
         assert!(m.files.iter().any(|f| f.rel_path == "Streaming/r.opus"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn memo_share_is_memo_prefixed() {
+        let dir = music_dir_with("memo", &[("voice.opus", b"memo-bytes")]);
+        let base = dir.to_string_lossy().to_string();
+        let lib = Library::open_in_memory().unwrap();
+        lib.set_setting("music_dir", &base).unwrap();
+        // The memo file sits anywhere readable; build_manifest hashes m.path
+        // directly and only the basename + memo prefix go on the wire.
+        let memo_path = dir.join("voice.opus").to_string_lossy().into_owned();
+        let cid = lib.add_memo_category("Notes").unwrap();
+        let mid = lib.add_memo(&memo_path, "My note", Some(cid), 0).unwrap();
+        let m = build_manifest(
+            &lib,
+            &Selection {
+                memos: vec![mid],
+                ..Default::default()
+            },
+            &caps(),
+        )
+        .unwrap();
+        assert_eq!(m.memos.len(), 1);
+        assert_eq!(m.memos[0].name, "voice.opus");
+        assert_eq!(m.memos[0].category.as_deref(), Some("Notes"));
+        // The audio rides along, marked with the memo prefix.
+        assert!(m
+            .files
+            .iter()
+            .any(|f| f.rel_path == ".emilia-memo/voice.opus"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
