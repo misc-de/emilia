@@ -395,6 +395,35 @@ impl App {
 
         let bypass_button: Rc<RefCell<Option<gtk::Button>>> = Rc::new(RefCell::new(None));
 
+        // Shared: load a band set into the UI for the current output — fill the
+        // in-memory bands, enable the level, refresh the sliders (under `loading`
+        // so they don't re-save band-by-band) and the bypass label. Used by both
+        // Reset (with zeros) and the genre presets; the caller emits the matching
+        // ClearEq / SetEq afterwards.
+        let load_bands: Rc<dyn Fn([f64; 10])> = {
+            let bands = bands.clone();
+            let enabled = enabled.clone();
+            let bands_box = bands_box.clone();
+            let scales = scales.clone();
+            let loading = loading.clone();
+            let cur_out = cur_out.clone();
+            let bypass_button = bypass_button.clone();
+            Rc::new(move |new_bands: [f64; 10]| {
+                let o = cur_out.get();
+                bands.borrow_mut()[o] = new_bands;
+                enabled.borrow_mut()[o] = true;
+                bands_box.set_sensitive(true);
+                if let Some(button) = bypass_button.borrow().as_ref() {
+                    button.set_label(&gettext("Turn off"));
+                }
+                loading.set(true);
+                for (i, sc) in scales.iter().enumerate() {
+                    sc.set_value(new_bands[i]);
+                }
+                loading.set(false);
+            })
+        };
+
         // Neutralize the current selection and reset it to "inherit".
         let reset = gtk::Button::builder()
             .label(gettext("Reset"))
@@ -402,32 +431,17 @@ impl App {
             .halign(gtk::Align::Center)
             .build();
         {
-            let bands = bands.clone();
+            let load_bands = load_bands.clone();
             let cur_out = cur_out.clone();
-            let loading = loading.clone();
-            let scales = scales.clone();
             let outputs = outputs.clone();
-            let enabled = enabled.clone();
-            let bypass_button = bypass_button.clone();
-            let bands_box = bands_box.clone();
             let key = key.clone();
             let sender = sender.clone();
             let preset_combo = preset_combo.clone();
             reset.connect_clicked(move |_| {
-                let o = cur_out.get();
-                bands.borrow_mut()[o] = [0.0; 10];
-                enabled.borrow_mut()[o] = true;
-                bands_box.set_sensitive(true);
-                if let Some(button) = bypass_button.borrow().as_ref() {
-                    let label = gettext("Turn off");
-                    button.set_label(&label);
-                }
-                loading.set(true);
-                for sc in scales.iter() {
-                    sc.set_value(0.0);
-                }
+                load_bands([0.0; 10]);
+                // Cleared bands are no genre preset (no-op if already "Custom").
                 preset_combo.set_selected(0);
-                loading.set(false);
+                let o = cur_out.get();
                 let (_, oid) = &outputs[o];
                 sender.input(Msg::ClearEq {
                     output: oid.clone(),
@@ -496,32 +510,21 @@ impl App {
         // enable the level so it is audible, and save (custom edits afterwards
         // revert the combo to "Custom" via the slider handlers).
         {
-            let bands = bands.clone();
-            let cur_out = cur_out.clone();
+            let load_bands = load_bands.clone();
             let loading = loading.clone();
-            let scales = scales.clone();
+            let cur_out = cur_out.clone();
             let outputs = outputs.clone();
-            let enabled = enabled.clone();
-            let bands_box = bands_box.clone();
-            let off = off.clone();
             let key = key.clone();
             let sender = sender.clone();
             preset_combo.connect_selected_notify(move |c| {
                 let sel = c.selected() as usize;
+                // Ignore programmatic changes (output switch / "Custom" reset).
                 if loading.get() || sel == 0 {
                     return;
                 }
                 let preset = GENRE_PRESETS[sel - 1].1;
+                load_bands(preset);
                 let o = cur_out.get();
-                bands.borrow_mut()[o] = preset;
-                enabled.borrow_mut()[o] = true;
-                bands_box.set_sensitive(true);
-                off.set_label(&gettext("Turn off"));
-                loading.set(true);
-                for (i, sc) in scales.iter().enumerate() {
-                    sc.set_value(preset[i]);
-                }
-                loading.set(false);
                 let (_, oid) = &outputs[o];
                 sender.input(Msg::SetEqEnabled {
                     output: oid.clone(),
