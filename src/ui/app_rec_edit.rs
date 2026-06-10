@@ -712,7 +712,9 @@ impl App {
             EditKind::Recording => gettext("Edit recording"),
             EditKind::Memo => gettext("Edit memo"),
         };
-        self.push_subpage(&page_title, &content);
+        // The editor has its own horizontal drags (waveform region marking +
+        // timeline), so it must not carry the swipe-back gesture.
+        self.push_subpage_fixed(&page_title, &content);
 
         // Follow the audio while previewing: keep the timeline + waveform
         // playhead in sync, skip over committed cuts, and flip back to the play

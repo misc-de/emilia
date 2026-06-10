@@ -2424,3 +2424,58 @@ msgstr "Schnelle Sprachnotizen, aufgenommen mit dem Mikrofon."
 
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "Hörstatistiken und deine meistgespielten Interpreten und Titel."
+
+# --- Genre equalizer presets ---
+msgid "Genre preset"
+msgstr "Genre-Voreinstellung"
+
+msgid "Equalizer presets per genre"
+msgstr "Equalizer-Voreinstellungen je Genre"
+
+msgid "Custom"
+msgstr "Benutzerdefiniert"
+
+msgid "Rock"
+msgstr "Rock"
+
+msgid "Pop"
+msgstr "Pop"
+
+msgid "Jazz"
+msgstr "Jazz"
+
+msgid "Classical"
+msgstr "Klassik"
+
+msgid "Dance"
+msgstr "Dance"
+
+msgid "Electronic"
+msgstr "Electronic"
+
+msgid "Hip-Hop"
+msgstr "Hip-Hop"
+
+msgid "R&B"
+msgstr "R&B"
+
+msgid "Metal"
+msgstr "Metal"
+
+msgid "Acoustic"
+msgstr "Akustik"
+
+msgid "Vocal"
+msgstr "Gesang"
+
+msgid "Bass boost"
+msgstr "Bass-Anhebung"
+
+msgid "Treble boost"
+msgstr "Höhen-Anhebung"
+
+msgid "Loudness"
+msgstr "Loudness"
+
+msgid "Soft"
+msgstr "Soft"

@@ -10,6 +10,83 @@ use crate::core::category;
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, CtxTarget, Msg};
 
+/// Fixed genre equalizer presets. Each holds the gain (dB) of the ten bands
+/// 29 Hz … 15 kHz, in the same order as the sliders. The names are English
+/// `msgid`s, translated at the display site. Loading a preset fills the bands;
+/// adjusting any slider afterwards drops the selection back to "Custom".
+///
+/// The curves follow the classic 10-band reference presets (Winamp/iTunes
+/// style): pronounced bass/treble boosts with the characteristic mid scoop or
+/// presence hump per genre, kept within the slider range (-24 … +12 dB).
+pub(crate) const GENRE_PRESETS: &[(&str, [f64; 10])] = &[
+    (
+        "Rock",
+        [8.0, 6.0, 4.0, -2.0, -4.0, -2.0, 3.0, 6.0, 8.0, 9.0],
+    ),
+    (
+        "Pop",
+        [-2.0, -1.0, 1.0, 4.0, 6.0, 6.0, 3.0, 0.0, -1.0, -2.0],
+    ),
+    ("Jazz", [5.0, 4.0, 2.0, 3.0, -2.0, -2.0, 0.0, 2.0, 5.0, 6.0]),
+    (
+        "Classical",
+        [5.0, 4.0, 3.0, 1.0, -1.0, -1.0, -2.0, -4.0, -5.0, -6.0],
+    ),
+    (
+        "Dance",
+        [9.0, 7.0, 3.0, 0.0, -1.0, -3.0, -4.0, -3.0, 1.0, 3.0],
+    ),
+    (
+        "Electronic",
+        [7.0, 6.0, 2.0, 0.0, -2.0, 2.0, 1.0, 2.0, 6.0, 7.0],
+    ),
+    (
+        "Hip-Hop",
+        [8.0, 7.0, 4.0, 3.0, -1.0, -2.0, 2.0, 0.0, 3.0, 4.0],
+    ),
+    ("R&B", [6.0, 8.0, 6.0, 2.0, -2.0, -2.0, 2.0, 3.0, 4.0, 4.0]),
+    ("Metal", [7.0, 5.0, 4.0, 1.0, -1.0, 2.0, 1.0, 4.0, 6.0, 7.0]),
+    (
+        "Acoustic",
+        [6.0, 5.0, 4.0, 2.0, 3.0, 3.0, 4.0, 4.0, 3.0, 2.0],
+    ),
+    (
+        "Vocal",
+        [-3.0, -3.0, -2.0, 2.0, 5.0, 6.0, 6.0, 4.0, 1.0, -2.0],
+    ),
+    (
+        "Bass boost",
+        [10.0, 8.0, 6.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ),
+    (
+        "Treble boost",
+        [0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 4.0, 6.0, 8.0, 9.0],
+    ),
+    (
+        "Loudness",
+        [9.0, 7.0, 3.0, 0.0, -3.0, 0.0, -1.0, 1.0, 6.0, 9.0],
+    ),
+    (
+        "Soft",
+        [4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 1.0, 2.0],
+    ),
+];
+
+/// Index (1-based, into the preset combo where 0 = "Custom") of the preset
+/// whose bands match `bands`, or 0 if none matches.
+fn match_preset(bands: &[f64; 10]) -> usize {
+    for (i, (_, preset)) in GENRE_PRESETS.iter().enumerate() {
+        if bands
+            .iter()
+            .zip(preset.iter())
+            .all(|(a, b)| (a - b).abs() < 0.01)
+        {
+            return i + 1;
+        }
+    }
+    0
+}
+
 impl App {
     /// Equalizer dialog: at the top choose **output** (device/Bluetooth) and
     /// **level** (global/artist/album/track), below them ten frequency sliders.
@@ -208,6 +285,23 @@ impl App {
             .build();
         out_combo.set_selected(out_default as u32);
         sel_group.add(&out_combo);
+
+        // Genre presets: pick a fixed preset to fill the ten bands. Adjusting any
+        // slider afterwards drops the selection back to "Custom". The combo is
+        // added here (above the sliders) but its handler is wired further down,
+        // once the sliders exist. Selecting it before connecting avoids a
+        // spurious load during setup.
+        let preset_names: Vec<String> = std::iter::once(gettext("Custom"))
+            .chain(GENRE_PRESETS.iter().map(|(n, _)| gettext(*n)))
+            .collect();
+        let preset_labels: Vec<&str> = preset_names.iter().map(|s| s.as_str()).collect();
+        let preset_combo = adw::ComboRow::builder()
+            .title(gettext("Genre preset"))
+            .subtitle(gettext("Equalizer presets per genre"))
+            .model(&gtk::StringList::new(&preset_labels))
+            .build();
+        preset_combo.set_selected(match_preset(&bands.borrow()[out_default]) as u32);
+        sel_group.add(&preset_combo);
         content.append(&sel_group);
 
         // Ten frequency sliders.
@@ -249,7 +343,8 @@ impl App {
         // current output; re-enabled on "Turn on", reset, or output switch.
         bands_box.set_sensitive(enabled.borrow()[out_default]);
 
-        // Slider movement → remember value + save (+ apply live via Msg).
+        // Slider movement → remember value + save (+ apply live via Msg). A
+        // manual move is no longer a clean preset, so drop the combo to "Custom".
         for (i, scale) in scales.iter().enumerate() {
             let bands = bands.clone();
             let cur_out = cur_out.clone();
@@ -257,6 +352,7 @@ impl App {
             let outputs = outputs.clone();
             let key = key.clone();
             let sender = sender.clone();
+            let preset_combo = preset_combo.clone();
             scale.connect_value_changed(move |s| {
                 if loading.get() {
                     return;
@@ -271,15 +367,20 @@ impl App {
                     key: (*key).clone(),
                     bands: arr,
                 });
+                // Drop to "Custom" (index 0 does nothing in the preset handler).
+                preset_combo.set_selected(0);
             });
         }
 
-        // Switch output → reload the sliders from the preloaded values.
+        // Switch output → reload the sliders from the preloaded values and
+        // re-match the genre preset for the new output (still under `loading`,
+        // so neither the sliders nor the preset combo trigger a save).
         {
             let bands = bands.clone();
             let cur_out = cur_out.clone();
             let loading = loading.clone();
             let scales = scales.clone();
+            let preset_combo = preset_combo.clone();
             out_combo.connect_selected_notify(move |c| {
                 cur_out.set(c.selected() as usize);
                 loading.set(true);
@@ -287,6 +388,7 @@ impl App {
                 for (i, sc) in scales.iter().enumerate() {
                     sc.set_value(arr[i]);
                 }
+                preset_combo.set_selected(match_preset(&arr) as u32);
                 loading.set(false);
             });
         }
@@ -310,6 +412,7 @@ impl App {
             let bands_box = bands_box.clone();
             let key = key.clone();
             let sender = sender.clone();
+            let preset_combo = preset_combo.clone();
             reset.connect_clicked(move |_| {
                 let o = cur_out.get();
                 bands.borrow_mut()[o] = [0.0; 10];
@@ -323,6 +426,7 @@ impl App {
                 for sc in scales.iter() {
                     sc.set_value(0.0);
                 }
+                preset_combo.set_selected(0);
                 loading.set(false);
                 let (_, oid) = &outputs[o];
                 sender.input(Msg::ClearEq {
@@ -385,6 +489,52 @@ impl App {
                     gettext("Turn on")
                 });
                 bands_box.set_sensitive(on);
+            });
+        }
+
+        // Genre preset chosen → fill the ten bands for the current output,
+        // enable the level so it is audible, and save (custom edits afterwards
+        // revert the combo to "Custom" via the slider handlers).
+        {
+            let bands = bands.clone();
+            let cur_out = cur_out.clone();
+            let loading = loading.clone();
+            let scales = scales.clone();
+            let outputs = outputs.clone();
+            let enabled = enabled.clone();
+            let bands_box = bands_box.clone();
+            let off = off.clone();
+            let key = key.clone();
+            let sender = sender.clone();
+            preset_combo.connect_selected_notify(move |c| {
+                let sel = c.selected() as usize;
+                if loading.get() || sel == 0 {
+                    return;
+                }
+                let preset = GENRE_PRESETS[sel - 1].1;
+                let o = cur_out.get();
+                bands.borrow_mut()[o] = preset;
+                enabled.borrow_mut()[o] = true;
+                bands_box.set_sensitive(true);
+                off.set_label(&gettext("Turn off"));
+                loading.set(true);
+                for (i, sc) in scales.iter().enumerate() {
+                    sc.set_value(preset[i]);
+                }
+                loading.set(false);
+                let (_, oid) = &outputs[o];
+                sender.input(Msg::SetEqEnabled {
+                    output: oid.clone(),
+                    scope,
+                    key: (*key).clone(),
+                    enabled: true,
+                });
+                sender.input(Msg::SetEq {
+                    output: oid.clone(),
+                    scope,
+                    key: (*key).clone(),
+                    bands: preset,
+                });
             });
         }
 

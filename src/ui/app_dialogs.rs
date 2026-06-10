@@ -287,11 +287,12 @@ impl App {
         if show_eq {
             actions.push((
                 gettext("Equalizer settings"),
-                "preferences-other-symbolic",
+                "multimedia-equalizer-symbolic",
                 || Msg::CtxEqualizer,
             ));
         }
-        actions.push((gettext("Share"), "emblem-shared-symbolic", || Msg::CtxShare));
+        // Same share icon as the title bar's device-sync button.
+        actions.push((gettext("Share"), "emilia-share-symbolic", || Msg::CtxShare));
         for (label, icon, make_msg) in actions {
             let row = adw::ActionRow::builder()
                 .title(&label)
@@ -320,8 +321,34 @@ impl App {
             .vexpand(true)
             .child(&content)
             .build();
+        // Header bar: the item name with the opened category shown discreetly
+        // below it (subtitle), plus a refresh button on the left that re-fetches
+        // the cover/metadata and rebuilds the detail view.
+        let category = match entry {
+            CtxTarget::Artist(_) => gettext("Artist"),
+            CtxTarget::Album(_) => gettext("Album"),
+            CtxTarget::Fs(e) if e.is_dir() => match self.fs_music_kind(e) {
+                Some(FsKind::Album { .. }) => gettext("Album"),
+                Some(FsKind::Artist(_)) => gettext("Artist"),
+                _ => gettext("Folder"),
+            },
+            CtxTarget::Fs(_) => gettext("Track"),
+        };
+        let header = adw::HeaderBar::new();
+        header.set_title_widget(Some(&adw::WindowTitle::new(&entry.heading(), &category)));
+        let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
+        refresh.set_tooltip_text(Some(&gettext("Refresh")));
+        {
+            let sender = sender.clone();
+            let dialog = dialog.clone();
+            refresh.connect_clicked(move |_| {
+                sender.input(Msg::CtxRefresh);
+                dialog.close();
+            });
+        }
+        header.pack_start(&refresh);
         let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&scroller));
         dialog.set_child(Some(&toolbar));
         // Forget the remembered play row as soon as the dialog closes.
@@ -797,7 +824,7 @@ impl App {
         // --- Category: Sound ---
         let page = adw::PreferencesPage::builder()
             .title(gettext("Sound"))
-            .icon_name("preferences-other-symbolic")
+            .icon_name("audio-speakers-symbolic")
             .build();
         // Global equalizer (basis for everything without a custom artist/album/track EQ).
         let eq_group = adw::PreferencesGroup::builder()
@@ -1102,6 +1129,17 @@ impl App {
         // mobile that immediately pops the on-screen keyboard (SpinRow is a
         // GtkEditable; the field is refocused on the first tap).
         crate::ui::widgets::no_autofocus(&buffer_row);
+        // no_autofocus only disables the text delegate; the embedded
+        // GtkSpinButton keeps its steppers focusable, so switching to the Cache
+        // page still parked focus on it. Disable the spin button's focus too –
+        // a tap restores editing through the no_autofocus click handler.
+        if let Some(spin) = buffer_row
+            .delegate()
+            .and_then(|d| d.dynamic_cast::<gtk::Widget>().ok())
+            .and_then(|t| t.parent())
+        {
+            spin.set_focusable(false);
+        }
         {
             let sender = sender.clone();
             buffer_row.connect_value_notify(move |r| {
@@ -1422,6 +1460,41 @@ impl App {
             // user starts the share again from the detail view.
             self.sync_page.emit(SyncInput::Open(root.clone()));
         }
+    }
+
+    /// Detail view's refresh button: force a fresh online fetch of the open
+    /// target's cover/metadata, then rebuild the detail view from the current
+    /// data (the old dialog was closed by the button).
+    pub(crate) fn on_ctx_refresh(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let Some(target) = self.nav.context_target.clone() else {
+            return;
+        };
+        // Let the galleries re-attempt this session and reset the failure
+        // counters, so a previously failed online match is retried.
+        self.libview.gallery_tried.borrow_mut().clear();
+        match &target {
+            CtxTarget::Artist(m) => {
+                self.library.reset_artist_attempts(&m.name);
+                self.fetch_focus_artist(sender, &m.name);
+            }
+            CtxTarget::Album(m) => {
+                self.library.reset_album_attempts(&m.artist, &m.album);
+                self.fetch_focus_album(sender, &m.artist, &m.album);
+            }
+            CtxTarget::Fs(e) => {
+                if let Some((artist, album)) = self.fs_album(e) {
+                    self.library.reset_album_attempts(&artist, &album);
+                    self.fetch_focus_album(sender, &artist, &album);
+                }
+            }
+        }
+        self.run_local_covers(sender);
+        self.toast(&gettext("Refreshing …"));
+        self.open_context_menu(root, sender);
     }
 
     /// Context menu: append the target's tracks to the user queue.

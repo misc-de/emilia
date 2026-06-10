@@ -1581,6 +1581,22 @@ impl Library {
             .unwrap_or(0)
     }
 
+    /// Reset an artist's online-fetch failure counter so a refresh retries it.
+    pub fn reset_artist_attempts(&self, name: &str) {
+        let _ = self.conn.execute(
+            "UPDATE artist_meta SET attempts = 0 WHERE name = ?1",
+            [name],
+        );
+    }
+
+    /// Reset an album's online-fetch failure counter so a refresh retries it.
+    pub fn reset_album_attempts(&self, artist: &str, album: &str) {
+        let _ = self.conn.execute(
+            "UPDATE album_meta SET attempts = 0 WHERE artist = ?1 AND album = ?2",
+            rusqlite::params![artist, album],
+        );
+    }
+
     /// Previous unsuccessful fingerprint attempts for a track (path).
     pub fn track_attempts(&self, path: &str) -> i64 {
         self.conn

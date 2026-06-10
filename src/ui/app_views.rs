@@ -1032,6 +1032,16 @@ impl App {
     /// Wraps a content into a scrollable subpage (with header bar +
     /// back arrow) and pushes it onto the navigation stack.
     pub(crate) fn push_subpage(&self, title: &str, content: &gtk::Box) {
+        self.push_subpage_inner(title, content, true);
+    }
+
+    /// Like [`Self::push_subpage`] but without the swipe-back gesture, for
+    /// subpages that need their own horizontal drags (e.g. the waveform editor).
+    pub(crate) fn push_subpage_fixed(&self, title: &str, content: &gtk::Box) {
+        self.push_subpage_inner(title, content, false);
+    }
+
+    fn push_subpage_inner(&self, title: &str, content: &gtk::Box, swipe_back: bool) {
         // If we are leaving the root overview, remember the current scroll position
         // of the visible section (restored when returning).
         let leaving_root = self
@@ -1058,6 +1068,20 @@ impl App {
             .vexpand(true)
             .child(content)
             .build();
+        // Swipe right anywhere on the subpage to go back — capture phase, so it
+        // also works when the swipe starts on a list row or a cover (the click
+        // handlers no longer swallow it). Skipped for subpages that need their
+        // own horizontal drags.
+        if swipe_back {
+            let nav = self.nav.nav_view.clone();
+            crate::ui::app::attach_swipe_back(
+                &scroller,
+                || true,
+                move || {
+                    nav.pop();
+                },
+            );
+        }
         // No own header: the shared header above the NavigationView provides the
         // back arrow + title (so the top/bottom navigation stays visible).
         let page = adw::NavigationPage::builder()
@@ -1223,9 +1247,10 @@ impl App {
                             .flatten()
                             .and_then(|m| m.image_path)
                     });
+                // Not activatable: the track plays via its play button; the
+                // detail view opens on long press / right click.
                 let row = adw::ActionRow::builder()
                     .title(gtk::glib::markup_escape_text(&t.title))
-                    .activatable(true)
                     .build();
                 // Album as secondary info under the song name (if present).
                 if let Some(al) = t.album.as_deref().filter(|a| !a.trim().is_empty()) {
@@ -1262,19 +1287,6 @@ impl App {
                     });
                 }
                 row.add_suffix(&play_btn);
-                // Short tap on the row: play track and return to the main page.
-                {
-                    let sender = sender.clone();
-                    let name = meta.name.clone();
-                    let path = path.clone();
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::PlayArtistTrack {
-                            name: name.clone(),
-                            path: path.clone(),
-                            close: true,
-                        });
-                    });
-                }
                 // Long press (touch) / right click (mouse): song detail view.
                 crate::ui::app::on_secondary_click(&row, {
                     let sender = sender.clone();
@@ -1431,10 +1443,11 @@ impl App {
         let multi_disc = discs.len() > 1;
 
         // Builds a track row (cover, track number, duration, play + gestures).
+        // The row itself is not activatable: a track plays via its play button,
+        // and the detail view opens on long press / right click.
         let make_row = |t: &Track| -> adw::ActionRow {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&t.title))
-                .activatable(true)
                 .build();
             row.add_css_class("emilia-flush");
             row.add_prefix(&crate::ui::widgets::rounded_image(
@@ -1498,14 +1511,6 @@ impl App {
                 play_btn.connect_clicked(move |_| sender.input(build_msg(path.clone(), false)));
             }
             row.add_suffix(&play_btn);
-            // Short tap on the row: play track (whole album from here) and
-            // return to the main page.
-            {
-                let sender = sender.clone();
-                let build_msg = build_msg.clone();
-                let path = path.clone();
-                row.connect_activated(move |_| sender.input(build_msg(path.clone(), true)));
-            }
             // Long press (touch) / right click (mouse): song detail view.
             crate::ui::app::on_secondary_click(&row, {
                 let sender = sender.clone();

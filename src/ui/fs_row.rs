@@ -345,7 +345,10 @@ impl FactoryComponent for FsRow {
             set_title: &esc(&self.entry.display_title()),
             #[watch]
             set_subtitle: &esc(&self.subtitle()),
-            set_activatable: true,
+            // Only folders activate on a tap (open the folder). Tracks play via
+            // their play button; a tap on the row does nothing, and the detail
+            // view opens on long press / right click.
+            set_activatable: self.entry.is_dir(),
             add_prefix = &gtk::Image::from_icon_name(self.entry.prefix_icon()),
 
             // Play button for an album folder (plays the whole album; the row
@@ -379,13 +382,16 @@ impl FactoryComponent for FsRow {
                 set_tooltip_text: Some(&crate::i18n::gettext("Downloaded")),
             },
 
-            // Play button (files only). Also reflects the state: track is
+            // Play button (files only): a single click plays/toggles this track
+            // while the list stays open. Also reflects the state: track is
             // playing → pause (accented), paused/active → play (accented),
             // in the queue → queue icon, otherwise the regular play button.
-            add_suffix = &gtk::Image {
+            add_suffix = &gtk::Button {
                 set_visible: !self.entry.is_dir(),
+                set_valign: gtk::Align::Center,
+                set_tooltip_text: Some(&crate::i18n::gettext("Play")),
                 #[watch]
-                set_icon_name: Some(if self.active {
+                set_icon_name: if self.active {
                     if self.playing {
                         "media-playback-pause-symbolic"
                     } else {
@@ -395,11 +401,15 @@ impl FactoryComponent for FsRow {
                     "media-playlist-consecutive-symbolic"
                 } else {
                     "media-playback-start-symbolic"
-                }),
+                },
                 #[watch]
-                set_css_classes: if self.active { &["accent"] } else { &["dim-label"] },
+                set_css_classes: if self.active { &["flat", "accent"] } else { &["flat", "dim-label"] },
+                connect_clicked[sender, index] => move |_| {
+                    let _ = sender.output(FsOutput::Activated(index.clone()));
+                },
             },
 
+            // Folders open on a tap (handled by ListBox activation).
             connect_activated[sender, index] => move |_| {
                 let _ = sender.output(FsOutput::Activated(index.clone()));
             },

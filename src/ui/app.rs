@@ -13,8 +13,8 @@ use crate::i18n::{gettext, gettext_f};
 use crate::model::{AlbumMeta, ArtistMeta, Source};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
 pub(crate) use crate::ui::app_helpers::{
-    album_subtitle, apply_color_scheme, artist_count_subtitle, cover_widget, duration_label,
-    find_scroller, fmt_duration, fmt_rate, guarded_resume, initial_gallery_columns,
+    album_subtitle, apply_color_scheme, artist_count_subtitle, attach_swipe_back, cover_widget,
+    duration_label, find_scroller, fmt_duration, fmt_rate, guarded_resume, initial_gallery_columns,
     most_common_artist, on_secondary_click, online_available, read_entries, save_window_state,
     unix_now,
 };
@@ -898,6 +898,9 @@ pub enum Msg {
     CtxAddPlaylist,
     CtxEqualizer,
     CtxShare,
+    /// Detail view's refresh button: re-fetch the cover/metadata of the open
+    /// target and rebuild the detail view.
+    CtxRefresh,
     /// Header sync icon → open the pairing / connection-status dialog (no item).
     OpenSync,
     // --- Device synchronization (handled by the SyncPage component) ---
@@ -2246,7 +2249,7 @@ impl Component for App {
                                 set_valign: gtk::Align::Center,
                                 #[name = "eq_btn"]
                                 gtk::Button {
-                                    set_label: "EQ",
+                                    set_icon_name: "multimedia-equalizer-symbolic",
                                     set_tooltip_text: Some(&gettext("Equalizer for this track")),
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
@@ -2420,7 +2423,8 @@ impl Component for App {
                                     {
                                         &["circular", "emilia-bigplay", "emilia-record-dot", "emilia-recording"]
                                     } else {
-                                        &["circular", "emilia-bigplay"]
+                                        // Red even when idle; only pulses while recording.
+                                        &["circular", "emilia-bigplay", "emilia-record-dot"]
                                     },
                                     connect_clicked => Msg::RecordToggle,
                                 },
@@ -3574,6 +3578,7 @@ impl Component for App {
             Msg::YtRefreshFinished => self.refresh_done(),
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.on_ctx_share(root),
+            Msg::CtxRefresh => self.on_ctx_refresh(root, &sender),
             Msg::OpenSync => {
                 use crate::ui::sync_page::SyncInput;
                 self.sync_page.emit(SyncInput::Open(root.clone()));

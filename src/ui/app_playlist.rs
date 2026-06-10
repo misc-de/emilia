@@ -289,10 +289,11 @@ impl App {
         icon: &str,
     ) -> adw::ActionRow {
         let display = self.display_name(std::path::Path::new(path));
+        // Not activatable: the track plays via its play button; the detail view
+        // opens on long press / right click.
         let row = adw::ActionRow::builder()
             .title(gtk::glib::markup_escape_text(&display))
             .subtitle(self.playlist_source_label(path))
-            .activatable(true)
             .build();
         // Cover flush to the far left (like the album/artist track lists).
         row.add_css_class("emilia-flush");
@@ -347,17 +348,6 @@ impl App {
             });
         }
         row.add_suffix(&play_btn);
-        // Short tap on the row: play this track and return to the main page.
-        {
-            let sender = sender.clone();
-            let path = path.to_string();
-            row.connect_activated(move |_| {
-                sender.input(Msg::PlayOneTrack {
-                    path: path.clone(),
-                    close: true,
-                });
-            });
-        }
         row
     }
 

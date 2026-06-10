@@ -642,7 +642,12 @@ impl App {
                 let prev = i.checked_sub(1).and_then(|p| labels.get(p));
                 match cur {
                     Some(cur) if i == 0 || prev != Some(cur) => {
-                        row.set_header(Some(&crate::ui::app_gallery::section_header_label(cur)));
+                        let label = crate::ui::app_gallery::section_header_label(cur);
+                        // The very first heading sits a touch low; pull it up 5px.
+                        if i == 0 {
+                            label.set_margin_top(3);
+                        }
+                        row.set_header(Some(&label));
                     }
                     _ => row.set_header(None::<&gtk::Widget>),
                 }
@@ -730,43 +735,34 @@ impl App {
             });
         }
 
-        // Swipe-to-go-back on the file system page: a horizontal drag to the
-        // right navigates back. Implemented as a `GestureDrag` in the **capture**
-        // phase so it recognises the horizontal intent *early* and claims the
-        // sequence — the previous velocity-based `GestureSwipe` ran in the bubble
-        // phase and only fired on release, so it lost the race against a row's
-        // tap/long-press and felt coarse and late. We only claim once the motion
-        // is clearly rightward-horizontal, leaving vertical drags to the list's
-        // scrolling and plain taps to the rows.
-        let drag = gtk::GestureDrag::new();
-        drag.set_touch_only(false);
-        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let swipe_claimed = std::rc::Rc::new(std::cell::Cell::new(false));
-        {
-            let swipe_claimed = swipe_claimed.clone();
-            drag.connect_drag_begin(move |_, _, _| swipe_claimed.set(false));
-        }
-        {
-            let swipe_claimed = swipe_claimed.clone();
-            drag.connect_drag_update(move |g, dx, dy| {
-                // Take over as soon as the drag is clearly a rightward swipe, so
-                // the gesture responds promptly instead of fighting the tap.
-                if !swipe_claimed.get() && dx > 30.0 && dx > dy.abs() * 1.2 {
-                    swipe_claimed.set(true);
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                }
-            });
-        }
-        {
+        // Swipe-to-go-back on the file system page: a rightward horizontal drag
+        // moves one folder up. Capture phase (see `attach_swipe_back`) so it also
+        // works when the swipe starts on a row — the row's tap/long-press no
+        // longer swallows it. At the root `NavUp` is a no-op.
+        crate::ui::app::attach_swipe_back(&widgets.files_page, || true, {
             let sender = sender.clone();
-            let swipe_claimed = swipe_claimed.clone();
-            drag.connect_drag_end(move |_, dx, dy| {
-                if swipe_claimed.get() && dx > 50.0 && dx > dy.abs() * 1.2 {
-                    sender.input(Msg::NavUp);
-                }
-            });
+            move || sender.input(Msg::NavUp)
+        });
+
+        // Same swipe-back on the top navigation strip, but only while a subpage
+        // is open — on the root the strip keeps its sideways scroll (the gesture
+        // does not claim there). Pops the pushed subpage.
+        {
+            let nav_for_guard = widgets.nav_view.clone();
+            let nav_for_pop = widgets.nav_view.clone();
+            crate::ui::app::attach_swipe_back(
+                &widgets.top_nav_scroller,
+                move || {
+                    nav_for_guard
+                        .visible_page()
+                        .and_then(|p| p.tag())
+                        .is_none_or(|t| t != "main")
+                },
+                move || {
+                    nav_for_pop.pop();
+                },
+            );
         }
-        widgets.files_page.add_controller(drag);
 
         // Restore the window size and save it on close.
         if let (Some(w), Some(h)) = (saved_w, saved_h) {

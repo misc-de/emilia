@@ -196,7 +196,12 @@ impl App {
             while j < items.len() && labels[j] == labels[i] {
                 j += 1;
             }
-            container.append(&section_header_label(&labels[i]));
+            let header = section_header_label(&labels[i]);
+            // The very first heading sits a touch low; pull it up 5px.
+            if i == 0 {
+                header.set_margin_top(3);
+            }
+            container.append(&header);
             let fb = gtk::FlowBox::new();
             container.append(&fb);
             self.fill_gallery_into(&fb, &items[i..j], i, activate, detail, false);

@@ -52,6 +52,50 @@ where
     widget.add_controller(click);
 }
 
+/// Attaches a "swipe right to go back" gesture to `widget`. It runs in the
+/// **capture** phase so it wins the race against a list row's or cover's
+/// tap/long-press — the back-swipe then works even when it starts directly on
+/// an object, not only on empty space. The sequence is only claimed once the
+/// drag is clearly a rightward horizontal swipe (so vertical scrolling and
+/// plain taps stay untouched) **and** `can_back` returns true; `on_back` fires
+/// on release. `can_back` lets the caller gate the gesture — e.g. the top
+/// navigation only goes back while a subpage is open, so its sideways scroll
+/// still works on the root.
+pub(crate) fn attach_swipe_back<C, F>(widget: &impl IsA<gtk::Widget>, can_back: C, on_back: F)
+where
+    C: Fn() -> bool + 'static,
+    F: Fn() + 'static,
+{
+    let drag = gtk::GestureDrag::new();
+    drag.set_touch_only(false);
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let claimed = std::rc::Rc::new(std::cell::Cell::new(false));
+    {
+        let claimed = claimed.clone();
+        drag.connect_drag_begin(move |_, _, _| claimed.set(false));
+    }
+    {
+        let claimed = claimed.clone();
+        drag.connect_drag_update(move |g, dx, dy| {
+            // Take over as soon as the drag is clearly a rightward swipe, so the
+            // gesture responds promptly instead of fighting the tap.
+            if !claimed.get() && can_back() && dx > 30.0 && dx > dy.abs() * 1.2 {
+                claimed.set(true);
+                g.set_state(gtk::EventSequenceState::Claimed);
+            }
+        });
+    }
+    {
+        let claimed = claimed.clone();
+        drag.connect_drag_end(move |_, dx, dy| {
+            if claimed.get() && dx > 50.0 && dx > dy.abs() * 1.2 {
+                on_back();
+            }
+        });
+    }
+    widget.add_controller(drag);
+}
+
 /// Default gallery tiles-per-row when the user has not chosen one yet: 3 on
 /// phone-sized screens, 4 on the desktop.
 pub(crate) fn initial_gallery_columns() -> u32 {
