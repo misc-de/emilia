@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.6.0" date="2026-06-10">
+      <description>
+        <p>Device sync can now share much more than files: from any detail view you can send an artist, album or song together with its collected covers, photos, year and categories, as well as concerts, audiobooks, saved radio stations, timeshift recordings, voice memos, podcasts (feed and episodes), playlists (with their local tracks) and YouTube channels and videos. Pairing also works by copying and pasting a code, not only by scanning the QR code. The exchange is version-aware, so devices on different versions stay compatible. Alongside this: a refreshed look with genre equalizer presets, a discreet category in detail titles, a refresh button, a red record button, and swipe-back that now works even when the swipe starts on a list entry.</p>
+        <p xml:lang="de">Die Geräte-Synchronisierung kann jetzt viel mehr als nur Dateien teilen: Aus jeder Detailansicht lassen sich Interpret, Album oder Lied samt gesammelter Cover, Fotos, Jahr und Kategorien senden, ebenso Konzerte, Hörbücher, gespeicherte Radiosender, Aufnahmen, Sprachnotizen, Podcasts (Feed und Folgen), Playlisten (mit ihren lokalen Titeln) sowie YouTube-Kanäle und -Videos. Die Kopplung funktioniert nun auch per Kopieren und Einfügen eines Codes, nicht nur per QR-Scan. Der Austausch ist versionsbewusst, sodass Geräte mit unterschiedlichen Versionen kompatibel bleiben. Dazu: ein aufgefrischtes Erscheinungsbild mit Genre-Equalizer-Voreinstellungen, eine dezente Kategorie in den Detail-Titeln, ein Aktualisieren-Knopf, ein roter Aufnahmeknopf und Zurück-Wischen, das nun auch funktioniert, wenn man auf einem Listeneintrag beginnt.</p>
+      </description>
+    </release>
     <release version="0.5.3" date="2026-06-09">
       <description>
         <p>Small mobile spacing refinements: the navigation menu sits slightly higher with a little more room beneath it, and the song name in the player bar gets a touch more space above it.</p>
