@@ -165,6 +165,11 @@ pub struct Selection {
     pub concerts: bool,
     /// Saved radio station db ids to share.
     pub stations: Vec<i64>,
+    /// Specific podcast feed URLs to share (incl. feed + episodes).
+    pub podcast_feeds: Vec<String>,
+    /// Specific user-playlist ids to share; their local tracks are added to the
+    /// file transfer so the playlist resolves on the receiver.
+    pub playlist_ids: Vec<i64>,
     /// Include the collected metadata (artist photos, album covers + year, and
     /// the category/area assignments) of the shared music.
     pub include_metadata: bool,
@@ -179,6 +184,30 @@ pub struct Selection {
     pub include_podcasts: bool,
     pub include_eq: bool,
     pub include_categories: bool,
+}
+
+impl Selection {
+    /// Whether the selection carries no actual content to share (the
+    /// `include_metadata` flag alone is enrichment, not content).
+    pub fn is_empty(&self) -> bool {
+        !self.whole_library
+            && self.artists.is_empty()
+            && self.albums.is_empty()
+            && self.song_paths.is_empty()
+            && !self.audiobooks
+            && !self.concerts
+            && self.stations.is_empty()
+            && self.podcast_feeds.is_empty()
+            && self.playlist_ids.is_empty()
+            && self.yt_channels.is_empty()
+            && self.yt_playlists.is_empty()
+            && self.yt_songs.is_empty()
+            && !self.include_favorites
+            && !self.include_playlists
+            && !self.include_podcasts
+            && !self.include_eq
+            && !self.include_categories
+    }
 }
 
 /// Resolves a [`Selection`] against the local library into a [`ShareManifest`].
@@ -212,6 +241,15 @@ pub fn build_manifest(
     }
     if sel.concerts {
         paths.extend(area_track_paths(lib, Area::Concerts, &tracks));
+    }
+    // Sharing a playlist also transfers its local tracks (YouTube entries are
+    // conveyed via the YT items, not as files), so it resolves on the receiver.
+    for pid in &sel.playlist_ids {
+        for p in lib.playlist_paths(*pid).unwrap_or_default() {
+            if crate::core::youtube::parse_yt_path(&p).is_none() {
+                paths.insert(p);
+            }
+        }
     }
 
     // Only real, hashable files end up in the manifest.
@@ -322,12 +360,20 @@ pub fn build_manifest(
         favorites: sel
             .include_favorites
             .then(|| data::export_favorites(lib, &base).unwrap_or_default()),
-        playlists: sel
-            .include_playlists
-            .then(|| data::export_playlists_user(lib, &base).unwrap_or_default()),
-        podcasts: sel
-            .include_podcasts
-            .then(|| data::export_podcasts(lib).unwrap_or_default()),
+        // Specific playlists (from a detail share) take precedence over the
+        // "all playlists" switch.
+        playlists: if !sel.playlist_ids.is_empty() {
+            Some(data::export_playlists_for(lib, &base, &sel.playlist_ids))
+        } else {
+            sel.include_playlists
+                .then(|| data::export_playlists_user(lib, &base).unwrap_or_default())
+        },
+        podcasts: if !sel.podcast_feeds.is_empty() {
+            Some(data::export_podcasts_for(lib, &sel.podcast_feeds))
+        } else {
+            sel.include_podcasts
+                .then(|| data::export_podcasts(lib).unwrap_or_default())
+        },
         categories: (sel.include_categories || sel.include_metadata)
             .then(|| data::export_categories(lib, &base).unwrap_or_default()),
         eq: sel

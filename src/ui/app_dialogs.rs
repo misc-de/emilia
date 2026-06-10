@@ -1440,26 +1440,35 @@ impl App {
 
     /// Context menu: share the target over device sync (or open pairing first).
     pub(crate) fn on_ctx_share(&mut self, root: &adw::ApplicationWindow) {
-        use crate::ui::sync_page::SyncInput;
-        if self.sync_connected {
-            // Paired: share the item whose detail menu this is. The
-            // SyncPage shows a short size confirmation, then sends it.
-            if let Some(target) = self.nav.context_target.clone() {
-                let selection = self.ctx_share_selection(&target);
-                if selection.song_paths.is_empty() {
-                    self.toast(&gettext("Nothing here to share"));
-                } else {
-                    self.sync_page.emit(SyncInput::ShareSelection {
-                        window: root.clone(),
-                        selection,
-                    });
-                }
-            }
-        } else {
-            // Not paired yet: open the pairing dialog. Once connected, the
-            // user starts the share again from the detail view.
-            self.sync_page.emit(SyncInput::Open(root.clone()));
+        if let Some(target) = self.nav.context_target.clone() {
+            self.share_items(self.ctx_share_selection(&target), root);
+        } else if !self.sync_connected {
+            self.share_items(crate::core::sync::share::Selection::default(), root);
         }
+    }
+
+    /// Shared entry point for every "Share" action (music detail view, plus the
+    /// station/podcast/playlist/YouTube detail views): when paired, hand the
+    /// selection to the SyncPage (size confirmation → send); otherwise open the
+    /// pairing dialog so the user can connect first.
+    pub(crate) fn share_items(
+        &self,
+        selection: crate::core::sync::share::Selection,
+        root: &adw::ApplicationWindow,
+    ) {
+        use crate::ui::sync_page::SyncInput;
+        if !self.sync_connected {
+            self.sync_page.emit(SyncInput::Open(root.clone()));
+            return;
+        }
+        if selection.is_empty() {
+            self.toast(&gettext("Nothing here to share"));
+            return;
+        }
+        self.sync_page.emit(SyncInput::ShareSelection {
+            window: root.clone(),
+            selection,
+        });
     }
 
     /// Detail view's refresh button: force a fresh online fetch of the open

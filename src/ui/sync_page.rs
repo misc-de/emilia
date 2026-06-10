@@ -723,11 +723,13 @@ impl SyncPage {
                 // here we only record the summary + reload the imported views.
                 self.synced_ok = true;
                 self.sync_summary = gettext_f(
-                    "Received {fav} favorites, {pl} playlists, {pod} podcasts.",
+                    "Received {fav} favorites, {pl} playlists, {pod} podcasts, {st} stations, {meta} covers/photos.",
                     &[
                         ("fav", &stats.favorites.to_string()),
                         ("pl", &stats.playlists.to_string()),
                         ("pod", &stats.podcasts.to_string()),
+                        ("st", &stats.stations.to_string()),
+                        ("meta", &stats.meta.to_string()),
                     ],
                 );
                 if let Some(st) = &self.status {

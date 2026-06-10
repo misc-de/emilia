@@ -178,6 +178,8 @@ pub(crate) enum StreamOutput {
     RecordingDeleteUndo(i64),
     /// A recording was copied into the music library → reload artist/album views.
     LibraryChanged,
+    /// Share a selection (a station) over device sync.
+    Share(crate::core::sync::share::Selection),
     /// Informational toast.
     Toast(String),
 }
@@ -597,6 +599,18 @@ impl StreamPage {
             });
         }
         actions.add(&rename);
+        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            share.connect_activated(move |_| {
+                let _ = sender.output(StreamOutput::Share(crate::core::sync::share::Selection {
+                    stations: vec![id],
+                    ..Default::default()
+                }));
+                dialog.close();
+            });
+        }
+        actions.add(&share);
         let remove = action_row(&gettext("Remove station"), "user-trash-symbolic");
         {
             let (sender, dialog, root) = (sender.clone(), dialog.clone(), root.clone());

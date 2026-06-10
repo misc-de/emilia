@@ -435,6 +435,8 @@ pub(crate) enum YtOutput {
     /// A "refresh all" worker was started / finished → drive the spinner.
     RefreshStarted(bool),
     RefreshFinished,
+    /// Share a selection (a YouTube channel or video) over device sync.
+    Share(crate::core::sync::share::Selection),
 }
 
 #[derive(Debug)]
@@ -1701,6 +1703,18 @@ impl YtPage {
             });
         }
         actions.add(&refresh);
+        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            share.connect_activated(move |_| {
+                let _ = sender.output(YtOutput::Share(crate::core::sync::share::Selection {
+                    yt_channels: vec![id],
+                    ..Default::default()
+                }));
+                dialog.close();
+            });
+        }
+        actions.add(&share);
         let bell = adw::SwitchRow::builder()
             .title(gettext("Notify of newest publications"))
             .active(true)
@@ -1844,6 +1858,18 @@ impl YtPage {
             });
         }
         actions.add(&eq);
+        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
+        {
+            let (sender, dialog, vid) = (sender.clone(), dialog.clone(), video_id.to_string());
+            share.connect_activated(move |_| {
+                let _ = sender.output(YtOutput::Share(crate::core::sync::share::Selection {
+                    yt_songs: vec![vid.clone()],
+                    ..Default::default()
+                }));
+                dialog.close();
+            });
+        }
+        actions.add(&share);
         if self.library.is_recent(video_id).unwrap_or(false) {
             let remove = action_row(&gettext("Remove from recent"), "user-trash-symbolic");
             remove.add_css_class("error");

@@ -901,6 +901,10 @@ pub enum Msg {
     /// Detail view's refresh button: re-fetch the cover/metadata of the open
     /// target and rebuild the detail view.
     CtxRefresh,
+    /// Share a ready-made selection over device sync (from the station / podcast
+    /// / playlist / YouTube detail views). Same path as the music "Share": size
+    /// confirmation when paired, otherwise open pairing.
+    ShareItems(crate::core::sync::share::Selection),
     /// Header sync icon → open the pairing / connection-status dialog (no item).
     OpenSync,
     // --- Device synchronization (handled by the SyncPage component) ---
@@ -2698,6 +2702,7 @@ impl Component for App {
                     O::ToggleEpisode { url, title } => Msg::ToggleEpisode { url, title },
                     O::EpisodeSeekTo { url, title, ms } => Msg::EpisodeSeekTo { url, title, ms },
                     O::PushSubpage => Msg::PushPodcastSubpage,
+                    O::Share(sel) => Msg::ShareItems(sel),
                     O::Toast(s) => Msg::PodcastToast(s),
                     O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
                     O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
@@ -2740,6 +2745,7 @@ impl Component for App {
                     O::DeleteChannelUndo(id) => Msg::YtChannelUndo(id),
                     O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
                     O::RefreshFinished => Msg::YtRefreshFinished,
+                    O::Share(sel) => Msg::ShareItems(sel),
                 }
             });
         let stream_page = crate::ui::stream_page::StreamPage::builder()
@@ -2754,6 +2760,7 @@ impl Component for App {
                     O::StreamDeleteUndo(id) => Msg::StreamDeleteUndo(id),
                     O::RecordingDeleteUndo(id) => Msg::RecordingDeleteUndo(id),
                     O::LibraryChanged => Msg::StreamLibraryChanged,
+                    O::Share(sel) => Msg::ShareItems(sel),
                     O::Toast(s) => Msg::StreamToast(s),
                 }
             });
@@ -3578,6 +3585,7 @@ impl Component for App {
             Msg::YtRefreshFinished => self.refresh_done(),
             Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
             Msg::CtxShare => self.on_ctx_share(root),
+            Msg::ShareItems(selection) => self.share_items(selection, root),
             Msg::CtxRefresh => self.on_ctx_refresh(root, &sender),
             Msg::OpenSync => {
                 use crate::ui::sync_page::SyncInput;

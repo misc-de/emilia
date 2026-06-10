@@ -2501,3 +2501,7 @@ msgstr "Diesen Code auf dem anderen Gerät scannen – oder den Code unten kopie
 
 msgid "Point the camera at the QR code — or paste a pairing code below."
 msgstr "Die Kamera auf den QR-Code richten – oder unten einen Kopplungscode einfügen."
+
+# --- Sync detail-share: extended receive summary ---
+msgid "Received {fav} favorites, {pl} playlists, {pod} podcasts, {st} stations, {meta} covers/photos."
+msgstr "{fav} Favoriten, {pl} Playlisten, {pod} Podcasts, {st} Stationen, {meta} Cover/Fotos empfangen."

@@ -510,6 +510,22 @@ impl App {
         }
         group.add(&show);
 
+        // Share the whole playlist (record + its local tracks) over device sync.
+        let share = row("emilia-share-symbolic", &gettext("Share"));
+        share.set_sensitive(!empty);
+        {
+            let sender = sender.clone();
+            let dialog = dialog.clone();
+            share.connect_activated(move |_| {
+                sender.input(Msg::ShareItems(crate::core::sync::share::Selection {
+                    playlist_ids: vec![id],
+                    ..Default::default()
+                }));
+                dialog.close();
+            });
+        }
+        group.add(&share);
+
         let rename = row("document-edit-symbolic", &gettext("Rename"));
         {
             let sender = sender.clone();

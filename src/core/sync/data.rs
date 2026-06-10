@@ -125,6 +125,37 @@ pub(crate) fn export_podcasts(lib: &Library) -> Result<Vec<PodcastRec>> {
     Ok(podcasts)
 }
 
+/// Like [`export_podcasts`] but only the podcasts whose feed URL is listed
+/// (for sharing a single podcast from its detail view).
+pub(crate) fn export_podcasts_for(lib: &Library, feeds: &[String]) -> Vec<PodcastRec> {
+    let want: std::collections::HashSet<&str> = feeds.iter().map(String::as_str).collect();
+    export_podcasts(lib)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| want.contains(p.feed_url.as_str()))
+        .collect()
+}
+
+/// Like [`export_playlists_user`] but only the user playlists with the given ids
+/// (for sharing a single playlist from its detail view).
+pub(crate) fn export_playlists_for(lib: &Library, base: &str, ids: &[i64]) -> Vec<PlaylistRec> {
+    let want: std::collections::HashSet<i64> = ids.iter().copied().collect();
+    let mut out = Vec::new();
+    for (id, name, _count, origin) in lib.playlists_with_origin().unwrap_or_default() {
+        if origin.is_some() || !want.contains(&id) {
+            continue;
+        }
+        let paths = lib
+            .playlist_paths(id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| relativize(&p, base))
+            .collect();
+        out.push(PlaylistRec { name, paths });
+    }
+    out
+}
+
 pub(crate) fn export_categories(lib: &Library, base: &str) -> Result<Vec<CategoryRec>> {
     Ok(lib
         .all_categories()?
