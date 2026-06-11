@@ -25,3 +25,5 @@ po/*/LC_MESSAGES/*.mo
 
 # Claude-Code: maschinenlokale Einstellungen (Berechtigungen etc.)
 .claude/settings.local.json
+.codex
+.agents
