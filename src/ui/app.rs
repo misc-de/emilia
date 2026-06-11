@@ -2704,7 +2704,7 @@ impl Component for App {
                     O::ToggleEpisode { url, title } => Msg::ToggleEpisode { url, title },
                     O::EpisodeSeekTo { url, title, ms } => Msg::EpisodeSeekTo { url, title, ms },
                     O::PushSubpage => Msg::PushPodcastSubpage,
-                    O::Share(sel) => Msg::ShareItems(sel),
+                    O::Share(sel) => Msg::ShareItems(*sel),
                     O::Toast(s) => Msg::PodcastToast(s),
                     O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
                     O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
@@ -2762,7 +2762,7 @@ impl Component for App {
                     O::StreamDeleteUndo(id) => Msg::StreamDeleteUndo(id),
                     O::RecordingDeleteUndo(id) => Msg::RecordingDeleteUndo(id),
                     O::LibraryChanged => Msg::StreamLibraryChanged,
-                    O::Share(sel) => Msg::ShareItems(sel),
+                    O::Share(sel) => Msg::ShareItems(*sel),
                     O::Toast(s) => Msg::StreamToast(s),
                 }
             });

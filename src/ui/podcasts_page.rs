@@ -185,8 +185,9 @@ pub(crate) enum PodcastsOutput {
     PushSubpage,
     /// Informational toast (parent owns the overlay; currently a no-op).
     Toast(String),
-    /// Share a selection (a podcast) over device sync.
-    Share(crate::core::sync::share::Selection),
+    /// Share a selection (a podcast) over device sync. Boxed: `Selection` is far
+    /// larger than the other variants (`clippy::large_enum_variant`).
+    Share(Box<crate::core::sync::share::Selection>),
     /// Show the "Podcast removed" undo toast; the parent defers the real
     /// deletion back to us via [`PodcastsInput::DeleteConfirmed`].
     DeletedUndoToast(i64),
@@ -1048,10 +1049,12 @@ impl PodcastsPage {
             let share = action_row(&gettext("Share"), "emilia-share-symbolic");
             let (sender, dialog) = (sender.clone(), dialog.clone());
             share.connect_activated(move |_| {
-                let _ = sender.output(PodcastsOutput::Share(crate::core::sync::share::Selection {
-                    podcast_feeds: vec![feed.clone()],
-                    ..Default::default()
-                }));
+                let _ = sender.output(PodcastsOutput::Share(Box::new(
+                    crate::core::sync::share::Selection {
+                        podcast_feeds: vec![feed.clone()],
+                        ..Default::default()
+                    },
+                )));
                 dialog.close();
             });
             actions.add(&share);

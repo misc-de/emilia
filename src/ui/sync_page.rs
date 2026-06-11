@@ -36,7 +36,7 @@ use crate::ui::sync_share_ui::{build_confirm, build_review, ReviewHandles};
 /// Commands from the UI to the persistent client-session worker.
 enum ClientCmd {
     /// Resolve a selection to a manifest (worker builds it, emits `ManifestReady`).
-    Prepare(share::Selection),
+    Prepare(Box<share::Selection>),
     /// Send the prepared offer, then upload accepted files.
     Send,
     /// Respond to an incoming offer, then download accepted files + apply.
@@ -115,7 +115,7 @@ pub(crate) enum SyncInput {
     /// peer: resolve it to a manifest off-thread, then show the size confirmation.
     ShareSelection {
         window: adw::ApplicationWindow,
-        selection: share::Selection,
+        selection: Box<share::Selection>,
     },
     /// Size-confirmation "Send" → park/send the prepared offer.
     ConfirmSend,
@@ -205,7 +205,7 @@ impl Component for SyncPage {
             SyncInput::PasteCode(text) => self.handle_qr(text.trim(), true, &sender),
             SyncInput::ShareSelection { window, selection } => {
                 self.window = Some(window);
-                self.share_selection(selection, &sender);
+                self.share_selection(*selection, &sender);
             }
             SyncInput::ConfirmSend => self.confirm_send(),
             SyncInput::CancelShare => self.show_connected_panel(&sender),
@@ -935,7 +935,7 @@ impl SyncPage {
                 SyncEvent::ManifestReady { manifest: m }
             });
         } else if let Some(cmd) = &self.client_cmd {
-            let _ = cmd.send(ClientCmd::Prepare(sel));
+            let _ = cmd.send(ClientCmd::Prepare(Box::new(sel)));
         }
     }
 

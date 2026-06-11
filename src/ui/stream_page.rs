@@ -178,8 +178,9 @@ pub(crate) enum StreamOutput {
     RecordingDeleteUndo(i64),
     /// A recording was copied into the music library → reload artist/album views.
     LibraryChanged,
-    /// Share a selection (a station) over device sync.
-    Share(crate::core::sync::share::Selection),
+    /// Share a selection (a station) over device sync. Boxed: `Selection` is far
+    /// larger than the other variants (`clippy::large_enum_variant`).
+    Share(Box<crate::core::sync::share::Selection>),
     /// Informational toast.
     Toast(String),
 }
@@ -598,10 +599,12 @@ impl StreamPage {
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
             share.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::Share(crate::core::sync::share::Selection {
-                    stations: vec![id],
-                    ..Default::default()
-                }));
+                let _ = sender.output(StreamOutput::Share(Box::new(
+                    crate::core::sync::share::Selection {
+                        stations: vec![id],
+                        ..Default::default()
+                    },
+                )));
                 dialog.close();
             });
         }
@@ -1113,10 +1116,12 @@ impl StreamPage {
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
             share.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::Share(crate::core::sync::share::Selection {
-                    recordings: vec![id],
-                    ..Default::default()
-                }));
+                let _ = sender.output(StreamOutput::Share(Box::new(
+                    crate::core::sync::share::Selection {
+                        recordings: vec![id],
+                        ..Default::default()
+                    },
+                )));
                 dialog.close();
             });
         }

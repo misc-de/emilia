@@ -1464,7 +1464,7 @@ impl App {
         }
         self.sync_page.emit(SyncInput::ShareSelection {
             window: root.clone(),
-            selection,
+            selection: Box::new(selection),
         });
     }
 
