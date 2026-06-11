@@ -9,8 +9,9 @@
 #
 # Voraussetzungen, bevor das hier baut (siehe FLATHUB.md):
 #   1. generated-sources.json, data/screenshots/ und alle Daten sind committet.
-#   2. Ein Tag (z. B. v0.5.1) zeigt auf genau diesen Commit und ist gepusht.
-#   3. `tag:` unten (und idealerweise `commit:`) auf diesen Tag gesetzt.
+#   2. Ein Tag (z. B. v0.6.1) zeigt auf genau diesen Commit und ist gepusht.
+#   3. `tag:`/`commit:` unten passend gesetzt – am besten via
+#      `scripts/sync-flathub.sh` (zieht beides aus MetaInfo-Top-Release + Tag).
 #
 # Lokal testen (nachdem Tag gepusht ist):
 #   flatpak-builder --user --install --force-clean build-dir \
@@ -135,12 +136,14 @@ modules:
         /app/share/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
     sources:
       # App-Quelle aus dem getaggten Git-Stand (Flathub baut nur hieraus).
-      # Release 0.5.1 == MetaInfo-Top-Release; der Tag zeigt auf den Release-
-      # Commit. Bei einem neuen Release: tag + commit gemeinsam hochziehen.
+      # Release 0.6.1 == MetaInfo-Top-Release; der Tag zeigt auf den Release-
+      # Commit. Bei einem neuen Release NICHT von Hand pflegen, sondern
+      # `scripts/sync-flathub.sh` laufen lassen (zieht tag + commit aus dem
+      # MetaInfo-Top-Release + Git-Tag). Der pre-commit-Hook warnt bei Drift.
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.5.1
-        commit: d254ddf5875b17bf78a199f88da7fe7ab574361c
+        tag: v0.6.1
+        commit: 9e0ec91fcfbd58074b876bcdc955ae6457e6831c
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json

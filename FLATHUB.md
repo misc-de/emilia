@@ -18,7 +18,7 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
 - [x] Reverse-DNS-App-ID, MetaInfo/Desktop/Icon valide, OARS, GPL-3.0-or-later
 - [x] Screenshots im `<screenshots>`-Block (`data/screenshots/`, Raw-URLs auf `main`)
 - [x] Offline-Build via `generated-sources.json` (verifiziert: baut ohne Netz)
-- [x] **App-Quelle auf `type: git` + Tag** → `de.cais.Emilia.flathub.yaml` (`tag: v0.5.1` + `commit:` gesetzt; Tag muss noch gepusht werden)
+- [x] **App-Quelle auf `type: git` + Tag** → `de.cais.Emilia.flathub.yaml` (`tag: v0.6.1` + `commit:` gesetzt; Tag gepusht). Nicht von Hand pflegen: `scripts/sync-flathub.sh` zieht `tag`/`commit` aus dem MetaInfo-Top-Release + Git-Tag, der pre-commit-Hook warnt bei Drift.
 
 ## Schritte für die Einreichung
 
@@ -30,7 +30,7 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
 
    > Hinweis: Die Tag-Version (Schritt 3) muss zum obersten `<release>`-Eintrag
    > der MetaInfo passen – die **Marketing-Version**, die du selbst setzt (aktuell:
-   > 0.5.1). Das ist NICHT die `version` in `Cargo.toml`: die zählt ein
+   > 0.6.1). Das ist NICHT die `version` in `Cargo.toml`: die zählt ein
    > pre-commit-Hook bei jedem Commit automatisch hoch (reiner Commit-Zähler) und
    > weicht daher bewusst ab.
 
@@ -41,15 +41,22 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
    git push origin main
    ```
 
-3. **Tag setzen und pushen** (Version = oberster MetaInfo-`<release>`):
+3. **Tag setzen und pushen** (Version = oberster MetaInfo-`<release>`, hier `vX.Y.Z`):
 
    ```sh
-   git tag v0.5.1 d333ff9   # Release-Commit (MetaInfo-Top-Release)
-   git push origin v0.5.1
+   git tag vX.Y.Z <release-commit>   # Commit des MetaInfo-Top-Release
+   git push origin vX.Y.Z
    ```
 
-   Dann in `de.cais.Emilia.flathub.yaml` `tag:` auf denselben Wert setzen und
-   `commit:` mit dem SHA (`git rev-parse v0.5.1`) ergänzen.
+   Dann `tag:`/`commit:` im Manifest **nicht von Hand** eintragen, sondern:
+
+   ```sh
+   scripts/sync-flathub.sh   # liest MetaInfo-Top + Git-Tag, schreibt tag+commit
+   ```
+
+   Das Script ist die Single-Source-of-Truth-Brücke und vermeidet Tippfehler im
+   SHA. Drift fällt sonst beim nächsten Commit über die Hook-Warnung auf
+   (`scripts/sync-flathub.sh --check`).
 
 4. **Lokal gegen den getaggten Stand testen** (baut jetzt wirklich aus Git):
 
@@ -112,14 +119,15 @@ und was nicht:
 - `--talk-name=org.freedesktop.secrets` — libsecret/Keyring für Nextcloud-Zugang
   + API-Keys; `secret-tool` ist im Runtime vorhanden, der Keyring greift also
   wirklich (keine Klartext-Secrets im Flatpak). ✅
-- `--device=all` — ⚠️ Beantragt für die Kamera (QR-Pairing). Der QR-Scan
-  **funktioniert jetzt** (Dekodierung in-process via `rqrr`, Quelle
-  `v4l2src`/`autovideosrc` aus der Runtime; auf Halium/FuriOS/Droidian ist die
-  Kamera über `droidcam2v4l2` als `/dev/video*` erreichbar). Der Reviewer
-  bevorzugt zwar das **Camera-Portal** (PipeWire) statt rohem `--device=all`,
-  aber das Portal exponiert die V4L2-Loopbacks der Halium-Brücke nicht
-  zuverlässig — daher der direkte Geräte-Zugriff. `--device=dri` ist redundant
-  (in `all` enthalten) und kann entfallen.
+- **Kamera (QR-Pairing) — über das Camera-Portal, KEIN `--device=all`.** Das
+  Flathub-Manifest greift die Kamera ausschließlich über das **XDG-Camera-Portal**
+  (PipeWire-fd via `pipewiresrc`) ab; im Manifest steht daher nur `--device=dri`
+  (GPU/Rendering), kein Rohzugriff auf `/dev/video*`. QR-Dekodierung läuft
+  in-process (`rqrr`), kein `zxing`-Plugin, `gtk4paintablesink` (Vorschau)
+  optional. ✅ Reviewer-konform. *(Nur der Selbst-Repo-Build für Halium/FuriOS/
+  Droidian nutzt zusätzlich `--device=all` + `EMILIA_CAMERA_SRC`, weil das Portal
+  die V4L2-Loopbacks der Halium-Brücke dort nicht zuverlässig exponiert — das
+  betrifft das Flathub-Manifest nicht.)
 
 ### App-Metadaten / Identität
 
@@ -128,8 +136,8 @@ und was nicht:
   dorthin; ggf. genügt ein Link von cais.de aufs Repo oder umgekehrt). ⚠️
 - `metadata_license: CC0-1.0`, `project_license: GPL-3.0-or-later`, OARS-
   `content_rating`, Screenshots, `<developer>`, Release-Notes — alle vorhanden. ✅
-  Der oberste `<release>`-Eintrag in der MetaInfo ist aktuell `0.5.1` und passt
-  zum Git-Tag `v0.5.1`.
+  Der oberste `<release>`-Eintrag in der MetaInfo ist aktuell `0.6.1` und passt
+  zum Git-Tag `v0.6.1` (und damit zu `tag:`/`commit:` im Flathub-Manifest).
 - Alte Release-Note 0.1.4 nennt „in-app self-update / Selbst-Aktualisierung".
   Im Code gibt es **keinen** Binary-Updater — gemeint ist der App-Neustart nach
   Sprachwechsel (`current_exe().spawn()` in `src/ui/app.rs`). Formulierung
@@ -139,7 +147,7 @@ und was nicht:
 
 - Offline-Build (`cargo build --offline`, vendored Crates via
   `generated-sources.json`), kein Netz beim Bauen. ✅
-- App-Quelle `type: git` + fester Tag/Commit. ✅ (Tag noch setzen, s. o.)
+- App-Quelle `type: git` + fester Tag/Commit. ✅ (synchron via `scripts/sync-flathub.sh`)
 
 ### `yt-dlp` — gebündelt + verifiziert ✅ (gelöst)
 
@@ -168,9 +176,9 @@ von GitHub — genau das spricht ein Reviewer an. Jetzt:
 1. **Kamera/QR** ✅ **gelöst** — QR-Dekodierung läuft jetzt in-process (`rqrr`),
    kein `zxing`-Plugin mehr nötig; Kamera-Quelle `v4l2src`/`autovideosrc` aus der
    Runtime, auf Halium/FuriOS/Droidian über `droidcam2v4l2` (`/dev/video*`).
-   `EMILIA_CAMERA_SRC` erlaubt Port-Overrides. Verbleibt nur die Reviewer-
-   Diskussion `--device=all` vs. Camera-Portal (Begründung oben); `--device=dri`
-   kann als redundant entfallen.
+   `EMILIA_CAMERA_SRC` erlaubt Port-Overrides. Das Flathub-Manifest nutzt das
+   **Camera-Portal** (PipeWire) und nur `--device=dri` – kein `--device=all`
+   (Begründung oben), damit kein Reviewer-Streitpunkt mehr.
 2. **`yt-dlp` zur Laufzeit** ✅ **gelöst** — jetzt gebündelt + sha256-verifiziert
    im Manifest, automatisch aktuell via `x-checker-data`, optionaler Nutzer-Update
    als Fallback (Vorrang vor Baseline). Details oben.
