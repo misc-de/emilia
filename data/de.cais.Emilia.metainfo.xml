@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.6.2" date="2026-06-11">
+      <description>
+        <p>This release smooths out everyday control. The top navigation bar now scrolls sideways reliably even when the swipe starts on one of its icons. Media-key and lock-screen (MPRIS) handling is more robust across track changes, and the headphone next/previous buttons now also skip between podcast episodes and radio stations, not just music tracks. In a playlist you can start playback straight from any track you tap.</p>
+        <p xml:lang="de">Diese Version glättet die alltägliche Steuerung. Die obere Navigationsleiste lässt sich jetzt zuverlässig seitwärts wischen, auch wenn die Geste auf einem ihrer Symbole beginnt. Die Behandlung von Medientasten und Sperrbildschirm (MPRIS) ist über Titelwechsel hinweg robuster, und die Kopfhörer-Knöpfe „weiter/zurück“ springen nun auch zwischen Podcast-Folgen und Radiosendern, nicht nur zwischen Musiktiteln. In einer Playliste startet die Wiedergabe direkt bei dem Titel, den du antippst.</p>
+      </description>
+    </release>
     <release version="0.6.1" date="2026-06-11">
       <description>
         <p>This release polishes everyday handling. The equalizer icon is now used consistently everywhere (settings, file and detail views, the bottom bar and YouTube), the genre presets were reworked so they no longer overdrive — they shape the sound by attenuation only and the default stays neutral — and the equalizer window grows to fit its content. Podcast episodes and radio stations now behave like the rest of the app: the play button starts playback while a long press (or right click) opens the detail view, so a tap no longer starts playback by accident. Long podcast show notes always wrap and can no longer push the dialog off the screen. In the library settings the empty "no additional sources" line is gone and the music folder sits closer to its sources. The queue button in the bottom bar is greyed out while the queue is empty, and the QR pairing window is larger so the camera preview is big instead of a thumbnail.</p>
