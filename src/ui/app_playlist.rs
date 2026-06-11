@@ -159,9 +159,9 @@ impl App {
                     let sender = sender.clone();
                     let path = first.path.clone();
                     play.connect_clicked(move |_| {
-                        sender.input(Msg::PlayOneTrack {
+                        sender.input(Msg::PlayPlaylistFrom {
+                            id,
                             path: path.clone(),
-                            close: false,
                         });
                     });
                     exp.add_suffix(&play);
@@ -169,6 +169,7 @@ impl App {
                 for t in tracks {
                     exp.add_row(&self.playlist_track_row(
                         sender,
+                        id,
                         &t.path,
                         "audio-x-generic-symbolic",
                     ));
@@ -184,7 +185,12 @@ impl App {
                 .title(format!("{} ({})", gettext("Songs"), singles.len()))
                 .build();
             for t in &singles {
-                group.add(&self.playlist_track_row(sender, &t.path, "audio-x-generic-symbolic"));
+                group.add(&self.playlist_track_row(
+                    sender,
+                    id,
+                    &t.path,
+                    "audio-x-generic-symbolic",
+                ));
             }
             content.append(&group);
         }
@@ -285,6 +291,7 @@ impl App {
     fn playlist_track_row(
         &self,
         sender: &ComponentSender<Self>,
+        id: i64,
         path: &str,
         icon: &str,
     ) -> adw::ActionRow {
@@ -330,7 +337,9 @@ impl App {
             row.add_controller(gesture);
             crate::ui::app::on_secondary_click(&row, open);
         }
-        // Play button: plays only this track, keeps the list open.
+        // Play button: starts the whole playlist at this track (so it keeps
+        // playing through the rest of the list), matching this view's "tapping a
+        // track plays the playlist from there".
         let play_btn = gtk::Button::builder()
             .icon_name("media-playback-start-symbolic")
             .tooltip_text(gettext("Play"))
@@ -341,9 +350,9 @@ impl App {
             let sender = sender.clone();
             let path = path.to_string();
             play_btn.connect_clicked(move |_| {
-                sender.input(Msg::PlayOneTrack {
+                sender.input(Msg::PlayPlaylistFrom {
+                    id,
                     path: path.clone(),
-                    close: false,
                 });
             });
         }

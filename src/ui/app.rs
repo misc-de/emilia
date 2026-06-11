@@ -1154,6 +1154,12 @@ pub enum Msg {
     ShowPlaylistDetail(i64),
     /// Play the whole playlist.
     PlayPlaylist(i64),
+    /// Play the whole playlist starting at the given track (so it continues
+    /// through the rest of the list, incl. standalone songs after an album).
+    PlayPlaylistFrom {
+        id: i64,
+        path: String,
+    },
     /// Play the whole playlist shuffled (random order, random start).
     PlayPlaylistShuffled(i64),
     /// Delete a playlist (shows an undo toast; the real delete is deferred to
@@ -3291,6 +3297,19 @@ impl Component for App {
                     self.refresh_queue_icons();
                 }
             }
+            Msg::PlayPlaylistFrom { id, path } => {
+                // Whole playlist as the queue, started at the tapped track — so it
+                // keeps playing through the rest of the list (e.g. the standalone
+                // songs after an album), not just that one entry.
+                let paths = self.library.playlist_paths(id).unwrap_or_default();
+                if let Some(pos) = paths.iter().position(|p| *p == path) {
+                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
+                    self.transport.queue_pos = pos;
+                    self.transport.shuffle = false;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
             Msg::PlayPlaylistShuffled(id) => {
                 let paths = self.library.playlist_paths(id).unwrap_or_default();
                 if !paths.is_empty() {
@@ -3634,20 +3653,8 @@ impl Component for App {
                 }
             }
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
-            Msg::Next => {
-                if self.files.playing_remote {
-                    self.remote_next();
-                } else {
-                    self.play_next();
-                }
-            }
-            Msg::Prev => {
-                if self.files.playing_remote {
-                    self.remote_prev();
-                } else {
-                    self.play_prev();
-                }
-            }
+            Msg::Next => self.skip_next(),
+            Msg::Prev => self.skip_prev(),
             Msg::ToggleShuffle => {
                 self.transport.shuffle = !self.transport.shuffle;
                 // When enabling, build a fresh random order of the whole

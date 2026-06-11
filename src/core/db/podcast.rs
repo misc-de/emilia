@@ -214,4 +214,18 @@ impl Library {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// The podcast an episode (identified by its audio URL) belongs to — used to
+    /// load its sibling episodes for next/previous navigation.
+    pub fn podcast_id_for_episode_url(&self, url: &str) -> Result<Option<i64>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT podcast_id FROM episode WHERE audio_url = ?1 LIMIT 1",
+                rusqlite::params![url],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?)
+    }
 }

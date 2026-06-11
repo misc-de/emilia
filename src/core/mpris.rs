@@ -51,76 +51,102 @@ impl Mpris {
         F: Fn(MprisCommand) + 'static,
     {
         let slot: Slot = Rc::new(RefCell::new(None));
-        let on_cmd: Rc<dyn Fn(MprisCommand)> = Rc::new(on_cmd);
+        // Log every command at the D-Bus boundary, then hand it to the app — so
+        // "the key never arrived" (routing/BlueZ issue, nothing logged) can be
+        // told apart from "arrived but nothing happened" (logged). Visible with
+        // RUST_LOG=emilia=debug.
+        let on_cmd: Rc<dyn Fn(MprisCommand)> = {
+            let inner = on_cmd;
+            Rc::new(move |cmd| {
+                tracing::debug!("MPRIS command: {cmd:?}");
+                inner(cmd);
+            })
+        };
         // Unique bus name per process so a second manually started build or a
         // stale instance cannot fight over the same MPRIS name.
         let suffix = format!("Emilia.instance{}", std::process::id());
 
         let slot_for_task = slot.clone();
         glib::spawn_future_local(async move {
-            let player = match Player::builder(&suffix)
-                .identity("Emilia")
-                .desktop_entry("de.cais.Emilia")
-                .can_play(true)
-                .can_pause(true)
-                .can_go_next(true)
-                .can_go_previous(true)
-                .can_seek(true)
-                .can_control(true)
-                .can_raise(true)
-                .shuffle(false)
-                .loop_status(LoopStatus::None)
-                .build()
-                .await
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!("MPRIS unavailable: {e}");
-                    return;
+            // (Re)build the service in a loop: if `run()` ever returns — most
+            // often because the session D-Bus connection dropped across a
+            // suspend/resume on mobile — log it and rebuild, so the lock screen
+            // and media keys keep working without an app restart.
+            loop {
+                let player = match Player::builder(&suffix)
+                    .identity("Emilia")
+                    .desktop_entry("de.cais.Emilia")
+                    .can_play(true)
+                    .can_pause(true)
+                    .can_go_next(true)
+                    .can_go_previous(true)
+                    .can_seek(true)
+                    .can_control(true)
+                    .can_raise(true)
+                    .shuffle(false)
+                    .loop_status(LoopStatus::None)
+                    .build()
+                    .await
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        // No D-Bus at all (e.g. headless): give up quietly.
+                        tracing::warn!("MPRIS unavailable: {e}");
+                        return;
+                    }
+                };
+
+                macro_rules! forward {
+                    ($connect:ident, $cmd:expr) => {{
+                        let cb = on_cmd.clone();
+                        player.$connect(move |_| cb($cmd));
+                    }};
                 }
-            };
-
-            macro_rules! forward {
-                ($connect:ident, $cmd:expr) => {{
+                forward!(connect_play_pause, MprisCommand::PlayPause);
+                forward!(connect_play, MprisCommand::Play);
+                forward!(connect_pause, MprisCommand::Pause);
+                forward!(connect_next, MprisCommand::Next);
+                forward!(connect_previous, MprisCommand::Prev);
+                forward!(connect_stop, MprisCommand::Stop);
+                forward!(connect_raise, MprisCommand::Raise);
+                {
                     let cb = on_cmd.clone();
-                    player.$connect(move |_| cb($cmd));
-                }};
-            }
-            forward!(connect_play_pause, MprisCommand::PlayPause);
-            forward!(connect_play, MprisCommand::Play);
-            forward!(connect_pause, MprisCommand::Pause);
-            forward!(connect_next, MprisCommand::Next);
-            forward!(connect_previous, MprisCommand::Prev);
-            forward!(connect_stop, MprisCommand::Stop);
-            forward!(connect_raise, MprisCommand::Raise);
-            {
-                let cb = on_cmd.clone();
-                player.connect_seek(move |_, offset: Time| {
-                    cb(MprisCommand::SeekBy(offset.as_micros()))
-                });
-            }
-            {
-                let cb = on_cmd.clone();
-                player.connect_set_position(move |_, _track: &TrackId, pos: Time| {
-                    cb(MprisCommand::SetPosition(pos.as_micros()))
-                });
-            }
-            {
-                let cb = on_cmd.clone();
-                player.connect_set_shuffle(move |_, shuffle: bool| {
-                    cb(MprisCommand::SetShuffle(shuffle))
-                });
-            }
-            {
-                let cb = on_cmd.clone();
-                player.connect_set_loop_status(move |_, status: LoopStatus| {
-                    cb(MprisCommand::SetRepeat(status != LoopStatus::None))
-                });
-            }
+                    player.connect_seek(move |_, offset: Time| {
+                        cb(MprisCommand::SeekBy(offset.as_micros()))
+                    });
+                }
+                {
+                    let cb = on_cmd.clone();
+                    player.connect_set_position(move |_, _track: &TrackId, pos: Time| {
+                        cb(MprisCommand::SetPosition(pos.as_micros()))
+                    });
+                }
+                {
+                    let cb = on_cmd.clone();
+                    player.connect_set_shuffle(move |_, shuffle: bool| {
+                        cb(MprisCommand::SetShuffle(shuffle))
+                    });
+                }
+                {
+                    let cb = on_cmd.clone();
+                    player.connect_set_loop_status(move |_, status: LoopStatus| {
+                        cb(MprisCommand::SetRepeat(status != LoopStatus::None))
+                    });
+                }
 
-            // Handle incoming method calls (keeps running on the main loop).
-            glib::spawn_future_local(player.run());
-            *slot_for_task.borrow_mut() = Some(Rc::new(player));
+                // Start serving method calls, then publish the player so the app
+                // can push state. `run()` returns a 'static future, so the borrow
+                // ends here and the player can move into the slot.
+                let run_fut = player.run();
+                *slot_for_task.borrow_mut() = Some(Rc::new(player));
+                tracing::debug!("MPRIS service ready");
+                let _ = run_fut.await;
+                // Service ended (D-Bus dropped) → clear the slot and rebuild after
+                // a short delay.
+                tracing::warn!("MPRIS service stopped; reconnecting");
+                slot_for_task.borrow_mut().take();
+                glib::timeout_future(std::time::Duration::from_secs(2)).await;
+            }
         });
 
         Mpris { player: slot }

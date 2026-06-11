@@ -217,11 +217,12 @@ impl App {
     }
 
     /// Next track of the remote row (for the next button and EOS advancing).
-    pub(crate) fn remote_next(&mut self) {
+    /// `wrap` (an explicit user "next") restarts the row from the top at its end.
+    pub(crate) fn remote_next(&mut self, wrap: bool) {
         if self.files.remote_pos + 1 < self.files.remote_queue.len() {
             self.files.remote_pos += 1;
             self.play_remote_current();
-        } else if self.transport.repeat && !self.files.remote_queue.is_empty() {
+        } else if (self.transport.repeat || wrap) && !self.files.remote_queue.is_empty() {
             self.files.remote_pos = 0;
             self.play_remote_current();
         } else {
@@ -240,6 +241,78 @@ impl App {
             self.files.remote_pos -= 1;
             self.play_remote_current();
         }
+    }
+
+    /// Unified "next" for the headphone / MPRIS / UI next button: routes to the
+    /// active context so the command is never a silent no-op. A podcast steps to
+    /// the neighbouring episode of its feed, radio to the neighbouring saved
+    /// station, a remote row to its next track, everything else to the next queue
+    /// track (wrapping to the start at the end).
+    pub(crate) fn skip_next(&mut self) {
+        if self.podcasts.playing_episode_url.is_some() {
+            self.podcast_step(1);
+        } else if self.streaming.playing_stream.is_some() {
+            self.station_step(1);
+        } else if self.files.playing_remote {
+            self.remote_next(true);
+        } else {
+            self.play_next(true);
+        }
+    }
+
+    /// Unified "previous" counterpart to [`Self::skip_next`].
+    pub(crate) fn skip_prev(&mut self) {
+        if self.podcasts.playing_episode_url.is_some() {
+            self.podcast_step(-1);
+        } else if self.streaming.playing_stream.is_some() {
+            self.station_step(-1);
+        } else if self.files.playing_remote {
+            self.remote_prev();
+        } else {
+            self.play_prev();
+        }
+    }
+
+    /// Step to another episode (`dir` = +1 next / −1 previous) of the podcast the
+    /// playing episode belongs to, cycling at the ends. A single-episode feed (or
+    /// wrapping onto the same episode) restarts it from the start.
+    fn podcast_step(&mut self, dir: i32) {
+        let Some(url) = self.podcasts.playing_episode_url.clone() else {
+            return;
+        };
+        let Some(pid) = self.library.podcast_id_for_episode_url(&url).ok().flatten() else {
+            return;
+        };
+        let eps = self.library.episodes(pid).unwrap_or_default();
+        if eps.is_empty() {
+            return;
+        }
+        let cur = eps.iter().position(|e| e.audio_url == url).unwrap_or(0);
+        let n = eps.len() as i32;
+        let next = (cur as i32 + dir).rem_euclid(n) as usize;
+        let (next_url, next_title) = (eps[next].audio_url.clone(), eps[next].title.clone());
+        if next_url == url {
+            // Same episode (single-episode feed / wrap onto itself): from the start.
+            self.play_episode_at(&next_url, &next_title, 0);
+        } else {
+            self.play_episode(&next_url, &next_title);
+        }
+    }
+
+    /// Step to another saved station (`dir` = +1 next / −1 previous), cycling at
+    /// the ends. A single station restarts it.
+    fn station_step(&mut self, dir: i32) {
+        let Some(cur_id) = self.streaming.playing_stream else {
+            return;
+        };
+        let list = self.library.streams().unwrap_or_default();
+        if list.is_empty() {
+            return;
+        }
+        let cur = list.iter().position(|s| s.id == cur_id).unwrap_or(0);
+        let n = list.len() as i32;
+        let next = (cur as i32 + dir).rem_euclid(n) as usize;
+        self.play_stream(list[next].id);
     }
 
     /// Rebuilds the shuffle order (Fisher-Yates), with the currently
@@ -261,8 +334,10 @@ impl App {
     }
 
     /// Next track: when shuffling, the next of the shuffle order, otherwise the
-    /// following one. At the end (all played) playback stops.
-    pub(crate) fn play_next(&mut self) {
+    /// following one. At the end: with `wrap` (an explicit user "next") playback
+    /// restarts from the start of the queue (a single track restarts itself);
+    /// without it (automatic advance at end-of-stream) playback stops.
+    pub(crate) fn play_next(&mut self, wrap: bool) {
         // The explicit user queue jumps ahead of the rest of the context: take
         // the first queued track, splice it into the context right after the
         // current track and play it. Splicing (instead of a separate list) keeps
@@ -315,9 +390,10 @@ impl App {
                 self.transport.queue_pos = n;
                 self.play_current();
             }
-            None if self.transport.repeat && !self.transport.queue.is_empty() => {
-                // Repeat: start over at the end (single track likewise, since
-                // the queue then has only one entry). Reshuffle when shuffling.
+            None if (self.transport.repeat || wrap) && !self.transport.queue.is_empty() => {
+                // Repeat or an explicit "next" at the end: start over from the
+                // top (single track likewise, since the queue then has only one
+                // entry). Reshuffle when shuffling.
                 if self.transport.shuffle {
                     self.rebuild_shuffle_order();
                     self.transport.queue_pos =
@@ -907,9 +983,9 @@ impl App {
             self.toast(&crate::i18n::gettext("Skipping unavailable track"));
         }
         if self.files.playing_remote {
-            self.remote_next();
+            self.remote_next(false);
         } else {
-            self.play_next();
+            self.play_next(false);
         }
     }
 
@@ -1040,20 +1116,8 @@ impl App {
                     self.refresh_queue_icons();
                 }
             }
-            M::Next => {
-                if self.files.playing_remote {
-                    self.remote_next();
-                } else {
-                    self.play_next();
-                }
-            }
-            M::Prev => {
-                if self.files.playing_remote {
-                    self.remote_prev();
-                } else {
-                    self.play_prev();
-                }
-            }
+            M::Next => self.skip_next(),
+            M::Prev => self.skip_prev(),
             M::Stop => {
                 self.save_resume();
                 self.finalize_play_session(false);
@@ -1205,7 +1269,7 @@ impl App {
         if self.files.playing_remote {
             // Remote queue: advance to the next track (or stop at the
             // end). Runs separately from the local queue.
-            self.remote_next();
+            self.remote_next(false);
         } else if self.podcasts.playing_episode_url.is_some() && self.transport.queue.is_empty() {
             // A streamed episode has ended (no queue
             // behind it): finalize its statistics session as "fully
@@ -1238,7 +1302,7 @@ impl App {
                 // A new (multi-part) playback discards a possibly
                 // remembered interruption.
                 self.transport.interrupted_queue = None;
-                self.play_next();
+                self.play_next(false);
             }
         }
     }
@@ -1325,7 +1389,7 @@ impl App {
             for (i, p) in block.into_iter().enumerate() {
                 self.transport.user_queue.insert(i, p);
             }
-            self.play_next();
+            self.play_next(false);
         }
     }
 
@@ -1354,7 +1418,7 @@ impl App {
         } else if !self.transport.user_queue.is_empty() {
             // Nothing loaded, but the user queued tracks → start the queue
             // (play_next splices the first queued track into the context).
-            self.play_next();
+            self.play_next(true);
             return;
         } else {
             return;
