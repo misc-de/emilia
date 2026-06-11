@@ -96,6 +96,56 @@ where
     widget.add_controller(drag);
 }
 
+/// Makes a horizontal `ScrolledWindow` (the mobile top-navigation strip) scroll
+/// reliably on a sideways swipe **even when the swipe starts directly on one of
+/// the icon buttons**. Without this the buttons swallow the touch and the strip
+/// feels stuck. A drag in the **capture** phase claims the sequence as soon as
+/// the finger moves clearly sideways and then scrolls the strip 1:1 with the
+/// finger; claiming also cancels the button's tap. A plain tap (no real
+/// movement) never claims, so it still falls through to the button and
+/// activates the section underneath. `enabled` gates the gesture off when the
+/// strip should not scroll — the top strip uses its swipe-back gesture instead
+/// while a subpage is open, so the two never fight over the same drag.
+pub(crate) fn attach_hscroll_swipe<E>(scroller: &gtk::ScrolledWindow, enabled: E)
+where
+    E: Fn() -> bool + 'static,
+{
+    let drag = gtk::GestureDrag::new();
+    drag.set_touch_only(false);
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let start = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
+    let scrolling = std::rc::Rc::new(std::cell::Cell::new(false));
+    {
+        let scroller = scroller.clone();
+        let start = start.clone();
+        let scrolling = scrolling.clone();
+        drag.connect_drag_begin(move |_, _, _| {
+            scrolling.set(false);
+            start.set(scroller.hadjustment().value());
+        });
+    }
+    {
+        let scroller = scroller.clone();
+        let start = start.clone();
+        let scrolling = scrolling.clone();
+        drag.connect_drag_update(move |g, dx, dy| {
+            if !scrolling.get() {
+                // Stay out of the way until the drag is clearly a sideways swipe:
+                // a small wobble during a tap keeps falling through to the button,
+                // a real horizontal swipe claims the sequence and starts scrolling.
+                if !enabled() || dx.abs() <= 8.0 || dx.abs() <= dy.abs() {
+                    return;
+                }
+                scrolling.set(true);
+                g.set_state(gtk::EventSequenceState::Claimed);
+            }
+            // Follow the finger 1:1; the adjustment clamps to its own range.
+            scroller.hadjustment().set_value(start.get() - dx);
+        });
+    }
+    scroller.add_controller(drag);
+}
+
 /// Default gallery tiles-per-row when the user has not chosen one yet: 3 on
 /// phone-sized screens, 4 on the desktop.
 pub(crate) fn initial_gallery_columns() -> u32 {

@@ -13,10 +13,10 @@ use crate::i18n::{gettext, gettext_f};
 use crate::model::{AlbumMeta, ArtistMeta, Source};
 use crate::ui::album_row::{AlbumCard, AlbumOutput};
 pub(crate) use crate::ui::app_helpers::{
-    album_subtitle, apply_color_scheme, artist_count_subtitle, attach_swipe_back, cover_widget,
-    duration_label, find_scroller, fmt_duration, fmt_rate, guarded_resume, initial_gallery_columns,
-    most_common_artist, on_secondary_click, online_available, read_entries, save_window_state,
-    unix_now,
+    album_subtitle, apply_color_scheme, artist_count_subtitle, attach_hscroll_swipe,
+    attach_swipe_back, cover_widget, duration_label, find_scroller, fmt_duration, fmt_rate,
+    guarded_resume, initial_gallery_columns, most_common_artist, on_secondary_click,
+    online_available, read_entries, save_window_state, unix_now,
 };
 use crate::ui::app_init::InitState;
 use crate::ui::artist_row::{ArtistCard, ArtistOutput};

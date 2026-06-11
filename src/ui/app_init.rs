@@ -764,6 +764,22 @@ impl App {
             );
         }
 
+        // Sideways swipe-to-scroll for the top navigation strip. The icon buttons
+        // would otherwise eat the touch and the strip feels stuck whenever a swipe
+        // lands on an icon (which is most of the time). This capture-phase drag
+        // claims a clearly horizontal swipe and scrolls the strip even when it
+        // starts on an icon, while a plain tap still activates the section. Only
+        // active on the root, where the swipe-back gesture above stays passive.
+        {
+            let nav_for_guard = widgets.nav_view.clone();
+            crate::ui::app::attach_hscroll_swipe(&widgets.top_nav_scroller, move || {
+                nav_for_guard
+                    .visible_page()
+                    .and_then(|p| p.tag())
+                    .is_some_and(|t| t == "main")
+            });
+        }
+
         // Restore the window size and save it on close.
         if let (Some(w), Some(h)) = (saved_w, saved_h) {
             root.set_default_size(w, h);
