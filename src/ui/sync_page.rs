@@ -308,6 +308,12 @@ impl SyncPage {
 
     /// Swaps the body of the open flow window (mode / QR / picker / review / …).
     fn set_sub_content(&self, content: &impl gtk::prelude::IsA<gtk::Widget>) {
+        // Reset to the compact default size; phases that need more room (the
+        // camera scan view) enlarge the window themselves afterwards.
+        if let Some(d) = &self.sub {
+            d.set_content_width(440);
+            d.set_content_height(-1);
+        }
         if let Some(tb) = &self.sub_toolbar {
             tb.set_content(Some(content));
         }
@@ -552,10 +558,13 @@ impl SyncPage {
         self.is_server = false;
 
         let cam = gtk::Picture::builder()
-            .width_request(320)
-            .height_request(240)
+            .width_request(360)
+            .height_request(360)
+            .hexpand(true)
+            .vexpand(true)
+            .halign(gtk::Align::Fill)
+            .valign(gtk::Align::Fill)
             .content_fit(gtk::ContentFit::Contain)
-            .halign(gtk::Align::Center)
             .build();
         let hint = gtk::Label::builder()
             .label(gettext(
@@ -606,13 +615,19 @@ impl SyncPage {
             .build();
 
         let content = padded_vbox();
-        content.set_valign(gtk::Align::Center);
         content.append(&hint);
         content.append(&cam);
         content.append(&paste_row);
         content.append(&status);
         content.append(&progress);
         self.set_sub_content(&content);
+        // Enlarge the flow window for the scan view so the camera preview is
+        // large instead of a thumbnail (reset to compact by `set_sub_content`
+        // for the other phases).
+        if let Some(d) = &self.sub {
+            d.set_content_width(560);
+            d.set_content_height(640);
+        }
 
         self.cam = Some(cam);
         self.status = Some(status);

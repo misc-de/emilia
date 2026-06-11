@@ -2477,8 +2477,10 @@ impl Component for App {
                                     set_tooltip_text: Some(&gettext("Queue")),
                                     set_valign: gtk::Align::Center,
                                     add_css_class: "flat",
+                                    // Greyed out while the queue is empty (the
+                                    // queue view shows the user queue).
                                     #[watch]
-                                    set_sensitive: model.mini.now_playing.is_some(),
+                                    set_sensitive: !model.transport.user_queue.is_empty(),
                                     connect_clicked => Msg::ShowQueue,
                                 },
                             },

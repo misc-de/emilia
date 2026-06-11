@@ -463,9 +463,10 @@ impl StreamPage {
             self.streams_list.remove(&child);
         }
         for st in self.stream_items.clone() {
+            // Not activatable: like a library track, the station plays via its
+            // play button; long press / right click opens the detail view.
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&st.name))
-                .activatable(true)
                 .build();
             row.add_css_class("emilia-flush");
             if let Some(sub) = stream_subtitle(&st) {
@@ -493,12 +494,6 @@ impl StreamPage {
             self.stream_play_buttons.borrow_mut().push((id, pp.clone()));
             row.add_suffix(&pp);
 
-            {
-                let sender = sender.clone();
-                row.connect_activated(move |_| {
-                    let _ = sender.output(StreamOutput::ToggleStream(id));
-                });
-            }
             on_secondary_click(&row, {
                 let sender = sender.clone();
                 move || sender.input(StreamInput::OpenStream(id))

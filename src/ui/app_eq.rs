@@ -15,60 +15,76 @@ use crate::ui::app::{App, CtxTarget, Msg};
 /// `msgid`s, translated at the display site. Loading a preset fills the bands;
 /// adjusting any slider afterwards drops the selection back to "Custom".
 ///
-/// The curves follow the classic 10-band reference presets (Winamp/iTunes
-/// style): pronounced bass/treble boosts with the characteristic mid scoop or
-/// presence hump per genre, kept within the slider range (-24 … +12 dB).
+/// The curves keep the classic 10-band tonal shapes (Winamp/iTunes style) but
+/// are **attenuation only**: the loudest band sits at 0 dB and every other band
+/// is cut relative to it. Boosting bands above 0 dB amplifies the signal past
+/// full scale and clips ("overdrive"), so the presets shape the sound purely by
+/// lowering the other bands instead. The result is the same character at a
+/// safe, distortion-free level (turn the volume up to taste).
 pub(crate) const GENRE_PRESETS: &[(&str, [f64; 10])] = &[
     (
         "Rock",
-        [8.0, 6.0, 4.0, -2.0, -4.0, -2.0, 3.0, 6.0, 8.0, 9.0],
+        [-1.0, -3.0, -5.0, -11.0, -13.0, -11.0, -6.0, -3.0, -1.0, 0.0],
     ),
     (
         "Pop",
-        [-2.0, -1.0, 1.0, 4.0, 6.0, 6.0, 3.0, 0.0, -1.0, -2.0],
+        [-8.0, -7.0, -5.0, -2.0, 0.0, 0.0, -3.0, -6.0, -7.0, -8.0],
     ),
-    ("Jazz", [5.0, 4.0, 2.0, 3.0, -2.0, -2.0, 0.0, 2.0, 5.0, 6.0]),
+    (
+        "Jazz",
+        [-1.0, -2.0, -4.0, -3.0, -8.0, -8.0, -6.0, -4.0, -1.0, 0.0],
+    ),
     (
         "Classical",
-        [5.0, 4.0, 3.0, 1.0, -1.0, -1.0, -2.0, -4.0, -5.0, -6.0],
+        [0.0, -1.0, -2.0, -4.0, -6.0, -6.0, -7.0, -9.0, -10.0, -11.0],
     ),
     (
         "Dance",
-        [9.0, 7.0, 3.0, 0.0, -1.0, -3.0, -4.0, -3.0, 1.0, 3.0],
+        [
+            0.0, -2.0, -6.0, -9.0, -10.0, -12.0, -13.0, -12.0, -8.0, -6.0,
+        ],
     ),
     (
         "Electronic",
-        [7.0, 6.0, 2.0, 0.0, -2.0, 2.0, 1.0, 2.0, 6.0, 7.0],
+        [0.0, -1.0, -5.0, -7.0, -9.0, -5.0, -6.0, -5.0, -1.0, 0.0],
     ),
     (
         "Hip-Hop",
-        [8.0, 7.0, 4.0, 3.0, -1.0, -2.0, 2.0, 0.0, 3.0, 4.0],
+        [0.0, -1.0, -4.0, -5.0, -9.0, -10.0, -6.0, -8.0, -5.0, -4.0],
     ),
-    ("R&B", [6.0, 8.0, 6.0, 2.0, -2.0, -2.0, 2.0, 3.0, 4.0, 4.0]),
-    ("Metal", [7.0, 5.0, 4.0, 1.0, -1.0, 2.0, 1.0, 4.0, 6.0, 7.0]),
+    (
+        "R&B",
+        [-2.0, 0.0, -2.0, -6.0, -10.0, -10.0, -6.0, -5.0, -4.0, -4.0],
+    ),
+    (
+        "Metal",
+        [0.0, -2.0, -3.0, -6.0, -8.0, -5.0, -6.0, -3.0, -1.0, 0.0],
+    ),
     (
         "Acoustic",
-        [6.0, 5.0, 4.0, 2.0, 3.0, 3.0, 4.0, 4.0, 3.0, 2.0],
+        [0.0, -1.0, -2.0, -4.0, -3.0, -3.0, -2.0, -2.0, -3.0, -4.0],
     ),
     (
         "Vocal",
-        [-3.0, -3.0, -2.0, 2.0, 5.0, 6.0, 6.0, 4.0, 1.0, -2.0],
+        [-9.0, -9.0, -8.0, -4.0, -1.0, 0.0, 0.0, -2.0, -5.0, -8.0],
     ),
     (
         "Bass boost",
-        [10.0, 8.0, 6.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [
+            0.0, -2.0, -4.0, -7.0, -9.0, -10.0, -10.0, -10.0, -10.0, -10.0,
+        ],
     ),
     (
         "Treble boost",
-        [0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 4.0, 6.0, 8.0, 9.0],
+        [-9.0, -9.0, -9.0, -9.0, -9.0, -7.0, -5.0, -3.0, -1.0, 0.0],
     ),
     (
         "Loudness",
-        [9.0, 7.0, 3.0, 0.0, -3.0, 0.0, -1.0, 1.0, 6.0, 9.0],
+        [0.0, -2.0, -6.0, -9.0, -12.0, -9.0, -10.0, -8.0, -3.0, 0.0],
     ),
     (
         "Soft",
-        [4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 1.0, 2.0],
+        [0.0, -1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -5.0, -3.0, -2.0],
     ),
 ];
 
@@ -214,10 +230,12 @@ impl App {
         let key = Rc::new(key);
         let loading = Rc::new(Cell::new(false));
 
+        // No fixed height: the dialog grows to the natural height of its content
+        // (header + presets + ten sliders + buttons) so nothing is cut off. On
+        // screens too small for that, the ScrolledWindow below still scrolls.
         let dialog = adw::Dialog::builder()
             .title(gettext("Equalizer"))
             .content_width(440)
-            .content_height(620)
             .build();
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)

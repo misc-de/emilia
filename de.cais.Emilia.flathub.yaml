@@ -131,6 +131,8 @@ modules:
         /app/share/icons/hicolor/scalable/actions/podcast-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
     sources:
       # App-Quelle aus dem getaggten Git-Stand (Flathub baut nur hieraus).
       # Release 0.5.1 == MetaInfo-Top-Release; der Tag zeigt auf den Release-

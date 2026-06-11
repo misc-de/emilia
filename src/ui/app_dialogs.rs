@@ -381,15 +381,13 @@ impl App {
             .ok()
             .and_then(|l| l.list_sources().ok())
             .unwrap_or_default();
+        // No extra sources: hide the (empty) list instead of showing a
+        // placeholder row, so only the "Add local folder" button remains.
         if sources.is_empty() {
-            list.append(
-                &adw::ActionRow::builder()
-                    .title(gettext("No additional sources"))
-                    .css_classes(["dim-label"])
-                    .build(),
-            );
+            list.set_visible(false);
             return;
         }
+        list.set_visible(true);
         for s in sources {
             let subtitle = match s.kind.as_str() {
                 "webdav" => s.base_url.clone().unwrap_or_default(),
@@ -722,19 +720,18 @@ impl App {
         row.add_suffix(&button);
         row.set_activatable_widget(Some(&button));
         group.add(&row);
-        page.add(&group);
 
         // --- Other sources (second local folder / Nextcloud) ---
-        // Its own connection to the DB (like everywhere in the code via `Library::open`),
-        // so this dialog can maintain the list itself; the main window is
-        // informed about changes via `Msg::SourcesChanged`. No heading/description
-        // here (kept deliberately bare); the list + "Add local folder" stand alone.
-        let src_group = adw::PreferencesGroup::builder().build();
+        // Placed directly inside the "Music folder" group (no separate group), so
+        // the sources sit right below the music folder without a large gap. Uses
+        // its own DB connection (like everywhere via `Library::open`); the main
+        // window is told about changes via `Msg::SourcesChanged`.
         let src_list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
+            .margin_top(6)
             .build();
-        src_group.add(&src_list);
+        group.add(&src_list);
 
         // Fill from the DB and remember the list, so `Msg::SourcesChanged`
         // (fired after add/remove **and** after a Nextcloud connect) can refresh
@@ -791,8 +788,8 @@ impl App {
             .margin_top(6)
             .build();
         btn_row.append(&add_local);
-        src_group.add(&btn_row);
-        page.add(&src_group);
+        group.add(&btn_row);
+        page.add(&group);
 
         // Nextcloud directly in the library (no separate menu item).
         let nc_group = adw::PreferencesGroup::builder()
@@ -839,7 +836,7 @@ impl App {
             .subtitle(gettext("Ten bands, per output"))
             .activatable(true)
             .build();
-        eq_row.add_prefix(&gtk::Image::from_icon_name("preferences-other-symbolic"));
+        eq_row.add_prefix(&gtk::Image::from_icon_name("multimedia-equalizer-symbolic"));
         eq_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
         {
             let sender = sender.clone();

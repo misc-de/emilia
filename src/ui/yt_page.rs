@@ -1841,7 +1841,10 @@ impl YtPage {
             });
         }
         actions.add(&off);
-        let eq = action_row(&gettext("Equalizer settings"), "preferences-other-symbolic");
+        let eq = action_row(
+            &gettext("Equalizer settings"),
+            "multimedia-equalizer-symbolic",
+        );
         {
             let (sender, dialog, path, t) = (
                 sender.clone(),

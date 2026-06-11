@@ -685,8 +685,8 @@ impl PodcastsPage {
     }
 
     /// Builds the "Newest" list: newest episodes across **all** subscriptions,
-    /// chronologically by publication date. Tapping streams; **long press**
-    /// opens the entry detail view.
+    /// chronologically by publication date. The **play button** streams the
+    /// episode; **long press / right click** opens the entry detail view.
     fn reload_newest(&mut self, sender: &ComponentSender<Self>) {
         // Only show episodes from at most ~one month ago.
         let cutoff = crate::core::podcast::recent_cutoff_key();
@@ -745,10 +745,11 @@ impl PodcastsPage {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&crate::core::podcast::pubdate_short(p));
             }
+            // Not activatable: like a library track, the episode plays via its
+            // play button; long press / right click opens the detail view.
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&ep.title))
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .activatable(true)
                 .build();
             row.add_css_class("emilia-flush");
             let cover = ep
@@ -768,17 +769,6 @@ impl PodcastsPage {
                 row.add_suffix(&lbl);
             }
             row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
-            {
-                let sender = sender.clone();
-                let url = ep.audio_url.clone();
-                let title = ep.title.clone();
-                row.connect_activated(move |_| {
-                    let _ = sender.output(PodcastsOutput::ToggleEpisode {
-                        url: url.clone(),
-                        title: title.clone(),
-                    });
-                });
-            }
             on_secondary_click(&row, {
                 let sender = sender.clone();
                 move || sender.input(PodcastsInput::ShowEpisodeDetail(i))
@@ -950,10 +940,13 @@ impl PodcastsPage {
         // Shownotes (if present): timestamps become clickable jump markers.
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
             let notes_group = adw::PreferencesGroup::new();
+            // Always wrap, including inside long unbreakable tokens (URLs), so a
+            // shownote can never force the dialog wider than the screen.
             let label = gtk::Label::builder()
                 .label(crate::core::podcast::linkify_timestamps(notes.trim()))
                 .use_markup(true)
                 .wrap(true)
+                .wrap_mode(gtk::pango::WrapMode::WordChar)
                 .xalign(0.0)
                 .selectable(true)
                 .build();
@@ -1077,7 +1070,8 @@ impl PodcastsPage {
         present_detail(&dialog, &content, &root);
     }
 
-    /// Episode subpage of a podcast (tap = stream episode).
+    /// Episode subpage of a podcast (play button = stream episode, long press =
+    /// detail view).
     fn open_podcast(&self, sender: &ComponentSender<Self>, id: i64, title: &str) {
         let episodes = self.library.episodes(id).unwrap_or_default();
         let cover = self
@@ -1124,25 +1118,15 @@ impl PodcastsPage {
                 }
                 subtitle.push_str(d.trim());
             }
+            // Not activatable: like a library track, the episode plays via its
+            // play button; long press / right click opens the detail view.
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&ep.title))
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .activatable(true)
                 .build();
             row.add_css_class("emilia-flush");
             row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
             row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
-            {
-                let sender = sender.clone();
-                let url = ep.audio_url.clone();
-                let title = ep.title.clone();
-                row.connect_activated(move |_| {
-                    let _ = sender.output(PodcastsOutput::ToggleEpisode {
-                        url: url.clone(),
-                        title: title.clone(),
-                    });
-                });
-            }
             on_secondary_click(&row, {
                 let sender = sender.clone();
                 move || {

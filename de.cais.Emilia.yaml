@@ -132,6 +132,8 @@ modules:
         /app/share/icons/hicolor/scalable/actions/podcast-symbolic.svg
       - install -Dm644 data/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
         /app/share/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
+      - install -Dm644 data/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
+        /app/share/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
     sources:
       - type: dir
         path: .
