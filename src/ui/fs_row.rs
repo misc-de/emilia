@@ -424,19 +424,26 @@ impl FactoryComponent for FsRow {
                 },
             },
 
-            // Long press: options menu.
+            // Long press: options menu. A press on the play button must not also
+            // open it — the play button only plays.
             add_controller = gtk::GestureLongPress {
-                connect_pressed[sender, index] => move |gesture, _, _| {
+                connect_pressed[sender, index] => move |gesture, x, y| {
+                    if crate::ui::app_helpers::gesture_press_on_button(gesture, x, y) {
+                        return;
+                    }
                     gesture.set_state(gtk::EventSequenceState::Claimed);
                     let _ = sender.output(FsOutput::LongPress(index.clone()));
                 },
             },
 
             // Right click (classic mouse): the desktop counterpart of the long
-            // press – opens the same options/detail menu.
+            // press – opens the same options/detail menu (also skipped on a button).
             add_controller = gtk::GestureClick {
                 set_button: gtk::gdk::BUTTON_SECONDARY,
-                connect_pressed[sender, index] => move |gesture, _, _, _| {
+                connect_pressed[sender, index] => move |gesture, _, x, y| {
+                    if crate::ui::app_helpers::gesture_press_on_button(gesture, x, y) {
+                        return;
+                    }
                     gesture.set_state(gtk::EventSequenceState::Claimed);
                     let _ = sender.output(FsOutput::LongPress(index.clone()));
                 },

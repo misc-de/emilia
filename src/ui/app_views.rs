@@ -1196,18 +1196,15 @@ impl App {
                         });
                     }
                 });
-                {
+                crate::ui::app::on_long_press(&row, {
                     let sender = sender.clone();
-                    let gesture = gtk::GestureLongPress::new();
-                    gesture.connect_pressed(move |g, _, _| {
-                        g.set_state(gtk::EventSequenceState::Claimed);
+                    move || {
                         sender.input(Msg::ShowAlbumDetailFor {
                             artist: display_artist.clone(),
                             album: album.clone(),
-                        });
-                    });
-                    row.add_controller(gesture);
-                }
+                        })
+                    }
+                });
                 group.add(&row);
             }
             content.append(&group);
@@ -1293,15 +1290,10 @@ impl App {
                     let path = path.clone();
                     move || sender.input(Msg::ShowTrackDetail(path.clone()))
                 });
-                {
+                crate::ui::app::on_long_press(&row, {
                     let sender = sender.clone();
-                    let gesture = gtk::GestureLongPress::new();
-                    gesture.connect_pressed(move |g, _, _| {
-                        g.set_state(gtk::EventSequenceState::Claimed);
-                        sender.input(Msg::ShowTrackDetail(path.clone()));
-                    });
-                    row.add_controller(gesture);
-                }
+                    move || sender.input(Msg::ShowTrackDetail(path.clone()))
+                });
                 group.add(&row);
             }
             content.append(&group);
@@ -1517,15 +1509,10 @@ impl App {
                 let path = path.clone();
                 move || sender.input(Msg::ShowTrackDetail(path.clone()))
             });
-            {
+            crate::ui::app::on_long_press(&row, {
                 let sender = sender.clone();
-                let gesture = gtk::GestureLongPress::new();
-                gesture.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::ShowTrackDetail(path.clone()));
-                });
-                row.add_controller(gesture);
-            }
+                move || sender.input(Msg::ShowTrackDetail(path.clone()))
+            });
             row
         };
 

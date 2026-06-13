@@ -43,6 +43,13 @@ pub struct BufferedSong {
     pub title: String,
     /// Is the **start** still in the buffer? Otherwise a recording would be incomplete.
     pub complete: bool,
+    /// Generous lead guard (bytes) to extend the saved file *before* `start`
+    /// (into the previous song), sized by the start boundary's uncertainty. The
+    /// overlap is trimmed away later in the editor.
+    pub lead_pad: u64,
+    /// Generous tail guard (bytes) to extend the saved file *after* `end` (into
+    /// the next song), sized by the end boundary's uncertainty.
+    pub tail_pad: u64,
 }
 
 /// Snapshot of the buffer state for the UI (replay page, recording).
@@ -62,6 +69,12 @@ pub struct Snapshot {
 struct Marker {
     offset: u64,
     title: String,
+    /// Generous save guard (bytes) for cutting *at* this boundary: how far a
+    /// saved song may reach past it to absorb ICY/refine imprecision (the
+    /// neighbouring songs trim the overlap away in the editor). Large when the
+    /// cut is uncertain (ICY sluggish / no silence found), small when it snapped
+    /// cleanly onto a real gap.
+    pad: u64,
 }
 
 #[derive(Default)]
@@ -92,7 +105,7 @@ pub struct Recorder {
 impl Recorder {
     /// Starts the recording worker for `url` with a buffer of `cap_minutes`
     /// minutes. Returns immediately; the worker runs in the background.
-    pub fn start(url: &str, cap_minutes: u32) -> Recorder {
+    pub fn start(url: &str, cap_minutes: u32, station: Option<&str>) -> Recorder {
         let n = BUFFER_SEQ.fetch_add(1, Ordering::Relaxed);
         let mut buffer_path = crate::core::online::cover_cache_dir();
         buffer_path.push(format!("stream_buffer_{}_{n}.dat", std::process::id()));
@@ -104,15 +117,24 @@ impl Recorder {
         let ext = Arc::new(Mutex::new(String::from("mp3")));
 
         {
-            let (url, shared, stop, buffer_path, ext) = (
+            let (url, station, shared, stop, buffer_path, ext) = (
                 url.to_string(),
+                station.map(str::to_string),
                 shared.clone(),
                 stop.clone(),
                 buffer_path.clone(),
                 ext.clone(),
             );
             std::thread::spawn(move || {
-                if let Err(e) = run(&url, cap_minutes, &buffer_path, &shared, &stop, &ext) {
+                if let Err(e) = run(
+                    &url,
+                    cap_minutes,
+                    station.as_deref(),
+                    &buffer_path,
+                    &shared,
+                    &stop,
+                    &ext,
+                ) {
                     tracing::info!("Stream recorder ended: {e}");
                 }
                 shared.lock_or_recover().ended = true;
@@ -133,12 +155,16 @@ impl Recorder {
         let avail = s.total.saturating_sub(s.cap);
         let mut songs: Vec<BufferedSong> = Vec::new();
         for (i, m) in s.markers.iter().enumerate() {
-            let end = s.markers.get(i + 1).map(|n| n.offset);
+            let next = s.markers.get(i + 1);
             songs.push(BufferedSong {
                 start: m.offset,
-                end,
+                end: next.map(|n| n.offset),
                 title: m.title.clone(),
                 complete: m.offset >= avail,
+                // Pad toward each boundary by that boundary's own uncertainty:
+                // the start marker for the lead, the next marker for the tail.
+                lead_pad: m.pad,
+                tail_pad: next.map_or(0, |n| n.pad),
             });
         }
         let current_start = s.markers.last().map(|m| m.offset);
@@ -157,16 +183,21 @@ impl Recorder {
         &self,
         start: u64,
         end: u64,
+        lead_pad: u64,
+        tail_pad: u64,
         artist: Option<&str>,
         title: &str,
         dest_dir: &Path,
     ) -> Result<PathBuf> {
-        let cap = self.shared.lock_or_recover().cap;
-        let avail = {
+        let (cap, avail, total) = {
             let s = self.shared.lock_or_recover();
-            s.total.saturating_sub(s.cap)
+            (s.cap, s.total.saturating_sub(s.cap), s.total)
         };
-        let start = start.max(avail);
+        // Extend the cut generously on both sides — clamped to what is still
+        // buffered — so a slightly-off boundary never clips the song; the overlap
+        // with the neighbours is trimmed away later in the editor.
+        let start = start.saturating_sub(lead_pad).max(avail);
+        let end = end.saturating_add(tail_pad).min(total);
         if end <= start {
             return Err(anyhow!("nothing buffered for this segment"));
         }
@@ -211,6 +242,7 @@ impl Drop for Recorder {
 fn run(
     url: &str,
     cap_minutes: u32,
+    station: Option<&str>,
     buffer_path: &Path,
     shared: &Arc<Mutex<Shared>>,
     stop: &Arc<AtomicBool>,
@@ -245,6 +277,13 @@ fn run(
     let bytes_per_sec = (br_kbps * 1000 / 8).max(8_000);
     let cap = (cap_minutes as u64 * 60 * bytes_per_sec).max(bytes_per_sec * 10);
     shared.lock_or_recover().cap = cap;
+
+    // Station idents/self-promo that some stations inject into the ICY title
+    // (e.g. "1LIVE DIGGI auch als Stream: 1LIVEDIGGI.de") are not songs. Build the
+    // identity needles once (from the configured station name and the advertised
+    // `icy-name`); such titles are then treated like a cleared title (a gap)
+    // instead of being saved as a bogus song that also splits the real one.
+    let idents = station_idents(station, resp.header("icy-name"));
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -313,12 +352,15 @@ fn run(
         };
 
         if let Some((off, title)) = commit_new {
-            // Snap the raw ICY boundary onto the real silence gap nearby.
-            let at = refine_marker(buffer_path, cap, bytes_per_sec, ext, off, prev_off, total);
+            // Snap the raw ICY boundary onto the real silence gap nearby; `pad` is
+            // the generous save guard derived from how confident that snap was.
+            let (at, pad) =
+                refine_marker(buffer_path, cap, bytes_per_sec, ext, off, prev_off, total);
             let mut s = shared.lock_or_recover();
             s.markers.push(Marker {
                 offset: at,
                 title: title.clone(),
+                pad,
             });
             s.current_title = Some(title);
             if s.markers.len() > 256 {
@@ -330,7 +372,7 @@ fn run(
             // Cleared title that has persisted long enough → end the running song
             // at the (refined) clear point and start an untitled gap segment (the
             // talk/ads between songs, saved to its own file, not identified).
-            let at = refine_marker(
+            let (at, pad) = refine_marker(
                 buffer_path,
                 cap,
                 bytes_per_sec,
@@ -343,6 +385,7 @@ fn run(
             s.markers.push(Marker {
                 offset: at,
                 title: String::new(),
+                pad,
             });
             s.current_title = None;
             if s.markers.len() > 256 {
@@ -370,10 +413,12 @@ fn run(
             reader.read_exact(&mut meta)?;
             if let Some(title) = parse_stream_title(&meta) {
                 let title = title.trim().to_string();
-                if title.is_empty() {
-                    // ICY title cleared → remember where. If it stays cleared (see
-                    // the commit in the section above), the running song ends there
-                    // and an untitled gap segment begins.
+                if title.is_empty() || is_station_ident(&title, &idents) {
+                    // ICY title cleared *or* a station ident/self-promo (not a
+                    // song) → remember where. If it persists (see the commit in the
+                    // section above), the running song ends there and an untitled
+                    // gap segment begins — instead of saving the promo as a bogus
+                    // song that also splits the real one around it.
                     empty_since.get_or_insert(total);
                     pending = None;
                 } else {
@@ -409,6 +454,16 @@ const MIN_GAP_SECS: u64 = 6;
 /// off the audio transition, so a narrow window avoids snapping to a quiet
 /// passage *inside* a song.
 const REFINE_WINDOW_SECS: u64 = 5;
+
+/// Worst-case generous save guard (seconds) applied to a cut boundary when the
+/// refine step could **not** confirm it on a real silence (ICY too sluggish, or
+/// the songs crossfade). The neighbouring songs absorb the overlap; the editor
+/// trims it. A confident, silence-snapped cut uses only a small fraction of this.
+const SAVE_GUARD_MAX_SECS: u64 = 30;
+
+/// Minimum generous guard (seconds) even for a confident cut, so there is always
+/// a little material to trim on either side.
+const SAVE_GUARD_MIN_SECS: u64 = 2;
 
 /// Removes song boundaries that have fully scrolled out of the buffer (whose
 /// following boundary already lies beyond the available window) – but keeps the
@@ -461,7 +516,10 @@ fn read_ring(buffer_path: &Path, cap: u64, start: u64, end: u64) -> Result<Vec<u
 /// point closest to the raw position. Falls back to the raw offset when nothing
 /// decodes or the window has no genuine gap (e.g. a crossfade) — a cut is never
 /// moved further from the truth than the metadata already put it. Best effort;
-/// `lo_bound`/`hi_bound` keep the boundary between its neighbours.
+/// `lo_bound`/`hi_bound` keep the boundary between its neighbours. Also returns a
+/// generous save guard (bytes): small when the cut snapped confidently onto a
+/// silence (sized by how far the ICY marker was off, a proxy for its
+/// sluggishness), the full worst-case [`SAVE_GUARD_MAX_SECS`] when it could not.
 fn refine_marker(
     buffer_path: &Path,
     cap: u64,
@@ -470,9 +528,10 @@ fn refine_marker(
     raw: u64,
     lo_bound: u64,
     hi_bound: u64,
-) -> u64 {
+) -> (u64, u64) {
+    let max_pad = SAVE_GUARD_MAX_SECS.saturating_mul(bytes_per_sec);
     if bytes_per_sec == 0 {
-        return raw;
+        return (raw, 0);
     }
     let w = REFINE_WINDOW_SECS.saturating_mul(bytes_per_sec);
     let lo = raw.saturating_sub(w).max(lo_bound);
@@ -480,11 +539,11 @@ fn refine_marker(
     // Need a usable window straddling the marker (the decoder also drops the
     // first partial frame, so demand at least ~2 s).
     if raw <= lo || hi <= raw || hi.saturating_sub(lo) < bytes_per_sec * 2 {
-        return raw;
+        return (raw, max_pad);
     }
     let data = match read_ring(buffer_path, cap, lo, hi) {
         Ok(d) => d,
-        Err(_) => return raw,
+        Err(_) => return (raw, max_pad),
     };
     // Decode via a temp file so the existing GStreamer `decode_pcm` (filesrc) can
     // sniff the codec; commits are minutes apart, so the I/O is negligible.
@@ -492,7 +551,7 @@ fn refine_marker(
     let n = BUFFER_SEQ.fetch_add(1, Ordering::Relaxed);
     tmp.push(format!("emilia_refine_{}_{n}.{ext}", std::process::id()));
     if std::fs::write(&tmp, &data).is_err() {
-        return raw;
+        return (raw, max_pad);
     }
     let target = (raw - lo) as f64 / bytes_per_sec as f64;
     let snapped = crate::core::waveform::snap_to_silence(&tmp, target);
@@ -500,15 +559,19 @@ fn refine_marker(
     match snapped {
         Some(t) => {
             let refined = (lo + (t * bytes_per_sec as f64) as u64).clamp(lo, hi);
+            // Confident cut on a real silence → modest guard that grows with how
+            // far the ICY marker was off (its sluggishness), never the full 30 s.
+            let pad = (refined.abs_diff(raw) + SAVE_GUARD_MIN_SECS.saturating_mul(bytes_per_sec))
+                .min(max_pad);
             if refined != raw {
                 tracing::debug!(
                     "stream cut refined {:+.2}s onto silence",
                     (refined as f64 - raw as f64) / bytes_per_sec as f64
                 );
             }
-            refined
+            (refined, pad)
         }
-        None => raw,
+        None => (raw, max_pad),
     }
 }
 
@@ -528,6 +591,58 @@ fn parse_stream_title(meta: &[u8]) -> Option<String> {
     // meaningful signal that the running song just ended. `None` means the field
     // was absent from this metadata block.
     Some(value.to_string())
+}
+
+/// Lowercased, alphanumeric-only form for ident matching (drops spaces and
+/// punctuation so "1LIVE DIGGI" and "1Livediggi" compare equal).
+fn normalize_ident(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Builds the normalized "identity needles" of a station from its configured
+/// name and the advertised `icy-name` header. A `StreamTitle` containing one of
+/// these (and lacking an "Artist - Title" structure) is a station
+/// ident/self-promo rather than a song.
+fn station_idents(station: Option<&str>, icy_name: Option<&str>) -> Vec<String> {
+    let mut needles: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        let n = normalize_ident(s);
+        // Require a few chars so a short/generic token cannot match real songs.
+        if n.len() >= 4 && !needles.contains(&n) {
+            needles.push(n);
+        }
+    };
+    if let Some(s) = station {
+        push(s);
+    }
+    if let Some(name) = icy_name {
+        // `icy-name` is often "Station, Broadcaster City" — use the leading part.
+        if let Some(first) = name.split(',').next() {
+            push(first);
+        }
+    }
+    needles
+}
+
+/// Whether the title carries a dash-style "Artist - Title" separator (ASCII
+/// hyphen or en/em dash, surrounded by spaces) — the radio convention for songs.
+fn has_track_separator(title: &str) -> bool {
+    title.contains(" - ") || title.contains(" – ") || title.contains(" — ")
+}
+
+/// True if `title` looks like a station ident/self-promo rather than a song: it
+/// contains a station identity needle **and** has no "Artist - Title" separator.
+/// The separator guard keeps a real song that merely *mentions* the station
+/// (e.g. "Queen - Radio Ga Ga" on a station called "Radio") from being dropped.
+fn is_station_ident(title: &str, idents: &[String]) -> bool {
+    if idents.is_empty() || has_track_separator(title) {
+        return false;
+    }
+    let n = normalize_ident(title);
+    idents.iter().any(|needle| n.contains(needle.as_str()))
 }
 
 fn ext_from_content_type(ct: Option<&str>) -> &'static str {
@@ -617,5 +732,63 @@ fn tag_file(path: &Path, artist: Option<&str>, title: &str) {
     }
     if let Err(e) = tag.save_to_path(path, WriteOptions::default()) {
         tracing::debug!("Could not tag recording {}: {e}", path.display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_station_ident, station_idents};
+
+    // Live ICY metadata observed on WDR 1Live Diggi: the station alternates the
+    // StreamTitle between real songs and a self-promo every ~minute.
+    const ICY_NAME: &str = "1Livediggi, Westdeutscher Rundfunk Koeln";
+
+    #[test]
+    fn flags_station_self_promo() {
+        let idents = station_idents(Some("1Live Diggi"), Some(ICY_NAME));
+        assert!(is_station_ident(
+            "1LIVE DIGGI auch als Stream: 1LIVEDIGGI.de",
+            &idents
+        ));
+    }
+
+    #[test]
+    fn keeps_real_songs() {
+        let idents = station_idents(Some("1Live Diggi"), Some(ICY_NAME));
+        for s in [
+            "Mauvais djo - Maladie",
+            "Lil Uzi Vert - What You Saying",
+            "GORDO & Reinier Zonneveld - Loco Loco",
+        ] {
+            assert!(
+                !is_station_ident(s, &idents),
+                "{s} wrongly flagged as ident"
+            );
+        }
+    }
+
+    #[test]
+    fn icy_name_alone_catches_promo() {
+        // Even without a configured station name, the advertised icy-name suffices.
+        let idents = station_idents(None, Some(ICY_NAME));
+        assert!(is_station_ident(
+            "1LIVE DIGGI auch als Stream: 1LIVEDIGGI.de",
+            &idents
+        ));
+    }
+
+    #[test]
+    fn separator_guard_protects_song_mentioning_station() {
+        // A song whose title contains the station token survives because it has an
+        // "Artist - Title" separator …
+        let idents = station_idents(Some("Radio"), None);
+        assert!(!is_station_ident("Queen - Radio Ga Ga", &idents));
+        // … while a bare promo with the same token is still caught.
+        assert!(is_station_ident("Radio Webstream jetzt live", &idents));
+    }
+
+    #[test]
+    fn no_idents_means_no_false_positives() {
+        assert!(!is_station_ident("Some Promo Without Needles", &[]));
     }
 }

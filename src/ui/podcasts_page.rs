@@ -24,7 +24,7 @@ use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::PodcastView;
 use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_secondary_click};
+use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 
 /// Fetches a feed and stores podcast + episodes (runs in the worker thread,
 /// its own DB connection). Returns the podcast title on success.
@@ -774,15 +774,10 @@ impl PodcastsPage {
                 let sender = sender.clone();
                 move || sender.input(PodcastsInput::ShowEpisodeDetail(i))
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let sender = sender.clone();
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(PodcastsInput::ShowEpisodeDetail(i));
-                });
-            }
-            row.add_controller(lp);
+                move || sender.input(PodcastsInput::ShowEpisodeDetail(i))
+            });
             if let Some(g) = &group {
                 g.add(&row);
             }
@@ -1139,18 +1134,15 @@ impl PodcastsPage {
                     });
                 }
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let sender = sender.clone();
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
+                move || {
                     sender.input(PodcastsInput::ShowPodcastEpisodeDetail {
                         podcast_id: id,
                         index: i,
                     });
-                });
-            }
-            row.add_controller(lp);
+                }
+            });
             group.add(&row);
         }
         content.append(&group);

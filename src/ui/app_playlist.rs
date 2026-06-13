@@ -78,15 +78,10 @@ impl App {
                 let sender = sender.clone();
                 move || sender.input(Msg::ShowPlaylistDetail(id))
             });
-            let long_press = gtk::GestureLongPress::new();
-            {
+            crate::ui::app::on_long_press(&row, {
                 let sender = sender.clone();
-                long_press.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::ShowPlaylistDetail(id));
-                });
-            }
-            row.add_controller(long_press);
+                move || sender.input(Msg::ShowPlaylistDetail(id))
+            });
             self.playlists.playlists_list.append(&row);
         }
     }
@@ -326,15 +321,10 @@ impl App {
                     }
                 }
             };
-            let gesture = gtk::GestureLongPress::new();
-            {
+            crate::ui::app::on_long_press(&row, {
                 let open = open.clone();
-                gesture.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    open();
-                });
-            }
-            row.add_controller(gesture);
+                move || open()
+            });
             crate::ui::app::on_secondary_click(&row, open);
         }
         // Play button: starts the whole playlist at this track (so it keeps

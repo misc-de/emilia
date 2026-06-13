@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.6.3" date="2026-06-13">
+      <description>
+        <p>This release fixes the streaming recorder and tightens playback controls. Internet-radio recordings are no longer chopped into pieces by a station's self-promo titles — those are now recognised and skipped, so whole songs are saved instead of fragments. Each saved song also keeps a generous, adaptive lead- and tail-in (more when the cut is uncertain, little when it lands cleanly on a silence), so you can trim it precisely in the editor. And app-wide, a play button now only plays: tapping or holding it never also opens the detail view — on touch or with the mouse.</p>
+        <p xml:lang="de">Diese Version repariert die Streaming-Aufnahme und schärft die Wiedergabe-Steuerung. Internetradio-Aufnahmen werden nicht mehr von Eigenwerbe-Titeln der Sender zerstückelt – diese werden jetzt erkannt und übersprungen, sodass ganze Lieder statt Fragmente gespeichert werden. Jedes gespeicherte Lied behält außerdem einen großzügigen, adaptiven Vor- und Nachlauf (mehr bei unsicherem Schnitt, wenig bei sauberem Treffer auf einer Stille), damit du es im Editor präzise zuschneiden kannst. Und app-weit gilt: Ein Play-Button spielt nur ab – Antippen oder langes Drücken öffnet nie zusätzlich die Detailansicht, weder per Touch noch mit der Maus.</p>
+      </description>
+    </release>
     <release version="0.6.2" date="2026-06-11">
       <description>
         <p>This release smooths out everyday control. The top navigation bar now scrolls sideways reliably even when the swipe starts on one of its icons. Media-key and lock-screen (MPRIS) handling is more robust across track changes, and the headphone next/previous buttons now also skip between podcast episodes and radio stations, not just music tracks. In a playlist you can start playback straight from any track you tap.</p>

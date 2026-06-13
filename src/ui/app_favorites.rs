@@ -289,15 +289,10 @@ impl App {
                 let sender = sender.clone();
                 move || sender.input(detail(i))
             });
-            let long_press = gtk::GestureLongPress::new();
-            {
+            crate::ui::app::on_long_press(&row, {
                 let sender = sender.clone();
-                long_press.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(detail(i));
-                });
-            }
-            row.add_controller(long_press);
+                move || sender.input(detail(i))
+            });
 
             list.append(&row);
         }

@@ -340,16 +340,11 @@ impl App {
             let id = m.id;
             move || sender.input(Msg::OpenMemo(id))
         });
-        let lp = gtk::GestureLongPress::new();
-        {
+        crate::ui::app::on_long_press(&row, {
             let sender = sender.clone();
             let id = m.id;
-            lp.connect_pressed(move |g, _, _| {
-                g.set_state(gtk::EventSequenceState::Claimed);
-                sender.input(Msg::OpenMemo(id));
-            });
-        }
-        row.add_controller(lp);
+            move || sender.input(Msg::OpenMemo(id))
+        });
         row
     }
 

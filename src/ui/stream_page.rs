@@ -24,7 +24,7 @@ use crate::core::streaming::StationResult;
 use crate::i18n::{gettext, gettext_f};
 use crate::model::{RecordingItem, StreamItem};
 use crate::ui::app::StreamView;
-use crate::ui::app_helpers::{cover_widget, on_secondary_click};
+use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 
 /// Placeholder icon when a station has no logo.
 const STREAM_ICON: &str = "audio-x-generic-symbolic";
@@ -499,15 +499,10 @@ impl StreamPage {
                 let sender = sender.clone();
                 move || sender.input(StreamInput::OpenStream(id))
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let sender = sender.clone();
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(StreamInput::OpenStream(id));
-                });
-            }
-            row.add_controller(lp);
+                move || sender.input(StreamInput::OpenStream(id))
+            });
             self.streams_list.append(&row);
         }
         self.refresh_stream_icons();
@@ -1003,16 +998,11 @@ impl StreamPage {
                 let id = rec.id;
                 move || sender.input(StreamInput::OpenRecording(id))
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let sender = sender.clone();
                 let id = rec.id;
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(StreamInput::OpenRecording(id));
-                });
-            }
-            row.add_controller(lp);
+                move || sender.input(StreamInput::OpenRecording(id))
+            });
             self.recordings_list.append(&row);
         }
     }

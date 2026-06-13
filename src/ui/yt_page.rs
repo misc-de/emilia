@@ -25,7 +25,7 @@ use crate::core::youtube::{self, YtKind, YtResult};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::YtView;
 use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_secondary_click};
+use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 
 /// How many newest videos to cache per channel on subscribe/refresh.
 pub(crate) const CHANNEL_VIDEO_LIMIT: usize = 30;
@@ -1180,15 +1180,10 @@ impl YtPage {
                 let sender = sender.clone();
                 move || sender.input(YtInput::ShowNewestDetail(i))
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let sender = sender.clone();
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(YtInput::ShowNewestDetail(i));
-                });
-            }
-            row.add_controller(lp);
+                move || sender.input(YtInput::ShowNewestDetail(i))
+            });
             if let Some(g) = &group {
                 g.add(&row);
             }
@@ -1264,18 +1259,15 @@ impl YtPage {
                         });
                     }
                 });
-                let lp = gtk::GestureLongPress::new();
-                {
+                on_long_press(&row, {
                     let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    lp.connect_pressed(move |g, _, _| {
-                        g.set_state(gtk::EventSequenceState::Claimed);
+                    move || {
                         sender.input(YtInput::ShowPlaylistDetail {
                             url: url.clone(),
                             title: t.clone(),
-                        });
-                    });
-                }
-                row.add_controller(lp);
+                        })
+                    }
+                });
                 group.add(&row);
                 continue;
             }
@@ -1308,18 +1300,15 @@ impl YtPage {
                     });
                 }
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
+                move || {
                     sender.input(YtInput::ShowVideoDetail {
                         video_id: vid.clone(),
                         title: t.clone(),
-                    });
-                });
-            }
-            row.add_controller(lp);
+                    })
+                }
+            });
             group.add(&row);
         }
         self.recent_list.append(&group);
@@ -1633,18 +1622,15 @@ impl YtPage {
                     });
                 }
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
+                move || {
                     sender.input(YtInput::ShowVideoDetail {
                         video_id: vid.clone(),
                         title: t.clone(),
-                    });
-                });
-            }
-            row.add_controller(lp);
+                    })
+                }
+            });
             group.add(&row);
         }
         content.append(&group);
@@ -2119,18 +2105,15 @@ impl YtPage {
                     });
                 }
             });
-            let lp = gtk::GestureLongPress::new();
-            {
+            on_long_press(&row, {
                 let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
-                lp.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
+                move || {
                     sender.input(YtInput::ShowVideoDetail {
                         video_id: vid.clone(),
                         title: t.clone(),
-                    });
-                });
-            }
-            row.add_controller(lp);
+                    })
+                }
+            });
             group.add(&row);
         }
         content.append(&group);

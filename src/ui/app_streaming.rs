@@ -73,6 +73,7 @@ impl App {
                     Some(crate::core::recorder::Recorder::start(
                         &st.url,
                         self.streaming.recording_buffer_minutes,
+                        Some(&st.name),
                     ))
                 } else {
                     None
@@ -214,7 +215,8 @@ impl App {
 
         // Collect finished segments (read-only data; no self-mutation): start,
         // end, the raw ICY title, and whether the beginning was missing.
-        let mut segs: Vec<(u64, u64, String, bool)> = Vec::new();
+        // (start, end, raw title, incomplete, lead_pad, tail_pad)
+        let mut segs: Vec<(u64, u64, String, bool, u64, u64)> = Vec::new();
         loop {
             // The song that contains `next_start` …
             let song = match snap
@@ -237,12 +239,19 @@ impl App {
                 break; // still running
             };
             let incomplete = !song.complete || next_start > song.start;
-            segs.push((next_start, end, song.title.clone(), incomplete));
+            segs.push((
+                next_start,
+                end,
+                song.title.clone(),
+                incomplete,
+                song.lead_pad,
+                song.tail_pad,
+            ));
             next_start = end;
         }
 
         let mut saved = 0;
-        for (start, end, raw_title, incomplete) in &segs {
+        for (start, end, raw_title, incomplete, lead_pad, tail_pad) in &segs {
             let ok = if raw_title.trim().is_empty() {
                 // Untitled gap (talk/ads between songs): save to its own file, but
                 // without any song recognition/enrichment.
@@ -252,6 +261,8 @@ impl App {
                     sender,
                     *start,
                     *end,
+                    *lead_pad,
+                    *tail_pad,
                     raw_title,
                     station.as_deref(),
                     *incomplete,
@@ -298,6 +309,8 @@ impl App {
         sender: &ComponentSender<Self>,
         start: u64,
         end: u64,
+        lead_pad: u64,
+        tail_pad: u64,
         raw_title: &str,
         station: Option<&str>,
         incomplete: bool,
@@ -313,7 +326,15 @@ impl App {
             return false;
         };
         let dest = recordings_dir();
-        let path = match rec.save_song(start, end, artist.as_deref(), &title, &dest) {
+        let path = match rec.save_song(
+            start,
+            end,
+            lead_pad,
+            tail_pad,
+            artist.as_deref(),
+            &title,
+            &dest,
+        ) {
             Ok(path) => path,
             Err(e) => {
                 tracing::warn!("Could not save recording: {e}");
@@ -376,7 +397,7 @@ impl App {
         let Some(rec) = self.streaming.recorder.as_ref() else {
             return false;
         };
-        let path = match rec.save_song(start, end, None, &title, &recordings_dir()) {
+        let path = match rec.save_song(start, end, 0, 0, None, &title, &recordings_dir()) {
             Ok(path) => path,
             Err(e) => {
                 tracing::warn!("Could not save gap recording: {e}");
@@ -420,11 +441,23 @@ impl App {
             .find(|s| s.start <= next_start && s.end.is_none());
         let raw_title = live_title.or_else(|| song.map(|s| s.title.clone()));
         let incomplete = song.is_none_or(|s| !s.complete || next_start > s.start);
+        // Lead guard from the song's start boundary; no tail guard — `end` is the
+        // live buffer edge, there is nothing buffered beyond it.
+        let lead_pad = song.map_or(0, |s| s.lead_pad);
         let station = self.stream_name(stream_id);
         match raw_title {
             // A real song still running → save with recognition.
             Some(t) if !t.trim().is_empty() => {
-                self.store_segment(sender, next_start, end, &t, station.as_deref(), incomplete);
+                self.store_segment(
+                    sender,
+                    next_start,
+                    end,
+                    lead_pad,
+                    0,
+                    &t,
+                    station.as_deref(),
+                    incomplete,
+                );
             }
             // A trailing untitled gap (talk/ads) → save plainly.
             Some(_) => {
@@ -633,7 +666,8 @@ impl App {
             .streaming
             .playing_stream
             .and_then(|id| self.stream_name(id));
-        if self.store_segment(sender, start, end, &title, station.as_deref(), false) {
+        // Replay "save" is an exact, user-picked range → no generous guard.
+        if self.store_segment(sender, start, end, 0, 0, &title, station.as_deref(), false) {
             self.sync_live_recording();
         } else {
             self.toast(&gettext("Could not extract from buffer"));

@@ -33,11 +33,59 @@ pub(crate) fn apply_color_scheme(code: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
+/// True if a press at (`x`,`y`) — in `widget`'s coordinates — landed on a
+/// `GtkButton` (or a child of one). Such a press belongs to that button's own
+/// action (play, download, …); a row's detail/context gesture must then stay
+/// silent so the **play button never also opens the detail view**.
+fn press_on_button(widget: &gtk::Widget, x: f64, y: f64) -> bool {
+    match widget.pick(x, y, gtk::PickFlags::DEFAULT) {
+        Some(t) => t.is::<gtk::Button>() || t.ancestor(gtk::Button::static_type()).is_some(),
+        None => false,
+    }
+}
+
+/// Button guard for a gesture handler written inline in a `view!` macro (where
+/// the row widget is not otherwise in scope): true if the press at (`x`,`y`)
+/// landed on a button, so a detail/context gesture should bail. Use this in the
+/// macro form; [`on_long_press`] is the imperative equivalent.
+pub(crate) fn gesture_press_on_button(
+    controller: &impl IsA<gtk::EventController>,
+    x: f64,
+    y: f64,
+) -> bool {
+    controller
+        .widget()
+        .is_some_and(|w| press_on_button(&w, x, y))
+}
+
+/// Attaches a "long press opens the detail/context view" gesture to `widget`,
+/// running `action`. A press that lands on a button (play/download/…) is ignored
+/// so that button's own action takes precedence — tapping/holding a play button
+/// must never also open the detail view. Pair with [`on_secondary_click`] for
+/// the classic-mouse equivalent.
+pub(crate) fn on_long_press<W, F>(widget: &W, action: F)
+where
+    W: IsA<gtk::Widget>,
+    F: Fn() + 'static,
+{
+    let lp = gtk::GestureLongPress::new();
+    let weak = widget.clone().upcast::<gtk::Widget>().downgrade();
+    lp.connect_pressed(move |g, x, y| {
+        if weak.upgrade().is_some_and(|w| press_on_button(&w, x, y)) {
+            return;
+        }
+        g.set_state(gtk::EventSequenceState::Claimed);
+        action();
+    });
+    widget.add_controller(lp);
+}
+
 /// Attaches a right-click (secondary mouse button) handler to `widget`, running
 /// `action`. This is the classic-mouse counterpart to a long press: touch users
 /// long-press a row to open its detail/context view, desktop users right-click.
-/// Mirror every `GestureLongPress` that opens a detail view with one of these so
-/// both input styles behave the same.
+/// Mirror every [`on_long_press`] that opens a detail view with one of these so
+/// both input styles behave the same. A right-click on a button is ignored for
+/// the same reason as in [`on_long_press`].
 pub(crate) fn on_secondary_click<W, F>(widget: &W, action: F)
 where
     W: IsA<gtk::Widget>,
@@ -45,7 +93,11 @@ where
 {
     let click = gtk::GestureClick::new();
     click.set_button(gtk::gdk::BUTTON_SECONDARY);
-    click.connect_pressed(move |g, _, _, _| {
+    let weak = widget.clone().upcast::<gtk::Widget>().downgrade();
+    click.connect_pressed(move |g, _, x, y| {
+        if weak.upgrade().is_some_and(|w| press_on_button(&w, x, y)) {
+            return;
+        }
         g.set_state(gtk::EventSequenceState::Claimed);
         action();
     });
