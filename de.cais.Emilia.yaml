@@ -46,6 +46,8 @@ finish-args:
   # Keys/Tokens wie AcoustID/fanart.tv) werden, wenn verfügbar, über libsecret
   # im Secret Service statt in der lokalen SQLite-Datenbank gespeichert.
   - --talk-name=org.freedesktop.secrets
+  # In-App-Self-Update über das Flatpak-Portal (sandbox-sichere Aktualisierung).
+  - --talk-name=org.freedesktop.portal.Flatpak
   # Kamera-Quelle für den QR-Scan: direkter V4L2-Pfad (dieser Build hat
   # --device=all). Umgeht das Kamera-Portal, das auf Halium die V4L2-Loopbacks
   # nicht zuverlässig exponiert. Auf dem Flathub-Build ist das NICHT gesetzt, dort

@@ -2508,7 +2508,7 @@ msgstr "{fav} Favoriten, {pl} Playlisten, {pod} Podcasts, {st} Stationen, {meta}
 
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
-msgstr "Abo"
+msgstr "Abos"
 
 # --- Memo page + memo-category management (de) ---
 msgid "Created"
@@ -2651,4 +2651,27 @@ msgstr "Wird zur Bibliothek hinzugefügt … ({done}/{total})"
 
 msgid "Saved {n} song(s) to Playlists"
 msgstr "{n} Titel zu den Playlists gespeichert"
+
+
+# --- In-app self-update (de) ---
+msgid "Install update?"
+msgstr "Update installieren?"
+
+msgid "Update Emilia from version {old} to {new}?"
+msgstr "Emilia von Version {old} auf {new} aktualisieren?"
+
+msgid "Downloading update …"
+msgstr "Update wird heruntergeladen …"
+
+msgid "Update is being installed — it takes effect after a restart."
+msgstr "Update wird installiert – beim nächsten Start aktiv."
+
+msgid "Automatic update failed — please run “flatpak update”."
+msgstr "Automatisches Update fehlgeschlagen – bitte „flatpak update“ ausführen."
+
+msgid "Update {v} available"
+msgstr "Update {v} verfügbar"
+
+msgid "A new version is available — click to update"
+msgstr "Eine neue Version ist verfügbar – zum Aktualisieren klicken"
 

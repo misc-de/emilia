@@ -2221,3 +2221,26 @@ msgstr ""
 #: src/ui/yt_page.rs:2451
 msgid "Could not load playlist"
 msgstr ""
+
+# --- In-app self-update ---
+msgid "Install update?"
+msgstr ""
+
+msgid "Update Emilia from version {old} to {new}?"
+msgstr ""
+
+msgid "Downloading update …"
+msgstr ""
+
+msgid "Update is being installed — it takes effect after a restart."
+msgstr ""
+
+msgid "Automatic update failed — please run “flatpak update”."
+msgstr ""
+
+msgid "Update {v} available"
+msgstr ""
+
+msgid "A new version is available — click to update"
+msgstr ""
+

@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.6.5" date="2026-06-13">
+      <description>
+        <p>This release adds in-app self-update for the Flatpak build. When a newer version is published, an “Update x.y.z available” button appears at the top-left of the title bar on the desktop; clicking it asks whether to update from your current version to the new one and installs it via the Flatpak portal (it takes effect after a restart). The podcast subscriptions tab now reads “Abos” in German.</p>
+        <p xml:lang="de">Diese Version bringt ein In-App-Self-Update für den Flatpak-Build. Sobald eine neuere Version veröffentlicht ist, erscheint am Desktop oben links in der Titelleiste ein Knopf „Update x.y.z verfügbar“; ein Klick fragt, ob von der aktuellen auf die neue Version aktualisiert werden soll, und installiert sie über das Flatpak-Portal (aktiv nach einem Neustart). Außerdem heißt der Podcast-Abo-Tab jetzt „Abos“.</p>
+      </description>
+    </release>
     <release version="0.6.4" date="2026-06-13">
       <description>
         <p>This release rounds out voice memos and polishes the interface. Voice-memo categories now have a detail view (long-press or right-click) to rename or remove them; removing one asks whether to delete its memos too or keep them under General, and recording shows a live input-level animation. The equalizer restores your own curve when you switch back to “Custom” after trying a genre preset. Browsed YouTube playlists are cached, so reopening them is instant instead of re-querying. Detail views gained an “Available in” section (formerly “Properties”), the podcast tab is now “Subscribed”, device sharing is now “Connect to share”, and the current section name shows in the title bar on the desktop too. Dialogs now close when you click outside them, and the German translation is complete throughout.</p>
