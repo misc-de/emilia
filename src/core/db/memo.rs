@@ -24,14 +24,15 @@ impl Library {
 
     /// All categories, in manual order (then by id for a stable tiebreak).
     pub fn memo_categories(&self) -> Result<Vec<MemoCategory>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, position FROM memo_category ORDER BY position, id")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, position, created_at FROM memo_category ORDER BY position, id",
+        )?;
         let rows = stmt.query_map([], |r| {
             Ok(MemoCategory {
                 id: r.get(0)?,
                 name: r.get(1)?,
                 position: r.get(2)?,
+                created_at: r.get(3)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -76,6 +77,23 @@ impl Library {
         tx.execute("DELETE FROM memo_category WHERE id = ?1", [id])?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Deletes a category **together with** its memos in one transaction and
+    /// returns the deleted memos' file paths, so the caller can remove the files.
+    /// The counterpart to [`Self::delete_memo_category`], which instead keeps the
+    /// memos (resets them to "General").
+    pub fn delete_memo_category_with_memos(&self, id: i64) -> Result<Vec<String>> {
+        let tx = self.conn.unchecked_transaction()?;
+        let paths: Vec<String> = {
+            let mut stmt = tx.prepare("SELECT path FROM memo WHERE category_id = ?1")?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        tx.execute("DELETE FROM memo WHERE category_id = ?1", [id])?;
+        tx.execute("DELETE FROM memo_category WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(paths)
     }
 
     /// Seeds the starter categories **once**, the first time the app runs. The
@@ -231,6 +249,23 @@ mod tests {
         assert_eq!(lib.memos().unwrap().len(), 2);
         assert_eq!(lib.memos_in_category(None).unwrap().len(), 2);
         assert!(lib.memo_categories().unwrap().iter().all(|c| c.id != idea));
+    }
+
+    #[test]
+    fn delete_category_with_memos_removes_both_and_returns_paths() {
+        let lib = Library::open_in_memory().unwrap();
+        let work = lib.add_memo_category("Work").unwrap();
+        lib.add_memo("/tmp/a.ogg", "Memo A", Some(work), 0).unwrap();
+        lib.add_memo("/tmp/b.ogg", "Memo B", Some(work), 0).unwrap();
+        lib.add_memo("/tmp/c.ogg", "Memo C", None, 0).unwrap();
+
+        let mut paths = lib.delete_memo_category_with_memos(work).unwrap();
+        paths.sort();
+        assert_eq!(paths, vec!["/tmp/a.ogg", "/tmp/b.ogg"]);
+        // The category and its two memos are gone; the unassigned one remains.
+        assert!(lib.memo_categories().unwrap().is_empty());
+        assert_eq!(lib.memos().unwrap().len(), 1);
+        assert_eq!(lib.memos_in_category(None).unwrap().len(), 1);
     }
 
     #[test]

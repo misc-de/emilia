@@ -365,6 +365,34 @@ impl Library {
             .optional()?)
     }
 
+    /// Caches a browsed YouTube playlist's song list (`songs` = JSON) so the next
+    /// open is instant. `fetched_at` is stamped to now for staleness checks.
+    pub fn set_yt_playlist_cache(&self, url: &str, title: &str, songs: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_playlist_cache (url, title, songs, fetched_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(url) DO UPDATE SET
+                 title = excluded.title,
+                 songs = excluded.songs,
+                 fetched_at = excluded.fetched_at",
+            rusqlite::params![url, title, songs],
+        )?;
+        Ok(())
+    }
+
+    /// Cached song list (JSON) of a browsed playlist plus its `fetched_at`
+    /// (Unix seconds), or `None` if never cached.
+    pub fn yt_playlist_cache(&self, url: &str) -> Result<Option<(String, i64)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT songs, fetched_at FROM yt_playlist_cache WHERE url = ?1",
+                [url],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .optional()?)
+    }
+
     /// Id of the mirrored playlist for a given `origin` key (e.g. a YouTube
     /// playlist URL), if any. Never matches user playlists (`origin IS NULL`).
     pub fn yt_playlist_id(&self, origin: &str) -> Result<Option<i64>> {

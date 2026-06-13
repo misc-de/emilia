@@ -286,7 +286,7 @@ impl SyncPage {
         // No fixed content_height: the dialog follows its content's natural
         // height (mode select is short, QR/camera/review grow as needed).
         let dialog = adw::Dialog::builder()
-            .title(gettext("Device sync"))
+            .title(gettext("Connect to share"))
             .content_width(440)
             .build();
         dialog.set_child(Some(&toolbar));
@@ -296,6 +296,7 @@ impl SyncPage {
         }
         self.sub = Some(dialog.clone());
         self.sub_toolbar = Some(toolbar);
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(&window));
     }
 
@@ -321,7 +322,7 @@ impl SyncPage {
 
     /// Mode-selection content (offer a connection / scan a code).
     fn show_mode_select(&mut self, sender: &ComponentSender<Self>) {
-        self.set_title(&gettext("Device sync"));
+        self.set_title(&gettext("Connect to share"));
         let group = adw::PreferencesGroup::builder()
             .description(gettext("Connect two devices on the same network."))
             .build();
@@ -385,7 +386,7 @@ impl SyncPage {
     /// live. Sharing is **not** offered here; it is started per item from a detail
     /// view.
     fn show_connected_panel(&mut self, sender: &ComponentSender<Self>) {
-        self.set_title(&gettext("Device sync"));
+        self.set_title(&gettext("Connect to share"));
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
 
@@ -883,7 +884,7 @@ impl SyncPage {
 
     /// A small "Disconnected" page with a "Connect again" button (→ mode select).
     fn show_disconnected_notice(&mut self, sender: &ComponentSender<Self>) {
-        self.set_title(&gettext("Device sync"));
+        self.set_title(&gettext("Connect to share"));
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
         let label = gtk::Label::builder()
@@ -918,7 +919,7 @@ impl SyncPage {
             return;
         }
         self.ensure_window(sender);
-        self.set_title(&gettext("Device sync"));
+        self.set_title(&gettext("Connect to share"));
         // Brief feedback while hashing runs.
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
@@ -991,7 +992,7 @@ impl SyncPage {
     /// a window is present first.
     fn on_share_offered(&mut self, manifest: ShareManifest, sender: &ComponentSender<Self>) {
         self.ensure_window(sender);
-        self.set_title(&gettext("Device sync"));
+        self.set_title(&gettext("Connect to share"));
         let reviews = share::review_files(&self.library, &manifest);
         let yt = self.youtube_enabled();
         let (page, handles) = build_review(&manifest, &reviews, yt, sender);

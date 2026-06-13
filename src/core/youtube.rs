@@ -148,7 +148,7 @@ fn set_executable(_path: &Path) -> Result<()> {
 }
 
 /// What a search/listing hit represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum YtKind {
     Video,
     Playlist,
@@ -156,8 +156,10 @@ pub enum YtKind {
 }
 
 /// A single search or listing result: enough to display it and act on it
-/// (subscribe a channel, open a playlist, play/add a video).
-#[derive(Debug, Clone)]
+/// (subscribe a channel, open a playlist, play/add a video). Serializable so a
+/// fetched playlist's song list can be cached in the DB (see
+/// `Library::set_yt_playlist_cache`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct YtResult {
     pub kind: YtKind,
     /// Video id | playlist id | channel id (or handle) – stable identifier.

@@ -13,7 +13,8 @@
 //! new codec work.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
 use gstreamer as gst;
@@ -46,6 +47,11 @@ pub struct MicRecorder {
     /// Set once [`stop`](Self::stop) has taken over teardown, so `Drop` does not
     /// also delete the (now finalized) file.
     stopped: bool,
+    /// Current input level, normalized 0.0–1.0, stored as `f32` bits. Fed from
+    /// the pipeline's `level` element via a bus sync handler (off the UI thread);
+    /// the UI polls it (via [`level_handle`](Self::level_handle) + [`level_from`])
+    /// to drive the recording animation.
+    level: Arc<AtomicU32>,
 }
 
 impl MicRecorder {
@@ -65,18 +71,51 @@ impl MicRecorder {
         let path = unique_path(dest_dir, &format!("memo-{stamp}-{n}"), EXT);
 
         // `name=micsrc` so `stop` can send EOS straight to the source (most
-        // reliable way to finalize a live capture).
-        let desc = format!(
+        // reliable way to finalize a live capture). The `level` element posts
+        // periodic peak/RMS messages that drive the recording animation; if that
+        // plugin is unavailable we fall back to a plain pipeline (no animation,
+        // but recording still works).
+        let with_level = format!(
+            "autoaudiosrc name=micsrc ! audioconvert ! level name=lvl interval=50000000 \
+             post-messages=true ! audioresample ! {ENC} ! filesink name=sink"
+        );
+        let plain = format!(
             "autoaudiosrc name=micsrc ! audioconvert ! audioresample ! {ENC} ! filesink name=sink"
         );
-        let pipeline = gst::parse::launch(&desc)
-            .context("building the microphone pipeline failed")?
-            .downcast::<gst::Pipeline>()
-            .map_err(|_| anyhow!("not a pipeline"))?;
+        let pipeline = match gst::parse::launch(&with_level) {
+            Ok(p) => p,
+            Err(_) => {
+                gst::parse::launch(&plain).context("building the microphone pipeline failed")?
+            }
+        }
+        .downcast::<gst::Pipeline>()
+        .map_err(|_| anyhow!("not a pipeline"))?;
         pipeline
             .by_name("sink")
             .context("no filesink")?
             .set_property("location", path.to_string_lossy().as_ref());
+
+        // Mirror the `level` element's peak readings into a shared atomic. The
+        // handler runs on GStreamer's thread, so it only does cheap, lock-free
+        // work; the frequent level messages are dropped (not queued) while
+        // EOS/Error still reach `stop`'s bus wait via `Pass`.
+        let level = Arc::new(AtomicU32::new(0));
+        if let Some(bus) = pipeline.bus() {
+            let level_w = level.clone();
+            bus.set_sync_handler(move |_, msg| {
+                if let gst::MessageView::Element(el) = msg.view() {
+                    if let Some(s) = el.structure() {
+                        if s.name() == "level" {
+                            if let Ok(peaks) = s.get::<gst::glib::ValueArray>("peak") {
+                                level_w.store(peak_to_norm(&peaks).to_bits(), Ordering::Relaxed);
+                            }
+                            return gst::BusSyncReply::Drop;
+                        }
+                    }
+                }
+                gst::BusSyncReply::Pass
+            });
+        }
 
         // For a live source `Async` is a normal result; only a hard error means
         // the microphone is unavailable. Never panic — the caller toasts.
@@ -90,7 +129,15 @@ impl MicRecorder {
             pipeline,
             path,
             stopped: false,
+            level,
         })
+    }
+
+    /// A cloneable handle to the live input level (normalized 0.0–1.0), so a UI
+    /// poll timeout can read it without holding the recorder. Decode it with
+    /// [`level_from`]. Stays 0 while the `level` element is unavailable.
+    pub fn level_handle(&self) -> Arc<AtomicU32> {
+        self.level.clone()
     }
 
     /// Stops and **finalizes** the recording: sends EOS, waits for it to reach
@@ -144,6 +191,29 @@ impl Drop for MicRecorder {
         let _ = self.pipeline.set_state(gst::State::Null);
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// Decodes a level handle (see [`MicRecorder::level_handle`]) into a 0.0–1.0
+/// magnitude, so callers need not know it is `f32`-bits in an atomic.
+pub fn level_from(handle: &AtomicU32) -> f32 {
+    f32::from_bits(handle.load(Ordering::Relaxed))
+}
+
+/// Maps the `level` element's per-channel peak values (dBFS, ≤ 0) to a single
+/// normalized 0.0–1.0 magnitude. Takes the loudest channel and folds the usual
+/// ~-60 dB noise floor up to 0, so quiet rooms read near 0 and speech swings the
+/// meter clearly.
+fn peak_to_norm(peaks: &[gst::glib::Value]) -> f32 {
+    const FLOOR_DB: f64 = -60.0;
+    let max_db = peaks
+        .iter()
+        .filter_map(|v| v.get::<f64>().ok())
+        .filter(|db| db.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max);
+    if !max_db.is_finite() {
+        return 0.0;
+    }
+    (((max_db - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)) as f32
 }
 
 /// Finds a free `<dir>/<base>.<ext>` (appends ` (2)`, … if needed), mirroring the

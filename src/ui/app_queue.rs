@@ -90,6 +90,7 @@ impl App {
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&scroller));
         dialog.set_child(Some(&toolbar));
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
     }
 

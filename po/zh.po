@@ -1802,3 +1802,7 @@ msgstr "用麦克风录制的快速语音备忘。"
 
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "收听统计以及你最常播放的艺术家和曲目。"
+
+# --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
+msgid "Subscribed"
+msgstr "订阅"

@@ -1826,3 +1826,7 @@ msgstr "Maelezo ya sauti ya haraka yaliyorekodiwa kwa maikrofoni."
 
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "Takwimu za kusikiliza na wasanii na nyimbo unazocheza zaidi."
+
+# --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
+msgid "Subscribed"
+msgstr "Usajili"

@@ -356,6 +356,7 @@ impl App {
             let ctx_play = self.nav.ctx_play.clone();
             dialog.connect_closed(move |_| *ctx_play.borrow_mut() = None);
         }
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
     }
 
@@ -662,6 +663,7 @@ impl App {
             }
         });
 
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
         entry.grab_focus();
     }

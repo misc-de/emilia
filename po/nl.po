@@ -1825,3 +1825,7 @@ msgstr "Snelle spraaknotities opgenomen met de microfoon."
 
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "Luisterstatistieken en je meest afgespeelde artiesten en nummers."
+
+# --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
+msgid "Subscribed"
+msgstr "Abonnementen"

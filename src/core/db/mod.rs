@@ -530,6 +530,17 @@ impl Library {
                 title    TEXT NOT NULL,
                 duration INTEGER
             );
+            -- Cache of a browsed (not "saved") YouTube playlist's song list, so
+            -- reopening it is instant instead of re-querying YouTube every time.
+            -- `songs` is the JSON-serialized result list; `fetched_at` (Unix
+            -- seconds) drives a staleness-gated background refresh. Saved
+            -- playlists use the `playlist` mirror instead (origin = url).
+            CREATE TABLE IF NOT EXISTS yt_playlist_cache (
+                url        TEXT PRIMARY KEY,
+                title      TEXT NOT NULL,
+                songs      TEXT NOT NULL,
+                fetched_at INTEGER NOT NULL
+            );
 
             -- Lyrics cache, keyed by track path. `source` distinguishes embedded
             -- tags from an online (LRCLIB) fetch; a row with source='none' is a
@@ -1968,6 +1979,24 @@ mod tests {
             vec!["song/mine.mp3".to_string()]
         );
         assert_eq!(lib.playlists().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn yt_playlist_cache_roundtrips_and_upserts() {
+        let lib = Library::open_in_memory().unwrap();
+        let url = "https://www.youtube.com/playlist?list=PLcache";
+        assert!(lib.yt_playlist_cache(url).unwrap().is_none());
+
+        lib.set_yt_playlist_cache(url, "Mix", "[1,2,3]").unwrap();
+        let (songs, fetched_at) = lib.yt_playlist_cache(url).unwrap().unwrap();
+        assert_eq!(songs, "[1,2,3]");
+        assert!(fetched_at > 0);
+
+        // Re-caching the same url replaces the songs in place (no duplicate row).
+        lib.set_yt_playlist_cache(url, "Mix", "[4]").unwrap();
+        assert_eq!(lib.yt_playlist_cache(url).unwrap().unwrap().0, "[4]");
+        // It is a plain cache, never a visible playlist.
+        assert!(lib.playlists().unwrap().is_empty());
     }
 
     #[test]

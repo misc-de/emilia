@@ -157,6 +157,7 @@ impl App {
         toolbar.set_content(Some(&scroller));
         toolbar.add_bottom_bar(&bottom);
         dialog.set_child(Some(&toolbar));
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
     }
 

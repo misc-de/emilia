@@ -1848,3 +1848,7 @@ msgstr "ملاحظات صوتية سريعة مسجَّلة بالميكروفو
 
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "إحصاءات الاستماع وأكثر الفنانين والمقاطع تشغيلًا لديك."
+
+# --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
+msgid "Subscribed"
+msgstr "الاشتراكات"

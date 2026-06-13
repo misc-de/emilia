@@ -249,6 +249,9 @@ pub struct MemoCategory {
     pub name: String,
     /// Manual sort order (`ORDER BY position`).
     pub position: i64,
+    /// Creation time (Unix seconds), or `None` for rows seeded before the column
+    /// existed. Shown in the category detail view ("Created").
+    pub created_at: Option<i64>,
 }
 
 /// A voice memo (microphone recording). Stored as an audio file at `path`; here

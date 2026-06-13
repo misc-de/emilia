@@ -240,6 +240,7 @@ impl CloudPage {
             let sender = sender.clone();
             dialog.connect_closed(move |_| sender.input(CloudInput::Closed));
         }
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(window));
 
         self.cam = Some(cam);

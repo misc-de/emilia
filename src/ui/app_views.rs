@@ -2180,8 +2180,8 @@ impl App {
         }
     }
 
-    /// "Properties" group of the detail target: multiple selection of the areas in
-    /// which the content appears (empty = hidden). It is set at the
+    /// "Available in" group of the detail target: multiple selection of the areas
+    /// in which the content appears (empty = hidden). It is set at the
     /// appropriate level (track/album/artist); inheritance is handled by
     /// `resolve_areas`.
     pub(crate) fn ctx_merkmale(
@@ -2263,7 +2263,7 @@ impl App {
         );
         let group = adw::PreferencesGroup::builder().build();
         let expander = adw::ExpanderRow::builder()
-            .title(gettext("Properties"))
+            .title(gettext("Available in"))
             .build();
         let active: Vec<String> = visible_areas
             .iter()

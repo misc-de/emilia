@@ -22,6 +22,41 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
+/// Makes an `adw::Dialog` dismiss when the user clicks/taps the dimmed area
+/// outside its content. By default AdwDialog only closes via Escape, its close
+/// button, or a bottom-sheet swipe — not by clicking next to it; this restores
+/// the familiar click-away dismissal. Honors `can-close`, so a dialog that
+/// blocks closing (e.g. the first-run setup) is unaffected.
+pub(crate) fn close_on_click_outside(dialog: &adw::Dialog) {
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
+    let weak = dialog.downgrade();
+    click.connect_released(move |_gesture, _n, x, y| {
+        let Some(dialog) = weak.upgrade() else {
+            return;
+        };
+        if !dialog.can_close() {
+            return;
+        }
+        // Without an explicit content child (e.g. AlertDialog/PreferencesDialog,
+        // which lay out internally) we can't tell inside from outside — leave
+        // those to their own dismissal so we never close them on a content click.
+        let Some(content) = dialog.child() else {
+            return;
+        };
+        // Close only when the release landed outside the content (on the
+        // backdrop): the picked widget is then neither the content nor one of
+        // its descendants.
+        let inside = dialog
+            .pick(x, y, gtk::PickFlags::DEFAULT)
+            .is_some_and(|w| w == content || w.is_ancestor(&content));
+        if !inside {
+            dialog.close();
+        }
+    });
+    dialog.add_controller(click);
+}
+
 /// Applies the color scheme ("system"/"dark"/"light") via the global
 /// libadwaita StyleManager. "system" follows the desktop setting.
 pub(crate) fn apply_color_scheme(code: &str) {

@@ -2505,3 +2505,150 @@ msgstr "Die Kamera auf den QR-Code richten – oder unten einen Kopplungscode ei
 # --- Sync detail-share: extended receive summary ---
 msgid "Received {fav} favorites, {pl} playlists, {pod} podcasts, {st} stations, {meta} covers/photos."
 msgstr "{fav} Favoriten, {pl} Playlisten, {pod} Podcasts, {st} Stationen, {meta} Cover/Fotos empfangen."
+
+# --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
+msgid "Subscribed"
+msgstr "Abo"
+
+# --- Memo page + memo-category management (de) ---
+msgid "Created"
+msgstr "Angelegt"
+
+msgid "Remove category"
+msgstr "Kategorie entfernen"
+
+msgid "Rename category"
+msgstr "Kategorie umbenennen"
+
+msgid "Delete this category?"
+msgstr "Diese Kategorie löschen?"
+
+msgid "Delete the memos too?"
+msgstr "Memos auch löschen?"
+
+msgid "Move to General"
+msgstr "Nach Allgemein verschieben"
+
+msgid "Delete memos"
+msgstr "Memos löschen"
+
+msgid "Category removed"
+msgstr "Kategorie entfernt"
+
+msgid "Available in"
+msgstr "Verfügbar in"
+
+msgid "Recording level"
+msgstr "Aufnahmepegel"
+
+msgid "General"
+msgstr "Allgemein"
+
+msgid "New category"
+msgstr "Neue Kategorie"
+
+msgid "Category"
+msgstr "Kategorie"
+
+msgid "Delete memo"
+msgstr "Memo löschen"
+
+msgid "Delete this memo?"
+msgstr "Dieses Memo löschen?"
+
+msgid "Memo deleted"
+msgstr "Memo gelöscht"
+
+msgid "Rename memo"
+msgstr "Memo umbenennen"
+
+msgid "Microphone not available"
+msgstr "Mikrofon nicht verfügbar"
+
+msgid "Memo"
+msgstr "Memo"
+
+msgid "{n} memo"
+msgid_plural "{n} memos"
+msgstr[0] "{n} Memo"
+msgstr[1] "{n} Memos"
+
+msgid "The category contains {n} memo. Delete it too, or move it to General?"
+msgid_plural "The category contains {n} memos. Delete them too, or move them to General?"
+msgstr[0] "Die Kategorie enthält {n} Memo. Auch löschen oder nach Allgemein verschieben?"
+msgstr[1] "Die Kategorie enthält {n} Memos. Auch löschen oder nach Allgemein verschieben?"
+
+
+# --- i18n sweep 2026-06-13: newer UI strings (memo edit, lyrics, karaoke, sync) ---
+msgid "Use the microphone button in the player bar to record a voice memo."
+msgstr "Über die Mikrofon-Schaltfläche in der Player-Leiste eine Sprachnotiz aufnehmen."
+
+msgid "Stop the voice memo"
+msgstr "Aufnahme stoppen"
+
+msgid "Record a voice memo"
+msgstr "Memo aufnehmen"
+
+msgid "Idea"
+msgstr "Idee"
+
+msgid "Task"
+msgstr "Aufgabe"
+
+msgid "Talk"
+msgstr "Gespräch"
+
+msgid "Karaoke"
+msgstr "Karaoke"
+
+msgid "Timed highlighting — turn off if the timing is wrong"
+msgstr "Zeitgesteuerte Hervorhebung — abschalten, wenn das Timing nicht stimmt"
+
+msgid "Karaoke timing offset"
+msgstr "Karaoke-Timing-Versatz"
+
+msgid "Connect to share"
+msgstr "Verbinden um zu Teilen"
+
+msgid "Add category"
+msgstr "Kategorie hinzufügen"
+
+msgid "No memos yet"
+msgstr "Noch keine Memos"
+
+msgid "Show album"
+msgstr "Album anzeigen"
+
+msgid "Memo edited"
+msgstr "Memo bearbeitet"
+
+msgid "Editing failed"
+msgstr "Bearbeiten fehlgeschlagen"
+
+msgid "Memo saved"
+msgstr "Memo gespeichert"
+
+msgid "Recording failed"
+msgstr "Aufnahme fehlgeschlagen"
+
+msgid "Lyrics earlier"
+msgstr "Liedtext früher"
+
+msgid "Lyrics later"
+msgstr "Liedtext später"
+
+msgid "Save name"
+msgstr "Name speichern"
+
+msgid "Edit memo"
+msgstr "Memo bearbeiten"
+
+msgid "Editing …"
+msgstr "Wird bearbeitet …"
+
+msgid "Adding to library … ({done}/{total})"
+msgstr "Wird zur Bibliothek hinzugefügt … ({done}/{total})"
+
+msgid "Saved {n} song(s) to Playlists"
+msgstr "{n} Titel zu den Playlists gespeichert"
+

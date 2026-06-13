@@ -31,6 +31,9 @@ use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 pub(crate) const CHANNEL_VIDEO_LIMIT: usize = 30;
 /// Upper bound of videos indexed when adding a whole playlist to the collection.
 const PLAYLIST_INDEX_LIMIT: usize = 200;
+/// How long a cached browsed-playlist song list is served as-is before a
+/// background refresh is kicked off on the next open (6 hours).
+const PLAYLIST_CACHE_TTL_SECS: i64 = 6 * 60 * 60;
 
 /// Outcome of a library-add attempt: the file was written, or the destination
 /// already holds a (different) file and the user must decide whether to overwrite.
@@ -144,6 +147,7 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
     dialog.set_content_width(600);
+    crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
 }
 
@@ -466,6 +470,13 @@ pub(crate) enum YtCmd {
         dest: String,
     },
     PlaylistSongs {
+        url: String,
+        title: String,
+        result: Result<Vec<YtResult>, String>,
+    },
+    /// A stale cached playlist was re-fetched in the background: refresh the DB
+    /// cache silently (no UI), so the *next* open shows fresh songs.
+    PlaylistCacheRefreshed {
         url: String,
         title: String,
         result: Result<Vec<YtResult>, String>,
@@ -947,6 +958,9 @@ impl Component for YtPage {
             YtCmd::PlaylistSongs { url, title, result } => {
                 self.on_cmd_yt_playlist_songs(&sender, url, title, result)
             }
+            YtCmd::PlaylistCacheRefreshed { url, title, result } => {
+                self.on_cmd_yt_playlist_cache_refreshed(url, title, result)
+            }
             YtCmd::PlaylistCoversReady => self.on_cmd_yt_playlist_covers_ready(),
             YtCmd::PlaylistSaved(result) => {
                 let _ = sender.output(YtOutput::PlaylistsChanged);
@@ -1340,7 +1354,9 @@ impl YtPage {
             .margin_bottom(6)
             .build();
         let b_video = gtk::ToggleButton::builder()
-            .label(gettext("Videos"))
+            // Labelled "Songs" (de "Lieder"): in this music app the video search
+            // is used to find songs. It still searches YtKind::Video.
+            .label(gettext("Songs"))
             .active(true)
             .build();
         let b_playlist = gtk::ToggleButton::builder()
@@ -2373,21 +2389,57 @@ impl YtPage {
         });
     }
 
-    /// Open a recent playlist's song list (DB mirror → session cache → fetch).
+    /// Open a recent playlist's song list:
+    /// saved DB mirror → session cache → **persistent DB cache** → fetch.
+    /// Serving from the DB cache is instant (no YouTube round-trip); if that
+    /// cache is stale it is refreshed in the background for the next open.
     fn yt_open_recent_playlist(
         &mut self,
         sender: &ComponentSender<Self>,
         url: String,
         title: String,
     ) {
-        match self.library.yt_playlist_id(&url) {
-            Ok(Some(id)) => {
-                let _ = sender.output(YtOutput::OpenPlaylist { id, name: title });
+        // A "saved" playlist (Add to Playlists) opens its local mirror directly.
+        if let Ok(Some(id)) = self.library.yt_playlist_id(&url) {
+            let _ = sender.output(YtOutput::OpenPlaylist { id, name: title });
+            return;
+        }
+        // Already fetched this session → show immediately.
+        if let Some(videos) = self.playlist_songs_cache.get(&url).cloned() {
+            self.show_yt_playlist_songs(sender, &url, &title, videos);
+            return;
+        }
+        // Persisted from an earlier session → show instantly from the DB cache,
+        // and refresh in the background if it has gone stale.
+        if let Ok(Some((json, fetched_at))) = self.library.yt_playlist_cache(&url) {
+            if let Ok(videos) = serde_json::from_str::<Vec<YtResult>>(&json) {
+                self.playlist_songs_cache
+                    .insert(url.clone(), videos.clone());
+                self.show_yt_playlist_songs(sender, &url, &title, videos);
+                if crate::ui::app_helpers::unix_now().saturating_sub(fetched_at)
+                    > PLAYLIST_CACHE_TTL_SECS
+                {
+                    let (url, title) = (url.clone(), title.clone());
+                    sender.spawn_command(move |out| {
+                        let result = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
+                            .map_err(|e| e.to_string());
+                        let _ = out.send(YtCmd::PlaylistCacheRefreshed { url, title, result });
+                    });
+                }
+                return;
             }
-            _ => match self.playlist_songs_cache.get(&url).cloned() {
-                Some(videos) => self.show_yt_playlist_songs(sender, &url, &title, videos),
-                None => self.yt_open_playlist_songs(sender, url, title),
-            },
+        }
+        // Never seen → fetch (the result is cached on arrival).
+        self.yt_open_playlist_songs(sender, url, title);
+    }
+
+    /// Serializes a playlist's song list into the persistent DB cache (best
+    /// effort: a serialization/DB error just skips the cache, never blocks).
+    fn cache_playlist_songs(&self, url: &str, title: &str, videos: &[YtResult]) {
+        if let Ok(json) = serde_json::to_string(videos) {
+            if let Err(e) = self.library.set_yt_playlist_cache(url, title, &json) {
+                tracing::warn!("caching playlist {url} failed: {e}");
+            }
         }
     }
 
@@ -2442,6 +2494,7 @@ impl YtPage {
         let _ = sender.output(YtOutput::SetLoading(None));
         match result {
             Ok(videos) => {
+                self.cache_playlist_songs(&url, &title, &videos);
                 self.playlist_songs_cache
                     .insert(url.clone(), videos.clone());
                 self.show_yt_playlist_songs(sender, &url, &title, videos);
@@ -2450,6 +2503,24 @@ impl YtPage {
                 tracing::warn!("yt playlist load failed: {e}");
                 let _ = sender.output(YtOutput::Toast(gettext("Could not load playlist")));
             }
+        }
+    }
+
+    /// Worker result: a stale cached playlist's background refresh finished →
+    /// update the persistent + session caches silently (no UI change; the fresh
+    /// list shows on the next open).
+    fn on_cmd_yt_playlist_cache_refreshed(
+        &mut self,
+        url: String,
+        title: String,
+        result: Result<Vec<YtResult>, String>,
+    ) {
+        match result {
+            Ok(videos) => {
+                self.cache_playlist_songs(&url, &title, &videos);
+                self.playlist_songs_cache.insert(url, videos);
+            }
+            Err(e) => tracing::warn!("yt playlist background refresh failed: {e}"),
         }
     }
 

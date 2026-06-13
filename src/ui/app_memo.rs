@@ -9,12 +9,15 @@
 //! button lives in the player bar (built in `app.rs`). New memos start
 //! uncategorised ("General"); a category is assigned afterwards.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::mic::MicRecorder;
-use crate::i18n::gettext;
+use crate::i18n::{gettext, ngettext_n};
 use crate::model::{MemoCategory, MemoItem};
 use crate::ui::app::{fmt_duration, App, MemoView, Msg};
 
@@ -33,12 +36,30 @@ pub(crate) struct MemoState {
     /// Whether a recording is in progress (drives the `#[watch]` player-bar
     /// record button without borrowing the recorder).
     pub(crate) recording: bool,
+    /// Live input level (0.0–1.0), smoothed for the recording meter; read by the
+    /// meter's draw function, written by the poll timeout while recording.
+    pub(crate) rec_level: Rc<Cell<f32>>,
+    /// Frame counter giving the meter bars some life even at a steady level.
+    rec_frame: Rc<Cell<u32>>,
+    /// The recording-level meter (equalizer bars), redrawn each poll tick.
+    pub(crate) rec_meter: gtk::DrawingArea,
+    /// The running poll timeout while recording; removed on stop.
+    rec_tick: Option<gtk::glib::SourceId>,
 }
 
 impl MemoState {
-    /// Initial (empty) state. `memos_list` is the widget bound by `#[local_ref]`
-    /// in the view macro.
-    pub(crate) fn new(memos_list: gtk::ListBox) -> Self {
+    /// Initial (empty) state. `memos_list` and `rec_meter` are the widgets bound
+    /// by `#[local_ref]` in the view macro; the meter's draw function is wired up
+    /// here against the shared level/frame cells.
+    pub(crate) fn new(memos_list: gtk::ListBox, rec_meter: gtk::DrawingArea) -> Self {
+        let rec_level = Rc::new(Cell::new(0.0_f32));
+        let rec_frame = Rc::new(Cell::new(0_u32));
+        {
+            let (lvl, frame) = (rec_level.clone(), rec_frame.clone());
+            rec_meter.set_draw_func(move |_, cr, w, h| {
+                draw_meter(cr, w, h, lvl.get(), frame.get());
+            });
+        }
         MemoState {
             memo_items: Vec::new(),
             categories: Vec::new(),
@@ -46,6 +67,10 @@ impl MemoState {
             memos_list,
             recorder: None,
             recording: false,
+            rec_level,
+            rec_frame,
+            rec_meter,
+            rec_tick: None,
         }
     }
 }
@@ -106,6 +131,7 @@ fn present_dialog(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
     dialog.set_content_width(600);
+    crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
 }
 
@@ -155,6 +181,7 @@ impl App {
     fn start_memo_record(&mut self) {
         match MicRecorder::start(&crate::core::mic::memos_dir()) {
             Ok(rec) => {
+                self.start_rec_meter(rec.level_handle());
                 self.memo.recorder = Some(rec);
                 self.memo.recording = true;
                 self.toast(&gettext("Recording …"));
@@ -166,6 +193,41 @@ impl App {
         }
     }
 
+    /// Polls the live mic level (~30 fps) and redraws the meter while recording.
+    /// Fast attack / slow release keeps the bars lively without flicker.
+    fn start_rec_meter(&mut self, handle: std::sync::Arc<std::sync::atomic::AtomicU32>) {
+        self.stop_rec_meter();
+        let (level, frame, meter) = (
+            self.memo.rec_level.clone(),
+            self.memo.rec_frame.clone(),
+            self.memo.rec_meter.clone(),
+        );
+        let id = gtk::glib::timeout_add_local(std::time::Duration::from_millis(33), move || {
+            let raw = crate::core::mic::level_from(&handle);
+            let prev = level.get();
+            // Jump up instantly, ease down gently.
+            let smoothed = if raw > prev {
+                raw
+            } else {
+                prev * 0.80 + raw * 0.20
+            };
+            level.set(smoothed);
+            frame.set(frame.get().wrapping_add(1));
+            meter.queue_draw();
+            gtk::glib::ControlFlow::Continue
+        });
+        self.memo.rec_tick = Some(id);
+    }
+
+    /// Stops the meter poll and clears the level so the next recording starts flat.
+    fn stop_rec_meter(&mut self) {
+        if let Some(id) = self.memo.rec_tick.take() {
+            id.remove();
+        }
+        self.memo.rec_level.set(0.0);
+        self.memo.rec_meter.queue_draw();
+    }
+
     /// Stops the recording and finalizes the file off-thread (the EOS wait would
     /// otherwise block the UI); the result arrives as [`Msg::MemoRecordSaved`].
     fn stop_memo_record(&mut self, sender: &ComponentSender<Self>) {
@@ -173,6 +235,7 @@ impl App {
             return;
         };
         self.memo.recording = false;
+        self.stop_rec_meter();
         let (tx, rx) = async_channel::bounded(1);
         std::thread::spawn(move || {
             let _ = tx.send_blocking(rec.stop());
@@ -271,6 +334,18 @@ impl App {
             for m in &items {
                 exp.add_row(&self.build_memo_row(m, sender, false));
             }
+            // Long press (touch) / right click (mouse) → category detail dialog.
+            // Only real categories carry this; the "General" node above is a label
+            // for the unassigned memos and cannot be edited or removed.
+            let cid = c.id;
+            crate::ui::app::on_secondary_click(&exp, {
+                let sender = sender.clone();
+                move || sender.input(Msg::OpenMemoCategory(cid))
+            });
+            crate::ui::app::on_long_press(&exp, {
+                let sender = sender.clone();
+                move || sender.input(Msg::OpenMemoCategory(cid))
+            });
             self.memo.memos_list.append(&exp);
         }
     }
@@ -522,6 +597,158 @@ impl App {
         content.append(&actions);
 
         present_dialog(&dialog, &content, root);
+    }
+
+    /// Detail dialog of a memo category: metadata (creation date, memo count),
+    /// rename, and remove (with the two-step delete flow). Reached via long
+    /// press / right click on a category node in the Category tree.
+    pub(crate) fn open_memo_category(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        id: i64,
+    ) {
+        let Some(c) = self.memo.categories.iter().find(|c| c.id == id).cloned() else {
+            return;
+        };
+        let count = self
+            .memo
+            .memo_items
+            .iter()
+            .filter(|m| m.category_id == Some(id))
+            .count();
+
+        let dialog = adw::Dialog::builder()
+            .title(gtk::glib::markup_escape_text(&c.name))
+            .build();
+        self.adapt_detail_dialog(&dialog);
+        let content = detail_box();
+
+        // Header: name + how many memos the category holds.
+        let info = adw::PreferencesGroup::new();
+        let head = adw::ActionRow::builder()
+            .title(gtk::glib::markup_escape_text(&c.name))
+            .subtitle(ngettext_n("{n} memo", "{n} memos", count as u32))
+            .build();
+        head.add_prefix(&gtk::Image::from_icon_name("folder-symbolic"));
+        info.add(&head);
+        content.append(&info);
+
+        // Metadata: creation date (only if known — older rows may lack it).
+        if let Some(created) = c.created_at {
+            let details = adw::PreferencesGroup::new();
+            let row = adw::ActionRow::builder().title(gettext("Created")).build();
+            row.set_subtitle(&fmt_datetime(created));
+            row.add_css_class("property");
+            details.add(&row);
+            content.append(&details);
+        }
+
+        // Actions: rename + remove.
+        let actions = adw::PreferencesGroup::new();
+        let rename = action_row(&gettext("Rename"), "text-editor-symbolic");
+        {
+            let (sender, dialog, root, cur) =
+                (sender.clone(), dialog.clone(), root.clone(), c.name.clone());
+            rename.connect_activated(move |_| {
+                dialog.close();
+                let sender = sender.clone();
+                prompt_text(
+                    &root,
+                    &gettext("Rename category"),
+                    &cur,
+                    &gettext("Rename"),
+                    move |name| sender.input(Msg::MemoCategoryRename { id, name }),
+                );
+            });
+        }
+        actions.add(&rename);
+        let remove = action_row(&gettext("Remove category"), "user-trash-symbolic");
+        {
+            let (sender, dialog, root) = (sender.clone(), dialog.clone(), root.clone());
+            remove.connect_activated(move |_| {
+                dialog.close();
+                confirm_remove_category(&root, &sender, id, count);
+            });
+        }
+        actions.add(&remove);
+        content.append(&actions);
+
+        present_dialog(&dialog, &content, root);
+    }
+}
+
+/// Two-step delete confirmation for a category. First asks whether to delete at
+/// all; if the category still holds memos, a second dialog asks whether the
+/// memos should be deleted too or kept (moved to "General").
+fn confirm_remove_category(
+    root: &adw::ApplicationWindow,
+    sender: &ComponentSender<App>,
+    id: i64,
+    count: usize,
+) {
+    let first = adw::AlertDialog::new(Some(&gettext("Delete this category?")), None);
+    first.add_response("cancel", &gettext("Cancel"));
+    first.add_response("ok", &gettext("Delete"));
+    first.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
+    first.set_default_response(Some("cancel"));
+    first.set_close_response("cancel");
+    let sender = sender.clone();
+    let parent = root.clone();
+    first.connect_response(None, move |_, resp| {
+        if resp != "ok" {
+            return;
+        }
+        // No memos → nothing to ask, just remove the (empty) category.
+        if count == 0 {
+            sender.input(Msg::MemoCategoryDeleteKeepMemos(id));
+            return;
+        }
+        // Memos present → ask whether to delete them too or keep them (General).
+        let body = ngettext_n(
+            "The category contains {n} memo. Delete it too, or move it to General?",
+            "The category contains {n} memos. Delete them too, or move them to General?",
+            count as u32,
+        );
+        let second = adw::AlertDialog::new(Some(&gettext("Delete the memos too?")), Some(&body));
+        second.add_response("cancel", &gettext("Cancel"));
+        second.add_response("general", &gettext("Move to General"));
+        second.add_response("delete", &gettext("Delete memos"));
+        second.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        second.set_default_response(Some("general"));
+        second.set_close_response("cancel");
+        let sender = sender.clone();
+        second.connect_response(None, move |_, resp| match resp {
+            "general" => sender.input(Msg::MemoCategoryDeleteKeepMemos(id)),
+            "delete" => sender.input(Msg::MemoCategoryDeleteWithMemos(id)),
+            _ => {}
+        });
+        second.present(Some(&parent));
+    });
+    first.present(Some(root));
+}
+
+/// Draws the recording level meter: a small row of equalizer bars whose height
+/// follows the live input `level` (0.0–1.0), with a per-bar sine wobble (driven
+/// by `frame`) so it stays animated even at a steady volume. Red, to match the
+/// recording state. Quiet input collapses the bars to a thin baseline.
+fn draw_meter(cr: &gtk::cairo::Context, w: i32, h: i32, level: f32, frame: u32) {
+    const BARS: usize = 7;
+    const GAP: f64 = 3.0;
+    let (w, h) = (w as f64, h as f64);
+    let bar_w = ((w - GAP * (BARS as f64 - 1.0)) / BARS as f64).max(1.0);
+    let level = level.clamp(0.0, 1.0) as f64;
+    for i in 0..BARS {
+        // Slow sine offset per bar → an equalizer-like ripple, scaled by level.
+        let phase = frame as f64 * 0.30 + i as f64 * 0.9;
+        let wobble = 0.55 + 0.45 * phase.sin(); // 0.10 – 1.00
+        let mag = (level * wobble).clamp(0.05, 1.0);
+        let bar_h = (h * mag).max(2.0);
+        let x = i as f64 * (bar_w + GAP);
+        let y = (h - bar_h) / 2.0; // vertically centered
+        cr.set_source_rgba(0.91, 0.30, 0.26, 0.45 + 0.55 * mag);
+        cr.rectangle(x, y, bar_w, bar_h);
+        let _ = cr.fill();
     }
 }
 

@@ -224,6 +224,10 @@ impl App {
             .collect();
 
         let outputs = Rc::new(outputs);
+        // The user's own ("Custom") curve per output, remembered so previewing a
+        // genre preset and then switching back to "Custom" restores it instead of
+        // leaving the last preset's values. Seeded with the values loaded from DB.
+        let custom_bands = Rc::new(RefCell::new(preloaded.clone()));
         let bands = Rc::new(RefCell::new(preloaded));
         let enabled = Rc::new(RefCell::new(preloaded_enabled));
         let cur_out = Rc::new(Cell::new(out_default));
@@ -365,6 +369,7 @@ impl App {
         // manual move is no longer a clean preset, so drop the combo to "Custom".
         for (i, scale) in scales.iter().enumerate() {
             let bands = bands.clone();
+            let custom_bands = custom_bands.clone();
             let cur_out = cur_out.clone();
             let loading = loading.clone();
             let outputs = outputs.clone();
@@ -378,6 +383,9 @@ impl App {
                 let o = cur_out.get();
                 bands.borrow_mut()[o][i] = s.value();
                 let arr = bands.borrow()[o];
+                // A manual move defines the user's "Custom" curve — remember it so
+                // returning to "Custom" later restores exactly this.
+                custom_bands.borrow_mut()[o] = arr;
                 let (_, oid) = &outputs[o];
                 sender.input(Msg::SetEq {
                     output: oid.clone(),
@@ -385,8 +393,11 @@ impl App {
                     key: (*key).clone(),
                     bands: arr,
                 });
-                // Drop to "Custom" (index 0 does nothing in the preset handler).
+                // Reflect "Custom" in the combo without triggering its restore
+                // handler (guarded by `loading`).
+                loading.set(true);
                 preset_combo.set_selected(0);
+                loading.set(false);
             });
         }
 
@@ -450,16 +461,23 @@ impl App {
             .build();
         {
             let load_bands = load_bands.clone();
+            let custom_bands = custom_bands.clone();
             let cur_out = cur_out.clone();
+            let loading = loading.clone();
             let outputs = outputs.clone();
             let key = key.clone();
             let sender = sender.clone();
             let preset_combo = preset_combo.clone();
             reset.connect_clicked(move |_| {
                 load_bands([0.0; 10]);
-                // Cleared bands are no genre preset (no-op if already "Custom").
-                preset_combo.set_selected(0);
                 let o = cur_out.get();
+                // Reset defines a flat "Custom" curve.
+                custom_bands.borrow_mut()[o] = [0.0; 10];
+                // Cleared bands are no genre preset; show "Custom" without
+                // triggering the restore handler.
+                loading.set(true);
+                preset_combo.set_selected(0);
+                loading.set(false);
                 let (_, oid) = &outputs[o];
                 sender.input(Msg::ClearEq {
                     output: oid.clone(),
@@ -529,6 +547,7 @@ impl App {
         // revert the combo to "Custom" via the slider handlers).
         {
             let load_bands = load_bands.clone();
+            let custom_bands = custom_bands.clone();
             let loading = loading.clone();
             let cur_out = cur_out.clone();
             let outputs = outputs.clone();
@@ -536,13 +555,19 @@ impl App {
             let sender = sender.clone();
             preset_combo.connect_selected_notify(move |c| {
                 let sel = c.selected() as usize;
-                // Ignore programmatic changes (output switch / "Custom" reset).
-                if loading.get() || sel == 0 {
+                // Ignore programmatic changes (output switch, slider/reset sync).
+                if loading.get() {
                     return;
                 }
-                let preset = GENRE_PRESETS[sel - 1].1;
-                load_bands(preset);
                 let o = cur_out.get();
+                // "Custom" (0) restores the user's own saved curve; otherwise the
+                // chosen genre preset fills the bands.
+                let new_bands = if sel == 0 {
+                    custom_bands.borrow()[o]
+                } else {
+                    GENRE_PRESETS[sel - 1].1
+                };
+                load_bands(new_bands);
                 let (_, oid) = &outputs[o];
                 sender.input(Msg::SetEqEnabled {
                     output: oid.clone(),
@@ -554,7 +579,7 @@ impl App {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
-                    bands: preset,
+                    bands: new_bands,
                 });
             });
         }
@@ -578,6 +603,7 @@ impl App {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         toolbar.set_content(Some(&scroller));
         dialog.set_child(Some(&toolbar));
+        crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
     }
 

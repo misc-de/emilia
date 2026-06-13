@@ -1386,6 +1386,17 @@ pub enum Msg {
     MemoCategoryAddPrompt,
     /// Add a new memo category (confirmed name).
     MemoCategoryAdd(String),
+    /// Open a category's detail dialog (id) – via long press / right click.
+    OpenMemoCategory(i64),
+    /// Rename a memo category.
+    MemoCategoryRename {
+        id: i64,
+        name: String,
+    },
+    /// Delete a category but keep its memos (they fall back to "General").
+    MemoCategoryDeleteKeepMemos(i64),
+    /// Delete a category together with all its memos (their files included).
+    MemoCategoryDeleteWithMemos(i64),
 }
 
 /// Results of the background workers (read folder or online enrichment).
@@ -1597,7 +1608,7 @@ impl Component for App {
                         #[name = "sync_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emilia-share-symbolic",
-                            set_tooltip_text: Some(&gettext("Device sync")),
+                            set_tooltip_text: Some(&gettext("Connect to share")),
                             connect_clicked => Msg::OpenSync,
                             #[watch]
                             set_css_classes: if model.sync_connected {
@@ -2438,6 +2449,20 @@ impl Component for App {
                                     },
                                     connect_clicked => Msg::RecordToggle,
                                 },
+                                // Live recording level animation (equalizer bars).
+                                // Only while a voice memo is being recorded; driven
+                                // by the mic `level` element via a poll timeout.
+                                #[local_ref]
+                                rec_meter -> gtk::DrawingArea {
+                                    set_content_width: 60,
+                                    set_content_height: 30,
+                                    set_valign: gtk::Align::Center,
+                                    set_margin_start: 2,
+                                    set_margin_end: 2,
+                                    set_tooltip_text: Some(&gettext("Recording level")),
+                                    #[watch]
+                                    set_visible: model.memo.recording,
+                                },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
                                     set_tooltip_text: Some(&gettext("Forward")),
@@ -2680,6 +2705,8 @@ impl Component for App {
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();
         let memos_list = gtk::ListBox::new();
+        // Recording level meter (player bar); its draw func is wired in MemoState.
+        let rec_meter = gtk::DrawingArea::new();
         let favorites_list = gtk::ListBox::new();
         let audiobooks_list = gtk::ListBox::new();
         let queue_list = gtk::ListBox::new();
@@ -2938,7 +2965,7 @@ impl Component for App {
                 record_state: None,
                 recording_buffer_minutes,
             },
-            memo: crate::ui::app_memo::MemoState::new(memos_list.clone()),
+            memo: crate::ui::app_memo::MemoState::new(memos_list.clone(), rec_meter.clone()),
             youtube: YoutubeState {
                 enabled: youtube_enabled,
                 ytdlp_version: None,
@@ -3501,6 +3528,25 @@ impl Component for App {
             Msg::MemoCategoryAdd(name) => {
                 let _ = self.library.add_memo_category(&name);
                 self.reload_memo_categories(&sender);
+            }
+            Msg::OpenMemoCategory(id) => self.open_memo_category(root, &sender, id),
+            Msg::MemoCategoryRename { id, name } => {
+                let _ = self.library.rename_memo_category(id, &name);
+                self.reload_memo_categories(&sender);
+            }
+            Msg::MemoCategoryDeleteKeepMemos(id) => {
+                let _ = self.library.delete_memo_category(id);
+                self.reload_memo_categories(&sender);
+                self.toast(&gettext("Category removed"));
+            }
+            Msg::MemoCategoryDeleteWithMemos(id) => {
+                if let Ok(paths) = self.library.delete_memo_category_with_memos(id) {
+                    for p in paths {
+                        let _ = std::fs::remove_file(&p);
+                    }
+                }
+                self.reload_memo_categories(&sender);
+                self.toast(&gettext("Category removed"));
             }
             Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),

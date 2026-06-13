@@ -1825,3 +1825,7 @@ msgstr "Note vocali rapide registrate con il microfono."
 
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "Statistiche di ascolto e i tuoi artisti e brani più riprodotti."
+
+# --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
+msgid "Subscribed"
+msgstr "Iscrizioni"

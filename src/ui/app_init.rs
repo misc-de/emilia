@@ -411,34 +411,38 @@ impl App {
         }
 
         // Content-header title, centralised so the breakpoint and every
-        // navigation callback stay in sync. Desktop: "Emilia" + the section name
-        // on the main page, or a pushed subpage's title. Mobile (narrow): the
-        // whole title bar is kept blank — no app name and no section/track text.
+        // navigation callback stay in sync. On the main page (desktop *and*
+        // mobile) we show only the current section (category) — no "Emilia" app
+        // name — discreetly via the dimmed subtitle slot. On a pushed subpage the
+        // desktop shows the page's own title; mobile stays blank (its back arrow
+        // gives the context).
         let refresh_title: std::rc::Rc<dyn Fn()> = {
             let win_title = widgets.win_title.clone();
             let nav_view = widgets.nav_view.clone();
             let stack = widgets.view_stack.clone();
             let narrow = self.nav.narrow.clone();
             std::rc::Rc::new(move || {
-                if narrow.get() {
-                    win_title.set_title("");
-                    win_title.set_subtitle("");
-                    return;
-                }
                 let on_main = nav_view
                     .visible_page()
                     .and_then(|p| p.tag())
                     .is_some_and(|t| t == "main");
                 if on_main {
-                    win_title.set_title("Emilia");
+                    // Just the section name (category), dimmed + centred; the empty
+                    // title hides the bold primary label.
                     let cur = stack.visible_child_name();
                     let cur = cur.as_deref().unwrap_or("files");
+                    win_title.set_title("");
                     win_title.set_subtitle(
                         &section_meta(cur)
                             .map(|(l, _)| gettext(l))
                             .unwrap_or_default(),
                     );
+                } else if narrow.get() {
+                    // Mobile subpage: keep it quiet (the back arrow gives context).
+                    win_title.set_title("");
+                    win_title.set_subtitle("");
                 } else {
+                    // Desktop subpage: the pushed page's own title.
                     let t = nav_view
                         .visible_page()
                         .map(|p| p.title().to_string())

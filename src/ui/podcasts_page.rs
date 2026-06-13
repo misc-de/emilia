@@ -79,6 +79,7 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     // Use full width, but never wider than 600 px (on narrow windows the
     // dialog automatically shrinks to the window width).
     dialog.set_content_width(600);
+    crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
 }
 
@@ -230,7 +231,7 @@ impl Component for PodcastsPage {
         gtk::Box {
             set_orientation: gtk::Orientation::Vertical,
 
-            // Header: linked tab switcher "Newest" / "Overview" and "+".
+            // Header: linked tab switcher "Newest" / "Subscribed" and "+".
             gtk::Box {
                 set_orientation: gtk::Orientation::Horizontal,
                 set_spacing: 6,
@@ -248,7 +249,7 @@ impl Component for PodcastsPage {
                     connect_clicked => PodcastsInput::SetView(PodcastView::Newest),
                 },
                 gtk::ToggleButton {
-                    set_label: &gettext("Overview"),
+                    set_label: &gettext("Subscribed"),
                     set_hexpand: true,
                     #[watch]
                     set_active: model.podcast_view == PodcastView::Overview,
