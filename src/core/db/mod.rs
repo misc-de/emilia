@@ -1982,6 +1982,24 @@ mod tests {
     }
 
     #[test]
+    fn add_artist_image_appends_and_dedups() {
+        let lib = Library::open_in_memory().unwrap();
+        let a = "Some Artist";
+        // The fanart gallery (replace) plus a preserved old photo (append).
+        lib.set_artist_images(a, &[("/g0.img".into(), "photo".into(), "fanart".into())])
+            .unwrap();
+        lib.add_artist_image(a, "/old.img", "photo", "local")
+            .unwrap();
+        // Re-adding the same path is a no-op (dedup).
+        lib.add_artist_image(a, "/old.img", "photo", "local")
+            .unwrap();
+        assert_eq!(
+            lib.artist_images(a).unwrap(),
+            vec!["/g0.img".to_string(), "/old.img".to_string()]
+        );
+    }
+
+    #[test]
     fn yt_playlist_cache_roundtrips_and_upserts() {
         let lib = Library::open_in_memory().unwrap();
         let url = "https://www.youtube.com/playlist?list=PLcache";

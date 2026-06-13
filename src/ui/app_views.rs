@@ -1786,17 +1786,22 @@ impl App {
             .into_iter()
             .filter(|t| std::path::Path::new(&t.path).starts_with(dir))
             .collect();
-        let albums: std::collections::HashSet<&str> = tracks
+        // Collapse multi-CD variants ("Album CD1" / "Album Disc 2" …) to their
+        // common base, so a multi-disc album counts as ONE album, not several —
+        // otherwise it falls through to a generic folder. Compared
+        // case-insensitively (sloppy rips tag "… besten CD 1" vs "… Besten Disc 2").
+        let refs: Vec<&Track> = tracks.iter().collect();
+        let distinct: std::collections::HashSet<String> = refs
             .iter()
-            .filter_map(|t| t.album.as_deref())
-            .filter(|a| !a.is_empty())
+            .filter_map(|t| t.album.as_deref().map(str::trim).filter(|a| !a.is_empty()))
+            .map(|a| album_base(a).to_lowercase())
             .collect();
-        if albums.len() == 1 {
-            let album = albums.into_iter().next().unwrap().to_string();
-            let artist = tracks
-                .iter()
-                .find_map(|t| t.artist.clone())
-                .unwrap_or_default();
+        if distinct.len() == 1 {
+            // Album name + artist match `open_folder_tracks`/`render_album_tracks`
+            // (most-common base + most-common artist) so the cover/EQ key — keyed
+            // on (artist, album) — is the same whether set here or read there.
+            let album = most_common_album_base(&refs).unwrap_or_default();
+            let artist = most_common_artist(&tracks);
             return Some(FsKind::Album { artist, album });
         }
         None
@@ -2169,10 +2174,17 @@ impl App {
                 imgs.extend(self.library.artist_images(&m.name).unwrap_or_default());
                 imgs
             }
-            CtxTarget::Album(m) => self
-                .library
-                .album_images(&m.artist, &m.album)
-                .unwrap_or_default(),
+            // Like the artist, merge the album's current (e.g. just-uploaded)
+            // cover in as the first candidate next to its gallery images.
+            CtxTarget::Album(m) => {
+                let mut imgs: Vec<String> = m.cover_path.clone().into_iter().collect();
+                imgs.extend(
+                    self.library
+                        .album_images(&m.artist, &m.album)
+                        .unwrap_or_default(),
+                );
+                imgs
+            }
             // A song shares its album's candidates – resolved once in
             // `append_cover_or_gallery` to avoid re-reading the file's tags.
             CtxTarget::Fs(_) => Vec::new(),
