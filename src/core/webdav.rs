@@ -76,11 +76,24 @@ impl Creds {
         let pass = crate::core::secrets::resolve_source_password(s.id, s.password.as_deref()?)?;
         let user = crate::core::secrets::resolve_source_username(s.id, s.username.as_deref()?)?;
         Some(Self {
-            base_url: s.base_url.clone()?.trim_end_matches('/').to_string(),
+            base_url: ensure_scheme(s.base_url.as_deref()?),
             user,
             pass,
             music_path: normalize_path(s.music_path.as_deref().unwrap_or("")),
         })
+    }
+}
+
+/// Ensures the base URL carries a scheme. Users routinely enter just a host
+/// (`cloud.example.com`); without a scheme `ureq` rejects the request URL, so
+/// the whole PROPFIND/listing silently fails. Default to HTTPS (Nextcloud is
+/// always TLS); an explicit `http://`/`https://` is kept as-is.
+fn ensure_scheme(base: &str) -> String {
+    let b = base.trim().trim_end_matches('/');
+    if b.contains("://") {
+        b.to_string()
+    } else {
+        format!("https://{b}")
     }
 }
 

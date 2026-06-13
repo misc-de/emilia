@@ -624,11 +624,11 @@ impl App {
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
-        // Header: name + how many memos the category holds.
+        // Header: just the memo count — the category name is already the dialog
+        // title, so repeating it as the row's primary text would be redundant.
         let info = adw::PreferencesGroup::new();
         let head = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(&c.name))
-            .subtitle(ngettext_n("{n} memo", "{n} memos", count as u32))
+            .title(ngettext_n("{n} memo", "{n} memos", count as u32))
             .build();
         head.add_prefix(&gtk::Image::from_icon_name("folder-symbolic"));
         info.add(&head);

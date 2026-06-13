@@ -4,6 +4,7 @@ use anyhow::Result;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::db::Library;
 use crate::model::Track;
@@ -168,8 +169,35 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
 /// large library is not thousands of separate fsyncs and a crash leaves whole
 /// batches, never a half-written row.
 pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
+    // No progress, never cancelled — the plain scan used where no UI feedback is
+    // wanted (e.g. the enrichment worker's pre-scan).
+    scan_into_progress(lib, root, &AtomicBool::new(false), |_, _, _, _| {})
+}
+
+/// Like [`scan_into`] but reports progress and can be cancelled, for the
+/// interactive library import. `on_progress(done_files, total_files, done_bytes,
+/// total_bytes)` is called once up front (with `done = 0`, so the UI gets the
+/// totals immediately) and then throttled to ~200 updates over the run. When
+/// `cancel` flips to `true` the scan stops at the next file and, crucially, does
+/// **not** prune — a half-finished scan must never delete the rows it didn't
+/// reach yet. Already-read files stay in the library.
+pub fn scan_into_progress(
+    lib: &Library,
+    root: &Path,
+    cancel: &AtomicBool,
+    mut on_progress: impl FnMut(usize, usize, u64, u64),
+) -> Result<usize> {
     const BATCH: usize = 500;
     let files = collect_audio_files(root);
+    let total_files = files.len();
+    // Pre-scan: stat each file so the UI can show "X MB of Y MB" from the start.
+    let sizes: Vec<u64> = files
+        .iter()
+        .map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .collect();
+    let total_bytes: u64 = sizes.iter().sum();
+    on_progress(0, total_files, 0, total_bytes);
+
     // Every audio file physically present under `root` (regardless of whether its
     // tags read cleanly) — the set that must survive orphan pruning.
     let present: Vec<String> = files
@@ -177,9 +205,17 @@ pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
 
+    // Throttle UI updates to at most ~200 over the whole run (plus the final one).
+    let step = (total_files / 200).max(1);
     let mut count = 0;
+    let mut done_bytes = 0u64;
+    let mut cancelled = false;
     let mut batch: Vec<Track> = Vec::with_capacity(BATCH);
-    for path in &files {
+    for (i, path) in files.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            cancelled = true;
+            break;
+        }
         match read_track(path) {
             Ok(track) => batch.push(track),
             Err(e) => tracing::warn!("Failed to read {}: {e}", path.display()),
@@ -188,12 +224,19 @@ pub fn scan_into(lib: &Library, root: &Path) -> Result<usize> {
             count += lib.upsert_tracks_resilient(&batch);
             batch.clear();
         }
+        done_bytes += sizes[i];
+        if (i + 1) % step == 0 || i + 1 == total_files {
+            on_progress(i + 1, total_files, done_bytes, total_bytes);
+        }
     }
     count += lib.upsert_tracks_resilient(&batch);
 
     // Drop DB rows for files that no longer exist under `root`. Skipped when the
-    // scan found nothing, so an unreadable/unmounted folder cannot wipe the DB.
-    lib.prune_tracks_under(root, &present)?;
+    // scan found nothing (so an unreadable/unmounted folder cannot wipe the DB)
+    // or when the user cancelled (a partial scan must not prune the rest).
+    if !cancelled {
+        lib.prune_tracks_under(root, &present)?;
+    }
     Ok(count)
 }
 

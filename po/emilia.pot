@@ -2244,3 +2244,28 @@ msgstr ""
 msgid "A new version is available — click to update"
 msgstr ""
 
+
+# --- Import progress ---
+msgid "{done} of {total} songs"
+msgstr ""
+
+msgid "{done} MB of {total} MB"
+msgstr ""
+
+msgid "Import cancelled"
+msgstr ""
+
+
+# --- Remote (WebDAV) load feedback ---
+msgid "Could not load the folder"
+msgstr ""
+
+msgid "Retry"
+msgstr ""
+
+msgid "This source is not configured correctly (URL/login missing)."
+msgstr ""
+
+
+msgid "Meta"
+msgstr ""

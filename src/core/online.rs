@@ -159,10 +159,20 @@ impl OnlineClient {
             .max_by_key(|r| r.score)
             .filter(|r| r.score >= 70);
 
-        Ok(best.map(|r| ReleaseMatch {
-            mbid: r.id,
-            release_group: r.release_group.map(|g| g.id),
-            year: r.date.as_deref().and_then(parse_year),
+        Ok(best.map(|r| {
+            // Prefer the release GROUP's first-release-date (the original year)
+            // over this specific release's date, which may be a reissue/remaster.
+            let rg_year = r
+                .release_group
+                .as_ref()
+                .and_then(|g| g.first_release_date.as_deref())
+                .and_then(parse_year);
+            let year = rg_year.or_else(|| r.date.as_deref().and_then(parse_year));
+            ReleaseMatch {
+                mbid: r.id,
+                release_group: r.release_group.map(|g| g.id),
+                year,
+            }
         }))
     }
 
@@ -1202,6 +1212,10 @@ struct MbRelease {
 #[derive(Deserialize)]
 struct MbReleaseGroup {
     id: String,
+    /// Original release date of the whole group (e.g. `1996-02-13`). Preferred
+    /// over a specific release's `date`, which may be a reissue/remaster.
+    #[serde(rename = "first-release-date", default)]
+    first_release_date: Option<String>,
 }
 
 // ---- Deezer JSON (artist photos) ----

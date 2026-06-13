@@ -882,9 +882,9 @@ impl App {
 
         let sound_page = page;
 
-        // --- Category: Search (read online metadata) ---
+        // --- Category: Meta (read online metadata) ---
         let page = adw::PreferencesPage::builder()
-            .title(gettext("Search"))
+            .title(gettext("Meta"))
             .icon_name("system-search-symbolic")
             .build();
 

@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.6.6" date="2026-06-13">
+      <description>
+        <p>This release fixes album-year sorting and improves importing and Nextcloud. Albums now sort by the original release year from your file tags (the earliest track) instead of an online reissue/remaster year, so a 1990s album no longer lands under 2015; the online lookup also prefers the release group's first release date. Importing a large folder now shows a progress bar ("X of Y songs", with total size) and a Cancel button. Nextcloud connections without a scheme are completed to HTTPS automatically, and a failed remote folder now shows the actual error with a Retry button instead of a blank list. Plus: the metadata settings page is now called "Meta", the voice-memo category detail shows just the memo count, and the equalizer's genre selector is labelled "Genre".</p>
+        <p xml:lang="de">Diese Version korrigiert die Album-Jahr-Sortierung und verbessert Import sowie Nextcloud. Alben werden jetzt nach dem Originaljahr aus deinen Datei-Tags (frühester Titel) sortiert statt nach einem Online-Reissue-/Remaster-Jahr – ein Album aus den 90ern landet so nicht mehr unter 2015; die Online-Suche bevorzugt zudem das erste Erscheinungsdatum der Release-Group. Beim Einlesen eines großen Ordners erscheint nun ein Fortschrittsbalken („X von Y Liedern", mit Gesamtgröße) und ein Abbrechen-Knopf. Nextcloud-Adressen ohne Schema werden automatisch zu HTTPS ergänzt, und ein fehlgeschlagener Remote-Ordner zeigt jetzt die echte Fehlerursache mit „Erneut versuchen" statt einer leeren Liste. Außerdem: Die Metadaten-Einstellungsseite heißt jetzt „Meta", die Memo-Kategorie-Detailansicht zeigt nur noch die Anzahl, und die Genre-Auswahl im Equalizer heißt „Genre".</p>
+      </description>
+    </release>
     <release version="0.6.5" date="2026-06-13">
       <description>
         <p>This release adds in-app self-update for the Flatpak build. When a newer version is published, an “Update x.y.z available” button appears at the top-left of the title bar on the desktop; clicking it asks whether to update from your current version to the new one and installs it via the Flatpak portal (it takes effect after a restart). The podcast subscriptions tab now reads “Abos” in German.</p>

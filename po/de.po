@@ -2427,7 +2427,7 @@ msgstr "Hörstatistiken und deine meistgespielten Interpreten und Titel."
 
 # --- Genre equalizer presets ---
 msgid "Genre preset"
-msgstr "Genre-Voreinstellung"
+msgstr "Genre"
 
 msgid "Equalizer presets per genre"
 msgstr "Equalizer-Voreinstellungen je Genre"
@@ -2675,3 +2675,29 @@ msgstr "Update {v} verfügbar"
 msgid "A new version is available — click to update"
 msgstr "Eine neue Version ist verfügbar – zum Aktualisieren klicken"
 
+
+# --- Import progress (de) ---
+msgid "{done} of {total} songs"
+msgstr "{done} von {total} Liedern"
+
+msgid "{done} MB of {total} MB"
+msgstr "{done} MB von {total} MB"
+
+msgid "Import cancelled"
+msgstr "Einlesen abgebrochen"
+
+
+# --- Remote (WebDAV) load feedback (de) ---
+msgid "Could not load the folder"
+msgstr "Ordner konnte nicht geladen werden"
+
+msgid "Retry"
+msgstr "Erneut versuchen"
+
+msgid "This source is not configured correctly (URL/login missing)."
+msgstr "Diese Quelle ist nicht korrekt konfiguriert (URL/Login fehlt)."
+
+
+# --- Settings: Meta page ---
+msgid "Meta"
+msgstr "Meta"

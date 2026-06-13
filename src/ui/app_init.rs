@@ -1079,6 +1079,13 @@ impl App {
         }
         // The (initial) scan finished → hide the explanatory loading overlay.
         self.scanning = false;
+        // If the user cancelled, say so once and clear the flag for the next run.
+        if self
+            .scan_cancel
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
+            self.toast(&gettext("Import cancelled"));
+        }
         // Library is read in → update the views.
         self.reload_library_overviews();
         // Fill in album covers from the embedded artwork in the files —

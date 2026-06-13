@@ -610,6 +610,10 @@ pub(crate) struct FilesState {
     pub(crate) source_tab_buttons: Vec<(ActiveSource, gtk::ToggleButton)>,
     /// Current subpath in the remote source (leading slash; `""` = root).
     pub(crate) remote_browse: Option<String>,
+    /// Last remote (WebDAV) listing error for the active source, shown as a
+    /// persistent status in the file view (so the user sees *why* it is empty,
+    /// not just a blank list). `None` while a remote load is fine or pending.
+    pub(crate) remote_error: Option<String>,
     /// Remote (cloud) playback queue of the most recently opened folder.
     pub(crate) remote_queue: Vec<RemoteTrack>,
     pub(crate) remote_pos: usize,
@@ -761,6 +765,16 @@ pub struct App {
     /// loading overlay with an explanatory text so the app does not look frozen.
     /// Cleared when the scan reports back (`Cmd::ScanDone`).
     pub(crate) scanning: bool,
+    /// Library-scan progress (driven by `Cmd::ScanProgress`): files read / total,
+    /// and bytes read / total. Shown as a progress bar + counts under the spinner
+    /// while `scanning`. Reset at the start of each scan.
+    pub(crate) scan_done: usize,
+    pub(crate) scan_total: usize,
+    pub(crate) scan_bytes: u64,
+    pub(crate) scan_total_bytes: u64,
+    /// Cancel flag for the running scan; the "Cancel" button sets it and the
+    /// scan worker stops at the next file (shared with the worker thread).
+    pub(crate) scan_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Online-enrichment state (covers/artist photos/fingerprint fetching).
     pub(crate) enrich_state: EnrichState,
     /// App-wide preferences (display language, active audio output).
@@ -963,6 +977,8 @@ pub enum Msg {
     NavUp,
     FilesGoStart,
     Refresh,
+    /// Cancel the running library scan (the import progress "Cancel" button).
+    ScanCancel,
     TogglePlay,
     /// Open the detail view of the currently running track (click on the bar).
     OpenNowPlaying,
@@ -1443,6 +1459,13 @@ pub enum Cmd {
         then_enrich: bool,
         manual: bool,
     },
+    /// Library-scan progress tick (throttled): files read / total + bytes.
+    ScanProgress {
+        done: usize,
+        total: usize,
+        bytes: u64,
+        total_bytes: u64,
+    },
     /// Found concert candidates (for the import dialog).
     Candidates(Vec<crate::core::concert::Candidate>),
     /// yt-dlp install/update/startup-check finished: the version on success,
@@ -1765,6 +1788,10 @@ impl Component for App {
 
                                         gtk::ScrolledWindow {
                                             set_vexpand: true,
+                                            // Hidden while a remote source failed to
+                                            // load — the error status below shows why.
+                                            #[watch]
+                                            set_visible: model.files.remote_error.is_none(),
                                             #[local_ref]
                                             entries_box -> gtk::ListBox {
                                                 set_valign: gtk::Align::Start,
@@ -1777,6 +1804,27 @@ impl Component for App {
                                                 set_margin_start: 12,
                                                 set_margin_end: 12,
                                                 set_css_classes: &["boxed-list"],
+                                            },
+                                        },
+
+                                        // Remote (Nextcloud/WebDAV) load failure: show
+                                        // the actual reason + a Retry button, instead of
+                                        // a silently blank list.
+                                        adw::StatusPage {
+                                            set_icon_name: Some("network-error-symbolic"),
+                                            set_title: &gettext("Could not load the folder"),
+                                            set_vexpand: true,
+                                            #[watch]
+                                            set_visible: model.files.remote_error.is_some(),
+                                            #[watch]
+                                            set_description: model.files.remote_error.as_deref(),
+                                            #[wrap(Some)]
+                                            set_child = &gtk::Button {
+                                                set_label: &gettext("Retry"),
+                                                set_halign: gtk::Align::Center,
+                                                add_css_class: "pill",
+                                                add_css_class: "suggested-action",
+                                                connect_clicked => Msg::Refresh,
                                             },
                                         },
                                     },
@@ -2161,7 +2209,10 @@ impl Component for App {
                             set_halign: gtk::Align::Center,
                             set_valign: gtk::Align::Center,
                             set_spacing: 12,
-                            set_can_target: false,
+                            // Click-through normally; targetable during a scan so
+                            // the "Cancel" button below can be clicked.
+                            #[watch]
+                            set_can_target: model.scanning,
                             add_css_class: "emilia-loading",
                             #[watch]
                             set_visible: model.overlay_visible(),
@@ -2174,6 +2225,55 @@ impl Component for App {
                                 #[watch]
                                 set_label: &model.overlay_text(),
                                 add_css_class: "dim-label",
+                            },
+
+                            // Import progress: a bar with "X of Y songs" and a
+                            // subtle "X MB of Y MB" line, plus a Cancel button.
+                            // Only while a library scan is actually running.
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_halign: gtk::Align::Center,
+                                set_spacing: 4,
+                                #[watch]
+                                set_visible: model.scanning && model.scan_total > 0,
+
+                                gtk::ProgressBar {
+                                    set_width_request: 260,
+                                    set_show_text: true,
+                                    #[watch]
+                                    set_fraction: if model.scan_total > 0 {
+                                        model.scan_done as f64 / model.scan_total as f64
+                                    } else {
+                                        0.0
+                                    },
+                                    #[watch]
+                                    set_text: Some(&gettext_f(
+                                        "{done} of {total} songs",
+                                        &[
+                                            ("done", &model.scan_done.to_string()),
+                                            ("total", &model.scan_total.to_string()),
+                                        ],
+                                    )),
+                                },
+                                gtk::Label {
+                                    add_css_class: "caption",
+                                    add_css_class: "dim-label",
+                                    #[watch]
+                                    set_label: &gettext_f(
+                                        "{done} MB of {total} MB",
+                                        &[
+                                            ("done", &(model.scan_bytes / 1_048_576).to_string()),
+                                            ("total", &(model.scan_total_bytes / 1_048_576).to_string()),
+                                        ],
+                                    ),
+                                },
+                                gtk::Button {
+                                    set_label: &gettext("Cancel"),
+                                    set_halign: gtk::Align::Center,
+                                    set_margin_top: 4,
+                                    add_css_class: "pill",
+                                    connect_clicked => Msg::ScanCancel,
+                                },
                             },
                         },
                     },
@@ -2894,6 +2994,11 @@ impl Component for App {
             },
             refresh_pending: 0,
             scanning: false,
+            scan_done: 0,
+            scan_total: 0,
+            scan_bytes: 0,
+            scan_total_bytes: 0,
+            scan_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             enrich_state: EnrichState {
                 enriching: false,
                 auto_enrich,
@@ -2920,6 +3025,7 @@ impl Component for App {
                 source_tabs: gtk::Box::new(gtk::Orientation::Horizontal, 0),
                 source_tab_buttons: Vec::new(),
                 remote_browse: None,
+                remote_error: None,
                 remote_queue: Vec::new(),
                 remote_pos: 0,
                 playing_remote: false,
@@ -3758,6 +3864,10 @@ impl Component for App {
             Msg::NavUp => self.on_nav_up(&sender),
             Msg::FilesGoStart => self.on_files_go_start(&sender),
             Msg::Refresh => self.on_refresh(&sender),
+            Msg::ScanCancel => {
+                self.scan_cancel
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             Msg::OpenSettings => self.open_settings(root, &sender),
             Msg::SetSleepTimer(choice) => self.on_set_sleep_timer(choice),
             Msg::InlineFilter(text) => self.apply_inline_filter(&text),
@@ -4171,6 +4281,17 @@ impl Component for App {
                 then_enrich,
                 manual,
             } => self.on_cmd_scan_done(then_enrich, manual, &sender),
+            Cmd::ScanProgress {
+                done,
+                total,
+                bytes,
+                total_bytes,
+            } => {
+                self.scan_done = done;
+                self.scan_total = total;
+                self.scan_bytes = bytes;
+                self.scan_total_bytes = total_bytes;
+            }
             Cmd::CloudReindexed { manual } => self.on_cmd_cloud_reindexed(manual, &sender),
             Cmd::Candidates(candidates) => {
                 if candidates.is_empty() {

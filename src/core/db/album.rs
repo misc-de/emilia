@@ -105,7 +105,7 @@ impl Library {
     ) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
-                    COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms), MAX(t.year)
+                    COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms), MIN(t.year)
              FROM track t
              LEFT JOIN album_meta m
                     ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
@@ -141,15 +141,16 @@ impl Library {
         let mut order: Vec<String> = Vec::new();
         let mut map: HashMap<String, AlbumMeta> = HashMap::new();
         let mut by_artist: HashMap<String, HashMap<String, ArtistInfo>> = HashMap::new();
-        // Per-album fallback year from the file tags (max across the album's
-        // tracks), used when no online release year exists – so date sorting has
-        // a metadata-backed year even without enrichment.
+        // Per-album year from the file tags — the **earliest** across the
+        // album's tracks (the original release year; later-tagged reissue/bonus
+        // tracks must not win). Preferred over the online match below, which can
+        // return a reissue/remaster year (e.g. a 1996 album coming back as 2015).
         let mut tag_years: HashMap<String, Option<i32>> = HashMap::new();
         for (artist, album, mbid, cover, year, status, count, duration, tag_year) in raw {
             let key = album.to_lowercase();
             if let Some(ty) = tag_year {
                 let slot = tag_years.entry(key.clone()).or_insert(None);
-                *slot = Some(slot.map_or(ty, |e| e.max(ty)));
+                *slot = Some(slot.map_or(ty, |e| e.min(ty)));
             }
             let entry = map.entry(key.clone()).or_insert_with(|| {
                 order.push(key.clone());
@@ -200,23 +201,24 @@ impl Library {
                     .cmp(&a.1 .0)
                     .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
             });
-            // Display artist = the most frequent; year/MBID: first available.
+            // Display artist = the most frequent; MBID: first available.
             if let Some((name, _)) = artists.first() {
                 meta.artist = (*name).clone();
             }
             for (_, info) in &artists {
-                if meta.year.is_none() {
-                    meta.year = info.2;
-                }
                 if meta.mbid.is_none() {
                     meta.mbid = info.3.clone();
                 }
             }
-            // No online year on any artist credit → fall back to the embedded
-            // tag year read during the scan.
-            if meta.year.is_none() {
-                meta.year = tag_years.get(key).copied().flatten();
-            }
+            // Year: the embedded tag year (the user's own metadata = the original
+            // release year) wins; only when no track carries a year do we fall
+            // back to the online match. This is deliberately metadata-first so a
+            // wrong online reissue year can't override a correctly tagged album.
+            meta.year = tag_years
+                .get(key)
+                .copied()
+                .flatten()
+                .or_else(|| artists.iter().find_map(|(_, info)| info.2));
             // Cover = the cover of the most representative artist (the list is
             // already sorted by track count, so the display artist comes first),
             // falling back to any member that has one. A representative image is

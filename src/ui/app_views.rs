@@ -213,6 +213,8 @@ impl App {
             self.load_remote_dir(sender, source);
             return;
         }
+        // Local folder → no remote error applies (clear a stale one from before).
+        self.files.remote_error = None;
         // Remember the scroll position of the currently shown folder before it is replaced.
         if let (Some(dir), Some(sc)) = (self.files.shown_dir.clone(), self.fs_scroller()) {
             self.files
@@ -379,9 +381,13 @@ impl App {
         let Some(creds) = crate::core::webdav::Creds::from_source(&source) else {
             self.libview.entries.guard().clear();
             self.libview.loading = false;
-            self.toast(&gettext("This source is not configured correctly"));
+            self.files.remote_error = Some(gettext(
+                "This source is not configured correctly (URL/login missing).",
+            ));
             return;
         };
+        // Clear any previous error for this fresh attempt.
+        self.files.remote_error = None;
         self.libview.loading = true;
         let active = self.files.active_source.clone();
         sender.spawn_oneshot_command(move || {
@@ -567,27 +573,44 @@ impl App {
         let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
             return false;
         };
-        // First import: the library is still empty, so there is nothing to show
-        // while the (potentially slow) tag scan runs. Show the loading overlay
-        // with an explanation so the app does not appear frozen. A manual refresh
-        // already drives the overlay via `refresh_pending`, and a non-empty
-        // library keeps its content visible during a background re-scan.
-        if !manual && self.libview.album_count == 0 && self.libview.artist_count == 0 {
-            self.scanning = true;
-        }
-        sender.spawn_oneshot_command(move || {
+        // Show the import progress overlay (spinner + progress bar + "Cancel")
+        // while the potentially slow tag scan runs — for the automatic first
+        // import *and* a manual rescan, so the user always sees how far along it
+        // is instead of a frozen-looking window. Reset the counters and the
+        // cancel flag for this run.
+        self.scanning = true;
+        self.scan_done = 0;
+        self.scan_total = 0;
+        self.scan_bytes = 0;
+        self.scan_total_bytes = 0;
+        self.scan_cancel.store(false, Ordering::Relaxed);
+        let cancel = self.scan_cancel.clone();
+        sender.spawn_command(move |out| {
             match Library::open() {
                 Ok(lib) => {
-                    if let Err(e) = scanner::scan_into(&lib, &root) {
+                    let r = scanner::scan_into_progress(
+                        &lib,
+                        &root,
+                        &cancel,
+                        |done, total, bytes, total_bytes| {
+                            let _ = out.send(Cmd::ScanProgress {
+                                done,
+                                total,
+                                bytes,
+                                total_bytes,
+                            });
+                        },
+                    );
+                    if let Err(e) = r {
                         tracing::warn!("Library scan failed: {e}");
                     }
                 }
                 Err(e) => tracing::error!("Database unavailable for scan: {e}"),
             }
-            Cmd::ScanDone {
+            let _ = out.send(Cmd::ScanDone {
                 then_enrich,
                 manual,
-            }
+            });
         });
         true
     }
@@ -1132,7 +1155,12 @@ impl App {
                     .get_album_meta(display_artist, album)
                     .ok()
                     .flatten();
-                let year = album_meta.as_ref().and_then(|m| m.year);
+                // Tag year (earliest track = original release) first, online fallback.
+                let year = tracks
+                    .iter()
+                    .filter_map(|t| t.year)
+                    .min()
+                    .or_else(|| album_meta.as_ref().and_then(|m| m.year));
                 let cover_path = album_meta.as_ref().and_then(|m| m.cover_path.clone());
 
                 let row = adw::ActionRow::builder()
@@ -1828,15 +1856,15 @@ impl App {
                     .first()
                     .and_then(|t| t.artist.clone())
                     .unwrap_or_default();
-                let year = self
-                    .library
-                    .get_album_meta(&artist, &album)
-                    .ok()
-                    .flatten()
-                    .and_then(|m| m.year)
-                    // No online year → fall back to the embedded tag year of the
-                    // album's tracks (metadata in the DB, never the file mtime).
-                    .or_else(|| tracks.iter().filter_map(|t| t.year).max());
+                // Prefer the embedded tag year (earliest track = original release)
+                // over the online match, which can be a reissue/remaster year.
+                let year = tracks.iter().filter_map(|t| t.year).min().or_else(|| {
+                    self.library
+                        .get_album_meta(&artist, &album)
+                        .ok()
+                        .flatten()
+                        .and_then(|m| m.year)
+                });
                 (year, album, tracks)
             })
             .collect()
@@ -3105,9 +3133,12 @@ impl App {
             Err(e) => {
                 tracing::warn!("WebDAV listing failed: {e}");
                 self.libview.entries.guard().clear();
-                self.toast(&gettext("Could not load this folder"));
+                // Surface the actual reason persistently (not just a transient
+                // toast) so the user can see *why* the folder is empty.
+                self.files.remote_error = Some(e);
             }
             Ok(list) => {
+                self.files.remote_error = None;
                 let (mut dirs, mut files): (Vec<_>, Vec<_>) =
                     list.into_iter().partition(|e| e.is_dir);
                 dirs.sort_by_key(|a| natural_key(&a.name));
