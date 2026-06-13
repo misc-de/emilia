@@ -577,6 +577,9 @@ pub(crate) struct NavState {
     pub(crate) context_target: Option<CtxTarget>,
     /// Play row of the open detail dialog + its track path (hidden while playing).
     pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
+    /// The open context/detail dialog, so a cover/photo change can rebuild it in
+    /// place (close + re-open) and the new image shows immediately.
+    pub(crate) ctx_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
     /// Remembered scroll position of the most recently left overview page.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// Narrow/mobile layout active (driven by the width breakpoint). The source
@@ -3132,6 +3135,7 @@ impl Component for App {
                 hidden_sections,
                 context_target: None,
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                ctx_dialog: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 narrow: std::rc::Rc::new(std::cell::Cell::new(false)),
                 nav_hidden: std::rc::Rc::new(std::cell::Cell::new(false)),
@@ -3956,8 +3960,8 @@ impl Component for App {
                 artist,
                 album,
                 path,
-            } => self.set_album_cover(artist, album, path),
-            Msg::SetArtistImage { name, path } => self.set_artist_image(name, path),
+            } => self.set_album_cover(root, &sender, artist, album, path),
+            Msg::SetArtistImage { name, path } => self.set_artist_image(root, &sender, name, path),
             Msg::UploadCover => self.open_cover_upload_dialog(root, &sender),
             Msg::SetFanartKey(key) => {
                 let key = key.trim().to_string();

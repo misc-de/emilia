@@ -351,13 +351,38 @@ impl App {
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&scroller));
         dialog.set_child(Some(&toolbar));
-        // Forget the remembered play row as soon as the dialog closes.
+        // Remember the open dialog so a cover/photo change can rebuild it; forget
+        // it (and the play row) as soon as it closes.
+        *self.nav.ctx_dialog.borrow_mut() = Some(dialog.clone());
         {
             let ctx_play = self.nav.ctx_play.clone();
-            dialog.connect_closed(move |_| *ctx_play.borrow_mut() = None);
+            let ctx_dialog = self.nav.ctx_dialog.clone();
+            let this = dialog.clone();
+            dialog.connect_closed(move |_| {
+                *ctx_play.borrow_mut() = None;
+                // Only clear if it's still us (a rebuild may have replaced it).
+                let is_current = ctx_dialog.borrow().as_ref() == Some(&this);
+                if is_current {
+                    *ctx_dialog.borrow_mut() = None;
+                }
+            });
         }
         crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
+    }
+
+    /// Rebuilds the open context/detail dialog in place (close + re-open) so a
+    /// just-changed cover/photo shows immediately. No-op when none is open.
+    pub(crate) fn refresh_context_dialog(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let Some(old) = self.nav.ctx_dialog.borrow_mut().take() else {
+            return; // no detail dialog open → nothing to rebuild
+        };
+        old.close();
+        self.open_context_menu(root, sender);
     }
 
     /// Shows/hides the detail dialog's remembered play row accordingly:
@@ -1342,9 +1367,16 @@ impl App {
         });
     }
 
-    /// Set an album's cover (from the picker), refreshing the albums view on a
-    /// real change.
-    pub(crate) fn set_album_cover(&mut self, artist: String, album: String, path: String) {
+    /// Set an album's cover (from the picker), refreshing the albums view and the
+    /// open detail dialog on a real change.
+    pub(crate) fn set_album_cover(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        artist: String,
+        album: String,
+        path: String,
+    ) {
         let mut meta = self
             .library
             .get_album_meta(&artist, &album)
@@ -1352,14 +1384,29 @@ impl App {
             .flatten()
             .unwrap_or_else(|| crate::model::AlbumMeta::pending(&artist, &album));
         if meta.cover_path.as_deref() != Some(path.as_str()) {
-            meta.cover_path = Some(path);
+            meta.cover_path = Some(path.clone());
             let _ = self.library.upsert_album_meta(&meta);
+            // Mirror onto the open detail target so the rebuilt dialog (below)
+            // shows the new cover; a song target reads it from the DB instead.
+            if let Some(CtxTarget::Album(m)) = self.nav.context_target.as_mut() {
+                if m.artist == artist && m.album == album {
+                    m.cover_path = Some(path);
+                }
+            }
             self.reload_albums();
+            self.refresh_context_dialog(root, sender);
         }
     }
 
-    /// Set an artist's image (from the picker), refreshing the artists view.
-    pub(crate) fn set_artist_image(&mut self, name: String, path: String) {
+    /// Set an artist's image (from the picker), refreshing the artists view and
+    /// the open detail dialog on a real change.
+    pub(crate) fn set_artist_image(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        name: String,
+        path: String,
+    ) {
         let mut meta = self
             .library
             .get_artist_meta(&name)
@@ -1367,9 +1414,16 @@ impl App {
             .flatten()
             .unwrap_or_else(|| crate::model::ArtistMeta::pending(&name));
         if meta.image_path.as_deref() != Some(path.as_str()) {
-            meta.image_path = Some(path);
+            meta.image_path = Some(path.clone());
             let _ = self.library.upsert_artist_meta(&meta);
+            // Mirror onto the open detail target so the rebuilt dialog shows it.
+            if let Some(CtxTarget::Artist(m)) = self.nav.context_target.as_mut() {
+                if m.name == name {
+                    m.image_path = Some(path);
+                }
+            }
             self.reload_artists();
+            self.refresh_context_dialog(root, sender);
         }
     }
 

@@ -1691,11 +1691,27 @@ impl App {
         }
 
         let mut out = Vec::new();
-        // Each subfolder = one album (all CDs/parts together).
+        // Each immediate subfolder is normally one album (its CDs/parts collapse
+        // into it). BUT if the subfolder is itself a container — e.g. an author
+        // folder holding several audiobook albums — recurse into it so each album
+        // becomes its own entry; otherwise the entry points at an artist folder
+        // and its detail opens the *artist* instead of the audiobook. CD/Disc/Part
+        // subfolders don't count as containers (they belong to one album).
         for (sub, grp) in &subfolders {
-            let key = format!("{base}/{sub}");
-            let title = most_common_album_base(grp).unwrap_or_else(|| sub.clone());
-            out.push(("folder".to_string(), key, title, true));
+            let inner = format!("{base}/{sub}/");
+            let has_album_subfolders = grp.iter().any(|t| {
+                t.path
+                    .strip_prefix(&inner)
+                    .and_then(|rel| rel.split('/').next().filter(|_| rel.contains('/')))
+                    .is_some_and(|seg| disc_from_segment(seg).is_none())
+            });
+            if has_album_subfolders {
+                out.extend(self.folder_albums_and_tracks(&format!("{base}/{sub}")));
+            } else {
+                let key = format!("{base}/{sub}");
+                let title = most_common_album_base(grp).unwrap_or_else(|| sub.clone());
+                out.push(("folder".to_string(), key, title, true));
+            }
         }
         // Loose files: group into an album entry by **album tag** – no
         // individual track from an album. The key uses the most common
