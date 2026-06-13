@@ -24,6 +24,6 @@ po/*/LC_MESSAGES/*.mo
 .DS_Store
 
 # Claude-Code: maschinenlokale Einstellungen (Berechtigungen etc.)
-.claude/settings.local.json
+.claude
 .codex
 .agents
