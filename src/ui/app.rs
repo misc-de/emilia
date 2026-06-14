@@ -367,6 +367,9 @@ pub(crate) struct PlaySession {
     pub(crate) played_ms: i64,
     /// Snapshot of the track length (0 = still unknown → backfilled on tick).
     pub(crate) duration_ms: i64,
+    /// How this play was started: `Some("single")` for a single tapped song
+    /// (excluded from the album stats), `None` for album/queue/history plays.
+    pub(crate) source: Option<&'static str>,
 }
 
 /// Album/artist overviews + file-list factory + gallery rendering state.
@@ -506,6 +509,11 @@ pub(crate) struct TransportState {
     pub(crate) playing_path: Option<PathBuf>,
     /// Snapshot (path, position, duration) of the running resume track.
     pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
+    /// One-shot source tag for the **next** listening session (consumed by
+    /// `start_play_session`). Set right before a single-track start to mark it
+    /// `"single"`, so playing one song doesn't inflate its album in the stats;
+    /// `None` (whole albums, queues, history) counts towards the album normally.
+    pub(crate) next_source: Option<&'static str>,
     /// Ongoing listening session for the statistics (see [`PlaySession`]).
     pub(crate) play_session: Option<PlaySession>,
     /// Snapshot of the session for close (path, start, listened, duration).
@@ -627,6 +635,13 @@ pub(crate) struct NavState {
     /// Title-bar sort button; its popover is (re)built per section in
     /// [`App::rebuild_sort_menu`], and it's hidden on non-sortable sections.
     pub(crate) sort_btn: gtk::MenuButton,
+    /// Sort popovers handed up from the component pages (Podcasts/Streaming/
+    /// YouTube), which keep their own sort state. The shared [`Self::sort_btn`]
+    /// adopts the matching one when its section is active (see
+    /// [`App::apply_component_sort`]).
+    pub(crate) podcast_sort: crate::ui::app_sort::SortSlot,
+    pub(crate) stream_sort: crate::ui::app_sort::SortSlot,
+    pub(crate) yt_sort: crate::ui::app_sort::SortSlot,
     /// Navigation container for the subpages (artist → albums → album).
     pub(crate) nav_view: adw::NavigationView,
     /// Navigation containers (sidebar, top bar) for reordering.
@@ -1181,18 +1196,27 @@ pub enum Msg {
     SetLanguage(String),
     /// Change the color scheme ("system"/"dark"/"light"); takes effect immediately.
     SetColorScheme(String),
+    /// Remember the last opened settings category (page name) so the settings
+    /// dialog reopens on it.
+    SetLastSettingsPage(String),
     /// Whole-app scale factor (0.5 ..= 1.5); persisted + applied live.
     SetUiScale(f64),
-    /// Toggle the blurred cover background.
-    SetCoverBlur(bool),
     /// Set/clear the custom background image (already copied into the data dir).
     SetCustomBg(Option<std::path::PathBuf>),
-    /// Set/clear the text & fields color (hex).
+    /// Select the background blur/effect filter (ComboRow index).
+    SetBgFilter(u32),
+    /// Strength (0..=100 %) of the selected background filter.
+    SetBgFilterStrength(u32),
+    /// Set/clear the text color (hex).
     SetTextColor(Option<String>),
+    /// Set/clear the fields (chrome) color (hex).
+    SetFieldColor(Option<String>),
     /// Toggle whether the background shows behind the sidebar/navigation.
     SetBgNav(bool),
+    /// Toggle whether the background shows behind the title bar (headerbar).
+    SetBgTitlebar(bool),
     /// Transparency (0..=100 %) of entries & buttons over the background.
-    SetChromeTransparency(u32),
+    SetFieldTransparency(u32),
     /// Show/hide the desktop tray icon.
     SetTrayEnabled(bool),
     /// Closing the window hides it into the tray instead of quitting.
@@ -1366,6 +1390,9 @@ pub enum Msg {
     /// The page started/finished a "refresh all" worker → drive the spinner.
     PodcastRefreshStarted(bool),
     PodcastRefreshFinished,
+    /// The page rebuilt its sort popover (slot updated) → refresh the shared
+    /// title-bar sort button if the Podcasts section is showing.
+    PodcastSortChanged,
     // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
     // menu switch (see `Msg::SetSectionVisible`), not a dedicated settings toggle.
     /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
@@ -1445,6 +1472,9 @@ pub enum Msg {
     /// The page started/finished a "refresh all" worker → drive the spinner.
     YtRefreshStarted(bool),
     YtRefreshFinished,
+    /// The page rebuilt its sort popover (slot updated) → refresh the shared
+    /// title-bar sort button if the YouTube section is showing.
+    YtSortChanged,
     // Streaming (internet radio) — transport; the page lives in the StreamPage
     // component and reaches the transport through these.
     /// Tap a station: starts it, toggle pause/resume on a running station.
@@ -1487,6 +1517,9 @@ pub enum Msg {
     StreamLibraryChanged,
     /// Informational toast requested by the page.
     StreamToast(String),
+    /// The page rebuilt its sort popover (slot updated) → refresh the shared
+    /// title-bar sort button if the Streaming section is showing.
+    StreamSortChanged,
     /// Open the waveform editor subpage for a recording (id).
     EditRecording(i64),
     /// Open the waveform editor subpage for a voice memo (id).
@@ -1806,11 +1839,14 @@ impl Component for App {
                             set_icon_name: "emilia-share-symbolic",
                             set_tooltip_text: Some(&gettext("Connect to share")),
                             connect_clicked => Msg::OpenSync,
+                            // Keep `flat` in both states — set_css_classes replaces
+                            // the whole list, so dropping it would re-add the button
+                            // background that header buttons are flattened out of.
                             #[watch]
                             set_css_classes: if model.sync_connected {
-                                &["sync-connected"]
+                                &["flat", "sync-connected"]
                             } else {
-                                &[]
+                                &["flat"]
                             },
                         },
                     },
@@ -1881,6 +1917,7 @@ impl Component for App {
                                             set_orientation: gtk::Orientation::Horizontal,
                                             set_spacing: 6,
                                             add_css_class: "linked",
+                                            add_css_class: "emilia-tabbar",
                                             // Flush to the top like the Artists/Albums lists.
                                             set_margin_top: 0,
                                             // A small gap below the source tab menu.
@@ -2895,20 +2932,46 @@ impl Component for App {
             .unwrap_or(1.0)
             .clamp(0.5, 1.5);
         let design = crate::ui::theme::DesignSettings {
-            cover_blur: setting_on(&library, "design_cover_blur"),
             custom_bg: library
                 .get_setting("design_bg_path")
                 .ok()
                 .flatten()
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
+            // New key wins; otherwise migrate the old cover-blur switch (on →
+            // Gaussian) so an upgraded install keeps a blurred background.
+            bg_filter: match library
+                .get_setting("design_bg_filter")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+            {
+                Some(k) => crate::ui::theme::BgFilter::from_key(&k),
+                None if setting_on(&library, "design_cover_blur") => {
+                    crate::ui::theme::BgFilter::Gaussian
+                }
+                None => crate::ui::theme::BgFilter::Off,
+            },
+            bg_filter_strength: library
+                .get_setting("design_bg_filter_strength")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(50)
+                .min(100),
+            bg_nav: setting_on(&library, "design_bg_nav"),
+            bg_titlebar: setting_on(&library, "design_bg_titlebar"),
             text_color: library
                 .get_setting("design_text_color")
                 .ok()
                 .flatten()
                 .filter(|s| !s.is_empty()),
-            bg_nav: setting_on(&library, "design_bg_nav"),
-            chrome_transparency: library
+            field_color: library
+                .get_setting("design_field_color")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            field_transparency: library
                 .get_setting("design_chrome_transparency")
                 .ok()
                 .flatten()
@@ -3066,12 +3129,17 @@ impl Component for App {
                 crate::ui::cloud_page::CloudOutput::SourcesChanged => Msg::SourcesChanged,
                 crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
             });
+        // Shared hand-off slots for the title-bar sort control of each component
+        // page (filled by the component, read by `apply_component_sort`).
+        let podcast_sort: crate::ui::app_sort::SortSlot = Default::default();
+        let stream_sort: crate::ui::app_sort::SortSlot = Default::default();
+        let yt_sort: crate::ui::app_sort::SortSlot = Default::default();
         // Shared hand-off slot for episode subpages built by the component (its
         // `!Send` widget can't ride on the parent's `Send` `Msg`).
         let podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
             std::rc::Rc::new(std::cell::RefCell::new(None));
         let podcasts_page = crate::ui::podcasts_page::PodcastsPage::builder()
-            .launch(podcast_subpage.clone())
+            .launch((podcast_subpage.clone(), podcast_sort.clone()))
             .forward(sender.input_sender(), |out| {
                 use crate::ui::podcasts_page::PodcastsOutput as O;
                 match out {
@@ -3083,12 +3151,13 @@ impl Component for App {
                     O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
                     O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
                     O::RefreshFinished => Msg::PodcastRefreshFinished,
+                    O::SortChanged => Msg::PodcastSortChanged,
                 }
             });
         let yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
             std::rc::Rc::new(std::cell::RefCell::new(None));
         let yt_page = crate::ui::yt_page::YtPage::builder()
-            .launch(yt_subpage.clone())
+            .launch((yt_subpage.clone(), yt_sort.clone()))
             .forward(sender.input_sender(), |out| {
                 use crate::ui::yt_page::YtOutput as O;
                 match out {
@@ -3122,10 +3191,11 @@ impl Component for App {
                     O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
                     O::RefreshFinished => Msg::YtRefreshFinished,
                     O::Share(sel) => Msg::ShareItems(sel),
+                    O::SortChanged => Msg::YtSortChanged,
                 }
             });
         let stream_page = crate::ui::stream_page::StreamPage::builder()
-            .launch(())
+            .launch(stream_sort.clone())
             .forward(sender.input_sender(), |out| {
                 use crate::ui::stream_page::StreamOutput as O;
                 match out {
@@ -3138,6 +3208,7 @@ impl Component for App {
                     O::LibraryChanged => Msg::StreamLibraryChanged,
                     O::Share(sel) => Msg::ShareItems(*sel),
                     O::Toast(s) => Msg::StreamToast(s),
+                    O::SortChanged => Msg::StreamSortChanged,
                 }
             });
         let setup_page = crate::ui::setup::SetupPage::builder().launch(()).forward(
@@ -3261,6 +3332,7 @@ impl Component for App {
                 prev_ctx: None,
                 playing_path: None,
                 close_resume: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                next_source: None,
                 play_session: None,
                 close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 queue_list: queue_list.clone(),
@@ -3340,6 +3412,9 @@ impl Component for App {
                 split: adw::OverlaySplitView::new(),
                 view_stack: adw::ViewStack::new(),
                 sort_btn: gtk::MenuButton::new(),
+                podcast_sort,
+                stream_sort,
+                yt_sort,
                 nav_view: adw::NavigationView::new(),
                 sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
                 top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
@@ -4210,18 +4285,14 @@ impl Component for App {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
             }
+            Msg::SetLastSettingsPage(name) => {
+                let _ = self.library.set_setting("settings_last_page", &name);
+            }
             Msg::SetUiScale(factor) => {
                 self.apply_ui_scale(factor);
                 let _ = self
                     .library
                     .set_setting("ui_scale", &self.theme.ui_scale.to_string());
-            }
-            Msg::SetCoverBlur(on) => {
-                self.theme.design.cover_blur = on;
-                let _ = self
-                    .library
-                    .set_setting("design_cover_blur", if on { "1" } else { "0" });
-                self.refresh_background();
             }
             Msg::SetCustomBg(src) => {
                 // Copy the chosen image into our data dir; `None` clears it.
@@ -4235,11 +4306,32 @@ impl Component for App {
                 );
                 self.refresh_background();
             }
+            Msg::SetBgFilter(idx) => {
+                let filter = crate::ui::theme::BgFilter::from_index(idx);
+                self.theme.design.bg_filter = filter;
+                let _ = self.library.set_setting("design_bg_filter", filter.key());
+                self.refresh_background();
+            }
+            Msg::SetBgFilterStrength(pct) => {
+                self.theme.design.bg_filter_strength = pct.min(100);
+                let _ = self.library.set_setting(
+                    "design_bg_filter_strength",
+                    &self.theme.design.bg_filter_strength.to_string(),
+                );
+                self.refresh_background();
+            }
             Msg::SetTextColor(color) => {
                 self.theme.design.text_color = color.clone();
                 let _ = self
                     .library
                     .set_setting("design_text_color", color.as_deref().unwrap_or(""));
+                self.reapply_runtime_style();
+            }
+            Msg::SetFieldColor(color) => {
+                self.theme.design.field_color = color.clone();
+                let _ = self
+                    .library
+                    .set_setting("design_field_color", color.as_deref().unwrap_or(""));
                 self.reapply_runtime_style();
             }
             Msg::SetBgNav(on) => {
@@ -4249,11 +4341,18 @@ impl Component for App {
                     .set_setting("design_bg_nav", if on { "1" } else { "0" });
                 self.reapply_runtime_style();
             }
-            Msg::SetChromeTransparency(pct) => {
-                self.theme.design.chrome_transparency = pct.min(100);
+            Msg::SetBgTitlebar(on) => {
+                self.theme.design.bg_titlebar = on;
+                let _ = self
+                    .library
+                    .set_setting("design_bg_titlebar", if on { "1" } else { "0" });
+                self.reapply_runtime_style();
+            }
+            Msg::SetFieldTransparency(pct) => {
+                self.theme.design.field_transparency = pct.min(100);
                 let _ = self.library.set_setting(
                     "design_chrome_transparency",
-                    &self.theme.design.chrome_transparency.to_string(),
+                    &self.theme.design.field_transparency.to_string(),
                 );
                 self.reapply_runtime_style();
             }
@@ -4327,6 +4426,23 @@ impl Component for App {
                 self.apply_playback_prefs();
             }
             Msg::SortMenuRefresh => self.rebuild_sort_menu(),
+            // A component page updated its sort slot; mirror it onto the shared
+            // title-bar button, but only while that page's section is showing.
+            Msg::PodcastSortChanged => {
+                if self.current_section().as_deref() == Some("podcasts") {
+                    self.apply_component_sort(&self.nav.podcast_sort);
+                }
+            }
+            Msg::StreamSortChanged => {
+                if self.current_section().as_deref() == Some("streaming") {
+                    self.apply_component_sort(&self.nav.stream_sort);
+                }
+            }
+            Msg::YtSortChanged => {
+                if self.current_section().as_deref() == Some("youtube") {
+                    self.apply_component_sort(&self.nav.yt_sort);
+                }
+            }
             Msg::SetSortCrit(crit) => {
                 let Some(section) = self.current_section() else {
                     return;

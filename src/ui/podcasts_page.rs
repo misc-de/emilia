@@ -25,7 +25,7 @@ use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
 use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
-use crate::ui::app_sort::{sort_dir_icon, sort_popover};
+use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
 
 /// Fetches a feed and stores podcast + episodes (runs in the worker thread,
@@ -122,8 +122,10 @@ pub(crate) struct PodcastsPage {
     gallery_override: Option<bool>,
     /// Per-row alphabetical headings of the overview list (name sort).
     overview_headers: Rc<RefCell<Option<Vec<String>>>>,
-    /// Header sort button (its popover is (re)built in [`Self::rebuild_sort`]).
-    sort_btn: gtk::MenuButton,
+    /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
+    /// writes the popover + direction here (or `None` to hide it), then signals
+    /// the parent via [`PodcastsOutput::SortChanged`].
+    sort_slot: crate::ui::app_sort::SortSlot,
     /// Newest episodes across all subscriptions (for the "Newest" view).
     newest_items: Vec<crate::model::EpisodeRef>,
     /// Container of the "Newest" list (filled imperatively in `reload_newest`).
@@ -218,6 +220,9 @@ pub(crate) enum PodcastsOutput {
     RefreshStarted(bool),
     /// The "refresh all" worker finished → the parent clears one spinner count.
     RefreshFinished,
+    /// The sort slot was rebuilt → the parent refreshes the shared title-bar
+    /// sort button (if the Podcasts section is showing).
+    SortChanged,
 }
 
 #[derive(Debug)]
@@ -243,7 +248,10 @@ pub(crate) enum PodcastsCmd {
 
 #[relm4::component(pub(crate))]
 impl Component for PodcastsPage {
-    type Init = Rc<RefCell<Option<(String, gtk::Box)>>>;
+    type Init = (
+        Rc<RefCell<Option<(String, gtk::Box)>>>,
+        crate::ui::app_sort::SortSlot,
+    );
     type Input = PodcastsInput;
     type Output = PodcastsOutput;
     type CommandOutput = PodcastsCmd;
@@ -262,6 +270,7 @@ impl Component for PodcastsPage {
                 set_margin_start: 12,
                 set_margin_end: 12,
                 add_css_class: "linked",
+                add_css_class: "emilia-tabbar",
 
                 gtk::ToggleButton {
                     set_label: &gettext("Newest"),
@@ -276,14 +285,6 @@ impl Component for PodcastsPage {
                     #[watch]
                     set_active: model.podcast_view == PodcastView::Overview,
                     connect_clicked => PodcastsInput::SetView(PodcastView::Overview),
-                },
-                #[local_ref]
-                sort_btn -> gtk::MenuButton {
-                    set_icon_name: "view-sort-ascending-symbolic",
-                    set_tooltip_text: Some(&gettext("Sort")),
-                    add_css_class: "flat",
-                    #[watch]
-                    set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty(),
                 },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
@@ -358,7 +359,7 @@ impl Component for PodcastsPage {
     }
 
     fn init(
-        subpage_slot: Self::Init,
+        (subpage_slot, sort_slot): Self::Init,
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
@@ -368,7 +369,6 @@ impl Component for PodcastsPage {
         let podcasts_list = gtk::ListBox::new();
         let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let podcasts_gallery = gtk::FlowBox::new();
-        let sort_btn = gtk::MenuButton::new();
         // Restore the persisted overview sort (default: by name, ascending) + the
         // grouping/gallery choices.
         let overview_sort =
@@ -414,7 +414,7 @@ impl Component for PodcastsPage {
             overview_no_group,
             gallery_override,
             overview_headers,
-            sort_btn: sort_btn.clone(),
+            sort_slot,
             podcast_search_results: Vec::new(),
             podcast_search_failed: false,
             podcast_search: Rc::new(RefCell::new(None)),
@@ -479,7 +479,11 @@ impl Component for PodcastsPage {
             }
             PodcastsInput::SetMobile(b) => self.mobile = b,
             PodcastsInput::SetWindow(w) => self.window = Some(w),
-            PodcastsInput::SetView(view) => self.podcast_view = view,
+            PodcastsInput::SetView(view) => {
+                self.podcast_view = view;
+                // The sort button only shows on the subscription overview.
+                self.rebuild_sort(&sender);
+            }
             PodcastsInput::SetSort(crit, desc) => {
                 if self.overview_sort != (crit, desc) {
                     self.overview_sort = (crit, desc);
@@ -487,7 +491,6 @@ impl Component for PodcastsPage {
                     let _ = self
                         .library
                         .set_setting("sort_podcasts_desc", if desc { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_podcasts(&sender);
                 }
             }
@@ -497,7 +500,6 @@ impl Component for PodcastsPage {
                     let _ = self
                         .library
                         .set_setting("nogroup_podcasts", if off { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_podcasts(&sender);
                 }
             }
@@ -507,7 +509,6 @@ impl Component for PodcastsPage {
                     let _ = self
                         .library
                         .set_setting("gallery_podcasts", if on { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_podcasts(&sender);
                 }
             }
@@ -687,7 +688,6 @@ impl PodcastsPage {
     fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
         use crate::ui::app_sort::SortToggle;
         let (crit, desc) = self.overview_sort;
-        self.sort_btn.set_icon_name(sort_dir_icon(desc));
         let crits = [
             (SortCrit::Name, gettext("Name")),
             (SortCrit::Songs, gettext("Number of episodes")),
@@ -720,7 +720,11 @@ impl PodcastsPage {
             },
             toggles,
         );
-        self.sort_btn.set_popover(Some(&popover));
+        // Only the subscription overview (with at least one entry) sorts; hand the
+        // popover up to the shared title-bar button, or hide it otherwise.
+        let visible = self.podcast_view == PodcastView::Overview && !self.podcast_items.is_empty();
+        *self.sort_slot.borrow_mut() = visible.then(|| (popover, desc));
+        let _ = sender.output(PodcastsOutput::SortChanged);
     }
 
     /// Per-row alphabetical headings (by name) for the overview list; none for the
@@ -800,6 +804,9 @@ impl PodcastsPage {
             self.podcasts_list.invalidate_headers();
         }
         self.reload_newest(sender);
+        // The overview's contents (and thus the sort button's visibility) may
+        // have changed → refresh the title-bar sort control.
+        self.rebuild_sort(sender);
     }
 
     /// Gallery variant of the podcast overview: cover grid; tap opens the

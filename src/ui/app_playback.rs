@@ -561,6 +561,11 @@ impl App {
                 return t;
             }
         }
+        // Voice memos aren't in the music library — show their list title
+        // ("Memo <date>" or the user's name), not the file name.
+        if let Some(t) = self.memo_title_for_path(&path_str) {
+            return t;
+        }
         if let Ok(Some(t)) = self.library.track_by_path(&path_str) {
             let title = if t.title.trim().is_empty() {
                 path.file_stem()
@@ -576,6 +581,25 @@ impl App {
             };
         }
         Self::track_display_name(path)
+    }
+
+    /// The display title of a voice memo at `path` (the loaded list first, a DB
+    /// lookup as fallback for the startup-restore case), or `None` if `path`
+    /// isn't a memo.
+    fn memo_title_for_path(&self, path_str: &str) -> Option<String> {
+        if let Some(m) = self
+            .memo
+            .memo_items
+            .iter()
+            .find(|m| m.path.as_str() == path_str)
+        {
+            return Some(m.title.clone());
+        }
+        let memos_dir = crate::core::mic::memos_dir();
+        if std::path::Path::new(path_str).starts_with(&memos_dir) {
+            return self.library.memo_title_by_path(path_str).ok().flatten();
+        }
+        None
     }
 
     pub(crate) fn track_display_name(path: &std::path::Path) -> String {
@@ -692,7 +716,7 @@ impl App {
                 s.played_ms,
                 dur,
                 completed,
-                None, // source (queue/album/…) stays unused in v1, column reserved.
+                s.source, // "single" for a tapped song → kept out of the album stats.
             );
         }
         *self.transport.close_session.borrow_mut() = None;
@@ -706,11 +730,15 @@ impl App {
     pub(crate) fn start_play_session(&mut self, path: PathBuf, duration_ms: i64) {
         let now = crate::ui::app::unix_now();
         let path_str = path.to_string_lossy().into_owned();
+        // Consume the one-shot source tag set by the caller (e.g. "single");
+        // a fresh session without one counts towards its album normally.
+        let source = self.transport.next_source.take();
         self.transport.play_session = Some(PlaySession {
             path,
             started_at: now,
             played_ms: 0,
             duration_ms,
+            source,
         });
         *self.transport.close_session.borrow_mut() = Some((path_str, now, 0, duration_ms));
     }
@@ -1237,6 +1265,8 @@ impl App {
         self.youtube.playing_playlist = false;
         self.transport.queue = vec![PathBuf::from(&path)];
         self.transport.queue_pos = 0;
+        // A single tapped song is not an album play (see `PlaySession::source`).
+        self.transport.next_source = Some("single");
         self.play_current();
         self.refresh_queue_icons();
         if close {

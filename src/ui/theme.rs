@@ -12,9 +12,11 @@
 //! then scales the remaining pinned px literals (icons, the big play button).
 //!
 //! The blurred background is dependency-free: the cover (or the user's image) is
-//! decoded **tiny** ([`COVER_BLUR_PX`]) and shown in a [`gtk::Picture`] that
-//! fills the window behind the content; GTK's linear upscaling turns it into a
-//! smooth blur. A scrim plus translucent chrome keep text readable.
+//! decoded small and shown in a [`gtk::Picture`] that fills the window behind
+//! the content. The chosen [`BgFilter`] either relies on GTK's linear upscaling
+//! of a tiny decode (soft) or pre-bakes the effect on the CPU (Gaussian/motion/
+//! radial/water; see [`render_filtered`]). A scrim plus translucent chrome keep
+//! text readable.
 
 use gtk::prelude::*;
 use relm4::gtk;
@@ -23,28 +25,103 @@ use std::path::PathBuf;
 use crate::ui::app::App;
 use crate::ui::widgets::decode_scaled;
 
-/// Longer-edge pixel size the now-playing cover is decoded to before it is
-/// upscaled to fill the window — small = heavily blurred.
-const COVER_BLUR_PX: i32 = 32;
-/// Same for a user-chosen background image ("extremely blurred").
-const CUSTOM_BG_PX: i32 = 48;
+/// Decode cap for the unfiltered ("Off") background: large enough to look crisp
+/// (1:1) when scaled to fill the window, without loading huge originals.
+const SHARP_BG_PX: i32 = 2560;
+/// Decode size for the CPU/Gaussian filter modes: large enough that the
+/// directional/radial/ripple structure survives, still cheap to process.
+const FILTER_BASE_PX: i32 = 200;
 
-/// The four user-configurable design options (besides scaling).
+/// Blur/effect style applied to the background image. The dropdown order is the
+/// enum order (see [`BgFilter::from_index`]). `Off` keeps the cover background
+/// disabled — only the chosen image is shown, unfiltered (1:1).
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum BgFilter {
+    /// No cover background and no filter: the custom image is shown sharp (1:1).
+    #[default]
+    Off,
+    /// Soft "box" blur (tiny decode upscaled).
+    Soft,
+    /// True Gaussian blur (CPU, separable box passes).
+    Gaussian,
+    /// Directional motion blur.
+    Motion,
+    /// Radial / zoom blur from the image center.
+    Radial,
+    /// Static water-ripple displacement.
+    Water,
+}
+
+impl BgFilter {
+    /// Map a ComboRow index to the variant (out-of-range → `Off`).
+    pub(crate) fn from_index(i: u32) -> Self {
+        match i {
+            1 => Self::Soft,
+            2 => Self::Gaussian,
+            3 => Self::Motion,
+            4 => Self::Radial,
+            5 => Self::Water,
+            _ => Self::Off,
+        }
+    }
+    /// The ComboRow index of this variant.
+    pub(crate) fn index(self) -> u32 {
+        match self {
+            Self::Off => 0,
+            Self::Soft => 1,
+            Self::Gaussian => 2,
+            Self::Motion => 3,
+            Self::Radial => 4,
+            Self::Water => 5,
+        }
+    }
+    /// Stable string used for DB persistence.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Soft => "soft",
+            Self::Gaussian => "gaussian",
+            Self::Motion => "motion",
+            Self::Radial => "radial",
+            Self::Water => "water",
+        }
+    }
+    /// Parse a persisted key (unknown → `Off`).
+    pub(crate) fn from_key(s: &str) -> Self {
+        match s {
+            "soft" => Self::Soft,
+            "gaussian" => Self::Gaussian,
+            "motion" => Self::Motion,
+            "radial" => Self::Radial,
+            "water" => Self::Water,
+            _ => Self::Off,
+        }
+    }
+}
+
+/// The user-configurable design options (besides scaling).
 #[derive(Clone, Default)]
 pub(crate) struct DesignSettings {
-    /// Blur the current cover behind the app content.
-    pub(crate) cover_blur: bool,
     /// A user-chosen background image (already copied into the app data dir).
-    /// Fallback when cover-blur is on but no cover is available; shown fixed
-    /// everywhere when cover-blur is off.
+    /// Presence of this image is the on/off switch for the whole background
+    /// feature; the now-playing cover (when `bg_filter != Off`) takes priority
+    /// over it as the actual source.
     pub(crate) custom_bg: Option<PathBuf>,
-    /// Text & fields (foreground) color (hex `#rrggbb`).
-    pub(crate) text_color: Option<String>,
+    /// Blur/effect style for the background. `Off` = no cover background.
+    pub(crate) bg_filter: BgFilter,
+    /// Strength (0..=100) of the selected filter.
+    pub(crate) bg_filter_strength: u32,
     /// Also let the background show behind the sidebar/navigation.
     pub(crate) bg_nav: bool,
-    /// Transparency (0..=100 %) of entries & buttons over the background
-    /// (0 = opaque, 100 = fully see-through). Default 40.
-    pub(crate) chrome_transparency: u32,
+    /// Also let the background show behind the title bar (headerbar).
+    pub(crate) bg_titlebar: bool,
+    /// Text (foreground) color (hex `#rrggbb`).
+    pub(crate) text_color: Option<String>,
+    /// Fields (chrome) color (hex `#rrggbb`); `None` = the theme's window bg.
+    pub(crate) field_color: Option<String>,
+    /// Transparency (0..=100 %) of entries, buttons, tabs & headings over the
+    /// background (0 = opaque, 100 = fully see-through). Default 40.
+    pub(crate) field_transparency: u32,
 }
 
 /// Holds the runtime CssProvider and the live theme parameters. Lives on `App`.
@@ -91,11 +168,22 @@ impl ThemeState {
 
     /// Wire the background layer widgets created by the `view!` tree.
     pub(crate) fn set_bg_widgets(&mut self, picture: gtk::Picture, scrim: gtk::Box) {
+        picture.add_css_class("emilia-bg");
         picture.set_can_target(false);
         scrim.set_can_target(false);
         scrim.set_visible(false);
         self.bg_picture = Some(picture);
         self.scrim = Some(scrim);
+    }
+
+    /// The paintable currently shown as the main blurred background (for sharing
+    /// it with the tray media popup), or `None` when no background is active.
+    pub(crate) fn bg_paintable(&self) -> Option<gtk::gdk::Paintable> {
+        if self.bg_active {
+            self.bg_picture.as_ref().and_then(|p| p.paintable())
+        } else {
+            None
+        }
     }
 
     /// Push a (pre-blurred) background texture or clear it. `None` hides the layer.
@@ -140,27 +228,67 @@ impl ThemeState {
             ));
         }
 
-        // ---- Text & fields color ----
+        // ---- Text color ----
+        // Also override `sidebar_fg_color` (the sidebar/main-nav text uses that,
+        // not `window_fg_color`) and color the list section headings explicitly.
         if let Some(fg) = self.design.text_color.as_deref().filter(|c| valid_hex(c)) {
             css.push_str(&format!(
-                "@define-color window_fg_color {fg};@define-color view_fg_color {fg};"
+                "@define-color window_fg_color {fg};@define-color view_fg_color {fg};\
+                 @define-color sidebar_fg_color {fg};\
+                 label.emilia-list-section, .emilia-nav-btn label {{ color: {fg}; }}"
             ));
         }
 
         // ---- Blurred background: make the chrome translucent so it shows through ----
         if self.bg_active {
+            // Fields (chrome) color: a custom hex or the theme's window bg.
+            let field = self
+                .design
+                .field_color
+                .as_deref()
+                .filter(|c| valid_hex(c))
+                .unwrap_or("@window_bg_color");
             // Configurable translucency of entries & buttons (0 % = opaque).
-            let a =
-                f64::from(100u32.saturating_sub(self.design.chrome_transparency.min(100))) / 100.0;
+            let a = opacity(self.design.field_transparency);
+            // Tabs + list headings stay 30 percentage points *less* transparent.
+            let a_head = (a + 0.30).min(1.0);
+            // The active tab (nav + in-page switcher) gets another 30 points of
+            // opacity on top, so the current section stands out from the rest.
+            let a_check = (a_head + 0.30).min(1.0);
+            // Dialogs & popovers ("same design") keep a readability floor.
+            let a_modal = a_head.max(0.55);
+            // Note: `window` itself is NOT made transparent — the background
+            // Picture (a child) already covers it, and a transparent `window`
+            // would bleed into separate dialogs (e.g. the color chooser).
             css.push_str(
-                "window, window > box, window > overlay, .view, viewport, stack, \
-                 scrolledwindow, list, flowbox, clamp { background-color: transparent; background-image: none; }",
+                ".view, viewport, stack, scrolledwindow, list, flowbox, clamp \
+                 { background-color: transparent; background-image: none; }",
             );
             css.push_str(&format!(
-                "headerbar, .toolbar {{ background-color: alpha(@window_bg_color, {a}); }}\
-                 list > row, .boxed-list > row, button:not(.flat), entry, spinbutton \
-                 {{ background-color: alpha(@window_bg_color, {a}); }}"
+                "headerbar, .toolbar {{ background-color: alpha({field}, {a}); }}\
+                 list > row, .boxed-list > row, entry, spinbutton \
+                 {{ background-color: alpha({field}, {a}); }}\
+                 .emilia-tabbar button {{ background-color: alpha({field}, {a_head}); }}\
+                 .emilia-tabbar button:checked, button.emilia-nav-btn:checked {{ background-color: alpha({field}, {a_check}); }}\
+                 label.emilia-list-section {{ background-color: transparent; }}\
+                 windowcontrols button, button.titlebutton {{ background-color: transparent; }}"
             ));
+            // Same design for modal dialogs: tint them with the field color so the
+            // blurred background shows through there, too. (Popovers stay opaque.)
+            css.push_str(&format!(
+                "window.dialog, dialog {{ background-color: alpha({field}, {a_modal}); }}"
+            ));
+            // The tray media popup carries its own blurred background Picture, so
+            // make its window transparent to let it show (the content floats over
+            // it like the main window, tinted by the shared scrim).
+            css.push_str("window.emilia-tray-popup { background-color: transparent; }");
+            // Optionally let the blur show fully behind the title bar
+            // (headerbar), overriding the field-alpha tint above.
+            if self.design.bg_titlebar {
+                css.push_str(
+                    "headerbar { background-color: transparent; background-image: none; }",
+                );
+            }
             // Optionally let the blur show behind the sidebar/navigation, too.
             if self.design.bg_nav {
                 css.push_str(
@@ -171,6 +299,12 @@ impl ThemeState {
 
         css
     }
+}
+
+/// Convert a transparency percentage (0 = opaque, 100 = fully transparent) into
+/// a CSS alpha value (1.0 = opaque).
+fn opacity(transparency: u32) -> f64 {
+    f64::from(100u32.saturating_sub(transparency.min(100))) / 100.0
 }
 
 /// Copy a chosen background image into the app data dir and return the stored
@@ -211,10 +345,12 @@ impl App {
         self.reapply_runtime_style();
     }
 
-    /// Cheap track-change hook: only rebuild the background when cover-blur is
-    /// actually on (otherwise nothing about the background depends on the track).
+    /// Cheap track-change hook: only rebuild the background when the now-playing
+    /// cover is actually used as the source (a filter other than `Off`, and a
+    /// background image configured at all).
     pub(crate) fn refresh_cover_background(&mut self) {
-        if self.theme.design.cover_blur {
+        let d = &self.theme.design;
+        if d.custom_bg.is_some() && d.bg_filter != BgFilter::Off {
             self.refresh_background();
         }
     }
@@ -228,22 +364,19 @@ impl App {
         self.reapply_runtime_style();
     }
 
-    /// The texture to show as the blurred background (already downscaled), or
-    /// `None` for the neutral look. Cover-blur uses the now-playing cover and
-    /// falls back to the custom image; without cover-blur the custom image is
-    /// the fixed background.
+    /// The texture to show as the blurred background (already filtered), or
+    /// `None` for the neutral look. A configured custom image is the on/off
+    /// switch; with a filter other than `Off` the now-playing cover takes
+    /// priority as the source and the image is the fallback.
     fn resolve_bg_texture(&self) -> Option<gtk::gdk::Texture> {
         let d = &self.theme.design;
-        if d.cover_blur {
-            if let Some(cover) = self.now_playing_cover_path() {
-                if let Some(t) = decode_scaled(&cover, COVER_BLUR_PX) {
-                    return Some(t);
-                }
-            }
-        }
-        d.custom_bg
-            .as_ref()
-            .and_then(|p| decode_scaled(&p.to_string_lossy(), CUSTOM_BG_PX))
+        let custom = d.custom_bg.as_ref()?.to_string_lossy().into_owned();
+        let src = if d.bg_filter != BgFilter::Off {
+            self.now_playing_cover_path().unwrap_or(custom)
+        } else {
+            custom
+        };
+        render_filtered(&src, d.bg_filter, d.bg_filter_strength)
     }
 
     /// Cover file of the currently playing local track (via its album), if any.
@@ -257,4 +390,194 @@ impl App {
         let album = track.album.filter(|a| !a.trim().is_empty())?;
         self.library.album_cover(&album).ok().flatten()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Background filters. The source image is decoded small (covers are tiny, a
+// custom wallpaper is downscaled to `FILTER_BASE_PX`), so the CPU effects below
+// touch only a few 10k pixels — cheap enough to run on every track change. The
+// soft/Gaussian modes don't need pixel work: soft is a tiny decode upscaled by
+// GTK, Gaussian is blurred by a CSS `filter` on the Picture (see `build_css`).
+// ---------------------------------------------------------------------------
+
+use gtk::gdk_pixbuf::Pixbuf;
+
+/// Decode `path` and turn it into the background texture for `filter`/`strength`.
+fn render_filtered(path: &str, filter: BgFilter, strength: u32) -> Option<gtk::gdk::Texture> {
+    let s = f64::from(strength.min(100)) / 100.0;
+    match filter {
+        BgFilter::Off => decode_scaled(path, SHARP_BG_PX),
+        // Smaller decode = stronger blur (≈64 px down to ≈12 px).
+        BgFilter::Soft => decode_scaled(path, ((64.0 - s * 52.0).round() as i32).max(8)),
+        BgFilter::Gaussian => cpu_filter(path, |pb| gaussian_blur(pb, s)),
+        BgFilter::Motion => cpu_filter(path, |pb| motion_blur(pb, s)),
+        BgFilter::Radial => cpu_filter(path, |pb| radial_blur(pb, s)),
+        BgFilter::Water => cpu_filter(path, |pb| water_ripple(pb, s)),
+    }
+}
+
+/// Decode a moderate-resolution pixbuf, run a per-pixel effect, return a texture.
+fn cpu_filter(path: &str, f: impl FnOnce(&Pixbuf) -> Option<Pixbuf>) -> Option<gtk::gdk::Texture> {
+    let src = Pixbuf::from_file_at_scale(path, FILTER_BASE_PX, FILTER_BASE_PX, true).ok()?;
+    f(&src).map(|pb| gtk::gdk::Texture::for_pixbuf(&pb))
+}
+
+/// Build the output pixbuf from a freshly computed byte buffer in `src`'s layout.
+fn finish(out: Vec<u8>, src: &Pixbuf) -> Option<Pixbuf> {
+    let bytes = gtk::glib::Bytes::from_owned(out);
+    Some(Pixbuf::from_bytes(
+        &bytes,
+        src.colorspace(),
+        src.has_alpha(),
+        8,
+        src.width(),
+        src.height(),
+        src.rowstride(),
+    ))
+}
+
+/// Gaussian blur, approximated by three separable box-blur passes (the classic
+/// box≈Gaussian trick). Radius scales with strength.
+fn gaussian_blur(src: &Pixbuf, s: f64) -> Option<Pixbuf> {
+    let (w, h, nch, stride) = (src.width(), src.height(), src.n_channels(), src.rowstride());
+    let r = (s * (FILTER_BASE_PX as f64 * 0.09)).round() as i32;
+    if r < 1 {
+        return Some(src.clone());
+    }
+    let bytes = src.read_pixel_bytes();
+    let mut buf = bytes.as_ref().to_vec();
+    for _ in 0..3 {
+        buf = box_blur(&buf, w, h, nch, stride, r);
+    }
+    finish(buf, src)
+}
+
+/// One separable box blur (horizontal then vertical) of radius `r`.
+fn box_blur(data: &[u8], w: i32, h: i32, nch: i32, stride: i32, r: i32) -> Vec<u8> {
+    let at = |x: i32, y: i32| -> usize { (y * stride + x * nch) as usize };
+    // Horizontal pass.
+    let mut tmp = vec![0u8; (stride * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for sx in (x - r).max(0)..=(x + r).min(w - 1) {
+                let i = at(sx, y);
+                for c in 0..nch as usize {
+                    acc[c] += u32::from(data[i + c]);
+                }
+                n += 1;
+            }
+            let o = at(x, y);
+            for c in 0..nch as usize {
+                tmp[o + c] = (acc[c] / n) as u8;
+            }
+        }
+    }
+    // Vertical pass.
+    let mut out = vec![0u8; (stride * h) as usize];
+    for x in 0..w {
+        for y in 0..h {
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for sy in (y - r).max(0)..=(y + r).min(h - 1) {
+                let i = at(x, sy);
+                for c in 0..nch as usize {
+                    acc[c] += u32::from(tmp[i + c]);
+                }
+                n += 1;
+            }
+            let o = at(x, y);
+            for c in 0..nch as usize {
+                out[o + c] = (acc[c] / n) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// Horizontal directional blur — averages a window of pixels along x.
+fn motion_blur(src: &Pixbuf, s: f64) -> Option<Pixbuf> {
+    let (w, h, nch, stride) = (src.width(), src.height(), src.n_channels(), src.rowstride());
+    let bytes = src.read_pixel_bytes();
+    let data = bytes.as_ref();
+    let mut out = vec![0u8; (stride * h) as usize];
+    let k = 1 + (s * (w as f64 / 6.0)).round() as i32;
+    let at = |x: i32, y: i32| -> usize { (y * stride + x * nch) as usize };
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for sx in (x - k).max(0)..=(x + k).min(w - 1) {
+                let i = at(sx, y);
+                for c in 0..nch as usize {
+                    acc[c] += u32::from(data[i + c]);
+                }
+                n += 1;
+            }
+            let o = at(x, y);
+            for c in 0..nch as usize {
+                out[o + c] = (acc[c] / n) as u8;
+            }
+        }
+    }
+    finish(out, src)
+}
+
+/// Radial / zoom blur — averages samples on the line toward the image center.
+fn radial_blur(src: &Pixbuf, s: f64) -> Option<Pixbuf> {
+    let (w, h, nch, stride) = (src.width(), src.height(), src.n_channels(), src.rowstride());
+    let bytes = src.read_pixel_bytes();
+    let data = bytes.as_ref();
+    let mut out = vec![0u8; (stride * h) as usize];
+    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+    let samples = 10i32;
+    let amount = s * 0.55;
+    let at = |x: i32, y: i32| -> usize { (y * stride + x * nch) as usize };
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            for i in 0..samples {
+                let t = 1.0 - amount * (f64::from(i) / f64::from(samples - 1));
+                let sx = (cx + (x as f64 - cx) * t).round() as i32;
+                let sy = (cy + (y as f64 - cy) * t).round() as i32;
+                let j = at(sx.clamp(0, w - 1), sy.clamp(0, h - 1));
+                for c in 0..nch as usize {
+                    acc[c] += u32::from(data[j + c]);
+                }
+            }
+            let o = at(x, y);
+            for c in 0..nch as usize {
+                out[o + c] = (acc[c] / samples as u32) as u8;
+            }
+        }
+    }
+    finish(out, src)
+}
+
+/// Static water effect — displaces each pixel by a sinusoidal ripple.
+fn water_ripple(src: &Pixbuf, s: f64) -> Option<Pixbuf> {
+    let (w, h, nch, stride) = (src.width(), src.height(), src.n_channels(), src.rowstride());
+    let bytes = src.read_pixel_bytes();
+    let data = bytes.as_ref();
+    let mut out = vec![0u8; (stride * h) as usize];
+    let amp = s * (w.min(h) as f64 * 0.06);
+    let waves = 6.0;
+    let (fx, fy) = (
+        2.0 * std::f64::consts::PI * waves / w as f64,
+        2.0 * std::f64::consts::PI * waves / h as f64,
+    );
+    let at = |x: i32, y: i32| -> usize { (y * stride + x * nch) as usize };
+    for y in 0..h {
+        for x in 0..w {
+            let dx = amp * (y as f64 * fy).sin();
+            let dy = amp * (x as f64 * fx).sin();
+            let sx = ((x as f64 + dx).round() as i32).clamp(0, w - 1);
+            let sy = ((y as f64 + dy).round() as i32).clamp(0, h - 1);
+            let (i, o) = (at(sx, sy), at(x, y));
+            let n = nch as usize;
+            out[o..o + n].copy_from_slice(&data[i..i + n]);
+        }
+    }
+    finish(out, src)
 }

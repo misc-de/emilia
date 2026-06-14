@@ -61,7 +61,12 @@ impl Tray for EmiliaTray {
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         self.icon_px.clone()
     }
-    fn activate(&mut self, x: i32, y: i32) {
+    /// Left click: toggle the main window (show/hide).
+    fn activate(&mut self, _x: i32, _y: i32) {
+        let _ = self.tx.try_send(TrayCmd::ShowHide);
+    }
+    /// Middle click: the styled media popup (right click is the native menu).
+    fn secondary_activate(&mut self, x: i32, y: i32) {
         let _ = self.tx.try_send(TrayCmd::Popup(x, y));
     }
     fn menu(&self) -> Vec<MenuItem<Self>> {

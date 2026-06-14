@@ -706,6 +706,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("Library"))
             .icon_name("folder-symbolic")
+            .name("library")
             .build();
         let group = adw::PreferencesGroup::builder()
             .title(gettext("Music folder"))
@@ -853,6 +854,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("Sound"))
             .icon_name("audio-speakers-symbolic")
+            .name("sound")
             .build();
         // Global equalizer (basis for everything without a custom artist/album/track EQ).
         let eq_group = adw::PreferencesGroup::builder()
@@ -915,6 +917,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("Meta"))
             .icon_name("system-search-symbolic")
+            .name("meta")
             .build();
 
         // 1. Automatic fetch (first option).
@@ -991,6 +994,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("View"))
             .icon_name("view-list-symbolic")
+            .name("view")
             .build();
 
         // Display language at the very top (takes effect after restarting the app).
@@ -1065,7 +1069,7 @@ impl App {
             });
         }
         theme_group.add(&theme_row);
-        page.add(&theme_group);
+        // Shown on the "Design" page (added further down), not here.
 
         // Gallery view (cover grid) instead of a list + tiles per row.
         let gallery_group = adw::PreferencesGroup::builder()
@@ -1101,7 +1105,7 @@ impl App {
             });
         }
         gallery_group.add(&cols_row);
-        page.add(&gallery_group);
+        // Shown on the "Design" page (added further down), not here.
 
         // App scaling (whole UI, not just text): -50% .. +50% in 10% steps.
         let scale_group = adw::PreferencesGroup::builder()
@@ -1205,32 +1209,90 @@ impl App {
                 to_u8(c.blue())
             )
         }
+        // The swatch next to each color row: the chosen color as a rounded chip,
+        // or – when no color is set – a neutral outline with a centered X, so an
+        // empty color reads as "none" instead of looking like a real (red) color.
+        fn draw_swatch(cr: &gtk::cairo::Context, w: i32, h: i32, color: Option<gtk::gdk::RGBA>) {
+            use std::f64::consts::PI;
+            let (w, h) = (w as f64, h as f64);
+            let inset = 2.0;
+            let r = 5.0;
+            let (x0, y0, x1, y1) = (inset, inset, w - inset, h - inset);
+            cr.new_sub_path();
+            cr.arc(x1 - r, y0 + r, r, -0.5 * PI, 0.0);
+            cr.arc(x1 - r, y1 - r, r, 0.0, 0.5 * PI);
+            cr.arc(x0 + r, y1 - r, r, 0.5 * PI, PI);
+            cr.arc(x0 + r, y0 + r, r, PI, 1.5 * PI);
+            cr.close_path();
+            match color {
+                Some(c) => {
+                    cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, 1.0);
+                    let _ = cr.fill_preserve();
+                    cr.set_source_rgba(0.0, 0.0, 0.0, 0.25);
+                    cr.set_line_width(1.0);
+                    let _ = cr.stroke();
+                }
+                None => {
+                    cr.set_source_rgba(0.55, 0.55, 0.55, 0.6);
+                    cr.set_line_width(1.0);
+                    let _ = cr.stroke();
+                    let pad = w.min(h) * 0.30;
+                    cr.set_source_rgba(0.55, 0.55, 0.55, 0.9);
+                    cr.set_line_width(1.6);
+                    cr.move_to(pad, pad);
+                    cr.line_to(w - pad, h - pad);
+                    cr.move_to(w - pad, pad);
+                    cr.line_to(pad, h - pad);
+                    let _ = cr.stroke();
+                }
+            }
+        }
 
         let page = adw::PreferencesPage::builder()
             .title(gettext("Design"))
             .icon_name("applications-graphics-symbolic")
+            .name("design")
             .build();
 
-        // Background: blurred cover and/or a custom image.
+        // Appearance (light/dark theme) and the list display, built up in the
+        // "View" section above but shown here so all visual options live
+        // together on the Design page.
+        page.add(&theme_group);
+        page.add(&gallery_group);
+
+        // Shared builders for the snapped 0–100 % sliders below.
+        let mk_scale = |initial: u32| {
+            let s = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 5.0);
+            s.set_value(f64::from(initial));
+            s.set_size_request(170, -1);
+            s.set_valign(gtk::Align::Center);
+            s.set_draw_value(true);
+            s.set_value_pos(gtk::PositionType::Left);
+            s.set_round_digits(0);
+            s
+        };
+        // Emit only when the snapped (5 %) value changes, to avoid a DB write +
+        // CSS reload on every drag pixel. `make` is a tuple-variant constructor.
+        let wire_scale = |scale: &gtk::Scale, initial: u32, make: fn(u32) -> Msg| {
+            let sender = sender.clone();
+            let last = std::cell::Cell::new(initial);
+            scale.connect_value_changed(move |s| {
+                let v = ((s.value() / 5.0).round() as u32) * 5;
+                if v != last.get() {
+                    last.set(v);
+                    sender.input(make(v));
+                }
+            });
+        };
+
+        // Background: a custom image is the on/off switch; the filter, its
+        // strength and the navigation toggle appear once an image is chosen.
         let bg_group = adw::PreferencesGroup::builder()
             .title(gettext("Background"))
             .build();
-        let blur_row = adw::SwitchRow::builder()
-            .title(gettext("Blurred cover background"))
-            .subtitle(gettext("Show the current cover, blurred, behind the app"))
-            .active(self.theme.design.cover_blur)
-            .build();
-        {
-            let sender = sender.clone();
-            blur_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetCoverBlur(r.is_active()));
-            });
-        }
-        bg_group.add(&blur_row);
-
-        // Custom background image (extremely blurred). Fallback when cover-blur is
-        // on but no cover is available; fixed everywhere when cover-blur is off.
         let has_bg = self.theme.design.custom_bg.is_some();
+
+        // 1) Custom background image (first).
         let bg_subtitle = if has_bg {
             gettext("Image selected")
         } else {
@@ -1253,11 +1315,93 @@ impl App {
             .css_classes(["flat"])
             .visible(has_bg)
             .build();
+
+        // 2) Blur/effect filter for the cover background (revealed with an image).
+        let filter_names = gtk::StringList::new(&[]);
+        for s in [
+            gettext("Off"),
+            gettext("Soft blur"),
+            gettext("Gaussian blur"),
+            gettext("Motion blur"),
+            gettext("Radial blur"),
+            gettext("Water"),
+        ] {
+            filter_names.append(&s);
+        }
+        let filter_row = adw::ComboRow::builder()
+            .title(gettext("Blurred cover background"))
+            .subtitle(gettext("Show the current cover, blurred, behind the app"))
+            .model(&filter_names)
+            .selected(self.theme.design.bg_filter.index())
+            .visible(has_bg)
+            .build();
+
+        // 3) Strength of the selected filter.
+        let strength_row = adw::ActionRow::builder()
+            .title(gettext("Strength"))
+            .visible(has_bg)
+            .sensitive(self.theme.design.bg_filter.index() != 0)
+            .build();
+        let strength_scale = mk_scale(self.theme.design.bg_filter_strength);
+        wire_scale(
+            &strength_scale,
+            self.theme.design.bg_filter_strength,
+            Msg::SetBgFilterStrength,
+        );
+        strength_row.add_suffix(&strength_scale);
+
+        // 4) Make the navigation transparent so the background shows through.
+        let bg_nav_row = adw::SwitchRow::builder()
+            .title(gettext("Transparency - Navigation"))
+            .subtitle(gettext(
+                "Also show the blurred background behind the sidebar",
+            ))
+            .active(self.theme.design.bg_nav)
+            .visible(has_bg)
+            .build();
+        {
+            let sender = sender.clone();
+            bg_nav_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetBgNav(r.is_active()));
+            });
+        }
+
+        // 5) Make the title bar transparent so the background shows through.
+        let bg_titlebar_row = adw::SwitchRow::builder()
+            .title(gettext("Transparency - Title bar"))
+            .subtitle(gettext(
+                "Also show the blurred background behind the title bar",
+            ))
+            .active(self.theme.design.bg_titlebar)
+            .visible(has_bg)
+            .build();
+        {
+            let sender = sender.clone();
+            bg_titlebar_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetBgTitlebar(r.is_active()));
+            });
+        }
+
+        // Filter change: a strength only applies to an active filter.
+        {
+            let sender = sender.clone();
+            let strength_row = strength_row.clone();
+            filter_row.connect_selected_notify(move |r| {
+                strength_row.set_sensitive(r.selected() != 0);
+                sender.input(Msg::SetBgFilter(r.selected()));
+            });
+        }
+
+        // Choosing/removing the image reveals or hides the options above.
         {
             let sender = sender.clone();
             let win = root.clone();
             let row = bg_row.clone();
             let clear = bg_clear.clone();
+            let filter_row = filter_row.clone();
+            let strength_row = strength_row.clone();
+            let nav_row = bg_nav_row.clone();
+            let titlebar_row = bg_titlebar_row.clone();
             bg_choose.connect_clicked(move |_| {
                 let filter = gtk::FileFilter::new();
                 filter.add_pixbuf_formats();
@@ -1271,11 +1415,20 @@ impl App {
                 let sender = sender.clone();
                 let row = row.clone();
                 let clear = clear.clone();
+                let filter_row = filter_row.clone();
+                let strength_row = strength_row.clone();
+                let nav_row = nav_row.clone();
+                let titlebar_row = titlebar_row.clone();
                 chooser.open(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
                     if let Ok(file) = res {
                         if let Some(path) = file.path() {
                             row.set_subtitle(&gettext("Image selected"));
                             clear.set_visible(true);
+                            filter_row.set_visible(true);
+                            strength_row.set_visible(true);
+                            strength_row.set_sensitive(filter_row.selected() != 0);
+                            nav_row.set_visible(true);
+                            titlebar_row.set_visible(true);
                             sender.input(Msg::SetCustomBg(Some(path)));
                         }
                     }
@@ -1285,102 +1438,157 @@ impl App {
         {
             let sender = sender.clone();
             let row = bg_row.clone();
+            let filter_row = filter_row.clone();
+            let strength_row = strength_row.clone();
+            let nav_row = bg_nav_row.clone();
+            let titlebar_row = bg_titlebar_row.clone();
             bg_clear.connect_clicked(move |b| {
                 row.set_subtitle(&gettext("None"));
                 b.set_visible(false);
+                filter_row.set_visible(false);
+                strength_row.set_visible(false);
+                nav_row.set_visible(false);
+                titlebar_row.set_visible(false);
                 sender.input(Msg::SetCustomBg(None));
             });
         }
         bg_row.add_suffix(&bg_clear);
         bg_row.add_suffix(&bg_choose);
         bg_group.add(&bg_row);
-
-        // Optionally let the background show behind the sidebar/navigation, too.
-        let bg_nav_row = adw::SwitchRow::builder()
-            .title(gettext("Background behind navigation"))
-            .subtitle(gettext(
-                "Also show the blurred background behind the sidebar",
-            ))
-            .active(self.theme.design.bg_nav)
-            .build();
-        {
-            let sender = sender.clone();
-            bg_nav_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetBgNav(r.is_active()));
-            });
-        }
+        bg_group.add(&filter_row);
+        bg_group.add(&strength_row);
         bg_group.add(&bg_nav_row);
-
-        // Transparency of entries & buttons over the background (0–100 %).
-        let trans_row = adw::ActionRow::builder()
-            .title(gettext("Transparency of entries & buttons"))
-            .build();
-        let trans_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 5.0);
-        trans_scale.set_value(f64::from(self.theme.design.chrome_transparency));
-        trans_scale.set_size_request(170, -1);
-        trans_scale.set_valign(gtk::Align::Center);
-        trans_scale.set_draw_value(true);
-        trans_scale.set_value_pos(gtk::PositionType::Left);
-        trans_scale.set_round_digits(0);
-        {
-            let sender = sender.clone();
-            // Only emit when the snapped (5 %) value actually changes, to avoid a
-            // DB write + CSS reload on every drag pixel.
-            let last = std::cell::Cell::new(self.theme.design.chrome_transparency);
-            trans_scale.connect_value_changed(move |s| {
-                let v = ((s.value() / 5.0).round() as u32) * 5;
-                if v != last.get() {
-                    last.set(v);
-                    sender.input(Msg::SetChromeTransparency(v));
-                }
-            });
-        }
-        trans_row.add_suffix(&trans_scale);
-        bg_group.add(&trans_row);
+        bg_group.add(&bg_titlebar_row);
         page.add(&bg_group);
 
-        // Color of text & fields (with reset).
+        // Colors: text and fields, each with its own color (with reset) and a
+        // transparency over the background.
         let colors_group = adw::PreferencesGroup::builder()
             .title(gettext("Colors"))
             .build();
+        // Build a color row (color button + reset). `set` is the tuple-variant
+        // constructor that persists the picked/cleared color.
+        let mk_color_row = |title: String,
+                            subtitle: Option<String>,
+                            initial: &Option<String>,
+                            set: fn(Option<String>) -> Msg| {
+            use std::cell::Cell;
+            use std::rc::Rc;
 
-        let text_color_row = adw::ActionRow::builder()
-            .title(gettext("Text & fields"))
-            .build();
-        let text_color_btn = gtk::ColorDialogButton::builder()
-            .dialog(&gtk::ColorDialog::new())
-            .valign(gtk::Align::Center)
-            .build();
-        if let Some(rgba) = self
-            .theme
-            .design
-            .text_color
-            .as_deref()
-            .and_then(|h| gtk::gdk::RGBA::parse(h).ok())
-        {
-            text_color_btn.set_rgba(&rgba);
-        }
-        {
-            let sender = sender.clone();
-            text_color_btn.connect_rgba_notify(move |b| {
-                sender.input(Msg::SetTextColor(Some(rgba_to_hex(&b.rgba()))));
-            });
-        }
-        let text_color_reset = gtk::Button::builder()
-            .icon_name("edit-clear-symbolic")
-            .tooltip_text(gettext("Reset"))
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        {
-            let sender = sender.clone();
-            text_color_reset.connect_clicked(move |_| {
-                sender.input(Msg::SetTextColor(None));
-            });
-        }
-        text_color_row.add_suffix(&text_color_reset);
-        text_color_row.add_suffix(&text_color_btn);
+            let row = adw::ActionRow::builder().title(title).build();
+            if let Some(sub) = subtitle {
+                row.set_subtitle(&sub);
+            }
+
+            // Current color (`None` = no color set), shared by the swatch's draw
+            // func and the picker/reset callbacks.
+            let color: Rc<Cell<Option<gtk::gdk::RGBA>>> = Rc::new(Cell::new(
+                initial
+                    .as_deref()
+                    .and_then(|h| gtk::gdk::RGBA::parse(h).ok()),
+            ));
+
+            let swatch = gtk::DrawingArea::builder()
+                .content_width(24)
+                .content_height(24)
+                .valign(gtk::Align::Center)
+                .build();
+            {
+                let color = color.clone();
+                swatch.set_draw_func(move |_, cr, w, h| draw_swatch(cr, w, h, color.get()));
+            }
+
+            // The clear button only makes sense once a color is actually set.
+            let reset = gtk::Button::builder()
+                .icon_name("edit-clear-symbolic")
+                .tooltip_text(gettext("Reset"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .visible(color.get().is_some())
+                .build();
+
+            // The swatch button opens a color dialog; picking persists the color.
+            let btn = gtk::Button::builder()
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .tooltip_text(gettext("Choose color"))
+                .child(&swatch)
+                .build();
+            {
+                let sender = sender.clone();
+                let color = color.clone();
+                let swatch = swatch.clone();
+                let reset = reset.clone();
+                btn.connect_clicked(move |b| {
+                    let dialog = gtk::ColorDialog::new();
+                    dialog.set_with_alpha(false);
+                    let parent = b.root().and_downcast::<gtk::Window>();
+                    let start = color.get().unwrap_or(gtk::gdk::RGBA::WHITE);
+                    let sender = sender.clone();
+                    let color = color.clone();
+                    let swatch = swatch.clone();
+                    let reset = reset.clone();
+                    dialog.choose_rgba(
+                        parent.as_ref(),
+                        Some(&start),
+                        gtk::gio::Cancellable::NONE,
+                        move |res| {
+                            if let Ok(rgba) = res {
+                                color.set(Some(rgba));
+                                swatch.queue_draw();
+                                reset.set_visible(true);
+                                sender.input(set(Some(rgba_to_hex(&rgba))));
+                            }
+                        },
+                    );
+                });
+            }
+            {
+                let sender = sender.clone();
+                let color = color.clone();
+                let swatch = swatch.clone();
+                let reset_btn = reset.clone();
+                reset.connect_clicked(move |_| {
+                    color.set(None);
+                    swatch.queue_draw();
+                    reset_btn.set_visible(false);
+                    sender.input(set(None));
+                });
+            }
+            row.add_suffix(&reset);
+            row.add_suffix(&btn);
+            row
+        };
+
+        // Text color.
+        let text_color_row = mk_color_row(
+            gettext("Text color"),
+            None,
+            &self.theme.design.text_color,
+            Msg::SetTextColor,
+        );
         colors_group.add(&text_color_row);
+
+        // Fields color + its transparency (tabs, navigation, list headings …).
+        let field_color_row = mk_color_row(
+            gettext("Fields color"),
+            Some(gettext("Background of tabs, navigation and list headings")),
+            &self.theme.design.field_color,
+            Msg::SetFieldColor,
+        );
+        colors_group.add(&field_color_row);
+        let field_trans_row = adw::ActionRow::builder()
+            .title(gettext("Fields transparency"))
+            .subtitle(gettext("0 % opaque, 100 % fully transparent"))
+            .build();
+        let field_trans_scale = mk_scale(self.theme.design.field_transparency);
+        wire_scale(
+            &field_trans_scale,
+            self.theme.design.field_transparency,
+            Msg::SetFieldTransparency,
+        );
+        field_trans_row.add_suffix(&field_trans_scale);
+        colors_group.add(&field_trans_row);
         page.add(&colors_group);
 
         let design_page = page;
@@ -1389,6 +1597,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("Menu"))
             .icon_name("open-menu-symbolic")
+            .name("menu")
             .build();
         let sections_group = adw::PreferencesGroup::builder()
             .title(gettext("Menu items"))
@@ -1412,6 +1621,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("Cache"))
             .icon_name("media-record-symbolic")
+            .name("cache")
             .build();
         let streaming_group = adw::PreferencesGroup::builder()
             .title(gettext("Streaming"))
@@ -1462,6 +1672,7 @@ impl App {
         let page = adw::PreferencesPage::builder()
             .title(gettext("Hidden"))
             .icon_name("view-conceal-symbolic")
+            .name("hidden")
             .build();
         let hidden_group = adw::PreferencesGroup::builder()
             .title(gettext("Hidden content"))
@@ -1591,6 +1802,25 @@ impl App {
         dialog.add(&menu_page);
         dialog.add(&cache_page);
         dialog.add(&hidden_page);
+
+        // Reopen on the category last viewed, and remember it on every switch.
+        if let Some(name) = self
+            .library
+            .get_setting("settings_last_page")
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty())
+        {
+            dialog.set_visible_page_name(&name);
+        }
+        {
+            let sender = sender.clone();
+            dialog.connect_visible_page_name_notify(move |d| {
+                if let Some(name) = d.visible_page_name() {
+                    sender.input(Msg::SetLastSettingsPage(name.to_string()));
+                }
+            });
+        }
 
         dialog.present(Some(root));
     }

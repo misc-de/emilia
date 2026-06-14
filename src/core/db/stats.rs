@@ -157,6 +157,7 @@ impl Library {
              FROM play_event e
              JOIN track t ON t.path = e.path
              WHERE e.started_at >= ?1 AND t.album IS NOT NULL AND t.album <> ''
+                   AND (e.source IS NULL OR e.source <> 'single')
              GROUP BY COALESCE(t.artist, ''), t.album",
             p = Self::COUNTS_AS_PLAY
         ))?;

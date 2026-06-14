@@ -18,6 +18,10 @@ pub(crate) struct MediaPopup {
     title: gtk::Label,
     artist: gtk::Label,
     play_btn: gtk::Button,
+    /// Blurred-background layer (mirrors the main window) so the popup shows the
+    /// same Design; `bg_picture` carries the shared texture, `scrim` tints it.
+    bg_picture: gtk::Picture,
+    scrim: gtk::Box,
 }
 
 impl MediaPopup {
@@ -99,7 +103,28 @@ impl MediaPopup {
         root_box.set_size_request(280, -1);
         root_box.append(&top);
         root_box.append(&controls);
-        window.set_child(Some(&root_box));
+
+        // Same Design as the app: a blurred background Picture + scrim behind the
+        // content. The texture is shared from the main window's theme state and
+        // pushed in `refresh_media_popup`; the chrome tint/text color come from
+        // the runtime stylesheet (`.emilia-tray-popup`, see `build_css`).
+        let bg_picture = gtk::Picture::builder()
+            .content_fit(gtk::ContentFit::Cover)
+            .can_target(false)
+            .css_classes(["emilia-bg"])
+            .build();
+        let scrim = gtk::Box::builder()
+            .css_classes(["emilia-bg-scrim"])
+            .can_target(false)
+            .visible(false)
+            .build();
+        let overlay = gtk::Overlay::new();
+        overlay.add_css_class("emilia-tray-popup-clip");
+        overlay.set_overflow(gtk::Overflow::Hidden);
+        overlay.set_child(Some(&bg_picture));
+        overlay.add_overlay(&scrim);
+        overlay.add_overlay(&root_box);
+        window.set_child(Some(&overlay));
 
         Self {
             window,
@@ -107,6 +132,8 @@ impl MediaPopup {
             title,
             artist,
             play_btn,
+            bg_picture,
+            scrim,
         }
     }
 }
@@ -184,5 +211,10 @@ impl App {
         } else {
             "media-playback-start-symbolic"
         });
+
+        // Mirror the app's blurred background into the popup (shared texture).
+        let paintable = self.theme.bg_paintable();
+        p.bg_picture.set_paintable(paintable.as_ref());
+        p.scrim.set_visible(paintable.is_some());
     }
 }

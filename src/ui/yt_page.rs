@@ -26,7 +26,7 @@ use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{SortCrit, YtView};
 use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
-use crate::ui::app_sort::{read_sort, sort_dir_icon, sort_popover};
+use crate::ui::app_sort::{read_sort, sort_popover};
 use crate::ui::app_views::natural_key;
 
 /// How many newest videos to cache per channel on subscribe/refresh.
@@ -301,13 +301,19 @@ pub(crate) struct YtPage {
     /// "Without grouping" for the channels list (no alphabetical headings).
     /// Persisted as "nogroup_channels".
     channels_no_group: bool,
+    /// Sort of the "Recent" (recently played) list (criterion + descending).
+    /// Persisted as "sort_yt_recent" / "sort_yt_recent_desc". Default: by date
+    /// (most recent first), i.e. the natural `played_at` order from the DB.
+    recent_sort: (SortCrit, bool),
     /// Per-view gallery override (sort popover); `None` follows the global
     /// `gallery_view`. Persisted as "gallery_channels".
     gallery_override: Option<bool>,
     /// Per-row alphabetical headings of the channels list (name sort).
     channel_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    /// Header sort button (its popover is built in [`Self::rebuild_sort`]).
-    sort_btn: gtk::MenuButton,
+    /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
+    /// writes the popover + direction here (or `None` to hide it) for the active
+    /// view, then signals the parent via [`YtOutput::SortChanged`].
+    sort_slot: crate::ui::app_sort::SortSlot,
     /// (id, title, url, thumbnail, video count) per subscribed channel.
     channel_items: Vec<(i64, String, String, Option<String>, i64)>,
     channels_list: gtk::ListBox,
@@ -344,6 +350,8 @@ pub(crate) enum YtInput {
     SetView(YtView),
     /// Change the subscriptions sort (criterion + descending), from the header.
     SetSort(SortCrit, bool),
+    /// Change the "Recent" list sort (criterion + descending), from the header.
+    SetRecentSort(SortCrit, bool),
     /// Toggle alphabetical grouping of the channels list (`true` = no grouping).
     SetNoGroup(bool),
     /// Per-view gallery override for the channels (sort popover toggle).
@@ -463,6 +471,9 @@ pub(crate) enum YtOutput {
     RefreshFinished,
     /// Share a selection (a YouTube channel or video) over device sync.
     Share(crate::core::sync::share::Selection),
+    /// The sort slot was rebuilt → the parent refreshes the shared title-bar
+    /// sort button (if the YouTube section is showing).
+    SortChanged,
 }
 
 #[derive(Debug)]
@@ -516,7 +527,10 @@ pub(crate) enum YtCmd {
 
 #[relm4::component(pub(crate))]
 impl Component for YtPage {
-    type Init = Rc<RefCell<Option<(String, gtk::Box)>>>;
+    type Init = (
+        Rc<RefCell<Option<(String, gtk::Box)>>>,
+        crate::ui::app_sort::SortSlot,
+    );
     type Input = YtInput;
     type Output = YtOutput;
     type CommandOutput = YtCmd;
@@ -546,6 +560,7 @@ impl Component for YtPage {
                 set_margin_start: 12,
                 set_margin_end: 12,
                 add_css_class: "linked",
+                add_css_class: "emilia-tabbar",
 
                 gtk::ToggleButton {
                     set_label: &gettext("Recent"),
@@ -567,14 +582,6 @@ impl Component for YtPage {
                     #[watch]
                     set_active: model.yt_view == YtView::Channels,
                     connect_clicked => YtInput::SetView(YtView::Channels),
-                },
-                #[local_ref]
-                sort_btn -> gtk::MenuButton {
-                    set_icon_name: "view-sort-ascending-symbolic",
-                    set_tooltip_text: Some(&gettext("Sort")),
-                    add_css_class: "flat",
-                    #[watch]
-                    set_visible: model.yt_view == YtView::Channels && !model.channel_items.is_empty(),
                 },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
@@ -675,7 +682,7 @@ impl Component for YtPage {
     }
 
     fn init(
-        subpage_slot: Self::Init,
+        (subpage_slot, sort_slot): Self::Init,
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
@@ -684,10 +691,11 @@ impl Component for YtPage {
         let yt_channels_gallery = gtk::FlowBox::new();
         let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let yt_recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let sort_btn = gtk::MenuButton::new();
         // Restore the persisted subscriptions sort (default: by name, ascending) +
         // the grouping/gallery choices.
         let channels_sort = read_sort(&library, "channels", SortCrit::Name, false);
+        // Recent list sort (default: by date, most recent first).
+        let recent_sort = read_sort(&library, "yt_recent", SortCrit::Release, true);
         let channels_no_group = matches!(
             library
                 .get_setting("nogroup_channels")
@@ -723,9 +731,10 @@ impl Component for YtPage {
             yt_view: YtView::Recent,
             channels_sort,
             channels_no_group,
+            recent_sort,
             gallery_override,
             channel_headers,
-            sort_btn: sort_btn.clone(),
+            sort_slot,
             channel_items: Vec::new(),
             channels_list: yt_channels_list.clone(),
             channels_gallery: yt_channels_gallery.clone(),
@@ -794,7 +803,11 @@ impl Component for YtPage {
                 self.refresh_yt_icons();
             }
             YtInput::RefreshBroken => self.ytdlp_broken = youtube::extraction_broken(),
-            YtInput::SetView(v) => self.yt_view = v,
+            YtInput::SetView(v) => {
+                self.yt_view = v;
+                // Each view has its own sort control (Newest: none).
+                self.rebuild_sort(&sender);
+            }
             YtInput::SetSort(crit, desc) => {
                 if self.channels_sort != (crit, desc) {
                     self.channels_sort = (crit, desc);
@@ -802,8 +815,17 @@ impl Component for YtPage {
                     let _ = self
                         .library
                         .set_setting("sort_channels_desc", if desc { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_channels(&sender);
+                }
+            }
+            YtInput::SetRecentSort(crit, desc) => {
+                if self.recent_sort != (crit, desc) {
+                    self.recent_sort = (crit, desc);
+                    let _ = self.library.set_setting("sort_yt_recent", crit.as_key());
+                    let _ = self
+                        .library
+                        .set_setting("sort_yt_recent_desc", if desc { "1" } else { "0" });
+                    self.reload_yt_recent(&sender);
                 }
             }
             YtInput::SetNoGroup(off) => {
@@ -812,7 +834,6 @@ impl Component for YtPage {
                     let _ = self
                         .library
                         .set_setting("nogroup_channels", if off { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_channels(&sender);
                 }
             }
@@ -822,7 +843,6 @@ impl Component for YtPage {
                     let _ = self
                         .library
                         .set_setting("gallery_channels", if on { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_channels(&sender);
                 }
             }
@@ -1111,41 +1131,92 @@ impl YtPage {
     /// and whenever the sort/grouping/gallery changes.
     fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
         use crate::ui::app_sort::SortToggle;
-        let (crit, desc) = self.channels_sort;
-        self.sort_btn.set_icon_name(sort_dir_icon(desc));
-        let crits = [
-            (SortCrit::Name, gettext("Name")),
-            (SortCrit::Songs, gettext("Number of videos")),
-        ];
         let input = sender.input_sender().clone();
-        let group_input = input.clone();
-        let gallery_input = input.clone();
-        let toggles = vec![
-            SortToggle {
-                label: gettext("Without grouping"),
-                active: self.channels_no_group,
-                on_toggle: Box::new(move |off| {
-                    let _ = group_input.send(YtInput::SetNoGroup(off));
-                }),
-            },
-            SortToggle {
-                label: gettext("Gallery view"),
-                active: self.gallery_on(),
-                on_toggle: Box::new(move |on| {
-                    let _ = gallery_input.send(YtInput::SetGallery(on));
-                }),
-            },
-        ];
-        let popover = sort_popover(
-            &crits,
-            crit,
-            desc,
-            move |crit, desc| {
-                let _ = input.send(YtInput::SetSort(crit, desc));
-            },
-            toggles,
-        );
-        self.sort_btn.set_popover(Some(&popover));
+        // Subscriptions and Recent both sort; Newest stays date-grouped (no sort).
+        let slot = match self.yt_view {
+            YtView::Channels => {
+                let (crit, desc) = self.channels_sort;
+                let crits = [
+                    (SortCrit::Name, gettext("Name")),
+                    (SortCrit::Songs, gettext("Number of videos")),
+                ];
+                let group_input = input.clone();
+                let gallery_input = input.clone();
+                let toggles = vec![
+                    SortToggle {
+                        label: gettext("Without grouping"),
+                        active: self.channels_no_group,
+                        on_toggle: Box::new(move |off| {
+                            let _ = group_input.send(YtInput::SetNoGroup(off));
+                        }),
+                    },
+                    SortToggle {
+                        label: gettext("Gallery view"),
+                        active: self.gallery_on(),
+                        on_toggle: Box::new(move |on| {
+                            let _ = gallery_input.send(YtInput::SetGallery(on));
+                        }),
+                    },
+                ];
+                let popover = sort_popover(
+                    &crits,
+                    crit,
+                    desc,
+                    move |crit, desc| {
+                        let _ = input.send(YtInput::SetSort(crit, desc));
+                    },
+                    toggles,
+                );
+                (!self.channel_items.is_empty()).then(|| (popover, desc))
+            }
+            YtView::Recent => {
+                let (crit, desc) = self.recent_sort;
+                // Recent is a flat list (no grouping / gallery): name, date, length.
+                let crits = [
+                    (SortCrit::Name, gettext("Name")),
+                    (SortCrit::Release, gettext("Date")),
+                    (SortCrit::Length, gettext("Length")),
+                ];
+                let popover = sort_popover(
+                    &crits,
+                    crit,
+                    desc,
+                    move |crit, desc| {
+                        let _ = input.send(YtInput::SetRecentSort(crit, desc));
+                    },
+                    vec![],
+                );
+                (!self.recent_items.is_empty()).then(|| (popover, desc))
+            }
+            YtView::Newest => None,
+        };
+        *self.sort_slot.borrow_mut() = slot;
+        let _ = sender.output(YtOutput::SortChanged);
+    }
+
+    /// Orders the "Recent" list by the chosen sort. "Date" keeps the DB order
+    /// (recently played first), reversing it for ascending; the others sort by
+    /// title or runtime (videos use `duration`, playlists `total_duration`).
+    fn sort_recent_items(&mut self) {
+        let (crit, desc) = self.recent_sort;
+        match crit {
+            SortCrit::Name => self
+                .recent_items
+                .sort_by_cached_key(|r| natural_key(&r.title)),
+            SortCrit::Length => self
+                .recent_items
+                .sort_by_key(|r| r.duration.or(r.total_duration).unwrap_or(0)),
+            // Date (Release): the query already returns `played_at` descending.
+            _ => {
+                if !desc {
+                    self.recent_items.reverse();
+                }
+                return;
+            }
+        }
+        if desc {
+            self.recent_items.reverse();
+        }
     }
 
     /// Per-row alphabetical headings (by name) for the channels list; none for the
@@ -1184,6 +1255,8 @@ impl YtPage {
     fn reload_channels(&mut self, sender: &ComponentSender<Self>) {
         self.channel_items = self.library.channels().unwrap_or_default();
         self.sort_channels();
+        // Refresh the title-bar sort control (visibility depends on emptiness).
+        self.rebuild_sort(sender);
         *self.channel_headers.borrow_mut() = self.channels_section_headers();
         if self.gallery_on() {
             self.fill_yt_gallery(sender);
@@ -1386,6 +1459,10 @@ impl YtPage {
     /// Builds the "Recent" list (recently played videos/playlists, newest first).
     fn reload_yt_recent(&mut self, sender: &ComponentSender<Self>) {
         self.recent_items = self.library.recent_videos(150).unwrap_or_default();
+        self.sort_recent_items();
+        // Refresh the title-bar sort control (visibility depends on emptiness);
+        // before the early-return below so the empty case hides it too.
+        self.rebuild_sort(sender);
         while let Some(child) = self.recent_list.first_child() {
             self.recent_list.remove(&child);
         }
@@ -1527,7 +1604,7 @@ impl YtPage {
         let kind = Rc::new(Cell::new(YtKind::Video));
         let kind_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .css_classes(["linked"])
+            .css_classes(["linked", "emilia-tabbar"])
             .halign(gtk::Align::Center)
             .margin_bottom(6)
             .build();

@@ -26,7 +26,7 @@ use crate::model::{RecordingItem, StreamItem};
 use crate::ui::app::{SortCrit, StreamView};
 use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
-use crate::ui::app_sort::{read_sort, sort_dir_icon, sort_popover, SortToggle};
+use crate::ui::app_sort::{read_sort, sort_popover, SortToggle};
 use crate::ui::app_views::natural_key;
 
 /// Placeholder icon when a station has no logo.
@@ -151,8 +151,10 @@ pub(crate) struct StreamPage {
     /// Gallery variant of the stations (logo grid). Its container box lives only
     /// in the view tree (a `#[local_ref]`); the flow box is filled imperatively.
     streams_gallery: gtk::FlowBox,
-    /// Header sort button; its popover is (re)built per sub-view in [`Self::rebuild_sort`].
-    sort_btn: gtk::MenuButton,
+    /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
+    /// writes the popover + direction here (or `None` to hide it) for the active
+    /// sub-view, then signals the parent via [`StreamOutput::SortChanged`].
+    sort_slot: crate::ui::app_sort::SortSlot,
 }
 
 #[derive(Debug)]
@@ -217,6 +219,9 @@ pub(crate) enum StreamOutput {
     Share(Box<crate::core::sync::share::Selection>),
     /// Informational toast.
     Toast(String),
+    /// The sort slot was rebuilt → the parent refreshes the shared title-bar
+    /// sort button (if the Streaming section is showing).
+    SortChanged,
 }
 
 #[derive(Debug)]
@@ -230,7 +235,7 @@ pub(crate) enum StreamCmd {
 
 #[relm4::component(pub(crate))]
 impl Component for StreamPage {
-    type Init = ();
+    type Init = crate::ui::app_sort::SortSlot;
     type Input = StreamInput;
     type Output = StreamOutput;
     type CommandOutput = StreamCmd;
@@ -248,6 +253,7 @@ impl Component for StreamPage {
                 set_margin_start: 12,
                 set_margin_end: 12,
                 add_css_class: "linked",
+                add_css_class: "emilia-tabbar",
                 gtk::ToggleButton {
                     set_label: &gettext("Stations"),
                     set_hexpand: true,
@@ -261,17 +267,6 @@ impl Component for StreamPage {
                     #[watch]
                     set_active: model.stream_view == StreamView::Recordings,
                     connect_clicked => StreamInput::SetView(StreamView::Recordings),
-                },
-                #[local_ref]
-                sort_btn -> gtk::MenuButton {
-                    set_icon_name: "view-sort-ascending-symbolic",
-                    set_tooltip_text: Some(&gettext("Sort")),
-                    add_css_class: "flat",
-                    #[watch]
-                    set_visible: match model.stream_view {
-                        StreamView::Channels => !model.stream_items.is_empty(),
-                        StreamView::Recordings => !model.recording_items.is_empty(),
-                    },
                 },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
@@ -349,14 +344,13 @@ impl Component for StreamPage {
     }
 
     fn init(
-        _init: Self::Init,
+        sort_slot: Self::Init,
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let library = Library::open_or_memory();
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
-        let sort_btn = gtk::MenuButton::new();
         let streams_gallery = gtk::FlowBox::new();
         let streams_gallery_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         // Restore the per-sub-view sorts. Stations default to name-ascending;
@@ -431,7 +425,7 @@ impl Component for StreamPage {
             station_headers,
             recording_headers,
             streams_gallery: streams_gallery.clone(),
-            sort_btn: sort_btn.clone(),
+            sort_slot,
         };
         // Cache the station logos once in the background, then redraw.
         sender.spawn_oneshot_command(|| {
@@ -491,7 +485,6 @@ impl Component for StreamPage {
                     let _ = self
                         .library
                         .set_setting(&format!("sort_{key}_desc"), if desc { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     match self.stream_view {
                         StreamView::Channels => self.reload_streams(&sender),
                         StreamView::Recordings => self.reload_recordings(&sender),
@@ -508,7 +501,6 @@ impl Component for StreamPage {
                     let _ = self
                         .library
                         .set_setting(&format!("nogroup_{key}"), if off { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     match self.stream_view {
                         StreamView::Channels => self.reload_streams(&sender),
                         StreamView::Recordings => self.reload_recordings(&sender),
@@ -521,7 +513,6 @@ impl Component for StreamPage {
                     let _ = self
                         .library
                         .set_setting("gallery_stations", if on { "1" } else { "0" });
-                    self.rebuild_sort(&sender);
                     self.reload_streams(&sender);
                 }
             }
@@ -651,7 +642,6 @@ impl StreamPage {
             ),
         };
         let (crit, desc) = state;
-        self.sort_btn.set_icon_name(sort_dir_icon(desc));
         let input = sender.input_sender().clone();
         let group_input = input.clone();
         let mut toggles = vec![SortToggle {
@@ -682,7 +672,14 @@ impl StreamPage {
             },
             toggles,
         );
-        self.sort_btn.set_popover(Some(&popover));
+        // Both sub-views sort (stations by name; recordings by name/date/length);
+        // show the button only when the visible sub-view has entries.
+        let visible = match self.stream_view {
+            StreamView::Channels => !self.stream_items.is_empty(),
+            StreamView::Recordings => !self.recording_items.is_empty(),
+        };
+        *self.sort_slot.borrow_mut() = visible.then(|| (popover, desc));
+        let _ = sender.output(StreamOutput::SortChanged);
     }
 
     /// Per-row alphabetical headings (by name) for the stations list; none when
@@ -811,6 +808,9 @@ impl StreamPage {
     fn reload_streams(&mut self, sender: &ComponentSender<Self>) {
         self.stream_items = self.library.streams().unwrap_or_default();
         self.sort_streams();
+        // Refresh the title-bar sort control (visibility depends on emptiness);
+        // done before the gallery early-return below so both paths cover it.
+        self.rebuild_sort(sender);
         // Alphabetical headings (by name) for the list; none in gallery mode.
         *self.station_headers.borrow_mut() = self.station_section_headers();
         if self.stations_gallery {
@@ -1248,6 +1248,8 @@ impl StreamPage {
             }
         }
         self.sort_recording_items();
+        // Refresh the title-bar sort control (visibility depends on emptiness).
+        self.rebuild_sort(sender);
         // Alphabetical headings (by name) for the saved rows; none while a live
         // entry is prepended (it would offset the labels) or for date/length sorts.
         *self.recording_headers.borrow_mut() = self.recording_section_headers();

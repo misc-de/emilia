@@ -20,6 +20,14 @@ use crate::ui::app::{
 use crate::ui::app_views::natural_key;
 use crate::ui::fs_row::FsEntry;
 
+/// Shared hand-off for a page component's title-bar sort control. The component
+/// (Podcasts/Streaming/YouTube) rebuilds it on every sort/view/list change; the
+/// parent reads it to drive the one shared title-bar [`crate::ui::app::NavState::sort_btn`].
+/// `None` hides the button, `Some((popover, desc))` shows it with that popover
+/// and direction icon. (`gtk::Popover` is `!Send`, so it rides an `Rc` slot,
+/// never a `Msg`.)
+pub(crate) type SortSlot = std::rc::Rc<std::cell::RefCell<Option<(gtk::Popover, bool)>>>;
+
 /// Alphabetical group heading for a name (Artists/Albums sorted by name):
 /// digit-initial entries collapse into one `0–9` group, letters use their
 /// uppercased initial (A, B, C …), anything else falls under `#`. Kept
@@ -296,6 +304,21 @@ impl App {
         }
     }
 
+    /// Drives the shared title-bar sort button from a component page's
+    /// [`SortSlot`]: shows it with the page's popover + direction icon, or hides
+    /// it. Used for the sections (Podcasts/Streaming/YouTube) that build their
+    /// own sort popover off in the component instead of here.
+    pub(crate) fn apply_component_sort(&self, slot: &SortSlot) {
+        match &*slot.borrow() {
+            Some((popover, desc)) => {
+                self.nav.sort_btn.set_icon_name(sort_dir_icon(*desc));
+                self.nav.sort_btn.set_popover(Some(popover));
+                self.nav.sort_btn.set_visible(true);
+            }
+            None => self.nav.sort_btn.set_visible(false),
+        }
+    }
+
     /// (Re)builds the title-bar sort popover for the current section, or hides
     /// the button on sections without a sort control.
     pub(crate) fn rebuild_sort_menu(&self) {
@@ -306,6 +329,14 @@ impl App {
                 return;
             }
         };
+        // Component pages (their own sort state lives in the component) hand their
+        // popover over through a slot; the rest are built from the library state.
+        match section.as_str() {
+            "podcasts" => return self.apply_component_sort(&self.nav.podcast_sort),
+            "streaming" => return self.apply_component_sort(&self.nav.stream_sort),
+            "youtube" => return self.apply_component_sort(&self.nav.yt_sort),
+            _ => {}
+        }
         let crits = section_sort_criteria(&section);
         if crits.is_empty() {
             self.nav.sort_btn.set_visible(false);

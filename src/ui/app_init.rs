@@ -879,21 +879,13 @@ impl App {
         if self.tray.start_hidden {
             root.set_visible(false);
         }
-        // Apply the skip-taskbar hint on every map (the X surface exists only
-        // then). Reads the live setting so a later toggle is honored on the next
-        // map; a runtime toggle while mapped goes through `SetTraySkipTaskbar`.
-        root.connect_map(move |win| {
-            if let Ok(lib) = Library::open() {
-                let enable = matches!(
-                    lib.get_setting("tray_skip_taskbar")
-                        .ok()
-                        .flatten()
-                        .as_deref(),
-                    Some("1")
-                );
-                crate::ui::app_tray::apply_skip_taskbar(win, enable);
-            }
-        });
+        // Apply the skip-taskbar hint on realize AND map. Setting the EWMH
+        // property at realize (before the WM maps the surface) makes it honored
+        // from the very first show — including "start hidden → first reveal" —
+        // not only after a later settings toggle. The map handler covers
+        // re-shows; the setting is read live each time.
+        root.connect_realize(crate::ui::app_tray::apply_skip_taskbar_from_db);
+        root.connect_map(crate::ui::app_tray::apply_skip_taskbar_from_db);
     }
 
     /// Set the primary music folder: persist it, re-root the file view (only on
@@ -1109,6 +1101,7 @@ impl App {
                  button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  button.emilia-nav-btn:checked image { color: @accent_color; }\
+                 button.emilia-nav-btn:checked, .emilia-tabbar button:checked { background-color: alpha(@window_fg_color, 0.3); }\
                  box.emilia-step { background-color: alpha(@window_fg_color, 0.12); border-radius: 999px; }\
                  box.emilia-step label { font-weight: bold; }\
                  box.emilia-step-active { background-color: @accent_bg_color; }\
@@ -1125,7 +1118,8 @@ impl App {
                  label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\
                  label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }\
                  box.emilia-bg-scrim { background-color: alpha(@window_bg_color, 0.45); }\
-                 window.emilia-tray-popup { background-color: @popover_bg_color; border-radius: 12px; }",
+                 window.emilia-tray-popup { background-color: @popover_bg_color; border-radius: 12px; }\
+                 .emilia-tray-popup-clip { border-radius: 12px; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,

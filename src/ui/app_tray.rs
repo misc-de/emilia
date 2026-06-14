@@ -184,9 +184,27 @@ fn configure_window_pos(xid: u32, x: i32, y: i32) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+/// Read the live `tray_skip_taskbar` setting and apply it to the window. Wired
+/// to both `realize` and `map` so the hint takes effect from the first show.
+pub(crate) fn apply_skip_taskbar_from_db(win: &adw::ApplicationWindow) {
+    if let Ok(lib) = crate::core::db::Library::open() {
+        let enable = matches!(
+            lib.get_setting("tray_skip_taskbar")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
+        apply_skip_taskbar(win, enable);
+    }
+}
+
 fn set_skip_taskbar_x11(xid: u32, enable: bool) -> Result<(), Box<dyn std::error::Error>> {
     use x11rb::connection::Connection;
-    use x11rb::protocol::xproto::{ClientMessageEvent, ConnectionExt, EventMask};
+    use x11rb::protocol::xproto::{
+        AtomEnum, ClientMessageEvent, ConnectionExt, EventMask, PropMode,
+    };
+    use x11rb::wrapper::ConnectionExt as _; // for change_property32
 
     let (conn, screen_num) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen_num].root;
@@ -199,7 +217,23 @@ fn set_skip_taskbar_x11(xid: u32, enable: bool) -> Result<(), Box<dyn std::error
         .intern_atom(false, b"_NET_WM_STATE_SKIP_PAGER")?
         .reply()?
         .atom;
-    // _NET_WM_STATE: action (1 = ADD, 0 = REMOVE), two properties, source = app.
+
+    // 1) Update the _NET_WM_STATE *property* directly (read-modify-write, keeping
+    // any other states). The WM reads this when it maps the window, so the hint
+    // is honored from the very first show — including "start hidden → first
+    // reveal" — not only after a later settings toggle.
+    let cur = conn
+        .get_property(false, xid, net_wm_state, AtomEnum::ATOM, 0, 1024)?
+        .reply()?;
+    let mut atoms: Vec<u32> = cur.value32().map(|it| it.collect()).unwrap_or_default();
+    atoms.retain(|a| *a != skip_taskbar && *a != skip_pager);
+    if enable {
+        atoms.push(skip_taskbar);
+        atoms.push(skip_pager);
+    }
+    conn.change_property32(PropMode::REPLACE, xid, net_wm_state, AtomEnum::ATOM, &atoms)?;
+
+    // 2) Live ClientMessage for the already-mapped case (runtime toggle).
     let data = [u32::from(enable), skip_taskbar, skip_pager, 1, 0];
     let event = ClientMessageEvent::new(32, xid, net_wm_state, data);
     conn.send_event(

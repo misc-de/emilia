@@ -9,7 +9,8 @@
 //! button lives in the player bar (built in `app.rs`). New memos start
 //! uncategorised ("General"); a category is assigned afterwards.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -21,6 +22,10 @@ use crate::i18n::{gettext, ngettext_n};
 use crate::model::{MemoCategory, MemoItem};
 use crate::ui::app::{fmt_duration, App, MemoView, Msg};
 
+/// Stand-in category id for the "General" (unassigned) node in
+/// [`MemoState::expanded_cats`]; real category ids are positive DB keys.
+const GENERAL_CAT: i64 = -1;
+
 /// Memo page state, grouped off the `App` god-object (mirrors `StreamingState`).
 pub(crate) struct MemoState {
     /// All memos (newest first); the Recent list shows these flat and the
@@ -31,6 +36,11 @@ pub(crate) struct MemoState {
     /// Which tab is shown: Recent or Category.
     pub(crate) view: MemoView,
     pub(crate) memos_list: gtk::ListBox,
+    /// Category ids the user has expanded in the Category tree (the "General"
+    /// node uses [`GENERAL_CAT`]). The tree is torn down and rebuilt on every
+    /// reload (e.g. after a sort change), so this remembers which expanders were
+    /// open and restores them, instead of collapsing everything.
+    pub(crate) expanded_cats: Rc<RefCell<HashSet<i64>>>,
     /// Active microphone recording; `None` when idle.
     pub(crate) recorder: Option<MicRecorder>,
     /// Whether a recording is in progress (drives the `#[watch]` player-bar
@@ -65,6 +75,7 @@ impl MemoState {
             categories: Vec::new(),
             view: MemoView::Recent,
             memos_list,
+            expanded_cats: Rc::new(RefCell::new(HashSet::new())),
             recorder: None,
             recording: false,
             rec_level,
@@ -73,6 +84,22 @@ impl MemoState {
             rec_tick: None,
         }
     }
+}
+
+/// Restores the remembered open/closed state of a category expander and keeps
+/// [`MemoState::expanded_cats`] in sync as the user toggles it, so a rebuild
+/// (e.g. after a sort change) reopens what was open. Set the state before wiring
+/// the handler, so the restore itself doesn't re-enter the borrowed set.
+fn bind_expanded(exp: &adw::ExpanderRow, id: i64, set: &Rc<RefCell<HashSet<i64>>>) {
+    exp.set_expanded(set.borrow().contains(&id));
+    let set = set.clone();
+    exp.connect_expanded_notify(move |e| {
+        if e.is_expanded() {
+            set.borrow_mut().insert(id);
+        } else {
+            set.borrow_mut().remove(&id);
+        }
+    });
 }
 
 /// Default title for a fresh memo: "Memo DD.MM.YYYY HH:MM" in local time.
@@ -325,6 +352,7 @@ impl App {
             for m in &unassigned {
                 exp.add_row(&self.build_memo_row(m, sender, false));
             }
+            bind_expanded(&exp, GENERAL_CAT, &self.memo.expanded_cats);
             self.memo.memos_list.append(&exp);
         }
 
@@ -345,6 +373,7 @@ impl App {
             for m in &items {
                 exp.add_row(&self.build_memo_row(m, sender, false));
             }
+            bind_expanded(&exp, c.id, &self.memo.expanded_cats);
             // Long press (touch) / right click (mouse) → category detail dialog.
             // Only real categories carry this; the "General" node above is a label
             // for the unassigned memos and cannot be edited or removed.

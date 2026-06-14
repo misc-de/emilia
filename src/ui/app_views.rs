@@ -2829,6 +2829,10 @@ impl App {
                     }
                     self.transport.queue = vec![path];
                     self.transport.queue_pos = 0;
+                    // A single tapped file is not an album play (see
+                    // `PlaySession::source`); a running queue is only paused, not
+                    // counted, and resumes with `next_source` already consumed.
+                    self.transport.next_source = Some("single");
                     self.play_current();
                     self.refresh_queue_icons();
                 }

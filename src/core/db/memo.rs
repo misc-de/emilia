@@ -158,6 +158,18 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// The display title of the memo stored at `path`, if any — so a playing
+    /// memo shows its list label ("Memo <date>" or the user's name) instead of
+    /// the file name.
+    pub fn memo_title_by_path(&self, path: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT title FROM memo WHERE path = ?1", [path], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
     /// Assigns (or, with `None`, clears) a memo's category. This is the
     /// "assign afterwards" / reassign operation.
     pub fn set_memo_category(&self, memo_id: i64, category_id: Option<i64>) -> Result<()> {
