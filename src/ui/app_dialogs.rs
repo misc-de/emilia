@@ -1103,24 +1103,6 @@ impl App {
         gallery_group.add(&cols_row);
         page.add(&gallery_group);
 
-        let view_page = page;
-
-        // --- Category: Design (scaling, colors, blurred background, tray) ---
-        fn rgba_to_hex(c: &gtk::gdk::RGBA) -> String {
-            let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-            format!(
-                "#{:02x}{:02x}{:02x}",
-                to_u8(c.red()),
-                to_u8(c.green()),
-                to_u8(c.blue())
-            )
-        }
-
-        let page = adw::PreferencesPage::builder()
-            .title(gettext("Design"))
-            .icon_name("applications-graphics-symbolic")
-            .build();
-
         // App scaling (whole UI, not just text): -50% .. +50% in 10% steps.
         let scale_group = adw::PreferencesGroup::builder()
             .title(gettext("Scaling"))
@@ -1145,6 +1127,89 @@ impl App {
         }
         scale_group.add(&scale_row);
         page.add(&scale_group);
+
+        // System: optional desktop tray icon + window behavior.
+        let tray_group = adw::PreferencesGroup::builder()
+            .title(gettext("System tray"))
+            .build();
+        let tray_enabled_row = adw::SwitchRow::builder()
+            .title(gettext("Show tray icon"))
+            .active(self.tray.enabled)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_enabled_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayEnabled(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_enabled_row);
+        let tray_close_row = adw::SwitchRow::builder()
+            .title(gettext("Close to tray"))
+            .subtitle(gettext("Closing the window keeps it running in the tray"))
+            .active(self.tray.close_hides)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_close_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayCloseHides(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_close_row);
+        let tray_hidden_row = adw::SwitchRow::builder()
+            .title(gettext("Start hidden"))
+            .subtitle(gettext("Start in the tray without showing the window"))
+            .active(self.tray.start_hidden)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_hidden_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayStartHidden(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_hidden_row);
+        let tray_skip_row = adw::SwitchRow::builder()
+            .title(gettext("No taskbar entry"))
+            .subtitle(gettext("Hide from the taskbar even when visible (X11)"))
+            .active(self.tray.skip_taskbar)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_skip_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTraySkipTaskbar(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_skip_row);
+        let tray_gray_row = adw::SwitchRow::builder()
+            .title(gettext("Gray tray icon"))
+            .subtitle(gettext("Show the tray icon desaturated"))
+            .active(self.tray.icon_gray)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_gray_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayIconGray(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_gray_row);
+        page.add(&tray_group);
+
+        let view_page = page;
+
+        // --- Category: Design (colors, blurred background) ---
+        fn rgba_to_hex(c: &gtk::gdk::RGBA) -> String {
+            let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            format!(
+                "#{:02x}{:02x}{:02x}",
+                to_u8(c.red()),
+                to_u8(c.green()),
+                to_u8(c.blue())
+            )
+        }
+
+        let page = adw::PreferencesPage::builder()
+            .title(gettext("Design"))
+            .icon_name("applications-graphics-symbolic")
+            .build();
 
         // Background: blurred cover and/or a custom image.
         let bg_group = adw::PreferencesGroup::builder()
@@ -1229,54 +1294,58 @@ impl App {
         bg_row.add_suffix(&bg_clear);
         bg_row.add_suffix(&bg_choose);
         bg_group.add(&bg_row);
+
+        // Optionally let the background show behind the sidebar/navigation, too.
+        let bg_nav_row = adw::SwitchRow::builder()
+            .title(gettext("Background behind navigation"))
+            .subtitle(gettext(
+                "Also show the blurred background behind the sidebar",
+            ))
+            .active(self.theme.design.bg_nav)
+            .build();
+        {
+            let sender = sender.clone();
+            bg_nav_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetBgNav(r.is_active()));
+            });
+        }
+        bg_group.add(&bg_nav_row);
+
+        // Transparency of entries & buttons over the background (0–100 %).
+        let trans_row = adw::ActionRow::builder()
+            .title(gettext("Transparency of entries & buttons"))
+            .build();
+        let trans_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 5.0);
+        trans_scale.set_value(f64::from(self.theme.design.chrome_transparency));
+        trans_scale.set_size_request(170, -1);
+        trans_scale.set_valign(gtk::Align::Center);
+        trans_scale.set_draw_value(true);
+        trans_scale.set_value_pos(gtk::PositionType::Left);
+        trans_scale.set_round_digits(0);
+        {
+            let sender = sender.clone();
+            // Only emit when the snapped (5 %) value actually changes, to avoid a
+            // DB write + CSS reload on every drag pixel.
+            let last = std::cell::Cell::new(self.theme.design.chrome_transparency);
+            trans_scale.connect_value_changed(move |s| {
+                let v = ((s.value() / 5.0).round() as u32) * 5;
+                if v != last.get() {
+                    last.set(v);
+                    sender.input(Msg::SetChromeTransparency(v));
+                }
+            });
+        }
+        trans_row.add_suffix(&trans_scale);
+        bg_group.add(&trans_row);
         page.add(&bg_group);
 
-        // Colors: button/entry/row background + text color (each with a reset).
+        // Color of text & fields (with reset).
         let colors_group = adw::PreferencesGroup::builder()
             .title(gettext("Colors"))
             .build();
 
-        let btn_color_row = adw::ActionRow::builder()
-            .title(gettext("Button & list background"))
-            .build();
-        let btn_color_btn = gtk::ColorDialogButton::builder()
-            .dialog(&gtk::ColorDialog::new())
-            .valign(gtk::Align::Center)
-            .build();
-        if let Some(rgba) = self
-            .theme
-            .design
-            .button_bg
-            .as_deref()
-            .and_then(|h| gtk::gdk::RGBA::parse(h).ok())
-        {
-            btn_color_btn.set_rgba(&rgba);
-        }
-        {
-            let sender = sender.clone();
-            // Connect after `set_rgba` so the preselect doesn't persist.
-            btn_color_btn.connect_rgba_notify(move |b| {
-                sender.input(Msg::SetButtonBg(Some(rgba_to_hex(&b.rgba()))));
-            });
-        }
-        let btn_color_reset = gtk::Button::builder()
-            .icon_name("edit-clear-symbolic")
-            .tooltip_text(gettext("Reset"))
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        {
-            let sender = sender.clone();
-            btn_color_reset.connect_clicked(move |_| {
-                sender.input(Msg::SetButtonBg(None));
-            });
-        }
-        btn_color_row.add_suffix(&btn_color_reset);
-        btn_color_row.add_suffix(&btn_color_btn);
-        colors_group.add(&btn_color_row);
-
         let text_color_row = adw::ActionRow::builder()
-            .title(gettext("Text color"))
+            .title(gettext("Text & fields"))
             .build();
         let text_color_btn = gtk::ColorDialogButton::builder()
             .dialog(&gtk::ColorDialog::new())
@@ -1313,59 +1382,6 @@ impl App {
         text_color_row.add_suffix(&text_color_btn);
         colors_group.add(&text_color_row);
         page.add(&colors_group);
-
-        // System: optional desktop tray icon + window behavior.
-        let tray_group = adw::PreferencesGroup::builder()
-            .title(gettext("System tray"))
-            .build();
-        let tray_enabled_row = adw::SwitchRow::builder()
-            .title(gettext("Show tray icon"))
-            .active(self.tray.enabled)
-            .build();
-        {
-            let sender = sender.clone();
-            tray_enabled_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayEnabled(r.is_active()));
-            });
-        }
-        tray_group.add(&tray_enabled_row);
-        let tray_close_row = adw::SwitchRow::builder()
-            .title(gettext("Close to tray"))
-            .subtitle(gettext("Closing the window keeps it running in the tray"))
-            .active(self.tray.close_hides)
-            .build();
-        {
-            let sender = sender.clone();
-            tray_close_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayCloseHides(r.is_active()));
-            });
-        }
-        tray_group.add(&tray_close_row);
-        let tray_hidden_row = adw::SwitchRow::builder()
-            .title(gettext("Start hidden"))
-            .subtitle(gettext("Start in the tray without showing the window"))
-            .active(self.tray.start_hidden)
-            .build();
-        {
-            let sender = sender.clone();
-            tray_hidden_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayStartHidden(r.is_active()));
-            });
-        }
-        tray_group.add(&tray_hidden_row);
-        let tray_skip_row = adw::SwitchRow::builder()
-            .title(gettext("No taskbar entry"))
-            .subtitle(gettext("Hide from the taskbar even when visible (X11)"))
-            .active(self.tray.skip_taskbar)
-            .build();
-        {
-            let sender = sender.clone();
-            tray_skip_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTraySkipTaskbar(r.is_active()));
-            });
-        }
-        tray_group.add(&tray_skip_row);
-        page.add(&tray_group);
 
         let design_page = page;
 

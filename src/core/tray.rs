@@ -17,8 +17,10 @@ use ksni::{MenuItem, Tray};
 /// `async-channel`.
 #[derive(Clone, Copy, Debug)]
 pub enum TrayCmd {
-    /// Left click / "Show / Hide": toggle the main window's visibility.
-    Toggle,
+    /// Left click at screen position (x, y): open the media popup near the icon.
+    Popup(i32, i32),
+    /// Menu "Show / Hide": toggle the main window's visibility.
+    ShowHide,
     PlayPause,
     Next,
     Prev,
@@ -32,6 +34,10 @@ pub struct EmiliaTray {
     pub tx: async_channel::Sender<TrayCmd>,
     pub playing: bool,
     pub has_track: bool,
+    /// Optional ARGB32 pixmap (grayscale variant). When non-empty it takes
+    /// precedence over the themed `icon_name` (built on the GTK thread in
+    /// `src/ui/app_tray.rs`).
+    pub icon_px: Vec<ksni::Icon>,
 }
 
 impl Tray for EmiliaTray {
@@ -43,19 +49,27 @@ impl Tray for EmiliaTray {
     }
     /// Themed icon name = the app id (installed under hicolor). On a bare `cargo
     /// run` (icon not installed) the host shows a placeholder, but the menu and
-    /// clicks still work.
+    /// clicks still work. Empty when a pixmap (grayscale) is provided, so the
+    /// host uses that instead.
     fn icon_name(&self) -> String {
-        "de.cais.Emilia".into()
+        if self.icon_px.is_empty() {
+            "de.cais.Emilia".into()
+        } else {
+            String::new()
+        }
     }
-    fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.tx.try_send(TrayCmd::Toggle);
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.icon_px.clone()
+    }
+    fn activate(&mut self, x: i32, y: i32) {
+        let _ = self.tx.try_send(TrayCmd::Popup(x, y));
     }
     fn menu(&self) -> Vec<MenuItem<Self>> {
         vec![
             StandardItem {
                 label: gettext("Show / Hide"),
                 activate: Box::new(|t: &mut Self| {
-                    let _ = t.tx.try_send(TrayCmd::Toggle);
+                    let _ = t.tx.try_send(TrayCmd::ShowHide);
                 }),
                 ..Default::default()
             }

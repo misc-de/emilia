@@ -2819,3 +2819,26 @@ msgstr "Kein Taskleisten-Eintrag"
 
 msgid "Hide from the taskbar even when visible (X11)"
 msgstr "Auch bei sichtbarem Fenster aus der Taskleiste ausblenden (X11)"
+
+# --- Design page round 2: nav background, transparency slider, media popup ---
+msgid "Background behind navigation"
+msgstr "Hintergrund hinter Navigation"
+
+msgid "Also show the blurred background behind the sidebar"
+msgstr "Den unscharfen Hintergrund auch hinter der Seitenleiste zeigen"
+
+msgid "Transparency of entries & buttons"
+msgstr "Transparenz von Einträgen & Buttons"
+
+msgid "Text & fields"
+msgstr "Text/Felder"
+
+msgid "Nothing playing"
+msgstr "Nichts wird abgespielt"
+
+# --- Gray tray icon option ---
+msgid "Gray tray icon"
+msgstr "Tray-Icon in Grau"
+
+msgid "Show the tray icon desaturated"
+msgstr "Das Tray-Icon entsättigt anzeigen"

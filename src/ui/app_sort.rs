@@ -294,15 +294,11 @@ impl App {
             "playlists" => self.reload_playlists(sender),
             _ => {}
         }
-        // The funnel button is offered in list mode only – keep it in step.
-        self.update_filter_chrome();
     }
 
     /// (Re)builds the title-bar sort popover for the current section, or hides
     /// the button on sections without a sort control.
     pub(crate) fn rebuild_sort_menu(&self) {
-        // Keep the inline-filter funnel button in step with the section, too.
-        self.update_filter_chrome();
         let section = match self.current_section() {
             Some(s) => s,
             None => {

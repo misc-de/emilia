@@ -2384,3 +2384,26 @@ msgstr ""
 
 msgid "Hide from the taskbar even when visible (X11)"
 msgstr ""
+
+# --- Design page round 2: nav background, transparency slider, media popup ---
+msgid "Background behind navigation"
+msgstr ""
+
+msgid "Also show the blurred background behind the sidebar"
+msgstr ""
+
+msgid "Transparency of entries & buttons"
+msgstr ""
+
+msgid "Text & fields"
+msgstr ""
+
+msgid "Nothing playing"
+msgstr ""
+
+# --- Gray tray icon option ---
+msgid "Gray tray icon"
+msgstr ""
+
+msgid "Show the tray icon desaturated"
+msgstr ""

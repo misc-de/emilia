@@ -627,12 +627,6 @@ pub(crate) struct NavState {
     /// Title-bar sort button; its popover is (re)built per section in
     /// [`App::rebuild_sort_menu`], and it's hidden on non-sortable sections.
     pub(crate) sort_btn: gtk::MenuButton,
-    /// Inline list filter: the title-bar toggle button, its search bar and the
-    /// search entry. Shown only on list sections (Files / Artists / Albums in
-    /// list mode); filters the visible `ListBox` live (see [`crate::ui::app_filter`]).
-    pub(crate) filter_btn: gtk::ToggleButton,
-    pub(crate) filter_bar: gtk::SearchBar,
-    pub(crate) filter_entry: gtk::SearchEntry,
     /// Navigation container for the subpages (artist → albums → album).
     pub(crate) nav_view: adw::NavigationView,
     /// Navigation containers (sidebar, top bar) for reordering.
@@ -927,6 +921,8 @@ pub struct App {
     pub(crate) theme: crate::ui::theme::ThemeState,
     /// Optional desktop tray icon + window behavior (close-to-tray, skip-taskbar).
     pub(crate) tray: TrayState,
+    /// MPRIS-style media popup opened by a left click on the tray icon (lazy).
+    pub(crate) media_popup: Option<crate::ui::tray_popup::MediaPopup>,
 }
 
 /// Desktop tray-icon options + the running service handle. The bool prefs are
@@ -940,6 +936,8 @@ pub(crate) struct TrayState {
     pub(crate) start_hidden: bool,
     /// Suppress the taskbar entry even while the window is visible (X11 only).
     pub(crate) skip_taskbar: bool,
+    /// Show the tray icon desaturated (grayscale pixmap) instead of colored.
+    pub(crate) icon_gray: bool,
     /// Running ksni service handle (for live menu updates); `None` when off.
     pub(crate) handle: Option<ksni::Handle<crate::core::tray::EmiliaTray>>,
     /// App-hold guard keeping the process alive while only the tray remains.
@@ -1087,8 +1085,6 @@ pub enum Msg {
     OpenSettings,
     /// Set or clear the sleep timer (from the header zzz popover).
     SetSleepTimer(SleepChoice),
-    /// Live inline-filter text changed (filters the visible list).
-    InlineFilter(String),
     /// Open the library search dialog (title-bar search icon).
     OpenSearch,
     /// A song hit of the search was activated → play it (close the dialog).
@@ -1191,10 +1187,12 @@ pub enum Msg {
     SetCoverBlur(bool),
     /// Set/clear the custom background image (already copied into the data dir).
     SetCustomBg(Option<std::path::PathBuf>),
-    /// Set/clear the button/entry/row background color (hex).
-    SetButtonBg(Option<String>),
-    /// Set/clear the text color (hex).
+    /// Set/clear the text & fields color (hex).
     SetTextColor(Option<String>),
+    /// Toggle whether the background shows behind the sidebar/navigation.
+    SetBgNav(bool),
+    /// Transparency (0..=100 %) of entries & buttons over the background.
+    SetChromeTransparency(u32),
     /// Show/hide the desktop tray icon.
     SetTrayEnabled(bool),
     /// Closing the window hides it into the tray instead of quitting.
@@ -1203,8 +1201,12 @@ pub enum Msg {
     SetTrayStartHidden(bool),
     /// Suppress the taskbar entry even while visible (X11 best-effort).
     SetTraySkipTaskbar(bool),
+    /// Show the tray icon in grayscale instead of colored.
+    SetTrayIconGray(bool),
     /// Tray click / "Show / Hide": toggle the main window's visibility.
     TrayToggleWindow,
+    /// Tray left click at (x, y): toggle the MPRIS-style media popup near the icon.
+    TrayMediaPopup(i32, i32),
     /// Tray "Quit": release the app-hold and quit for real.
     TrayQuit,
     /// Gapless playback on/off (settings); persisted + pushed to the player.
@@ -1767,17 +1769,6 @@ impl Component for App {
                             set_visible: false,
                             connect_clicked => Msg::OpenSettings,
                         },
-                        // Inline list filter: reveals the search bar below the
-                        // header to filter the visible list (Files / Artists /
-                        // Albums). Only shown on list sections; wired in
-                        // `setup_inline_filter`. Separate from the global search
-                        // dialog (the magnifier on the left).
-                        #[name = "filter_btn"]
-                        pack_end = &gtk::ToggleButton {
-                            set_icon_name: "emilia-filter-symbolic",
-                            set_tooltip_text: Some(&gettext("Filter list")),
-                            set_visible: false,
-                        },
                         // Per-category sorting. The popover (criteria + direction)
                         // is built per section in `rebuild_sort_menu`; the button
                         // is hidden on sections without a sort control.
@@ -1850,19 +1841,6 @@ impl Component for App {
                             // Center the icon strip when it fits; it still scrolls
                             // (left-aligned) once the icons overflow the width.
                             set_halign: gtk::Align::Center,
-                        },
-                    },
-
-                    // Inline filter bar: revealed by the header filter button on
-                    // list sections to filter the visible list live. Collapsed
-                    // (zero height) while inactive, so it costs nothing elsewhere.
-                    #[name = "filter_bar"]
-                    add_top_bar = &gtk::SearchBar {
-                        #[wrap(Some)]
-                        #[name = "filter_entry"]
-                        set_child = &gtk::SearchEntry {
-                            set_hexpand: true,
-                            set_placeholder_text: Some(&gettext("Filter the list …")),
                         },
                     },
 
@@ -2924,16 +2902,19 @@ impl Component for App {
                 .flatten()
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
-            button_bg: library
-                .get_setting("design_btn_bg")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty()),
             text_color: library
                 .get_setting("design_text_color")
                 .ok()
                 .flatten()
                 .filter(|s| !s.is_empty()),
+            bg_nav: setting_on(&library, "design_bg_nav"),
+            chrome_transparency: library
+                .get_setting("design_chrome_transparency")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(40)
+                .min(100),
         };
         let theme = crate::ui::theme::ThemeState::new(ui_scale, design);
         let tray = TrayState {
@@ -2941,6 +2922,7 @@ impl Component for App {
             close_hides: setting_on(&library, "tray_close_hides"),
             start_hidden: setting_on(&library, "tray_start_hidden"),
             skip_taskbar: setting_on(&library, "tray_skip_taskbar"),
+            icon_gray: setting_on(&library, "tray_icon_gray"),
             handle: None,
             hold: None,
         };
@@ -3358,9 +3340,6 @@ impl Component for App {
                 split: adw::OverlaySplitView::new(),
                 view_stack: adw::ViewStack::new(),
                 sort_btn: gtk::MenuButton::new(),
-                filter_btn: gtk::ToggleButton::new(),
-                filter_bar: gtk::SearchBar::new(),
-                filter_entry: gtk::SearchEntry::new(),
                 nav_view: adw::NavigationView::new(),
                 sidebar_nav: gtk::Box::new(gtk::Orientation::Vertical, 0),
                 top_nav: gtk::Box::new(gtk::Orientation::Horizontal, 0),
@@ -3387,6 +3366,7 @@ impl Component for App {
             setup_page,
             theme,
             tray,
+            media_popup: None,
         };
 
         // Restore the queue from last time (only still existing
@@ -4124,7 +4104,6 @@ impl Component for App {
             }
             Msg::OpenSettings => self.open_settings(root, &sender),
             Msg::SetSleepTimer(choice) => self.on_set_sleep_timer(choice),
-            Msg::InlineFilter(text) => self.apply_inline_filter(&text),
             Msg::OpenSearch => self.open_search_dialog(root, &sender),
             Msg::SearchPlayTrack(path) => self.on_search_play_track(path, &sender),
             Msg::SearchOpenAlbum(album) => self.open_album_by_name(&sender, &album),
@@ -4256,18 +4235,26 @@ impl Component for App {
                 );
                 self.refresh_background();
             }
-            Msg::SetButtonBg(color) => {
-                self.theme.design.button_bg = color.clone();
-                let _ = self
-                    .library
-                    .set_setting("design_btn_bg", color.as_deref().unwrap_or(""));
-                self.reapply_runtime_style();
-            }
             Msg::SetTextColor(color) => {
                 self.theme.design.text_color = color.clone();
                 let _ = self
                     .library
                     .set_setting("design_text_color", color.as_deref().unwrap_or(""));
+                self.reapply_runtime_style();
+            }
+            Msg::SetBgNav(on) => {
+                self.theme.design.bg_nav = on;
+                let _ = self
+                    .library
+                    .set_setting("design_bg_nav", if on { "1" } else { "0" });
+                self.reapply_runtime_style();
+            }
+            Msg::SetChromeTransparency(pct) => {
+                self.theme.design.chrome_transparency = pct.min(100);
+                let _ = self.library.set_setting(
+                    "design_chrome_transparency",
+                    &self.theme.design.chrome_transparency.to_string(),
+                );
                 self.reapply_runtime_style();
             }
             Msg::SetTrayEnabled(on) => {
@@ -4300,7 +4287,25 @@ impl Component for App {
                     .set_setting("tray_skip_taskbar", if on { "1" } else { "0" });
                 self.refresh_skip_taskbar(root);
             }
+            Msg::SetTrayIconGray(on) => {
+                self.tray.icon_gray = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_icon_gray", if on { "1" } else { "0" });
+                // Update the live tray icon (no respawn needed; ksni emits NewIcon).
+                let px = if on {
+                    crate::ui::app_tray::gray_tray_icon()
+                } else {
+                    Vec::new()
+                };
+                if let Some(handle) = &self.tray.handle {
+                    handle.update(move |t| {
+                        t.icon_px = px;
+                    });
+                }
+            }
             Msg::TrayToggleWindow => self.tray_toggle_window(root),
+            Msg::TrayMediaPopup(x, y) => self.toggle_media_popup(x, y, root, &sender),
             Msg::TrayQuit => {
                 self.stop_tray();
                 if let Some(app) = root.application() {
@@ -4366,9 +4371,6 @@ impl Component for App {
                     .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryView(on));
                 self.yt_page
                     .emit(crate::ui::yt_page::YtInput::SetGalleryView(on));
-                // Artists/Albums gallery tiles aren't filtered → update the
-                // funnel button's visibility for the new (list/gallery) mode.
-                self.update_filter_chrome();
             }
             Msg::SetGalleryColumns(n) => {
                 self.libview.gallery_columns = n.clamp(2, 8);

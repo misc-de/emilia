@@ -342,8 +342,6 @@ impl App {
         self.rebuild_source_tabs();
         // Build the sleep-timer popover (presets) onto the header zzz button.
         self.setup_sleep_button(&widgets.sleep_btn, sender);
-        // Wire the inline list-filter button + search bar.
-        self.setup_inline_filter(widgets, sender);
 
         // Hover over the seek bar → temporarily show the hovered chapter below the
         // title; on leaving, back to the current chapter (at the
@@ -1126,7 +1124,8 @@ impl App {
                  flowbox.emilia-gallery > flowboxchild:selected { background: none; }\
                  label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\
                  label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }\
-                 box.emilia-bg-scrim { background-color: alpha(@window_bg_color, 0.45); }",
+                 box.emilia-bg-scrim { background-color: alpha(@window_bg_color, 0.45); }\
+                 window.emilia-tray-popup { background-color: @popover_bg_color; border-radius: 12px; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,

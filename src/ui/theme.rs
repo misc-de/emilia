@@ -38,10 +38,13 @@ pub(crate) struct DesignSettings {
     /// Fallback when cover-blur is on but no cover is available; shown fixed
     /// everywhere when cover-blur is off.
     pub(crate) custom_bg: Option<PathBuf>,
-    /// Background color for buttons / list rows / entries (hex `#rrggbb`).
-    pub(crate) button_bg: Option<String>,
-    /// Text (foreground) color (hex `#rrggbb`).
+    /// Text & fields (foreground) color (hex `#rrggbb`).
     pub(crate) text_color: Option<String>,
+    /// Also let the background show behind the sidebar/navigation.
+    pub(crate) bg_nav: bool,
+    /// Transparency (0..=100 %) of entries & buttons over the background
+    /// (0 = opaque, 100 = fully see-through). Default 40.
+    pub(crate) chrome_transparency: u32,
 }
 
 /// Holds the runtime CssProvider and the live theme parameters. Lives on `App`.
@@ -137,27 +140,33 @@ impl ThemeState {
             ));
         }
 
-        // ---- Colors ----
+        // ---- Text & fields color ----
         if let Some(fg) = self.design.text_color.as_deref().filter(|c| valid_hex(c)) {
             css.push_str(&format!(
                 "@define-color window_fg_color {fg};@define-color view_fg_color {fg};"
             ));
         }
-        if let Some(bg) = self.design.button_bg.as_deref().filter(|c| valid_hex(c)) {
-            css.push_str(&format!(
-                "button:not(.flat):not(.suggested-action):not(.destructive-action):not(.image-button),\
-                 entry, spinbutton, .boxed-list > row {{ background-color: {bg}; }}"
-            ));
-        }
 
         // ---- Blurred background: make the chrome translucent so it shows through ----
         if self.bg_active {
+            // Configurable translucency of entries & buttons (0 % = opaque).
+            let a =
+                f64::from(100u32.saturating_sub(self.design.chrome_transparency.min(100))) / 100.0;
             css.push_str(
                 "window, window > box, window > overlay, .view, viewport, stack, \
-                 scrolledwindow, list, flowbox, clamp { background-color: transparent; background-image: none; }\
-                 headerbar, .toolbar { background-color: alpha(@window_bg_color, 0.55); }\
-                 list > row, .boxed-list > row { background-color: alpha(@window_bg_color, 0.6); }",
+                 scrolledwindow, list, flowbox, clamp { background-color: transparent; background-image: none; }",
             );
+            css.push_str(&format!(
+                "headerbar, .toolbar {{ background-color: alpha(@window_bg_color, {a}); }}\
+                 list > row, .boxed-list > row, button:not(.flat), entry, spinbutton \
+                 {{ background-color: alpha(@window_bg_color, {a}); }}"
+            ));
+            // Optionally let the blur show behind the sidebar/navigation, too.
+            if self.design.bg_nav {
+                css.push_str(
+                    ".sidebar-pane { background-color: transparent; background-image: none; }",
+                );
+            }
         }
 
         css
