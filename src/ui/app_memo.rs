@@ -278,6 +278,9 @@ impl App {
                 }
             }
         }
+        // Apply the section's chosen sort (drives the Recent list and the order
+        // of memos within each category in the tree).
+        self.sort_memos();
 
         while let Some(child) = self.memo.memos_list.first_child() {
             self.memo.memos_list.remove(&child);
@@ -285,13 +288,21 @@ impl App {
 
         match self.memo.view {
             MemoView::Recent => {
+                // Alphabetical headings (by name) for the flat Recent list; none
+                // for the date/length sorts or when grouping is off.
+                *self.libview.memo_headers.borrow_mut() = self.memo_section_headers();
                 for m in self.memo.memo_items.clone() {
                     let row = self.build_memo_row(&m, sender, true);
                     self.memo.memos_list.append(&row);
                 }
             }
-            MemoView::Category => self.build_memo_tree(sender),
+            MemoView::Category => {
+                // The category tree is its own grouping → no alphabetical headings.
+                *self.libview.memo_headers.borrow_mut() = None;
+                self.build_memo_tree(sender);
+            }
         }
+        self.memo.memos_list.invalidate_headers();
     }
 
     /// Builds the Category tree: a "General" node for unassigned memos (only if

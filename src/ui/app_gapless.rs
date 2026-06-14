@@ -111,6 +111,9 @@ impl App {
         self.apply_current_eq();
         self.update_mpris_metadata(&path, track.as_ref());
         self.mpris.set_playing(true);
+        // Refresh the blurred cover background + tray menu for the new track.
+        self.refresh_cover_background();
+        self.refresh_tray_state();
         self.mini.position_ms = 0;
         self.mini.track_duration_ms = self
             .player

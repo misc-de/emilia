@@ -26,7 +26,7 @@ impl App {
         // gallery, exactly like the albums overview.
         let headers = self.entry_section_headers("concerts", &items);
         *self.libview.concert_headers.borrow_mut() = headers.clone();
-        if self.libview.gallery_view {
+        if self.libview.gallery_on("concerts") {
             let tiles = self.entry_gallery_items(&items);
             self.fill_sectioned_gallery(
                 &self.concerts.concerts_gallery_box,
@@ -49,6 +49,7 @@ impl App {
                 None,
                 false,
                 true,
+                false,
             );
             // Refresh the section headings for the rebuilt rows (or clear them).
             self.concerts.concerts_list.invalidate_headers();

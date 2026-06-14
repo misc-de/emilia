@@ -266,6 +266,18 @@ impl FsEntry {
         matches!(self, FsEntry::Dir { .. } | FsEntry::RemoteDir { .. })
     }
 
+    /// Raw runtime in milliseconds used for sorting: a folder's summed runtime, a
+    /// file's own duration; 0 when unknown (plain folders, untagged remote files).
+    pub fn runtime_ms(&self) -> i64 {
+        match self {
+            FsEntry::File { duration_ms, .. } | FsEntry::RemoteFile { duration_ms, .. } => {
+                duration_ms.unwrap_or(0)
+            }
+            FsEntry::Dir { total_ms, .. } => *total_ms,
+            FsEntry::RemoteDir { .. } => 0,
+        }
+    }
+
     fn prefix_icon(&self) -> &'static str {
         if self.is_dir() {
             "folder-symbolic"

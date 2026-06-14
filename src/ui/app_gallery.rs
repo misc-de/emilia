@@ -166,6 +166,44 @@ pub(crate) fn section_header_label(text: &str) -> gtk::Label {
     label
 }
 
+/// A `gtk::ListBox` `set_header_func` that draws the alphabetical/year section
+/// headings from `labels` (one per row, same order as the rows) on the **window
+/// background** (the `emilia-list-section` class) so the heading sits above the
+/// `boxed-list` card rather than inside it. `None`/out-of-range → no header.
+/// Shared by the library overviews and the standalone components.
+pub(crate) fn list_section_header_func(
+    labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+) -> impl Fn(&gtk::ListBoxRow, Option<&gtk::ListBoxRow>) {
+    move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
+        let guard = labels.borrow();
+        let Some(labels) = guard.as_ref() else {
+            row.set_header(None::<&gtk::Widget>);
+            return;
+        };
+        let i = row.index();
+        if i < 0 {
+            row.set_header(None::<&gtk::Widget>);
+            return;
+        }
+        let i = i as usize;
+        let cur = labels.get(i);
+        let prev = i.checked_sub(1).and_then(|p| labels.get(p));
+        match cur {
+            Some(cur) if i == 0 || prev != Some(cur) => {
+                let label = section_header_label(cur);
+                // Drop the outer margins so the window-background strip bleeds
+                // fully (no card colour peeking); spacing comes from CSS padding.
+                label.set_margin_top(0);
+                label.set_margin_bottom(0);
+                label.set_margin_start(0);
+                label.add_css_class("emilia-list-section");
+                row.set_header(Some(&label));
+            }
+            _ => row.set_header(None::<&gtk::Widget>),
+        }
+    }
+}
+
 impl App {
     /// Fills `container` as a gallery, optionally split into labelled sections.
     /// `labels` (one per item, same order/length as `items`) groups consecutive

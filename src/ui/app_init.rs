@@ -36,6 +36,7 @@ pub(crate) struct InitState {
     pub sort: std::collections::HashMap<&'static str, (SortCrit, bool)>,
     pub no_group: std::collections::HashMap<&'static str, bool>,
     pub gallery_view: bool,
+    pub section_gallery: std::collections::HashMap<&'static str, bool>,
     pub gallery_columns: u32,
     pub recording_buffer_minutes: u32,
     pub saved_section: Option<String>,
@@ -208,6 +209,11 @@ impl App {
                 sort.insert(section, (crit.unwrap_or(SortCrit::Name), desc));
             }
         }
+        // Memos default to newest-first (recording date, descending) – unlike the
+        // generic name-ascending fallback – unless the user chose otherwise above.
+        sort.entry("memo").or_insert((SortCrit::Release, true));
+        // Favorites default to the manual drag order, not name-ascending.
+        sort.entry("favorites").or_insert((SortCrit::Manual, false));
         // Per-section "no grouping" flag ("nogroup_<section>"); default grouped.
         let mut no_group: std::collections::HashMap<&'static str, bool> =
             std::collections::HashMap::new();
@@ -232,6 +238,27 @@ impl App {
                 .as_deref(),
             Some("1")
         );
+        // Per-section gallery override ("gallery_<section>"): a stored "0"/"1"
+        // pins that section to list/gallery regardless of the global flag; an
+        // absent entry follows the global `gallery_view`.
+        let mut section_gallery: std::collections::HashMap<&'static str, bool> =
+            std::collections::HashMap::new();
+        for &section in SORTABLE_SECTIONS {
+            match library
+                .get_setting(&format!("gallery_{section}"))
+                .ok()
+                .flatten()
+                .as_deref()
+            {
+                Some("1") => {
+                    section_gallery.insert(section, true);
+                }
+                Some("0") => {
+                    section_gallery.insert(section, false);
+                }
+                _ => {}
+            }
+        }
         // Tiles per row (2–8). Initial default depends on the form factor:
         // 3 on phone-sized screens, 4 on the desktop (see `initial_gallery_columns`).
         let gallery_columns = library
@@ -275,6 +302,7 @@ impl App {
             sort,
             no_group,
             gallery_view,
+            section_gallery,
             gallery_columns,
             recording_buffer_minutes,
             saved_section,
@@ -299,6 +327,15 @@ impl App {
         self.nav.view_stack = widgets.view_stack.clone();
         self.nav.nav_view = widgets.nav_view.clone();
         self.nav.split = widgets.split.clone();
+        // Runtime theming: wire the blurred-background layer, then apply the saved
+        // scale + design. The UI rides as a *measured* overlay so the window sizes
+        // to the content, not to the tiny background texture. `refresh_background`
+        // also reapplies colors/scale through the shared choke point.
+        self.theme
+            .set_bg_widgets(widgets.bg_picture.clone(), widgets.bg_scrim.clone());
+        widgets.bg_overlay.set_measure_overlay(&widgets.split, true);
+        self.theme.apply_scale_dpi();
+        self.refresh_background();
         self.mini.seek_scale = widgets.seek_scale.clone();
         self.mini.chapter_label = widgets.chapter_label.clone();
         self.files.source_tabs = widgets.source_tabs.clone();
@@ -626,37 +663,9 @@ impl App {
 
         // Album & artist lists: section headings driven by the per-row labels
         // filled in `reload_albums_with`/`reload_artists_with` (alphabetical when
-        // sorting by name, year strings by date). `None` means no grouping, so
-        // every row's header is cleared; otherwise a header is shown whenever a
-        // row's label differs from the row above it.
-        let header_func = |labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>| {
-            move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
-                let guard = labels.borrow();
-                let Some(labels) = guard.as_ref() else {
-                    row.set_header(None::<&gtk::Widget>);
-                    return;
-                };
-                let i = row.index();
-                if i < 0 {
-                    row.set_header(None::<&gtk::Widget>);
-                    return;
-                }
-                let i = i as usize;
-                let cur = labels.get(i);
-                let prev = i.checked_sub(1).and_then(|p| labels.get(p));
-                match cur {
-                    Some(cur) if i == 0 || prev != Some(cur) => {
-                        let label = crate::ui::app_gallery::section_header_label(cur);
-                        // The very first heading sits a touch low; pull it up 5px.
-                        if i == 0 {
-                            label.set_margin_top(3);
-                        }
-                        row.set_header(Some(&label));
-                    }
-                    _ => row.set_header(None::<&gtk::Widget>),
-                }
-            }
-        };
+        // sorting by name, year strings by date). `None` means no grouping. The
+        // heading is painted on the window background (see `list_section_header_func`).
+        let header_func = crate::ui::app_gallery::list_section_header_func;
         self.libview
             .albums
             .widget()
@@ -673,6 +682,21 @@ impl App {
         self.favorites
             .audiobooks_list
             .set_header_func(header_func(self.libview.audiobook_headers.clone()));
+        // Favorites/playlists/memo (Recent)/files lists: alphabetical headings by
+        // name (filled in their reload functions); same `set_header_func` machinery.
+        self.favorites
+            .favorites_list
+            .set_header_func(header_func(self.libview.favorite_headers.clone()));
+        self.playlists
+            .playlists_list
+            .set_header_func(header_func(self.libview.playlist_headers.clone()));
+        self.memo
+            .memos_list
+            .set_header_func(header_func(self.libview.memo_headers.clone()));
+        self.libview
+            .entries
+            .widget()
+            .set_header_func(header_func(self.libview.files_headers.clone()));
 
         // Set the active button to match the visible stack page and show the name
         // of the menu item discreetly as the subtitle of the header.
@@ -817,6 +841,27 @@ impl App {
                 win.is_maximized(),
                 section.as_deref(),
             );
+            // Close-to-tray: when the tray is on and "close hides" is set, hide
+            // the window instead of quitting (the tray + app-hold keep the
+            // process alive). Read live from the DB so the toggle takes effect
+            // without a restart.
+            if let Ok(lib) = Library::open() {
+                let tray_on = matches!(
+                    lib.get_setting("tray_enabled").ok().flatten().as_deref(),
+                    Some("1")
+                );
+                let close_hides = matches!(
+                    lib.get_setting("tray_close_hides")
+                        .ok()
+                        .flatten()
+                        .as_deref(),
+                    Some("1")
+                );
+                if tray_on && close_hides {
+                    win.set_visible(false);
+                    return gtk::glib::Propagation::Stop;
+                }
+            }
             // Explicitly quit so the process reliably exits when the main window
             // is closed. An idle app already returns from `run()` on its own, but
             // an active background feature (media playback, a running device-sync
@@ -827,6 +872,29 @@ impl App {
                 app.quit();
             }
             gtk::glib::Propagation::Proceed
+        });
+
+        // --- Tray icon + window behavior (optional) ---
+        if self.tray.enabled {
+            self.start_tray(root, sender);
+        }
+        if self.tray.start_hidden {
+            root.set_visible(false);
+        }
+        // Apply the skip-taskbar hint on every map (the X surface exists only
+        // then). Reads the live setting so a later toggle is honored on the next
+        // map; a runtime toggle while mapped goes through `SetTraySkipTaskbar`.
+        root.connect_map(move |win| {
+            if let Ok(lib) = Library::open() {
+                let enable = matches!(
+                    lib.get_setting("tray_skip_taskbar")
+                        .ok()
+                        .flatten()
+                        .as_deref(),
+                    Some("1")
+                );
+                crate::ui::app_tray::apply_skip_taskbar(win, enable);
+            }
         });
     }
 
@@ -1050,13 +1118,15 @@ impl App {
                  scrolledwindow.emilia-nav-scroller scrollbar { opacity: 0; min-width: 0px; min-height: 0px; }\
                  scrolledwindow.emilia-nav-scroller button.emilia-nav-btn { padding-left: 6px; padding-right: 6px; min-width: 0px; }\
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
-                 box.emilia-loading { background-color: alpha(@window_bg_color, 0.85); border-radius: 18px; padding: 22px 30px; }\
+                 box.emilia-loading { background-color: alpha(@window_bg_color, 0.97); border-radius: 18px; padding: 22px 30px; }\
+                 label.emilia-list-section { background-color: @window_bg_color; padding: 10px 13px 4px 13px; }\
                  progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
                  label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
                  flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\
                  flowbox.emilia-gallery > flowboxchild:selected { background: none; }\
                  label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\
-                 label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }",
+                 label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }\
+                 box.emilia-bg-scrim { background-color: alpha(@window_bg_color, 0.45); }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,

@@ -23,8 +23,11 @@ use crate::core::db::Library;
 use crate::core::streaming::StationResult;
 use crate::i18n::{gettext, gettext_f};
 use crate::model::{RecordingItem, StreamItem};
-use crate::ui::app::StreamView;
+use crate::ui::app::{SortCrit, StreamView};
+use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
+use crate::ui::app_sort::{read_sort, sort_dir_icon, sort_popover, SortToggle};
+use crate::ui::app_views::natural_key;
 
 /// Placeholder icon when a station has no logo.
 const STREAM_ICON: &str = "audio-x-generic-symbolic";
@@ -126,6 +129,30 @@ pub(crate) struct StreamPage {
     recordings_list: gtk::ListBox,
     stream_play_buttons: Rc<RefCell<Vec<(i64, gtk::Button)>>>,
     rec_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
+    /// Per-sub-view sort (criterion + descending): stations by name; recordings by
+    /// name / recording date / length. Persisted as "sort_stations[_desc]" /
+    /// "sort_recordings[_desc]".
+    stations_sort: (SortCrit, bool),
+    recordings_sort: (SortCrit, bool),
+    /// "Without grouping" per sub-view (no alphabetical headings). Persisted as
+    /// "nogroup_stations" / "nogroup_recordings".
+    stations_no_group: bool,
+    recordings_no_group: bool,
+    /// Stations gallery on/off (cover grid of station logos). Persisted as
+    /// "gallery_stations". Recordings carry no covers, so they have no gallery.
+    stations_gallery: bool,
+    /// Tiles per row in the stations gallery (mirrors the global setting).
+    gallery_columns: u32,
+    /// One-time resize hook of the stations gallery already registered?
+    gallery_hooked: std::cell::Cell<bool>,
+    /// Per-row alphabetical headings of the stations / recordings lists (name sort).
+    station_headers: Rc<RefCell<Option<Vec<String>>>>,
+    recording_headers: Rc<RefCell<Option<Vec<String>>>>,
+    /// Gallery variant of the stations (logo grid). Its container box lives only
+    /// in the view tree (a `#[local_ref]`); the flow box is filled imperatively.
+    streams_gallery: gtk::FlowBox,
+    /// Header sort button; its popover is (re)built per sub-view in [`Self::rebuild_sort`].
+    sort_btn: gtk::MenuButton,
 }
 
 #[derive(Debug)]
@@ -144,6 +171,12 @@ pub(crate) enum StreamInput {
     SetWindow(adw::ApplicationWindow),
     // --- view-internal ---
     SetView(StreamView),
+    /// Change the current sub-view's sort (criterion + descending), from the header.
+    SetSort(SortCrit, bool),
+    /// Toggle alphabetical grouping of the current sub-view's list (`true` = off).
+    SetNoGroup(bool),
+    /// Toggle the stations gallery (Channels sub-view only).
+    SetGallery(bool),
     Add,
     Search(String),
     AddResult(usize),
@@ -229,6 +262,17 @@ impl Component for StreamPage {
                     set_active: model.stream_view == StreamView::Recordings,
                     connect_clicked => StreamInput::SetView(StreamView::Recordings),
                 },
+                #[local_ref]
+                sort_btn -> gtk::MenuButton {
+                    set_icon_name: "view-sort-ascending-symbolic",
+                    set_tooltip_text: Some(&gettext("Sort")),
+                    add_css_class: "flat",
+                    #[watch]
+                    set_visible: match model.stream_view {
+                        StreamView::Channels => !model.stream_items.is_empty(),
+                        StreamView::Recordings => !model.recording_items.is_empty(),
+                    },
+                },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
                     set_tooltip_text: Some(&gettext("Add station")),
@@ -237,11 +281,11 @@ impl Component for StreamPage {
                 },
             },
 
-            // Stations.
+            // Stations (list).
             gtk::ScrolledWindow {
                 set_vexpand: true,
                 #[watch]
-                set_visible: model.stream_view == StreamView::Channels && !model.stream_items.is_empty(),
+                set_visible: model.stream_view == StreamView::Channels && !model.stream_items.is_empty() && !model.stations_gallery,
                 #[local_ref]
                 streams_list -> gtk::ListBox {
                     set_valign: gtk::Align::Start,
@@ -250,6 +294,23 @@ impl Component for StreamPage {
                     set_margin_start: 12,
                     set_margin_end: 12,
                     set_css_classes: &["boxed-list"],
+                },
+            },
+            // Stations (logo gallery).
+            gtk::ScrolledWindow {
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.stream_view == StreamView::Channels && !model.stream_items.is_empty() && model.stations_gallery,
+                #[local_ref]
+                streams_gallery_box -> gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 6,
+                    set_valign: gtk::Align::Start,
+                    set_margin_top: 10,
+                    set_margin_bottom: 12,
+                    set_margin_start: 12,
+                    set_margin_end: 12,
+                    append: &model.streams_gallery,
                 },
             },
             adw::StatusPage {
@@ -295,6 +356,52 @@ impl Component for StreamPage {
         let library = Library::open_or_memory();
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
+        let sort_btn = gtk::MenuButton::new();
+        let streams_gallery = gtk::FlowBox::new();
+        let streams_gallery_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        // Restore the per-sub-view sorts. Stations default to name-ascending;
+        // recordings to newest-first (recording date, descending).
+        let stations_sort = read_sort(&library, "stations", SortCrit::Name, false);
+        let recordings_sort = read_sort(&library, "recordings", SortCrit::Release, true);
+        let stations_no_group = matches!(
+            library
+                .get_setting("nogroup_stations")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
+        let recordings_no_group = matches!(
+            library
+                .get_setting("nogroup_recordings")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
+        let stations_gallery_on = matches!(
+            library
+                .get_setting("gallery_stations")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
+        let gallery_columns = library
+            .get_setting("gallery_columns")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(4)
+            .clamp(2, 8);
+        let station_headers = Rc::new(RefCell::new(None));
+        let recording_headers = Rc::new(RefCell::new(None));
+        streams_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
+            station_headers.clone(),
+        ));
+        recordings_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
+            recording_headers.clone(),
+        ));
         let model = StreamPage {
             library,
             window: None,
@@ -314,6 +421,17 @@ impl Component for StreamPage {
             recordings_list: recordings_list.clone(),
             stream_play_buttons: Rc::new(RefCell::new(Vec::new())),
             rec_play_buttons: Rc::new(RefCell::new(Vec::new())),
+            stations_sort,
+            recordings_sort,
+            stations_no_group,
+            recordings_no_group,
+            stations_gallery: stations_gallery_on,
+            gallery_columns,
+            gallery_hooked: std::cell::Cell::new(false),
+            station_headers,
+            recording_headers,
+            streams_gallery: streams_gallery.clone(),
+            sort_btn: sort_btn.clone(),
         };
         // Cache the station logos once in the background, then redraw.
         sender.spawn_oneshot_command(|| {
@@ -327,6 +445,8 @@ impl Component for StreamPage {
             StreamCmd::ReloadStreams
         });
         let widgets = view_output!();
+        // Build the header sort popover for the restored sort + current sub-view.
+        model.rebuild_sort(&sender);
         ComponentParts { model, widgets }
     }
 
@@ -352,7 +472,59 @@ impl Component for StreamPage {
             StreamInput::SetBufferMinutes(n) => self.buffer_minutes = n,
             StreamInput::SetMobile(b) => self.mobile = b,
             StreamInput::SetWindow(w) => self.window = Some(w),
-            StreamInput::SetView(v) => self.stream_view = v,
+            StreamInput::SetView(v) => {
+                self.stream_view = v;
+                // The criteria differ per sub-view → rebuild the popover.
+                self.rebuild_sort(&sender);
+            }
+            StreamInput::SetSort(crit, desc) => {
+                // Apply to the sort of the currently visible sub-view.
+                let (key, slot) = match self.stream_view {
+                    StreamView::Channels => ("stations", &mut self.stations_sort),
+                    StreamView::Recordings => ("recordings", &mut self.recordings_sort),
+                };
+                if *slot != (crit, desc) {
+                    *slot = (crit, desc);
+                    let _ = self
+                        .library
+                        .set_setting(&format!("sort_{key}"), crit.as_key());
+                    let _ = self
+                        .library
+                        .set_setting(&format!("sort_{key}_desc"), if desc { "1" } else { "0" });
+                    self.rebuild_sort(&sender);
+                    match self.stream_view {
+                        StreamView::Channels => self.reload_streams(&sender),
+                        StreamView::Recordings => self.reload_recordings(&sender),
+                    }
+                }
+            }
+            StreamInput::SetNoGroup(off) => {
+                let (key, slot) = match self.stream_view {
+                    StreamView::Channels => ("stations", &mut self.stations_no_group),
+                    StreamView::Recordings => ("recordings", &mut self.recordings_no_group),
+                };
+                if *slot != off {
+                    *slot = off;
+                    let _ = self
+                        .library
+                        .set_setting(&format!("nogroup_{key}"), if off { "1" } else { "0" });
+                    self.rebuild_sort(&sender);
+                    match self.stream_view {
+                        StreamView::Channels => self.reload_streams(&sender),
+                        StreamView::Recordings => self.reload_recordings(&sender),
+                    }
+                }
+            }
+            StreamInput::SetGallery(on) => {
+                if self.stations_gallery != on {
+                    self.stations_gallery = on;
+                    let _ = self
+                        .library
+                        .set_setting("gallery_stations", if on { "1" } else { "0" });
+                    self.rebuild_sort(&sender);
+                    self.reload_streams(&sender);
+                }
+            }
             StreamInput::Add => self.open_add_stream_dialog(&sender),
             StreamInput::Search(term) => {
                 let term = term.trim().to_string();
@@ -458,8 +630,193 @@ impl StreamPage {
     }
 
     /// Rebuilds the station list.
+    /// (Re)builds the header sort button (direction icon + criteria popover) for
+    /// the currently visible sub-view. Stations sort by name; recordings by name /
+    /// recording date / length.
+    fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
+        let (state, crits, no_group) = match self.stream_view {
+            StreamView::Channels => (
+                self.stations_sort,
+                vec![(SortCrit::Name, gettext("Name"))],
+                self.stations_no_group,
+            ),
+            StreamView::Recordings => (
+                self.recordings_sort,
+                vec![
+                    (SortCrit::Name, gettext("Name")),
+                    (SortCrit::Release, gettext("Date")),
+                    (SortCrit::Length, gettext("Length")),
+                ],
+                self.recordings_no_group,
+            ),
+        };
+        let (crit, desc) = state;
+        self.sort_btn.set_icon_name(sort_dir_icon(desc));
+        let input = sender.input_sender().clone();
+        let group_input = input.clone();
+        let mut toggles = vec![SortToggle {
+            label: gettext("Without grouping"),
+            active: no_group,
+            on_toggle: Box::new(move |off| {
+                let _ = group_input.send(StreamInput::SetNoGroup(off));
+            }),
+        }];
+        // The stations sub-view additionally offers a logo gallery (recordings
+        // carry no covers, so they group but never gallery).
+        if matches!(self.stream_view, StreamView::Channels) {
+            let gallery_input = input.clone();
+            toggles.push(SortToggle {
+                label: gettext("Gallery view"),
+                active: self.stations_gallery,
+                on_toggle: Box::new(move |on| {
+                    let _ = gallery_input.send(StreamInput::SetGallery(on));
+                }),
+            });
+        }
+        let popover = sort_popover(
+            &crits,
+            crit,
+            desc,
+            move |crit, desc| {
+                let _ = input.send(StreamInput::SetSort(crit, desc));
+            },
+            toggles,
+        );
+        self.sort_btn.set_popover(Some(&popover));
+    }
+
+    /// Per-row alphabetical headings (by name) for the stations list; none when
+    /// grouping is off (stations only ever sort by name).
+    fn station_section_headers(&self) -> Option<Vec<String>> {
+        if self.stations_no_group {
+            return None;
+        }
+        Some(
+            self.stream_items
+                .iter()
+                .map(|s| crate::ui::app_sort::alpha_header(&s.name))
+                .collect(),
+        )
+    }
+
+    /// Per-row alphabetical headings (by name) for the recordings list; none for
+    /// the date/length sorts or when grouping is off. The live entry has no row
+    /// here (it is prepended separately), so the labels align with the saved rows
+    /// only — which is why grouping is cleared while a live recording shows.
+    fn recording_section_headers(&self) -> Option<Vec<String>> {
+        if self.recordings_no_group || self.live_recording.is_some() {
+            return None;
+        }
+        match self.recordings_sort.0 {
+            SortCrit::Name => Some(
+                self.recording_items
+                    .iter()
+                    .map(|r| crate::ui::app_sort::alpha_header(&r.title))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Gallery variant of the stations: a grid of station logos. Tap opens the
+    /// station's detail/replay; long press the detail dialog — same as the rows.
+    fn fill_streams_gallery(&self, sender: &ComponentSender<Self>) {
+        let fb = &self.streams_gallery;
+        while let Some(c) = fb.first_child() {
+            fb.remove(&c);
+        }
+        fb.set_min_children_per_line(1);
+        fb.set_max_children_per_line(self.gallery_columns);
+        fb.set_homogeneous(true);
+        fb.set_row_spacing(8);
+        fb.set_column_spacing(8);
+        fb.set_selection_mode(gtk::SelectionMode::None);
+        fb.set_activate_on_single_click(false);
+        if !fb.has_css_class("emilia-gallery") {
+            fb.add_css_class("emilia-gallery");
+        }
+        let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
+        for st in self.stream_items.clone() {
+            let logo = st
+                .favicon
+                .as_deref()
+                .and_then(crate::core::online::station_image_path);
+            let (cell, pic) = gallery_cell(logo.as_deref(), STREAM_ICON, &st.name);
+            if let (Some(path), Some(pic)) = (logo.as_deref(), pic) {
+                if crate::ui::widgets::cached_thumb(path).is_none() {
+                    to_decode.push((path.to_string(), pic));
+                }
+            }
+            let id = st.id;
+            let click = gtk::GestureClick::new();
+            {
+                let sender = sender.clone();
+                click.connect_released(move |g, n, _, _| {
+                    if n == 1 {
+                        g.set_state(gtk::EventSequenceState::Claimed);
+                        sender.input(StreamInput::OpenStream(id));
+                    }
+                });
+            }
+            cell.add_controller(click);
+            on_secondary_click(&cell, {
+                let sender = sender.clone();
+                move || sender.input(StreamInput::OpenStream(id))
+            });
+            let long_press = gtk::GestureLongPress::new();
+            {
+                let sender = sender.clone();
+                long_press.connect_pressed(move |g, _, _| {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    sender.input(StreamInput::OpenStream(id));
+                });
+            }
+            cell.add_controller(long_press);
+            fb.append(&cell);
+        }
+        spawn_gallery_decode(to_decode);
+        size_gallery_tiles_when_ready(fb);
+        if !self.gallery_hooked.replace(true) {
+            fb.connect_map(size_gallery_tiles_when_ready);
+        }
+    }
+
+    /// Orders the stations list by the chosen sort (by name; direction applies).
+    fn sort_streams(&mut self) {
+        let (_crit, desc) = self.stations_sort;
+        self.stream_items
+            .sort_by_cached_key(|s| natural_key(&s.name));
+        if desc {
+            self.stream_items.reverse();
+        }
+    }
+
+    /// Orders the recordings list by the chosen sort (the live entry is rendered
+    /// separately and always stays on top).
+    fn sort_recording_items(&mut self) {
+        let (crit, desc) = self.recordings_sort;
+        match crit {
+            SortCrit::Length => self.recording_items.sort_by_key(|r| r.duration_ms),
+            SortCrit::Release => self.recording_items.sort_by_key(|r| r.recorded_at),
+            // Name is the remaining criterion.
+            _ => self
+                .recording_items
+                .sort_by_cached_key(|r| natural_key(&r.title)),
+        }
+        if desc {
+            self.recording_items.reverse();
+        }
+    }
+
     fn reload_streams(&mut self, sender: &ComponentSender<Self>) {
         self.stream_items = self.library.streams().unwrap_or_default();
+        self.sort_streams();
+        // Alphabetical headings (by name) for the list; none in gallery mode.
+        *self.station_headers.borrow_mut() = self.station_section_headers();
+        if self.stations_gallery {
+            self.fill_streams_gallery(sender);
+            return;
+        }
         self.stream_play_buttons.borrow_mut().clear();
         while let Some(child) = self.streams_list.first_child() {
             self.streams_list.remove(&child);
@@ -506,6 +863,7 @@ impl StreamPage {
             });
             self.streams_list.append(&row);
         }
+        self.streams_list.invalidate_headers();
         self.refresh_stream_icons();
     }
 
@@ -889,6 +1247,10 @@ impl StreamPage {
                 }
             }
         }
+        self.sort_recording_items();
+        // Alphabetical headings (by name) for the saved rows; none while a live
+        // entry is prepended (it would offset the labels) or for date/length sorts.
+        *self.recording_headers.borrow_mut() = self.recording_section_headers();
         self.rec_play_buttons.borrow_mut().clear();
         while let Some(child) = self.recordings_list.first_child() {
             self.recordings_list.remove(&child);
@@ -1006,6 +1368,7 @@ impl StreamPage {
             });
             self.recordings_list.append(&row);
         }
+        self.recordings_list.invalidate_headers();
     }
 
     /// Detail dialog of a saved recording.

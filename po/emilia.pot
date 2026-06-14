@@ -2269,3 +2269,118 @@ msgstr ""
 
 msgid "Meta"
 msgstr ""
+
+# --- Cover/photo upload-or-remove ---
+msgid "Cover / photo"
+msgstr ""
+
+msgid "Upload a new image or remove the current one?"
+msgstr ""
+
+msgid "Upload"
+msgstr ""
+
+
+# --- Audiobook menu terminology ---
+msgid "Audiobook"
+msgstr ""
+
+msgid "{n} audiobook"
+msgid_plural "{n} audiobooks"
+msgstr[0] ""
+msgstr[1] ""
+
+
+msgctxt "audiobook"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Custom order"
+msgstr ""
+
+msgid "Number of episodes"
+msgstr ""
+
+msgid "Number of videos"
+msgstr ""
+
+# --- Design page: scaling, colors, blurred background, tray (added) ---
+msgid "Show / Hide"
+msgstr ""
+
+msgid "Previous"
+msgstr ""
+
+msgid "Quit Emilia"
+msgstr ""
+
+msgid "Design"
+msgstr ""
+
+msgid "Scaling"
+msgstr ""
+
+msgid "App size"
+msgstr ""
+
+msgid "Scales the whole interface (percent)"
+msgstr ""
+
+msgid "Background"
+msgstr ""
+
+msgid "Blurred cover background"
+msgstr ""
+
+msgid "Show the current cover, blurred, behind the app"
+msgstr ""
+
+msgid "Custom background"
+msgstr ""
+
+msgid "Image selected"
+msgstr ""
+
+msgid "None"
+msgstr ""
+
+msgid "Choose image"
+msgstr ""
+
+msgid "Choose background image"
+msgstr ""
+
+msgid "Colors"
+msgstr ""
+
+msgid "Button & list background"
+msgstr ""
+
+msgid "Text color"
+msgstr ""
+
+msgid "System tray"
+msgstr ""
+
+msgid "Show tray icon"
+msgstr ""
+
+msgid "Close to tray"
+msgstr ""
+
+msgid "Closing the window keeps it running in the tray"
+msgstr ""
+
+msgid "Start hidden"
+msgstr ""
+
+msgid "Start in the tray without showing the window"
+msgstr ""
+
+msgid "No taskbar entry"
+msgstr ""
+
+msgid "Hide from the taskbar even when visible (X11)"
+msgstr ""

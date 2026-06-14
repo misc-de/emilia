@@ -324,12 +324,16 @@ impl App {
         // Header bar: the item name with the opened category shown discreetly
         // below it (subtitle), plus a refresh button on the left that re-fetches
         // the cover/metadata and rebuilds the detail view.
+        let ab = self.is_audiobook(entry);
         let category = match entry {
             CtxTarget::Artist(_) => gettext("Artist"),
+            CtxTarget::Album(_) if ab => gettext("Audiobook"),
             CtxTarget::Album(_) => gettext("Album"),
             CtxTarget::Fs(e) if e.is_dir() => match self.fs_music_kind(e) {
+                Some(FsKind::Album { .. }) if ab => gettext("Audiobook"),
                 Some(FsKind::Album { .. }) => gettext("Album"),
                 Some(FsKind::Artist(_)) => gettext("Artist"),
+                _ if ab => gettext("Audiobook"),
                 _ => gettext("Folder"),
             },
             CtxTarget::Fs(_) => gettext("Track"),
@@ -1101,6 +1105,270 @@ impl App {
 
         let view_page = page;
 
+        // --- Category: Design (scaling, colors, blurred background, tray) ---
+        fn rgba_to_hex(c: &gtk::gdk::RGBA) -> String {
+            let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            format!(
+                "#{:02x}{:02x}{:02x}",
+                to_u8(c.red()),
+                to_u8(c.green()),
+                to_u8(c.blue())
+            )
+        }
+
+        let page = adw::PreferencesPage::builder()
+            .title(gettext("Design"))
+            .icon_name("applications-graphics-symbolic")
+            .build();
+
+        // App scaling (whole UI, not just text): -50% .. +50% in 10% steps.
+        let scale_group = adw::PreferencesGroup::builder()
+            .title(gettext("Scaling"))
+            .build();
+        let scale_row = adw::SpinRow::builder()
+            .title(gettext("App size"))
+            .subtitle(gettext("Scales the whole interface (percent)"))
+            .adjustment(&gtk::Adjustment::new(
+                (self.theme.ui_scale * 100.0).round(),
+                50.0,
+                150.0,
+                10.0,
+                10.0,
+                0.0,
+            ))
+            .build();
+        {
+            let sender = sender.clone();
+            scale_row.connect_value_notify(move |r| {
+                sender.input(Msg::SetUiScale(r.value() / 100.0));
+            });
+        }
+        scale_group.add(&scale_row);
+        page.add(&scale_group);
+
+        // Background: blurred cover and/or a custom image.
+        let bg_group = adw::PreferencesGroup::builder()
+            .title(gettext("Background"))
+            .build();
+        let blur_row = adw::SwitchRow::builder()
+            .title(gettext("Blurred cover background"))
+            .subtitle(gettext("Show the current cover, blurred, behind the app"))
+            .active(self.theme.design.cover_blur)
+            .build();
+        {
+            let sender = sender.clone();
+            blur_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetCoverBlur(r.is_active()));
+            });
+        }
+        bg_group.add(&blur_row);
+
+        // Custom background image (extremely blurred). Fallback when cover-blur is
+        // on but no cover is available; fixed everywhere when cover-blur is off.
+        let has_bg = self.theme.design.custom_bg.is_some();
+        let bg_subtitle = if has_bg {
+            gettext("Image selected")
+        } else {
+            gettext("None")
+        };
+        let bg_row = adw::ActionRow::builder()
+            .title(gettext("Custom background"))
+            .subtitle(&bg_subtitle)
+            .build();
+        let bg_choose = gtk::Button::builder()
+            .icon_name("document-open-symbolic")
+            .tooltip_text(gettext("Choose image"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        let bg_clear = gtk::Button::builder()
+            .icon_name("edit-clear-symbolic")
+            .tooltip_text(gettext("Remove"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .visible(has_bg)
+            .build();
+        {
+            let sender = sender.clone();
+            let win = root.clone();
+            let row = bg_row.clone();
+            let clear = bg_clear.clone();
+            bg_choose.connect_clicked(move |_| {
+                let filter = gtk::FileFilter::new();
+                filter.add_pixbuf_formats();
+                filter.set_name(Some(&gettext("Images")));
+                let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
+                filters.append(&filter);
+                let chooser = gtk::FileDialog::builder()
+                    .title(gettext("Choose background image"))
+                    .filters(&filters)
+                    .build();
+                let sender = sender.clone();
+                let row = row.clone();
+                let clear = clear.clone();
+                chooser.open(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
+                    if let Ok(file) = res {
+                        if let Some(path) = file.path() {
+                            row.set_subtitle(&gettext("Image selected"));
+                            clear.set_visible(true);
+                            sender.input(Msg::SetCustomBg(Some(path)));
+                        }
+                    }
+                });
+            });
+        }
+        {
+            let sender = sender.clone();
+            let row = bg_row.clone();
+            bg_clear.connect_clicked(move |b| {
+                row.set_subtitle(&gettext("None"));
+                b.set_visible(false);
+                sender.input(Msg::SetCustomBg(None));
+            });
+        }
+        bg_row.add_suffix(&bg_clear);
+        bg_row.add_suffix(&bg_choose);
+        bg_group.add(&bg_row);
+        page.add(&bg_group);
+
+        // Colors: button/entry/row background + text color (each with a reset).
+        let colors_group = adw::PreferencesGroup::builder()
+            .title(gettext("Colors"))
+            .build();
+
+        let btn_color_row = adw::ActionRow::builder()
+            .title(gettext("Button & list background"))
+            .build();
+        let btn_color_btn = gtk::ColorDialogButton::builder()
+            .dialog(&gtk::ColorDialog::new())
+            .valign(gtk::Align::Center)
+            .build();
+        if let Some(rgba) = self
+            .theme
+            .design
+            .button_bg
+            .as_deref()
+            .and_then(|h| gtk::gdk::RGBA::parse(h).ok())
+        {
+            btn_color_btn.set_rgba(&rgba);
+        }
+        {
+            let sender = sender.clone();
+            // Connect after `set_rgba` so the preselect doesn't persist.
+            btn_color_btn.connect_rgba_notify(move |b| {
+                sender.input(Msg::SetButtonBg(Some(rgba_to_hex(&b.rgba()))));
+            });
+        }
+        let btn_color_reset = gtk::Button::builder()
+            .icon_name("edit-clear-symbolic")
+            .tooltip_text(gettext("Reset"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        {
+            let sender = sender.clone();
+            btn_color_reset.connect_clicked(move |_| {
+                sender.input(Msg::SetButtonBg(None));
+            });
+        }
+        btn_color_row.add_suffix(&btn_color_reset);
+        btn_color_row.add_suffix(&btn_color_btn);
+        colors_group.add(&btn_color_row);
+
+        let text_color_row = adw::ActionRow::builder()
+            .title(gettext("Text color"))
+            .build();
+        let text_color_btn = gtk::ColorDialogButton::builder()
+            .dialog(&gtk::ColorDialog::new())
+            .valign(gtk::Align::Center)
+            .build();
+        if let Some(rgba) = self
+            .theme
+            .design
+            .text_color
+            .as_deref()
+            .and_then(|h| gtk::gdk::RGBA::parse(h).ok())
+        {
+            text_color_btn.set_rgba(&rgba);
+        }
+        {
+            let sender = sender.clone();
+            text_color_btn.connect_rgba_notify(move |b| {
+                sender.input(Msg::SetTextColor(Some(rgba_to_hex(&b.rgba()))));
+            });
+        }
+        let text_color_reset = gtk::Button::builder()
+            .icon_name("edit-clear-symbolic")
+            .tooltip_text(gettext("Reset"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        {
+            let sender = sender.clone();
+            text_color_reset.connect_clicked(move |_| {
+                sender.input(Msg::SetTextColor(None));
+            });
+        }
+        text_color_row.add_suffix(&text_color_reset);
+        text_color_row.add_suffix(&text_color_btn);
+        colors_group.add(&text_color_row);
+        page.add(&colors_group);
+
+        // System: optional desktop tray icon + window behavior.
+        let tray_group = adw::PreferencesGroup::builder()
+            .title(gettext("System tray"))
+            .build();
+        let tray_enabled_row = adw::SwitchRow::builder()
+            .title(gettext("Show tray icon"))
+            .active(self.tray.enabled)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_enabled_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayEnabled(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_enabled_row);
+        let tray_close_row = adw::SwitchRow::builder()
+            .title(gettext("Close to tray"))
+            .subtitle(gettext("Closing the window keeps it running in the tray"))
+            .active(self.tray.close_hides)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_close_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayCloseHides(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_close_row);
+        let tray_hidden_row = adw::SwitchRow::builder()
+            .title(gettext("Start hidden"))
+            .subtitle(gettext("Start in the tray without showing the window"))
+            .active(self.tray.start_hidden)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_hidden_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTrayStartHidden(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_hidden_row);
+        let tray_skip_row = adw::SwitchRow::builder()
+            .title(gettext("No taskbar entry"))
+            .subtitle(gettext("Hide from the taskbar even when visible (X11)"))
+            .active(self.tray.skip_taskbar)
+            .build();
+        {
+            let sender = sender.clone();
+            tray_skip_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetTraySkipTaskbar(r.is_active()));
+            });
+        }
+        tray_group.add(&tray_skip_row);
+        page.add(&tray_group);
+
+        let design_page = page;
+
         // --- Category: Menu (manage menu items) ---
         let page = adw::PreferencesPage::builder()
             .title(gettext("Menu"))
@@ -1300,6 +1568,7 @@ impl App {
 
         // Order of the settings pages: "View" first.
         dialog.add(&view_page);
+        dialog.add(&design_page);
         dialog.add(&lib_page);
         dialog.add(&sound_page);
         dialog.add(&search_page);
@@ -1310,6 +1579,93 @@ impl App {
         dialog.present(Some(root));
     }
 
+    /// The album/artist a custom cover/photo applies to for the current detail
+    /// target. Folders are resolved as an album or artist. `None` where no custom
+    /// image can be set.
+    pub(crate) fn cover_dest(&self) -> Option<CoverDest> {
+        match self.nav.context_target.as_ref() {
+            Some(CtxTarget::Album(m)) => Some(CoverDest::Album(m.artist.clone(), m.album.clone())),
+            Some(CtxTarget::Artist(m)) => Some(CoverDest::Artist(m.name.clone())),
+            // Folder in the file browser: resolve as an album or artist.
+            _ => match self.ctx_album() {
+                Some((a, al)) => Some(CoverDest::Album(a, al)),
+                None => self.ctx_artist().map(CoverDest::Artist),
+            },
+        }
+    }
+
+    /// Asks first whether to upload a new cover/photo, remove the current one, or
+    /// cancel — instead of jumping straight into the file picker.
+    pub(crate) fn open_cover_options_dialog(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        if self.cover_dest().is_none() {
+            self.toast(&gettext("No custom image can be set here"));
+            return;
+        }
+        let dialog = adw::AlertDialog::new(
+            Some(&gettext("Cover / photo")),
+            Some(&gettext("Upload a new image or remove the current one?")),
+        );
+        dialog.add_response("cancel", &gettext("Cancel"));
+        dialog.add_response("remove", &gettext("Remove"));
+        dialog.add_response("upload", &gettext("Upload"));
+        dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+        dialog.set_response_appearance("upload", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("upload"));
+        dialog.set_close_response("cancel");
+        {
+            let sender = sender.clone();
+            dialog.connect_response(None, move |_, resp| match resp {
+                "upload" => sender.input(Msg::UploadCover),
+                "remove" => sender.input(Msg::RemoveCover),
+                _ => {}
+            });
+        }
+        dialog.present(Some(root));
+    }
+
+    /// Removes the stored cover/photo of the current target (reverts to embedded
+    /// art / the online fallback), refreshing the views and the open dialog.
+    pub(crate) fn remove_cover(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match self.cover_dest() {
+            Some(CoverDest::Album(artist, album)) => {
+                if let Some(mut meta) = self.library.get_album_meta(&artist, &album).ok().flatten()
+                {
+                    meta.cover_path = None;
+                    let _ = self.library.upsert_album_meta(&meta);
+                }
+                if let Some(CtxTarget::Album(m)) = self.nav.context_target.as_mut() {
+                    if m.artist == artist && m.album == album {
+                        m.cover_path = None;
+                    }
+                }
+                self.reload_albums();
+                self.refresh_context_dialog(root, sender);
+            }
+            Some(CoverDest::Artist(name)) => {
+                if let Some(mut meta) = self.library.get_artist_meta(&name).ok().flatten() {
+                    meta.image_path = None;
+                    let _ = self.library.upsert_artist_meta(&meta);
+                }
+                if let Some(CtxTarget::Artist(m)) = self.nav.context_target.as_mut() {
+                    if m.name == name {
+                        m.image_path = None;
+                    }
+                }
+                self.reload_artists();
+                self.refresh_context_dialog(root, sender);
+            }
+            None => self.toast(&gettext("No custom image can be set here")),
+        }
+    }
+
     /// File dialog for uploading a custom cover/photo for the current detail
     /// target (album → cover, artist → photo). The chosen image is copied into
     /// the cache and set as the primary image.
@@ -1318,20 +1674,7 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        enum Dest {
-            Album(String, String),
-            Artist(String),
-        }
-        let dest = match self.nav.context_target.as_ref() {
-            Some(CtxTarget::Album(m)) => Some(Dest::Album(m.artist.clone(), m.album.clone())),
-            Some(CtxTarget::Artist(m)) => Some(Dest::Artist(m.name.clone())),
-            // Folder in the file browser: resolve as an album or artist.
-            _ => match self.ctx_album() {
-                Some((a, al)) => Some(Dest::Album(a, al)),
-                None => self.ctx_artist().map(Dest::Artist),
-            },
-        };
-        let Some(dest) = dest else {
+        let Some(dest) = self.cover_dest() else {
             self.toast(&gettext("No custom image can be set here"));
             return;
         };
@@ -1352,17 +1695,17 @@ impl App {
             let Some(src) = file.path() else {
                 return;
             };
-            let is_artist = matches!(dest, Dest::Artist(_));
+            let is_artist = matches!(dest, CoverDest::Artist(_));
             let Some(cached) = store_custom_image(&src, is_artist) else {
                 return;
             };
             match dest {
-                Dest::Album(artist, album) => sender.input(Msg::SetAlbumCover {
+                CoverDest::Album(artist, album) => sender.input(Msg::SetAlbumCover {
                     artist,
                     album,
                     path: cached,
                 }),
-                Dest::Artist(name) => sender.input(Msg::SetArtistImage { name, path: cached }),
+                CoverDest::Artist(name) => sender.input(Msg::SetArtistImage { name, path: cached }),
             }
         });
     }
@@ -1592,6 +1935,12 @@ impl App {
             ));
         }
     }
+}
+
+/// What a custom cover/photo applies to (see [`App::cover_dest`]).
+pub(crate) enum CoverDest {
+    Album(String, String),
+    Artist(String),
 }
 
 /// Copies a chosen image into the cover or artist cache and returns the new

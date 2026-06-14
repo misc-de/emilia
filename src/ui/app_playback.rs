@@ -892,6 +892,9 @@ impl App {
                 // Inform the lock screen/media keys about the new track.
                 self.update_mpris_metadata(&path, track.as_ref());
                 self.mpris.set_playing(true);
+                // Refresh the blurred cover background + tray menu for the new track.
+                self.refresh_cover_background();
+                self.refresh_tray_state();
                 let start = self.player.position_ms().unwrap_or(resume_ms.max(0));
                 self.mpris.set_position(start);
                 self.mpris.seeked(start);
@@ -1427,5 +1430,7 @@ impl App {
         // Adjust the play/pause icon of the active track in the list.
         self.refresh_queue_icons();
         self.sync_stream_page_icons();
+        // Keep the tray's Play/Pause label in sync.
+        self.refresh_tray_state();
     }
 }

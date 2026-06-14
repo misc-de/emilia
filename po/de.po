@@ -2701,3 +2701,121 @@ msgstr "Diese Quelle ist nicht korrekt konfiguriert (URL/Login fehlt)."
 # --- Settings: Meta page ---
 msgid "Meta"
 msgstr "Meta"
+
+# --- Cover/photo upload-or-remove (de) ---
+msgid "Cover / photo"
+msgstr "Cover / Foto"
+
+msgid "Upload a new image or remove the current one?"
+msgstr "Neues Bild hochladen oder das aktuelle entfernen?"
+
+msgid "Upload"
+msgstr "Hochladen"
+
+
+# --- Audiobook menu terminology (de) ---
+msgid "Audiobook"
+msgstr "Hörbuch"
+
+msgid "{n} audiobook"
+msgid_plural "{n} audiobooks"
+msgstr[0] "{n} Hörbuch"
+msgstr[1] "{n} Hörbücher"
+
+
+# --- Audiobook track count (context-qualified) ---
+msgctxt "audiobook"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} Track"
+msgstr[1] "{n} Tracks"
+
+# --- Sort: favorites custom (drag) order ---
+msgid "Custom order"
+msgstr "Eigene Reihenfolge"
+
+# --- Sort criteria for podcasts / youtube overviews ---
+msgid "Number of episodes"
+msgstr "Anzahl Episoden"
+
+msgid "Number of videos"
+msgstr "Anzahl Videos"
+
+# --- Design page: scaling, colors, blurred background, tray (added) ---
+msgid "Show / Hide"
+msgstr "Anzeigen / Verbergen"
+
+msgid "Previous"
+msgstr "Zurück"
+
+msgid "Quit Emilia"
+msgstr "Emilia beenden"
+
+msgid "Design"
+msgstr "Design"
+
+msgid "Scaling"
+msgstr "Skalierung"
+
+msgid "App size"
+msgstr "App-Größe"
+
+msgid "Scales the whole interface (percent)"
+msgstr "Skaliert die gesamte Oberfläche (Prozent)"
+
+msgid "Background"
+msgstr "Hintergrund"
+
+msgid "Blurred cover background"
+msgstr "Unscharfer Cover-Hintergrund"
+
+msgid "Show the current cover, blurred, behind the app"
+msgstr "Zeigt das aktuelle Cover unscharf hinter der App"
+
+msgid "Custom background"
+msgstr "Eigener Hintergrund"
+
+msgid "Image selected"
+msgstr "Bild ausgewählt"
+
+msgid "None"
+msgstr "Keiner"
+
+msgid "Choose image"
+msgstr "Bild auswählen"
+
+msgid "Choose background image"
+msgstr "Hintergrundbild auswählen"
+
+msgid "Colors"
+msgstr "Farben"
+
+msgid "Button & list background"
+msgstr "Button- & Listenhintergrund"
+
+msgid "Text color"
+msgstr "Textfarbe"
+
+msgid "System tray"
+msgstr "System-Tray"
+
+msgid "Show tray icon"
+msgstr "Tray-Icon anzeigen"
+
+msgid "Close to tray"
+msgstr "Ins Tray minimieren"
+
+msgid "Closing the window keeps it running in the tray"
+msgstr "Beim Schließen läuft die App im Tray weiter"
+
+msgid "Start hidden"
+msgstr "Versteckt starten"
+
+msgid "Start in the tray without showing the window"
+msgstr "Im Tray starten, ohne das Fenster zu zeigen"
+
+msgid "No taskbar entry"
+msgstr "Kein Taskleisten-Eintrag"
+
+msgid "Hide from the taskbar even when visible (X11)"
+msgstr "Auch bei sichtbarem Fenster aus der Taskleiste ausblenden (X11)"

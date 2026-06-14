@@ -30,6 +30,37 @@ impl App {
     pub(crate) fn reload_playlists(&mut self, sender: &ComponentSender<Self>) {
         self.playlists.playlist_items = self.library.playlists().unwrap_or_default();
         let durations = self.library.playlist_durations_ms().unwrap_or_default();
+        self.sort_playlists(&durations);
+
+        // Alphabetical headings (by name) shared by list + gallery; none otherwise.
+        let headers = self.playlist_section_headers();
+        *self.libview.playlist_headers.borrow_mut() = headers.clone();
+
+        // Gallery variant: derived covers in a grid.
+        if self.libview.gallery_on("playlists") {
+            let tiles: Vec<(Option<String>, &'static str, String)> = self
+                .playlists
+                .playlist_items
+                .iter()
+                .map(|(id, name, _)| {
+                    let paths = self.library.playlist_paths(*id).unwrap_or_default();
+                    (
+                        self.playlist_display_cover(*id, &paths),
+                        "view-list-symbolic",
+                        name.clone(),
+                    )
+                })
+                .collect();
+            self.fill_sectioned_gallery(
+                &self.playlists.playlists_gallery_box,
+                &self.playlists.playlists_gallery,
+                &tiles,
+                headers.as_deref(),
+                Msg::OpenPlaylistAt,
+                Msg::ShowPlaylistDetailAt,
+            );
+            return;
+        }
 
         while let Some(child) = self.playlists.playlists_list.first_child() {
             self.playlists.playlists_list.remove(&child);
@@ -84,6 +115,8 @@ impl App {
             });
             self.playlists.playlists_list.append(&row);
         }
+        // Refresh the section headings for the rebuilt rows (or clear them).
+        self.playlists.playlists_list.invalidate_headers();
     }
 
     /// Short tap on a playlist: a subpage that lists the playlist's

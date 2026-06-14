@@ -11,7 +11,10 @@ use relm4::{adw, gtk};
 
 use crate::core::category::album_key;
 use crate::i18n::gettext;
+use crate::model::Track;
 use crate::ui::app::{cover_widget, duration_label, App, CtxTarget, Msg};
+use crate::ui::app_helpers::most_common_artist;
+use crate::ui::app_views::most_common_album_base;
 use crate::ui::fs_row::FsEntry;
 
 impl App {
@@ -72,19 +75,49 @@ impl App {
     /// drag handle for reordering).
     pub(crate) fn load_favorites(&mut self, sender: &ComponentSender<Self>) {
         self.favorites.favorite_items = self.library.favorites().unwrap_or_default();
+        // The stored order is the user's manual drag arrangement. Only when the
+        // user picks an actual sort (Name) do we reorder – and then the reorder
+        // handles are hidden (a manual move would be overwritten on reload).
+        let crit = self.libview.sort_for("favorites").0;
+        let manual = matches!(crit, crate::ui::app::SortCrit::Manual);
+        if !manual {
+            self.sort_favorites();
+        }
         let items = self.favorites.favorite_items.clone();
-        self.fill_entry_list(
-            &self.favorites.favorites_list,
-            &items,
-            sender,
-            Msg::PlayFavorite,
-            // No trash button - removal via long press ("More info" → star).
-            None,
-            Msg::ShowFavoriteDetail,
-            Some(|from, to| Msg::MoveFavorite { from, to }),
-            true,
-            false,
-        );
+        // Alphabetical headings (by name) shared by list + gallery; none in the
+        // manual order (entry_section_headers returns None for the Manual sort).
+        let headers = self.entry_section_headers("favorites", &items);
+        *self.libview.favorite_headers.borrow_mut() = headers.clone();
+        if self.libview.gallery_on("favorites") {
+            let tiles = self.entry_gallery_items(&items);
+            self.fill_sectioned_gallery(
+                &self.favorites.favorites_gallery_box,
+                &self.favorites.favorites_gallery,
+                &tiles,
+                headers.as_deref(),
+                Msg::PlayFavorite,
+                Msg::ShowFavoriteDetail,
+            );
+        } else {
+            // Drag-to-reorder only in the manual order; a sort would override it.
+            let move_msg: Option<fn(usize, usize) -> Msg> =
+                manual.then_some(|from, to| Msg::MoveFavorite { from, to });
+            self.fill_entry_list(
+                &self.favorites.favorites_list,
+                &items,
+                sender,
+                Msg::PlayFavorite,
+                // No trash button - removal via long press ("More info" → star).
+                None,
+                Msg::ShowFavoriteDetail,
+                move_msg,
+                true,
+                false,
+                false,
+            );
+            // Refresh the section headings for the rebuilt rows (or clear them).
+            self.favorites.favorites_list.invalidate_headers();
+        }
     }
 
     /// Loads the audiobooks (the "Audiobooks" area) - only **albums and single
@@ -103,7 +136,7 @@ impl App {
         // gallery, exactly like the albums overview.
         let headers = self.entry_section_headers("audiobooks", &items);
         *self.libview.audiobook_headers.borrow_mut() = headers.clone();
-        if self.libview.gallery_view {
+        if self.libview.gallery_on("audiobooks") {
             let tiles = self.entry_gallery_items(&items);
             self.fill_sectioned_gallery(
                 &self.favorites.audiobooks_gallery_box,
@@ -123,6 +156,7 @@ impl App {
                 Msg::ShowAudiobookDetail,
                 None,
                 false,
+                true,
                 true,
             );
             // Refresh the section headings for the rebuilt rows (or clear them).
@@ -147,6 +181,8 @@ impl App {
         track_subtitle: bool,
         // Render folder entries as albums (subtitle "Album", album icon).
         folder_as_album: bool,
+        // Audiobook area: say "Audiobook" instead of "Album" for folder/album rows.
+        audiobook: bool,
     ) {
         while let Some(child) = list.first_child() {
             list.remove(&child);
@@ -154,6 +190,8 @@ impl App {
         for (i, (scope, key, title, is_dir)) in items.iter().enumerate() {
             let subtitle = if track_subtitle && scope == "track" {
                 self.track_meta_subtitle(key)
+            } else if audiobook && (scope == "folder" || scope == "album") {
+                gettext("Audiobook")
             } else if folder_as_album && scope == "folder" {
                 gettext("Album")
             } else {
@@ -449,15 +487,34 @@ impl App {
     /// Cover of a folder: cover of any track within it.
     fn folder_cover(&self, folder: &str) -> Option<String> {
         let prefix = format!("{}/", folder.trim_end_matches('/'));
-        let t = self
+        let tracks: Vec<Track> = self
             .library
             .all_tracks()
             .ok()?
             .into_iter()
-            .find(|t| t.path.starts_with(&prefix))?;
-        crate::core::online::local_track_cover(&t.path).or_else(|| {
-            let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
-            self.album_cover_for(t.artist.as_deref().unwrap_or(""), album)
+            .filter(|t| t.path.starts_with(&prefix))
+            .collect();
+        let first = tracks.first()?;
+        // A folder recognized as an album: its stored cover (custom upload first),
+        // keyed by the SAME resolved (artist, album) the detail/upload use, wins
+        // over embedded art — so a just-set cover shows in the list too.
+        let refs: Vec<&Track> = tracks.iter().collect();
+        if let Some(album) = most_common_album_base(&refs).filter(|a| !a.is_empty()) {
+            let artist = most_common_artist(&tracks);
+            if let Some(p) = self
+                .library
+                .get_album_meta(&artist, &album)
+                .ok()
+                .flatten()
+                .and_then(|m| m.cover_path)
+                .filter(|p| std::path::Path::new(p).exists())
+            {
+                return Some(p);
+            }
+        }
+        crate::core::online::local_track_cover(&first.path).or_else(|| {
+            let album = first.album.as_deref().filter(|a| !a.trim().is_empty())?;
+            self.album_cover_for(first.artist.as_deref().unwrap_or(""), album)
         })
     }
 

@@ -22,9 +22,11 @@ use relm4::{adw, gtk};
 
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
-use crate::ui::app::PodcastView;
+use crate::ui::app::{PodcastView, SortCrit};
 use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
+use crate::ui::app_sort::{sort_dir_icon, sort_popover};
+use crate::ui::app_views::natural_key;
 
 /// Fetches a feed and stores podcast + episodes (runs in the worker thread,
 /// its own DB connection). Returns the podcast title on success.
@@ -108,6 +110,20 @@ pub(crate) struct PodcastsPage {
     podcasts_gallery: gtk::FlowBox,
     /// Which podcast view is visible: newest episodes or subscription overview.
     podcast_view: PodcastView,
+    /// Sort of the subscription overview (criterion + descending). Persisted as
+    /// "sort_podcasts" / "sort_podcasts_desc". The "Newest" view is date-bucketed
+    /// and not affected.
+    overview_sort: (SortCrit, bool),
+    /// "Without grouping" for the overview list (no alphabetical headings).
+    /// Persisted as "nogroup_podcasts".
+    overview_no_group: bool,
+    /// Per-view gallery override (sort popover); `None` follows the global
+    /// `gallery_view`. Persisted as "gallery_podcasts".
+    gallery_override: Option<bool>,
+    /// Per-row alphabetical headings of the overview list (name sort).
+    overview_headers: Rc<RefCell<Option<Vec<String>>>>,
+    /// Header sort button (its popover is (re)built in [`Self::rebuild_sort`]).
+    sort_btn: gtk::MenuButton,
     /// Newest episodes across all subscriptions (for the "Newest" view).
     newest_items: Vec<crate::model::EpisodeRef>,
     /// Container of the "Newest" list (filled imperatively in `reload_newest`).
@@ -151,6 +167,12 @@ pub(crate) enum PodcastsInput {
     SetWindow(adw::ApplicationWindow),
     // --- view-internal (from the page's own rows/dialogs) ---
     SetView(PodcastView),
+    /// Change the overview sort (criterion + descending), from the header popover.
+    SetSort(SortCrit, bool),
+    /// Toggle alphabetical grouping of the overview list (`true` = no grouping).
+    SetNoGroup(bool),
+    /// Per-view gallery override for the overview (sort popover toggle).
+    SetGallery(bool),
     Subscribe,
     Search(String),
     SubscribeUrl(String),
@@ -255,6 +277,14 @@ impl Component for PodcastsPage {
                     set_active: model.podcast_view == PodcastView::Overview,
                     connect_clicked => PodcastsInput::SetView(PodcastView::Overview),
                 },
+                #[local_ref]
+                sort_btn -> gtk::MenuButton {
+                    set_icon_name: "view-sort-ascending-symbolic",
+                    set_tooltip_text: Some(&gettext("Sort")),
+                    add_css_class: "flat",
+                    #[watch]
+                    set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty(),
+                },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
                     set_tooltip_text: Some(&gettext("Subscribe to podcast")),
@@ -291,7 +321,7 @@ impl Component for PodcastsPage {
             gtk::ScrolledWindow {
                 set_vexpand: true,
                 #[watch]
-                set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && !model.gallery_view,
+                set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && !model.gallery_on(),
                 #[local_ref]
                 podcasts_list -> gtk::ListBox {
                     set_valign: gtk::Align::Start,
@@ -306,7 +336,7 @@ impl Component for PodcastsPage {
             gtk::ScrolledWindow {
                 set_vexpand: true,
                 #[watch]
-                set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && model.gallery_view,
+                set_visible: model.podcast_view == PodcastView::Overview && !model.podcast_items.is_empty() && model.gallery_on(),
                 #[local_ref]
                 podcasts_gallery -> gtk::FlowBox {
                     set_valign: gtk::Align::Start,
@@ -338,6 +368,33 @@ impl Component for PodcastsPage {
         let podcasts_list = gtk::ListBox::new();
         let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let podcasts_gallery = gtk::FlowBox::new();
+        let sort_btn = gtk::MenuButton::new();
+        // Restore the persisted overview sort (default: by name, ascending) + the
+        // grouping/gallery choices.
+        let overview_sort =
+            crate::ui::app_sort::read_sort(&library, "podcasts", SortCrit::Name, false);
+        let overview_no_group = matches!(
+            library
+                .get_setting("nogroup_podcasts")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
+        let gallery_override = match library
+            .get_setting("gallery_podcasts")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("1") => Some(true),
+            Some("0") => Some(false),
+            _ => None,
+        };
+        let overview_headers = Rc::new(RefCell::new(None));
+        podcasts_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
+            overview_headers.clone(),
+        ));
         let model = PodcastsPage {
             library,
             window: None,
@@ -353,6 +410,11 @@ impl Component for PodcastsPage {
             podcast_view: PodcastView::Newest,
             newest_items: Vec::new(),
             newest_list: newest_list.clone(),
+            overview_sort,
+            overview_no_group,
+            gallery_override,
+            overview_headers,
+            sort_btn: sort_btn.clone(),
             podcast_search_results: Vec::new(),
             podcast_search_failed: false,
             podcast_search: Rc::new(RefCell::new(None)),
@@ -375,6 +437,8 @@ impl Component for PodcastsPage {
             PodcastsCmd::CoversCached
         });
         let widgets = view_output!();
+        // Build the header sort popover (icon + criteria) for the restored sort.
+        model.rebuild_sort(&sender);
         ComponentParts { model, widgets }
     }
 
@@ -416,6 +480,37 @@ impl Component for PodcastsPage {
             PodcastsInput::SetMobile(b) => self.mobile = b,
             PodcastsInput::SetWindow(w) => self.window = Some(w),
             PodcastsInput::SetView(view) => self.podcast_view = view,
+            PodcastsInput::SetSort(crit, desc) => {
+                if self.overview_sort != (crit, desc) {
+                    self.overview_sort = (crit, desc);
+                    let _ = self.library.set_setting("sort_podcasts", crit.as_key());
+                    let _ = self
+                        .library
+                        .set_setting("sort_podcasts_desc", if desc { "1" } else { "0" });
+                    self.rebuild_sort(&sender);
+                    self.reload_podcasts(&sender);
+                }
+            }
+            PodcastsInput::SetNoGroup(off) => {
+                if self.overview_no_group != off {
+                    self.overview_no_group = off;
+                    let _ = self
+                        .library
+                        .set_setting("nogroup_podcasts", if off { "1" } else { "0" });
+                    self.rebuild_sort(&sender);
+                    self.reload_podcasts(&sender);
+                }
+            }
+            PodcastsInput::SetGallery(on) => {
+                if self.gallery_override != Some(on) {
+                    self.gallery_override = Some(on);
+                    let _ = self
+                        .library
+                        .set_setting("gallery_podcasts", if on { "1" } else { "0" });
+                    self.rebuild_sort(&sender);
+                    self.reload_podcasts(&sender);
+                }
+            }
             PodcastsInput::Subscribe => self.open_subscribe_podcast_dialog(&sender),
             PodcastsInput::Search(term) => {
                 let term = term.trim().to_string();
@@ -580,9 +675,92 @@ impl PodcastsPage {
     /// Rebuilds the overview of subscribed podcasts: cover, title, episode
     /// count. Tapping opens the episodes; **long press** opens the subscription
     /// detail view (refresh/remove). Afterwards also refreshes "Newest".
+    /// Effective gallery mode for the overview: the per-view override if set, else
+    /// the global `gallery_view`.
+    fn gallery_on(&self) -> bool {
+        self.gallery_override.unwrap_or(self.gallery_view)
+    }
+
+    /// (Re)builds the header sort button: its direction icon and the criteria
+    /// popover (name / episode count) plus the grouping + gallery toggles. Called
+    /// on init and whenever the sort/grouping/gallery changes.
+    fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
+        use crate::ui::app_sort::SortToggle;
+        let (crit, desc) = self.overview_sort;
+        self.sort_btn.set_icon_name(sort_dir_icon(desc));
+        let crits = [
+            (SortCrit::Name, gettext("Name")),
+            (SortCrit::Songs, gettext("Number of episodes")),
+        ];
+        let input = sender.input_sender().clone();
+        let group_input = input.clone();
+        let gallery_input = input.clone();
+        let toggles = vec![
+            SortToggle {
+                label: gettext("Without grouping"),
+                active: self.overview_no_group,
+                on_toggle: Box::new(move |off| {
+                    let _ = group_input.send(PodcastsInput::SetNoGroup(off));
+                }),
+            },
+            SortToggle {
+                label: gettext("Gallery view"),
+                active: self.gallery_on(),
+                on_toggle: Box::new(move |on| {
+                    let _ = gallery_input.send(PodcastsInput::SetGallery(on));
+                }),
+            },
+        ];
+        let popover = sort_popover(
+            &crits,
+            crit,
+            desc,
+            move |crit, desc| {
+                let _ = input.send(PodcastsInput::SetSort(crit, desc));
+            },
+            toggles,
+        );
+        self.sort_btn.set_popover(Some(&popover));
+    }
+
+    /// Per-row alphabetical headings (by name) for the overview list; none for the
+    /// episode-count sort or when grouping is off.
+    fn overview_section_headers(&self) -> Option<Vec<String>> {
+        if self.overview_no_group {
+            return None;
+        }
+        match self.overview_sort.0 {
+            SortCrit::Name => Some(
+                self.podcast_items
+                    .iter()
+                    .map(|(_, title, _, _)| crate::ui::app_sort::alpha_header(title))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Orders the subscription overview by the chosen sort (shared by list +
+    /// gallery, which both read `podcast_items`).
+    fn sort_podcasts(&mut self) {
+        let (crit, desc) = self.overview_sort;
+        match crit {
+            SortCrit::Songs => self.podcast_items.sort_by_key(|(_, _, _, count)| *count),
+            // Name is the only other criterion offered for podcasts.
+            _ => self
+                .podcast_items
+                .sort_by_cached_key(|(_, title, _, _)| natural_key(title)),
+        }
+        if desc {
+            self.podcast_items.reverse();
+        }
+    }
+
     fn reload_podcasts(&mut self, sender: &ComponentSender<Self>) {
         self.podcast_items = self.library.podcasts().unwrap_or_default();
-        if self.gallery_view {
+        self.sort_podcasts();
+        *self.overview_headers.borrow_mut() = self.overview_section_headers();
+        if self.gallery_on() {
             self.fill_podcast_gallery(sender);
         } else {
             while let Some(child) = self.podcasts_list.first_child() {
@@ -619,6 +797,7 @@ impl PodcastsPage {
                 row.add_controller(lp);
                 self.podcasts_list.append(&row);
             }
+            self.podcasts_list.invalidate_headers();
         }
         self.reload_newest(sender);
     }

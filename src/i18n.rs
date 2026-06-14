@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use gettextrs::{bind_textdomain_codeset, bindtextdomain, setlocale, textdomain, LocaleCategory};
 
-pub use gettextrs::{gettext, ngettext};
+pub use gettextrs::{gettext, ngettext, npgettext};
 
 /// Text domain (corresponds to the `.mo` file name `emilia.mo`).
 pub const DOMAIN: &str = "emilia";
@@ -152,4 +152,11 @@ pub fn gettext_f(msgid: &str, args: &[(&str, &str)]) -> String {
 /// Example: `ngettext_n("{n} album", "{n} albums", count)`.
 pub fn ngettext_n(msgid: &str, msgid_plural: &str, n: u32) -> String {
     ngettext(msgid, msgid_plural, n).replace("{n}", &n.to_string())
+}
+
+/// Context-qualified [`ngettext_n`] (`msgctxt`): same English source, but a
+/// distinct translation per context — e.g. "{n} track" reads "{n} Titel"
+/// normally but "{n} Track" in the audiobook menus.
+pub fn npgettext_n(msgctxt: &str, msgid: &str, msgid_plural: &str, n: u32) -> String {
+    npgettext(msgctxt, msgid, msgid_plural, n).replace("{n}", &n.to_string())
 }

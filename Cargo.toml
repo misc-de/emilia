@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.6.9"
+version = "0.6.10"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -42,6 +42,15 @@ gstreamer-app = "0.23"
 # QR *decoding* (camera scanner). default-features off → drop the heavy `image`
 # integration; we feed a raw grayscale buffer via `prepare_from_greyscale`.
 rqrr = { version = "0.10.1", default-features = false }
+# Optional desktop tray icon (StatusNotifierItem). Pure-Rust over zbus — no C
+# deps, Flatpak-friendly. Runs its own background thread; commands are bridged
+# back to the glib main loop via an `async-channel` (see src/core/tray.rs).
+ksni = "0.2"
+# X11 backend access for the optional "hide from taskbar" window hint
+# (`_NET_WM_STATE_SKIP_TASKBAR`). GTK4 dropped the high-level setter, so we send
+# the EWMH client message ourselves; no-op on Wayland. See src/ui/app_tray.rs.
+gdk4-x11 = "0.9"
+x11rb = "0.13"
 
 [profile.release]
 opt-level = "s"

@@ -13,7 +13,7 @@ use relm4::{adw, gtk};
 use crate::core::category;
 use crate::core::db::Library;
 use crate::core::{cover, scanner};
-use crate::i18n::{gettext, ngettext_n};
+use crate::i18n::{gettext, ngettext_n, npgettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
     album_subtitle, artist_count_subtitle, cover_widget, duration_label, find_scroller,
@@ -185,7 +185,7 @@ fn sort_by_structure(tracks: &mut [Track]) {
 
 /// Most common album base title of a set of tracks (for the display title of a
 /// subfolder grouped as an album).
-fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
+pub(crate) fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
     use std::collections::HashMap;
     let mut counts: HashMap<String, usize> = HashMap::new();
     for t in tracks {
@@ -524,7 +524,7 @@ impl App {
         let headers = self.album_section_headers(&albums);
         *self.libview.album_headers.borrow_mut() = headers.clone();
         let offline_keys = self.offline_album_keys();
-        if self.libview.gallery_view {
+        if self.libview.gallery_on("albums") {
             let items: Vec<(Option<String>, &'static str, String)> = albums
                 .iter()
                 .map(|a| {
@@ -736,7 +736,7 @@ impl App {
         // Alphabetical section headings when sorting by name (shared list/gallery).
         let headers = self.artist_section_headers(&artists);
         *self.libview.artist_headers.borrow_mut() = headers.clone();
-        if self.libview.gallery_view {
+        if self.libview.gallery_on("artists") {
             let items: Vec<(Option<String>, &'static str, String)> = artists
                 .iter()
                 .map(|a| {
@@ -1840,6 +1840,25 @@ impl App {
         }
     }
 
+    /// Whether a detail target lives in the Audiobooks area — used to relabel the
+    /// menus ("Album"→"Audiobook", "songs"→"tracks") in that context.
+    pub(crate) fn is_audiobook(&self, target: &CtxTarget) -> bool {
+        use crate::core::category::Area;
+        let areas = match target {
+            CtxTarget::Album(m) => self.library.album_areas(&m.artist, &m.album),
+            CtxTarget::Artist(m) => self.library.artist_areas(&m.name),
+            CtxTarget::Fs(e) if e.is_dir() => e
+                .path()
+                .map(|p| self.library.folder_areas(&p.to_string_lossy()))
+                .unwrap_or_default(),
+            CtxTarget::Fs(e) => self
+                .fs_album(e)
+                .map(|(a, al)| self.library.album_areas(&a, &al))
+                .unwrap_or_default(),
+        };
+        areas.contains(&Area::Audiobooks)
+    }
+
     /// Album identity (artist, album) of the current context target, if it is an
     /// album (album card or folder recognized as an album).
     pub(crate) fn ctx_album(&self) -> Option<(String, String)> {
@@ -2028,7 +2047,7 @@ impl App {
                 let sender = sender.clone();
                 click.connect_pressed(move |g, _, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::UploadCover);
+                    sender.input(Msg::CoverOptions);
                 });
             }
             w.add_controller(click);
@@ -2037,7 +2056,7 @@ impl App {
                 let sender = sender.clone();
                 lp.connect_pressed(move |g, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::UploadCover);
+                    sender.input(Msg::CoverOptions);
                 });
             }
             w.add_controller(lp);
@@ -2199,6 +2218,9 @@ impl App {
 
     /// Detail lines for the "More info" expander.
     pub(crate) fn ctx_info_lines(&self, target: &CtxTarget) -> Vec<(String, String)> {
+        // In the audiobook area the menus say "Audiobook"/"tracks", not
+        // "Album"/"songs".
+        let ab = self.is_audiobook(target);
         match target {
             CtxTarget::Fs(e) => self.info_lines(e),
             CtxTarget::Artist(m) => {
@@ -2212,7 +2234,7 @@ impl App {
                 }
                 lines.push((
                     gettext("Collection"),
-                    Self::folder_summary(&files, !year_shown).0,
+                    Self::folder_summary(&files, !year_shown, ab).0,
                 ));
                 lines
             }
@@ -2221,9 +2243,16 @@ impl App {
                 if !m.artist.is_empty() {
                     lines.push((gettext("Artist"), m.artist.clone()));
                 }
-                lines.push((gettext("Album"), m.album.clone()));
+                lines.push((
+                    if ab {
+                        gettext("Audiobook")
+                    } else {
+                        gettext("Album")
+                    },
+                    m.album.clone(),
+                ));
                 let files = self.album_files(&m.artist, &m.album);
-                let (summary, genre) = Self::folder_summary(&files, m.year.is_none());
+                let (summary, genre) = Self::folder_summary(&files, m.year.is_none(), ab);
                 if let Some(g) = genre {
                     lines.push((gettext("Genre"), g));
                 }
@@ -2447,7 +2476,11 @@ impl App {
     /// first genre, from a single tag parse per file (was two passes — one for
     /// the summary, one for the genre). The genre is `None` for callers that
     /// don't need it (it's read in the same pass either way).
-    pub(crate) fn folder_summary(files: &[PathBuf], with_year: bool) -> (String, Option<String>) {
+    pub(crate) fn folder_summary(
+        files: &[PathBuf],
+        with_year: bool,
+        audiobook: bool,
+    ) -> (String, Option<String>) {
         let songs = files.len();
         let mut albums = std::collections::HashSet::new();
         let mut min_year: Option<u32> = None;
@@ -2470,12 +2503,20 @@ impl App {
         let mut value = String::new();
         let n = albums.len();
         if n > 0 {
-            value.push_str(&format!(
-                "{} - ",
+            let count = if audiobook {
+                ngettext_n("{n} audiobook", "{n} audiobooks", n as u32)
+            } else {
                 ngettext_n("{n} album", "{n} albums", n as u32)
-            ));
+            };
+            value.push_str(&format!("{count} - "));
         }
-        value.push_str(&ngettext_n("{n} song", "{n} songs", songs as u32));
+        value.push_str(&if audiobook {
+            // Context "audiobook" so this is "{n} Track(s)", not the generic
+            // "{n} Titel" used for playlists/queue.
+            npgettext_n("audiobook", "{n} track", "{n} tracks", songs as u32)
+        } else {
+            ngettext_n("{n} song", "{n} songs", songs as u32)
+        });
         if with_year {
             if let (Some(a), Some(b)) = (min_year, max_year) {
                 let span = if a == b {
@@ -2558,6 +2599,22 @@ impl App {
                 .and_then(|p| gtk::gdk::Texture::from_filename(&p).ok());
         }
         if entry.is_dir() {
+            // A folder recognized as an album: its stored cover (custom upload
+            // first, keyed by the resolved artist+album) wins over scanning the
+            // folder/embedded art — so a just-set cover actually shows.
+            if let Some(FsKind::Album { artist, album }) = self.fs_music_kind(entry) {
+                if let Some(tex) = self
+                    .library
+                    .get_album_meta(&artist, &album)
+                    .ok()
+                    .flatten()
+                    .and_then(|m| m.cover_path)
+                    .filter(|p| std::path::Path::new(p).exists())
+                    .and_then(|p| gtk::gdk::Texture::from_filename(&p).ok())
+                {
+                    return Some(tex);
+                }
+            }
             if let Some(path) = cover::find_cover_file(epath) {
                 if let Ok(texture) = gtk::gdk::Texture::from_filename(&path) {
                     return Some(texture);
@@ -2602,6 +2659,8 @@ impl App {
 
     /// Detail lines for the "More info" expander.
     pub(crate) fn info_lines(&self, entry: &FsEntry) -> Vec<(String, String)> {
+        // Audiobook area → say "Audiobook"/"tracks" instead of "Album"/"songs".
+        let ab = self.is_audiobook(&CtxTarget::Fs(entry.clone()));
         let mut lines = Vec::new();
         if entry.is_dir() {
             // Folders recognized as album/artist show matching info incl. year.
@@ -2614,7 +2673,14 @@ impl App {
                     if !artist.is_empty() {
                         lines.push((gettext("Artist"), artist.clone()));
                     }
-                    lines.push((gettext("Album"), album.clone()));
+                    lines.push((
+                        if ab {
+                            gettext("Audiobook")
+                        } else {
+                            gettext("Album")
+                        },
+                        album.clone(),
+                    ));
                     if let Some(y) = self
                         .library
                         .get_album_meta(&artist, &album)
@@ -2636,7 +2702,7 @@ impl App {
                 None => {}
             }
             // One tag parse per file: collection summary + (for albums) the genre.
-            let (summary, genre) = Self::folder_summary(&files, !year_shown);
+            let (summary, genre) = Self::folder_summary(&files, !year_shown, ab);
             if is_album {
                 if let Some(g) = genre {
                     lines.push((gettext("Genre"), g));
@@ -2660,7 +2726,14 @@ impl App {
                     lines.push((gettext("Composer"), c));
                 }
                 if let Some(al) = t.album {
-                    lines.push((gettext("Album"), al));
+                    lines.push((
+                        if ab {
+                            gettext("Audiobook")
+                        } else {
+                            gettext("Album")
+                        },
+                        al,
+                    ));
                 }
                 if let Some(g) = t.genre {
                     lines.push((gettext("Genre"), g));
@@ -3105,7 +3178,11 @@ impl App {
 
     /// Worker result: populate the file browser with a local folder's entries
     /// and restore the remembered scroll position.
-    pub(crate) fn on_cmd_entries(&mut self, entries: Vec<FsEntry>) {
+    pub(crate) fn on_cmd_entries(&mut self, mut entries: Vec<FsEntry>) {
+        // Apply the file browser's chosen sort (folders stay above files).
+        self.sort_fs_entries(&mut entries);
+        // Alphabetical headings (by name) for the list, like the library overviews.
+        *self.libview.files_headers.borrow_mut() = self.files_section_headers(&entries);
         // "Mixed album": more than one distinct artist in the folder.
         let distinct: std::collections::HashSet<String> = entries
             .iter()
@@ -3122,6 +3199,7 @@ impl App {
             guard.push_back((e, opts, queued));
         }
         drop(guard);
+        self.libview.entries.widget().invalidate_headers();
         self.libview.loading = false;
 
         // This folder is now shown; restore the remembered scroll position (from
@@ -3205,6 +3283,10 @@ impl App {
                         duration_ms,
                     ));
                 }
+                // Apply the file browser's chosen sort (folders stay above files);
+                // overrides the default name order built above.
+                self.sort_fs_entries(&mut entries);
+                *self.libview.files_headers.borrow_mut() = self.files_section_headers(&entries);
                 let distinct: std::collections::HashSet<String> = entries
                     .iter()
                     .filter_map(|e| e.effective_artist())
@@ -3219,6 +3301,7 @@ impl App {
                         guard.push_back((e, opts, false));
                     }
                 }
+                self.libview.entries.widget().invalidate_headers();
                 self.refresh_queue_icons();
                 // Fetch the tags of the remote files in the background.
                 if let Some(src) = self.active_remote_source() {

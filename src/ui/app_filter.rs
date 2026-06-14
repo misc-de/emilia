@@ -54,13 +54,12 @@ impl App {
     }
 
     /// Whether the visible section shows a filterable list (so the funnel button
-    /// is offered): the file browser always, Artists/Albums only in list mode
-    /// (their gallery tiles are not filtered).
+    /// is offered): Artists/Albums/Concerts/Audiobooks only in list mode (their
+    /// gallery tiles are not filtered). The file browser has no filter.
     fn filter_applies(&self) -> bool {
         match self.current_section().as_deref() {
-            Some("files") => true,
-            Some("artists") | Some("albums") | Some("concerts") | Some("audiobooks") => {
-                !self.libview.gallery_view
+            Some(s @ ("artists" | "albums" | "concerts" | "audiobooks")) => {
+                !self.libview.gallery_on(s)
             }
             _ => false,
         }

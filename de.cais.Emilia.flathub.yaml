@@ -52,6 +52,8 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
   # In-App-Self-Update über das Flatpak-Portal (sandbox-sichere Aktualisierung).
   - --talk-name=org.freedesktop.portal.Flatpak
+  # Optionales Tray-Icon (StatusNotifierItem) – Registrierung beim Tray-Host.
+  - --talk-name=org.kde.StatusNotifierWatcher
   # Übersetzungskataloge liegen privat unter /app (nicht in der Locale-Extension,
   # die nur die Gerätesprachen installiert), damit der eingebaute Sprachwähler
   # jede Sprache laden kann – unabhängig von der Systemsprache. Muss zum

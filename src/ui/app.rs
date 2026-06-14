@@ -253,6 +253,9 @@ pub(crate) enum SortCrit {
     Release,
     /// By the number of songs.
     Songs,
+    /// Keep the user's own drag order (favorites). No sort is applied; the
+    /// reorder handles stay active. Only offered where a manual order exists.
+    Manual,
 }
 
 impl SortCrit {
@@ -263,6 +266,7 @@ impl SortCrit {
             SortCrit::Length => "length",
             SortCrit::Release => "release",
             SortCrit::Songs => "songs",
+            SortCrit::Manual => "manual",
         }
     }
 
@@ -272,6 +276,7 @@ impl SortCrit {
             "length" => SortCrit::Length,
             "release" => SortCrit::Release,
             "songs" => SortCrit::Songs,
+            "manual" => SortCrit::Manual,
             _ => SortCrit::Name,
         }
     }
@@ -284,24 +289,71 @@ impl SortCrit {
             // Release year; sorting by it groups the album list under year headings.
             SortCrit::Release => gettext("Date"),
             SortCrit::Songs => gettext("Number of songs"),
+            SortCrit::Manual => gettext("Custom order"),
         }
     }
 }
 
 /// The library sections that offer a sort control (with their own remembered
-/// criterion + direction). Other sections (Files/Podcasts/YouTube/Stats) don't.
-pub(crate) const SORTABLE_SECTIONS: &[&str] = &["artists", "albums", "concerts", "audiobooks"];
+/// criterion + direction). The cover/entry overviews additionally group + offer
+/// a gallery (see [`section_has_grouping`]/[`section_has_gallery`]); the flat
+/// lists (playlists, memos) only sort. Files/Podcasts/YouTube/Stats have none.
+pub(crate) const SORTABLE_SECTIONS: &[&str] = &[
+    "files",
+    "artists",
+    "albums",
+    "concerts",
+    "audiobooks",
+    "favorites",
+    "playlists",
+    "memo",
+];
 
 /// The criteria a given section offers, in popover order. Category-appropriate:
 /// artists carry no single release year, so they omit [`SortCrit::Release`];
 /// albums/concerts/audiobooks derive a year from their tracks' tag metadata.
+/// Playlists sort by name/track-count/runtime; memos by name/recording-date/length.
 pub(crate) fn section_sort_criteria(section: &str) -> &'static [SortCrit] {
     use SortCrit::*;
     match section {
+        // File browser: by name or by runtime; folders stay above files either way.
+        "files" => &[Name, Length],
         "albums" | "concerts" | "audiobooks" => &[Name, Length, Release, Songs],
         "artists" => &[Name, Songs, Length],
+        "playlists" => &[Name, Songs, Length],
+        // For memos `Release` is the recording date (label "Date"); no song count.
+        "memo" => &[Name, Release, Length],
+        // Favorites keep a manual drag order (the default); name is the alternative.
+        "favorites" => &[Manual, Name],
         _ => &[],
     }
+}
+
+/// Whether a section offers the alphabetical "without grouping" toggle (section
+/// headings) in its sort popover. Only the cover/entry overviews group; the flat
+/// lists (playlists, memos) sort without headings.
+pub(crate) fn section_has_grouping(section: &str) -> bool {
+    matches!(
+        section,
+        "artists"
+            | "albums"
+            | "concerts"
+            | "audiobooks"
+            | "favorites"
+            | "playlists"
+            | "memo"
+            | "files"
+    )
+}
+
+/// Whether a section offers the per-view "gallery" toggle in its sort popover.
+/// Only the cover/photo overviews have a gallery variant (memos/files/recordings
+/// carry no covers, so they group but never offer a gallery).
+pub(crate) fn section_has_gallery(section: &str) -> bool {
+    matches!(
+        section,
+        "artists" | "albums" | "concerts" | "audiobooks" | "favorites" | "playlists"
+    )
 }
 
 /// Ongoing listening session of a track. On switch/end it is written as **one**
@@ -353,6 +405,12 @@ pub(crate) struct LibView {
     /// = no grouping. Mirrors [`Self::album_headers`] for those entry lists.
     pub(crate) concert_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     pub(crate) audiobook_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    /// Per-row alphabetical headings of the favorites/playlists/memo/files lists
+    /// (sorted order, name sort); drive their `set_header_func`. `None` = no grouping.
+    pub(crate) favorite_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(crate) playlist_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(crate) memo_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(crate) files_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     /// Per-section sort state (criterion + `desc` direction), keyed by the
     /// view-stack section name. Only the [`SORTABLE_SECTIONS`] have an entry;
     /// a missing entry means the default (by name, ascending).
@@ -361,8 +419,12 @@ pub(crate) struct LibView {
     /// split into section headings (the flat look from before grouping existed).
     /// Keyed like [`Self::sort`]; a missing/`false` entry means grouped.
     pub(crate) no_group: std::collections::HashMap<&'static str, bool>,
-    /// Show lists as a gallery (cover grid) instead of a list.
+    /// Show lists as a gallery (cover grid) instead of a list (global default).
     pub(crate) gallery_view: bool,
+    /// Per-section gallery override (sort popover's "Gallery view" toggle): a
+    /// section with an entry uses it instead of the global [`Self::gallery_view`];
+    /// a missing entry follows the global flag. Keyed like [`Self::sort`].
+    pub(crate) section_gallery: std::collections::HashMap<&'static str, bool>,
     /// Number of tiles per row in the gallery view (2–8).
     pub(crate) gallery_columns: u32,
     pub(crate) loading: bool,
@@ -397,6 +459,16 @@ impl LibView {
     /// but don't split them under headings). Defaults to grouped.
     pub(crate) fn grouping_off(&self, section: &str) -> bool {
         self.no_group.get(section).copied().unwrap_or(false)
+    }
+
+    /// Whether `section` shows the gallery (cover grid). A per-section override
+    /// (set in the sort popover) wins; otherwise the global [`Self::gallery_view`]
+    /// applies. Used by the sortable sections' list/gallery visibility + reloads.
+    pub(crate) fn gallery_on(&self, section: &str) -> bool {
+        self.section_gallery
+            .get(section)
+            .copied()
+            .unwrap_or(self.gallery_view)
     }
 }
 
@@ -692,6 +764,9 @@ pub(crate) struct FavoritesState {
     /// Favorites: (scope, key, title, is_dir).
     pub(crate) favorite_items: Vec<(String, String, String, bool)>,
     pub(crate) favorites_list: gtk::ListBox,
+    /// Gallery variant of the favorites (cover grid), like the audiobooks.
+    pub(crate) favorites_gallery: gtk::FlowBox,
+    pub(crate) favorites_gallery_box: gtk::Box,
     /// Audiobooks: (scope, key, title, is_dir).
     pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
     pub(crate) audiobooks_list: gtk::ListBox,
@@ -707,6 +782,9 @@ pub(crate) struct PlaylistsState {
     /// (id, name, track count) per playlist.
     pub(crate) playlist_items: Vec<(i64, String, i64)>,
     pub(crate) playlists_list: gtk::ListBox,
+    /// Gallery variant of the playlists (derived-cover grid), like the audiobooks.
+    pub(crate) playlists_gallery: gtk::FlowBox,
+    pub(crate) playlists_gallery_box: gtk::Box,
 }
 
 /// Concerts page state, grouped off the `App` god-object.
@@ -845,6 +923,27 @@ pub struct App {
     pub(crate) stream_page: relm4::Controller<crate::ui::stream_page::StreamPage>,
     /// First-run setup assistant, shown once on the very first launch.
     pub(crate) setup_page: relm4::Controller<crate::ui::setup::SetupPage>,
+    /// Runtime theming: app scaling + design options (colors, blurred background).
+    pub(crate) theme: crate::ui::theme::ThemeState,
+    /// Optional desktop tray icon + window behavior (close-to-tray, skip-taskbar).
+    pub(crate) tray: TrayState,
+}
+
+/// Desktop tray-icon options + the running service handle. The bool prefs are
+/// persisted; `handle`/`hold` are live runtime state (see `src/ui/app_tray.rs`).
+pub(crate) struct TrayState {
+    /// Show a StatusNotifierItem tray icon.
+    pub(crate) enabled: bool,
+    /// Closing the window hides it into the tray instead of quitting.
+    pub(crate) close_hides: bool,
+    /// Start with the window hidden (tray only).
+    pub(crate) start_hidden: bool,
+    /// Suppress the taskbar entry even while the window is visible (X11 only).
+    pub(crate) skip_taskbar: bool,
+    /// Running ksni service handle (for live menu updates); `None` when off.
+    pub(crate) handle: Option<ksni::Handle<crate::core::tray::EmiliaTray>>,
+    /// App-hold guard keeping the process alive while only the tray remains.
+    pub(crate) hold: Option<gtk::gio::ApplicationHoldGuard>,
 }
 
 #[derive(Debug)]
@@ -1073,8 +1172,12 @@ pub enum Msg {
         name: String,
         path: String,
     },
+    /// Image long-press/right-click: ask whether to upload, remove, or cancel.
+    CoverOptions,
     /// Upload a custom cover/photo for the current detail target (file dialog).
     UploadCover,
+    /// Remove the stored cover/photo of the current detail target.
+    RemoveCover,
     SetFanartKey(String),
     /// Turn the automatic online fetch on/off.
     SetAutoEnrich(bool),
@@ -1082,6 +1185,28 @@ pub enum Msg {
     SetLanguage(String),
     /// Change the color scheme ("system"/"dark"/"light"); takes effect immediately.
     SetColorScheme(String),
+    /// Whole-app scale factor (0.5 ..= 1.5); persisted + applied live.
+    SetUiScale(f64),
+    /// Toggle the blurred cover background.
+    SetCoverBlur(bool),
+    /// Set/clear the custom background image (already copied into the data dir).
+    SetCustomBg(Option<std::path::PathBuf>),
+    /// Set/clear the button/entry/row background color (hex).
+    SetButtonBg(Option<String>),
+    /// Set/clear the text color (hex).
+    SetTextColor(Option<String>),
+    /// Show/hide the desktop tray icon.
+    SetTrayEnabled(bool),
+    /// Closing the window hides it into the tray instead of quitting.
+    SetTrayCloseHides(bool),
+    /// Start with the window hidden (tray only).
+    SetTrayStartHidden(bool),
+    /// Suppress the taskbar entry even while visible (X11 best-effort).
+    SetTraySkipTaskbar(bool),
+    /// Tray click / "Show / Hide": toggle the main window's visibility.
+    TrayToggleWindow,
+    /// Tray "Quit": release the app-hold and quit for real.
+    TrayQuit,
     /// Gapless playback on/off (settings); persisted + pushed to the player.
     SetGapless(bool),
     /// Crossfade window in seconds (settings); persisted + pushed to the player.
@@ -1099,6 +1224,9 @@ pub enum Msg {
     SetSortDir(bool),
     /// Toggle section grouping for the current section (`true` = no grouping).
     SetSortNoGroup(bool),
+    /// Toggle the gallery view for the current section only (overrides the global
+    /// [`Self::SetGalleryView`] for that one section). Set from the sort popover.
+    SetSectionGallery(bool),
     /// Set a property of a level (or with `None` reset to "inherit").
     /// Set the areas (properties) of a level; empty value = hidden.
     SetAreas {
@@ -1173,8 +1301,12 @@ pub enum Msg {
     PlaylistCreateAddTo(String),
     /// Open the tracks subpage of a playlist (short tap: albums + songs).
     OpenPlaylist(i64),
+    /// Gallery tile tap: open the playlist by its index in `playlist_items`.
+    OpenPlaylistAt(usize),
     /// Open the detail view of a playlist (long press: cover + actions).
     ShowPlaylistDetail(i64),
+    /// Gallery tile long-press: playlist detail by index in `playlist_items`.
+    ShowPlaylistDetailAt(usize),
     /// Play the whole playlist.
     PlayPlaylist(i64),
     /// Play the whole playlist starting at the given track (so it continues
@@ -1530,9 +1662,25 @@ impl Component for App {
 
             #[local_ref]
             toast_overlay -> adw::ToastOverlay {
+                // Blurred-background layer: the cover/custom image fills the
+                // window behind everything (bottom child), a scrim tints it for
+                // readability, and the real UI rides on top as a measured
+                // overlay (so the window still sizes to the content, not the
+                // tiny background texture — set in `finish_init`).
                 #[wrap(Some)]
-                #[name = "split"]
-                set_child = &adw::OverlaySplitView {
+                #[name = "bg_overlay"]
+                set_child = &gtk::Overlay {
+                    #[wrap(Some)]
+                    #[name = "bg_picture"]
+                    set_child = &gtk::Picture {
+                        set_content_fit: gtk::ContentFit::Cover,
+                    },
+                    #[name = "bg_scrim"]
+                    add_overlay = &gtk::Box {
+                        add_css_class: "emilia-bg-scrim",
+                    },
+                    #[name = "split"]
+                    add_overlay = &adw::OverlaySplitView {
                 set_collapsed: false,
                 set_enable_show_gesture: false,
                 set_enable_hide_gesture: false,
@@ -1850,7 +1998,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.libview.artist_count > 0 && !model.libview.gallery_view,
+                                        set_visible: model.libview.artist_count > 0 && !model.libview.gallery_on("artists"),
                                         #[local_ref]
                                         artists_box -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1866,7 +2014,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.libview.artist_count > 0 && model.libview.gallery_view,
+                                        set_visible: model.libview.artist_count > 0 && model.libview.gallery_on("artists"),
                                         #[local_ref]
                                         artists_gallery_box -> gtk::Box {
                                             set_orientation: gtk::Orientation::Vertical,
@@ -1898,7 +2046,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.libview.album_count > 0 && !model.libview.gallery_view,
+                                        set_visible: model.libview.album_count > 0 && !model.libview.gallery_on("albums"),
                                         #[local_ref]
                                         albums_box -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1914,7 +2062,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: model.libview.album_count > 0 && model.libview.gallery_view,
+                                        set_visible: model.libview.album_count > 0 && model.libview.gallery_on("albums"),
                                         #[local_ref]
                                         albums_gallery_box -> gtk::Box {
                                             set_orientation: gtk::Orientation::Vertical,
@@ -1935,7 +2083,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concerts.concert_items.is_empty() && !model.libview.gallery_view,
+                                        set_visible: !model.concerts.concert_items.is_empty() && !model.libview.gallery_on("concerts"),
                                         #[local_ref]
                                         concerts_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -1952,7 +2100,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.concerts.concert_items.is_empty() && model.libview.gallery_view,
+                                        set_visible: !model.concerts.concert_items.is_empty() && model.libview.gallery_on("concerts"),
                                         #[local_ref]
                                         concerts_gallery_box -> gtk::Box {
                                             set_orientation: gtk::Orientation::Vertical,
@@ -2015,7 +2163,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.playlists.playlist_items.is_empty(),
+                                        set_visible: !model.playlists.playlist_items.is_empty() && !model.libview.gallery_on("playlists"),
                                         #[local_ref]
                                         playlists_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -2024,6 +2172,22 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    // Gallery variant of the playlists (cover grid).
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.playlists.playlist_items.is_empty() && model.libview.gallery_on("playlists"),
+                                        #[local_ref]
+                                        playlists_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                         },
                                     },
 
@@ -2058,7 +2222,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.favorites.favorite_items.is_empty(),
+                                        set_visible: !model.favorites.favorite_items.is_empty() && !model.libview.gallery_on("favorites"),
                                         #[local_ref]
                                         favorites_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -2067,6 +2231,22 @@ impl Component for App {
                                             set_margin_start: 12,
                                             set_margin_end: 12,
                                             set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    // Gallery variant of the favorites (cover grid).
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: !model.favorites.favorite_items.is_empty() && model.libview.gallery_on("favorites"),
+                                        #[local_ref]
+                                        favorites_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
                                         },
                                     },
 
@@ -2092,7 +2272,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.favorites.audiobook_items.is_empty() && !model.libview.gallery_view,
+                                        set_visible: !model.favorites.audiobook_items.is_empty() && !model.libview.gallery_on("audiobooks"),
                                         #[local_ref]
                                         audiobooks_list -> gtk::ListBox {
                                             set_valign: gtk::Align::Start,
@@ -2109,7 +2289,7 @@ impl Component for App {
                                     gtk::ScrolledWindow {
                                         set_vexpand: true,
                                         #[watch]
-                                        set_visible: !model.favorites.audiobook_items.is_empty() && model.libview.gallery_view,
+                                        set_visible: !model.favorites.audiobook_items.is_empty() && model.libview.gallery_on("audiobooks"),
                                         #[local_ref]
                                         audiobooks_gallery_box -> gtk::Box {
                                             set_orientation: gtk::Orientation::Vertical,
@@ -2653,6 +2833,7 @@ impl Component for App {
                     },
                 },
                 }
+                }
             }
         }
     }
@@ -2715,10 +2896,54 @@ impl Component for App {
             sort,
             no_group,
             gallery_view,
+            section_gallery,
             gallery_columns,
             recording_buffer_minutes,
             saved_section,
         } = Self::read_init_state(&library);
+
+        // Runtime theming (scaling + design) and tray prefs. Plain DB reads, so
+        // they sit here next to the model build rather than in `InitState`.
+        // Takes `lib` as a param so it captures nothing — `library` is moved into
+        // the model literal further down.
+        let setting_on = |lib: &Library, key: &str| {
+            matches!(lib.get_setting(key).ok().flatten().as_deref(), Some("1"))
+        };
+        let ui_scale = library
+            .get_setting("ui_scale")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(1.0)
+            .clamp(0.5, 1.5);
+        let design = crate::ui::theme::DesignSettings {
+            cover_blur: setting_on(&library, "design_cover_blur"),
+            custom_bg: library
+                .get_setting("design_bg_path")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
+            button_bg: library
+                .get_setting("design_btn_bg")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            text_color: library
+                .get_setting("design_text_color")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+        };
+        let theme = crate::ui::theme::ThemeState::new(ui_scale, design);
+        let tray = TrayState {
+            enabled: setting_on(&library, "tray_enabled"),
+            close_hides: setting_on(&library, "tray_close_hides"),
+            start_hidden: setting_on(&library, "tray_start_hidden"),
+            skip_taskbar: setting_on(&library, "tray_skip_taskbar"),
+            handle: None,
+            hold: None,
+        };
 
         let entries = FactoryVecDeque::builder()
             .launch(gtk::ListBox::default())
@@ -2986,9 +3211,14 @@ impl Component for App {
                 artist_count: 0,
                 concert_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 audiobook_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                favorite_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                playlist_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                memo_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                files_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 sort,
                 no_group,
                 gallery_view,
+                section_gallery,
                 gallery_columns,
                 loading: false,
                 loading_label: None,
@@ -3086,6 +3316,8 @@ impl Component for App {
             favorites: FavoritesState {
                 favorite_items: Vec::new(),
                 favorites_list: favorites_list.clone(),
+                favorites_gallery: gtk::FlowBox::new(),
+                favorites_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
                 audiobook_items: Vec::new(),
                 audiobooks_list: audiobooks_list.clone(),
                 audiobooks_gallery: gtk::FlowBox::new(),
@@ -3094,6 +3326,8 @@ impl Component for App {
             playlists: PlaylistsState {
                 playlist_items: Vec::new(),
                 playlists_list: playlists_list.clone(),
+                playlists_gallery: gtk::FlowBox::new(),
+                playlists_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
             },
             podcasts: PodcastsState {
                 playing_episode_url: None,
@@ -3151,6 +3385,8 @@ impl Component for App {
             yt_subpage,
             stream_page,
             setup_page,
+            theme,
+            tray,
         };
 
         // Restore the queue from last time (only still existing
@@ -3344,6 +3580,8 @@ impl Component for App {
         let artists_gallery_box = model.libview.artists_gallery_box.clone();
         let concerts_gallery_box = model.concerts.concerts_gallery_box.clone();
         let audiobooks_gallery_box = model.favorites.audiobooks_gallery_box.clone();
+        let favorites_gallery_box = model.favorites.favorites_gallery_box.clone();
+        let playlists_gallery_box = model.playlists.playlists_gallery_box.clone();
         let widgets = view_output!();
         model.finish_init(
             &widgets,
@@ -3447,6 +3685,18 @@ impl Component for App {
                     .cloned()
                 {
                     self.open_playlist(&sender, id, &name);
+                }
+            }
+            // Gallery tile → resolve the index to the playlist id, then reuse the
+            // list paths.
+            Msg::OpenPlaylistAt(i) => {
+                if let Some((id, name, _)) = self.playlists.playlist_items.get(i).cloned() {
+                    self.open_playlist(&sender, id, &name);
+                }
+            }
+            Msg::ShowPlaylistDetailAt(i) => {
+                if let Some((id, _, _)) = self.playlists.playlist_items.get(i).cloned() {
+                    sender.input(Msg::ShowPlaylistDetail(id));
                 }
             }
             Msg::ShowPlaylistDetail(id) => {
@@ -3962,7 +4212,9 @@ impl Component for App {
                 path,
             } => self.set_album_cover(root, &sender, artist, album, path),
             Msg::SetArtistImage { name, path } => self.set_artist_image(root, &sender, name, path),
+            Msg::CoverOptions => self.open_cover_options_dialog(root, &sender),
             Msg::UploadCover => self.open_cover_upload_dialog(root, &sender),
+            Msg::RemoveCover => self.remove_cover(root, &sender),
             Msg::SetFanartKey(key) => {
                 let key = key.trim().to_string();
                 let _ = self.library.set_secret_setting("fanart_key", &key);
@@ -3978,6 +4230,82 @@ impl Component for App {
             Msg::SetColorScheme(scheme) => {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
+            }
+            Msg::SetUiScale(factor) => {
+                self.apply_ui_scale(factor);
+                let _ = self
+                    .library
+                    .set_setting("ui_scale", &self.theme.ui_scale.to_string());
+            }
+            Msg::SetCoverBlur(on) => {
+                self.theme.design.cover_blur = on;
+                let _ = self
+                    .library
+                    .set_setting("design_cover_blur", if on { "1" } else { "0" });
+                self.refresh_background();
+            }
+            Msg::SetCustomBg(src) => {
+                // Copy the chosen image into our data dir; `None` clears it.
+                let stored = src.as_deref().and_then(crate::ui::theme::import_custom_bg);
+                self.theme.design.custom_bg = stored.clone();
+                let _ = self.library.set_setting(
+                    "design_bg_path",
+                    &stored
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                );
+                self.refresh_background();
+            }
+            Msg::SetButtonBg(color) => {
+                self.theme.design.button_bg = color.clone();
+                let _ = self
+                    .library
+                    .set_setting("design_btn_bg", color.as_deref().unwrap_or(""));
+                self.reapply_runtime_style();
+            }
+            Msg::SetTextColor(color) => {
+                self.theme.design.text_color = color.clone();
+                let _ = self
+                    .library
+                    .set_setting("design_text_color", color.as_deref().unwrap_or(""));
+                self.reapply_runtime_style();
+            }
+            Msg::SetTrayEnabled(on) => {
+                self.tray.enabled = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_enabled", if on { "1" } else { "0" });
+                if on {
+                    self.start_tray(root, &sender);
+                } else {
+                    self.stop_tray();
+                }
+            }
+            Msg::SetTrayCloseHides(on) => {
+                self.tray.close_hides = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_close_hides", if on { "1" } else { "0" });
+            }
+            Msg::SetTrayStartHidden(on) => {
+                self.tray.start_hidden = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_start_hidden", if on { "1" } else { "0" });
+            }
+            Msg::SetTraySkipTaskbar(on) => {
+                self.tray.skip_taskbar = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_skip_taskbar", if on { "1" } else { "0" });
+                self.refresh_skip_taskbar(root);
+            }
+            Msg::TrayToggleWindow => self.tray_toggle_window(root),
+            Msg::TrayQuit => {
+                self.stop_tray();
+                if let Some(app) = root.application() {
+                    app.quit();
+                }
             }
             Msg::SetGapless(on) => {
                 self.settings.gapless = on;
@@ -4018,6 +4346,14 @@ impl Component for App {
                 };
                 if self.libview.grouping_off(&section) != off {
                     self.set_section_grouping(&section, off, &sender);
+                }
+            }
+            Msg::SetSectionGallery(on) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                if self.libview.gallery_on(&section) != on {
+                    self.set_section_gallery(&section, on, &sender);
                 }
             }
             Msg::SetGalleryView(on) => {

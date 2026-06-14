@@ -10,10 +10,15 @@ use relm4::gtk;
 use relm4::prelude::*;
 
 use crate::core::artist::{norm_key, split_artists};
+use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::model::{AlbumMeta, ArtistMeta};
-use crate::ui::app::{section_sort_criteria, App, Msg, SortCrit, SORTABLE_SECTIONS};
+use crate::ui::app::{
+    section_has_gallery, section_has_grouping, section_sort_criteria, App, Msg, SortCrit,
+    SORTABLE_SECTIONS,
+};
 use crate::ui::app_views::natural_key;
+use crate::ui::fs_row::FsEntry;
 
 /// Alphabetical group heading for a name (Artists/Albums sorted by name):
 /// digit-initial entries collapse into one `0–9` group, letters use their
@@ -26,6 +31,159 @@ pub(crate) fn alpha_header(name: &str) -> String {
         Some(c) if c.is_alphabetic() => c.to_uppercase().to_string(),
         _ => "#".to_string(),
     }
+}
+
+/// Compares two file-browser entries for the chosen "files" sort: folders always
+/// rank above files (the direction never sinks a folder below a file); within a
+/// group, by name (natural) or by runtime, reversed for descending.
+fn fs_entry_cmp(a: &FsEntry, b: &FsEntry, crit: SortCrit, desc: bool) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.is_dir(), b.is_dir()) {
+        (true, false) => return Ordering::Less,
+        (false, true) => return Ordering::Greater,
+        _ => {}
+    }
+    let ord = match crit {
+        SortCrit::Length => a.runtime_ms().cmp(&b.runtime_ms()),
+        // Name is the only other criterion offered for files.
+        _ => natural_key(a.name()).cmp(&natural_key(b.name())),
+    };
+    if desc {
+        ord.reverse()
+    } else {
+        ord
+    }
+}
+
+/// Reads a component's persisted sort (`sort_<key>` / `sort_<key>_desc`) from the
+/// settings DB, falling back to `default_crit`/`default_desc` when unset. Used by
+/// the standalone components (podcasts/youtube/streaming) for their own sort state.
+pub(crate) fn read_sort(
+    lib: &Library,
+    key: &str,
+    default_crit: SortCrit,
+    default_desc: bool,
+) -> (SortCrit, bool) {
+    let crit = lib
+        .get_setting(&format!("sort_{key}"))
+        .ok()
+        .flatten()
+        .map(|s| SortCrit::from_key(&s))
+        .unwrap_or(default_crit);
+    let desc = match lib
+        .get_setting(&format!("sort_{key}_desc"))
+        .ok()
+        .flatten()
+        .as_deref()
+    {
+        Some("1") => true,
+        Some("0") => false,
+        _ => default_desc,
+    };
+    (crit, desc)
+}
+
+/// Builds a standalone sort popover (criteria radio group + an ascending/
+/// descending toggle) for the components that carry their **own** header sort
+/// button instead of the shared title-bar one (podcasts/youtube/streaming).
+///
+/// `crits` pairs each criterion with its display label (so the same [`SortCrit`]
+/// can read "Number of episodes"/"Number of videos" per context). `on_change` is
+/// invoked with the chosen `(criterion, descending)` whenever either changes; the
+/// caller persists + reloads + rebuilds this popover, so the build-time `active`/
+/// `desc` captured below are always fresh on the next interaction.
+/// One discreet bottom toggle of a [`sort_popover`] (e.g. "Without grouping",
+/// "Gallery view"): its label, current state, and a callback fired on toggle.
+pub(crate) struct SortToggle {
+    pub label: String,
+    pub active: bool,
+    pub on_toggle: Box<dyn Fn(bool)>,
+}
+
+pub(crate) fn sort_popover(
+    crits: &[(SortCrit, String)],
+    active: SortCrit,
+    desc: bool,
+    on_change: impl Fn(SortCrit, bool) + 'static,
+    toggles: Vec<SortToggle>,
+) -> gtk::Popover {
+    let on_change = std::rc::Rc::new(on_change);
+
+    let bx = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    bx.set_margin_top(10);
+    bx.set_margin_bottom(10);
+    bx.set_margin_start(12);
+    bx.set_margin_end(12);
+
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let title = gtk::Label::new(Some(&gettext("Sort by")));
+    title.add_css_class("heading");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    header.append(&title);
+    let dir = gtk::ToggleButton::new();
+    dir.add_css_class("flat");
+    dir.set_active(desc);
+    dir.set_icon_name(sort_dir_icon(desc));
+    dir.set_tooltip_text(Some(&if desc {
+        gettext("Descending")
+    } else {
+        gettext("Ascending")
+    }));
+    {
+        let on_change = on_change.clone();
+        dir.connect_toggled(move |b| {
+            let desc = b.is_active();
+            b.set_icon_name(sort_dir_icon(desc));
+            b.set_tooltip_text(Some(&if desc {
+                gettext("Descending")
+            } else {
+                gettext("Ascending")
+            }));
+            on_change(active, desc);
+        });
+    }
+    header.append(&dir);
+    bx.append(&header);
+
+    let mut leader: Option<gtk::CheckButton> = None;
+    for (crit, label) in crits {
+        let crit = *crit;
+        let cb = gtk::CheckButton::with_label(label);
+        match &leader {
+            Some(l) => cb.set_group(Some(l)),
+            None => leader = Some(cb.clone()),
+        }
+        cb.set_active(crit == active);
+        {
+            let on_change = on_change.clone();
+            cb.connect_toggled(move |b| {
+                if b.is_active() {
+                    on_change(crit, desc);
+                }
+            });
+        }
+        bx.append(&cb);
+    }
+
+    // Discreet bottom toggles (grouping / gallery), set off by a separator.
+    if !toggles.is_empty() {
+        let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+        sep.set_margin_top(4);
+        sep.set_margin_bottom(2);
+        bx.append(&sep);
+        for t in toggles {
+            let cb = gtk::CheckButton::with_label(&t.label);
+            cb.add_css_class("dim-label");
+            cb.set_active(t.active);
+            cb.connect_toggled(move |b| (t.on_toggle)(b.is_active()));
+            bx.append(&cb);
+        }
+    }
+
+    let popover = gtk::Popover::new();
+    popover.set_child(Some(&bx));
+    popover
 }
 
 /// Icon for a sort direction – shared by the title-bar button and the popover
@@ -69,10 +227,14 @@ impl App {
         // Keep the title-bar icon in step with the chosen direction.
         self.nav.sort_btn.set_icon_name(sort_dir_icon(desc));
         match key {
+            "files" => self.resort_entries(),
             "albums" => self.reload_albums(),
             "artists" => self.reload_artists(),
             "concerts" => self.load_concerts(sender),
             "audiobooks" => self.load_audiobooks(sender),
+            "favorites" => self.load_favorites(sender),
+            "playlists" => self.reload_playlists(sender),
+            "memo" => self.reload_memos(sender),
             _ => {}
         }
     }
@@ -94,12 +256,46 @@ impl App {
             .library
             .set_setting(&format!("nogroup_{key}"), if off { "1" } else { "0" });
         match key {
+            "files" => self.resort_entries(),
             "albums" => self.reload_albums(),
             "artists" => self.reload_artists(),
             "concerts" => self.load_concerts(sender),
             "audiobooks" => self.load_audiobooks(sender),
+            "favorites" => self.load_favorites(sender),
+            "playlists" => self.reload_playlists(sender),
+            "memo" => self.reload_memos(sender),
             _ => {}
         }
+    }
+
+    /// Stores a section's per-view "gallery" choice (overriding the global
+    /// gallery setting for that one section), persists it and rebuilds the
+    /// affected overview in the new mode. Called from the sort popover's gallery
+    /// toggle; the inline-filter funnel only applies in list mode, so refresh it.
+    pub(crate) fn set_section_gallery(
+        &mut self,
+        section: &str,
+        on: bool,
+        sender: &ComponentSender<Self>,
+    ) {
+        let Some(&key) = SORTABLE_SECTIONS.iter().find(|s| **s == section) else {
+            return;
+        };
+        self.libview.section_gallery.insert(key, on);
+        let _ = self
+            .library
+            .set_setting(&format!("gallery_{key}"), if on { "1" } else { "0" });
+        match key {
+            "albums" => self.reload_albums(),
+            "artists" => self.reload_artists(),
+            "concerts" => self.load_concerts(sender),
+            "audiobooks" => self.load_audiobooks(sender),
+            "favorites" => self.load_favorites(sender),
+            "playlists" => self.reload_playlists(sender),
+            _ => {}
+        }
+        // The funnel button is offered in list mode only – keep it in step.
+        self.update_filter_chrome();
     }
 
     /// (Re)builds the title-bar sort popover for the current section, or hides
@@ -183,23 +379,46 @@ impl App {
             bx.append(&cb);
         }
 
-        // Set apart at the very bottom: a discreet "no grouping" toggle. Sorts the
-        // rows as chosen but without the section headings (the flat look from
-        // before grouping existed). A separator keeps it visually off the criteria.
-        let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
-        sep.set_margin_top(4);
-        sep.set_margin_bottom(2);
-        bx.append(&sep);
-        let no_group = gtk::CheckButton::with_label(&gettext("Without grouping"));
-        no_group.add_css_class("dim-label");
-        no_group.set_active(self.libview.grouping_off(&section));
-        {
-            let input = self.input.clone();
-            no_group.connect_toggled(move |b| {
-                let _ = input.send(Msg::SetSortNoGroup(b.is_active()));
-            });
+        // Set apart at the very bottom: the discreet per-view toggles (grouping
+        // and/or gallery), each only for the sections that support it. A single
+        // separator keeps them visually off the criteria when either is shown.
+        let has_grouping = section_has_grouping(&section);
+        let has_gallery = section_has_gallery(&section);
+        if has_grouping || has_gallery {
+            let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+            sep.set_margin_top(4);
+            sep.set_margin_bottom(2);
+            bx.append(&sep);
         }
-        bx.append(&no_group);
+        // "Without grouping": sorts the rows as chosen but without the section
+        // headings (the flat look from before grouping existed).
+        if has_grouping {
+            let no_group = gtk::CheckButton::with_label(&gettext("Without grouping"));
+            no_group.add_css_class("dim-label");
+            no_group.set_active(self.libview.grouping_off(&section));
+            {
+                let input = self.input.clone();
+                no_group.connect_toggled(move |b| {
+                    let _ = input.send(Msg::SetSortNoGroup(b.is_active()));
+                });
+            }
+            bx.append(&no_group);
+        }
+        // Per-view gallery override: shows this one section as a cover grid (or a
+        // list) regardless of the global gallery setting. Touching it pins the
+        // choice for this section, so a later global toggle leaves it alone.
+        if has_gallery {
+            let gallery = gtk::CheckButton::with_label(&gettext("Gallery view"));
+            gallery.add_css_class("dim-label");
+            gallery.set_active(self.libview.gallery_on(&section));
+            {
+                let input = self.input.clone();
+                gallery.connect_toggled(move |b| {
+                    let _ = input.send(Msg::SetSectionGallery(b.is_active()));
+                });
+            }
+            bx.append(&gallery);
+        }
 
         let popover = gtk::Popover::new();
         popover.set_child(Some(&bx));
@@ -278,6 +497,8 @@ impl App {
             // Unknown year groups together at the start (ascending).
             SortCrit::Release => albums.sort_by_key(|a| a.year.unwrap_or(0)),
             SortCrit::Songs => albums.sort_by_key(|a| a.track_count),
+            // Not offered for albums – leave the order untouched.
+            SortCrit::Manual => {}
         }
         if desc {
             albums.reverse();
@@ -299,6 +520,8 @@ impl App {
             }
             // Artists carry no single release year – criterion not offered.
             SortCrit::Release => {}
+            // Not offered for artists – leave the order untouched.
+            SortCrit::Manual => {}
         }
         if desc {
             artists.reverse();
@@ -316,6 +539,145 @@ impl App {
             SortCrit::Release => {
                 items.sort_by_cached_key(|e| self.entry_year(&e.0, &e.1).unwrap_or(0))
             }
+            // Not offered for concert/audiobook entries – leave the order untouched.
+            SortCrit::Manual => {}
+        }
+        if desc {
+            items.reverse();
+        }
+    }
+
+    /// Orders a file-browser listing by the "files" section's chosen sort, always
+    /// keeping folders above files (the browser convention).
+    pub(crate) fn sort_fs_entries(&self, entries: &mut [FsEntry]) {
+        let (crit, desc) = self.libview.sort_for("files");
+        entries.sort_by(|a, b| fs_entry_cmp(a, b, crit, desc));
+    }
+
+    /// Re-orders the file browser to the section's chosen sort *without* re-reading
+    /// the folder from disk/network: the current rows are pulled out (keeping each
+    /// row's backfilled tags + queued flag), re-sorted and repopulated. The queue/
+    /// playing markers are then re-applied. Called when the "files" sort changes.
+    pub(crate) fn resort_entries(&mut self) {
+        let mut rows: Vec<(FsEntry, crate::ui::fs_row::RowOpts, bool)> = {
+            let guard = self.libview.entries.guard();
+            (0..guard.len())
+                .filter_map(|i| guard.get(i).map(|r| (r.entry.clone(), r.opts, r.queued)))
+                .collect()
+        };
+        let (crit, desc) = self.libview.sort_for("files");
+        rows.sort_by(|a, b| fs_entry_cmp(&a.0, &b.0, crit, desc));
+        // Alphabetical headings (by name) for the re-sorted order.
+        let entries: Vec<FsEntry> = rows.iter().map(|(e, _, _)| e.clone()).collect();
+        *self.libview.files_headers.borrow_mut() = self.files_section_headers(&entries);
+        {
+            let mut guard = self.libview.entries.guard();
+            guard.clear();
+            for row in rows {
+                guard.push_back(row);
+            }
+        }
+        self.libview.entries.widget().invalidate_headers();
+        self.refresh_queue_icons();
+    }
+
+    /// Orders the favorites list in place by the section's chosen sort. Only
+    /// `Name` reorders (natural by title); `Manual` keeps the user's drag order
+    /// and is handled by the caller (which then skips this). No other criteria.
+    pub(crate) fn sort_favorites(&mut self) {
+        let (crit, desc) = self.libview.sort_for("favorites");
+        if matches!(crit, SortCrit::Name) {
+            let items = &mut self.favorites.favorite_items;
+            items.sort_by_cached_key(|e| natural_key(&e.2));
+            if desc {
+                items.reverse();
+            }
+        }
+    }
+
+    /// Per-row alphabetical headings for the playlist overview when sorting by
+    /// name; none for the other criteria or when grouping is off. Same length/order
+    /// as `playlist_items`.
+    pub(crate) fn playlist_section_headers(&self) -> Option<Vec<String>> {
+        if self.libview.grouping_off("playlists") {
+            return None;
+        }
+        match self.libview.sort_for("playlists").0 {
+            SortCrit::Name => Some(
+                self.playlists
+                    .playlist_items
+                    .iter()
+                    .map(|(_, name, _)| alpha_header(name))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Per-row alphabetical headings for the memo list when sorting by name; none
+    /// for date/length or when grouping is off. Same length/order as `memo_items`.
+    pub(crate) fn memo_section_headers(&self) -> Option<Vec<String>> {
+        if self.libview.grouping_off("memo") {
+            return None;
+        }
+        match self.libview.sort_for("memo").0 {
+            SortCrit::Name => Some(
+                self.memo
+                    .memo_items
+                    .iter()
+                    .map(|m| alpha_header(&m.title))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Per-row alphabetical headings for the file browser when sorting by name;
+    /// none for the runtime sort or when grouping is off. Folders and files are
+    /// each grouped by initial (the folders-first order makes the letters restart
+    /// once at the files, which is the intended boundary). Same length/order as the
+    /// current `entries` factory.
+    pub(crate) fn files_section_headers(&self, entries: &[FsEntry]) -> Option<Vec<String>> {
+        if self.libview.grouping_off("files") {
+            return None;
+        }
+        match self.libview.sort_for("files").0 {
+            SortCrit::Name => Some(entries.iter().map(|e| alpha_header(e.name())).collect()),
+            _ => None,
+        }
+    }
+
+    /// Orders the playlist overview in place by the section's chosen sort:
+    /// by name, by track count, or by total runtime (`durations` keyed by id).
+    pub(crate) fn sort_playlists(&mut self, durations: &HashMap<i64, i64>) {
+        let (crit, desc) = self.libview.sort_for("playlists");
+        let items = &mut self.playlists.playlist_items;
+        match crit {
+            SortCrit::Name => items.sort_by_cached_key(|(_, name, _)| natural_key(name)),
+            SortCrit::Songs => items.sort_by_key(|(_, _, count)| *count),
+            SortCrit::Length => {
+                items.sort_by_key(|(id, _, _)| durations.get(id).copied().unwrap_or(0))
+            }
+            // Neither a release year nor a manual order for playlists.
+            SortCrit::Release | SortCrit::Manual => {}
+        }
+        if desc {
+            items.reverse();
+        }
+    }
+
+    /// Orders the memo list in place by the section's chosen sort: by title, by
+    /// recording date (`Release`, labelled "Date"; the newest-first default), or
+    /// by playback length. Drives both the Recent list and the within-category order.
+    pub(crate) fn sort_memos(&mut self) {
+        let (crit, desc) = self.libview.sort_for("memo");
+        let items = &mut self.memo.memo_items;
+        match crit {
+            SortCrit::Name => items.sort_by_cached_key(|m| natural_key(&m.title)),
+            SortCrit::Release => items.sort_by_key(|m| m.recorded_at),
+            SortCrit::Length => items.sort_by_key(|m| m.duration_ms),
+            // Memos have neither a song count nor a manual order.
+            SortCrit::Songs | SortCrit::Manual => {}
         }
         if desc {
             items.reverse();
