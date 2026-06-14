@@ -1328,6 +1328,20 @@ impl App {
             .visible(has_bg)
             .build();
 
+        // 1b) Use the now-playing cover as the background source (default off).
+        let cover_row = adw::SwitchRow::builder()
+            .title(gettext("Cover as background"))
+            .subtitle(gettext("Use the current track's cover as the background"))
+            .active(self.theme.design.use_cover_bg)
+            .visible(bg_on)
+            .build();
+        {
+            let sender = sender.clone();
+            cover_row.connect_active_notify(move |r| {
+                sender.input(Msg::SetUseCoverBg(r.is_active()));
+            });
+        }
+
         // 2) Blur/effect filter for the cover background (revealed with an image).
         let filter_names = gtk::StringList::new(&[]);
         for s in [
@@ -1465,6 +1479,7 @@ impl App {
         {
             let sender = sender.clone();
             let row = bg_row.clone();
+            let cover_row = cover_row.clone();
             let filter_row = filter_row.clone();
             let strength_row = strength_row.clone();
             let nav_row = bg_nav_row.clone();
@@ -1472,6 +1487,7 @@ impl App {
             bg_on_row.connect_active_notify(move |r| {
                 let on = r.is_active();
                 row.set_visible(on);
+                cover_row.set_visible(on);
                 filter_row.set_visible(on);
                 strength_row.set_visible(on);
                 nav_row.set_visible(on);
@@ -1483,6 +1499,7 @@ impl App {
         bg_row.add_suffix(&bg_choose);
         bg_group.add(&bg_on_row);
         bg_group.add(&bg_row);
+        bg_group.add(&cover_row);
         bg_group.add(&filter_row);
         bg_group.add(&strength_row);
         bg_group.add(&bg_nav_row);

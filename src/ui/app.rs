@@ -1209,6 +1209,8 @@ pub enum Msg {
     RefreshBackground,
     /// Set/clear the custom background image (already copied into the data dir).
     SetCustomBg(Option<std::path::PathBuf>),
+    /// Toggle using the now-playing cover as the background source.
+    SetUseCoverBg(bool),
     /// Select the background blur/effect filter (ComboRow index).
     SetBgFilter(u32),
     /// Strength (0..=100 %) of the selected background filter.
@@ -2956,6 +2958,7 @@ impl Component for App {
                 .flatten()
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
+            use_cover_bg: setting_on(&library, "design_use_cover_bg"),
             // New key wins; otherwise migrate the old cover-blur switch (on →
             // Gaussian) so an upgraded install keeps a blurred background.
             bg_filter: match library
@@ -4333,6 +4336,13 @@ impl Component for App {
                         .map(|p| p.to_string_lossy().into_owned())
                         .unwrap_or_default(),
                 );
+                self.refresh_background();
+            }
+            Msg::SetUseCoverBg(on) => {
+                self.theme.design.use_cover_bg = on;
+                let _ = self
+                    .library
+                    .set_setting("design_use_cover_bg", if on { "1" } else { "0" });
                 self.refresh_background();
             }
             Msg::SetBgFilter(idx) => {

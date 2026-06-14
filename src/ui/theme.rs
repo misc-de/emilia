@@ -135,10 +135,13 @@ pub(crate) struct DesignSettings {
     /// no `custom_bg` is set, the built-in light/dark "bubbles" default is shown.
     pub(crate) background_on: bool,
     /// A user-chosen background image (already copied into the app data dir).
-    /// When set it takes the place of the built-in default; the now-playing
-    /// cover (when `bg_filter != Off`) still takes priority as the source.
+    /// When set it takes the place of the built-in default as the base image.
     pub(crate) custom_bg: Option<PathBuf>,
-    /// Blur/effect style for the background. `Off` = no cover background.
+    /// Use the now-playing track's cover as the background source (default off).
+    /// When on it takes priority over `custom_bg`/the built-in default; the
+    /// `bg_filter` then applies to it.
+    pub(crate) use_cover_bg: bool,
+    /// Blur/effect style applied to the background source (base image or cover).
     pub(crate) bg_filter: BgFilter,
     /// Strength (0..=100) of the selected filter.
     pub(crate) bg_filter_strength: u32,
@@ -381,7 +384,7 @@ impl App {
     /// background image configured at all).
     pub(crate) fn refresh_cover_background(&mut self) {
         let d = &self.theme.design;
-        if d.background_on && d.bg_filter != BgFilter::Off {
+        if d.background_on && d.use_cover_bg {
             self.refresh_background();
         }
     }
@@ -398,7 +401,7 @@ impl App {
     /// The texture to show as the blurred background (already filtered), or
     /// `None` for the neutral look. The master switch turns the whole feature
     /// off; otherwise the base image is the user's `custom_bg` or, when none is
-    /// set, the built-in light/dark default. With a filter other than `Off` the
+    /// set, the built-in light/dark default. With "cover as background" on, the
     /// now-playing cover takes priority as the source and the base is the fallback.
     fn resolve_bg_texture(&self) -> Option<gtk::gdk::Texture> {
         let d = &self.theme.design;
@@ -412,7 +415,7 @@ impl App {
                 default_bg_path(dark)?.to_string_lossy().into_owned()
             }
         };
-        let src = if d.bg_filter != BgFilter::Off {
+        let src = if d.use_cover_bg {
             self.now_playing_cover_path().unwrap_or(base)
         } else {
             base
