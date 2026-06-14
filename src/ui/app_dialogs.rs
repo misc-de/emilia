@@ -1285,22 +1285,34 @@ impl App {
             });
         };
 
-        // Background: a custom image is the on/off switch; the filter, its
-        // strength and the navigation toggle appear once an image is chosen.
+        // Background: a master switch turns the whole feature on/off (default on);
+        // the image/filter/transparency options below apply while it is on. With
+        // it on and no custom image chosen, the built-in light/dark default shows.
         let bg_group = adw::PreferencesGroup::builder()
             .title(gettext("Background"))
             .build();
         let has_bg = self.theme.design.custom_bg.is_some();
+        let bg_on = self.theme.design.background_on;
 
-        // 1) Custom background image (first).
+        // 0) Master switch for the whole background feature.
+        let bg_on_row = adw::SwitchRow::builder()
+            .title(gettext("Show a background"))
+            .subtitle(gettext(
+                "On without a chosen image uses the built-in default",
+            ))
+            .active(bg_on)
+            .build();
+
+        // 1) Custom background image (shown while the feature is on).
         let bg_subtitle = if has_bg {
             gettext("Image selected")
         } else {
-            gettext("None")
+            gettext("None (built-in default)")
         };
         let bg_row = adw::ActionRow::builder()
             .title(gettext("Custom background"))
             .subtitle(&bg_subtitle)
+            .visible(bg_on)
             .build();
         let bg_choose = gtk::Button::builder()
             .icon_name("document-open-symbolic")
@@ -1329,17 +1341,19 @@ impl App {
             filter_names.append(&s);
         }
         let filter_row = adw::ComboRow::builder()
-            .title(gettext("Blurred cover background"))
-            .subtitle(gettext("Show the current cover, blurred, behind the app"))
+            .title(gettext("Background filter"))
+            .subtitle(gettext(
+                "Apply a filter to the current cover shown behind the app",
+            ))
             .model(&filter_names)
             .selected(self.theme.design.bg_filter.index())
-            .visible(has_bg)
+            .visible(bg_on)
             .build();
 
         // 3) Strength of the selected filter.
         let strength_row = adw::ActionRow::builder()
             .title(gettext("Strength"))
-            .visible(has_bg)
+            .visible(bg_on)
             .sensitive(self.theme.design.bg_filter.index() != 0)
             .build();
         let strength_scale = mk_scale(self.theme.design.bg_filter_strength);
@@ -1357,7 +1371,7 @@ impl App {
                 "Also show the blurred background behind the sidebar",
             ))
             .active(self.theme.design.bg_nav)
-            .visible(has_bg)
+            .visible(bg_on)
             .build();
         {
             let sender = sender.clone();
@@ -1373,7 +1387,7 @@ impl App {
                 "Also show the blurred background behind the title bar",
             ))
             .active(self.theme.design.bg_titlebar)
-            .visible(has_bg)
+            .visible(bg_on)
             .build();
         {
             let sender = sender.clone();
@@ -1438,22 +1452,36 @@ impl App {
         {
             let sender = sender.clone();
             let row = bg_row.clone();
+            // Clearing the image falls back to the built-in default (the feature
+            // stays on), so the filter/transparency options remain visible.
+            bg_clear.connect_clicked(move |b| {
+                row.set_subtitle(&gettext("None (built-in default)"));
+                b.set_visible(false);
+                sender.input(Msg::SetCustomBg(None));
+            });
+        }
+
+        // Master switch: reveal/hide all background options and toggle the feature.
+        {
+            let sender = sender.clone();
+            let row = bg_row.clone();
             let filter_row = filter_row.clone();
             let strength_row = strength_row.clone();
             let nav_row = bg_nav_row.clone();
             let titlebar_row = bg_titlebar_row.clone();
-            bg_clear.connect_clicked(move |b| {
-                row.set_subtitle(&gettext("None"));
-                b.set_visible(false);
-                filter_row.set_visible(false);
-                strength_row.set_visible(false);
-                nav_row.set_visible(false);
-                titlebar_row.set_visible(false);
-                sender.input(Msg::SetCustomBg(None));
+            bg_on_row.connect_active_notify(move |r| {
+                let on = r.is_active();
+                row.set_visible(on);
+                filter_row.set_visible(on);
+                strength_row.set_visible(on);
+                nav_row.set_visible(on);
+                titlebar_row.set_visible(on);
+                sender.input(Msg::SetBackgroundOn(on));
             });
         }
         bg_row.add_suffix(&bg_clear);
         bg_row.add_suffix(&bg_choose);
+        bg_group.add(&bg_on_row);
         bg_group.add(&bg_row);
         bg_group.add(&filter_row);
         bg_group.add(&strength_row);

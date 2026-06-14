@@ -23,7 +23,9 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
-use crate::ui::app_gallery::{gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode};
+use crate::ui::app_gallery::{
+    connect_gallery_resize, gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode,
+};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
@@ -868,7 +870,7 @@ impl PodcastsPage {
         spawn_gallery_decode(to_decode);
         size_gallery_tiles_when_ready(fb);
         if !self.gallery_hooked.replace(true) {
-            fb.connect_map(size_gallery_tiles_when_ready);
+            connect_gallery_resize(fb);
         }
     }
 

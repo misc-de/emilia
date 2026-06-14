@@ -18,12 +18,41 @@
 //! radial/water; see [`render_filtered`]). A scrim plus translucent chrome keep
 //! text readable.
 
-use gtk::prelude::*;
-use relm4::gtk;
+use adw::prelude::*;
+use relm4::{adw, gtk};
 use std::path::PathBuf;
 
 use crate::ui::app::App;
 use crate::ui::widgets::decode_scaled;
+
+/// Built-in default backgrounds ("bubbles"), shown when the background feature
+/// is on but the user has not chosen an image. Embedded so there's no Flatpak
+/// install path to resolve; materialized to the data dir on first use (the
+/// background loader needs a file path).
+const LIGHT_BUBBLES: &[u8] = include_bytes!("../../data/backgrounds/light_bubbles.jpg");
+const DARK_BUBBLES: &[u8] = include_bytes!("../../data/backgrounds/dark_bubbles.jpg");
+
+/// Writes the built-in default background for the current light/dark mode into
+/// the data dir (once) and returns its path. `None` only if the data dir is
+/// unavailable.
+pub(crate) fn default_bg_path(dark: bool) -> Option<PathBuf> {
+    let (bytes, name) = if dark {
+        (DARK_BUBBLES, "default-bg-dark.jpg")
+    } else {
+        (LIGHT_BUBBLES, "default-bg-light.jpg")
+    };
+    let mut dir = dirs::data_dir()?;
+    dir.push("emilia");
+    std::fs::create_dir_all(&dir).ok()?;
+    let dest = dir.join(name);
+    // (Re)write when missing or when the embedded image changed (size differs),
+    // so updating the built-in default actually takes effect.
+    let stale = std::fs::metadata(&dest).map_or(true, |m| m.len() != bytes.len() as u64);
+    if stale {
+        std::fs::write(&dest, bytes).ok()?;
+    }
+    Some(dest)
+}
 
 /// Decode cap for the unfiltered ("Off") background: large enough to look crisp
 /// (1:1) when scaled to fill the window, without loading huge originals.
@@ -102,10 +131,12 @@ impl BgFilter {
 /// The user-configurable design options (besides scaling).
 #[derive(Clone, Default)]
 pub(crate) struct DesignSettings {
+    /// Master switch for the whole background feature (default on). When on and
+    /// no `custom_bg` is set, the built-in light/dark "bubbles" default is shown.
+    pub(crate) background_on: bool,
     /// A user-chosen background image (already copied into the app data dir).
-    /// Presence of this image is the on/off switch for the whole background
-    /// feature; the now-playing cover (when `bg_filter != Off`) takes priority
-    /// over it as the actual source.
+    /// When set it takes the place of the built-in default; the now-playing
+    /// cover (when `bg_filter != Off`) still takes priority as the source.
     pub(crate) custom_bg: Option<PathBuf>,
     /// Blur/effect style for the background. `Off` = no cover background.
     pub(crate) bg_filter: BgFilter,
@@ -350,7 +381,7 @@ impl App {
     /// background image configured at all).
     pub(crate) fn refresh_cover_background(&mut self) {
         let d = &self.theme.design;
-        if d.custom_bg.is_some() && d.bg_filter != BgFilter::Off {
+        if d.background_on && d.bg_filter != BgFilter::Off {
             self.refresh_background();
         }
     }
@@ -365,16 +396,26 @@ impl App {
     }
 
     /// The texture to show as the blurred background (already filtered), or
-    /// `None` for the neutral look. A configured custom image is the on/off
-    /// switch; with a filter other than `Off` the now-playing cover takes
-    /// priority as the source and the image is the fallback.
+    /// `None` for the neutral look. The master switch turns the whole feature
+    /// off; otherwise the base image is the user's `custom_bg` or, when none is
+    /// set, the built-in light/dark default. With a filter other than `Off` the
+    /// now-playing cover takes priority as the source and the base is the fallback.
     fn resolve_bg_texture(&self) -> Option<gtk::gdk::Texture> {
         let d = &self.theme.design;
-        let custom = d.custom_bg.as_ref()?.to_string_lossy().into_owned();
+        if !d.background_on {
+            return None;
+        }
+        let base = match d.custom_bg.as_ref() {
+            Some(p) => p.to_string_lossy().into_owned(),
+            None => {
+                let dark = adw::StyleManager::default().is_dark();
+                default_bg_path(dark)?.to_string_lossy().into_owned()
+            }
+        };
         let src = if d.bg_filter != BgFilter::Off {
-            self.now_playing_cover_path().unwrap_or(custom)
+            self.now_playing_cover_path().unwrap_or(base)
         } else {
-            custom
+            base
         };
         render_filtered(&src, d.bg_filter, d.bg_filter_strength)
     }

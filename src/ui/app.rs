@@ -1201,6 +1201,12 @@ pub enum Msg {
     SetLastSettingsPage(String),
     /// Whole-app scale factor (0.5 ..= 1.5); persisted + applied live.
     SetUiScale(f64),
+    /// Master switch for the background feature (off → no background at all;
+    /// on with no custom image → the built-in light/dark default).
+    SetBackgroundOn(bool),
+    /// Re-resolve the background (e.g. after a light/dark switch changes which
+    /// built-in default applies).
+    RefreshBackground,
     /// Set/clear the custom background image (already copied into the data dir).
     SetCustomBg(Option<std::path::PathBuf>),
     /// Select the background blur/effect filter (ComboRow index).
@@ -1918,8 +1924,8 @@ impl Component for App {
                                             set_spacing: 6,
                                             add_css_class: "linked",
                                             add_css_class: "emilia-tabbar",
-                                            // Flush to the top like the Artists/Albums lists.
-                                            set_margin_top: 0,
+                                            // Same top gap as the Podcasts/Streaming/YouTube tab bars.
+                                            set_margin_top: 2,
                                             // A small gap below the source tab menu.
                                             set_margin_bottom: 4,
                                             set_margin_start: 12,
@@ -2340,6 +2346,7 @@ impl Component for App {
                                         set_margin_start: 12,
                                         set_margin_end: 12,
                                         add_css_class: "linked",
+                                        add_css_class: "emilia-tabbar",
 
                                         gtk::ToggleButton {
                                             set_label: &gettext("Recent"),
@@ -2488,14 +2495,17 @@ impl Component for App {
                         // is halved (spacing 2→1, top 4→2, bottom 6→3, song top 5→2).
                         set_spacing: 1,
                         set_margin_top: 2,
-                        set_margin_bottom: 3,
+                        // 5px more room below the transport row (the big play
+                        // button) to the bottom edge.
+                        set_margin_bottom: 8,
                         set_margin_start: 10,
                         set_margin_end: 10,
 
                         gtk::Button {
                             add_css_class: "flat",
-                            // Trim ~5px of vertical padding above/below the song line
-                            // (CSS, see `init`), on top of the small top margin.
+                            // Vertical breathing room around the title comes from the
+                            // button's own padding (CSS `emilia-songline`), so the
+                            // hover/press area includes it; only a small top margin here.
                             add_css_class: "emilia-songline",
                             set_tooltip_text: Some(&gettext("Show details of the current track")),
                             // 5px more breathing room above the song name (2 → 7).
@@ -2932,6 +2942,14 @@ impl Component for App {
             .unwrap_or(1.0)
             .clamp(0.5, 1.5);
         let design = crate::ui::theme::DesignSettings {
+            // Master switch, default on: a fresh install shows the built-in
+            // light/dark "bubbles" background until turned off or replaced.
+            background_on: library
+                .get_setting("design_background_on")
+                .ok()
+                .flatten()
+                .map(|s| s != "0")
+                .unwrap_or(true),
             custom_bg: library
                 .get_setting("design_bg_path")
                 .ok()
@@ -4284,6 +4302,9 @@ impl Component for App {
             Msg::SetColorScheme(scheme) => {
                 apply_color_scheme(&scheme);
                 let _ = self.library.set_setting("color_scheme", &scheme);
+                // The built-in default background differs per light/dark, so a
+                // scheme change may need a different image.
+                self.refresh_background();
             }
             Msg::SetLastSettingsPage(name) => {
                 let _ = self.library.set_setting("settings_last_page", &name);
@@ -4294,6 +4315,14 @@ impl Component for App {
                     .library
                     .set_setting("ui_scale", &self.theme.ui_scale.to_string());
             }
+            Msg::SetBackgroundOn(on) => {
+                self.theme.design.background_on = on;
+                let _ = self
+                    .library
+                    .set_setting("design_background_on", if on { "1" } else { "0" });
+                self.refresh_background();
+            }
+            Msg::RefreshBackground => self.refresh_background(),
             Msg::SetCustomBg(src) => {
                 // Copy the chosen image into our data dir; `None` clears it.
                 let stored = src.as_deref().and_then(crate::ui::theme::import_custom_bg);

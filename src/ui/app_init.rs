@@ -336,6 +336,14 @@ impl App {
         widgets.bg_overlay.set_measure_overlay(&widgets.split, true);
         self.theme.apply_scale_dpi();
         self.refresh_background();
+        // The built-in default background has a light and a dark variant; when the
+        // system light/dark preference flips, re-resolve so the right one shows.
+        {
+            let sender = sender.clone();
+            adw::StyleManager::default().connect_dark_notify(move |_| {
+                sender.input(Msg::RefreshBackground);
+            });
+        }
         self.mini.seek_scale = widgets.seek_scale.clone();
         self.mini.chapter_label = widgets.chapter_label.clone();
         self.files.source_tabs = widgets.source_tabs.clone();
@@ -1093,7 +1101,7 @@ impl App {
                  button.sync-connected { color: @success_color; }\
                  button.sleep-armed { color: @accent_color; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
-                 button.emilia-songline { min-height: 0px; padding-top: 1px; padding-bottom: 1px; }\
+                 button.emilia-songline { min-height: 0px; padding-top: 6px; padding-bottom: 6px; }\
                  button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\
                  button.emilia-record-dot image { color: @error_color; }\
                  image.emilia-record-dot { color: @error_color; }\

@@ -106,15 +106,27 @@ fn gallery_width_hint(fb: &gtk::FlowBox) -> i32 {
     0
 }
 
-/// Sets each gallery tile to a square in column width.
+/// Sizes each gallery tile to a square that fills the available row width.
+/// Instead of always sizing for the configured maximum column count (which made
+/// the FlowBox keep oversized tiles and wrap to fewer columns badly as the
+/// window shrank), this picks how many columns of at least `MIN_TILE` actually
+/// fit — capped at the configured maximum — and sizes the tiles so exactly that
+/// many fill the row. The grid therefore drops a column cleanly and rescales.
 pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
-    let cols = fb.max_children_per_line().max(1) as i32;
     let w = gallery_width_hint(fb);
     if w <= 1 {
         return;
     }
     let spacing = fb.column_spacing() as i32;
-    let tile = ((w - spacing * cols) / cols).max(64);
+    let max_cols = fb.max_children_per_line().max(1) as i32;
+    // Smallest tile before a column is dropped. Kept low enough that phone
+    // galleries keep their 3 columns and the desktop its 4, while narrower
+    // windows reflow to fewer, correctly sized tiles.
+    const MIN_TILE: i32 = 96;
+    let cols = ((w + spacing) / (MIN_TILE + spacing)).clamp(1, max_cols);
+    // FlowBox lays out `cols` tiles with `cols - 1` gaps between them; size each
+    // so they fill `w` exactly (a fifth one then never fits → no bad wrap).
+    let tile = ((w - spacing * (cols - 1)) / cols).max(64);
     let mut child = fb.first_child();
     while let Some(c) = child {
         let next = c.next_sibling();
@@ -149,6 +161,35 @@ pub(crate) fn size_gallery_tiles_when_ready(fb: &gtk::FlowBox) {
             gtk::glib::ControlFlow::Break
         } else {
             gtk::glib::ControlFlow::Continue
+        }
+    });
+}
+
+/// Keeps a gallery's tiles sized to the available width across window resizes:
+/// on every map it re-sizes the tiles, and once it walks up to the enclosing
+/// `ScrolledWindow` and re-sizes whenever its horizontal page size (the visible
+/// width) changes. Call once per FlowBox (callers gate it with their own
+/// "hooked" flag so `connect_map` isn't wired up repeatedly).
+pub(crate) fn connect_gallery_resize(fb: &gtk::FlowBox) {
+    let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
+    fb.connect_map(move |fb| {
+        size_gallery_tiles_when_ready(fb);
+        if pagesize_done.get() {
+            return;
+        }
+        let mut ancestor = fb.parent();
+        while let Some(w) = ancestor {
+            if let Ok(sw) = w.clone().downcast::<gtk::ScrolledWindow>() {
+                let weak = fb.downgrade();
+                sw.hadjustment().connect_page_size_notify(move |_| {
+                    if let Some(fb) = weak.upgrade() {
+                        size_gallery_tiles(&fb);
+                    }
+                });
+                pagesize_done.set(true);
+                break;
+            }
+            ancestor = w.parent();
         }
     });
 }
@@ -335,27 +376,7 @@ impl App {
                 .borrow_mut()
                 .insert(fb.as_ptr() as usize)
         {
-            let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
-            fb.connect_map(move |fb| {
-                size_gallery_tiles_when_ready(fb);
-                if pagesize_done.get() {
-                    return;
-                }
-                let mut ancestor = fb.parent();
-                while let Some(w) = ancestor {
-                    if let Ok(sw) = w.clone().downcast::<gtk::ScrolledWindow>() {
-                        let weak = fb.downgrade();
-                        sw.hadjustment().connect_page_size_notify(move |_| {
-                            if let Some(fb) = weak.upgrade() {
-                                size_gallery_tiles(&fb);
-                            }
-                        });
-                        pagesize_done.set(true);
-                        break;
-                    }
-                    ancestor = w.parent();
-                }
-            });
+            connect_gallery_resize(fb);
         }
     }
 }

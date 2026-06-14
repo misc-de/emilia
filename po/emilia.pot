@@ -875,11 +875,11 @@ msgid "Water"
 msgstr ""
 
 #: src/ui/app_dialogs.rs:1332
-msgid "Blurred cover background"
+msgid "Background filter"
 msgstr ""
 
 #: src/ui/app_dialogs.rs:1333
-msgid "Show the current cover, blurred, behind the app"
+msgid "Apply a filter to the current cover shown behind the app"
 msgstr ""
 
 #: src/ui/app_dialogs.rs:1341
