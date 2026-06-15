@@ -2951,8 +2951,9 @@ impl Component for App {
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
             use_cover_bg: setting_on(&library, "design_use_cover_bg"),
-            // New key wins; otherwise migrate the old cover-blur switch (on →
-            // Gaussian) so an upgraded install keeps a blurred background.
+            // No explicit filter set (fresh install, or an upgrade from the old
+            // cover-blur switch): default to a Gaussian blur on the built-in
+            // bubbles background.
             bg_filter: match library
                 .get_setting("design_bg_filter")
                 .ok()
@@ -2960,22 +2961,14 @@ impl Component for App {
                 .filter(|s| !s.is_empty())
             {
                 Some(k) => crate::ui::theme::BgFilter::from_key(&k),
-                None if setting_on(&library, "design_cover_blur") => {
-                    crate::ui::theme::BgFilter::Gaussian
-                }
-                // Fresh install: a gentle blur on the built-in bubbles — Gaussian
-                // on a dark theme, the lighter Soft blur on light.
-                None if adw::StyleManager::default().is_dark() => {
-                    crate::ui::theme::BgFilter::Gaussian
-                }
-                None => crate::ui::theme::BgFilter::Soft,
+                None => crate::ui::theme::BgFilter::Gaussian,
             },
             bg_filter_strength: library
                 .get_setting("design_bg_filter_strength")
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(10)
+                .unwrap_or(0)
                 .min(100),
             // Default on: let the background show behind nav and title bar.
             bg_nav: library
@@ -2995,17 +2988,20 @@ impl Component for App {
                 .ok()
                 .flatten()
                 .filter(|s| !s.is_empty()),
-            field_color: library
-                .get_setting("design_field_color")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty()),
+            // Default field tint for a fresh install (the light grey the user
+            // shipped). `None` = key never set; `Some("")` = explicitly cleared
+            // via the reset button, which must stay cleared.
+            field_color: match library.get_setting("design_field_color").ok().flatten() {
+                None => Some("#deddda".to_string()),
+                Some(s) if s.is_empty() => None,
+                Some(s) => Some(s),
+            },
             field_transparency: library
                 .get_setting("design_chrome_transparency")
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(20)
+                .unwrap_or(40)
                 .min(100),
         };
         let theme = crate::ui::theme::ThemeState::new(ui_scale, design);
