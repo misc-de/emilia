@@ -27,3 +27,4 @@ po/*/LC_MESSAGES/*.mo
 .claude
 .codex
 .agents
+docs
