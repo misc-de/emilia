@@ -1165,7 +1165,7 @@ impl YtPage {
                     },
                     toggles,
                 );
-                (!self.channel_items.is_empty()).then(|| (popover, desc))
+                (!self.channel_items.is_empty()).then_some((popover, desc))
             }
             YtView::Recent => {
                 let (crit, desc) = self.recent_sort;
@@ -1184,7 +1184,7 @@ impl YtPage {
                     },
                     vec![],
                 );
-                (!self.recent_items.is_empty()).then(|| (popover, desc))
+                (!self.recent_items.is_empty()).then_some((popover, desc))
             }
             YtView::Newest => None,
         };

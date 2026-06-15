@@ -675,7 +675,7 @@ impl StreamPage {
             StreamView::Channels => !self.stream_items.is_empty(),
             StreamView::Recordings => !self.recording_items.is_empty(),
         };
-        *self.sort_slot.borrow_mut() = visible.then(|| (popover, desc));
+        *self.sort_slot.borrow_mut() = visible.then_some((popover, desc));
         let _ = sender.output(StreamOutput::SortChanged);
     }
 

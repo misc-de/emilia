@@ -729,7 +729,7 @@ impl PodcastsPage {
         // Only the subscription overview (with at least one entry) sorts; hand the
         // popover up to the shared title-bar button, or hide it otherwise.
         let visible = self.podcast_view == PodcastView::Overview && !self.podcast_items.is_empty();
-        *self.sort_slot.borrow_mut() = visible.then(|| (popover, desc));
+        *self.sort_slot.borrow_mut() = visible.then_some((popover, desc));
         let _ = sender.output(PodcastsOutput::SortChanged);
     }
 

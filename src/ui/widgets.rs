@@ -223,7 +223,7 @@ struct CoverDecoder {
 }
 
 thread_local! {
-    static COVER_DECODER: RefCell<Option<CoverDecoder>> = RefCell::new(None);
+    static COVER_DECODER: RefCell<Option<CoverDecoder>> = const { RefCell::new(None) };
 }
 
 /// Schedules `path` to be decoded in the background and set into `bin` once ready
