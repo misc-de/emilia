@@ -8,7 +8,7 @@ use relm4::{adw, gtk};
 
 use crate::i18n::{gettext, gettext_f};
 use crate::model::StreamItem;
-use crate::ui::app::{App, Cmd, Msg};
+use crate::ui::app::{App, Msg};
 
 /// State of a running continuous recording (state machine, driven by the 1 s
 /// tick; saves complete songs until manually stopped).
@@ -84,9 +84,21 @@ impl App {
     }
 
     /// Stops the timeshift buffer and running recording (on stop/switch to music).
+    ///
+    /// If a continuous recording is active, the song still in progress is
+    /// **finalized** (saved) and the live "Current recording" entry cleared
+    /// before the buffer is torn down — otherwise switching away (tapping
+    /// another recording, starting a track/podcast/YouTube/Nextcloud item, or
+    /// deleting the running station) would silently drop the in-progress song
+    /// and leave a stale live row in the list. Mirrors the explicit
+    /// `Msg::RecordStop` path.
     pub(crate) fn stop_recorder(&mut self) {
+        if self.streaming.record_state.is_some() {
+            self.finalize_recording();
+            self.streaming.record_state = None;
+            self.sync_live_recording();
+        }
         self.streaming.recorder = None;
-        self.streaming.record_state = None;
     }
 
     /// Pushes the current playback state to the StreamPage component so it can
@@ -145,7 +157,7 @@ impl App {
     }
 
     /// Arms the continuous recording: start offset = beginning of the current song.
-    pub(crate) fn record_arm(&mut self, sender: &ComponentSender<Self>, id: i64) {
+    pub(crate) fn record_arm(&mut self, id: i64) {
         let Some(rec) = self.streaming.recorder.as_ref() else {
             return;
         };
@@ -167,13 +179,13 @@ impl App {
         // Show the live entry ("Current recording" / the song title) immediately …
         self.sync_live_recording();
         // … and fetch its cover from the online DB in the background.
-        self.maybe_fetch_live_cover(sender);
+        self.maybe_fetch_live_cover();
     }
 
     /// Kicks off – once per title – an online cover lookup for the song
     /// currently being recorded, so the live entry at the top of the recordings
     /// list gets a cover. Reuses the cache; on success the list is reloaded.
-    fn maybe_fetch_live_cover(&mut self, sender: &ComponentSender<Self>) {
+    fn maybe_fetch_live_cover(&mut self) {
         let (raw, stream_id) = match self.streaming.record_state.as_mut() {
             Some(rs) => {
                 let Some(raw) = rs.current_title.clone() else {
@@ -196,15 +208,16 @@ impl App {
                 return;
             }
         }
-        sender.spawn_command(move |out| {
+        let input = self.input.clone();
+        std::thread::spawn(move || {
             let _ = crate::core::online::recording_cover(&raw, station.as_deref());
-            let _ = out.send(Cmd::ReloadRecordings);
+            let _ = input.send(Msg::ReloadRecordings);
         });
     }
 
     /// Driven by the 1 s tick: saves songs of the running recording that have
     /// finished (at the song boundaries) and advances.
-    pub(crate) fn drive_recording(&mut self, sender: &ComponentSender<Self>) {
+    pub(crate) fn drive_recording(&mut self) {
         let snap = match self.streaming.recorder.as_ref() {
             Some(r) => r.snapshot(),
             None => return,
@@ -216,7 +229,7 @@ impl App {
         if snap.ended {
             // The stream ended: finalize the song still in progress so it isn't
             // lost, then end the recording.
-            self.finalize_recording(sender);
+            self.finalize_recording();
             self.streaming.record_state = None;
             self.toast(&gettext("Recording stopped (stream ended)"));
             self.sync_live_recording();
@@ -269,7 +282,6 @@ impl App {
                 self.store_plain_segment(*start, *end, station.as_deref(), *incomplete)
             } else {
                 self.store_segment(
-                    sender,
                     *start,
                     *end,
                     *lead_pad,
@@ -306,7 +318,7 @@ impl App {
             self.sync_live_recording();
         }
         if title_changed {
-            self.maybe_fetch_live_cover(sender);
+            self.maybe_fetch_live_cover();
         }
     }
 
@@ -317,7 +329,6 @@ impl App {
     /// replay "save".
     pub(crate) fn store_segment(
         &mut self,
-        sender: &ComponentSender<Self>,
         start: u64,
         end: u64,
         lead_pad: u64,
@@ -378,7 +389,8 @@ impl App {
         // Look up cover + album online (trying several combinations) and embed
         // them into the file (best effort); refresh the list once cached.
         let (raw, st) = (raw_title.to_string(), station.map(str::to_string));
-        sender.spawn_command(move |out| {
+        let input = self.input.clone();
+        std::thread::spawn(move || {
             if let Some((bytes, album)) = crate::core::online::recording_cover(&raw, st.as_deref())
             {
                 crate::core::recorder::embed_cover(
@@ -388,7 +400,7 @@ impl App {
                     album.as_deref(),
                     &bytes,
                 );
-                let _ = out.send(Cmd::ReloadRecordings);
+                let _ = input.send(Msg::ReloadRecordings);
             }
         });
         true
@@ -431,7 +443,7 @@ impl App {
     /// On stop: saves the song currently being recorded (from `next_start` up to
     /// the current buffer end) so the in-progress song is not lost. Best effort;
     /// does nothing if nothing has been buffered/identified yet.
-    pub(crate) fn finalize_recording(&mut self, sender: &ComponentSender<Self>) {
+    pub(crate) fn finalize_recording(&mut self) {
         let Some(rs) = self.streaming.record_state.as_ref() else {
             return;
         };
@@ -441,41 +453,31 @@ impl App {
             return;
         };
         let snap = rec.snapshot();
-        let end = snap.total;
-        if end <= next_start {
-            return;
-        }
-        // The running song (for its title + completeness).
-        let song = snap
-            .songs
-            .iter()
-            .find(|s| s.start <= next_start && s.end.is_none());
-        let raw_title = live_title.or_else(|| song.map(|s| s.title.clone()));
-        let incomplete = song.is_none_or(|s| !s.complete || next_start > s.start);
-        // Lead guard from the song's start boundary; no tail guard — `end` is the
-        // live buffer edge, there is nothing buffered beyond it.
-        let lead_pad = song.map_or(0, |s| s.lead_pad);
         let station = self.stream_name(stream_id);
-        match raw_title {
+        match plan_finalize(&snap, next_start, live_title.as_deref()) {
             // A real song still running → save with recognition.
-            Some(t) if !t.trim().is_empty() => {
+            FinalizePlan::Song {
+                end,
+                lead_pad,
+                raw_title,
+                incomplete,
+            } => {
                 self.store_segment(
-                    sender,
                     next_start,
                     end,
                     lead_pad,
                     0,
-                    &t,
+                    &raw_title,
                     station.as_deref(),
                     incomplete,
                 );
             }
             // A trailing untitled gap (talk/ads) → save plainly.
-            Some(_) => {
+            FinalizePlan::Plain { end, incomplete } => {
                 self.store_plain_segment(next_start, end, station.as_deref(), incomplete);
             }
-            // Nothing identified yet → don't save an untitled blob.
-            None => {}
+            // Nothing buffered/identified beyond `next_start` → save nothing.
+            FinalizePlan::Nothing => {}
         }
     }
 
@@ -594,7 +596,7 @@ impl App {
             if self.streaming.playing_stream != Some(id) {
                 self.play_stream(id);
             }
-            self.record_arm(sender, id);
+            self.record_arm(id);
             // Jump to the recordings view so the new captures are visible as they
             // are saved at the song boundaries.
             self.stream_page
@@ -666,19 +668,13 @@ impl App {
     }
 
     /// Save a buffer segment `[start, end)` as a recording.
-    pub(crate) fn replay_save(
-        &mut self,
-        sender: &ComponentSender<Self>,
-        start: u64,
-        end: u64,
-        title: String,
-    ) {
+    pub(crate) fn replay_save(&mut self, start: u64, end: u64, title: String) {
         let station = self
             .streaming
             .playing_stream
             .and_then(|id| self.stream_name(id));
         // Replay "save" is an exact, user-picked range → no generous guard.
-        if self.store_segment(sender, start, end, 0, 0, &title, station.as_deref(), false) {
+        if self.store_segment(start, end, 0, 0, &title, station.as_deref(), false) {
             self.sync_live_recording();
         } else {
             self.toast(&gettext("Could not extract from buffer"));
@@ -701,5 +697,190 @@ impl App {
         } else {
             self.toast(&gettext("File not found"));
         }
+    }
+}
+
+/// What `finalize_recording` should persist for the song still in progress when
+/// a continuous recording is stopped (manually, on switch-away, or because the
+/// stream ended). All start offsets are `next_start`; the plan only varies the
+/// end/title/guard/completeness. Kept as a pure decision over the buffer
+/// `Snapshot` so it can be unit-tested without the GStreamer/DB/UI stack.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FinalizePlan {
+    /// Nothing buffered/identified beyond `next_start` → save nothing.
+    Nothing,
+    /// A real, titled song is still running → save with recognition.
+    Song {
+        end: u64,
+        lead_pad: u64,
+        raw_title: String,
+        incomplete: bool,
+    },
+    /// A trailing untitled gap (talk/ads) → save plainly, no recognition.
+    Plain { end: u64, incomplete: bool },
+}
+
+/// Decide what the in-progress song should become on stop. The live title (the
+/// firmly-assigned ICY title tracked by `RecordState`) wins over the snapshot's
+/// running-song title; absent both, an unidentified blob is not saved.
+pub(crate) fn plan_finalize(
+    snap: &crate::core::recorder::Snapshot,
+    next_start: u64,
+    live_title: Option<&str>,
+) -> FinalizePlan {
+    let end = snap.total;
+    // The live buffer edge hasn't advanced past where we'd resume saving → there
+    // is nothing new to write.
+    if end <= next_start {
+        return FinalizePlan::Nothing;
+    }
+    // The song that is still running (the one containing `next_start`).
+    let song = snap
+        .songs
+        .iter()
+        .find(|s| s.start <= next_start && s.end.is_none());
+    let raw_title = live_title
+        .map(str::to_string)
+        .or_else(|| song.map(|s| s.title.clone()));
+    // Incomplete if the start boundary was lost from the buffer, or we resume
+    // mid-song (past the song's start), or there is no tracked song at all.
+    let incomplete = song.is_none_or(|s| !s.complete || next_start > s.start);
+    // Lead guard from the song's start boundary; no tail guard — `end` is the
+    // live buffer edge, there is nothing buffered beyond it.
+    let lead_pad = song.map_or(0, |s| s.lead_pad);
+    match raw_title {
+        Some(t) if !t.trim().is_empty() => FinalizePlan::Song {
+            end,
+            lead_pad,
+            raw_title: t,
+            incomplete,
+        },
+        Some(_) => FinalizePlan::Plain { end, incomplete },
+        None => FinalizePlan::Nothing,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plan_finalize, FinalizePlan};
+    use crate::core::recorder::{BufferedSong, Snapshot};
+
+    fn running_song(start: u64, title: &str, complete: bool, lead_pad: u64) -> BufferedSong {
+        BufferedSong {
+            start,
+            end: None,
+            title: title.to_string(),
+            complete,
+            lead_pad,
+            tail_pad: 0,
+        }
+    }
+
+    fn snap(total: u64, songs: Vec<BufferedSong>) -> Snapshot {
+        Snapshot {
+            current_start: songs.last().map(|s| s.start),
+            songs,
+            total,
+            ended: false,
+        }
+    }
+
+    #[test]
+    fn nothing_when_buffer_has_not_advanced() {
+        // end (total) == next_start → no new bytes to save.
+        let s = snap(1000, vec![running_song(0, "A - B", true, 0)]);
+        assert_eq!(plan_finalize(&s, 1000, None), FinalizePlan::Nothing);
+        // total < next_start is likewise nothing.
+        assert_eq!(plan_finalize(&s, 1500, None), FinalizePlan::Nothing);
+    }
+
+    #[test]
+    fn nothing_when_unidentified() {
+        // Data buffered but no running song and no live title → don't save a blob.
+        let s = snap(2000, vec![]);
+        assert_eq!(plan_finalize(&s, 500, None), FinalizePlan::Nothing);
+    }
+
+    #[test]
+    fn complete_running_song_saved_with_recognition() {
+        let s = snap(2000, vec![running_song(500, "Artist - Title", true, 64)]);
+        assert_eq!(
+            plan_finalize(&s, 500, None),
+            FinalizePlan::Song {
+                end: 2000,
+                lead_pad: 64,
+                raw_title: "Artist - Title".to_string(),
+                incomplete: false,
+            }
+        );
+    }
+
+    #[test]
+    fn resuming_mid_song_is_incomplete() {
+        // next_start past the song's own start → the beginning is missing.
+        let s = snap(2000, vec![running_song(500, "Artist - Title", true, 64)]);
+        match plan_finalize(&s, 900, None) {
+            FinalizePlan::Song { incomplete, .. } => assert!(incomplete),
+            other => panic!("expected Song, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lost_start_boundary_is_incomplete() {
+        let s = snap(2000, vec![running_song(500, "Artist - Title", false, 0)]);
+        match plan_finalize(&s, 500, None) {
+            FinalizePlan::Song { incomplete, .. } => assert!(incomplete),
+            other => panic!("expected Song, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn live_title_overrides_song_title() {
+        let s = snap(2000, vec![running_song(500, "Stale ICY", true, 0)]);
+        match plan_finalize(&s, 500, Some("Fresh Live Title")) {
+            FinalizePlan::Song { raw_title, .. } => assert_eq!(raw_title, "Fresh Live Title"),
+            other => panic!("expected Song, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn live_title_without_tracked_song_saves_incomplete_song() {
+        // The recorder lost the song boundary but the live entry still knows the
+        // title → save it (flagged incomplete, no lead guard).
+        let s = snap(2000, vec![]);
+        assert_eq!(
+            plan_finalize(&s, 0, Some("Artist - Title")),
+            FinalizePlan::Song {
+                end: 2000,
+                lead_pad: 0,
+                raw_title: "Artist - Title".to_string(),
+                incomplete: true,
+            }
+        );
+    }
+
+    #[test]
+    fn empty_running_title_is_a_plain_gap() {
+        // A running but untitled segment (talk/ads) → plain save, no recognition.
+        let s = snap(2000, vec![running_song(500, "   ", true, 0)]);
+        assert_eq!(
+            plan_finalize(&s, 500, None),
+            FinalizePlan::Plain {
+                end: 2000,
+                incomplete: false,
+            }
+        );
+    }
+
+    #[test]
+    fn whitespace_live_title_is_a_plain_gap() {
+        let s = snap(2000, vec![]);
+        assert_eq!(
+            plan_finalize(&s, 0, Some("   ")),
+            FinalizePlan::Plain {
+                end: 2000,
+                incomplete: true,
+            }
+        );
     }
 }

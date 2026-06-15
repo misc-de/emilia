@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use gtk::prelude::GtkWindowExt;
-use relm4::{adw, gtk, ComponentController, ComponentSender};
+use relm4::{adw, gtk, ComponentController};
 
 use crate::core::scanner;
 use crate::core::webdav::{self, Creds};
@@ -1371,10 +1371,10 @@ impl App {
 
     /// 1 s timer: drive timeshift recording, refresh station icons and update
     /// the seek bar / chapter / statistics counters.
-    pub(crate) fn on_tick(&mut self, sender: &ComponentSender<Self>) {
+    pub(crate) fn on_tick(&mut self) {
         // Advance the running timeshift recording at the song boundaries.
         if self.streaming.record_state.is_some() {
-            self.drive_recording(sender);
+            self.drive_recording();
         }
         // Sync the play/pause and record icons of the station rows.
         self.sync_stream_page_icons();

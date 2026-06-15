@@ -1506,6 +1506,10 @@ pub enum Msg {
     // Recording (timeshift)
     /// Stop the running recording.
     RecordStop,
+    /// A background recording job (store + online cover embed) finished →
+    /// reload the recordings list. Sent from `store_segment` /
+    /// `maybe_fetch_live_cover` worker threads via `self.input`.
+    ReloadRecordings,
     /// Open the replay subpage of a station.
     OpenStreamReplay(i64),
     /// Preview a buffered song (absolute byte range).
@@ -1677,9 +1681,6 @@ pub enum Cmd {
     },
     /// Startup background refresh finished → tell the YtPage component to reload.
     YtReload,
-    /// A timeshift recording's cover/segment finished (worker) → tell the
-    /// StreamPage component to rebuild the recordings list.
-    ReloadRecordings,
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
     /// Cloud sources were re-indexed → rebuild views + covers. `manual` = the
@@ -3879,8 +3880,13 @@ impl Component for App {
             Msg::ToggleStream(id) => self.toggle_stream(id),
             Msg::StreamRecordToggle(id) => self.stream_record_toggle(&sender, id),
             Msg::RecordToggle => {
-                // Context decides the action: timeshift in Streaming, memo elsewhere.
-                if self.nav.view_stack.visible_child_name().as_deref() == Some("streaming") {
+                // Context decides the action: a running timeshift recording can be
+                // stopped from any section (the button stays visible while it
+                // runs); otherwise start the timeshift in Streaming, or record a
+                // voice memo elsewhere.
+                if self.streaming.record_state.is_some() {
+                    sender.input(Msg::RecordStop);
+                } else if self.on_streaming_section() {
                     if let Some(id) = self.streaming.playing_stream {
                         sender.input(Msg::StreamRecordToggle(id));
                     }
@@ -3894,15 +3900,18 @@ impl Component for App {
             Msg::RecordStop => {
                 if self.streaming.record_state.is_some() {
                     // Finalize the song still in progress so it isn't lost.
-                    self.finalize_recording(&sender);
+                    self.finalize_recording();
                     self.streaming.record_state = None;
                     self.toast(&gettext("Recording stopped"));
                     self.sync_live_recording();
                 }
             }
+            Msg::ReloadRecordings => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings),
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::ReplayPlay { start, end } => self.replay_play(start, end),
-            Msg::ReplaySave { start, end, title } => self.replay_save(&sender, start, end, title),
+            Msg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
             Msg::PlayRecording(path) => self.play_recording(path),
             // --- bridge from the StreamPage component to the shared parent chrome ---
             Msg::StreamDeleteUndo(id) => {
@@ -4172,7 +4181,7 @@ impl Component for App {
             Msg::TrackFinished => self.on_track_finished(),
             Msg::GaplessAdvanced => self.on_gapless_advanced(),
             Msg::PersistResume => self.on_persist_resume(),
-            Msg::Tick => self.on_tick(&sender),
+            Msg::Tick => self.on_tick(),
             Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::LoadLyrics(path) => self.load_lyrics(&sender, path),
@@ -4865,9 +4874,6 @@ impl Component for App {
                 items,
                 total_duration,
             } => self.on_cmd_yt_playlist_start(url, title, items, total_duration, &sender),
-            Cmd::ReloadRecordings => self
-                .stream_page
-                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings),
             Cmd::SourceStatus(status) => {
                 let mut changed = false;
                 for (id, ok) in status {
@@ -4902,7 +4908,19 @@ impl App {
     fn on_streaming_section(&self) -> bool {
         self.nav.view_stack.visible_child_name().as_deref() == Some("streaming")
     }
+    /// The shared record button acts on the timeshift recorder while on the
+    /// Streaming section **or** whenever a timeshift recording is actually
+    /// running — so a running recording can still be seen and stopped after
+    /// navigating to another section. Otherwise it is the voice-memo button.
+    fn record_btn_is_timeshift(&self) -> bool {
+        self.on_streaming_section() || self.streaming.record_state.is_some()
+    }
     fn record_btn_visible(&self) -> bool {
+        // A running timeshift recording keeps the button visible everywhere, so
+        // it never runs without a reachable Stop control.
+        if self.streaming.record_state.is_some() {
+            return true;
+        }
         match self.nav.view_stack.visible_child_name().as_deref() {
             Some("memo") => true,
             Some("streaming") => {
@@ -4913,14 +4931,14 @@ impl App {
         }
     }
     fn record_btn_icon(&self) -> &'static str {
-        if self.on_streaming_section() {
+        if self.record_btn_is_timeshift() {
             "media-record-symbolic"
         } else {
             "audio-input-microphone-symbolic"
         }
     }
     fn record_btn_tooltip(&self) -> String {
-        if self.on_streaming_section() {
+        if self.record_btn_is_timeshift() {
             if self.streaming.record_state.is_some() {
                 gettext("Stop recording")
             } else {
@@ -4933,7 +4951,7 @@ impl App {
         }
     }
     fn record_btn_recording(&self) -> bool {
-        if self.on_streaming_section() {
+        if self.record_btn_is_timeshift() {
             self.streaming.record_state.is_some()
         } else {
             self.memo.recording
