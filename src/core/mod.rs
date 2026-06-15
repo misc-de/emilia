@@ -19,7 +19,6 @@ pub mod source;
 pub mod streaming;
 pub mod sync;
 pub mod tray;
-pub mod update;
 pub mod waveform;
 pub mod webdav;
 pub mod youtube;

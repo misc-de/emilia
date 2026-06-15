@@ -50,8 +50,6 @@ finish-args:
   # Keys/Tokens wie AcoustID/fanart.tv) werden, wenn verfügbar, über libsecret
   # im Secret Service statt in der lokalen SQLite-Datenbank gespeichert.
   - --talk-name=org.freedesktop.secrets
-  # In-App-Self-Update über das Flatpak-Portal (sandbox-sichere Aktualisierung).
-  - --talk-name=org.freedesktop.portal.Flatpak
   # Optionales Tray-Icon (StatusNotifierItem) – Registrierung beim Tray-Host.
   - --talk-name=org.kde.StatusNotifierWatcher
   # Übersetzungskataloge liegen privat unter /app (nicht in der Locale-Extension,
@@ -67,6 +65,26 @@ build-options:
     CARGO_HOME: /run/build/emilia/cargo
 
 modules:
+  # AcoustID-Fingerprint (fpcalc) mitliefern, damit die Track-Erkennung über
+  # Chromaprint auch im Flatpak funktioniert (die Runtime enthält fpcalc nicht).
+  # Gebaut mit dem in Chromaprint gebündelten KissFFT (keine externe FFT-
+  # Abhängigkeit) und libswresample aus der Runtime zum Dekodieren; installiert
+  # libchromaprint + fpcalc nach /app. Siehe src/core/fingerprint.rs.
+  - name: chromaprint
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      # Chromaprint 1.5.1 deklariert cmake_minimum_required < 3.5; neuere CMake
+      # (SDK) lehnt das sonst ab.
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+      - -DBUILD_TOOLS=ON
+      - -DBUILD_TESTS=OFF
+      - -DFFT_LIB=kissfft
+      - -DAUDIO_PROCESSOR_LIB=swresample
+    sources:
+      - type: archive
+        url: https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-1.6.0.tar.gz
+        sha256: 9d33482e56a1389a37a0d6742c376139fa43e3b8a63d29003222b93db2cb40da
   # yt-dlp als gepinnte, sha256-verifizierte Binary mitliefern (statt sie zur
   # Laufzeit ungeprüft von GitHub zu laden → das spricht der Flathub-Reviewer an).
   # Flathubs `flatpak-external-data-checker` hält die Version über `x-checker-data`

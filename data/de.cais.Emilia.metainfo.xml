@@ -135,8 +135,8 @@
     </release>
     <release version="0.6.5" date="2026-06-13">
       <description>
-        <p>This release adds in-app self-update for the Flatpak build. When a newer version is published, an “Update x.y.z available” button appears at the top-left of the title bar on the desktop; clicking it asks whether to update from your current version to the new one and installs it via the Flatpak portal (it takes effect after a restart). The podcast subscriptions tab now reads “Abos” in German.</p>
-        <p xml:lang="de">Diese Version bringt ein In-App-Self-Update für den Flatpak-Build. Sobald eine neuere Version veröffentlicht ist, erscheint am Desktop oben links in der Titelleiste ein Knopf „Update x.y.z verfügbar“; ein Klick fragt, ob von der aktuellen auf die neue Version aktualisiert werden soll, und installiert sie über das Flatpak-Portal (aktiv nach einem Neustart). Außerdem heißt der Podcast-Abo-Tab jetzt „Abos“.</p>
+        <p>The podcast subscriptions tab now reads “Abos” in German.</p>
+        <p xml:lang="de">Der Podcast-Abo-Tab heißt jetzt „Abos“.</p>
       </description>
     </release>
     <release version="0.6.4" date="2026-06-13">
@@ -309,8 +309,8 @@
     </release>
     <release version="0.1.4" date="2026-06-01">
       <description>
-        <p>Custom app icon, mini-player polish, podcast grouping, audiobook CD ordering, and in-app self-update.</p>
-        <p xml:lang="de">Eigenes App-Icon, Mini-Player-Politur, Podcast-Gruppierung, CD-Sortierung bei Hörbüchern und Selbst-Aktualisierung.</p>
+        <p>Custom app icon, mini-player polish, podcast grouping, and audiobook CD ordering.</p>
+        <p xml:lang="de">Eigenes App-Icon, Mini-Player-Politur, Podcast-Gruppierung und CD-Sortierung bei Hörbüchern.</p>
       </description>
     </release>
     <release version="0.1.0" date="2026-05-30">

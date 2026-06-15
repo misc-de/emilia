@@ -916,10 +916,6 @@ pub struct App {
     /// Whether a device is currently paired – controls the green sync icon at the
     /// top. Kept here (parent chrome); set via the component's `ConnectedChanged`.
     pub(crate) sync_connected: bool,
-    /// Newer version available via the Flatpak self-update (set by the startup
-    /// check); drives the "Update x.y.z available" button in the title bar.
-    /// `None` = up to date / not in Flatpak.
-    pub(crate) update_version: Option<String>,
     /// Nextcloud setup dialog, extracted into its own relm4 component.
     pub(crate) cloud_page: relm4::Controller<crate::ui::cloud_page::CloudPage>,
     /// Podcasts page, extracted into its own relm4 component (list + dialogs +
@@ -1606,22 +1602,12 @@ pub enum Msg {
     MemoCategoryDeleteKeepMemos(i64),
     /// Delete a category together with all its memos (their files included).
     MemoCategoryDeleteWithMemos(i64),
-    /// Title-bar "Update available" clicked → confirm, then self-update.
-    UpdatePrompt,
-    /// User confirmed the self-update → ask the Flatpak portal to install it.
-    UpdateConfirmed,
 }
 
 /// Results of the background workers (read folder or online enrichment).
 #[derive(Debug)]
 pub enum Cmd {
     Entries(Vec<FsEntry>),
-    /// Startup self-update check finished: `Some(version)` if a newer release is
-    /// available (Flatpak only), else `None`.
-    UpdateChecked(Option<String>),
-    /// The portal self-update request returned (`Ok` = download started, applies
-    /// on the next restart; `Err` = the portal route is unavailable).
-    UpdateStarted(Result<(), String>),
     /// Result of a WebDAV directory listing (background PROPFIND). Carries the
     /// source and the rel path along, so that an intervening source/folder
     /// switch can discard the stale result.
@@ -1779,23 +1765,6 @@ impl Component for App {
                             set_tooltip_text: Some(&gettext("Back")),
                             set_visible: false,
                             connect_clicked => Msg::NavBack,
-                        },
-                        // Self-update (Flatpak): "Update x.y.z available" at the
-                        // top-left when a newer release is out. Desktop only — the
-                        // narrow header has no room for the label. Click → confirm.
-                        #[name = "update_btn"]
-                        pack_start = &gtk::Button {
-                            add_css_class: "suggested-action",
-                            #[watch]
-                            set_visible: model.update_version.is_some() && !model.nav.narrow.get(),
-                            #[watch]
-                            set_label: &model
-                                .update_version
-                                .as_deref()
-                                .map(|v| gettext_f("Update {v} available", &[("v", v)]))
-                                .unwrap_or_default(),
-                            set_tooltip_text: Some(&gettext("A new version is available — click to update")),
-                            connect_clicked => Msg::UpdatePrompt,
                         },
                         #[wrap(Some)]
                         #[name = "win_title"]
@@ -3482,7 +3451,6 @@ impl Component for App {
             },
             sync_page,
             sync_connected: false,
-            update_version: None,
             cloud_page,
             podcasts_page,
             podcast_subpage,
@@ -3665,10 +3633,6 @@ impl Component for App {
                 Cmd::YtReload
             });
         }
-        // Self-update (Flatpak only): check in the background whether a newer
-        // release is out; the result drives the title-bar "Update … available"
-        // button. Returns `None` instantly (no network) when not sandboxed.
-        sender.spawn_oneshot_command(|| Cmd::UpdateChecked(crate::core::update::check()));
         // Automatically read the library at startup and – on Wi-Fi/LAN and
         // with the switch enabled – fetch missing covers/metadata in the background.
         model.start_scan(&sender, true, false);
@@ -4712,42 +4676,6 @@ impl Component for App {
             }
             Msg::TogglePlay => self.on_toggle_play(),
             Msg::OpenNowPlaying => self.on_open_now_playing(root, &sender),
-            Msg::UpdatePrompt => {
-                let Some(new_v) = self.update_version.clone() else {
-                    return;
-                };
-                let dialog = adw::AlertDialog::new(
-                    Some(&gettext("Install update?")),
-                    Some(&gettext_f(
-                        "Update Emilia from version {old} to {new}?",
-                        &[
-                            ("old", crate::core::update::current_version()),
-                            ("new", &new_v),
-                        ],
-                    )),
-                );
-                dialog.add_response("cancel", &gettext("Cancel"));
-                dialog.add_response("update", &gettext("Update"));
-                dialog.set_response_appearance("update", adw::ResponseAppearance::Suggested);
-                dialog.set_default_response(Some("update"));
-                dialog.set_close_response("cancel");
-                {
-                    let sender = sender.clone();
-                    dialog.connect_response(None, move |_, resp| {
-                        if resp == "update" {
-                            sender.input(Msg::UpdateConfirmed);
-                        }
-                    });
-                }
-                dialog.present(Some(root));
-            }
-            Msg::UpdateConfirmed => {
-                self.toast(&gettext("Downloading update …"));
-                sender.spawn_command(|out| {
-                    let result = crate::core::update::request_update().map_err(|e| e.to_string());
-                    let _ = out.send(Cmd::UpdateStarted(result));
-                });
-            }
         }
         // Suppress the per-second tick the moment the app goes idle (and resume
         // it when playback/recording starts) — see `tick_active`.
@@ -4763,22 +4691,6 @@ impl Component for App {
     ) {
         match msg {
             Cmd::Entries(entries) => self.on_cmd_entries(entries),
-            Cmd::UpdateChecked(version) => self.update_version = version,
-            Cmd::UpdateStarted(result) => match result {
-                Ok(()) => {
-                    // The download runs in the background; it applies on restart.
-                    self.update_version = None;
-                    self.toast(&gettext(
-                        "Update is being installed — it takes effect after a restart.",
-                    ));
-                }
-                Err(e) => {
-                    tracing::warn!("self-update via portal failed: {e}");
-                    self.toast(&gettext(
-                        "Automatic update failed — please run “flatpak update”.",
-                    ));
-                }
-            },
             Cmd::RemoteEntries(result, source, rel) => {
                 self.on_cmd_remote_entries(result, source, rel, &sender)
             }

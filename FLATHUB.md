@@ -100,7 +100,7 @@ und was nicht:
 | `gtk4paintablesink` | ✅ | Live-Kameravorschau | Vorschau aus (Code degradiert sauber) |
 | `v4l2src`/`autovideosrc` | ✅ | Kamera-Quelle (QR-Scan) | — (Halium: via `droidcam2v4l2`) |
 | ~~`zxing`~~ (nicht mehr nötig) | — | QR-Dekodierung jetzt **in-process** (`rqrr`) | — |
-| `fpcalc` (Chromaprint) | ❌ **fehlt** | AcoustID-Fingerprint | Fingerprint-Erkennung aus |
+| `fpcalc` (Chromaprint) | ✅ **gebündelt** (Modul v1.6.0) | AcoustID-Fingerprint | — |
 
 ### finish-args — Begründung je Berechtigung
 
@@ -138,10 +138,11 @@ und was nicht:
   `content_rating`, Screenshots, `<developer>`, Release-Notes — alle vorhanden. ✅
   Der oberste `<release>`-Eintrag in der MetaInfo ist aktuell `0.6.1` und passt
   zum Git-Tag `v0.6.1` (und damit zu `tag:`/`commit:` im Flathub-Manifest).
-- Alte Release-Note 0.1.4 nennt „in-app self-update / Selbst-Aktualisierung".
-  Im Code gibt es **keinen** Binary-Updater — gemeint ist der App-Neustart nach
-  Sprachwechsel (`current_exe().spawn()` in `src/ui/app.rs`). Formulierung
-  entschärfen, damit der Reviewer beim Lesen der MetaInfo nicht stutzt. ⚠️
+- **In-App-Self-Update entfernt** ✅ — das frühere `src/core/update.rs` + der
+  Titelleisten-Knopf „Update verfügbar" wurden ausgebaut (Flathub-Apps werden
+  vom Host aktualisiert; ein eigener Updater ist ein Reviewer-Streitpunkt). Die
+  Berechtigung `--talk-name=org.freedesktop.portal.Flatpak` ist aus beiden
+  Manifesten entfernt, das „self-update"-Wording aus den MetaInfo-Release-Notes.
 
 ### Build
 
@@ -182,9 +183,12 @@ von GitHub — genau das spricht ein Reviewer an. Jetzt:
 2. **`yt-dlp` zur Laufzeit** ✅ **gelöst** — jetzt gebündelt + sha256-verifiziert
    im Manifest, automatisch aktuell via `x-checker-data`, optionaler Nutzer-Update
    als Fallback (Vorrang vor Baseline). Details oben.
-3. **`fpcalc` fehlt** ⚠️ — AcoustID-Fingerprint funktioniert im Flatpak nicht.
-   Optional Chromaprint/`fpcalc` als Modul bündeln, sonst Feature bewusst
-   deaktiviert lassen (degradiert bereits sauber).
+3. **`fpcalc`** ✅ **gelöst** — Chromaprint 1.6.0 wird als `cmake-ninja`-Modul
+   aus der Quelle gebaut (gebündeltes KissFFT → keine externe FFT-Abhängigkeit,
+   `libswresample` aus der Runtime) und installiert `fpcalc` nach `/app/bin`. Mit
+   einem echten `flatpak-builder`-Lauf verifiziert (`fpcalc 1.6.0` baut + läuft).
+   **1.6.0, nicht 1.5.1:** Letzteres nutzt die alte FFmpeg-Channel-Layout-API
+   (`AVCodecContext.channels`) und kompiliert nicht mehr gegen das Runtime-FFmpeg.
 
 ## generated-sources.json neu erzeugen (nach Cargo.lock-Änderung)
 
