@@ -93,15 +93,26 @@ impl App {
     /// refresh the station + recording row play/pause icons. Replaces the former
     /// `refresh_stream_icons`/`refresh_recording_icons` (now in the component).
     pub(crate) fn sync_stream_page_icons(&self) {
+        let state = (
+            self.streaming.playing_stream,
+            self.transport
+                .playing_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+            self.mini.playing,
+        );
+        // Called on every tick while playing; only push to the StreamPage (which
+        // walks all station/recording rows) when the playback state actually
+        // changed, so an unchanged tick costs nothing.
+        if self.last_stream_icon_state.borrow().as_ref() == Some(&state) {
+            return;
+        }
+        *self.last_stream_icon_state.borrow_mut() = Some(state.clone());
         self.stream_page
             .emit(crate::ui::stream_page::StreamInput::PlaybackStateChanged {
-                playing_stream: self.streaming.playing_stream,
-                playing_path: self
-                    .transport
-                    .playing_path
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().into_owned()),
-                playing: self.mini.playing,
+                playing_stream: state.0,
+                playing_path: state.1,
+                playing: state.2,
             });
     }
 

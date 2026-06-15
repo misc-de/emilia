@@ -365,8 +365,18 @@ pub(crate) fn find_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow>
 }
 
 pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget {
-    let texture = path.and_then(crate::ui::widgets::thumb_cached);
-    crate::ui::widgets::rounded_image(texture.as_ref(), placeholder, 48)
+    // List thumbnail: show the placeholder frame immediately, then fill in the
+    // cover — synchronously from the cache, or decoded in the background on a
+    // miss — so building a long list never blocks the UI thread on decoding.
+    let bin = crate::ui::widgets::thumb_frame(placeholder, 48);
+    if let Some(path) = path {
+        if let Some(tex) = crate::ui::widgets::cached_thumb(path) {
+            crate::ui::widgets::set_cover_thumb(&bin, &tex);
+        } else {
+            crate::ui::widgets::enqueue_thumb_decode(path, &bin);
+        }
+    }
+    bin.upcast()
 }
 
 /// If `sub` is a single-album folder (and not a known artist folder), returns

@@ -486,14 +486,7 @@ impl App {
 
     /// Cover of a folder: cover of any track within it.
     fn folder_cover(&self, folder: &str) -> Option<String> {
-        let prefix = format!("{}/", folder.trim_end_matches('/'));
-        let tracks: Vec<Track> = self
-            .library
-            .all_tracks()
-            .ok()?
-            .into_iter()
-            .filter(|t| t.path.starts_with(&prefix))
-            .collect();
+        let tracks: Vec<Track> = self.library.tracks_under_path(folder).ok()?;
         let first = tracks.first()?;
         // A folder recognized as an album: its stored cover (custom upload first),
         // keyed by the SAME resolved (artist, album) the detail/upload use, wins

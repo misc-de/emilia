@@ -1091,7 +1091,20 @@ impl App {
             return;
         }
         let files = if is_dir {
-            let mut fs = scanner::collect_audio_files(&p);
+            // Prefer the indexed tracks under the folder (same set as the
+            // displayed `folder_tracks_ordered`) over a synchronous recursive
+            // filesystem scan on the UI thread; fall back to the scan only when
+            // the folder isn't indexed yet.
+            let mut fs: Vec<PathBuf> = self
+                .library
+                .tracks_under_path(path)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|t| PathBuf::from(t.path))
+                .collect();
+            if fs.is_empty() {
+                fs = scanner::collect_audio_files(&p);
+            }
             // Like the display (`folder_tracks_ordered`): **natural** path
             // sorting so that playback and display order match
             // (CD folders + file names dictate the order, robust against

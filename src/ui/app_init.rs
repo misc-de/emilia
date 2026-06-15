@@ -1116,6 +1116,12 @@ impl App {
                  image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  button.emilia-nav-btn:checked image { color: @accent_color; }\
                  button.emilia-nav-btn:checked { background-color: alpha(@window_fg_color, 0.3); }\
+                 /* Active tab: a foreground-tinted overlay so it stands out from \
+                    the inactive tabs — lighter on dark themes (window_fg is \
+                    light there). As background-image it sits on top of whatever \
+                    background-color the tab has (default-linked or, in blur mode, \
+                    the field tint), so it works in both. */\
+                 .emilia-tabbar button:checked { background-image: linear-gradient(alpha(@window_fg_color, 0.22), alpha(@window_fg_color, 0.22)); }\
                  box.emilia-step { background-color: alpha(@window_fg_color, 0.12); border-radius: 999px; }\
                  box.emilia-step label { font-weight: bold; }\
                  box.emilia-step-active { background-color: @accent_bg_color; }\

@@ -835,6 +835,15 @@ pub(crate) struct Settings {
 }
 
 pub struct App {
+    /// Gates the per-second tick: the timer only delivers `Msg::Tick` while this
+    /// is set (playing or recording). When idle it stays unset, so the app does
+    /// no per-second work — and triggers no full per-second view re-render.
+    pub(crate) tick_active: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Last (stream, path, playing) pushed to the StreamPage; lets
+    /// `sync_stream_page_icons` skip re-emitting (and re-rendering the page)
+    /// when nothing actually changed.
+    pub(crate) last_stream_icon_state:
+        std::cell::RefCell<Option<(Option<i64>, Option<String>, bool)>>,
     pub(crate) library: Library,
     pub(crate) player: Player,
     /// Lock screen / media keys control (MPRIS, optional).
@@ -2430,6 +2439,12 @@ impl Component for App {
                                 #[watch]
                                 set_label: &model.overlay_text(),
                                 add_css_class: "dim-label",
+                                // Long status lines (e.g. the first-scan hint) must
+                                // wrap, not push the overlay wider than a narrow
+                                // phone screen.
+                                set_wrap: true,
+                                set_justify: gtk::Justification::Center,
+                                set_max_width_chars: 28,
                             },
 
                             // Import progress: a bar with "X of Y songs" and a
@@ -2451,26 +2466,33 @@ impl Component for App {
                                     } else {
                                         0.0
                                     },
+                                    // Only format while actually scanning; the
+                                    // watch runs every view pass (incl. each tick
+                                    // while playing), but the block is hidden then.
                                     #[watch]
-                                    set_text: Some(&gettext_f(
+                                    set_text: model.scanning.then(|| gettext_f(
                                         "{done} of {total} songs",
                                         &[
                                             ("done", &model.scan_done.to_string()),
                                             ("total", &model.scan_total.to_string()),
                                         ],
-                                    )),
+                                    )).as_deref(),
                                 },
                                 gtk::Label {
                                     add_css_class: "caption",
                                     add_css_class: "dim-label",
                                     #[watch]
-                                    set_label: &gettext_f(
-                                        "{done} MB of {total} MB",
-                                        &[
-                                            ("done", &(model.scan_bytes / 1_048_576).to_string()),
-                                            ("total", &(model.scan_total_bytes / 1_048_576).to_string()),
-                                        ],
-                                    ),
+                                    set_label: &if model.scanning {
+                                        gettext_f(
+                                            "{done} MB of {total} MB",
+                                            &[
+                                                ("done", &(model.scan_bytes / 1_048_576).to_string()),
+                                                ("total", &(model.scan_total_bytes / 1_048_576).to_string()),
+                                            ],
+                                        )
+                                    } else {
+                                        String::new()
+                                    },
                                 },
                                 gtk::Button {
                                     set_label: &gettext("Cancel"),
@@ -2753,34 +2775,13 @@ impl Component for App {
                                 gtk::Button {
                                     set_valign: gtk::Align::Center,
                                     #[watch]
-                                    set_visible: model.nav.view_stack.visible_child_name().as_deref() == Some("memo")
-                                        || (model.nav.view_stack.visible_child_name().as_deref() == Some("streaming")
-                                            && model.streaming.playing_stream.is_some()
-                                            && model.streaming.recording_buffer_minutes > 0),
+                                    set_visible: model.record_btn_visible(),
                                     #[watch]
-                                    set_icon_name: if model.nav.view_stack.visible_child_name().as_deref() == Some("streaming") {
-                                        "media-record-symbolic"
-                                    } else {
-                                        "audio-input-microphone-symbolic"
-                                    },
+                                    set_icon_name: model.record_btn_icon(),
                                     #[watch]
-                                    set_tooltip_text: Some(&if model.nav.view_stack.visible_child_name().as_deref() == Some("streaming") {
-                                        if model.streaming.record_state.is_some() {
-                                            gettext("Stop recording")
-                                        } else {
-                                            gettext("Record")
-                                        }
-                                    } else if model.memo.recording {
-                                        gettext("Stop the voice memo")
-                                    } else {
-                                        gettext("Record a voice memo")
-                                    }),
+                                    set_tooltip_text: Some(&model.record_btn_tooltip()),
                                     #[watch]
-                                    set_css_classes: if (model.nav.view_stack.visible_child_name().as_deref() == Some("streaming")
-                                        && model.streaming.record_state.is_some())
-                                        || (model.nav.view_stack.visible_child_name().as_deref() != Some("streaming")
-                                            && model.memo.recording)
-                                    {
+                                    set_css_classes: if model.record_btn_recording() {
                                         &["circular", "emilia-bigplay", "emilia-record-dot", "emilia-recording"]
                                     } else {
                                         // Red even when idle; only pulses while recording.
@@ -3077,21 +3078,34 @@ impl Component for App {
             );
         }
 
+        // Gates the per-second tick AND the resume-persist timer: both only need
+        // to run while playing/recording. While idle they still fire but deliver
+        // nothing, so there is no periodic view re-render / overlay re-measure.
+        // `sync_tick_active` keeps the flag current after every message.
+        let tick_active = std::rc::Rc::new(std::cell::Cell::new(false));
+
         // During playback, regularly save the resume position, so that
         // an audio drama also resumes there after a crash/close.
         {
             let sender = sender.clone();
+            let tick_active = tick_active.clone();
             gtk::glib::timeout_add_seconds_local(5, move || {
-                sender.input(Msg::PersistResume);
+                if tick_active.get() {
+                    sender.input(Msg::PersistResume);
+                }
                 gtk::glib::ControlFlow::Continue
             });
         }
 
-        // Per-second tick for the seek bar (update position/duration).
+        // Per-second tick for the seek bar (position/duration), gated by
+        // `tick_active` like the resume-persist timer above.
         {
             let sender = sender.clone();
+            let tick_active = tick_active.clone();
             gtk::glib::timeout_add_seconds_local(1, move || {
-                sender.input(Msg::Tick);
+                if tick_active.get() {
+                    sender.input(Msg::Tick);
+                }
                 gtk::glib::ControlFlow::Continue
             });
         }
@@ -3279,6 +3293,8 @@ impl Component for App {
         player.set_crossfade_secs(crossfade_secs);
 
         let mut model = App {
+            tick_active,
+            last_stream_icon_state: std::cell::RefCell::new(None),
             library,
             player,
             mpris,
@@ -4724,6 +4740,9 @@ impl Component for App {
                 });
             }
         }
+        // Suppress the per-second tick the moment the app goes idle (and resume
+        // it when playback/recording starts) — see `tick_active`.
+        self.sync_tick_active();
     }
 
     /// Process the results of the background workers.
@@ -4865,10 +4884,61 @@ impl Component for App {
                 }
             }
         }
+        self.sync_tick_active();
     }
 }
 
 impl App {
+    /// Keep `tick_active` current: the per-second tick is only needed while
+    /// playing or while a timeshift recording runs. Called after every message
+    /// so the timer stops delivering ticks the moment the app goes idle.
+    pub(crate) fn sync_tick_active(&self) {
+        self.tick_active
+            .set(self.mini.playing || self.streaming.record_state.is_some());
+    }
+
+    // --- Shared record button (each helper reads `visible_child_name()` once,
+    //     instead of the watches calling it 6–7× per view pass). ---
+    fn on_streaming_section(&self) -> bool {
+        self.nav.view_stack.visible_child_name().as_deref() == Some("streaming")
+    }
+    fn record_btn_visible(&self) -> bool {
+        match self.nav.view_stack.visible_child_name().as_deref() {
+            Some("memo") => true,
+            Some("streaming") => {
+                self.streaming.playing_stream.is_some()
+                    && self.streaming.recording_buffer_minutes > 0
+            }
+            _ => false,
+        }
+    }
+    fn record_btn_icon(&self) -> &'static str {
+        if self.on_streaming_section() {
+            "media-record-symbolic"
+        } else {
+            "audio-input-microphone-symbolic"
+        }
+    }
+    fn record_btn_tooltip(&self) -> String {
+        if self.on_streaming_section() {
+            if self.streaming.record_state.is_some() {
+                gettext("Stop recording")
+            } else {
+                gettext("Record")
+            }
+        } else if self.memo.recording {
+            gettext("Stop the voice memo")
+        } else {
+            gettext("Record a voice memo")
+        }
+    }
+    fn record_btn_recording(&self) -> bool {
+        if self.on_streaming_section() {
+            self.streaming.record_state.is_some()
+        } else {
+            self.memo.recording
+        }
+    }
     /// One background worker of a manual refresh reported back → decrement the
     /// pending counter (saturating, so a stray completion can never wrap it).
     /// When it hits zero the loading overlay hides itself again (see the view).

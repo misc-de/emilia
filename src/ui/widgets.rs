@@ -212,6 +212,73 @@ pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
     bin.set_child(Some(&img));
 }
 
+/// Process-wide background decoder for list thumbnails. [`crate::ui::app::cover_widget`]
+/// enqueues a `(path, target Bin)` on a cache miss; a single worker thread
+/// decodes sequentially off the UI thread, and the texture is cached + applied
+/// to every bin still waiting for that path. This keeps building long lists from
+/// blocking on image decoding, without spawning a thread per cover.
+struct CoverDecoder {
+    tx: async_channel::Sender<String>,
+    pending: std::rc::Rc<RefCell<HashMap<String, Vec<gtk::glib::WeakRef<adw::Bin>>>>>,
+}
+
+thread_local! {
+    static COVER_DECODER: RefCell<Option<CoverDecoder>> = RefCell::new(None);
+}
+
+/// Schedules `path` to be decoded in the background and set into `bin` once ready
+/// (used by the list cover widgets on a cache miss).
+pub fn enqueue_thumb_decode(path: &str, bin: &adw::Bin) {
+    COVER_DECODER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            let (tx, rx) = async_channel::unbounded::<String>();
+            let (out_tx, out_rx) = async_channel::unbounded::<(String, gtk::gdk::Texture)>();
+            // Worker thread: decode off the UI thread (path + texture are Send;
+            // the Bin weak refs stay on the UI thread in `pending`).
+            std::thread::spawn(move || {
+                while let Ok(path) = rx.recv_blocking() {
+                    if let Some(tex) = decode_thumb(&path) {
+                        if out_tx.send_blocking((path, tex)).is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+            let pending: std::rc::Rc<RefCell<HashMap<String, Vec<gtk::glib::WeakRef<adw::Bin>>>>> =
+                std::rc::Rc::new(RefCell::new(HashMap::new()));
+            {
+                let pending = pending.clone();
+                gtk::glib::spawn_future_local(async move {
+                    while let Ok((path, tex)) = out_rx.recv().await {
+                        store_thumb(path.clone(), tex.clone());
+                        if let Some(bins) = pending.borrow_mut().remove(&path) {
+                            for weak in bins {
+                                if let Some(bin) = weak.upgrade() {
+                                    set_cover_thumb(&bin, &tex);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            *slot = Some(CoverDecoder { tx, pending });
+        }
+        let dec = slot.as_ref().unwrap();
+        let is_new = {
+            let mut pend = dec.pending.borrow_mut();
+            let entry = pend.entry(path.to_string()).or_default();
+            let is_new = entry.is_empty();
+            entry.push(bin.downgrade());
+            is_new
+        };
+        // Enqueue the path only once even if several rows want the same cover.
+        if is_new {
+            let _ = dec.tx.send_blocking(path.to_string());
+        }
+    });
+}
+
 /// Image or placeholder as a **square**, rounded image in card style –
 /// consistently for covers/photos and their placeholders. For single images
 /// (e.g. the detail view) where the texture is already available; list cards

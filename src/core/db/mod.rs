@@ -1568,6 +1568,35 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// All tracks whose path lies under `dir`, via an index-friendly range scan
+    /// on the path (`[dir/, dir/\u{10FFFF})`) — far cheaper than loading every
+    /// track and filtering by prefix in Rust, and exact (no LIKE/GLOB wildcards).
+    pub fn tracks_under_path(&self, dir: &str) -> Result<Vec<Track>> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        let upper = format!("{prefix}\u{10FFFF}");
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
+             FROM track
+             WHERE path >= ?1 AND path < ?2",
+        )?;
+        let rows = stmt.query_map([&prefix, &upper], |r| {
+            Ok(Track {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                title: r.get(2)?,
+                artist: r.get(3)?,
+                album: r.get(4)?,
+                genre: None,
+                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+                duration_ms: r.get(6)?,
+                resume_ms: r.get(7)?,
+                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+                year: r.get(9)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     // ---- Failure counters (limit the repeated online retrying) ----
 
     /// Previous unsuccessful online attempts for an album (0 if unknown).

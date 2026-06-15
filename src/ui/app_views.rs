@@ -791,16 +791,12 @@ impl App {
             };
             if entry.is_dir() {
                 // All indexed tracks below this folder, in path (≈ track) order.
-                let prefix = format!(
-                    "{}/",
-                    crate::core::webdav::nc_path(*id, rel).trim_end_matches('/')
-                );
+                let dir = crate::core::webdav::nc_path(*id, rel);
                 let mut paths: Vec<PathBuf> = self
                     .library
-                    .all_tracks()
+                    .tracks_under_path(&dir)
                     .unwrap_or_default()
                     .into_iter()
-                    .filter(|t| t.path.starts_with(&prefix))
                     .map(|t| PathBuf::from(t.path))
                     .collect();
                 paths.sort();
@@ -846,17 +842,18 @@ impl App {
     /// grouped albums overview.
     pub(crate) fn album_files(&self, artist: &str, album: &str) -> Vec<PathBuf> {
         let target = crate::core::artist::norm_key(artist);
+        // Indexed album query instead of scanning the whole track table; the
+        // main-artist refinement stays in Rust (split "feat." credits).
         self.library
-            .all_tracks()
+            .tracks_by_album_name(album)
             .unwrap_or_default()
             .into_iter()
             .filter(|t| {
-                t.album.as_deref() == Some(album)
-                    && t.artist.as_deref().is_some_and(|a| {
-                        crate::core::artist::split_artists(a)
-                            .first()
-                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
-                    })
+                t.artist.as_deref().is_some_and(|a| {
+                    crate::core::artist::split_artists(a)
+                        .first()
+                        .is_some_and(|p| crate::core::artist::norm_key(p) == target)
+                })
             })
             .map(|t| PathBuf::from(t.path))
             .collect()
@@ -1354,14 +1351,7 @@ impl App {
     /// Tracks of a folder in playback order (CD/disc, track number, path).
     /// Basis for the track list of a folder presented as an album.
     pub(crate) fn folder_tracks_ordered(&self, folder: &str) -> Vec<Track> {
-        let prefix = format!("{}/", folder.trim_end_matches('/'));
-        let mut tracks: Vec<Track> = self
-            .library
-            .all_tracks()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| t.path.starts_with(&prefix))
-            .collect();
+        let mut tracks: Vec<Track> = self.library.tracks_under_path(folder).unwrap_or_default();
         // **File structure as truth:** sort folder contents (audiobooks/concerts) by
         // **natural path** – the filenames/CD folders dictate the
         // correct order, even when disc/track tags are missing or wrong.
@@ -1671,13 +1661,7 @@ impl App {
 
         let base = dir.trim_end_matches('/');
         let prefix = format!("{base}/");
-        let tracks: Vec<Track> = self
-            .library
-            .all_tracks()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| t.path.starts_with(&prefix))
-            .collect();
+        let tracks: Vec<Track> = self.library.tracks_under_path(base).unwrap_or_default();
 
         // Group by immediate subfolder; without a subfolder = loose file.
         let mut subfolders: BTreeMap<String, Vec<&Track>> = BTreeMap::new();
@@ -1781,11 +1765,8 @@ impl App {
         let dir = entry.path()?;
         let tracks: Vec<Track> = self
             .library
-            .all_tracks()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| std::path::Path::new(&t.path).starts_with(dir))
-            .collect();
+            .tracks_under_path(&dir.to_string_lossy())
+            .unwrap_or_default();
         // Collapse multi-CD variants ("Album CD1" / "Album Disc 2" …) to their
         // common base, so a multi-disc album counts as ONE album, not several —
         // otherwise it falls through to a generic folder. Compared
