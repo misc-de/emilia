@@ -903,9 +903,6 @@ pub struct App {
     pub(crate) memo: crate::ui::app_memo::MemoState,
     /// YouTube page state (optional feature, gated behind `youtube_enabled`).
     pub(crate) youtube: YoutubeState,
-    /// "Other sources" list in the open settings dialog, so that it can be
-    /// refreshed immediately after add/remove or a successful Nextcloud connect.
-    pub(crate) settings_src_list: std::rc::Rc<std::cell::RefCell<Option<gtk::ListBox>>>,
     /// Source ids that are currently **not reachable** (Nextcloud offline) –
     /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
@@ -1163,11 +1160,42 @@ pub enum Msg {
     /// The source list has changed (added/removed in the settings dialog)
     /// – reload sources and update the tab bar.
     SourcesChanged,
+    /// A new source (id) was just added – reload sources/tabs and switch to it
+    /// so its folder is shown straight away.
+    SourceAdded(i64),
     /// Remove an extra source (local folder / Nextcloud) by id, after the user
     /// confirmed it in the settings list. Then reloads sources + tabs.
     DeleteSource(i64),
+    /// Long-press / right-click on a source tab → open its context menu.
+    SourceContextMenu(ActiveSource),
+    /// Open the rename dialog for source `id`.
+    SourceRename(i64),
+    /// Apply a new name to source `id`.
+    SourceRenameDo {
+        id: i64,
+        name: String,
+    },
+    /// Open the "change folder / music path" editor for a tab.
+    SourceEdit(ActiveSource),
+    /// Apply a new root path to a local source (then reload it if active).
+    SourceSetPath {
+        id: i64,
+        path: PathBuf,
+    },
+    /// Apply a new music subpath to a WebDAV source (then re-index it).
+    SourceSetMusicPath {
+        id: i64,
+        path: String,
+    },
+    /// Confirm-then-remove a source (the context-menu delete entry).
+    SourceDelete(i64),
     /// Check reachability of the Nextcloud sources (periodically + at startup).
     CheckSources,
+    /// The "+" in the Files tab bar: ask whether to add a local folder or
+    /// connect a Nextcloud.
+    AddSourceMenu,
+    /// Pick a local folder and add it as an extra source.
+    AddLocalFolder,
     /// Open the Nextcloud setup dialog (QR scan or manual).
     AddCloudSource,
     /// The CloudPage component finished indexing a newly added source.
@@ -1559,8 +1587,6 @@ pub enum Msg {
         path: Option<String>,
         duration_ms: i64,
     },
-    /// Set the size of the timeshift buffer in minutes (0–60).
-    SetRecordingBufferMinutes(u32),
 
     // ---- Voice memos ----
     /// A finished recording was finalized off-thread: new file path (`None` =
@@ -1893,24 +1919,21 @@ impl Component for App {
                                         set_orientation: gtk::Orientation::Vertical,
                                         set_vexpand: true,
 
-                                        // Source tabs (linked) – only visible if, besides the
-                                        // primary music folder, at least one additional source
-                                        // (SD card/Nextcloud) is set up. Filled in
+                                        // Source tab bar: holds the linked source toggles (only
+                                        // built when there is more than one folder) plus a trailing
+                                        // "+" to add a folder/Nextcloud. Always shown on the Files
+                                        // page so the "+" stays reachable. Filled in
                                         // `rebuild_source_tabs`.
                                         #[name = "source_tabs"]
                                         gtk::Box {
                                             set_orientation: gtk::Orientation::Horizontal,
                                             set_spacing: 6,
-                                            add_css_class: "linked",
-                                            add_css_class: "emilia-tabbar",
                                             // Same top gap as the Podcasts/Streaming/YouTube tab bars.
                                             set_margin_top: 2,
                                             // A small gap below the source tab menu.
                                             set_margin_bottom: 4,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
-                                            #[watch]
-                                            set_visible: model.source_tabs_visible(),
                                         },
 
                                         // Path/back bar – only in subfolders
@@ -3145,7 +3168,7 @@ impl Component for App {
         let cloud_page = crate::ui::cloud_page::CloudPage::builder()
             .launch(())
             .forward(sender.input_sender(), |out| match out {
-                crate::ui::cloud_page::CloudOutput::SourcesChanged => Msg::SourcesChanged,
+                crate::ui::cloud_page::CloudOutput::SourcesChanged(id) => Msg::SourceAdded(id),
                 crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
             });
         // Shared hand-off slots for the title-bar sort control of each component
@@ -3425,7 +3448,6 @@ impl Component for App {
                 playing_playlist: false,
                 progress_toast: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
-            settings_src_list: std::rc::Rc::new(std::cell::RefCell::new(None)),
             offline_sources: std::collections::HashSet::new(),
             stats_page,
             nav: NavState {
@@ -3949,17 +3971,6 @@ impl Component for App {
                 }
                 None => self.toast(&gettext("Editing failed")),
             },
-            Msg::SetRecordingBufferMinutes(n) => {
-                self.streaming.recording_buffer_minutes = n.min(60);
-                let _ = self.library.set_setting(
-                    "recording_buffer_minutes",
-                    &self.streaming.recording_buffer_minutes.to_string(),
-                );
-                self.stream_page
-                    .emit(crate::ui::stream_page::StreamInput::SetBufferMinutes(
-                        self.streaming.recording_buffer_minutes,
-                    ));
-            }
             // --- Voice memos ---
             Msg::MemoRecordSaved { path, duration_ms } => match path {
                 Some(p) => {
@@ -4264,16 +4275,52 @@ impl Component for App {
                 }
             }
             Msg::SourcesChanged => self.on_sources_changed(&sender),
+            Msg::SourceAdded(id) => {
+                self.on_sources_changed(&sender);
+                self.apply_source(ActiveSource::Source(id), &sender);
+            }
             Msg::DeleteSource(id) => {
                 let _ = self.library.delete_source(id);
                 self.on_sources_changed(&sender);
             }
+            Msg::SourceContextMenu(sel) => self.open_source_context_menu(sel, &sender),
+            Msg::SourceRename(id) => self.open_source_rename_dialog(id, root, &sender),
+            Msg::SourceRenameDo { id, name } => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    let _ = self.library.set_source_name(id, name);
+                    self.on_sources_changed(&sender);
+                }
+            }
+            Msg::SourceEdit(sel) => self.open_source_edit(sel, root, &sender),
+            Msg::SourceSetPath { id, path } => self.on_source_set_path(id, path, &sender),
+            Msg::SourceSetMusicPath { id, path } => {
+                self.on_source_set_music_path(id, path, &sender)
+            }
+            Msg::SourceDelete(id) => confirm_destructive(
+                root,
+                &gettext("Remove this source?"),
+                &gettext("Remove"),
+                sender.clone(),
+                Msg::DeleteSource(id),
+            ),
             Msg::CheckSources => self.on_check_sources(&sender),
+            Msg::AddSourceMenu => self.open_add_source_menu(root, &sender),
+            Msg::AddLocalFolder => self.add_local_folder_dialog(root, &sender),
             Msg::AddCloudSource => {
                 use crate::ui::cloud_page::CloudInput;
+                // Offer already-connected Nextcloud servers for reuse.
+                let existing = self
+                    .library
+                    .list_sources()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|s| s.kind == "webdav")
+                    .collect();
                 self.cloud_page.emit(CloudInput::Open {
                     window: root.clone(),
                     mobile: self.is_mobile(),
+                    existing,
                 });
             }
             Msg::CloudIndexed => self.on_cloud_indexed(&sender),

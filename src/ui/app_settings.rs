@@ -1,228 +1,25 @@
 //! Settings dialog: preferences, extra sources, section order & hidden items.
 //! Split out of app_dialogs.rs – pure reordering, no functional change.
 
-use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f};
-use crate::model::Source;
 use crate::ui::app::{cover_widget, App, Msg};
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 impl App {
-    /// Opens the settings dialog (among others, sets the music folder).
-    /// Fills the "Other sources" list with **all** configured extra sources
-    /// (second local folder + Nextcloud/WebDAV). Called on open **and** after
-    /// every add/remove or a Nextcloud connect (via `Msg::SourcesChanged`), so
-    /// the display is correct immediately – without restarting the dialog.
-    pub(crate) fn fill_src_list(&self, list: &gtk::ListBox, sender: &ComponentSender<Self>) {
-        while let Some(c) = list.first_child() {
-            list.remove(&c);
-        }
-        let sources: Vec<Source> = Library::open()
-            .ok()
-            .and_then(|l| l.list_sources().ok())
-            .unwrap_or_default();
-        // No extra sources: hide the (empty) list instead of showing a
-        // placeholder row, so only the "Add local folder" button remains.
-        if sources.is_empty() {
-            list.set_visible(false);
-            return;
-        }
-        list.set_visible(true);
-        for s in sources {
-            let subtitle = match s.kind.as_str() {
-                "webdav" => s.base_url.clone().unwrap_or_default(),
-                _ => s.path.clone().unwrap_or_default(),
-            };
-            let icon = if s.kind == "webdav" {
-                "network-server-symbolic"
-            } else {
-                "drive-removable-media-symbolic"
-            };
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&s.name))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .build();
-            row.add_prefix(&gtk::Image::from_icon_name(icon));
-            let del = gtk::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .tooltip_text(gettext("Remove"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            {
-                let id = s.id;
-                let sender = sender.clone();
-                // Confirm before removing – a Nextcloud source in particular is
-                // costly to re-add (login/QR), so don't drop it on a stray tap.
-                del.connect_clicked(move |b| {
-                    crate::ui::app::confirm_destructive(
-                        b,
-                        &gettext("Remove this source?"),
-                        &gettext("Remove"),
-                        sender.clone(),
-                        Msg::DeleteSource(id),
-                    );
-                });
-            }
-            row.add_suffix(&del);
-            list.append(&row);
-        }
-    }
-
     pub(crate) fn open_settings(
         &self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
         let dialog = adw::PreferencesDialog::new();
-        let page = adw::PreferencesPage::builder()
-            .title(gettext("Library"))
-            .icon_name("folder-symbolic")
-            .name("library")
-            .build();
-        let group = adw::PreferencesGroup::builder()
-            .title(gettext("Music folder"))
-            .description(gettext("Folder for the file system view"))
-            .build();
 
-        let not_set = gettext("Not set");
-        let current = self.files.music_dir.as_deref().unwrap_or(&not_set);
-        // First entry shows only the path (no "Music folder" label).
-        let row = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(current))
-            .title_lines(2)
-            .build();
-
-        let button = gtk::Button::builder()
-            .icon_name("folder-open-symbolic")
-            .tooltip_text(gettext("Choose folder"))
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-
-        {
-            let sender = sender.clone();
-            let win = root.clone();
-            let row = row.clone();
-            button.connect_clicked(move |_| {
-                let chooser = gtk::FileDialog::builder()
-                    .title(gettext("Choose music folder"))
-                    .build();
-                let sender = sender.clone();
-                let row = row.clone();
-                chooser.select_folder(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
-                    if let Ok(folder) = res {
-                        if let Some(path) = folder.path() {
-                            row.set_title(&gtk::glib::markup_escape_text(&path.to_string_lossy()));
-                            sender.input(Msg::SetMusicDir(path));
-                        }
-                    }
-                });
-            });
-        }
-
-        row.add_suffix(&button);
-        row.set_activatable_widget(Some(&button));
-        group.add(&row);
-
-        // --- Other sources (second local folder / Nextcloud) ---
-        // Placed directly inside the "Music folder" group (no separate group), so
-        // the sources sit right below the music folder without a large gap. Uses
-        // its own DB connection (like everywhere via `Library::open`); the main
-        // window is told about changes via `Msg::SourcesChanged`.
-        let src_list = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .css_classes(["boxed-list"])
-            .margin_top(6)
-            .build();
-        group.add(&src_list);
-
-        // Fill from the DB and remember the list, so `Msg::SourcesChanged`
-        // (fired after add/remove **and** after a Nextcloud connect) can refresh
-        // it live while the dialog stays open.
-        self.fill_src_list(&src_list, sender);
-        *self.settings_src_list.borrow_mut() = Some(src_list.clone());
-
-        // Button row: add a local folder. (A Nextcloud is added via the button in
-        // the "Nextcloud" group below; both kinds land in this same list.)
-        let add_local = gtk::Button::builder()
-            .label(gettext("Add local folder"))
-            .css_classes(["flat"])
-            .build();
-        {
-            let win = root.clone();
-            let sender = sender.clone();
-            add_local.connect_clicked(move |_| {
-                let chooser = gtk::FileDialog::builder()
-                    .title(gettext("Choose folder"))
-                    .build();
-                let sender = sender.clone();
-                chooser.select_folder(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
-                    if let Ok(folder) = res {
-                        if let Some(path) = folder.path() {
-                            let name = path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("Folder")
-                                .to_string();
-                            let src = Source {
-                                id: 0,
-                                kind: "local".into(),
-                                name,
-                                position: 0,
-                                path: Some(path.to_string_lossy().into_owned()),
-                                base_url: None,
-                                username: None,
-                                password: None,
-                                music_path: None,
-                            };
-                            if let Ok(lib) = Library::open() {
-                                let _ = lib.add_source(&src);
-                            }
-                            sender.input(Msg::SourcesChanged);
-                        }
-                    }
-                });
-            });
-        }
-        let btn_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(6)
-            .halign(gtk::Align::Center)
-            .margin_top(6)
-            .build();
-        btn_row.append(&add_local);
-        group.add(&btn_row);
-        page.add(&group);
-
-        // Nextcloud directly in the library (no separate menu item).
-        let nc_group = adw::PreferencesGroup::builder()
-            .title(gettext("Nextcloud"))
-            .description(gettext(
-                "Connect a Nextcloud and index its music folder like a local library.",
-            ))
-            .build();
-        let connect = adw::ActionRow::builder()
-            .title(gettext("Connect to Nextcloud"))
-            .subtitle(gettext(
-                "Scan the login QR code or enter the details manually.",
-            ))
-            .activatable(true)
-            .build();
-        connect.add_prefix(&gtk::Image::from_icon_name("network-server-symbolic"));
-        connect.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-        {
-            let sender = sender.clone();
-            connect.connect_activated(move |_| sender.input(Msg::AddCloudSource));
-        }
-        nc_group.add(&connect);
-        page.add(&nc_group);
-        // Connected Nextcloud sources are listed (and removable) together with the
-        // local ones in the "Other sources" group above – no separate list here.
-
-        let lib_page = page;
+        // The former "Library" page (music folder, extra sources, Nextcloud
+        // connect) was removed: all of that is now managed directly on the Files
+        // page – the "+" adds a folder/Nextcloud, and a tab's context menu
+        // renames/edits/removes a source (the "Music" tab changes the primary
+        // folder).
 
         // --- Category: Sound ---
         let page = adw::PreferencesPage::builder()
@@ -287,9 +84,9 @@ impl App {
 
         let sound_page = page;
 
-        // --- Category: Meta (read online metadata) ---
+        // --- Category: Meta/Lib (read online metadata + the YouTube tool) ---
         let page = adw::PreferencesPage::builder()
-            .title(gettext("Meta"))
+            .title(gettext("Meta/Lib"))
             .icon_name("system-search-symbolic")
             .name("meta")
             .build();
@@ -479,7 +276,7 @@ impl App {
             });
         }
         gallery_group.add(&cols_row);
-        // Shown on the "Design" page (added further down), not here.
+        // Added to this "View" page below, right after "Scaling".
 
         // App scaling (whole UI, not just text): -50% .. +50% in 10% steps.
         let scale_group = adw::PreferencesGroup::builder()
@@ -505,6 +302,8 @@ impl App {
         }
         scale_group.add(&scale_row);
         page.add(&scale_group);
+        // "List display" sits right after "Scaling" on the View page.
+        page.add(&gallery_group);
 
         // System: optional desktop tray icon + window behavior.
         let tray_group = adw::PreferencesGroup::builder()
@@ -628,11 +427,10 @@ impl App {
             .name("design")
             .build();
 
-        // Appearance (light/dark theme) and the list display, built up in the
-        // "View" section above but shown here so all visual options live
-        // together on the Design page.
+        // Appearance (light/dark theme), built up in the "View" section above
+        // but shown here so the visual options live together on the Design page.
+        // ("List display" now lives on the View page, after "Scaling".)
         page.add(&theme_group);
-        page.add(&gallery_group);
 
         // Shared builders for the snapped 0–100 % sliders below.
         let mk_scale = |initial: u32| {
@@ -1053,56 +851,8 @@ impl App {
         page.add(&sections_group);
         let menu_page = page;
 
-        // --- Category: Cache (incl. the recording timeshift buffer) ---
-        let page = adw::PreferencesPage::builder()
-            .title(gettext("Cache"))
-            .icon_name("media-record-symbolic")
-            .name("cache")
-            .build();
-        let streaming_group = adw::PreferencesGroup::builder()
-            .title(gettext("Streaming"))
-            .description(gettext(
-                "Timeshift buffer for recording the currently playing station.",
-            ))
-            .build();
-        let buffer_row = adw::SpinRow::builder()
-            .title(gettext("Recording buffer (minutes)"))
-            .subtitle(gettext(
-                "Keep the last minutes of a station so you can record a song after it played. 0 turns it off.",
-            ))
-            .adjustment(&gtk::Adjustment::new(
-                self.streaming.recording_buffer_minutes as f64,
-                0.0,
-                60.0,
-                1.0,
-                5.0,
-                0.0,
-            ))
-            .build();
-        // Don't auto-focus the spin button when the "Cache" page is shown – on
-        // mobile that immediately pops the on-screen keyboard (SpinRow is a
-        // GtkEditable; the field is refocused on the first tap).
-        crate::ui::widgets::no_autofocus(&buffer_row);
-        // no_autofocus only disables the text delegate; the embedded
-        // GtkSpinButton keeps its steppers focusable, so switching to the Cache
-        // page still parked focus on it. Disable the spin button's focus too –
-        // a tap restores editing through the no_autofocus click handler.
-        if let Some(spin) = buffer_row
-            .delegate()
-            .and_then(|d| d.dynamic_cast::<gtk::Widget>().ok())
-            .and_then(|t| t.parent())
-        {
-            spin.set_focusable(false);
-        }
-        {
-            let sender = sender.clone();
-            buffer_row.connect_value_notify(move |r| {
-                sender.input(Msg::SetRecordingBufferMinutes(r.value() as u32));
-            });
-        }
-        streaming_group.add(&buffer_row);
-        page.add(&streaming_group);
-        let cache_page = page;
+        // (The former "Cache" page with the stream recording timeshift buffer
+        // was removed from the settings.)
 
         // --- Category: Hidden (far right) ---
         let page = adw::PreferencesPage::builder()
@@ -1159,7 +909,7 @@ impl App {
 
         // YouTube (optional feature; the extractor yt-dlp is downloaded at
         // runtime, never bundled, and the feature is off by default). Lives on
-        // the "Library" page (added to `lib_page` below).
+        // the "Meta" page (added to `search_page` below).
         // Enabling/disabling the YouTube *section* is done via the menu settings
         // (the "youtube" menu switch doubles as the feature toggle), so there is no
         // separate "Enable YouTube" switch here – only the yt-dlp tool management.
@@ -1206,8 +956,8 @@ impl App {
         }
         ytdlp_row.add_suffix(&dl_btn);
         yt_group.add(&ytdlp_row);
-        // The YouTube group lives at the bottom of the "Library" page.
-        lib_page.add(&yt_group);
+        // The YouTube group lives at the bottom of the "Meta" page.
+        search_page.add(&yt_group);
         // Remember the status row + button so a finished probe/download/update
         // refreshes them (see `refresh_ytdlp_status_label`).
         *self.youtube.settings_status.borrow_mut() = Some(ytdlp_row.clone());
@@ -1232,11 +982,9 @@ impl App {
         // Order of the settings pages: "View" first.
         dialog.add(&view_page);
         dialog.add(&design_page);
-        dialog.add(&lib_page);
         dialog.add(&sound_page);
         dialog.add(&search_page);
         dialog.add(&menu_page);
-        dialog.add(&cache_page);
         dialog.add(&hidden_page);
 
         // Reopen on the category last viewed, and remember it on every switch.

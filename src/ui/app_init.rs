@@ -1010,17 +1010,6 @@ impl App {
         self.rebuild_source_tabs();
         // Indexed cloud tracks may have been added/removed.
         self.reload_library_overviews();
-        // Refresh the "Other sources" list of the settings page, in case
-        // the settings dialog is currently open (e.g. right after a
-        // Nextcloud connect, which lands the source in that same list).
-        let src_list = self.settings_src_list.borrow().clone();
-        if let Some(list) = src_list {
-            if list.root().is_some() {
-                self.fill_src_list(&list, sender);
-            } else {
-                *self.settings_src_list.borrow_mut() = None;
-            }
-        }
     }
 
     /// Probe the reachability of all WebDAV sources off-thread.

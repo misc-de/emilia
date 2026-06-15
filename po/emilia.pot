@@ -2464,3 +2464,43 @@ msgstr ""
 #: src/ui/yt_page.rs:2683
 msgid "Could not load playlist"
 msgstr ""
+
+# --- Files "+" tab: add a folder/Nextcloud source ---
+msgid "Add a source"
+msgstr ""
+
+msgid "Add a local folder or connect a Nextcloud as another tab."
+msgstr ""
+
+msgid "Add folder or Nextcloud"
+msgstr ""
+
+msgid "Local folder"
+msgstr ""
+
+msgid "Connection"
+msgstr ""
+
+msgid "New connection"
+msgstr ""
+
+msgid "Using the saved login of {host} – just set the music folder"
+msgstr ""
+
+msgid "Enter manually"
+msgstr ""
+
+msgid "Change folder"
+msgstr ""
+
+msgid "Change music folder"
+msgstr ""
+
+msgid "Rename source"
+msgstr ""
+
+msgid "Meta/Lib"
+msgstr ""
+
+msgid "Subfolder on the server to index, e.g. /Music."
+msgstr ""

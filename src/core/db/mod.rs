@@ -1062,6 +1062,46 @@ impl Library {
         Ok(())
     }
 
+    /// Renames a source (the tab label).
+    pub fn set_source_name(&self, id: i64, name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE source SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )?;
+        Ok(())
+    }
+
+    /// Changes the root path of a local source (its "mount point").
+    pub fn set_source_path(&self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE source SET path = ?1 WHERE id = ?2",
+            rusqlite::params![path, id],
+        )?;
+        Ok(())
+    }
+
+    /// Changes the indexed music subpath of a WebDAV source. The caller should
+    /// re-index (see [`clear_source_tracks`](Self::clear_source_tracks)) since
+    /// the synthetic track paths are relative to this root.
+    pub fn set_source_music_path(&self, id: i64, music_path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE source SET music_path = ?1 WHERE id = ?2",
+            rusqlite::params![music_path, id],
+        )?;
+        Ok(())
+    }
+
+    /// Removes the indexed cloud tracks (`nc:<id>:…`) of a source **without**
+    /// deleting the source itself — used to re-index after its music path
+    /// changed.
+    pub fn clear_source_tracks(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM track WHERE path LIKE ?1",
+            [format!("nc:{id}:%")],
+        )?;
+        Ok(())
+    }
+
     /// Best-effort migration of existing **plaintext** secrets into the Secret
     /// Service (run once at startup). Each value is only replaced by its
     /// `secret-tool:` reference after a verifying lookup confirms the keyring

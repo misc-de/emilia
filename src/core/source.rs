@@ -18,14 +18,21 @@ fn webdav_display_name(base_url: &str) -> String {
 }
 
 /// Adds a WebDAV/Nextcloud source and stores the app password in the Secret
-/// Service when possible. Returns the source with its DB id set.
-pub fn add_webdav_source(lib: &Library, creds: Creds) -> Result<Source> {
+/// Service when possible. Returns the source with its DB id set. `name` is the
+/// tab label; `None` derives it from the host. An explicit name is used when an
+/// existing server connection is reused for a second music folder, so the new
+/// tab is distinguishable from the first (which carries the bare host name).
+pub fn add_webdav_source_named(
+    lib: &Library,
+    creds: Creds,
+    name: Option<String>,
+) -> Result<Source> {
     let password = creds.pass.clone();
     let username = creds.user.clone();
     let mut src = Source {
         id: 0,
         kind: "webdav".into(),
-        name: webdav_display_name(&creds.base_url),
+        name: name.unwrap_or_else(|| webdav_display_name(&creds.base_url)),
         position: 0,
         path: None,
         base_url: Some(creds.base_url),
