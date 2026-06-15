@@ -97,6 +97,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.4" date="2026-06-15">
+      <description>
+        <p>Music sources are now managed right on the Files page. A new "+" on the tab bar adds a local folder or connects a Nextcloud, and a right-click (or long-press) on a tab lets you rename, edit or remove it. Connecting a Nextcloud is now a guided flow that lists the servers you already use and offers either a QR scan or manual entry for a new one. The settings were tidied up to match — the separate Library and Cache pages are gone and the remaining options were regrouped.</p>
+        <p xml:lang="de">Musikquellen werden jetzt direkt auf der Dateien-Seite verwaltet. Ein neues „+" in der Reiterleiste fügt einen lokalen Ordner hinzu oder verbindet eine Nextcloud, und ein Rechtsklick (oder langes Drücken) auf einen Reiter erlaubt Umbenennen, Bearbeiten oder Entfernen. Das Verbinden einer Nextcloud ist nun ein geführter Ablauf, der bereits genutzte Server auflistet und für eine neue Verbindung wahlweise einen QR-Scan oder die manuelle Eingabe anbietet. Die Einstellungen wurden passend aufgeräumt — die eigenen Seiten „Bibliothek" und „Cache" sind weg, die übrigen Optionen neu gruppiert.</p>
+        <p>The tray options (close to tray, start hidden, no taskbar entry, gray icon) now show up only when the tray icon itself is turned on. Audio fingerprinting (AcoustID) now works inside the Flatpak, and app updates are delivered through Flatpak itself.</p>
+        <p xml:lang="de">Die Tray-Optionen (in den Tray schließen, versteckt starten, kein Taskleisten-Eintrag, graues Symbol) erscheinen nur noch, wenn das Tray-Icon selbst aktiviert ist. Die Audio-Erkennung per Fingerprint (AcoustID) funktioniert jetzt im Flatpak, und App-Updates kommen über Flatpak selbst.</p>
+      </description>
+    </release>
     <release version="0.7.3" date="2026-06-15">
       <description>
         <p>Recording fixes: stopping a radio timeshift recording — or switching to music, a podcast or another track while one is running — now keeps the song still in progress instead of discarding it. The record button also stays reachable the whole time a recording runs, so it can always be stopped, even after you leave the radio section.</p>
