@@ -313,12 +313,6 @@ impl App {
             .title(gettext("Show tray icon"))
             .active(self.tray.enabled)
             .build();
-        {
-            let sender = sender.clone();
-            tray_enabled_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayEnabled(r.is_active()));
-            });
-        }
         tray_group.add(&tray_enabled_row);
         let tray_close_row = adw::SwitchRow::builder()
             .title(gettext("Close to tray"))
@@ -368,6 +362,33 @@ impl App {
             });
         }
         tray_group.add(&tray_gray_row);
+
+        // The remaining tray options only make sense with the icon on: show them
+        // only while "Show tray icon" is active, and toggle them live with it.
+        for row in [
+            &tray_close_row,
+            &tray_hidden_row,
+            &tray_skip_row,
+            &tray_gray_row,
+        ] {
+            row.set_visible(self.tray.enabled);
+        }
+        {
+            let sender = sender.clone();
+            let dependents = [
+                tray_close_row.clone(),
+                tray_hidden_row.clone(),
+                tray_skip_row.clone(),
+                tray_gray_row.clone(),
+            ];
+            tray_enabled_row.connect_active_notify(move |r| {
+                let on = r.is_active();
+                sender.input(Msg::SetTrayEnabled(on));
+                for row in &dependents {
+                    row.set_visible(on);
+                }
+            });
+        }
         page.add(&tray_group);
 
         let view_page = page;
