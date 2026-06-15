@@ -146,8 +146,8 @@ modules:
       # MetaInfo-Top-Release + Git-Tag). Der pre-commit-Hook warnt bei Drift.
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.7.2
-        commit: 3551395b92c8d2a7183a66f6997d35c1afd3fc69
+        tag: v0.7.3
+        commit: 54242c923b16b707d9c05438bc336ac3f473724e
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json
