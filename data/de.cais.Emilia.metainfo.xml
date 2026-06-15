@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.3" date="2026-06-15">
+      <description>
+        <p>Recording fixes: stopping a radio timeshift recording — or switching to music, a podcast or another track while one is running — now keeps the song still in progress instead of discarding it. The record button also stays reachable the whole time a recording runs, so it can always be stopped, even after you leave the radio section.</p>
+        <p xml:lang="de">Aufnahme-Korrekturen: Wird ein Radio-Mitschnitt gestoppt — oder während er läuft zu Musik, einem Podcast oder einem anderen Titel gewechselt —, bleibt das gerade laufende Lied jetzt erhalten, statt verworfen zu werden. Außerdem bleibt der Aufnahme-Knopf erreichbar, solange eine Aufnahme läuft, sodass sie sich jederzeit stoppen lässt — auch nachdem man den Radio-Bereich verlassen hat.</p>
+      </description>
+    </release>
     <release version="0.7.2" date="2026-06-15">
       <description>
         <p>A performance pass makes the app lighter on the phone: the whole interface is no longer re-rendered every second while idle, navigating large libraries no longer stutters, and list covers load in the background instead of briefly freezing the view. The active tab is now clearly highlighted (brighter on dark themes), and the long status line shown while reading in your music wraps instead of running off a narrow screen.</p>
