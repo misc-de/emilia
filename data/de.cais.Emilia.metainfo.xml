@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.2" date="2026-06-15">
+      <description>
+        <p>A performance pass makes the app lighter on the phone: the whole interface is no longer re-rendered every second while idle, navigating large libraries no longer stutters, and list covers load in the background instead of briefly freezing the view. The active tab is now clearly highlighted (brighter on dark themes), and the long status line shown while reading in your music wraps instead of running off a narrow screen.</p>
+        <p xml:lang="de">Eine Performance-Überarbeitung macht die App leichter fürs Telefon: Im Leerlauf wird nicht mehr jede Sekunde die ganze Oberfläche neu gezeichnet, das Navigieren in großen Bibliotheken ruckelt nicht mehr, und Listen-Cover laden im Hintergrund, statt die Ansicht kurz einzufrieren. Der aktive Tab wird jetzt klar hervorgehoben (im dunklen Design heller), und der lange Hinweistext beim Einlesen der Musik bricht um, statt über den Rand schmaler Bildschirme hinauszulaufen.</p>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-06-15">
       <description>
         <p>Gallery covers now stay perfectly square at every window width and keep the number of columns you choose instead of reflowing. Library lists with section headings (#, 0–9, A–Z) are now grouped into a separate rounded card per section. The built-in background gets a gentle default blur — softer on light, Gaussian on dark themes — that shows through the navigation and title bar, with refreshed default backdrops. On a narrow phone screen the category label is dropped from the title bar, which the icon bar already shows. Tapping the playing title now opens the episode details for a podcast even when it was started from a playlist.</p>
