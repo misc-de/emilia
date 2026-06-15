@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.1" date="2026-06-15">
+      <description>
+        <p>Gallery covers now stay perfectly square at every window width and keep the number of columns you choose instead of reflowing. Library lists with section headings (#, 0–9, A–Z) are now grouped into a separate rounded card per section. The built-in background gets a gentle default blur — softer on light, Gaussian on dark themes — that shows through the navigation and title bar, with refreshed default backdrops. On a narrow phone screen the category label is dropped from the title bar, which the icon bar already shows. Tapping the playing title now opens the episode details for a podcast even when it was started from a playlist.</p>
+        <p xml:lang="de">Galerie-Cover bleiben jetzt bei jeder Fensterbreite exakt quadratisch und behalten die gewählte Spaltenanzahl, statt umzubrechen. Bibliothekslisten mit Abschnittsüberschriften (#, 0–9, A–Z) werden nun je Abschnitt in eine eigene, abgerundete Karte gruppiert. Der eingebaute Hintergrund erhält eine dezente Standard-Unschärfe — sanft im hellen, gaußsch im dunklen Design — die durch Navigation und Titelleiste scheint, mit aufgefrischten Standardmotiven. Auf schmalen Telefonbildschirmen entfällt die Kategorie in der Titelleiste, da die Symbolleiste sie ohnehin zeigt. Ein Tipp auf den laufenden Titel öffnet die Episodendetails eines Podcasts jetzt auch dann, wenn er aus einer Playlist gestartet wurde.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-06-14">
       <description>
         <p>The background feature now works out of the box: a built-in light or dark backdrop is shown by default, and a single switch under View → Design turns the whole background on or off. Choosing your own image is optional — clearing it falls back to the built-in default — and the filter that blurs the current cover behind the app can be adjusted independently. The library, podcast, station and YouTube galleries now reflow correctly as the window narrows, dropping a column cleanly and resizing the covers instead of leaving oversized tiles.</p>

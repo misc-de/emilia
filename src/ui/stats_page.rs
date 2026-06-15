@@ -224,6 +224,7 @@ impl StatsPage {
             .build();
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         group.add_css_class("linked");
+        group.add_css_class("emilia-tabbar");
         group.set_hexpand(true);
         let mut leader: Option<gtk::ToggleButton> = None;
         for period in [StatsPeriod::Weeks4, StatsPeriod::Year, StatsPeriod::All] {

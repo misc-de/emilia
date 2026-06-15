@@ -299,7 +299,7 @@ impl ThemeState {
                  { background-color: transparent; background-image: none; }",
             );
             css.push_str(&format!(
-                "headerbar, .toolbar {{ background-color: alpha({field}, {a}); }}\
+                "headerbar, .toolbar {{ background-color: transparent; background-image: none; }}\
                  list > row, .boxed-list > row, entry, spinbutton \
                  {{ background-color: alpha({field}, {a}); }}\
                  .emilia-tabbar button {{ background-color: alpha({field}, {a_head}); }}\

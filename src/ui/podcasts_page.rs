@@ -12,7 +12,7 @@
 //! icons in sync. Subpage navigation and the (undo) toast live on the parent's
 //! shared chrome, so they too go through `Output`.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -23,9 +23,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
-use crate::ui::app_gallery::{
-    connect_gallery_resize, gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode,
-};
+use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
@@ -101,8 +99,6 @@ pub(crate) struct PodcastsPage {
     gallery_view: bool,
     /// Gallery columns (mirror of the global setting).
     gallery_columns: u32,
-    /// One-time resize hook of the overview gallery already registered?
-    gallery_hooked: Cell<bool>,
     /// Narrow (mobile) layout → detail dialogs as bottom sheets.
     mobile: bool,
     /// (id, title, image URL, episode count) per podcast.
@@ -189,6 +185,12 @@ pub(crate) enum PodcastsInput {
     ShowPodcastEpisodeDetail {
         podcast_id: i64,
         index: usize,
+    },
+    /// Episode detail resolved from the episode's audio URL — used when the
+    /// now-playing track is a podcast started from a playlist (no podcast id /
+    /// index at hand).
+    ShowEpisodeDetailByUrl {
+        url: String,
     },
     ToggleDownload {
         url: String,
@@ -404,7 +406,6 @@ impl Component for PodcastsPage {
             playing: false,
             gallery_view: false,
             gallery_columns: 4,
-            gallery_hooked: Cell::new(false),
             mobile: false,
             podcast_items: Vec::new(),
             podcasts_list: podcasts_list.clone(),
@@ -580,6 +581,9 @@ impl Component for PodcastsPage {
             PodcastsInput::ShowEpisodeDetail(index) => self.open_episode_detail(&sender, index),
             PodcastsInput::ShowPodcastEpisodeDetail { podcast_id, index } => {
                 self.open_podcast_episode_detail(&sender, podcast_id, index)
+            }
+            PodcastsInput::ShowEpisodeDetailByUrl { url } => {
+                self.open_episode_detail_by_url(&sender, &url)
             }
             PodcastsInput::ToggleDownload { url, title } => {
                 self.toggle_episode_download(&sender, url, title)
@@ -818,7 +822,7 @@ impl PodcastsPage {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
         }
-        fb.set_min_children_per_line(1);
+        fb.set_min_children_per_line(self.gallery_columns);
         fb.set_max_children_per_line(self.gallery_columns);
         fb.set_homogeneous(true);
         fb.set_row_spacing(8);
@@ -868,10 +872,6 @@ impl PodcastsPage {
         }
 
         spawn_gallery_decode(to_decode);
-        size_gallery_tiles_when_ready(fb);
-        if !self.gallery_hooked.replace(true) {
-            connect_gallery_resize(fb);
-        }
     }
 
     /// Builds the "Newest" list: newest episodes across **all** subscriptions,
@@ -1016,6 +1016,25 @@ impl PodcastsPage {
                 description: ep.description,
             },
         );
+    }
+
+    /// Like [`Self::open_podcast_episode_detail`] but identified by the episode's
+    /// audio URL — used when the now-playing track is a podcast started from a
+    /// playlist (no podcast id / index at hand). Resolves both from the URL.
+    fn open_episode_detail_by_url(&self, sender: &ComponentSender<Self>, url: &str) {
+        let Some(podcast_id) = self.library.podcast_id_for_episode_url(url).ok().flatten() else {
+            return;
+        };
+        let Some(index) = self
+            .library
+            .episodes(podcast_id)
+            .unwrap_or_default()
+            .iter()
+            .position(|e| e.audio_url == url)
+        else {
+            return;
+        };
+        self.open_podcast_episode_detail(sender, podcast_id, index);
     }
 
     /// Builds the episode detail dialog (shared by "Newest" and a podcast's

@@ -24,9 +24,7 @@ use crate::core::db::Library;
 use crate::core::youtube::{self, YtKind, YtResult};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{SortCrit, YtView};
-use crate::ui::app_gallery::{
-    connect_gallery_resize, gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode,
-};
+use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover};
 use crate::ui::app_views::natural_key;
@@ -288,7 +286,6 @@ pub(crate) struct YtPage {
     /// Mirror of the global gallery setting.
     gallery_view: bool,
     gallery_columns: u32,
-    gallery_hooked: Cell<bool>,
     /// Narrow (mobile) layout → detail dialogs as bottom sheets.
     mobile: bool,
     /// yt-dlp can no longer parse YouTube → show the warning banner. Mirror of
@@ -727,7 +724,6 @@ impl Component for YtPage {
             playing: false,
             gallery_view: false,
             gallery_columns: 4,
-            gallery_hooked: Cell::new(false),
             mobile: false,
             ytdlp_broken: false,
             yt_view: YtView::Recent,
@@ -1307,7 +1303,7 @@ impl YtPage {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
         }
-        fb.set_min_children_per_line(1);
+        fb.set_min_children_per_line(self.gallery_columns);
         fb.set_max_children_per_line(self.gallery_columns);
         fb.set_homogeneous(true);
         fb.set_row_spacing(8);
@@ -1355,10 +1351,6 @@ impl YtPage {
             fb.append(&cell);
         }
         spawn_gallery_decode(to_decode);
-        size_gallery_tiles_when_ready(fb);
-        if !self.gallery_hooked.replace(true) {
-            connect_gallery_resize(fb);
-        }
     }
 
     /// Builds the "Newest videos" list across all subscribed channels.

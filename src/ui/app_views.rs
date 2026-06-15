@@ -3172,6 +3172,19 @@ impl App {
                     .unwrap_or_else(|| video_id.clone());
                 self.yt_page
                     .emit(crate::ui::yt_page::YtInput::ShowVideoDetail { video_id, title });
+            } else if path
+                .to_str()
+                .and_then(|p| self.library.podcast_id_for_episode_url(p).ok().flatten())
+                .is_some()
+            {
+                // A podcast episode (e.g. played from a playlist, where it lands
+                // in the queue with no episode context) → its episode detail, not
+                // the file-tag track info which is empty for a remote URL.
+                self.podcasts_page.emit(
+                    crate::ui::podcasts_page::PodcastsInput::ShowEpisodeDetailByUrl {
+                        url: path.to_string_lossy().into_owned(),
+                    },
+                );
             } else {
                 // Detail view of the running track (as a file entry).
                 self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));

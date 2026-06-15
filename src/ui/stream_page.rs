@@ -24,9 +24,7 @@ use crate::core::streaming::StationResult;
 use crate::i18n::{gettext, gettext_f};
 use crate::model::{RecordingItem, StreamItem};
 use crate::ui::app::{SortCrit, StreamView};
-use crate::ui::app_gallery::{
-    connect_gallery_resize, gallery_cell, size_gallery_tiles_when_ready, spawn_gallery_decode,
-};
+use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover, SortToggle};
 use crate::ui::app_views::natural_key;
@@ -145,8 +143,6 @@ pub(crate) struct StreamPage {
     stations_gallery: bool,
     /// Tiles per row in the stations gallery (mirrors the global setting).
     gallery_columns: u32,
-    /// One-time resize hook of the stations gallery already registered?
-    gallery_hooked: std::cell::Cell<bool>,
     /// Per-row alphabetical headings of the stations / recordings lists (name sort).
     station_headers: Rc<RefCell<Option<Vec<String>>>>,
     recording_headers: Rc<RefCell<Option<Vec<String>>>>,
@@ -423,7 +419,6 @@ impl Component for StreamPage {
             recordings_no_group,
             stations_gallery: stations_gallery_on,
             gallery_columns,
-            gallery_hooked: std::cell::Cell::new(false),
             station_headers,
             recording_headers,
             streams_gallery: streams_gallery.clone(),
@@ -724,7 +719,7 @@ impl StreamPage {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
         }
-        fb.set_min_children_per_line(1);
+        fb.set_min_children_per_line(self.gallery_columns);
         fb.set_max_children_per_line(self.gallery_columns);
         fb.set_homogeneous(true);
         fb.set_row_spacing(8);
@@ -774,10 +769,6 @@ impl StreamPage {
             fb.append(&cell);
         }
         spawn_gallery_decode(to_decode);
-        size_gallery_tiles_when_ready(fb);
-        if !self.gallery_hooked.replace(true) {
-            connect_gallery_resize(fb);
-        }
     }
 
     /// Orders the stations list by the chosen sort (by name; direction applies).

@@ -1543,13 +1543,24 @@ impl App {
                 swatch.set_draw_func(move |_, cr, w, h| draw_swatch(cr, w, h, color.get()));
             }
 
+            // With no color set, the button shows an edit icon (inviting a pick);
+            // the color swatch replaces it once a color exists.
+            let edit_icon = gtk::Image::from_icon_name("document-edit-symbolic");
+            let has_color = color.get().is_some();
+            swatch.set_visible(has_color);
+            edit_icon.set_visible(!has_color);
+            let btn_content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            btn_content.set_valign(gtk::Align::Center);
+            btn_content.append(&edit_icon);
+            btn_content.append(&swatch);
+
             // The clear button only makes sense once a color is actually set.
             let reset = gtk::Button::builder()
                 .icon_name("edit-clear-symbolic")
                 .tooltip_text(gettext("Reset"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
-                .visible(color.get().is_some())
+                .visible(has_color)
                 .build();
 
             // The swatch button opens a color dialog; picking persists the color.
@@ -1557,13 +1568,14 @@ impl App {
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .tooltip_text(gettext("Choose color"))
-                .child(&swatch)
+                .child(&btn_content)
                 .build();
             {
                 let sender = sender.clone();
                 let color = color.clone();
                 let swatch = swatch.clone();
                 let reset = reset.clone();
+                let edit_icon = edit_icon.clone();
                 btn.connect_clicked(move |b| {
                     let dialog = gtk::ColorDialog::new();
                     dialog.set_with_alpha(false);
@@ -1573,6 +1585,7 @@ impl App {
                     let color = color.clone();
                     let swatch = swatch.clone();
                     let reset = reset.clone();
+                    let edit_icon = edit_icon.clone();
                     dialog.choose_rgba(
                         parent.as_ref(),
                         Some(&start),
@@ -1580,6 +1593,8 @@ impl App {
                         move |res| {
                             if let Ok(rgba) = res {
                                 color.set(Some(rgba));
+                                swatch.set_visible(true);
+                                edit_icon.set_visible(false);
                                 swatch.queue_draw();
                                 reset.set_visible(true);
                                 sender.input(set(Some(rgba_to_hex(&rgba))));
@@ -1593,9 +1608,11 @@ impl App {
                 let color = color.clone();
                 let swatch = swatch.clone();
                 let reset_btn = reset.clone();
+                let edit_icon = edit_icon.clone();
                 reset.connect_clicked(move |_| {
                     color.set(None);
-                    swatch.queue_draw();
+                    swatch.set_visible(false);
+                    edit_icon.set_visible(true);
                     reset_btn.set_visible(false);
                     sender.input(set(None));
                 });

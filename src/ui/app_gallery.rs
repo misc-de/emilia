@@ -3,28 +3,103 @@ use relm4::gtk;
 
 use crate::ui::app::{App, Msg};
 
-/// A gallery tile: square cover (or placeholder icon) with the title as a
-/// semi-transparent band at the bottom (overlay). Click/long-press handlers are
-/// added by the caller (FlowBox).
-const GALLERY_TILE_DEFAULT: i32 = 110;
+/// A square container: it forces its single child into a 1:1 box by reporting a
+/// height equal to the width it is handed (height-for-width). Gallery covers wrap
+/// in this so they stay proportional with zero lag — the square size is decided
+/// during layout itself, not via a deferred `size_request` that trails a frame.
+mod square_bin {
+    use gtk::glib;
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use relm4::gtk;
+    use std::cell::RefCell;
+
+    /// Preferred (natural) side before the FlowBox stretches the tile to the cell
+    /// width; the child's own texture size is intentionally ignored.
+    const DEFAULT_SIDE: i32 = 110;
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct SquareBin {
+            pub child: RefCell<Option<gtk::Widget>>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for SquareBin {
+            const NAME: &'static str = "EmiliaSquareBin";
+            type Type = super::SquareBin;
+            type ParentType = gtk::Widget;
+        }
+
+        impl ObjectImpl for SquareBin {
+            fn dispose(&self) {
+                if let Some(child) = self.child.borrow_mut().take() {
+                    child.unparent();
+                }
+            }
+        }
+
+        impl WidgetImpl for SquareBin {
+            fn request_mode(&self) -> gtk::SizeRequestMode {
+                gtk::SizeRequestMode::HeightForWidth
+            }
+
+            fn measure(
+                &self,
+                orientation: gtk::Orientation,
+                for_size: i32,
+            ) -> (i32, i32, i32, i32) {
+                if orientation == gtk::Orientation::Vertical {
+                    // Height equals the width we are given → always square.
+                    let side = for_size.max(0);
+                    (side, side, -1, -1)
+                } else {
+                    // Width can shrink to nothing; prefer the default side. The
+                    // child's texture size is ignored so it can't inflate cells.
+                    (0, DEFAULT_SIDE, -1, -1)
+                }
+            }
+
+            fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+                if let Some(child) = self.child.borrow().as_ref() {
+                    child.allocate(width, height, baseline, None);
+                }
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct SquareBin(ObjectSubclass<imp::SquareBin>) @extends gtk::Widget;
+    }
+
+    impl SquareBin {
+        pub fn new(child: &impl IsA<gtk::Widget>) -> Self {
+            let obj: Self = glib::Object::new();
+            child.set_parent(&obj);
+            obj.imp().child.replace(Some(child.clone().upcast()));
+            obj
+        }
+    }
+}
+use square_bin::SquareBin;
 
 pub(crate) fn gallery_cell(
     cover_path: Option<&str>,
     icon: &str,
     title: &str,
-) -> (gtk::Overlay, Option<gtk::Picture>) {
+) -> (SquareBin, Option<gtk::Picture>) {
     let overlay = gtk::Overlay::new();
-    overlay.set_hexpand(false);
-    overlay.set_halign(gtk::Align::Start);
-    overlay.set_valign(gtk::Align::Start);
-    overlay.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
+    overlay.set_halign(gtk::Align::Fill);
+    overlay.set_valign(gtk::Align::Fill);
 
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     frame.set_overflow(gtk::Overflow::Hidden);
-    frame.set_hexpand(false);
+    frame.set_hexpand(true);
+    frame.set_vexpand(true);
     frame.set_halign(gtk::Align::Fill);
     frame.set_valign(gtk::Align::Fill);
-    frame.set_size_request(GALLERY_TILE_DEFAULT, GALLERY_TILE_DEFAULT);
     frame.add_css_class("card");
 
     let picture = match cover_path {
@@ -60,7 +135,10 @@ pub(crate) fn gallery_cell(
     label.set_halign(gtk::Align::Fill);
     label.add_css_class("emilia-gallery-title");
     overlay.add_overlay(&label);
-    (overlay, picture)
+
+    let cell = SquareBin::new(&overlay);
+    cell.set_hexpand(true);
+    (cell, picture)
 }
 
 /// Decodes covers (path -> target `Picture`) in a background thread and
@@ -91,109 +169,6 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     });
 }
 
-fn gallery_width_hint(fb: &gtk::FlowBox) -> i32 {
-    if fb.width() > 1 {
-        return fb.width();
-    }
-    let mut ancestor = fb.parent();
-    while let Some(w) = ancestor {
-        if w.width() > 1 {
-            let margins = fb.margin_start() + fb.margin_end();
-            return (w.width() - margins).max(1);
-        }
-        ancestor = w.parent();
-    }
-    0
-}
-
-/// Sizes each gallery tile to a square that fills the available row width.
-/// Instead of always sizing for the configured maximum column count (which made
-/// the FlowBox keep oversized tiles and wrap to fewer columns badly as the
-/// window shrank), this picks how many columns of at least `MIN_TILE` actually
-/// fit — capped at the configured maximum — and sizes the tiles so exactly that
-/// many fill the row. The grid therefore drops a column cleanly and rescales.
-pub(crate) fn size_gallery_tiles(fb: &gtk::FlowBox) {
-    let w = gallery_width_hint(fb);
-    if w <= 1 {
-        return;
-    }
-    let spacing = fb.column_spacing() as i32;
-    let max_cols = fb.max_children_per_line().max(1) as i32;
-    // Smallest tile before a column is dropped. Kept low enough that phone
-    // galleries keep their 3 columns and the desktop its 4, while narrower
-    // windows reflow to fewer, correctly sized tiles.
-    const MIN_TILE: i32 = 96;
-    let cols = ((w + spacing) / (MIN_TILE + spacing)).clamp(1, max_cols);
-    // FlowBox lays out `cols` tiles with `cols - 1` gaps between them; size each
-    // so they fill `w` exactly (a fifth one then never fits → no bad wrap).
-    let tile = ((w - spacing * (cols - 1)) / cols).max(64);
-    let mut child = fb.first_child();
-    while let Some(c) = child {
-        let next = c.next_sibling();
-        if let Some(inner) = c
-            .downcast_ref::<gtk::FlowBoxChild>()
-            .and_then(|f| f.child())
-        {
-            inner.set_size_request(tile, tile);
-            if let Some(frame) = inner.first_child() {
-                frame.set_size_request(tile, tile);
-            }
-        }
-        child = next;
-    }
-}
-
-/// Like `size_gallery_tiles`, but tolerant of being called before the FlowBox
-/// has a real allocation.
-pub(crate) fn size_gallery_tiles_when_ready(fb: &gtk::FlowBox) {
-    if fb.width() > 1 {
-        size_gallery_tiles(fb);
-        return;
-    }
-    let tries = std::cell::Cell::new(0u32);
-    fb.add_tick_callback(move |fb, _| {
-        if fb.width() > 1 {
-            size_gallery_tiles(fb);
-            return gtk::glib::ControlFlow::Break;
-        }
-        tries.set(tries.get() + 1);
-        if tries.get() > 240 {
-            gtk::glib::ControlFlow::Break
-        } else {
-            gtk::glib::ControlFlow::Continue
-        }
-    });
-}
-
-/// Keeps a gallery's tiles sized to the available width across window resizes:
-/// on every map it re-sizes the tiles, and once it walks up to the enclosing
-/// `ScrolledWindow` and re-sizes whenever its horizontal page size (the visible
-/// width) changes. Call once per FlowBox (callers gate it with their own
-/// "hooked" flag so `connect_map` isn't wired up repeatedly).
-pub(crate) fn connect_gallery_resize(fb: &gtk::FlowBox) {
-    let pagesize_done = std::rc::Rc::new(std::cell::Cell::new(false));
-    fb.connect_map(move |fb| {
-        size_gallery_tiles_when_ready(fb);
-        if pagesize_done.get() {
-            return;
-        }
-        let mut ancestor = fb.parent();
-        while let Some(w) = ancestor {
-            if let Ok(sw) = w.clone().downcast::<gtk::ScrolledWindow>() {
-                let weak = fb.downgrade();
-                sw.hadjustment().connect_page_size_notify(move |_| {
-                    if let Some(fb) = weak.upgrade() {
-                        size_gallery_tiles(&fb);
-                    }
-                });
-                pagesize_done.set(true);
-                break;
-            }
-            ancestor = w.parent();
-        }
-    });
-}
-
 /// A styled section heading shared by the grouped library overviews — year
 /// sections (date sort) and alphabetical sections (name sort) — in both the list
 /// `set_header_func` and the gallery sections.
@@ -208,17 +183,33 @@ pub(crate) fn section_header_label(text: &str) -> gtk::Label {
 }
 
 /// A `gtk::ListBox` `set_header_func` that draws the alphabetical/year section
-/// headings from `labels` (one per row, same order as the rows) on the **window
-/// background** (the `emilia-list-section` class) so the heading sits above the
-/// `boxed-list` card rather than inside it. `None`/out-of-range → no header.
-/// Shared by the library overviews and the standalone components.
+/// headings from `labels` (one per row, same order as the rows) and turns each
+/// heading block into its own rounded card: the heading sits on the window
+/// background, and the first/last row of every section get the `emilia-sec-top`
+/// / `emilia-sec-bottom` markers (CSS rounds them and the list gets the
+/// `emilia-sectioned` class). `None`/out-of-range → no header, no markers (one
+/// plain `boxed-list`). Shared by the library overviews and standalone components.
 pub(crate) fn list_section_header_func(
     labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
 ) -> impl Fn(&gtk::ListBoxRow, Option<&gtk::ListBoxRow>) {
+    fn set_class(w: &gtk::ListBoxRow, class: &str, on: bool) {
+        if on {
+            w.add_css_class(class);
+        } else {
+            w.remove_css_class(class);
+        }
+    }
     move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
+        let list = row.parent().and_downcast::<gtk::ListBox>();
         let guard = labels.borrow();
         let Some(labels) = guard.as_ref() else {
+            // No grouping → a single plain boxed-list, no per-section cards.
             row.set_header(None::<&gtk::Widget>);
+            set_class(row, "emilia-sec-top", false);
+            set_class(row, "emilia-sec-bottom", false);
+            if let Some(list) = &list {
+                list.remove_css_class("emilia-sectioned");
+            }
             return;
         };
         let i = row.index();
@@ -229,18 +220,28 @@ pub(crate) fn list_section_header_func(
         let i = i as usize;
         let cur = labels.get(i);
         let prev = i.checked_sub(1).and_then(|p| labels.get(p));
-        match cur {
-            Some(cur) if i == 0 || prev != Some(cur) => {
-                let label = section_header_label(cur);
-                // Drop the outer margins so the window-background strip bleeds
-                // fully (no card colour peeking); spacing comes from CSS padding.
-                label.set_margin_top(0);
-                label.set_margin_bottom(0);
-                label.set_margin_start(0);
-                label.add_css_class("emilia-list-section");
-                row.set_header(Some(&label));
-            }
-            _ => row.set_header(None::<&gtk::Widget>),
+        let next = labels.get(i + 1);
+        // First row of a section (heading + top rounding) / last row (bottom
+        // rounding). At the list ends `prev`/`next` are `None`, which differs
+        // from `cur` and so correctly marks the boundary.
+        let is_top = cur.is_some() && (i == 0 || prev != cur);
+        let is_bottom = cur.is_some() && next != cur;
+        if let Some(list) = &list {
+            list.add_css_class("emilia-sectioned");
+        }
+        set_class(row, "emilia-sec-top", is_top);
+        set_class(row, "emilia-sec-bottom", is_bottom);
+        if let (true, Some(cur)) = (is_top, cur) {
+            let label = section_header_label(cur);
+            // Drop the outer margins so the window-background strip bleeds fully
+            // (no card colour peeking); spacing comes from CSS padding.
+            label.set_margin_top(0);
+            label.set_margin_bottom(0);
+            label.set_margin_start(0);
+            label.add_css_class("emilia-list-section");
+            row.set_header(Some(&label));
+        } else {
+            row.set_header(None::<&gtk::Widget>);
         }
     }
 }
@@ -315,7 +316,10 @@ impl App {
         while let Some(c) = fb.first_child() {
             fb.remove(&c);
         }
-        fb.set_min_children_per_line(1);
+        // Fixed grid: exactly the configured number of columns per row, every
+        // tile the same width. No reflow to fewer columns — the user picks the
+        // grid, and each tile is kept square by `SquareBin`.
+        fb.set_min_children_per_line(self.libview.gallery_columns);
         fb.set_max_children_per_line(self.libview.gallery_columns);
         fb.set_homogeneous(true);
         fb.set_row_spacing(8);
@@ -368,15 +372,8 @@ impl App {
         }
 
         spawn_gallery_decode(to_decode);
-        size_gallery_tiles_when_ready(fb);
-        if hook
-            && self
-                .libview
-                .gallery_hooked
-                .borrow_mut()
-                .insert(fb.as_ptr() as usize)
-        {
-            connect_gallery_resize(fb);
-        }
+        // `SquareBin` keeps every tile square during layout, so there is no
+        // resize hook or deferred sizing to wire up anymore.
+        let _ = hook;
     }
 }

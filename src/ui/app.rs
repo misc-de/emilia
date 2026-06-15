@@ -436,8 +436,6 @@ pub(crate) struct LibView {
     pub(crate) loading_label: Option<String>,
     /// Galleries (artist/album) for which an on-demand fetch already ran this session.
     pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
-    /// Gallery FlowBoxes whose resize hook has already been connected once.
-    pub(crate) gallery_hooked: std::cell::RefCell<std::collections::HashSet<usize>>,
 }
 
 impl LibView {
@@ -2971,17 +2969,33 @@ impl Component for App {
                 None if setting_on(&library, "design_cover_blur") => {
                     crate::ui::theme::BgFilter::Gaussian
                 }
-                None => crate::ui::theme::BgFilter::Off,
+                // Fresh install: a gentle blur on the built-in bubbles — Gaussian
+                // on a dark theme, the lighter Soft blur on light.
+                None if adw::StyleManager::default().is_dark() => {
+                    crate::ui::theme::BgFilter::Gaussian
+                }
+                None => crate::ui::theme::BgFilter::Soft,
             },
             bg_filter_strength: library
                 .get_setting("design_bg_filter_strength")
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(50)
+                .unwrap_or(10)
                 .min(100),
-            bg_nav: setting_on(&library, "design_bg_nav"),
-            bg_titlebar: setting_on(&library, "design_bg_titlebar"),
+            // Default on: let the background show behind nav and title bar.
+            bg_nav: library
+                .get_setting("design_bg_nav")
+                .ok()
+                .flatten()
+                .map(|s| s != "0")
+                .unwrap_or(true),
+            bg_titlebar: library
+                .get_setting("design_bg_titlebar")
+                .ok()
+                .flatten()
+                .map(|s| s != "0")
+                .unwrap_or(true),
             text_color: library
                 .get_setting("design_text_color")
                 .ok()
@@ -2997,7 +3011,7 @@ impl Component for App {
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(40)
+                .unwrap_or(20)
                 .min(100),
         };
         let theme = crate::ui::theme::ThemeState::new(ui_scale, design);
@@ -3297,7 +3311,6 @@ impl Component for App {
                 loading: false,
                 loading_label: None,
                 gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
-                gallery_hooked: std::cell::RefCell::new(std::collections::HashSet::new()),
             },
             refresh_pending: 0,
             scanning: false,

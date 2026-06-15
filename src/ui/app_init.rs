@@ -470,16 +470,22 @@ impl App {
                     .and_then(|p| p.tag())
                     .is_some_and(|t| t == "main");
                 if on_main {
-                    // Just the section name (category), dimmed + centred; the empty
-                    // title hides the bold primary label.
-                    let cur = stack.visible_child_name();
-                    let cur = cur.as_deref().unwrap_or("files");
+                    // The title bar shows just the section (category) name, dimmed
+                    // + centred (the empty title hides the bold primary label). In
+                    // narrow/mobile mode the top icon nav already conveys the
+                    // category, so the title bar stays empty — no redundant label.
                     win_title.set_title("");
-                    win_title.set_subtitle(
-                        &section_meta(cur)
-                            .map(|(l, _)| gettext(l))
-                            .unwrap_or_default(),
-                    );
+                    if narrow.get() {
+                        win_title.set_subtitle("");
+                    } else {
+                        let cur = stack.visible_child_name();
+                        let cur = cur.as_deref().unwrap_or("files");
+                        win_title.set_subtitle(
+                            &section_meta(cur)
+                                .map(|(l, _)| gettext(l))
+                                .unwrap_or_default(),
+                        );
+                    }
                 } else if narrow.get() {
                     // Mobile subpage: keep it quiet (the back arrow gives context).
                     win_title.set_title("");
@@ -1109,7 +1115,7 @@ impl App {
                  button.emilia-recording image { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  image.emilia-recording { animation: emilia-blink 1.1s ease-in-out infinite; }\
                  button.emilia-nav-btn:checked image { color: @accent_color; }\
-                 button.emilia-nav-btn:checked, .emilia-tabbar button:checked { background-color: alpha(@window_fg_color, 0.3); }\
+                 button.emilia-nav-btn:checked { background-color: alpha(@window_fg_color, 0.3); }\
                  box.emilia-step { background-color: alpha(@window_fg_color, 0.12); border-radius: 999px; }\
                  box.emilia-step label { font-weight: bold; }\
                  box.emilia-step-active { background-color: @accent_bg_color; }\
@@ -1127,7 +1133,11 @@ impl App {
                  label.emilia-lyric-active { color: @accent_color; font-weight: bold; font-size: 1.5em; }\
                  box.emilia-bg-scrim { background-color: alpha(@window_bg_color, 0.45); }\
                  window.emilia-tray-popup { background-color: @popover_bg_color; border-radius: 12px; }\
-                 .emilia-tray-popup-clip { border-radius: 12px; }",
+                 .emilia-tray-popup-clip { border-radius: 12px; }\
+                 list.emilia-sectioned, list.emilia-sectioned.boxed-list { background: none; border: none; box-shadow: none; }\
+                 list.emilia-sectioned > row { background-color: @card_bg_color; border-left: 1px solid @card_shade_color; border-right: 1px solid @card_shade_color; border-bottom: 1px solid @card_shade_color; }\
+                 list.emilia-sectioned > row.emilia-sec-top { border-top: 1px solid @card_shade_color; border-top-left-radius: 12px; border-top-right-radius: 12px; }\
+                 list.emilia-sectioned > row.emilia-sec-bottom { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; margin-bottom: 6px; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
