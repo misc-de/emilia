@@ -1,0 +1,594 @@
+//! View/event handlers (on_*): activate, navigation, detail openers, refresh,
+//! search actions and the background-command (Cmd) result handlers.
+//! Split out of app_views.rs – pure reordering, no functional change.
+
+use adw::prelude::*;
+use relm4::prelude::*;
+use relm4::{adw, gtk};
+
+use crate::i18n::gettext;
+use crate::ui::app::{online_available, ActiveSource, App, Cmd, CtxTarget};
+use crate::ui::app_views::natural_key;
+use crate::ui::fs_row::{FsEntry, FsInput, RowOpts};
+
+impl App {
+    /// Activate a file-browser row: descend into a folder, follow a remote
+    /// (Nextcloud) entry, or play/toggle a tapped file.
+    pub(crate) fn on_activate(&mut self, index: usize, sender: &ComponentSender<Self>) {
+        let entry = self
+            .libview
+            .entries
+            .guard()
+            .get(index)
+            .map(|r| r.entry.clone());
+        let Some(entry) = entry else {
+            return;
+        };
+        // Remote entries (Nextcloud) go through their own path.
+        if let crate::ui::fs_row::FsEntry::RemoteDir { rel_path, .. } = &entry {
+            self.files.remote_browse = Some(rel_path.clone());
+            self.load_dir(sender);
+            return;
+        }
+        if let crate::ui::fs_row::FsEntry::RemoteFile { rel_path, .. } = &entry {
+            let rel = rel_path.clone();
+            self.activate_remote(&rel);
+            return;
+        }
+        {
+            if entry.is_dir() {
+                let Some(p) = entry.path().cloned() else {
+                    return;
+                };
+                self.files.browse_dir = Some(p);
+                self.load_dir(sender);
+            } else {
+                let Some(path) = entry.path().cloned() else {
+                    return;
+                };
+                // Tapping the active song again → toggle playback
+                // (pause/resume), instead of restarting.
+                if !self.toggle_if_active_file(&path) {
+                    // Is a real queue currently running? Then slip the
+                    // single song in between and resume the queue
+                    // afterwards at its spot (it stays intact).
+                    if self.mini.playing
+                        && self.transport.queue.len() > 1
+                        && self.transport.interrupted_queue.is_none()
+                    {
+                        self.transport.interrupted_queue =
+                            Some((self.transport.queue.clone(), self.transport.queue_pos));
+                    }
+                    self.transport.queue = vec![path];
+                    self.transport.queue_pos = 0;
+                    // A single tapped file is not an album play (see
+                    // `PlaySession::source`); a running queue is only paused, not
+                    // counted, and resumes with `next_source` already consumed.
+                    self.transport.next_source = Some("single");
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
+        }
+    }
+
+    /// Toggle membership of a file-browser row in the user queue (a second tap
+    /// removes it again). Local and remote (nc:) paths are both supported.
+    pub(crate) fn on_toggle_queue(&mut self, index: usize) {
+        // Local files use their path, remote (NC) files their synthetic
+        // nc: path (resolved via `entry_files`), so both can be queued.
+        let entry = self
+            .libview
+            .entries
+            .guard()
+            .get(index)
+            .filter(|r| !r.entry.is_dir())
+            .map(|r| r.entry.clone());
+        let path = entry.and_then(|e| self.entry_files(&e).into_iter().next());
+        if let Some(path) = path {
+            // Toggle membership in the user queue (never the active
+            // context): a second tap removes it again.
+            if let Some(pos) = self.transport.user_queue.iter().position(|p| *p == path) {
+                self.transport.user_queue.remove(pos);
+                self.toast(&gettext("Removed from queue"));
+            } else {
+                self.transport.user_queue.push(path);
+                self.toast(&gettext("Will play next"));
+            }
+            self.reload_queue_list();
+            self.refresh_queue_icons();
+            self.save_queue();
+        }
+    }
+
+    /// Open the detail/context menu for a file-browser row.
+    pub(crate) fn on_show_context_menu(
+        &mut self,
+        index: usize,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let entry = self
+            .libview
+            .entries
+            .guard()
+            .get(index)
+            .map(|r| CtxTarget::Fs(r.entry.clone()));
+        if entry.is_some() {
+            self.nav.context_target = entry;
+            self.open_context_menu(root, sender);
+        }
+    }
+
+    /// Open the detail/context menu for an artist (by overview index).
+    pub(crate) fn on_show_artist_detail(
+        &mut self,
+        index: usize,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let meta = self
+            .libview
+            .artists
+            .guard()
+            .get(index)
+            .map(|c| c.meta.clone())
+            .or_else(|| self.libview.artists_overview.get(index).cloned());
+        if let Some(meta) = meta {
+            // Fetch the photo of the opened artist with priority.
+            self.fetch_focus_artist(sender, &meta.name);
+            self.nav.context_target = Some(CtxTarget::Artist(meta));
+            self.open_context_menu(root, sender);
+        }
+    }
+
+    /// Open the detail/context menu for an album (by overview index).
+    pub(crate) fn on_show_album_detail(
+        &mut self,
+        index: usize,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let meta = self
+            .libview
+            .albums
+            .guard()
+            .get(index)
+            .map(|c| c.meta.clone())
+            .or_else(|| self.libview.albums_overview.get(index).cloned());
+        if let Some(meta) = meta {
+            // Fetch the cover of the opened album with priority.
+            self.fetch_focus_album(sender, &meta.artist, &meta.album);
+            self.nav.context_target = Some(CtxTarget::Album(meta));
+            self.open_context_menu(root, sender);
+        }
+    }
+
+    /// Open the detail page of an album via (artist, album) (from subpages).
+    pub(crate) fn on_show_album_detail_for(
+        &mut self,
+        artist: String,
+        album: String,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        self.fetch_focus_album(sender, &artist, &album);
+        // Load album metadata (for cover/year), otherwise an empty entry.
+        let meta = self
+            .library
+            .get_album_meta(&artist, &album)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| crate::model::AlbumMeta::pending(artist, album));
+        let mut meta = meta;
+        if meta
+            .cover_path
+            .as_deref()
+            .is_none_or(|p| p.trim().is_empty())
+        {
+            meta.cover_path = self.album_cover_for(&meta.artist, &meta.album);
+        }
+        self.nav.context_target = Some(CtxTarget::Album(meta));
+        self.open_context_menu(root, sender);
+    }
+
+    /// Open the songs subpage of an album from the album overview (short tap).
+    pub(crate) fn on_show_album_tracks(&mut self, index: usize, sender: &ComponentSender<Self>) {
+        // Album overview: open by album name (artist irrelevant).
+        let album = self
+            .libview
+            .albums
+            .guard()
+            .get(index)
+            .map(|c| c.meta.album.clone())
+            .or_else(|| {
+                self.libview
+                    .albums_overview
+                    .get(index)
+                    .map(|m| m.album.clone())
+            });
+        if let Some(album) = album {
+            self.open_album_by_name(sender, &album);
+        }
+    }
+
+    /// Open the detail/context menu for a concert entry (by index).
+    pub(crate) fn on_show_concert_detail(
+        &mut self,
+        index: usize,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        if let Some((scope, key, _, is_dir)) = self.concerts.concert_items.get(index).cloned() {
+            self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
+            self.open_context_menu(root, sender);
+        }
+    }
+
+    /// Short tap on an artist: open its albums & songs subpage.
+    pub(crate) fn on_open_artist_tracks(&mut self, index: usize, sender: &ComponentSender<Self>) {
+        let meta = self
+            .libview
+            .artists
+            .guard()
+            .get(index)
+            .map(|c| c.meta.clone())
+            .or_else(|| self.libview.artists_overview.get(index).cloned());
+        if let Some(meta) = meta {
+            // Fetch the photo of the opened artist with priority.
+            self.fetch_focus_artist(sender, &meta.name);
+            self.open_artist_tracks(sender, &meta);
+        }
+    }
+
+    /// File browser: go one level up (local parent dir or remote rel segment).
+    pub(crate) fn on_nav_up(&mut self, sender: &ComponentSender<Self>) {
+        // Remote source: one rel segment up.
+        if let Some(rel) = self.files.remote_browse.clone() {
+            if !rel.is_empty() {
+                let parent = match rel.rfind('/') {
+                    Some(0) | None => String::new(),
+                    Some(i) => rel[..i].to_string(),
+                };
+                self.files.remote_browse = Some(parent);
+                self.load_dir(sender);
+            }
+            return;
+        }
+        if self.can_go_up() {
+            if let Some(parent) = self.files.browse_dir.as_ref().and_then(|d| d.parent()) {
+                self.files.browse_dir = Some(parent.to_path_buf());
+                self.load_dir(sender);
+            }
+        }
+    }
+
+    /// File browser: jump back to the root of the active source.
+    pub(crate) fn on_files_go_start(&mut self, sender: &ComponentSender<Self>) {
+        // Remote source: back to the music root of the source.
+        if self.files.remote_browse.is_some() {
+            if self.files.remote_browse.as_deref() != Some("") {
+                self.files.remote_browse = Some(String::new());
+                self.load_dir(sender);
+            }
+            return;
+        }
+        if let Some(root) = self.files.root_dir.clone() {
+            if self.files.browse_dir.as_ref() != Some(&root) {
+                self.files.browse_dir = Some(root);
+                self.load_dir(sender);
+            }
+        }
+    }
+
+    /// Pull-to-refresh: reload the current dir, rescan the library, re-index
+    /// cloud sources and refresh podcast/YouTube subscriptions.
+    pub(crate) fn on_refresh(&mut self, sender: &ComponentSender<Self>) {
+        self.load_dir(sender);
+        // Each helper reports whether it actually spawned a background
+        // worker; we count those so the loading spinner stays up until
+        // the last one reports back (see the matching `Cmd::*` arms).
+        let mut pending = 0u32;
+        // Re-index the cloud sources too, so their structure and covers
+        // update (existing sources are only indexed when first added).
+        // On completion this rebuilds the views and fetches covers.
+        // `manual` → fetch online regardless of the auto-enrich setting.
+        if self.reindex_cloud_sources(sender, true) {
+            pending += 1;
+        }
+        // "Rescan" also updates the local library (artists/albums).
+        if self.start_scan(sender, false, true) {
+            pending += 1;
+        }
+        // Also pull new content for the media subscriptions: every
+        // podcast feed and every YouTube channel (background workers;
+        // both need a connection, so skip them when offline).
+        if online_available() {
+            // Podcasts refresh in their own component; it reports back whether a
+            // worker started (`PodcastRefreshStarted`) and when it finished
+            // (`PodcastRefreshFinished`), which adjust `refresh_pending` then.
+            self.podcasts_page
+                .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
+            // YouTube refreshes in its own component too (reports start/finish via
+            // `YtRefreshStarted`/`YtRefreshFinished`, which adjust the spinner).
+            if self.youtube.enabled {
+                self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshAll);
+            }
+        }
+        self.refresh_pending = pending;
+    }
+
+    /// Quiet background tick: backfill missing artist photos & online covers.
+    pub(crate) fn on_auto_enrich_tick(&mut self, sender: &ComponentSender<Self>) {
+        // Quiet backfill of missing artist photos & online covers in the
+        // background (rate-limited in the worker). Only if desired, a
+        // folder is set, no run is currently active and there is network.
+        // If a (full) fetch is already running, the `enriching` lock takes effect and
+        // this tick fizzles out – no pileup.
+        if self.enrich_state.auto_enrich
+            && !self.enrich_state.enriching
+            && self.files.music_dir.is_some()
+            && online_available()
+        {
+            self.run_enrich(sender, false, true);
+        }
+    }
+
+    /// A song hit of the library search was activated: play it directly, or
+    /// open its album for remote (`nc:`) hits that can't be played as a file.
+    pub(crate) fn on_search_play_track(&mut self, path: String, sender: &ComponentSender<Self>) {
+        // A real local file is played directly; remote (`nc:`) hits can't
+        // be played as a file, so fall back to opening their album.
+        if std::path::Path::new(&path).is_file() {
+            self.play_path(&path, false);
+        } else if let Some(album) = self
+            .library
+            .track_by_path(&path)
+            .ok()
+            .flatten()
+            .and_then(|t| t.album)
+            .filter(|a| !a.trim().is_empty())
+        {
+            self.open_album_by_name(sender, &album);
+        }
+    }
+
+    /// An artist hit of the library search was activated: open its subpage.
+    pub(crate) fn on_search_open_artist(&mut self, name: String, sender: &ComponentSender<Self>) {
+        self.fetch_focus_artist(sender, &name);
+        let meta = self
+            .library
+            .get_artist_meta(&name)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| crate::model::ArtistMeta::pending(name.clone()));
+        self.open_artist_tracks(sender, &meta);
+    }
+
+    /// Download a remote (active-source) file for offline playback.
+    pub(crate) fn on_ctx_download_remote(&mut self, rel: String, sender: &ComponentSender<Self>) {
+        let Some(creds) = self.active_webdav_creds() else {
+            return;
+        };
+        let Some(dest) = self.remote_cache_path(&rel) else {
+            return;
+        };
+        self.toast(&gettext("Downloading …"));
+        sender.spawn_oneshot_command(move || {
+            match crate::core::webdav::download(&creds, &rel, &dest) {
+                Ok(()) => Cmd::RemoteDownloaded(Ok((rel, dest))),
+                Err(e) => Cmd::RemoteDownloaded(Err(e.to_string())),
+            }
+        });
+    }
+
+    /// Open the detail view of the currently running track (or YouTube video).
+    pub(crate) fn on_open_now_playing(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
+            // A running YouTube video (synthetic `yt:<id>` path) needs its
+            // own detail (channel / URL / thumbnail) – not the file-tag
+            // based track info, which would be empty/wrong for it.
+            if let Some(video_id) = path.to_str().and_then(crate::core::youtube::parse_yt_path) {
+                let title = self
+                    .youtube
+                    .video_titles
+                    .get(&video_id)
+                    .cloned()
+                    .or_else(|| self.library.yt_title(&video_id).ok().flatten())
+                    .filter(|t| !t.trim().is_empty())
+                    .or_else(|| self.mini.now_playing.clone())
+                    .unwrap_or_else(|| video_id.clone());
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::ShowVideoDetail { video_id, title });
+            } else if path
+                .to_str()
+                .and_then(|p| self.library.podcast_id_for_episode_url(p).ok().flatten())
+                .is_some()
+            {
+                // A podcast episode (e.g. played from a playlist, where it lands
+                // in the queue with no episode context) → its episode detail, not
+                // the file-tag track info which is empty for a remote URL.
+                self.podcasts_page.emit(
+                    crate::ui::podcasts_page::PodcastsInput::ShowEpisodeDetailByUrl {
+                        url: path.to_string_lossy().into_owned(),
+                    },
+                );
+            } else {
+                // Detail view of the running track (as a file entry).
+                self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
+                self.open_context_menu(root, sender);
+            }
+        }
+    }
+
+    /// Worker result: populate the file browser with a local folder's entries
+    /// and restore the remembered scroll position.
+    pub(crate) fn on_cmd_entries(&mut self, mut entries: Vec<FsEntry>) {
+        // Apply the file browser's chosen sort (folders stay above files).
+        self.sort_fs_entries(&mut entries);
+        // Alphabetical headings (by name) for the list, like the library overviews.
+        *self.libview.files_headers.borrow_mut() = self.files_section_headers(&entries);
+        // "Mixed album": more than one distinct artist in the folder.
+        let distinct: std::collections::HashSet<String> = entries
+            .iter()
+            .filter_map(|e| e.effective_artist())
+            .collect();
+        let opts = RowOpts {
+            show_artist: distinct.len() > 1,
+        };
+        let queue = self.transport.queue.clone();
+        let mut guard = self.libview.entries.guard();
+        guard.clear();
+        for e in entries {
+            let queued = e.path().is_some_and(|ep| queue.iter().any(|p| p == ep));
+            guard.push_back((e, opts, queued));
+        }
+        drop(guard);
+        self.libview.entries.widget().invalidate_headers();
+        self.libview.loading = false;
+
+        // This folder is now shown; restore the remembered scroll position (from
+        // the last visit) after the layout.
+        self.files.shown_dir = self.files.browse_dir.clone();
+        if let (Some(dir), Some(sc)) = (self.files.browse_dir.clone(), self.fs_scroller()) {
+            if let Some(&value) = self.files.fs_scroll.borrow().get(&dir) {
+                for delay in [50u64, 250] {
+                    let sc = sc.clone();
+                    gtk::glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(delay),
+                        move || sc.vadjustment().set_value(value),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Worker result: populate the file browser with a remote (WebDAV) folder
+    /// listing, then kick off background tag fetching. Stale results (the source
+    /// or folder switched meanwhile) are discarded.
+    pub(crate) fn on_cmd_remote_entries(
+        &mut self,
+        result: Result<Vec<crate::core::webdav::DavEntry>, String>,
+        source: ActiveSource,
+        rel: String,
+        sender: &ComponentSender<Self>,
+    ) {
+        // Discard the stale result (source/folder switched in the meantime).
+        if self.files.active_source != source
+            || self.files.remote_browse.as_deref() != Some(rel.as_str())
+        {
+            return;
+        }
+        self.libview.loading = false;
+        match result {
+            Err(e) => {
+                tracing::warn!("WebDAV listing failed: {e}");
+                self.libview.entries.guard().clear();
+                // Surface the actual reason persistently (not just a transient
+                // toast) so the user can see *why* the folder is empty.
+                self.files.remote_error = Some(e);
+            }
+            Ok(list) => {
+                self.files.remote_error = None;
+                let (mut dirs, mut files): (Vec<_>, Vec<_>) =
+                    list.into_iter().partition(|e| e.is_dir);
+                dirs.sort_by_key(|a| natural_key(&a.name));
+                files.sort_by_key(|a| natural_key(&a.name));
+                // Source id, to read already-indexed track metadata
+                // (title/artist/duration) straight from the DB.
+                let source_id = match &source {
+                    ActiveSource::Source(id) => Some(*id),
+                    _ => None,
+                };
+                let mut entries: Vec<FsEntry> = Vec::with_capacity(dirs.len() + files.len());
+                for d in dirs {
+                    entries.push(FsEntry::remote_dir(d.rel_path, d.name));
+                }
+                for f in files {
+                    let cached = self.remote_cache_path(&f.rel_path).filter(|p| p.exists());
+                    // If the source was indexed, the tags already live in
+                    // the DB → show them at once instead of re-reading them
+                    // over the network row by row.
+                    let meta = source_id.and_then(|id| {
+                        self.library
+                            .track_by_path(&crate::core::webdav::nc_path(id, &f.rel_path))
+                            .ok()
+                            .flatten()
+                    });
+                    let (title, artist, duration_ms) = match meta {
+                        Some(t) => (Some(t.title), t.artist, t.duration_ms),
+                        None => (None, None, None),
+                    };
+                    entries.push(FsEntry::remote_file(
+                        f.rel_path,
+                        f.name,
+                        cached,
+                        title,
+                        artist,
+                        duration_ms,
+                    ));
+                }
+                // Apply the file browser's chosen sort (folders stay above files);
+                // overrides the default name order built above.
+                self.sort_fs_entries(&mut entries);
+                *self.libview.files_headers.borrow_mut() = self.files_section_headers(&entries);
+                let distinct: std::collections::HashSet<String> = entries
+                    .iter()
+                    .filter_map(|e| e.effective_artist())
+                    .collect();
+                let opts = RowOpts {
+                    show_artist: distinct.len() > 1,
+                };
+                {
+                    let mut guard = self.libview.entries.guard();
+                    guard.clear();
+                    for e in entries {
+                        guard.push_back((e, opts, false));
+                    }
+                }
+                self.libview.entries.widget().invalidate_headers();
+                self.refresh_queue_icons();
+                // Fetch the tags of the remote files in the background.
+                if let Some(src) = self.active_remote_source() {
+                    self.start_remote_tag_fetch(sender, &src);
+                }
+            }
+        }
+    }
+
+    /// Worker result: apply backfilled tags (title/artist/duration) to the
+    /// matching remote file rows.
+    pub(crate) fn on_cmd_remote_tags(
+        &mut self,
+        tags: Vec<(String, Option<String>, Option<String>, Option<i64>)>,
+    ) {
+        // rel path → factory index, then send tags to the respective row.
+        let map: std::collections::HashMap<String, usize> = {
+            let guard = self.libview.entries.guard();
+            (0..guard.len())
+                .filter_map(|i| {
+                    guard.get(i).and_then(|r| match &r.entry {
+                        FsEntry::RemoteFile { rel_path, .. } => Some((rel_path.clone(), i)),
+                        _ => None,
+                    })
+                })
+                .collect()
+        };
+        for (rel, title, artist, duration_ms) in tags {
+            if let Some(&i) = map.get(&rel) {
+                self.libview.entries.send(
+                    i,
+                    FsInput::SetTags {
+                        title,
+                        artist,
+                        duration_ms,
+                    },
+                );
+            }
+        }
+    }
+}
