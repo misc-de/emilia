@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.5" date="2026-06-17">
+      <description>
+        <p>Closing the app now shuts it down completely instead of leaving an invisible copy running in the background. This keeps the lock-screen and media-key controls reliable — they no longer end up controlling a stale leftover instance.</p>
+        <p xml:lang="de">Das Schließen der App beendet sie jetzt vollständig, statt eine unsichtbare Kopie im Hintergrund weiterlaufen zu lassen. Dadurch bleiben die Steuerung über den Sperrbildschirm und die Medientasten zuverlässig — sie sprechen nicht länger eine übrig gebliebene alte Instanz an.</p>
+      </description>
+    </release>
     <release version="0.7.4" date="2026-06-15">
       <description>
         <p>Music sources are now managed right on the Files page. A new "+" on the tab bar adds a local folder or connects a Nextcloud, and a right-click (or long-press) on a tab lets you rename, edit or remove it. Connecting a Nextcloud is now a guided flow that lists the servers you already use and offers either a QR scan or manual entry for a new one. The settings were tidied up to match — the separate Library and Cache pages are gone and the remaining options were regrouped.</p>
