@@ -47,11 +47,46 @@ pub struct MicRecorder {
     /// Set once [`stop`](Self::stop) has taken over teardown, so `Drop` does not
     /// also delete the (now finalized) file.
     stopped: bool,
-    /// Current input level, normalized 0.0–1.0, stored as `f32` bits. Fed from
-    /// the pipeline's `level` element via a bus sync handler (off the UI thread);
-    /// the UI polls it (via [`level_handle`](Self::level_handle) + [`level_from`])
-    /// to drive the recording animation.
-    level: Arc<AtomicU32>,
+    /// Live per-channel input level for the recording meter (see [`MicLevel`]).
+    /// Fed from the pipeline's `level` element via a bus sync handler (off the UI
+    /// thread); the UI polls it via [`level_handle`](Self::level_handle).
+    level: MicLevel,
+}
+
+/// Live microphone input level for the recording meter. Lock-free: the mic
+/// thread stores, the UI poll reads. `lr` packs the left channel (high 32 bits)
+/// and right channel (low 32 bits) as `f32` bits, each normalized 0.0–1.0;
+/// `channels` is the source channel count (1 = mono → the meter draws a single
+/// bar, ≥2 = stereo → two bars).
+#[derive(Clone)]
+pub struct MicLevel {
+    lr: Arc<AtomicU64>,
+    channels: Arc<AtomicU32>,
+}
+
+impl MicLevel {
+    fn new() -> Self {
+        Self {
+            lr: Arc::new(AtomicU64::new(0)),
+            channels: Arc::new(AtomicU32::new(1)),
+        }
+    }
+
+    fn store(&self, left: f32, right: f32, channels: u32) {
+        let packed = (u64::from(left.to_bits()) << 32) | u64::from(right.to_bits());
+        self.lr.store(packed, Ordering::Relaxed);
+        self.channels.store(channels.max(1), Ordering::Relaxed);
+    }
+
+    /// `(left, right, channels)`. For mono `left == right` and `channels == 1`.
+    pub fn read(&self) -> (f32, f32, u32) {
+        let v = self.lr.load(Ordering::Relaxed);
+        (
+            f32::from_bits((v >> 32) as u32),
+            f32::from_bits(v as u32),
+            self.channels.load(Ordering::Relaxed),
+        )
+    }
 }
 
 impl MicRecorder {
@@ -99,7 +134,7 @@ impl MicRecorder {
         // handler runs on GStreamer's thread, so it only does cheap, lock-free
         // work; the frequent level messages are dropped (not queued) while
         // EOS/Error still reach `stop`'s bus wait via `Pass`.
-        let level = Arc::new(AtomicU32::new(0));
+        let level = MicLevel::new();
         if let Some(bus) = pipeline.bus() {
             let level_w = level.clone();
             bus.set_sync_handler(move |_, msg| {
@@ -107,7 +142,12 @@ impl MicRecorder {
                     if let Some(s) = el.structure() {
                         if s.name() == "level" {
                             if let Ok(peaks) = s.get::<gst::glib::ValueArray>("peak") {
-                                level_w.store(peak_to_norm(&peaks).to_bits(), Ordering::Relaxed);
+                                let p: &[gst::glib::Value] = &peaks;
+                                let channels = p.len().max(1) as u32;
+                                let left = p.first().map(norm_db).unwrap_or(0.0);
+                                // Mono: mirror the single channel onto the right.
+                                let right = p.get(1).map(norm_db).unwrap_or(left);
+                                level_w.store(left, right, channels);
                             }
                             return gst::BusSyncReply::Drop;
                         }
@@ -133,10 +173,10 @@ impl MicRecorder {
         })
     }
 
-    /// A cloneable handle to the live input level (normalized 0.0–1.0), so a UI
-    /// poll timeout can read it without holding the recorder. Decode it with
-    /// [`level_from`]. Stays 0 while the `level` element is unavailable.
-    pub fn level_handle(&self) -> Arc<AtomicU32> {
+    /// A cloneable handle to the live per-channel input level, so a UI poll
+    /// timeout can read it without holding the recorder. Read it with
+    /// [`MicLevel::read`]. Stays 0 while the `level` element is unavailable.
+    pub fn level_handle(&self) -> MicLevel {
         self.level.clone()
     }
 
@@ -193,27 +233,16 @@ impl Drop for MicRecorder {
     }
 }
 
-/// Decodes a level handle (see [`MicRecorder::level_handle`]) into a 0.0–1.0
-/// magnitude, so callers need not know it is `f32`-bits in an atomic.
-pub fn level_from(handle: &AtomicU32) -> f32 {
-    f32::from_bits(handle.load(Ordering::Relaxed))
-}
-
-/// Maps the `level` element's per-channel peak values (dBFS, ≤ 0) to a single
-/// normalized 0.0–1.0 magnitude. Takes the loudest channel and folds the usual
-/// ~-60 dB noise floor up to 0, so quiet rooms read near 0 and speech swings the
-/// meter clearly.
-fn peak_to_norm(peaks: &[gst::glib::Value]) -> f32 {
+/// Maps one `level` peak value (dBFS, ≤ 0) to a normalized 0.0–1.0 magnitude,
+/// folding the usual ~-60 dB noise floor up to 0, so a quiet room reads near 0
+/// and speech swings the meter clearly.
+fn norm_db(v: &gst::glib::Value) -> f32 {
     const FLOOR_DB: f64 = -60.0;
-    let max_db = peaks
-        .iter()
-        .filter_map(|v| v.get::<f64>().ok())
-        .filter(|db| db.is_finite())
-        .fold(f64::NEG_INFINITY, f64::max);
-    if !max_db.is_finite() {
-        return 0.0;
-    }
-    (((max_db - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)) as f32
+    let db = match v.get::<f64>() {
+        Ok(d) if d.is_finite() => d,
+        _ => return 0.0,
+    };
+    (((db - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)) as f32
 }
 
 /// Finds a free `<dir>/<base>.<ext>` (appends ` (2)`, … if needed), mirroring the

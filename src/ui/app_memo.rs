@@ -46,12 +46,13 @@ pub(crate) struct MemoState {
     /// Whether a recording is in progress (drives the `#[watch]` player-bar
     /// record button without borrowing the recorder).
     pub(crate) recording: bool,
-    /// Live input level (0.0–1.0), smoothed for the recording meter; read by the
-    /// meter's draw function, written by the poll timeout while recording.
-    pub(crate) rec_level: Rc<Cell<f32>>,
-    /// Frame counter giving the meter bars some life even at a steady level.
-    rec_frame: Rc<Cell<u32>>,
-    /// The recording-level meter (equalizer bars), redrawn each poll tick.
+    /// Live input levels (0.0–1.0) per channel, smoothed for the recording
+    /// meter; read by the meter's draw function, written by the poll timeout.
+    pub(crate) rec_level_l: Rc<Cell<f32>>,
+    pub(crate) rec_level_r: Rc<Cell<f32>>,
+    /// Source channel count (1 = mono → a single bar; ≥2 → two bars).
+    pub(crate) rec_channels: Rc<Cell<u32>>,
+    /// The recording-level meter (horizontal level bars), redrawn each poll tick.
     pub(crate) rec_meter: gtk::DrawingArea,
     /// The running poll timeout while recording; removed on stop.
     rec_tick: Option<gtk::glib::SourceId>,
@@ -62,12 +63,17 @@ impl MemoState {
     /// by `#[local_ref]` in the view macro; the meter's draw function is wired up
     /// here against the shared level/frame cells.
     pub(crate) fn new(memos_list: gtk::ListBox, rec_meter: gtk::DrawingArea) -> Self {
-        let rec_level = Rc::new(Cell::new(0.0_f32));
-        let rec_frame = Rc::new(Cell::new(0_u32));
+        let rec_level_l = Rc::new(Cell::new(0.0_f32));
+        let rec_level_r = Rc::new(Cell::new(0.0_f32));
+        let rec_channels = Rc::new(Cell::new(1_u32));
         {
-            let (lvl, frame) = (rec_level.clone(), rec_frame.clone());
+            let (l, r, ch) = (
+                rec_level_l.clone(),
+                rec_level_r.clone(),
+                rec_channels.clone(),
+            );
             rec_meter.set_draw_func(move |_, cr, w, h| {
-                draw_meter(cr, w, h, lvl.get(), frame.get());
+                draw_meter(cr, w, h, l.get(), r.get(), ch.get());
             });
         }
         MemoState {
@@ -78,8 +84,9 @@ impl MemoState {
             expanded_cats: Rc::new(RefCell::new(HashSet::new())),
             recorder: None,
             recording: false,
-            rec_level,
-            rec_frame,
+            rec_level_l,
+            rec_level_r,
+            rec_channels,
             rec_meter,
             rec_tick: None,
         }
@@ -222,36 +229,41 @@ impl App {
 
     /// Polls the live mic level (~30 fps) and redraws the meter while recording.
     /// Fast attack / slow release keeps the bars lively without flicker.
-    fn start_rec_meter(&mut self, handle: std::sync::Arc<std::sync::atomic::AtomicU32>) {
+    fn start_rec_meter(&mut self, handle: crate::core::mic::MicLevel) {
         self.stop_rec_meter();
-        let (level, frame, meter) = (
-            self.memo.rec_level.clone(),
-            self.memo.rec_frame.clone(),
+        let (left, right, channels, meter) = (
+            self.memo.rec_level_l.clone(),
+            self.memo.rec_level_r.clone(),
+            self.memo.rec_channels.clone(),
             self.memo.rec_meter.clone(),
         );
         let id = gtk::glib::timeout_add_local(std::time::Duration::from_millis(33), move || {
-            let raw = crate::core::mic::level_from(&handle);
-            let prev = level.get();
-            // Jump up instantly, ease down gently.
-            let smoothed = if raw > prev {
-                raw
-            } else {
-                prev * 0.80 + raw * 0.20
+            let (raw_l, raw_r, ch) = handle.read();
+            // Jump up instantly, ease down gently — per channel.
+            let smooth = |cell: &Rc<Cell<f32>>, raw: f32| {
+                let prev = cell.get();
+                cell.set(if raw > prev {
+                    raw
+                } else {
+                    prev * 0.80 + raw * 0.20
+                });
             };
-            level.set(smoothed);
-            frame.set(frame.get().wrapping_add(1));
+            smooth(&left, raw_l);
+            smooth(&right, raw_r);
+            channels.set(ch);
             meter.queue_draw();
             gtk::glib::ControlFlow::Continue
         });
         self.memo.rec_tick = Some(id);
     }
 
-    /// Stops the meter poll and clears the level so the next recording starts flat.
+    /// Stops the meter poll and clears the levels so the next recording starts flat.
     fn stop_rec_meter(&mut self) {
         if let Some(id) = self.memo.rec_tick.take() {
             id.remove();
         }
-        self.memo.rec_level.set(0.0);
+        self.memo.rec_level_l.set(0.0);
+        self.memo.rec_level_r.set(0.0);
         self.memo.rec_meter.queue_draw();
     }
 
@@ -768,28 +780,46 @@ fn confirm_remove_category(
     first.present(Some(root));
 }
 
-/// Draws the recording level meter: a small row of equalizer bars whose height
-/// follows the live input `level` (0.0–1.0), with a per-bar sine wobble (driven
-/// by `frame`) so it stays animated even at a steady volume. Red, to match the
-/// recording state. Quiet input collapses the bars to a thin baseline.
-fn draw_meter(cr: &gtk::cairo::Context, w: i32, h: i32, level: f32, frame: u32) {
-    const BARS: usize = 7;
-    const GAP: f64 = 3.0;
+/// Draws the recording level meter like a hardware audio meter: a horizontal
+/// bar that fills from the left with the live input level, coloured
+/// green→yellow→red along its length. Mono shows a single bar; stereo shows two
+/// stacked bars (left over right). The fill clips a fixed full-width gradient,
+/// so a point's colour is constant (low level = green only, loud = into the red).
+fn draw_meter(cr: &gtk::cairo::Context, w: i32, h: i32, left: f32, right: f32, channels: u32) {
     let (w, h) = (w as f64, h as f64);
-    let bar_w = ((w - GAP * (BARS as f64 - 1.0)) / BARS as f64).max(1.0);
-    let level = level.clamp(0.0, 1.0) as f64;
-    for i in 0..BARS {
-        // Slow sine offset per bar → an equalizer-like ripple, scaled by level.
-        let phase = frame as f64 * 0.30 + i as f64 * 0.9;
-        let wobble = 0.55 + 0.45 * phase.sin(); // 0.10 – 1.00
-        let mag = (level * wobble).clamp(0.05, 1.0);
-        let bar_h = (h * mag).max(2.0);
-        let x = i as f64 * (bar_w + GAP);
-        let y = (h - bar_h) / 2.0; // vertically centered
-        cr.set_source_rgba(0.91, 0.30, 0.26, 0.45 + 0.55 * mag);
-        cr.rectangle(x, y, bar_w, bar_h);
-        let _ = cr.fill();
+    if channels >= 2 {
+        let gap = 3.0;
+        let bar_h = ((h - gap) / 2.0).max(2.0);
+        draw_level_bar(cr, w, 0.0, bar_h, left as f64);
+        draw_level_bar(cr, w, bar_h + gap, bar_h, right as f64);
+    } else {
+        // Mono: a single, vertically centred bar (one channel → one bar).
+        let bar_h = (h * 0.55).clamp(6.0, h);
+        draw_level_bar(cr, w, (h - bar_h) / 2.0, bar_h, left as f64);
     }
+}
+
+/// One horizontal meter bar of width `w`, height `h` at vertical offset `y`,
+/// filled to `level` (0.0–1.0) over a dim track.
+fn draw_level_bar(cr: &gtk::cairo::Context, w: f64, y: f64, h: f64, level: f64) {
+    let level = level.clamp(0.0, 1.0);
+    // Dim track behind the bar.
+    cr.rectangle(0.0, y, w, h);
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.10);
+    let _ = cr.fill();
+    if level <= 0.0 {
+        return;
+    }
+    // Green→yellow→red gradient fixed over the FULL width, drawn only up to the
+    // level — so each position keeps its colour instead of stretching.
+    let grad = gtk::cairo::LinearGradient::new(0.0, 0.0, w, 0.0);
+    grad.add_color_stop_rgb(0.0, 0.18, 0.78, 0.35); // green
+    grad.add_color_stop_rgb(0.55, 0.85, 0.80, 0.20); // yellow
+    grad.add_color_stop_rgb(0.78, 0.95, 0.55, 0.15); // orange
+    grad.add_color_stop_rgb(1.0, 0.90, 0.22, 0.20); // red
+    let _ = cr.set_source(&grad);
+    cr.rectangle(0.0, y, (w * level).max(1.0), h);
+    let _ = cr.fill();
 }
 
 /// A small dim count label (suffix on a category expander).

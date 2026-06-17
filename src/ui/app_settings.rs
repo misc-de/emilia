@@ -301,6 +301,33 @@ impl App {
             });
         }
         scale_group.add(&scale_row);
+        // Mobile only: scale just the top-bar menu icons, -50 .. +50 % in 10 %
+        // steps. Hidden on desktop, where the sidebar shows icon + label.
+        let menu_scale_row = adw::SpinRow::builder()
+            .title(gettext("Menu icon size"))
+            .subtitle(gettext("Scales the menu icons (mobile, percent)"))
+            .adjustment(&gtk::Adjustment::new(
+                self.library
+                    .get_setting("menu_icon_scale")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0),
+                -50.0,
+                50.0,
+                10.0,
+                10.0,
+                0.0,
+            ))
+            .build();
+        menu_scale_row.set_visible(self.nav.narrow.get());
+        {
+            let sender = sender.clone();
+            menu_scale_row.connect_value_notify(move |r| {
+                sender.input(Msg::SetMenuIconScale(r.value() as i32));
+            });
+        }
+        scale_group.add(&menu_scale_row);
         page.add(&scale_group);
         // "List display" sits right after "Scaling" on the View page.
         page.add(&gallery_group);

@@ -323,6 +323,12 @@ pub(crate) struct YtPage {
     recent_list: gtk::Box,
     search_results: Vec<YtResult>,
     search_failed: bool,
+    /// Monotonic search counter. Every new search bumps it; command results
+    /// carrying an older value are ignored. This keeps the "Searching …"
+    /// spinner up until the *current* search returns — a still-running worker
+    /// from a previous search (e.g. after switching Songs→Playlists→Channels)
+    /// can no longer clear the spinner early or flash stale results.
+    search_seq: u64,
     search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox, gtk::Box)>>>,
     video_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
     ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
@@ -477,9 +483,9 @@ pub(crate) enum YtOutput {
 
 #[derive(Debug)]
 pub(crate) enum YtCmd {
-    SearchResults(Vec<YtResult>),
-    SearchFailed,
-    SearchThumbsReady,
+    SearchResults(u64, Vec<YtResult>),
+    SearchFailed(u64),
+    SearchThumbsReady(u64),
     ChannelFetched(Option<String>),
     ChannelsRefreshed,
     VideoMeta {
@@ -742,6 +748,7 @@ impl Component for YtPage {
             recent_list: yt_recent_list.clone(),
             search_results: Vec::new(),
             search_failed: false,
+            search_seq: 0,
             search: Rc::new(RefCell::new(None)),
             video_play_buttons: Rc::new(RefCell::new(Vec::new())),
             ctx_video_play: Rc::new(RefCell::new(None)),
@@ -863,21 +870,23 @@ impl Component for YtPage {
             YtInput::Search(term, kind) => {
                 let term = term.trim().to_string();
                 if !term.is_empty() {
+                    self.search_seq = self.search_seq.wrapping_add(1);
+                    let seq = self.search_seq;
                     sender.spawn_command(move |out| {
                         let results = match youtube::search(&term, kind, 25) {
                             Ok(r) => r,
                             Err(_) => {
-                                let _ = out.send(YtCmd::SearchFailed);
+                                let _ = out.send(YtCmd::SearchFailed(seq));
                                 return;
                             }
                         };
-                        let _ = out.send(YtCmd::SearchResults(results.clone()));
+                        let _ = out.send(YtCmd::SearchResults(seq, results.clone()));
                         for r in &results {
                             if let Some(t) = r.thumbnail.as_deref() {
                                 crate::core::online::cache_youtube_thumb(t);
                             }
                         }
-                        let _ = out.send(YtCmd::SearchThumbsReady);
+                        let _ = out.send(YtCmd::SearchThumbsReady(seq));
                     });
                 }
             }
@@ -1001,17 +1010,27 @@ impl Component for YtPage {
 
     fn update_cmd(&mut self, cmd: YtCmd, sender: ComponentSender<Self>, _root: &Self::Root) {
         match cmd {
-            YtCmd::SearchResults(results) => {
+            YtCmd::SearchResults(seq, results) => {
+                if seq != self.search_seq {
+                    return; // a newer search is already in flight
+                }
                 self.search_failed = false;
                 self.search_results = results;
                 self.rebuild_youtube_search_results(&sender);
             }
-            YtCmd::SearchFailed => {
+            YtCmd::SearchFailed(seq) => {
+                if seq != self.search_seq {
+                    return;
+                }
                 self.search_failed = true;
                 self.search_results.clear();
                 self.rebuild_youtube_search_results(&sender);
             }
-            YtCmd::SearchThumbsReady => self.rebuild_youtube_search_results(&sender),
+            YtCmd::SearchThumbsReady(seq) => {
+                if seq == self.search_seq {
+                    self.rebuild_youtube_search_results(&sender);
+                }
+            }
             YtCmd::ChannelFetched(title) => {
                 let _ = sender.output(YtOutput::SetLoading(None));
                 self.reload_channels(&sender);
@@ -1793,7 +1812,7 @@ impl YtPage {
                     row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
                 }
                 YtKind::Playlist => {
-                    row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                    row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
                 }
             }
             {
@@ -2021,11 +2040,13 @@ impl YtPage {
         let initial = cover_path
             .as_deref()
             .and_then(|p| gtk::gdk::Texture::from_filename(p).ok());
-        cover_box.append(&crate::ui::widgets::rounded_image(
-            initial.as_ref(),
-            "video-x-generic-symbolic",
-            200,
-        ));
+        let cover =
+            crate::ui::widgets::rounded_image(initial.as_ref(), "video-x-generic-symbolic", 200);
+        // `rounded_image` (via `cover_frame`) defaults to `halign: Start` for
+        // list/header use; in this centred detail dialog that left the cover
+        // stuck to the left edge with empty space on the right. Override it.
+        cover.set_halign(gtk::Align::Center);
+        cover_box.append(&cover);
         content.append(&cover_box);
 
         let (p_artist, p_album, p_title) = youtube::split_title(title, stored_channel.as_deref());

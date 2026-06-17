@@ -25,21 +25,21 @@ use std::path::PathBuf;
 use crate::ui::app::App;
 use crate::ui::widgets::decode_scaled;
 
-/// Built-in default backgrounds ("bubbles"), shown when the background feature
-/// is on but the user has not chosen an image. Embedded so there's no Flatpak
-/// install path to resolve; materialized to the data dir on first use (the
-/// background loader needs a file path).
-const LIGHT_BUBBLES: &[u8] = include_bytes!("../../data/backgrounds/light_bubbles.jpg");
-const DARK_BUBBLES: &[u8] = include_bytes!("../../data/backgrounds/dark_bubbles.jpg");
+/// Built-in default backgrounds (a festival/concert photo per light & dark
+/// mode), shown when the background feature is on but the user has not chosen an
+/// image. Embedded so there's no Flatpak install path to resolve; materialized
+/// to the data dir on first use (the background loader needs a file path).
+const LIGHT_DEFAULT_BG: &[u8] = include_bytes!("../../data/backgrounds/light_concert.jpg");
+const DARK_DEFAULT_BG: &[u8] = include_bytes!("../../data/backgrounds/dark_concert.jpg");
 
 /// Writes the built-in default background for the current light/dark mode into
 /// the data dir (once) and returns its path. `None` only if the data dir is
 /// unavailable.
 pub(crate) fn default_bg_path(dark: bool) -> Option<PathBuf> {
     let (bytes, name) = if dark {
-        (DARK_BUBBLES, "default-bg-dark.jpg")
+        (DARK_DEFAULT_BG, "default-bg-dark.jpg")
     } else {
-        (LIGHT_BUBBLES, "default-bg-light.jpg")
+        (LIGHT_DEFAULT_BG, "default-bg-light.jpg")
     };
     let mut dir = dirs::data_dir()?;
     dir.push("emilia");
@@ -132,7 +132,7 @@ impl BgFilter {
 #[derive(Clone, Default)]
 pub(crate) struct DesignSettings {
     /// Master switch for the whole background feature (default on). When on and
-    /// no `custom_bg` is set, the built-in light/dark "bubbles" default is shown.
+    /// no `custom_bg` is set, the built-in light/dark concert default is shown.
     pub(crate) background_on: bool,
     /// A user-chosen background image (already copied into the app data dir).
     /// When set it takes the place of the built-in default as the base image.
@@ -449,6 +449,13 @@ use gtk::gdk_pixbuf::Pixbuf;
 /// Decode `path` and turn it into the background texture for `filter`/`strength`.
 fn render_filtered(path: &str, filter: BgFilter, strength: u32) -> Option<gtk::gdk::Texture> {
     let s = f64::from(strength.min(100)) / 100.0;
+    // Strength 0 means "no effect": decode the image sharp, whichever filter is
+    // selected. Without this the small filter-resolution decode (≈200 px for the
+    // CPU effects, 64 px for soft) gets upscaled to the window and looks
+    // blocky/pixelated even though no blur was applied.
+    if strength == 0 {
+        return decode_scaled(path, SHARP_BG_PX);
+    }
     match filter {
         BgFilter::Off => decode_scaled(path, SHARP_BG_PX),
         // Smaller decode = stronger blur (≈64 px down to ≈12 px).

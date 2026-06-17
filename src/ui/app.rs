@@ -1232,6 +1232,8 @@ pub enum Msg {
     SetLastSettingsPage(String),
     /// Whole-app scale factor (0.5 ..= 1.5); persisted + applied live.
     SetUiScale(f64),
+    /// Mobile menu-icon size offset (-50 ..= 50 %); persisted + applied live.
+    SetMenuIconScale(i32),
     /// Master switch for the background feature (off → no background at all;
     /// on with no custom image → the built-in light/dark default).
     SetBackgroundOn(bool),
@@ -2526,8 +2528,10 @@ impl Component for App {
                             // 5px more breathing room above the song name (2 → 7).
                             set_margin_top: 7,
                             // Without a selected track, hide entirely (frees up space).
+                            // Also hidden while recording a memo, so the level meter
+                            // below can take the title's place.
                             #[watch]
-                            set_visible: model.mini.now_playing.is_some(),
+                            set_visible: model.mini.now_playing.is_some() && !model.memo.recording,
                             // A plain tap on the song display opens the track detail view.
                             connect_clicked[sender] => move |_| {
                                 sender.input(Msg::OpenNowPlaying);
@@ -2566,6 +2570,20 @@ impl Component for App {
                                 #[watch]
                                 set_label: model.mini.now_playing.as_deref().unwrap_or(""),
                             },
+                        },
+
+                        // While recording a voice memo, the live input level takes
+                        // the place of the (hidden) track title. Driven by the mic
+                        // `level` element via a poll timeout.
+                        #[local_ref]
+                        rec_meter -> gtk::DrawingArea {
+                            set_content_width: 220,
+                            set_content_height: 22,
+                            set_halign: gtk::Align::Center,
+                            set_margin_top: 7,
+                            set_tooltip_text: Some(&gettext("Recording level")),
+                            #[watch]
+                            set_visible: model.memo.recording,
                         },
 
                         // Chapter name when hovering over the seek bar
@@ -2782,20 +2800,6 @@ impl Component for App {
                                     },
                                     connect_clicked => Msg::RecordToggle,
                                 },
-                                // Live recording level animation (equalizer bars).
-                                // Only while a voice memo is being recorded; driven
-                                // by the mic `level` element via a poll timeout.
-                                #[local_ref]
-                                rec_meter -> gtk::DrawingArea {
-                                    set_content_width: 60,
-                                    set_content_height: 30,
-                                    set_valign: gtk::Align::Center,
-                                    set_margin_start: 2,
-                                    set_margin_end: 2,
-                                    set_tooltip_text: Some(&gettext("Recording level")),
-                                    #[watch]
-                                    set_visible: model.memo.recording,
-                                },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
                                     set_tooltip_text: Some(&gettext("Forward")),
@@ -2937,7 +2941,7 @@ impl Component for App {
             .clamp(0.5, 1.5);
         let design = crate::ui::theme::DesignSettings {
             // Master switch, default on: a fresh install shows the built-in
-            // light/dark "bubbles" background until turned off or replaced.
+            // light/dark concert background until turned off or replaced.
             background_on: library
                 .get_setting("design_background_on")
                 .ok()
@@ -2953,7 +2957,7 @@ impl Component for App {
             use_cover_bg: setting_on(&library, "design_use_cover_bg"),
             // No explicit filter set (fresh install, or an upgrade from the old
             // cover-blur switch): default to a Gaussian blur on the built-in
-            // bubbles background.
+            // concert background.
             bg_filter: match library
                 .get_setting("design_bg_filter")
                 .ok()
@@ -4362,6 +4366,13 @@ impl Component for App {
                 let _ = self
                     .library
                     .set_setting("ui_scale", &self.theme.ui_scale.to_string());
+            }
+            Msg::SetMenuIconScale(offset) => {
+                let offset = offset.clamp(-50, 50);
+                crate::ui::app_init::apply_menu_icon_scale(&self.nav.top_nav, offset);
+                let _ = self
+                    .library
+                    .set_setting("menu_icon_scale", &offset.to_string());
             }
             Msg::SetBackgroundOn(on) => {
                 self.theme.design.background_on = on;

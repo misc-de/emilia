@@ -42,6 +42,31 @@ pub(crate) struct InitState {
     pub saved_section: Option<String>,
 }
 
+/// Mobile top-bar nav icon size for a user offset (-50..=50 %, the mobile-only
+/// "Menu icon size" setting). Base is 34 px (see the nav build below).
+pub(crate) fn mobile_nav_icon_px(offset: i32) -> i32 {
+    let f = 1.0 + (offset.clamp(-50, 50) as f64) / 100.0;
+    (34.0 * f).round().clamp(10.0, 64.0) as i32
+}
+
+/// Re-apply the mobile menu-icon size to the already-built top-bar buttons
+/// (each holds a single `gtk::Image`). Used for live updates from settings.
+pub(crate) fn apply_menu_icon_scale(top_nav: &gtk::Box, offset: i32) {
+    let px = mobile_nav_icon_px(offset);
+    let mut child = top_nav.first_child();
+    while let Some(c) = child {
+        let next = c.next_sibling();
+        if let Some(img) = c
+            .downcast_ref::<gtk::ToggleButton>()
+            .and_then(|b| b.child())
+            .and_then(|w| w.downcast::<gtk::Image>().ok())
+        {
+            img.set_pixel_size(px);
+        }
+        child = next;
+    }
+}
+
 impl App {
     /// Read all persisted startup settings from the library DB into an
     /// [`InitState`]. Pure reads (plus a one-time `setup_complete` backfill);
@@ -586,6 +611,16 @@ impl App {
         self.nav.sidebar_nav = widgets.sidebar_nav.clone();
         self.nav.top_nav = widgets.top_nav.clone();
         let mut nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)> = Vec::new();
+        // Mobile menu-icon size: base 34 px, adjusted by the saved offset
+        // (-50..=50 %, the mobile-only "Menu icon size" setting).
+        let menu_icon_px = mobile_nav_icon_px(
+            self.library
+                .get_setting("menu_icon_scale")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(0),
+        );
         for (is_sidebar, container) in [
             (true, widgets.sidebar_nav.clone()),
             (false, widgets.top_nav.clone()),
@@ -616,7 +651,7 @@ impl App {
                     // phone. The strip lives in a horizontal scroller, so wider
                     // icons just scroll instead of overflowing.
                     let img = gtk::Image::from_icon_name(icon);
-                    img.set_pixel_size(34);
+                    img.set_pixel_size(menu_icon_px);
                     btn.set_child(Some(&img));
                     btn.set_tooltip_text(Some(&gettext(label)));
                 }
