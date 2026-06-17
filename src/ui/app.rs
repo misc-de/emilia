@@ -4491,9 +4491,13 @@ impl Component for App {
             Msg::TrayMediaPopup(x, y) => self.toggle_media_popup(x, y, root, &sender),
             Msg::TrayQuit => {
                 self.stop_tray();
+                // Same reason as the window close handler (see app_init.rs): the
+                // MPRIS/zbus service keeps the process alive past `app.quit()`, so
+                // force a full exit to avoid leaving a ghost instance behind.
                 if let Some(app) = root.application() {
                     app.quit();
                 }
+                std::process::exit(0);
             }
             Msg::SetGapless(on) => {
                 self.settings.gapless = on;

@@ -875,15 +875,21 @@ impl App {
                 }
             }
             // Explicitly quit so the process reliably exits when the main window
-            // is closed. An idle app already returns from `run()` on its own, but
-            // an active background feature (media playback, a running device-sync
-            // session, the MPRIS/zbus service) can keep the GApplication held, so
-            // the process would linger in the background. Quitting here guarantees
-            // a full shutdown in every case.
+            // is closed. `app.quit()` alone is NOT enough on Flatpak/mobile: the
+            // MPRIS/zbus service runs an endless task on its own executor and
+            // keeps the process — PID 1 of the Flatpak sandbox — alive even after
+            // the GApplication has already released its `de.cais.Emilia` bus name.
+            // The result is an invisible "ghost" instance whose stale MPRIS player
+            // stays on the bus; because the app name is now free, the next launch
+            // is no longer caught by GTK's single-instance guard and starts a
+            // fresh instance with its own player, so the lock screen/media keys
+            // end up talking to the wrong (idle) instance. A hard exit tears the
+            // whole sandbox down. The resume/session state was already saved
+            // above, so exiting here loses nothing.
             if let Some(app) = win.application() {
                 app.quit();
             }
-            gtk::glib::Propagation::Proceed
+            std::process::exit(0);
         });
 
         // --- Tray icon + window behavior (optional) ---
