@@ -97,6 +97,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.6" date="2026-06-18">
+      <description>
+        <p>The background can now look different in light and dark mode: the image, blur, transparency and the text/field colours are each remembered per theme, so switching between light and dark restores its own look. New installs ship with a festival photo as the default backdrop (a light one for light mode, a dark one for dark mode), and the "Soft" blur is now a genuine gentle blur instead of a pixelated one.</p>
+        <p xml:lang="de">Der Hintergrund kann jetzt im hellen und dunklen Modus unterschiedlich aussehen: Bild, Weichzeichner, Transparenz sowie Text- und Feldfarben werden je Design getrennt gemerkt, sodass der Wechsel zwischen Hell und Dunkel den jeweils eigenen Look wiederherstellt. Neuinstallationen starten mit einem Festivalfoto als Standardhintergrund (ein helles für den hellen, ein dunkles für den dunklen Modus), und der „Soft"-Weichzeichner ist jetzt ein echter sanfter Blur statt eines verpixelten.</p>
+        <p>Voice memos show a live input-level meter while recording. The YouTube search keeps its spinner up until results arrive, playlists carry a "+", and on phones the menu-icon size is adjustable.</p>
+        <p xml:lang="de">Sprachmemos zeigen während der Aufnahme eine Live-Pegelanzeige. Die YouTube-Suche behält ihre Ladeanzeige, bis Ergebnisse da sind, Playlisten tragen ein „+", und auf dem Telefon ist die Größe der Menü-Symbole einstellbar.</p>
+      </description>
+    </release>
     <release version="0.7.5" date="2026-06-17">
       <description>
         <p>Closing the app now shuts it down completely instead of leaving an invisible copy running in the background. This keeps the lock-screen and media-key controls reliable — they no longer end up controlling a stale leftover instance.</p>
