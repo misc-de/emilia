@@ -174,6 +174,74 @@ pub(crate) fn relaunch_for_language_change() -> ! {
     std::process::exit(0);
 }
 
+/// Theme suffix for the per-theme design settings (the appearance — background +
+/// colours — is stored separately for light and dark).
+pub(crate) fn design_theme_suffix() -> &'static str {
+    if adw::StyleManager::default().is_dark() {
+        "dark"
+    } else {
+        "light"
+    }
+}
+
+/// Read a per-theme design setting (`<base>_light`/`<base>_dark`), falling back
+/// to the legacy global `<base>` key so values from before the split carry over
+/// into both themes until the user changes them.
+fn get_design(lib: &Library, base: &str) -> Option<String> {
+    lib.get_setting(&format!("{base}_{}", design_theme_suffix()))
+        .ok()
+        .flatten()
+        .or_else(|| lib.get_setting(base).ok().flatten())
+}
+
+/// Write a per-theme design setting under the current theme's key.
+fn set_design(lib: &Library, base: &str, value: &str) {
+    let _ = lib.set_setting(&format!("{base}_{}", design_theme_suffix()), value);
+}
+
+/// Build the [`DesignSettings`] for the *current* theme from the DB. Used at
+/// startup and again whenever the light/dark theme flips (see `reload_design`),
+/// so each theme keeps its own appearance.
+fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
+    crate::ui::theme::DesignSettings {
+        background_on: get_design(lib, "design_background_on")
+            .map(|s| s != "0")
+            .unwrap_or(true),
+        custom_bg: get_design(lib, "design_bg_path")
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from),
+        use_cover_bg: matches!(get_design(lib, "design_use_cover_bg").as_deref(), Some("1")),
+        // No explicit filter set: default to a gentle Soft blur on the built-in
+        // concert background.
+        bg_filter: match get_design(lib, "design_bg_filter").filter(|s| !s.is_empty()) {
+            Some(k) => crate::ui::theme::BgFilter::from_key(&k),
+            None => crate::ui::theme::BgFilter::Soft,
+        },
+        bg_filter_strength: get_design(lib, "design_bg_filter_strength")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(5)
+            .min(100),
+        bg_nav: get_design(lib, "design_bg_nav")
+            .map(|s| s != "0")
+            .unwrap_or(true),
+        bg_titlebar: get_design(lib, "design_bg_titlebar")
+            .map(|s| s != "0")
+            .unwrap_or(true),
+        text_color: get_design(lib, "design_text_color").filter(|s| !s.is_empty()),
+        // Default field tint for a fresh install. `None` = never set; `Some("")`
+        // = explicitly cleared via the reset button, which must stay cleared.
+        field_color: match get_design(lib, "design_field_color") {
+            None => Some("#5e5c64".to_string()),
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s),
+        },
+        field_transparency: get_design(lib, "design_chrome_transparency")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(65)
+            .min(100),
+    }
+}
+
 /// Cadence of the quiet background backfill of missing artist photos & covers.
 /// Deliberately low (~1 min) so new users quickly get an enriched overview;
 /// the worker throttles the actual network requests itself.
@@ -659,6 +727,9 @@ pub(crate) struct NavState {
     /// The open context/detail dialog, so a cover/photo change can rebuild it in
     /// place (close + re-open) and the new image shows immediately.
     pub(crate) ctx_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
+    /// The open settings dialog, so a light/dark theme switch can rebuild it —
+    /// its appearance controls show per-theme values. `None` when closed.
+    pub(crate) settings_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
     /// Remembered scroll position of the most recently left overview page.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// Narrow/mobile layout active (driven by the width breakpoint). The source
@@ -1237,9 +1308,9 @@ pub enum Msg {
     /// Master switch for the background feature (off → no background at all;
     /// on with no custom image → the built-in light/dark default).
     SetBackgroundOn(bool),
-    /// Re-resolve the background (e.g. after a light/dark switch changes which
-    /// built-in default applies).
-    RefreshBackground,
+    /// Reload the per-theme appearance (background + colours) from the DB and
+    /// re-apply it — fired when the light/dark theme flips.
+    ReloadDesign,
     /// Set/clear the custom background image (already copied into the data dir).
     SetCustomBg(Option<std::path::PathBuf>),
     /// Toggle using the now-playing cover as the background source.
@@ -2888,14 +2959,14 @@ impl Component for App {
         // into the Secret Service once, before they are read below.
         library.migrate_secrets();
         let player = Player::new().expect("Failed to initialize GStreamer");
-        // Apply the color scheme (default: system) immediately.
+        // Apply the color scheme (fresh-install default: dark) immediately.
         apply_color_scheme(
             library
                 .get_setting("color_scheme")
                 .ok()
                 .flatten()
                 .as_deref()
-                .unwrap_or("system"),
+                .unwrap_or("dark"),
         );
         // All persisted startup settings, read in one place (see
         // `App::read_init_state`) and destructured back into locals so the model
@@ -2939,75 +3010,9 @@ impl Component for App {
             .and_then(|s| s.parse::<f64>().ok())
             .unwrap_or(1.0)
             .clamp(0.5, 1.5);
-        let design = crate::ui::theme::DesignSettings {
-            // Master switch, default on: a fresh install shows the built-in
-            // light/dark concert background until turned off or replaced.
-            background_on: library
-                .get_setting("design_background_on")
-                .ok()
-                .flatten()
-                .map(|s| s != "0")
-                .unwrap_or(true),
-            custom_bg: library
-                .get_setting("design_bg_path")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from),
-            use_cover_bg: setting_on(&library, "design_use_cover_bg"),
-            // No explicit filter set (fresh install, or an upgrade from the old
-            // cover-blur switch): default to a Gaussian blur on the built-in
-            // concert background.
-            bg_filter: match library
-                .get_setting("design_bg_filter")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty())
-            {
-                Some(k) => crate::ui::theme::BgFilter::from_key(&k),
-                None => crate::ui::theme::BgFilter::Gaussian,
-            },
-            bg_filter_strength: library
-                .get_setting("design_bg_filter_strength")
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(0)
-                .min(100),
-            // Default on: let the background show behind nav and title bar.
-            bg_nav: library
-                .get_setting("design_bg_nav")
-                .ok()
-                .flatten()
-                .map(|s| s != "0")
-                .unwrap_or(true),
-            bg_titlebar: library
-                .get_setting("design_bg_titlebar")
-                .ok()
-                .flatten()
-                .map(|s| s != "0")
-                .unwrap_or(true),
-            text_color: library
-                .get_setting("design_text_color")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty()),
-            // Default field tint for a fresh install (the light grey the user
-            // shipped). `None` = key never set; `Some("")` = explicitly cleared
-            // via the reset button, which must stay cleared.
-            field_color: match library.get_setting("design_field_color").ok().flatten() {
-                None => Some("#deddda".to_string()),
-                Some(s) if s.is_empty() => None,
-                Some(s) => Some(s),
-            },
-            field_transparency: library
-                .get_setting("design_chrome_transparency")
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(40)
-                .min(100),
-        };
+        // Appearance (background + colours) is stored per theme; this reads the
+        // current theme's values (see `read_design_settings`).
+        let design = read_design_settings(&library);
         let theme = crate::ui::theme::ThemeState::new(ui_scale, design);
         let tray = TrayState {
             enabled: setting_on(&library, "tray_enabled"),
@@ -3466,6 +3471,7 @@ impl Component for App {
                 context_target: None,
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ctx_dialog: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                settings_dialog: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 narrow: std::rc::Rc::new(std::cell::Cell::new(false)),
                 nav_hidden: std::rc::Rc::new(std::cell::Cell::new(false)),
@@ -4376,17 +4382,33 @@ impl Component for App {
             }
             Msg::SetBackgroundOn(on) => {
                 self.theme.design.background_on = on;
-                let _ = self
-                    .library
-                    .set_setting("design_background_on", if on { "1" } else { "0" });
+                set_design(
+                    &self.library,
+                    "design_background_on",
+                    if on { "1" } else { "0" },
+                );
                 self.refresh_background();
             }
-            Msg::RefreshBackground => self.refresh_background(),
+            Msg::ReloadDesign => {
+                // Light/dark flipped: load the new theme's appearance and apply.
+                self.theme.design = read_design_settings(&self.library);
+                self.refresh_background();
+                self.reapply_runtime_style();
+                // If the settings dialog is open, rebuild it so its appearance
+                // controls show the new theme's values (it reopens on the same
+                // page via `settings_last_page`).
+                let reopen = self.nav.settings_dialog.borrow_mut().take();
+                if let Some(dialog) = reopen {
+                    dialog.close();
+                    self.open_settings(root, &sender);
+                }
+            }
             Msg::SetCustomBg(src) => {
                 // Copy the chosen image into our data dir; `None` clears it.
                 let stored = src.as_deref().and_then(crate::ui::theme::import_custom_bg);
                 self.theme.design.custom_bg = stored.clone();
-                let _ = self.library.set_setting(
+                set_design(
+                    &self.library,
                     "design_bg_path",
                     &stored
                         .map(|p| p.to_string_lossy().into_owned())
@@ -4396,20 +4418,23 @@ impl Component for App {
             }
             Msg::SetUseCoverBg(on) => {
                 self.theme.design.use_cover_bg = on;
-                let _ = self
-                    .library
-                    .set_setting("design_use_cover_bg", if on { "1" } else { "0" });
+                set_design(
+                    &self.library,
+                    "design_use_cover_bg",
+                    if on { "1" } else { "0" },
+                );
                 self.refresh_background();
             }
             Msg::SetBgFilter(idx) => {
                 let filter = crate::ui::theme::BgFilter::from_index(idx);
                 self.theme.design.bg_filter = filter;
-                let _ = self.library.set_setting("design_bg_filter", filter.key());
+                set_design(&self.library, "design_bg_filter", filter.key());
                 self.refresh_background();
             }
             Msg::SetBgFilterStrength(pct) => {
                 self.theme.design.bg_filter_strength = pct.min(100);
-                let _ = self.library.set_setting(
+                set_design(
+                    &self.library,
                     "design_bg_filter_strength",
                     &self.theme.design.bg_filter_strength.to_string(),
                 );
@@ -4417,35 +4442,40 @@ impl Component for App {
             }
             Msg::SetTextColor(color) => {
                 self.theme.design.text_color = color.clone();
-                let _ = self
-                    .library
-                    .set_setting("design_text_color", color.as_deref().unwrap_or(""));
+                set_design(
+                    &self.library,
+                    "design_text_color",
+                    color.as_deref().unwrap_or(""),
+                );
                 self.reapply_runtime_style();
             }
             Msg::SetFieldColor(color) => {
                 self.theme.design.field_color = color.clone();
-                let _ = self
-                    .library
-                    .set_setting("design_field_color", color.as_deref().unwrap_or(""));
+                set_design(
+                    &self.library,
+                    "design_field_color",
+                    color.as_deref().unwrap_or(""),
+                );
                 self.reapply_runtime_style();
             }
             Msg::SetBgNav(on) => {
                 self.theme.design.bg_nav = on;
-                let _ = self
-                    .library
-                    .set_setting("design_bg_nav", if on { "1" } else { "0" });
+                set_design(&self.library, "design_bg_nav", if on { "1" } else { "0" });
                 self.reapply_runtime_style();
             }
             Msg::SetBgTitlebar(on) => {
                 self.theme.design.bg_titlebar = on;
-                let _ = self
-                    .library
-                    .set_setting("design_bg_titlebar", if on { "1" } else { "0" });
+                set_design(
+                    &self.library,
+                    "design_bg_titlebar",
+                    if on { "1" } else { "0" },
+                );
                 self.reapply_runtime_style();
             }
             Msg::SetFieldTransparency(pct) => {
                 self.theme.design.field_transparency = pct.min(100);
-                let _ = self.library.set_setting(
+                set_design(
+                    &self.library,
                     "design_chrome_transparency",
                     &self.theme.design.field_transparency.to_string(),
                 );

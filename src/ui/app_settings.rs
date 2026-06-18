@@ -591,11 +591,25 @@ impl App {
             .sensitive(self.theme.design.bg_filter.index() != 0)
             .build();
         let strength_scale = mk_scale(self.theme.design.bg_filter_strength);
-        wire_scale(
-            &strength_scale,
-            self.theme.design.bg_filter_strength,
-            Msg::SetBgFilterStrength,
-        );
+        // Soft saturates after a small radius, so it uses a finer 0..10 scale
+        // (step 1) for fine control; the other filters keep 0..100 (step 5).
+        // The filter dropdown retunes this on change (see below).
+        if self.theme.design.bg_filter.index() == 1 {
+            strength_scale.set_range(0.0, 10.0);
+            strength_scale.set_increments(1.0, 1.0);
+        }
+        strength_scale.set_value(f64::from(self.theme.design.bg_filter_strength));
+        {
+            let sender = sender.clone();
+            let last = std::cell::Cell::new(self.theme.design.bg_filter_strength);
+            strength_scale.connect_value_changed(move |s| {
+                let v = s.value().round() as u32;
+                if v != last.get() {
+                    last.set(v);
+                    sender.input(Msg::SetBgFilterStrength(v));
+                }
+            });
+        }
         strength_row.add_suffix(&strength_scale);
 
         // 4) Make the navigation transparent so the background shows through.
@@ -630,11 +644,21 @@ impl App {
             });
         }
 
-        // Filter change: a strength only applies to an active filter.
+        // Filter change: a strength only applies to an active filter. Soft uses
+        // a finer 0..10 scale, the others 0..100 — retune the slider on change
+        // (a clamp of the old value re-emits via the handler above).
         {
             let sender = sender.clone();
             let strength_row = strength_row.clone();
+            let strength_scale = strength_scale.clone();
             filter_row.connect_selected_notify(move |r| {
+                if r.selected() == 1 {
+                    strength_scale.set_range(0.0, 10.0);
+                    strength_scale.set_increments(1.0, 1.0);
+                } else {
+                    strength_scale.set_range(0.0, 100.0);
+                    strength_scale.set_increments(5.0, 5.0);
+                }
                 strength_row.set_sensitive(r.selected() != 0);
                 sender.input(Msg::SetBgFilter(r.selected()));
             });
@@ -1054,6 +1078,15 @@ impl App {
             });
         }
 
+        // Track the open dialog so a light/dark theme switch can rebuild it —
+        // otherwise its appearance controls keep showing the old theme's values.
+        *self.nav.settings_dialog.borrow_mut() = Some(dialog.clone().upcast());
+        {
+            let slot = self.nav.settings_dialog.clone();
+            dialog.connect_closed(move |_| {
+                *slot.borrow_mut() = None;
+            });
+        }
         dialog.present(Some(root));
     }
 }

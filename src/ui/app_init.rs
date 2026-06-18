@@ -361,12 +361,13 @@ impl App {
         widgets.bg_overlay.set_measure_overlay(&widgets.split, true);
         self.theme.apply_scale_dpi();
         self.refresh_background();
-        // The built-in default background has a light and a dark variant; when the
-        // system light/dark preference flips, re-resolve so the right one shows.
+        // Appearance (background + colours) is stored per theme; when the
+        // light/dark preference flips, reload the new theme's values and apply
+        // them (this also re-resolves the light/dark default background).
         {
             let sender = sender.clone();
             adw::StyleManager::default().connect_dark_notify(move |_| {
-                sender.input(Msg::RefreshBackground);
+                sender.input(Msg::ReloadDesign);
             });
         }
         self.mini.seek_scale = widgets.seek_scale.clone();

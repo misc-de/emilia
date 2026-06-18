@@ -458,8 +458,15 @@ fn render_filtered(path: &str, filter: BgFilter, strength: u32) -> Option<gtk::g
     }
     match filter {
         BgFilter::Off => decode_scaled(path, SHARP_BG_PX),
-        // Smaller decode = stronger blur (≈64 px down to ≈12 px).
-        BgFilter::Soft => decode_scaled(path, ((64.0 - s * 52.0).round() as i32).max(8)),
+        // Soft = a gentle *real* blur (a light Gaussian on the moderate-res
+        // decode), not the old tiny-decode upscale that looked blocky. It uses a
+        // finer 0..10 strength scale (see `app_settings`): the visible effect
+        // saturates after a small radius, so the upper 11..100 range was wasted —
+        // 0..10 gives fine control across the whole slider.
+        BgFilter::Soft => {
+            let s = f64::from(strength.min(10)) / 10.0;
+            cpu_filter(path, |pb| gaussian_blur(pb, (0.10 + s * 0.45).min(1.0)))
+        }
         BgFilter::Gaussian => cpu_filter(path, |pb| gaussian_blur(pb, s)),
         BgFilter::Motion => cpu_filter(path, |pb| motion_blur(pb, s)),
         BgFilter::Radial => cpu_filter(path, |pb| radial_blur(pb, s)),
