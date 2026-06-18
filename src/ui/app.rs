@@ -203,6 +203,10 @@ fn set_design(lib: &Library, base: &str, value: &str) {
 /// startup and again whenever the light/dark theme flips (see `reload_design`),
 /// so each theme keeps its own appearance.
 fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
+    // Fresh-install defaults differ per theme (the maintainer's shipped look):
+    // dark gets a stronger blur, more chrome transparency and a dark field tint;
+    // light a barely-there blur, less transparency and a near-white tint.
+    let dark = adw::StyleManager::default().is_dark();
     crate::ui::theme::DesignSettings {
         background_on: get_design(lib, "design_background_on")
             .map(|s| s != "0")
@@ -219,7 +223,7 @@ fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
         },
         bg_filter_strength: get_design(lib, "design_bg_filter_strength")
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(5)
+            .unwrap_or(if dark { 8 } else { 1 })
             .min(100),
         bg_nav: get_design(lib, "design_bg_nav")
             .map(|s| s != "0")
@@ -231,13 +235,13 @@ fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
         // Default field tint for a fresh install. `None` = never set; `Some("")`
         // = explicitly cleared via the reset button, which must stay cleared.
         field_color: match get_design(lib, "design_field_color") {
-            None => Some("#5e5c64".to_string()),
+            None => Some(if dark { "#5e5c64" } else { "#f6f5f4" }.to_string()),
             Some(s) if s.is_empty() => None,
             Some(s) => Some(s),
         },
         field_transparency: get_design(lib, "design_chrome_transparency")
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(65)
+            .unwrap_or(if dark { 80 } else { 60 })
             .min(100),
     }
 }
