@@ -942,22 +942,8 @@ impl SyncPage {
 
     /// Manifest built → show the size confirmation.
     fn on_manifest_ready(&mut self, manifest: ShareManifest, sender: &ComponentSender<Self>) {
-        let names: Vec<String> = manifest
-            .files
-            .iter()
-            .take(8)
-            .map(|f| {
-                if f.rel_path.is_empty() {
-                    f.title.clone()
-                } else {
-                    f.rel_path.clone()
-                }
-            })
-            .collect();
-        let total = manifest.total_size;
-        let count = manifest.files.len();
+        let page = build_confirm(&manifest, sender);
         self.prepared_manifest = Some(manifest);
-        let page = build_confirm(total, count, &names, sender);
         self.set_sub_content(&page);
     }
 

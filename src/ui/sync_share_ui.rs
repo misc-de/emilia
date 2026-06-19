@@ -21,26 +21,127 @@ use crate::ui::sync_page::{SyncInput, SyncPage};
 // ---------------------------------------------------------------------------
 
 /// Builds the "transfer summary" confirmation shown after the manifest is built.
+///
+/// Lists every kind of content the offer carries — not just audio files — so a
+/// library-only share (podcasts, playlists, stations, …) reads as what it is
+/// instead of the misleading "0 files · 0 B".
 pub(crate) fn build_confirm(
-    total_size: u64,
-    file_count: usize,
-    names: &[String],
+    manifest: &ShareManifest,
     sender: &ComponentSender<SyncPage>,
 ) -> gtk::Widget {
     let page = adw::PreferencesPage::new();
     let g = adw::PreferencesGroup::builder()
         .title(gettext("Transfer summary"))
+        .description(gettext(
+            "Send to offer this to the other device — it then reviews the list \
+             and chooses what to keep.",
+        ))
         .build();
-    let files_row = adw::ActionRow::builder()
-        .title(gettext_f("{n} files", &[("n", &file_count.to_string())]))
-        .subtitle(names.iter().take(4).cloned().collect::<Vec<_>>().join(", "))
-        .build();
-    let size_row = adw::ActionRow::builder()
-        .title(gettext("Total size"))
-        .subtitle(human_size(total_size))
-        .build();
-    g.add(&files_row);
-    g.add(&size_row);
+
+    // Audio files are the only rows that carry bytes; the rest is metadata or
+    // subscriptions the receiver re-fetches itself.
+    let file_count = manifest.files.len();
+    if file_count > 0 {
+        let names = manifest
+            .files
+            .iter()
+            .take(4)
+            .map(|f| {
+                if f.rel_path.is_empty() {
+                    f.title.clone()
+                } else {
+                    f.rel_path.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        g.add(
+            &adw::ActionRow::builder()
+                .title(gettext_f("{n} files", &[("n", &file_count.to_string())]))
+                .subtitle(names)
+                .build(),
+        );
+    }
+
+    let lib = &manifest.library;
+    let pod = lib.podcasts.as_ref().map_or(0, Vec::len);
+    let pl = lib.playlists.as_ref().map_or(0, Vec::len);
+    let fav = lib.favorites.as_ref().map_or(0, Vec::len);
+    let cat = lib.categories.as_ref().map_or(0, Vec::len);
+    let eq = lib.eq.as_ref().map_or(0, Vec::len);
+    let yt = manifest.yt.len();
+    let st = manifest.stations.len();
+    let rec = manifest.recordings.len();
+    let memo = manifest.memos.len();
+
+    count_row(
+        &g,
+        yt,
+        gettext_f("{n} YouTube items", &[("n", &yt.to_string())]),
+    );
+    count_row(
+        &g,
+        pod,
+        gettext_f("{n} podcasts", &[("n", &pod.to_string())]),
+    );
+    count_row(
+        &g,
+        pl,
+        gettext_f("{n} playlists", &[("n", &pl.to_string())]),
+    );
+    count_row(
+        &g,
+        fav,
+        gettext_f("{n} favorites", &[("n", &fav.to_string())]),
+    );
+    count_row(
+        &g,
+        st,
+        gettext_f("{n} radio stations", &[("n", &st.to_string())]),
+    );
+    count_row(
+        &g,
+        rec,
+        gettext_f("{n} recordings", &[("n", &rec.to_string())]),
+    );
+    count_row(
+        &g,
+        memo,
+        gettext_f("{n} voice memos", &[("n", &memo.to_string())]),
+    );
+    count_row(
+        &g,
+        cat,
+        gettext_f("{n} categories", &[("n", &cat.to_string())]),
+    );
+    if eq > 0 {
+        g.add(
+            &adw::ActionRow::builder()
+                .title(gettext("Equalizer settings"))
+                .build(),
+        );
+    }
+
+    if manifest.total_size > 0 {
+        g.add(
+            &adw::ActionRow::builder()
+                .title(gettext("Total size"))
+                .subtitle(human_size(manifest.total_size))
+                .build(),
+        );
+    }
+
+    // Guard against an offer that resolved to nothing: spell it out instead of
+    // showing an empty group, and don't let the user "Send" emptiness.
+    let visible = file_count + yt + pod + pl + fav + st + rec + memo + cat + usize::from(eq > 0);
+    if visible == 0 {
+        g.add(
+            &adw::ActionRow::builder()
+                .title(gettext("Nothing to share"))
+                .subtitle(gettext("The selection did not resolve to any content."))
+                .build(),
+        );
+    }
     page.add(&g);
 
     let buttons = adw::PreferencesGroup::new();
@@ -51,6 +152,7 @@ pub(crate) fn build_confirm(
     let send = gtk::Button::builder()
         .label(gettext("Send"))
         .css_classes(["suggested-action"])
+        .sensitive(visible > 0)
         .build();
     {
         let sender = sender.clone();
@@ -66,6 +168,13 @@ pub(crate) fn build_confirm(
     page.add(&buttons);
 
     scrolled(&page)
+}
+
+/// Adds a `"{n} …"` summary row to `g` when `n > 0` (skipped otherwise).
+fn count_row(g: &adw::PreferencesGroup, n: usize, label: String) {
+    if n > 0 {
+        g.add(&adw::ActionRow::builder().title(label).build());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,9 +495,15 @@ fn album_expander(
 }
 
 /// Wraps a preferences page in a vertically-scrolling container.
+///
+/// `propagate_natural_height` is essential: without it the scroller reports its
+/// own tiny minimum and the natural-sized dialog collapses to a single line. With
+/// it the dialog grows to the content's natural height and only scrolls once that
+/// exceeds the parent window.
 fn scrolled(page: &adw::PreferencesPage) -> gtk::Widget {
     let sw = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
         .vexpand(true)
         .child(page)
         .build();

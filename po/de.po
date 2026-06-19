@@ -2678,6 +2678,44 @@ msgstr "Meta/Lib"
 msgid "Subfolder on the server to index, e.g. /Music."
 msgstr "Unterordner auf dem Server, der indiziert wird, z.B. /Music."
 
+# --- Share confirmation: per-facet transfer summary + next-step hint ---
+msgid ""
+"Send to offer this to the other device — it then reviews the list and chooses "
+"what to keep."
+msgstr ""
+"Mit „Senden“ wird dies dem anderen Gerät angeboten – es prüft anschließend die "
+"Liste und wählt aus, was übernommen wird."
+
+msgid "{n} YouTube items"
+msgstr "{n} YouTube-Einträge"
+
+msgid "{n} podcasts"
+msgstr "{n} Podcasts"
+
+msgid "{n} playlists"
+msgstr "{n} Playlisten"
+
+msgid "{n} favorites"
+msgstr "{n} Favoriten"
+
+msgid "{n} radio stations"
+msgstr "{n} Radiostationen"
+
+msgid "{n} recordings"
+msgstr "{n} Aufnahmen"
+
+msgid "{n} voice memos"
+msgstr "{n} Sprachmemos"
+
+msgid "{n} categories"
+msgstr "{n} Kategorien"
+
+msgid "Nothing to share"
+msgstr "Nichts zu teilen"
+
+msgid "The selection did not resolve to any content."
+msgstr "Die Auswahl ergab keine Inhalte."
+
 # --- Design page round 2: nav background, transparency slider, media popup ---
 #~ msgid "Background behind navigation"
 #~ msgstr "Hintergrund Navigation"
