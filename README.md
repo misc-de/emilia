@@ -210,7 +210,7 @@ rustup default stable
 
 ```bash
 sudo apt install build-essential pkg-config curl \
-  libgtk-4-dev libadwaita-1-dev \
+  libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
