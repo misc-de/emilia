@@ -97,6 +97,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.7.7" date="2026-06-19">
+      <description>
+        <p>When sharing to another device, the confirmation window now sizes itself to its content instead of collapsing to a single line, and the transfer summary lists everything the share actually contains — podcasts, playlists, favourites, radio stations, recordings, voice memos and more — not just audio files, together with a note explaining what happens after you press Send.</p>
+        <p xml:lang="de">Beim Teilen mit einem anderen Gerät passt sich das Bestätigungsfenster jetzt seinem Inhalt an, statt auf eine Zeile zusammenzufallen, und die Übertragungsübersicht listet alles auf, was die Freigabe tatsächlich enthält – Podcasts, Playlisten, Favoriten, Radiostationen, Aufnahmen, Sprachmemos und mehr – nicht nur Audiodateien, samt einem Hinweis, was nach dem Senden passiert.</p>
+      </description>
+    </release>
     <release version="0.7.6" date="2026-06-18">
       <description>
         <p>The background can now look different in light and dark mode: the image, blur, transparency and the text/field colours are each remembered per theme, so switching between light and dark restores its own look. New installs ship with a festival photo as the default backdrop (a light one for light mode, a dark one for dark mode), and the "Soft" blur is now a genuine gentle blur instead of a pixelated one.</p>
