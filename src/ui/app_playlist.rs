@@ -5,6 +5,8 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use std::path::PathBuf;
+
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
 
@@ -25,7 +27,158 @@ fn cover_content_hash(path: &str) -> Option<u64> {
     Some(hasher.finish())
 }
 
+/// Playlist-section messages, dispatched by [`App::update_playlist`]. Grouped
+/// out of the flat `Msg` enum (see `app.rs`): create / open / play / rename /
+/// delete + cover. The `*At` variants index into `playlists.playlist_items`
+/// (gallery tiles), the others take an id directly.
+#[derive(Debug)]
+pub(crate) enum PlaylistMsg {
+    /// Create a playlist and add the current context files.
+    CreateAddTo(String),
+    /// Open the tracks subpage of a playlist (short tap: albums + songs).
+    Open(i64),
+    /// Gallery tile tap: open the playlist by its index in `playlist_items`.
+    OpenAt(usize),
+    /// Open the detail view of a playlist (long press: cover + actions).
+    ShowDetail(i64),
+    /// Gallery tile long-press: playlist detail by index in `playlist_items`.
+    ShowDetailAt(usize),
+    /// Play the whole playlist.
+    Play(i64),
+    /// Play the whole playlist starting at the given track (so it continues
+    /// through the rest of the list, incl. standalone songs after an album).
+    PlayFrom { id: i64, path: String },
+    /// Play the whole playlist shuffled (random order, random start).
+    PlayShuffled(i64),
+    /// Delete a playlist (shows an undo toast; the real delete is deferred to
+    /// `DeleteConfirmed`).
+    Delete(i64),
+    /// Actually delete a playlist (fired when the undo toast expires).
+    DeleteConfirmed(i64),
+    /// Add the current context files to this playlist.
+    AddTo(i64),
+    /// Set the chosen cover of a playlist (last shown in the detail carousel).
+    SetCover { id: i64, path: String },
+    /// Open the rename dialog of a playlist.
+    RenameDialog(i64),
+    /// Rename a playlist.
+    Rename { id: i64, name: String },
+}
+
 impl App {
+    /// Dispatch a [`PlaylistMsg`]. Split out of the monolithic `App::update` match.
+    pub(crate) fn update_playlist(
+        &mut self,
+        msg: PlaylistMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            PlaylistMsg::CreateAddTo(name) => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    if let Ok(id) = self.library.create_playlist(name) {
+                        self.add_context_to_playlist(id, sender);
+                    }
+                }
+            }
+            PlaylistMsg::AddTo(id) => self.add_context_to_playlist(id, sender),
+            PlaylistMsg::Open(id) => {
+                if let Some((_, name, _)) = self
+                    .playlists
+                    .playlist_items
+                    .iter()
+                    .find(|(pid, _, _)| *pid == id)
+                    .cloned()
+                {
+                    self.open_playlist(sender, id, &name);
+                }
+            }
+            // Gallery tile → resolve the index to the playlist id, then reuse the
+            // list paths.
+            PlaylistMsg::OpenAt(i) => {
+                if let Some((id, name, _)) = self.playlists.playlist_items.get(i).cloned() {
+                    self.open_playlist(sender, id, &name);
+                }
+            }
+            PlaylistMsg::ShowDetailAt(i) => {
+                if let Some((id, _, _)) = self.playlists.playlist_items.get(i).cloned() {
+                    sender.input(Msg::Playlist(PlaylistMsg::ShowDetail(id)));
+                }
+            }
+            PlaylistMsg::ShowDetail(id) => {
+                if let Some((_, name, _)) = self
+                    .playlists
+                    .playlist_items
+                    .iter()
+                    .find(|(pid, _, _)| *pid == id)
+                    .cloned()
+                {
+                    self.open_playlist_detail(root, sender, id, &name);
+                }
+            }
+            PlaylistMsg::Play(id) => {
+                let paths = self.library.playlist_paths(id).unwrap_or_default();
+                if !paths.is_empty() {
+                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
+                    self.transport.queue_pos = 0;
+                    self.transport.shuffle = false;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
+            PlaylistMsg::PlayFrom { id, path } => {
+                // Whole playlist as the queue, started at the tapped track — so it
+                // keeps playing through the rest of the list (e.g. the standalone
+                // songs after an album), not just that one entry.
+                let paths = self.library.playlist_paths(id).unwrap_or_default();
+                if let Some(pos) = paths.iter().position(|p| *p == path) {
+                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
+                    self.transport.queue_pos = pos;
+                    self.transport.shuffle = false;
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
+            PlaylistMsg::PlayShuffled(id) => {
+                let paths = self.library.playlist_paths(id).unwrap_or_default();
+                if !paths.is_empty() {
+                    let len = paths.len();
+                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
+                    // Random start, then a fresh random order over the rest.
+                    self.transport.queue_pos = gtk::glib::random_int_range(0, len as i32) as usize;
+                    self.transport.shuffle = true;
+                    self.rebuild_shuffle_order();
+                    self.play_current();
+                    self.refresh_queue_icons();
+                }
+            }
+            PlaylistMsg::SetCover { id, path } => {
+                let _ = self.library.set_playlist_cover(id, &path);
+                self.reload_playlists(sender);
+            }
+            PlaylistMsg::Delete(id) => {
+                self.undo_toast(
+                    sender,
+                    &gettext("Playlist deleted"),
+                    Msg::Playlist(PlaylistMsg::DeleteConfirmed(id)),
+                );
+            }
+            PlaylistMsg::DeleteConfirmed(id) => {
+                let _ = self.library.delete_playlist(id);
+                self.reload_playlists(sender);
+            }
+            PlaylistMsg::RenameDialog(id) => self.open_rename_playlist_dialog(root, sender, id),
+            PlaylistMsg::Rename { id, name } => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    let _ = self.library.rename_playlist(id, name);
+                    self.reload_playlists(sender);
+                }
+            }
+        }
+    }
+
     /// Rebuilds the playlist list (name, track count, play, delete).
     pub(crate) fn reload_playlists(&mut self, sender: &ComponentSender<Self>) {
         self.playlists.playlist_items = self.library.playlists().unwrap_or_default();
@@ -56,8 +209,8 @@ impl App {
                 &self.playlists.playlists_gallery,
                 &tiles,
                 headers.as_deref(),
-                Msg::OpenPlaylistAt,
-                Msg::ShowPlaylistDetailAt,
+                |i| Msg::Playlist(PlaylistMsg::OpenAt(i)),
+                |i| Msg::Playlist(PlaylistMsg::ShowDetailAt(i)),
             );
             return;
         }
@@ -96,22 +249,23 @@ impl App {
                 .build();
             {
                 let sender = sender.clone();
-                play_btn.connect_clicked(move |_| sender.input(Msg::PlayPlaylist(id)));
+                play_btn
+                    .connect_clicked(move |_| sender.input(Msg::Playlist(PlaylistMsg::Play(id))));
             }
             row.add_suffix(&play_btn);
 
             {
                 let sender = sender.clone();
-                row.connect_activated(move |_| sender.input(Msg::OpenPlaylist(id)));
+                row.connect_activated(move |_| sender.input(Msg::Playlist(PlaylistMsg::Open(id))));
             }
             // Long press (touch) / right click (mouse): detail view (cover + actions).
             crate::ui::app::on_secondary_click(&row, {
                 let sender = sender.clone();
-                move || sender.input(Msg::ShowPlaylistDetail(id))
+                move || sender.input(Msg::Playlist(PlaylistMsg::ShowDetail(id)))
             });
             crate::ui::app::on_long_press(&row, {
                 let sender = sender.clone();
-                move || sender.input(Msg::ShowPlaylistDetail(id))
+                move || sender.input(Msg::Playlist(PlaylistMsg::ShowDetail(id)))
             });
             self.playlists.playlists_list.append(&row);
         }
@@ -187,10 +341,10 @@ impl App {
                     let sender = sender.clone();
                     let path = first.path.clone();
                     play.connect_clicked(move |_| {
-                        sender.input(Msg::PlayPlaylistFrom {
+                        sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
                             id,
                             path: path.clone(),
-                        });
+                        }));
                     });
                     exp.add_suffix(&play);
                 }
@@ -373,10 +527,10 @@ impl App {
             let sender = sender.clone();
             let path = path.to_string();
             play_btn.connect_clicked(move |_| {
-                sender.input(Msg::PlayPlaylistFrom {
+                sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
                     id,
                     path: path.clone(),
-                });
+                }));
             });
         }
         row.add_suffix(&play_btn);
@@ -460,10 +614,10 @@ impl App {
             dialog.connect_closed(move |_| {
                 let idx = carousel.position().round().max(0.0) as usize;
                 if let Some(path) = covers.get(idx) {
-                    sender.input(Msg::SetPlaylistCover {
+                    sender.input(Msg::Playlist(PlaylistMsg::SetCover {
                         id,
                         path: path.clone(),
-                    });
+                    }));
                 }
             });
         } else {
@@ -510,7 +664,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             play.connect_activated(move |_| {
-                sender.input(Msg::PlayPlaylist(id));
+                sender.input(Msg::Playlist(PlaylistMsg::Play(id)));
                 dialog.close();
             });
         }
@@ -525,7 +679,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             shuffle.connect_activated(move |_| {
-                sender.input(Msg::PlayPlaylistShuffled(id));
+                sender.input(Msg::Playlist(PlaylistMsg::PlayShuffled(id)));
                 dialog.close();
             });
         }
@@ -536,7 +690,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             show.connect_activated(move |_| {
-                sender.input(Msg::OpenPlaylist(id));
+                sender.input(Msg::Playlist(PlaylistMsg::Open(id)));
                 dialog.close();
             });
         }
@@ -563,7 +717,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             rename.connect_activated(move |_| {
-                sender.input(Msg::PlaylistRenameDialog(id));
+                sender.input(Msg::Playlist(PlaylistMsg::RenameDialog(id)));
                 dialog.close();
             });
         }
@@ -575,7 +729,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             delete.connect_activated(move |_| {
-                sender.input(Msg::PlaylistDelete(id));
+                sender.input(Msg::Playlist(PlaylistMsg::Delete(id)));
                 dialog.close();
             });
         }
@@ -636,7 +790,9 @@ impl App {
             let dialog2 = dialog.clone();
             entry.connect_entry_activated(move |_| {
                 if !entry2.text().trim().is_empty() {
-                    sender.input(Msg::PlaylistCreateAddTo(entry2.text().to_string()));
+                    sender.input(Msg::Playlist(PlaylistMsg::CreateAddTo(
+                        entry2.text().to_string(),
+                    )));
                     dialog2.close();
                 }
             });
@@ -658,7 +814,7 @@ impl App {
                     let sender = sender.clone();
                     let dialog2 = dialog.clone();
                     row.connect_activated(move |_| {
-                        sender.input(Msg::PlaylistAddTo(id));
+                        sender.input(Msg::Playlist(PlaylistMsg::AddTo(id)));
                         dialog2.close();
                     });
                 }
@@ -708,10 +864,10 @@ impl App {
             let sender = sender.clone();
             dialog.connect_response(None, move |_, resp| {
                 if resp == "rename" {
-                    sender.input(Msg::PlaylistRename {
+                    sender.input(Msg::Playlist(PlaylistMsg::Rename {
                         id,
                         name: entry.text().to_string(),
-                    });
+                    }));
                 }
             });
         }

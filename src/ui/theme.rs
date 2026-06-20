@@ -22,8 +22,10 @@ use adw::prelude::*;
 use relm4::{adw, gtk};
 use std::path::PathBuf;
 
-use crate::ui::app::App;
+use crate::ui::app::{read_design_settings, set_design, App};
+use crate::ui::app_helpers::apply_color_scheme;
 use crate::ui::widgets::decode_scaled;
+use relm4::ComponentSender;
 
 /// Built-in default backgrounds (a festival/concert photo per light & dark
 /// mode), shown when the background feature is on but the user has not chosen an
@@ -394,7 +396,177 @@ fn valid_hex(s: &str) -> bool {
         && s[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Appearance / design messages, dispatched by [`App::update_design`]. Grouped
+/// out of the flat `Msg` enum (see `app.rs`): whole-app scaling, the colour
+/// scheme, custom/cover background + its filter, and the chrome colours.
+#[derive(Debug)]
+pub(crate) enum DesignMsg {
+    /// Change the color scheme ("system"/"dark"/"light"); takes effect immediately.
+    ColorScheme(String),
+    /// Whole-app scale factor (0.5 ..= 1.5); persisted + applied live.
+    UiScale(f64),
+    /// Mobile menu-icon size offset (-50 ..= 50 %); persisted + applied live.
+    MenuIconScale(i32),
+    /// Master switch for the background feature (off → no background at all;
+    /// on with no custom image → the built-in light/dark default).
+    BackgroundOn(bool),
+    /// Reload the per-theme appearance (background + colours) from the DB and
+    /// re-apply it — fired when the light/dark theme flips.
+    Reload,
+    /// Set/clear the custom background image (already copied into the data dir).
+    CustomBg(Option<PathBuf>),
+    /// Toggle using the now-playing cover as the background source.
+    UseCoverBg(bool),
+    /// Select the background blur/effect filter (ComboRow index).
+    BgFilter(u32),
+    /// Strength (0..=100 %) of the selected background filter.
+    BgFilterStrength(u32),
+    /// Set/clear the text color (hex).
+    TextColor(Option<String>),
+    /// Set/clear the fields (chrome) color (hex).
+    FieldColor(Option<String>),
+    /// Toggle whether the background shows behind the sidebar/navigation.
+    BgNav(bool),
+    /// Toggle whether the background shows behind the title bar (headerbar).
+    BgTitlebar(bool),
+    /// Transparency (0..=100 %) of entries & buttons over the background.
+    FieldTransparency(u32),
+}
+
 impl App {
+    /// Dispatch a [`DesignMsg`] (appearance: scaling, colours, background). Split
+    /// out of the monolithic `App::update` match.
+    pub(crate) fn update_design(
+        &mut self,
+        msg: DesignMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            DesignMsg::ColorScheme(scheme) => {
+                apply_color_scheme(&scheme);
+                let _ = self.library.set_setting("color_scheme", &scheme);
+                // The built-in default background differs per light/dark, so a
+                // scheme change may need a different image.
+                self.refresh_background();
+            }
+            DesignMsg::UiScale(factor) => {
+                self.apply_ui_scale(factor);
+                let _ = self
+                    .library
+                    .set_setting("ui_scale", &self.theme.ui_scale.to_string());
+            }
+            DesignMsg::MenuIconScale(offset) => {
+                let offset = offset.clamp(-50, 50);
+                crate::ui::app_init::apply_menu_icon_scale(&self.nav.top_nav, offset);
+                let _ = self
+                    .library
+                    .set_setting("menu_icon_scale", &offset.to_string());
+            }
+            DesignMsg::BackgroundOn(on) => {
+                self.theme.design.background_on = on;
+                set_design(
+                    &self.library,
+                    "design_background_on",
+                    if on { "1" } else { "0" },
+                );
+                self.refresh_background();
+            }
+            DesignMsg::Reload => {
+                // Light/dark flipped: load the new theme's appearance and apply.
+                self.theme.design = read_design_settings(&self.library);
+                self.refresh_background();
+                self.reapply_runtime_style();
+                // If the settings dialog is open, rebuild it so its appearance
+                // controls show the new theme's values (it reopens on the same
+                // page via `settings_last_page`).
+                let reopen = self.nav.settings_dialog.borrow_mut().take();
+                if let Some(dialog) = reopen {
+                    dialog.close();
+                    self.open_settings(root, sender);
+                }
+            }
+            DesignMsg::CustomBg(src) => {
+                // Copy the chosen image into our data dir; `None` clears it.
+                let stored = src.as_deref().and_then(import_custom_bg);
+                self.theme.design.custom_bg = stored.clone();
+                set_design(
+                    &self.library,
+                    "design_bg_path",
+                    &stored
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                );
+                self.refresh_background();
+            }
+            DesignMsg::UseCoverBg(on) => {
+                self.theme.design.use_cover_bg = on;
+                set_design(
+                    &self.library,
+                    "design_use_cover_bg",
+                    if on { "1" } else { "0" },
+                );
+                self.refresh_background();
+            }
+            DesignMsg::BgFilter(idx) => {
+                let filter = BgFilter::from_index(idx);
+                self.theme.design.bg_filter = filter;
+                set_design(&self.library, "design_bg_filter", filter.key());
+                self.refresh_background();
+            }
+            DesignMsg::BgFilterStrength(pct) => {
+                self.theme.design.bg_filter_strength = pct.min(100);
+                set_design(
+                    &self.library,
+                    "design_bg_filter_strength",
+                    &self.theme.design.bg_filter_strength.to_string(),
+                );
+                self.refresh_background();
+            }
+            DesignMsg::TextColor(color) => {
+                self.theme.design.text_color = color.clone();
+                set_design(
+                    &self.library,
+                    "design_text_color",
+                    color.as_deref().unwrap_or(""),
+                );
+                self.reapply_runtime_style();
+            }
+            DesignMsg::FieldColor(color) => {
+                self.theme.design.field_color = color.clone();
+                set_design(
+                    &self.library,
+                    "design_field_color",
+                    color.as_deref().unwrap_or(""),
+                );
+                self.reapply_runtime_style();
+            }
+            DesignMsg::BgNav(on) => {
+                self.theme.design.bg_nav = on;
+                set_design(&self.library, "design_bg_nav", if on { "1" } else { "0" });
+                self.reapply_runtime_style();
+            }
+            DesignMsg::BgTitlebar(on) => {
+                self.theme.design.bg_titlebar = on;
+                set_design(
+                    &self.library,
+                    "design_bg_titlebar",
+                    if on { "1" } else { "0" },
+                );
+                self.reapply_runtime_style();
+            }
+            DesignMsg::FieldTransparency(pct) => {
+                self.theme.design.field_transparency = pct.min(100);
+                set_design(
+                    &self.library,
+                    "design_chrome_transparency",
+                    &self.theme.design.field_transparency.to_string(),
+                );
+                self.reapply_runtime_style();
+            }
+        }
+    }
+
     /// Single choke point: rebuild + reload the runtime stylesheet from the
     /// current scale, colors and background state.
     pub(crate) fn reapply_runtime_style(&self) {

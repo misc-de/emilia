@@ -13,6 +13,8 @@ use crate::ui::app::{
     save_window_state, section_meta, ActiveSource, App, AppWidgets, Cmd, Msg, SortCrit, SECTIONS,
     SORTABLE_SECTIONS,
 };
+use crate::ui::app_sort::SortMsg;
+use crate::ui::theme::DesignMsg;
 
 /// The settings/state read from the library DB at startup, before the model
 /// exists. Produced by [`App::read_init_state`] and destructured back into
@@ -344,6 +346,121 @@ impl App {
         }
     }
 
+    /// Brings the extracted page components (podcasts / YouTube / stream) up to
+    /// the current chrome state, seeds the memo categories, and kicks off the
+    /// startup background work — the library scan, the optional YouTube refresh,
+    /// and the remote re-index. Called from `init` once `model` is built, before
+    /// `view_output!` (it touches no widgets).
+    pub(crate) fn startup_configure(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        // Bring the PodcastsPage component up to the current chrome state. The
+        // final `SetGalleryView` triggers exactly one (correctly-moded) reload.
+        {
+            use crate::ui::podcasts_page::PodcastsInput as PI;
+            self.podcasts_page.emit(PI::SetWindow(root.clone()));
+            self.podcasts_page.emit(PI::SetMobile(self.is_mobile()));
+            self.podcasts_page
+                .emit(PI::SetGalleryColumns(self.libview.gallery_columns));
+            self.podcasts_page
+                .emit(PI::SetGalleryView(self.libview.gallery_view));
+        }
+        // Same for the YtPage component.
+        {
+            use crate::ui::yt_page::YtInput as YI;
+            self.yt_page.emit(YI::SetWindow(root.clone()));
+            self.yt_page.emit(YI::SetMobile(self.is_mobile()));
+            self.yt_page
+                .emit(YI::SetGalleryColumns(self.libview.gallery_columns));
+            self.yt_page
+                .emit(YI::SetGalleryView(self.libview.gallery_view));
+        }
+        // Bring the StreamPage component up to the current chrome state + load.
+        {
+            use crate::ui::stream_page::StreamInput as SI;
+            self.stream_page.emit(SI::SetWindow(root.clone()));
+            self.stream_page.emit(SI::SetMobile(self.is_mobile()));
+            self.stream_page.emit(SI::SetBufferMinutes(
+                self.streaming.recording_buffer_minutes,
+            ));
+            self.stream_page.emit(SI::Reload);
+            self.stream_page.emit(SI::ReloadRecordings);
+            self.stream_page.emit(SI::ReloadHeard);
+        }
+        // Seed the starter memo categories once (localized; i18n is ready here),
+        // then load categories + memos for the Memo page.
+        {
+            let names = [gettext("Idea"), gettext("Task"), gettext("Note")];
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let _ = self.library.seed_memo_categories(&refs);
+            // One-time: the former default "Music" category was dropped from the
+            // seed set; remove an existing one (its memos fall back to General).
+            if self
+                .library
+                .get_setting("memo_music_default_removed")
+                .ok()
+                .flatten()
+                .is_none()
+            {
+                let music = gettext("Music");
+                for c in self
+                    .library
+                    .memo_categories()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|c| c.name == music)
+                {
+                    let _ = self.library.delete_memo_category(c.id);
+                }
+                let _ = self.library.set_setting("memo_music_default_removed", "1");
+            }
+        }
+        self.reload_memo_categories(sender);
+        self.reload_memos(sender);
+        // (Statistics build themselves in the StatsPage component's init; the
+        // podcast feed-image cache runs in the PodcastsPage component's init; the
+        // station-logo cache runs in the StreamPage component's init.)
+        // YouTube (optional, opt-in): load subscribed channels, and – on a
+        // connection – verify/refresh yt-dlp and the newest videos in the
+        // background. yt-dlp is re-fetched once per new app version (YouTube
+        // changes frequently break older versions).
+        if self.youtube.enabled {
+            self.yt_page.emit(crate::ui::yt_page::YtInput::Reload);
+            let online = online_available();
+            sender.spawn_oneshot_command(move || {
+                let Ok(lib) = Library::open() else {
+                    return Cmd::YtReload;
+                };
+                let prev = lib.get_setting("yt_dlp_app_version").ok().flatten();
+                let cur = env!("CARGO_PKG_VERSION");
+                if online && crate::core::youtube::available() && prev.as_deref() != Some(cur) {
+                    let _ = crate::core::youtube::update_ytdlp();
+                }
+                let _ = lib.set_setting("yt_dlp_app_version", cur);
+                if online && crate::core::youtube::available() {
+                    for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
+                        if let Some(t) = thumb.as_deref() {
+                            crate::core::online::cache_youtube_thumb(t);
+                        }
+                        let _ = crate::ui::yt_page::refresh_channel_videos(id, &title, &url);
+                    }
+                }
+                Cmd::YtReload
+            });
+        }
+        // Automatically read the library at startup and – on Wi-Fi/LAN and
+        // with the switch enabled – fetch missing covers/metadata in the background.
+        self.start_scan(sender, true, false);
+        // Also check the remote sources for new content in the background (silent,
+        // non-manual: respects the auto-enrich setting). Skipped when offline so a
+        // launch without a connection does not spin up a pointless re-index worker.
+        if online_available() {
+            self.reindex_cloud_sources(sender, false);
+        }
+    }
+
     /// Wires up everything that needs the built `widgets`: seek-bar/chapter
     /// hover, scroll restore, the adaptive breakpoint, the icon navigation, and
     /// the window-state restore. The `saved_*` values come from the settings DB
@@ -377,7 +494,7 @@ impl App {
         {
             let sender = sender.clone();
             adw::StyleManager::default().connect_dark_notify(move |_| {
-                sender.input(Msg::ReloadDesign);
+                sender.input(Msg::Design(DesignMsg::Reload));
             });
         }
         self.mini.seek_scale = widgets.seek_scale.clone();
@@ -796,7 +913,7 @@ impl App {
                     sync_active(stack, &nav_buttons);
                     rt();
                     // Rebuild (or hide) the title-bar sort control for the section.
-                    sender.input(Msg::SortMenuRefresh);
+                    sender.input(Msg::Sort(SortMsg::MenuRefresh));
                     // Recompute the statistics fresh when opening the section.
                     if stack.visible_child_name().as_deref() == Some("stats") {
                         stats_sender.emit(crate::ui::stats_page::StatsInput::Refresh);

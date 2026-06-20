@@ -197,14 +197,14 @@ fn get_design(lib: &Library, base: &str) -> Option<String> {
 }
 
 /// Write a per-theme design setting under the current theme's key.
-fn set_design(lib: &Library, base: &str, value: &str) {
+pub(crate) fn set_design(lib: &Library, base: &str, value: &str) {
     let _ = lib.set_setting(&format!("{base}_{}", design_theme_suffix()), value);
 }
 
 /// Build the [`DesignSettings`] for the *current* theme from the DB. Used at
 /// startup and again whenever the light/dark theme flips (see `reload_design`),
 /// so each theme keeps its own appearance.
-fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
+pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
     // Fresh-install defaults differ per theme (the maintainer's shipped look):
     // dark gets a dark blue field tint; light a light grey one that is a touch
     // more see-through. Both use a barely-there blur on the built-in concert
@@ -1250,25 +1250,12 @@ pub enum Msg {
     Mpris(crate::core::mpris::MprisCommand),
     /// Command from the embedded MCP server (see [`crate::ui::app_mcp`]).
     Mcp(crate::core::mcp::McpCommand),
-    /// Settings: change the MCP backend (off / JSON-RPC / SDK) → persist + restart.
-    SetMcpMode(crate::core::mcp::McpMode),
-    /// Settings: toggle LAN exposure of the MCP server → persist + restart.
-    SetMcpPublic(bool),
-    /// Settings: store a freshly generated MCP bearer token → persist + restart
-    /// (existing connections drop).
-    SetMcpToken(String),
-    /// Settings: pick the assistant LLM provider preset (`minimax` / `custom`).
-    SetAssistantProvider(String),
-    /// Settings: persist the assistant API base URL (custom provider only).
-    SetAssistantBaseUrl(String),
-    /// Settings: persist the assistant model name.
-    SetAssistantModel(String),
-    /// Settings: persist the assistant API key (Secret Service).
-    SetAssistantApiKey(String),
-    /// Open the assistant chat for the currently shown detail object.
-    OpenAssistantChat,
-    /// Send a user message in the open assistant chat → run the agent.
-    AssistantSend(String),
+    /// MCP-server settings (backend mode / LAN exposure / bearer token)
+    /// (see [`crate::ui::app_mcp`]).
+    McpSetting(crate::ui::app_mcp::McpSettingMsg),
+    /// In-app assistant: provider/model/key settings + open chat / send a turn
+    /// (see [`crate::ui::app_assistant`]).
+    Assistant(crate::ui::app_assistant::AssistantMsg),
     /// 1-s tick: update position/duration of the seek bar.
     Tick,
     /// Periodic, quiet background backfill: fetch missing artist photos (first)
@@ -1371,53 +1358,9 @@ pub enum Msg {
         music_dir: PathBuf,
         enabled_sections: Vec<String>,
     },
-    /// Switch to another source (tab) in the file view.
-    SelectSource(ActiveSource),
-    /// The source list has changed (added/removed in the settings dialog)
-    /// – reload sources and update the tab bar.
-    SourcesChanged,
-    /// A new source (id) was just added – reload sources/tabs and switch to it
-    /// so its folder is shown straight away.
-    SourceAdded(i64),
-    /// Remove an extra source (local folder / Nextcloud) by id, after the user
-    /// confirmed it in the settings list. Then reloads sources + tabs.
-    DeleteSource(i64),
-    /// Long-press / right-click on a source tab → open its context menu.
-    SourceContextMenu(ActiveSource),
-    /// Open the rename dialog for source `id`.
-    SourceRename(i64),
-    /// Apply a new name to source `id`.
-    SourceRenameDo {
-        id: i64,
-        name: String,
-    },
-    /// Open the "change folder / music path" editor for a tab.
-    SourceEdit(ActiveSource),
-    /// Apply a new root path to a local source (then reload it if active).
-    SourceSetPath {
-        id: i64,
-        path: PathBuf,
-    },
-    /// Apply a new music subpath to a WebDAV source (then re-index it).
-    SourceSetMusicPath {
-        id: i64,
-        path: String,
-    },
-    /// Confirm-then-remove a source (the context-menu delete entry).
-    SourceDelete(i64),
-    /// Check reachability of the Nextcloud sources (periodically + at startup).
-    CheckSources,
-    /// The "+" in the Files tab bar: ask whether to add a local folder or
-    /// connect a Nextcloud.
-    AddSourceMenu,
-    /// Pick a local folder and add it as an extra source.
-    AddLocalFolder,
-    /// Open the Nextcloud setup dialog (QR scan or manual).
-    AddCloudSource,
-    /// The CloudPage component finished indexing a newly added source.
-    CloudIndexed,
-    /// Download a remote file offline (rel path in the active source).
-    CtxDownloadRemote(String),
+    /// Music sources (Files tab bar: extra local folders / Nextcloud)
+    /// (see [`crate::ui::app_views_sources`]).
+    Source(crate::ui::app_views_sources::SourceMsg),
     SetAcoustidKey(String),
     /// Set the primary cover of an album (last shown in the gallery carousel).
     SetAlbumCover {
@@ -1441,75 +1384,20 @@ pub enum Msg {
     SetAutoEnrich(bool),
     /// Change the display language ("system"/"de"/"en"); restarts the app.
     SetLanguage(String),
-    /// Change the color scheme ("system"/"dark"/"light"); takes effect immediately.
-    SetColorScheme(String),
     /// Remember the last opened settings category (page name) so the settings
     /// dialog reopens on it.
     SetLastSettingsPage(String),
-    /// Whole-app scale factor (0.5 ..= 1.5); persisted + applied live.
-    SetUiScale(f64),
-    /// Mobile menu-icon size offset (-50 ..= 50 %); persisted + applied live.
-    SetMenuIconScale(i32),
-    /// Master switch for the background feature (off → no background at all;
-    /// on with no custom image → the built-in light/dark default).
-    SetBackgroundOn(bool),
-    /// Reload the per-theme appearance (background + colours) from the DB and
-    /// re-apply it — fired when the light/dark theme flips.
-    ReloadDesign,
-    /// Set/clear the custom background image (already copied into the data dir).
-    SetCustomBg(Option<std::path::PathBuf>),
-    /// Toggle using the now-playing cover as the background source.
-    SetUseCoverBg(bool),
-    /// Select the background blur/effect filter (ComboRow index).
-    SetBgFilter(u32),
-    /// Strength (0..=100 %) of the selected background filter.
-    SetBgFilterStrength(u32),
-    /// Set/clear the text color (hex).
-    SetTextColor(Option<String>),
-    /// Set/clear the fields (chrome) color (hex).
-    SetFieldColor(Option<String>),
-    /// Toggle whether the background shows behind the sidebar/navigation.
-    SetBgNav(bool),
-    /// Toggle whether the background shows behind the title bar (headerbar).
-    SetBgTitlebar(bool),
-    /// Transparency (0..=100 %) of entries & buttons over the background.
-    SetFieldTransparency(u32),
-    /// Show/hide the desktop tray icon.
-    SetTrayEnabled(bool),
-    /// Closing the window hides it into the tray instead of quitting.
-    SetTrayCloseHides(bool),
-    /// Start with the window hidden (tray only).
-    SetTrayStartHidden(bool),
-    /// Suppress the taskbar entry even while visible (X11 best-effort).
-    SetTraySkipTaskbar(bool),
-    /// Show the tray icon in grayscale instead of colored.
-    SetTrayIconGray(bool),
-    /// Tray click / "Show / Hide": toggle the main window's visibility.
-    TrayToggleWindow,
-    /// Tray left click at (x, y): toggle the MPRIS-style media popup near the icon.
-    TrayMediaPopup(i32, i32),
-    /// Tray "Quit": release the app-hold and quit for real.
-    TrayQuit,
+    /// Appearance / design: scaling, colours, background (see [`crate::ui::theme`]).
+    Design(crate::ui::theme::DesignMsg),
+    /// Desktop tray icon: settings + click actions (see [`crate::ui::app_tray`]).
+    Tray(crate::ui::app_tray::TrayMsg),
     /// Gapless playback on/off (settings); persisted + pushed to the player.
     SetGapless(bool),
     /// Crossfade window in seconds (settings); persisted + pushed to the player.
     SetCrossfade(f64),
-    /// Gallery view (cover grid) on/off; rebuilds the lists.
-    SetGalleryView(bool),
-    /// Tiles per row in the gallery view (2–8); rebuilds the lists.
-    SetGalleryColumns(u32),
-    /// Rebuild the title-bar sort popover for the current section (or hide it).
-    /// Emitted when the visible section changes.
-    SortMenuRefresh,
-    /// Change the sort criterion of the current section; persists and re-sorts.
-    SetSortCrit(SortCrit),
-    /// Change the sort direction of the current section (`true` = descending).
-    SetSortDir(bool),
-    /// Toggle section grouping for the current section (`true` = no grouping).
-    SetSortNoGroup(bool),
-    /// Toggle the gallery view for the current section only (overrides the global
-    /// [`Self::SetGalleryView`] for that one section). Set from the sort popover.
-    SetSectionGallery(bool),
+    /// Sort + gallery: the title-bar sort popover, the global gallery view, and
+    /// the page `*Changed` mirrors (see [`crate::ui::app_sort`]).
+    Sort(crate::ui::app_sort::SortMsg),
     /// Set a property of a level (or with `None` reset to "inherit").
     /// Set the areas (properties) of a level; empty value = hidden.
     SetAreas {
@@ -1523,26 +1411,9 @@ pub enum Msg {
         album: String,
         kind: Option<crate::model::AlbumKind>,
     },
-    /// Save and apply the equalizer bands of an output + a level.
-    SetEq {
-        output: String,
-        scope: &'static str,
-        key: String,
-        bands: [f64; 10],
-    },
-    /// Enable/disable one equalizer setting without changing its saved bands.
-    SetEqEnabled {
-        output: String,
-        scope: &'static str,
-        key: String,
-        enabled: bool,
-    },
-    /// Reset the equalizer of an output + a level (inherits again).
-    ClearEq {
-        output: String,
-        scope: &'static str,
-        key: String,
-    },
+    /// Equalizer: set / enable / clear bands per output × level
+    /// (see [`crate::ui::app_eq`]).
+    Eq(crate::ui::app_eq::EqMsg),
     // Concerts
     ConcertImport,
     ConcertDismissHint,
@@ -1586,45 +1457,9 @@ pub enum Msg {
     /// Open the detail view of an audiobook.
     ShowAudiobookDetail(usize),
     // Playlists
-    /// Create a playlist and add the current context files.
-    PlaylistCreateAddTo(String),
-    /// Open the tracks subpage of a playlist (short tap: albums + songs).
-    OpenPlaylist(i64),
-    /// Gallery tile tap: open the playlist by its index in `playlist_items`.
-    OpenPlaylistAt(usize),
-    /// Open the detail view of a playlist (long press: cover + actions).
-    ShowPlaylistDetail(i64),
-    /// Gallery tile long-press: playlist detail by index in `playlist_items`.
-    ShowPlaylistDetailAt(usize),
-    /// Play the whole playlist.
-    PlayPlaylist(i64),
-    /// Play the whole playlist starting at the given track (so it continues
-    /// through the rest of the list, incl. standalone songs after an album).
-    PlayPlaylistFrom {
-        id: i64,
-        path: String,
-    },
-    /// Play the whole playlist shuffled (random order, random start).
-    PlayPlaylistShuffled(i64),
-    /// Delete a playlist (shows an undo toast; the real delete is deferred to
-    /// `PlaylistDeleteConfirmed`).
-    PlaylistDelete(i64),
-    /// Actually delete a playlist (fired when the undo toast expires).
-    PlaylistDeleteConfirmed(i64),
-    /// Add the current context files to this playlist.
-    PlaylistAddTo(i64),
-    /// Set the chosen cover of a playlist (last shown in the detail carousel).
-    SetPlaylistCover {
-        id: i64,
-        path: String,
-    },
-    /// Open the rename dialog of a playlist.
-    PlaylistRenameDialog(i64),
-    /// Rename a playlist.
-    PlaylistRename {
-        id: i64,
-        name: String,
-    },
+    /// Playlists section: create / open / play / rename / delete + cover
+    /// (see [`crate::ui::app_playlist`]).
+    Playlist(crate::ui::app_playlist::PlaylistMsg),
     // Podcasts (episode playback only; the page lives in the PodcastsPage
     // component — these two are mapped from its `Output`).
     /// Toggle an episode: start or – if already the running one – pause/resume.
@@ -1653,9 +1488,6 @@ pub enum Msg {
     /// The page started/finished a "refresh all" worker → drive the spinner.
     PodcastRefreshStarted(bool),
     PodcastRefreshFinished,
-    /// The page rebuilt its sort popover (slot updated) → refresh the shared
-    /// title-bar sort button if the Podcasts section is showing.
-    PodcastSortChanged,
     // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
     // menu switch (see `Msg::SetSectionVisible`), not a dedicated settings toggle.
     /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
@@ -1735,9 +1567,6 @@ pub enum Msg {
     /// The page started/finished a "refresh all" worker → drive the spinner.
     YtRefreshStarted(bool),
     YtRefreshFinished,
-    /// The page rebuilt its sort popover (slot updated) → refresh the shared
-    /// title-bar sort button if the YouTube section is showing.
-    YtSortChanged,
     // Streaming (internet radio) — transport; the page lives in the StreamPage
     // component and reaches the transport through these.
     /// Tap a station: starts it, toggle pause/resume on a running station.
@@ -1799,9 +1628,6 @@ pub enum Msg {
     StreamLibraryChanged,
     /// Informational toast requested by the page.
     StreamToast(String),
-    /// The page rebuilt its sort popover (slot updated) → refresh the shared
-    /// title-bar sort button if the Streaming section is showing.
-    StreamSortChanged,
     /// Open the waveform editor subpage for a recording (id).
     EditRecording(i64),
     /// Open the waveform editor subpage for a voice memo (id).
@@ -1828,45 +1654,8 @@ pub enum Msg {
     },
 
     // ---- Voice memos ----
-    /// A finished recording was finalized off-thread: new file path (`None` =
-    /// failed) + its duration. Creates the memo row.
-    MemoRecordSaved {
-        path: Option<String>,
-        duration_ms: i64,
-    },
-    /// Switch the memo view: Recent list or Category tree.
-    SetMemoView(MemoView),
-    /// Open a memo's detail dialog (id) – via long press.
-    OpenMemo(i64),
-    /// Rename a memo.
-    MemoRename {
-        id: i64,
-        title: String,
-    },
-    /// Assign (or clear, with `None`) a memo's category.
-    MemoSetCategory {
-        id: i64,
-        category_id: Option<i64>,
-    },
-    /// Delete a memo (id) – undo toast; deferred to `MemoDeleteConfirmed`.
-    MemoDelete(i64),
-    /// Actually delete a memo (after the undo toast expires).
-    MemoDeleteConfirmed(i64),
-    /// Open the "new category" text prompt (the "+" in the tab bar).
-    MemoCategoryAddPrompt,
-    /// Add a new memo category (confirmed name).
-    MemoCategoryAdd(String),
-    /// Open a category's detail dialog (id) – via long press / right click.
-    OpenMemoCategory(i64),
-    /// Rename a memo category.
-    MemoCategoryRename {
-        id: i64,
-        name: String,
-    },
-    /// Delete a category but keep its memos (they fall back to "General").
-    MemoCategoryDeleteKeepMemos(i64),
-    /// Delete a category together with all its memos (their files included).
-    MemoCategoryDeleteWithMemos(i64),
+    /// Voice memos + categories (see [`crate::ui::app_memo`]).
+    Memo(crate::ui::app_memo::MemoMsg),
 }
 
 /// Results of the background workers (read folder or online enrichment).
@@ -2722,20 +2511,20 @@ impl Component for App {
                                             set_hexpand: true,
                                             #[watch]
                                             set_active: model.memo.view == MemoView::Recent,
-                                            connect_clicked => Msg::SetMemoView(MemoView::Recent),
+                                            connect_clicked => Msg::Memo(crate::ui::app_memo::MemoMsg::SetView(MemoView::Recent)),
                                         },
                                         gtk::ToggleButton {
                                             set_label: &gettext("Category"),
                                             set_hexpand: true,
                                             #[watch]
                                             set_active: model.memo.view == MemoView::Category,
-                                            connect_clicked => Msg::SetMemoView(MemoView::Category),
+                                            connect_clicked => Msg::Memo(crate::ui::app_memo::MemoMsg::SetView(MemoView::Category)),
                                         },
                                         gtk::Button {
                                             set_icon_name: "list-add-symbolic",
                                             set_tooltip_text: Some(&gettext("Add category")),
                                             add_css_class: "flat",
-                                            connect_clicked => Msg::MemoCategoryAddPrompt,
+                                            connect_clicked => Msg::Memo(crate::ui::app_memo::MemoMsg::CategoryAddPrompt),
                                         },
                                     },
                                     // Memo list + empty state.
@@ -3434,9 +3223,9 @@ impl Component for App {
         // regularly (controls the red "Disconnected" hint).
         {
             let sender = sender.clone();
-            sender.input(Msg::CheckSources);
+            sender.input(Msg::Source(crate::ui::app_views_sources::SourceMsg::Check));
             gtk::glib::timeout_add_seconds_local(45, move || {
-                sender.input(Msg::CheckSources);
+                sender.input(Msg::Source(crate::ui::app_views_sources::SourceMsg::Check));
                 gtk::glib::ControlFlow::Continue
             });
         }
@@ -3481,8 +3270,12 @@ impl Component for App {
         let cloud_page = crate::ui::cloud_page::CloudPage::builder()
             .launch(())
             .forward(sender.input_sender(), |out| match out {
-                crate::ui::cloud_page::CloudOutput::SourcesChanged(id) => Msg::SourceAdded(id),
-                crate::ui::cloud_page::CloudOutput::Indexed => Msg::CloudIndexed,
+                crate::ui::cloud_page::CloudOutput::SourcesChanged(id) => {
+                    Msg::Source(crate::ui::app_views_sources::SourceMsg::Added(id))
+                }
+                crate::ui::cloud_page::CloudOutput::Indexed => {
+                    Msg::Source(crate::ui::app_views_sources::SourceMsg::CloudIndexed)
+                }
             });
         // Shared hand-off slots for the title-bar sort control of each component
         // page (filled by the component, read by `apply_component_sort`).
@@ -3506,7 +3299,7 @@ impl Component for App {
                     O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
                     O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
                     O::RefreshFinished => Msg::PodcastRefreshFinished,
-                    O::SortChanged => Msg::PodcastSortChanged,
+                    O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::PodcastChanged),
                 }
             });
         let yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
@@ -3546,7 +3339,7 @@ impl Component for App {
                     O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
                     O::RefreshFinished => Msg::YtRefreshFinished,
                     O::Share(sel) => Msg::ShareItems(sel),
-                    O::SortChanged => Msg::YtSortChanged,
+                    O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::YtChanged),
                 }
             });
         let stream_page = crate::ui::stream_page::StreamPage::builder()
@@ -3565,7 +3358,7 @@ impl Component for App {
                     O::DownloadHeard { artist, title } => Msg::DownloadHeard { artist, title },
                     O::Share(sel) => Msg::ShareItems(*sel),
                     O::Toast(s) => Msg::StreamToast(s),
-                    O::SortChanged => Msg::StreamSortChanged,
+                    O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::StreamChanged),
                 }
             });
         let setup_page = crate::ui::setup::SetupPage::builder().launch(()).forward(
@@ -3891,113 +3684,7 @@ impl Component for App {
         model.load_favorites(&sender);
         model.load_audiobooks(&sender);
         model.reload_playlists(&sender);
-        // Bring the PodcastsPage component up to the current chrome state. The
-        // final `SetGalleryView` triggers exactly one (correctly-moded) reload.
-        {
-            use crate::ui::podcasts_page::PodcastsInput as PI;
-            model.podcasts_page.emit(PI::SetWindow(root.clone()));
-            model.podcasts_page.emit(PI::SetMobile(model.is_mobile()));
-            model
-                .podcasts_page
-                .emit(PI::SetGalleryColumns(model.libview.gallery_columns));
-            model
-                .podcasts_page
-                .emit(PI::SetGalleryView(model.libview.gallery_view));
-        }
-        // Same for the YtPage component.
-        {
-            use crate::ui::yt_page::YtInput as YI;
-            model.yt_page.emit(YI::SetWindow(root.clone()));
-            model.yt_page.emit(YI::SetMobile(model.is_mobile()));
-            model
-                .yt_page
-                .emit(YI::SetGalleryColumns(model.libview.gallery_columns));
-            model
-                .yt_page
-                .emit(YI::SetGalleryView(model.libview.gallery_view));
-        }
-        // Bring the StreamPage component up to the current chrome state + load.
-        {
-            use crate::ui::stream_page::StreamInput as SI;
-            model.stream_page.emit(SI::SetWindow(root.clone()));
-            model.stream_page.emit(SI::SetMobile(model.is_mobile()));
-            model.stream_page.emit(SI::SetBufferMinutes(
-                model.streaming.recording_buffer_minutes,
-            ));
-            model.stream_page.emit(SI::Reload);
-            model.stream_page.emit(SI::ReloadRecordings);
-            model.stream_page.emit(SI::ReloadHeard);
-        }
-        // Seed the starter memo categories once (localized; i18n is ready here),
-        // then load categories + memos for the Memo page.
-        {
-            let names = [gettext("Idea"), gettext("Task"), gettext("Note")];
-            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            let _ = model.library.seed_memo_categories(&refs);
-            // One-time: the former default "Music" category was dropped from the
-            // seed set; remove an existing one (its memos fall back to General).
-            if model
-                .library
-                .get_setting("memo_music_default_removed")
-                .ok()
-                .flatten()
-                .is_none()
-            {
-                let music = gettext("Music");
-                for c in model
-                    .library
-                    .memo_categories()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|c| c.name == music)
-                {
-                    let _ = model.library.delete_memo_category(c.id);
-                }
-                let _ = model.library.set_setting("memo_music_default_removed", "1");
-            }
-        }
-        model.reload_memo_categories(&sender);
-        model.reload_memos(&sender);
-        // (Statistics build themselves in the StatsPage component's init; the
-        // podcast feed-image cache runs in the PodcastsPage component's init; the
-        // station-logo cache runs in the StreamPage component's init.)
-        // YouTube (optional, opt-in): load subscribed channels, and – on a
-        // connection – verify/refresh yt-dlp and the newest videos in the
-        // background. yt-dlp is re-fetched once per new app version (YouTube
-        // changes frequently break older versions).
-        if model.youtube.enabled {
-            model.yt_page.emit(crate::ui::yt_page::YtInput::Reload);
-            let online = online_available();
-            sender.spawn_oneshot_command(move || {
-                let Ok(lib) = Library::open() else {
-                    return Cmd::YtReload;
-                };
-                let prev = lib.get_setting("yt_dlp_app_version").ok().flatten();
-                let cur = env!("CARGO_PKG_VERSION");
-                if online && crate::core::youtube::available() && prev.as_deref() != Some(cur) {
-                    let _ = crate::core::youtube::update_ytdlp();
-                }
-                let _ = lib.set_setting("yt_dlp_app_version", cur);
-                if online && crate::core::youtube::available() {
-                    for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
-                        if let Some(t) = thumb.as_deref() {
-                            crate::core::online::cache_youtube_thumb(t);
-                        }
-                        let _ = crate::ui::yt_page::refresh_channel_videos(id, &title, &url);
-                    }
-                }
-                Cmd::YtReload
-            });
-        }
-        // Automatically read the library at startup and – on Wi-Fi/LAN and
-        // with the switch enabled – fetch missing covers/metadata in the background.
-        model.start_scan(&sender, true, false);
-        // Also check the remote sources for new content in the background (silent,
-        // non-manual: respects the auto-enrich setting). Skipped when offline so a
-        // launch without a connection does not spin up a pointless re-index worker.
-        if online_available() {
-            model.reindex_cloud_sources(&sender, false);
-        }
+        model.startup_configure(&root, &sender);
 
         let entries_box = model.libview.entries.widget();
         let albums_box = model.libview.albums.widget();
@@ -4129,108 +3816,7 @@ impl Component for App {
             Msg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
             Msg::CtxAddQueue => self.on_ctx_add_queue(),
             Msg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, &sender),
-            Msg::PlaylistCreateAddTo(name) => {
-                let name = name.trim();
-                if !name.is_empty() {
-                    if let Ok(id) = self.library.create_playlist(name) {
-                        self.add_context_to_playlist(id, &sender);
-                    }
-                }
-            }
-            Msg::PlaylistAddTo(id) => self.add_context_to_playlist(id, &sender),
-            Msg::OpenPlaylist(id) => {
-                if let Some((_, name, _)) = self
-                    .playlists
-                    .playlist_items
-                    .iter()
-                    .find(|(pid, _, _)| *pid == id)
-                    .cloned()
-                {
-                    self.open_playlist(&sender, id, &name);
-                }
-            }
-            // Gallery tile → resolve the index to the playlist id, then reuse the
-            // list paths.
-            Msg::OpenPlaylistAt(i) => {
-                if let Some((id, name, _)) = self.playlists.playlist_items.get(i).cloned() {
-                    self.open_playlist(&sender, id, &name);
-                }
-            }
-            Msg::ShowPlaylistDetailAt(i) => {
-                if let Some((id, _, _)) = self.playlists.playlist_items.get(i).cloned() {
-                    sender.input(Msg::ShowPlaylistDetail(id));
-                }
-            }
-            Msg::ShowPlaylistDetail(id) => {
-                if let Some((_, name, _)) = self
-                    .playlists
-                    .playlist_items
-                    .iter()
-                    .find(|(pid, _, _)| *pid == id)
-                    .cloned()
-                {
-                    self.open_playlist_detail(root, &sender, id, &name);
-                }
-            }
-            Msg::PlayPlaylist(id) => {
-                let paths = self.library.playlist_paths(id).unwrap_or_default();
-                if !paths.is_empty() {
-                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
-                    self.transport.queue_pos = 0;
-                    self.transport.shuffle = false;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                }
-            }
-            Msg::PlayPlaylistFrom { id, path } => {
-                // Whole playlist as the queue, started at the tapped track — so it
-                // keeps playing through the rest of the list (e.g. the standalone
-                // songs after an album), not just that one entry.
-                let paths = self.library.playlist_paths(id).unwrap_or_default();
-                if let Some(pos) = paths.iter().position(|p| *p == path) {
-                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
-                    self.transport.queue_pos = pos;
-                    self.transport.shuffle = false;
-                    self.play_current();
-                    self.refresh_queue_icons();
-                }
-            }
-            Msg::PlayPlaylistShuffled(id) => {
-                let paths = self.library.playlist_paths(id).unwrap_or_default();
-                if !paths.is_empty() {
-                    let len = paths.len();
-                    self.transport.queue = paths.into_iter().map(PathBuf::from).collect();
-                    // Random start, then a fresh random order over the rest.
-                    self.transport.queue_pos = gtk::glib::random_int_range(0, len as i32) as usize;
-                    self.transport.shuffle = true;
-                    self.rebuild_shuffle_order();
-                    self.play_current();
-                    self.refresh_queue_icons();
-                }
-            }
-            Msg::SetPlaylistCover { id, path } => {
-                let _ = self.library.set_playlist_cover(id, &path);
-                self.reload_playlists(&sender);
-            }
-            Msg::PlaylistDelete(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Playlist deleted"),
-                    Msg::PlaylistDeleteConfirmed(id),
-                );
-            }
-            Msg::PlaylistDeleteConfirmed(id) => {
-                let _ = self.library.delete_playlist(id);
-                self.reload_playlists(&sender);
-            }
-            Msg::PlaylistRenameDialog(id) => self.open_rename_playlist_dialog(root, &sender, id),
-            Msg::PlaylistRename { id, name } => {
-                let name = name.trim();
-                if !name.is_empty() {
-                    let _ = self.library.rename_playlist(id, name);
-                    self.reload_playlists(&sender);
-                }
-            }
+            Msg::Playlist(m) => self.update_playlist(m, root, &sender),
             // --- Streaming (internet radio) ---
             // --- Streaming transport (requested by the StreamPage component) ---
             Msg::ToggleStream(id) => self.toggle_stream(id),
@@ -4349,67 +3935,7 @@ impl Component for App {
                 None => self.toast(&gettext("Editing failed")),
             },
             // --- Voice memos ---
-            Msg::MemoRecordSaved { path, duration_ms } => match path {
-                Some(p) => {
-                    let title = crate::ui::app_memo::memo_default_title();
-                    let _ = self.library.add_memo(&p, &title, None, duration_ms);
-                    self.reload_memos(&sender);
-                    self.toast(&gettext("Memo saved"));
-                }
-                None => self.toast(&gettext("Recording failed")),
-            },
-            Msg::SetMemoView(view) => {
-                if self.memo.view != view {
-                    self.memo.view = view;
-                    self.reload_memos(&sender);
-                }
-            }
-            Msg::OpenMemo(id) => self.open_memo(root, &sender, id),
-            Msg::MemoRename { id, title } => {
-                let _ = self.library.rename_memo(id, &title);
-                self.reload_memos(&sender);
-            }
-            Msg::MemoSetCategory { id, category_id } => {
-                let _ = self.library.set_memo_category(id, category_id);
-                self.reload_memos(&sender);
-            }
-            Msg::MemoDelete(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Memo deleted"),
-                    Msg::MemoDeleteConfirmed(id),
-                );
-            }
-            Msg::MemoDeleteConfirmed(id) => {
-                if let Ok(Some(path)) = self.library.delete_memo(id) {
-                    let _ = std::fs::remove_file(&path);
-                }
-                self.reload_memos(&sender);
-            }
-            Msg::MemoCategoryAddPrompt => self.prompt_new_memo_category(root, &sender),
-            Msg::MemoCategoryAdd(name) => {
-                let _ = self.library.add_memo_category(&name);
-                self.reload_memo_categories(&sender);
-            }
-            Msg::OpenMemoCategory(id) => self.open_memo_category(root, &sender, id),
-            Msg::MemoCategoryRename { id, name } => {
-                let _ = self.library.rename_memo_category(id, &name);
-                self.reload_memo_categories(&sender);
-            }
-            Msg::MemoCategoryDeleteKeepMemos(id) => {
-                let _ = self.library.delete_memo_category(id);
-                self.reload_memo_categories(&sender);
-                self.toast(&gettext("Category removed"));
-            }
-            Msg::MemoCategoryDeleteWithMemos(id) => {
-                if let Ok(paths) = self.library.delete_memo_category_with_memos(id) {
-                    for p in paths {
-                        let _ = std::fs::remove_file(&p);
-                    }
-                }
-                self.reload_memo_categories(&sender);
-                self.toast(&gettext("Category removed"));
-            }
+            Msg::Memo(m) => self.update_memo(m, root, &sender),
             Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
             Msg::PushPodcastSubpage => {
@@ -4562,44 +4088,8 @@ impl Component for App {
             }
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
             Msg::Mcp(cmd) => self.handle_mcp(cmd),
-            Msg::SetMcpMode(mode) => {
-                let _ = self.library.set_setting("mcp_mode", mode.as_setting());
-                self.start_mcp_if_enabled();
-            }
-            Msg::SetMcpPublic(on) => {
-                let _ = self
-                    .library
-                    .set_setting("mcp_public", if on { "1" } else { "0" });
-                self.start_mcp_if_enabled();
-            }
-            Msg::SetMcpToken(token) => {
-                let _ = self.library.set_secret_setting("mcp_token", &token);
-                // Restart so the new token takes effect and existing connections drop.
-                self.start_mcp_if_enabled();
-            }
-            Msg::SetAssistantProvider(provider) => {
-                let _ = self.library.set_setting("assistant_provider", &provider);
-                // MiniMax has a fixed endpoint: prefill it so the user needn't know it.
-                if provider == "minimax" {
-                    let _ = self.library.set_setting(
-                        "assistant_base_url",
-                        crate::core::assistant::MINIMAX_BASE_URL,
-                    );
-                }
-            }
-            Msg::SetAssistantBaseUrl(url) => {
-                let _ = self.library.set_setting("assistant_base_url", url.trim());
-            }
-            Msg::SetAssistantModel(model) => {
-                let _ = self.library.set_setting("assistant_model", model.trim());
-            }
-            Msg::SetAssistantApiKey(key) => {
-                let _ = self
-                    .library
-                    .set_secret_setting("assistant_api_key", key.trim());
-            }
-            Msg::OpenAssistantChat => self.open_assistant_chat(root, &sender),
-            Msg::AssistantSend(text) => self.assistant_send(&sender, text),
+            Msg::McpSetting(m) => self.update_mcp_setting(m),
+            Msg::Assistant(m) => self.update_assistant(m, root, &sender),
             Msg::Next => self.skip_next(),
             Msg::Prev => self.skip_prev(),
             Msg::ToggleShuffle => {
@@ -4685,62 +4175,7 @@ impl Component for App {
                 music_dir,
                 enabled_sections,
             } => self.on_setup_finished(lang_code, music_dir, enabled_sections, &sender),
-            Msg::SelectSource(sel) => {
-                if self.files.active_source != sel {
-                    self.apply_source(sel, &sender);
-                }
-            }
-            Msg::SourcesChanged => self.on_sources_changed(&sender),
-            Msg::SourceAdded(id) => {
-                self.on_sources_changed(&sender);
-                self.apply_source(ActiveSource::Source(id), &sender);
-            }
-            Msg::DeleteSource(id) => {
-                let _ = self.library.delete_source(id);
-                self.on_sources_changed(&sender);
-            }
-            Msg::SourceContextMenu(sel) => self.open_source_context_menu(sel, &sender),
-            Msg::SourceRename(id) => self.open_source_rename_dialog(id, root, &sender),
-            Msg::SourceRenameDo { id, name } => {
-                let name = name.trim();
-                if !name.is_empty() {
-                    let _ = self.library.set_source_name(id, name);
-                    self.on_sources_changed(&sender);
-                }
-            }
-            Msg::SourceEdit(sel) => self.open_source_edit(sel, root, &sender),
-            Msg::SourceSetPath { id, path } => self.on_source_set_path(id, path, &sender),
-            Msg::SourceSetMusicPath { id, path } => {
-                self.on_source_set_music_path(id, path, &sender)
-            }
-            Msg::SourceDelete(id) => confirm_destructive(
-                root,
-                &gettext("Remove this source?"),
-                &gettext("Remove"),
-                sender.clone(),
-                Msg::DeleteSource(id),
-            ),
-            Msg::CheckSources => self.on_check_sources(&sender),
-            Msg::AddSourceMenu => self.open_add_source_menu(root, &sender),
-            Msg::AddLocalFolder => self.add_local_folder_dialog(root, &sender),
-            Msg::AddCloudSource => {
-                use crate::ui::cloud_page::CloudInput;
-                // Offer already-connected Nextcloud servers for reuse.
-                let existing = self
-                    .library
-                    .list_sources()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|s| s.kind == "webdav")
-                    .collect();
-                self.cloud_page.emit(CloudInput::Open {
-                    window: root.clone(),
-                    mobile: self.is_mobile(),
-                    existing,
-                });
-            }
-            Msg::CloudIndexed => self.on_cloud_indexed(&sender),
-            Msg::CtxDownloadRemote(rel) => self.on_ctx_download_remote(rel, &sender),
+            Msg::Source(m) => self.update_source(m, root, &sender),
             Msg::SetAcoustidKey(key) => {
                 let key = key.trim().to_string();
                 let _ = self.library.set_secret_setting("acoustid_key", &key);
@@ -4767,189 +4202,11 @@ impl Component for App {
                     .set_setting("auto_enrich", if on { "1" } else { "0" });
             }
             Msg::SetLanguage(lang) => self.on_set_language(lang, root),
-            Msg::SetColorScheme(scheme) => {
-                apply_color_scheme(&scheme);
-                let _ = self.library.set_setting("color_scheme", &scheme);
-                // The built-in default background differs per light/dark, so a
-                // scheme change may need a different image.
-                self.refresh_background();
-            }
             Msg::SetLastSettingsPage(name) => {
                 let _ = self.library.set_setting("settings_last_page", &name);
             }
-            Msg::SetUiScale(factor) => {
-                self.apply_ui_scale(factor);
-                let _ = self
-                    .library
-                    .set_setting("ui_scale", &self.theme.ui_scale.to_string());
-            }
-            Msg::SetMenuIconScale(offset) => {
-                let offset = offset.clamp(-50, 50);
-                crate::ui::app_init::apply_menu_icon_scale(&self.nav.top_nav, offset);
-                let _ = self
-                    .library
-                    .set_setting("menu_icon_scale", &offset.to_string());
-            }
-            Msg::SetBackgroundOn(on) => {
-                self.theme.design.background_on = on;
-                set_design(
-                    &self.library,
-                    "design_background_on",
-                    if on { "1" } else { "0" },
-                );
-                self.refresh_background();
-            }
-            Msg::ReloadDesign => {
-                // Light/dark flipped: load the new theme's appearance and apply.
-                self.theme.design = read_design_settings(&self.library);
-                self.refresh_background();
-                self.reapply_runtime_style();
-                // If the settings dialog is open, rebuild it so its appearance
-                // controls show the new theme's values (it reopens on the same
-                // page via `settings_last_page`).
-                let reopen = self.nav.settings_dialog.borrow_mut().take();
-                if let Some(dialog) = reopen {
-                    dialog.close();
-                    self.open_settings(root, &sender);
-                }
-            }
-            Msg::SetCustomBg(src) => {
-                // Copy the chosen image into our data dir; `None` clears it.
-                let stored = src.as_deref().and_then(crate::ui::theme::import_custom_bg);
-                self.theme.design.custom_bg = stored.clone();
-                set_design(
-                    &self.library,
-                    "design_bg_path",
-                    &stored
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                );
-                self.refresh_background();
-            }
-            Msg::SetUseCoverBg(on) => {
-                self.theme.design.use_cover_bg = on;
-                set_design(
-                    &self.library,
-                    "design_use_cover_bg",
-                    if on { "1" } else { "0" },
-                );
-                self.refresh_background();
-            }
-            Msg::SetBgFilter(idx) => {
-                let filter = crate::ui::theme::BgFilter::from_index(idx);
-                self.theme.design.bg_filter = filter;
-                set_design(&self.library, "design_bg_filter", filter.key());
-                self.refresh_background();
-            }
-            Msg::SetBgFilterStrength(pct) => {
-                self.theme.design.bg_filter_strength = pct.min(100);
-                set_design(
-                    &self.library,
-                    "design_bg_filter_strength",
-                    &self.theme.design.bg_filter_strength.to_string(),
-                );
-                self.refresh_background();
-            }
-            Msg::SetTextColor(color) => {
-                self.theme.design.text_color = color.clone();
-                set_design(
-                    &self.library,
-                    "design_text_color",
-                    color.as_deref().unwrap_or(""),
-                );
-                self.reapply_runtime_style();
-            }
-            Msg::SetFieldColor(color) => {
-                self.theme.design.field_color = color.clone();
-                set_design(
-                    &self.library,
-                    "design_field_color",
-                    color.as_deref().unwrap_or(""),
-                );
-                self.reapply_runtime_style();
-            }
-            Msg::SetBgNav(on) => {
-                self.theme.design.bg_nav = on;
-                set_design(&self.library, "design_bg_nav", if on { "1" } else { "0" });
-                self.reapply_runtime_style();
-            }
-            Msg::SetBgTitlebar(on) => {
-                self.theme.design.bg_titlebar = on;
-                set_design(
-                    &self.library,
-                    "design_bg_titlebar",
-                    if on { "1" } else { "0" },
-                );
-                self.reapply_runtime_style();
-            }
-            Msg::SetFieldTransparency(pct) => {
-                self.theme.design.field_transparency = pct.min(100);
-                set_design(
-                    &self.library,
-                    "design_chrome_transparency",
-                    &self.theme.design.field_transparency.to_string(),
-                );
-                self.reapply_runtime_style();
-            }
-            Msg::SetTrayEnabled(on) => {
-                self.tray.enabled = on;
-                let _ = self
-                    .library
-                    .set_setting("tray_enabled", if on { "1" } else { "0" });
-                if on {
-                    self.start_tray(root, &sender);
-                } else {
-                    self.stop_tray();
-                }
-            }
-            Msg::SetTrayCloseHides(on) => {
-                self.tray.close_hides = on;
-                let _ = self
-                    .library
-                    .set_setting("tray_close_hides", if on { "1" } else { "0" });
-            }
-            Msg::SetTrayStartHidden(on) => {
-                self.tray.start_hidden = on;
-                let _ = self
-                    .library
-                    .set_setting("tray_start_hidden", if on { "1" } else { "0" });
-            }
-            Msg::SetTraySkipTaskbar(on) => {
-                self.tray.skip_taskbar = on;
-                let _ = self
-                    .library
-                    .set_setting("tray_skip_taskbar", if on { "1" } else { "0" });
-                self.refresh_skip_taskbar(root);
-            }
-            Msg::SetTrayIconGray(on) => {
-                self.tray.icon_gray = on;
-                let _ = self
-                    .library
-                    .set_setting("tray_icon_gray", if on { "1" } else { "0" });
-                // Update the live tray icon (no respawn needed; ksni emits NewIcon).
-                let px = if on {
-                    crate::ui::app_tray::gray_tray_icon()
-                } else {
-                    Vec::new()
-                };
-                if let Some(handle) = &self.tray.handle {
-                    handle.update(move |t| {
-                        t.icon_px = px;
-                    });
-                }
-            }
-            Msg::TrayToggleWindow => self.tray_toggle_window(root),
-            Msg::TrayMediaPopup(x, y) => self.toggle_media_popup(x, y, root, &sender),
-            Msg::TrayQuit => {
-                self.stop_tray();
-                // Same reason as the window close handler (see app_init.rs): the
-                // MPRIS/zbus service keeps the process alive past `app.quit()`, so
-                // force a full exit to avoid leaving a ghost instance behind.
-                if let Some(app) = root.application() {
-                    app.quit();
-                }
-                std::process::exit(0);
-            }
+            Msg::Design(m) => self.update_design(m, root, &sender),
+            Msg::Tray(m) => self.update_tray(m, root, &sender),
             Msg::SetGapless(on) => {
                 self.settings.gapless = on;
                 let _ = self
@@ -4964,87 +4221,7 @@ impl Component for App {
                     .set_setting("crossfade_secs", &self.settings.crossfade_secs.to_string());
                 self.apply_playback_prefs();
             }
-            Msg::SortMenuRefresh => self.rebuild_sort_menu(),
-            // A component page updated its sort slot; mirror it onto the shared
-            // title-bar button, but only while that page's section is showing.
-            Msg::PodcastSortChanged => {
-                if self.current_section().as_deref() == Some("podcasts") {
-                    self.apply_component_sort(&self.nav.podcast_sort);
-                }
-            }
-            Msg::StreamSortChanged => {
-                if self.current_section().as_deref() == Some("streaming") {
-                    self.apply_component_sort(&self.nav.stream_sort);
-                }
-            }
-            Msg::YtSortChanged => {
-                if self.current_section().as_deref() == Some("youtube") {
-                    self.apply_component_sort(&self.nav.yt_sort);
-                }
-            }
-            Msg::SetSortCrit(crit) => {
-                let Some(section) = self.current_section() else {
-                    return;
-                };
-                let (cur, desc) = self.libview.sort_for(&section);
-                if cur != crit {
-                    self.set_section_sort(&section, crit, desc, &sender);
-                }
-            }
-            Msg::SetSortDir(desc) => {
-                let Some(section) = self.current_section() else {
-                    return;
-                };
-                let (crit, cur) = self.libview.sort_for(&section);
-                if cur != desc {
-                    self.set_section_sort(&section, crit, desc, &sender);
-                }
-            }
-            Msg::SetSortNoGroup(off) => {
-                let Some(section) = self.current_section() else {
-                    return;
-                };
-                if self.libview.grouping_off(&section) != off {
-                    self.set_section_grouping(&section, off, &sender);
-                }
-            }
-            Msg::SetSectionGallery(on) => {
-                let Some(section) = self.current_section() else {
-                    return;
-                };
-                if self.libview.gallery_on(&section) != on {
-                    self.set_section_gallery(&section, on, &sender);
-                }
-            }
-            Msg::SetGalleryView(on) => {
-                self.libview.gallery_view = on;
-                let _ = self
-                    .library
-                    .set_setting("gallery_view", if on { "1" } else { "0" });
-                self.rebuild_all_lists(&sender);
-                self.podcasts_page
-                    .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryView(on));
-                self.yt_page
-                    .emit(crate::ui::yt_page::YtInput::SetGalleryView(on));
-            }
-            Msg::SetGalleryColumns(n) => {
-                self.libview.gallery_columns = n.clamp(2, 8);
-                let _ = self
-                    .library
-                    .set_setting("gallery_columns", &self.libview.gallery_columns.to_string());
-                if self.libview.gallery_view {
-                    self.rebuild_all_lists(&sender);
-                }
-                self.podcasts_page.emit(
-                    crate::ui::podcasts_page::PodcastsInput::SetGalleryColumns(
-                        self.libview.gallery_columns,
-                    ),
-                );
-                self.yt_page
-                    .emit(crate::ui::yt_page::YtInput::SetGalleryColumns(
-                        self.libview.gallery_columns,
-                    ));
-            }
+            Msg::Sort(m) => self.update_sort(m, &sender),
             Msg::SetAreas { scope, key, value } => self.set_areas(&sender, scope, key, value),
             Msg::SetAlbumKind { album, kind } => {
                 match kind {
@@ -5061,30 +4238,7 @@ impl Component for App {
                 self.reload_singles();
                 self.reload_compilations();
             }
-            Msg::SetEq {
-                output,
-                scope,
-                key,
-                bands,
-            } => {
-                let _ = self.library.set_eq(&output, scope, &key, &bands);
-                // Re-resolve and apply the effective EQ of the active output
-                // (audible, provided the edited level currently applies).
-                self.apply_current_eq();
-            }
-            Msg::SetEqEnabled {
-                output,
-                scope,
-                key,
-                enabled,
-            } => {
-                let _ = self.library.set_eq_enabled(&output, scope, &key, enabled);
-                self.apply_current_eq();
-            }
-            Msg::ClearEq { output, scope, key } => {
-                let _ = self.library.clear_eq(&output, scope, &key);
-                self.apply_current_eq();
-            }
+            Msg::Eq(m) => self.update_eq(m),
             Msg::ConcertImport => self.concert_import(&sender),
             Msg::ConcertDismissHint => {
                 self.concerts.concert_hint_dismissed = true;

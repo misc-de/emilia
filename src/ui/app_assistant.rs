@@ -23,7 +23,59 @@ use crate::core::mcp::{ControlFn, McpContext};
 use crate::i18n::gettext;
 use crate::ui::app::{App, AssistantUi, Cmd, CtxTarget, Msg};
 
+/// In-app assistant messages, dispatched by [`App::update_assistant`]. Grouped
+/// out of the flat `Msg` enum (see `app.rs`): the provider/model/key settings
+/// plus opening the chat and sending a turn.
+#[derive(Debug)]
+pub(crate) enum AssistantMsg {
+    /// Pick the assistant LLM provider preset (`minimax` / `custom`).
+    SetProvider(String),
+    /// Persist the assistant API base URL (custom provider only).
+    SetBaseUrl(String),
+    /// Persist the assistant model name.
+    SetModel(String),
+    /// Persist the assistant API key (Secret Service).
+    SetApiKey(String),
+    /// Open the assistant chat for the currently shown detail object.
+    OpenChat,
+    /// Send a user message in the open chat → run the agent.
+    Send(String),
+}
+
 impl App {
+    /// Dispatch an [`AssistantMsg`]. Split out of the monolithic `App::update`.
+    pub(crate) fn update_assistant(
+        &mut self,
+        msg: AssistantMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            AssistantMsg::SetProvider(provider) => {
+                let _ = self.library.set_setting("assistant_provider", &provider);
+                // MiniMax has a fixed endpoint: prefill it so the user needn't know it.
+                if provider == "minimax" {
+                    let _ = self
+                        .library
+                        .set_setting("assistant_base_url", MINIMAX_BASE_URL);
+                }
+            }
+            AssistantMsg::SetBaseUrl(url) => {
+                let _ = self.library.set_setting("assistant_base_url", url.trim());
+            }
+            AssistantMsg::SetModel(model) => {
+                let _ = self.library.set_setting("assistant_model", model.trim());
+            }
+            AssistantMsg::SetApiKey(key) => {
+                let _ = self
+                    .library
+                    .set_secret_setting("assistant_api_key", key.trim());
+            }
+            AssistantMsg::OpenChat => self.open_assistant_chat(root, sender),
+            AssistantMsg::Send(text) => self.assistant_send(sender, text),
+        }
+    }
+
     /// Opens (or re-opens) the assistant chat for the current detail object.
     pub(crate) fn open_assistant_chat(
         &mut self,
@@ -81,7 +133,7 @@ impl App {
                     return;
                 }
                 e.set_text("");
-                sender.input(Msg::AssistantSend(text));
+                sender.input(Msg::Assistant(AssistantMsg::Send(text)));
             });
         }
         let input_group = adw::PreferencesGroup::builder()

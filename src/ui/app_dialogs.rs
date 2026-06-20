@@ -3,6 +3,8 @@
 
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, CtxTarget, FsKind, Msg};
+use crate::ui::app_assistant::AssistantMsg;
+use crate::ui::app_views_sources::SourceMsg;
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
@@ -80,7 +82,7 @@ impl App {
         {
             let sender = sender.clone();
             asst_row.connect_activated(move |_| {
-                sender.input(Msg::OpenAssistantChat);
+                sender.input(Msg::Assistant(AssistantMsg::OpenChat));
             });
         }
         asst_group.add(&asst_row);
@@ -250,7 +252,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             dl_row.connect_activated(move |_| {
-                sender.input(Msg::CtxDownloadRemote(rel.clone()));
+                sender.input(Msg::Source(SourceMsg::DownloadRemote(rel.clone())));
                 dialog.close();
             });
             action_group.add(&dl_row);

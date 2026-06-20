@@ -103,7 +103,64 @@ fn match_preset(bands: &[f64; 10]) -> usize {
     0
 }
 
+/// Equalizer messages, dispatched by [`App::update_eq`]. Grouped out of the flat
+/// `Msg` enum (see `app.rs`): each targets one output × level (global / artist /
+/// album / track) by `(output, scope, key)`.
+#[derive(Debug)]
+pub(crate) enum EqMsg {
+    /// Save and apply the equalizer bands of an output + a level.
+    Set {
+        output: String,
+        scope: &'static str,
+        key: String,
+        bands: [f64; 10],
+    },
+    /// Enable/disable one equalizer setting without changing its saved bands.
+    SetEnabled {
+        output: String,
+        scope: &'static str,
+        key: String,
+        enabled: bool,
+    },
+    /// Reset the equalizer of an output + a level (inherits again).
+    Clear {
+        output: String,
+        scope: &'static str,
+        key: String,
+    },
+}
+
 impl App {
+    /// Dispatch an [`EqMsg`]. Split out of the monolithic `App::update` match.
+    pub(crate) fn update_eq(&mut self, msg: EqMsg) {
+        match msg {
+            EqMsg::Set {
+                output,
+                scope,
+                key,
+                bands,
+            } => {
+                let _ = self.library.set_eq(&output, scope, &key, &bands);
+                // Re-resolve and apply the effective EQ of the active output
+                // (audible, provided the edited level currently applies).
+                self.apply_current_eq();
+            }
+            EqMsg::SetEnabled {
+                output,
+                scope,
+                key,
+                enabled,
+            } => {
+                let _ = self.library.set_eq_enabled(&output, scope, &key, enabled);
+                self.apply_current_eq();
+            }
+            EqMsg::Clear { output, scope, key } => {
+                let _ = self.library.clear_eq(&output, scope, &key);
+                self.apply_current_eq();
+            }
+        }
+    }
+
     /// Equalizer dialog: at the top choose **output** (device/Bluetooth) and
     /// **level** (global/artist/album/track), below them ten frequency sliders.
     /// Changes take effect immediately and are saved per output+level; during
@@ -387,12 +444,12 @@ impl App {
                 // returning to "Custom" later restores exactly this.
                 custom_bands.borrow_mut()[o] = arr;
                 let (_, oid) = &outputs[o];
-                sender.input(Msg::SetEq {
+                sender.input(Msg::Eq(EqMsg::Set {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
                     bands: arr,
-                });
+                }));
                 // Reflect "Custom" in the combo without triggering its restore
                 // handler (guarded by `loading`).
                 loading.set(true);
@@ -479,11 +536,11 @@ impl App {
                 preset_combo.set_selected(0);
                 loading.set(false);
                 let (_, oid) = &outputs[o];
-                sender.input(Msg::ClearEq {
+                sender.input(Msg::Eq(EqMsg::Clear {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
-                });
+                }));
             });
         }
         // Bypass the EQ for this level without changing its saved values. Unlike
@@ -518,12 +575,12 @@ impl App {
                 button.set_label(&label);
                 bands_box.set_sensitive(now_enabled);
                 let (_, oid) = &outputs[o];
-                sender.input(Msg::SetEqEnabled {
+                sender.input(Msg::Eq(EqMsg::SetEnabled {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
                     enabled: now_enabled,
-                });
+                }));
             });
         }
         {
@@ -569,18 +626,18 @@ impl App {
                 };
                 load_bands(new_bands);
                 let (_, oid) = &outputs[o];
-                sender.input(Msg::SetEqEnabled {
+                sender.input(Msg::Eq(EqMsg::SetEnabled {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
                     enabled: true,
-                });
-                sender.input(Msg::SetEq {
+                }));
+                sender.input(Msg::Eq(EqMsg::Set {
                     output: oid.clone(),
                     scope,
                     key: (*key).clone(),
                     bands: new_bands,
-                });
+                }));
             });
         }
 

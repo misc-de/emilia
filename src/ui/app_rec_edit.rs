@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::i18n::gettext;
 use crate::ui::app::{App, EditKind, Msg};
+use crate::ui::app_memo::MemoMsg;
 
 /// Number of waveform columns decoded for the display.
 const BUCKETS: usize = 1200;
@@ -328,10 +329,10 @@ impl App {
                     let t = entry.text().to_string();
                     let t = t.trim();
                     if !t.is_empty() {
-                        sender.input(Msg::MemoRename {
+                        sender.input(Msg::Memo(MemoMsg::Rename {
                             id,
                             title: t.to_string(),
-                        });
+                        }));
                     }
                     entry.set_editable(false);
                     save_btn2.set_visible(false);

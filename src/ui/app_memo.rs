@@ -200,7 +200,116 @@ fn prompt_text(
     dialog.present(Some(root));
 }
 
+/// Voice-memo messages, dispatched by [`App::update_memo`]. Grouped out of the
+/// flat `Msg` enum (see `app.rs`): memo CRUD + the category tree.
+#[derive(Debug)]
+pub(crate) enum MemoMsg {
+    /// A finished recording was finalized off-thread: new file path (`None` =
+    /// failed) + its duration. Creates the memo row.
+    RecordSaved {
+        path: Option<String>,
+        duration_ms: i64,
+    },
+    /// Switch the memo view: Recent list or Category tree.
+    SetView(MemoView),
+    /// Open a memo's detail dialog (id) – via long press.
+    Open(i64),
+    /// Rename a memo.
+    Rename { id: i64, title: String },
+    /// Assign (or clear, with `None`) a memo's category.
+    SetCategory { id: i64, category_id: Option<i64> },
+    /// Delete a memo (id) – undo toast; deferred to `DeleteConfirmed`.
+    Delete(i64),
+    /// Actually delete a memo (after the undo toast expires).
+    DeleteConfirmed(i64),
+    /// Open the "new category" text prompt (the "+" in the tab bar).
+    CategoryAddPrompt,
+    /// Add a new memo category (confirmed name).
+    CategoryAdd(String),
+    /// Open a category's detail dialog (id) – via long press / right click.
+    OpenCategory(i64),
+    /// Rename a memo category.
+    CategoryRename { id: i64, name: String },
+    /// Delete a category but keep its memos (they fall back to "General").
+    CategoryDeleteKeepMemos(i64),
+    /// Delete a category together with all its memos (their files included).
+    CategoryDeleteWithMemos(i64),
+}
+
 impl App {
+    /// Dispatch a [`MemoMsg`] (voice memos + categories). Split out of the
+    /// monolithic `App::update` match.
+    pub(crate) fn update_memo(
+        &mut self,
+        msg: MemoMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            MemoMsg::RecordSaved { path, duration_ms } => match path {
+                Some(p) => {
+                    let title = memo_default_title();
+                    let _ = self.library.add_memo(&p, &title, None, duration_ms);
+                    self.reload_memos(sender);
+                    self.toast(&gettext("Memo saved"));
+                }
+                None => self.toast(&gettext("Recording failed")),
+            },
+            MemoMsg::SetView(view) => {
+                if self.memo.view != view {
+                    self.memo.view = view;
+                    self.reload_memos(sender);
+                }
+            }
+            MemoMsg::Open(id) => self.open_memo(root, sender, id),
+            MemoMsg::Rename { id, title } => {
+                let _ = self.library.rename_memo(id, &title);
+                self.reload_memos(sender);
+            }
+            MemoMsg::SetCategory { id, category_id } => {
+                let _ = self.library.set_memo_category(id, category_id);
+                self.reload_memos(sender);
+            }
+            MemoMsg::Delete(id) => {
+                self.undo_toast(
+                    sender,
+                    &gettext("Memo deleted"),
+                    Msg::Memo(MemoMsg::DeleteConfirmed(id)),
+                );
+            }
+            MemoMsg::DeleteConfirmed(id) => {
+                if let Ok(Some(path)) = self.library.delete_memo(id) {
+                    let _ = std::fs::remove_file(&path);
+                }
+                self.reload_memos(sender);
+            }
+            MemoMsg::CategoryAddPrompt => self.prompt_new_memo_category(root, sender),
+            MemoMsg::CategoryAdd(name) => {
+                let _ = self.library.add_memo_category(&name);
+                self.reload_memo_categories(sender);
+            }
+            MemoMsg::OpenCategory(id) => self.open_memo_category(root, sender, id),
+            MemoMsg::CategoryRename { id, name } => {
+                let _ = self.library.rename_memo_category(id, &name);
+                self.reload_memo_categories(sender);
+            }
+            MemoMsg::CategoryDeleteKeepMemos(id) => {
+                let _ = self.library.delete_memo_category(id);
+                self.reload_memo_categories(sender);
+                self.toast(&gettext("Category removed"));
+            }
+            MemoMsg::CategoryDeleteWithMemos(id) => {
+                if let Ok(paths) = self.library.delete_memo_category_with_memos(id) {
+                    for p in paths {
+                        let _ = std::fs::remove_file(&p);
+                    }
+                }
+                self.reload_memo_categories(sender);
+                self.toast(&gettext("Category removed"));
+            }
+        }
+    }
+
     // ---- Recording ----
 
     /// Player-bar record button: start a new recording or stop the running one.
@@ -289,7 +398,7 @@ impl App {
                 }
                 Err(_) => (None, 0),
             };
-            sender.input(Msg::MemoRecordSaved { path, duration_ms });
+            sender.input(Msg::Memo(MemoMsg::RecordSaved { path, duration_ms }));
         });
     }
 
@@ -395,11 +504,11 @@ impl App {
             let cid = c.id;
             crate::ui::app::on_secondary_click(&exp, {
                 let sender = sender.clone();
-                move || sender.input(Msg::OpenMemoCategory(cid))
+                move || sender.input(Msg::Memo(MemoMsg::OpenCategory(cid)))
             });
             crate::ui::app::on_long_press(&exp, {
                 let sender = sender.clone();
-                move || sender.input(Msg::OpenMemoCategory(cid))
+                move || sender.input(Msg::Memo(MemoMsg::OpenCategory(cid)))
             });
             self.memo.memos_list.append(&exp);
         }
@@ -468,12 +577,12 @@ impl App {
         crate::ui::app::on_secondary_click(&row, {
             let sender = sender.clone();
             let id = m.id;
-            move || sender.input(Msg::OpenMemo(id))
+            move || sender.input(Msg::Memo(MemoMsg::Open(id)))
         });
         crate::ui::app::on_long_press(&row, {
             let sender = sender.clone();
             let id = m.id;
-            move || sender.input(Msg::OpenMemo(id))
+            move || sender.input(Msg::Memo(MemoMsg::Open(id)))
         });
         row
     }
@@ -490,7 +599,7 @@ impl App {
             &gettext("New category"),
             "",
             &gettext("Add"),
-            move |name| sender.input(Msg::MemoCategoryAdd(name)),
+            move |name| sender.input(Msg::Memo(MemoMsg::CategoryAdd(name))),
         );
     }
 
@@ -573,7 +682,7 @@ impl App {
             let sender = sender.clone();
             combo.connect_selected_notify(move |c| {
                 let category_id = option_ids.get(c.selected() as usize).copied().flatten();
-                sender.input(Msg::MemoSetCategory { id, category_id });
+                sender.input(Msg::Memo(MemoMsg::SetCategory { id, category_id }));
             });
         }
         catgrp.add(&combo);
@@ -615,7 +724,7 @@ impl App {
                     &gettext("Rename memo"),
                     &cur,
                     &gettext("Rename"),
-                    move |title| sender.input(Msg::MemoRename { id, title }),
+                    move |title| sender.input(Msg::Memo(MemoMsg::Rename { id, title })),
                 );
             });
         }
@@ -644,7 +753,7 @@ impl App {
                     &gettext("Delete this memo?"),
                     &gettext("Delete"),
                     sender.clone(),
-                    Msg::MemoDelete(id),
+                    Msg::Memo(MemoMsg::Delete(id)),
                 );
             });
         }
@@ -713,7 +822,7 @@ impl App {
                     &gettext("Rename category"),
                     &cur,
                     &gettext("Rename"),
-                    move |name| sender.input(Msg::MemoCategoryRename { id, name }),
+                    move |name| sender.input(Msg::Memo(MemoMsg::CategoryRename { id, name })),
                 );
             });
         }
@@ -756,7 +865,7 @@ fn confirm_remove_category(
         }
         // No memos → nothing to ask, just remove the (empty) category.
         if count == 0 {
-            sender.input(Msg::MemoCategoryDeleteKeepMemos(id));
+            sender.input(Msg::Memo(MemoMsg::CategoryDeleteKeepMemos(id)));
             return;
         }
         // Memos present → ask whether to delete them too or keep them (General).
@@ -774,8 +883,8 @@ fn confirm_remove_category(
         second.set_close_response("cancel");
         let sender = sender.clone();
         second.connect_response(None, move |_, resp| match resp {
-            "general" => sender.input(Msg::MemoCategoryDeleteKeepMemos(id)),
-            "delete" => sender.input(Msg::MemoCategoryDeleteWithMemos(id)),
+            "general" => sender.input(Msg::Memo(MemoMsg::CategoryDeleteKeepMemos(id))),
+            "delete" => sender.input(Msg::Memo(MemoMsg::CategoryDeleteWithMemos(id))),
             _ => {}
         });
         second.present(Some(&parent));

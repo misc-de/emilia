@@ -11,15 +11,122 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::model::Source;
-use crate::ui::app::{ActiveSource, App, Cmd, Msg};
+use crate::ui::app::{confirm_destructive, ActiveSource, App, Cmd, Msg};
 use crate::ui::fs_row::FsEntry;
 
+/// Music-source messages, dispatched by [`App::update_source`]. Grouped out of
+/// the flat `Msg` enum (see `app.rs`): the Files tab bar's extra sources (a 2nd
+/// local folder or a Nextcloud/WebDAV remote) — add / select / edit / rename /
+/// remove + reachability checks.
+#[derive(Debug)]
+pub(crate) enum SourceMsg {
+    /// Switch to another source (tab) in the file view.
+    Select(ActiveSource),
+    /// The source list has changed (added/removed) – reload sources + tab bar.
+    Changed,
+    /// A new source (id) was just added – reload + switch to it.
+    Added(i64),
+    /// Actually remove a source by id (after the confirm prompt).
+    DeleteConfirmed(i64),
+    /// Long-press / right-click on a source tab → open its context menu.
+    ContextMenu(ActiveSource),
+    /// Open the rename dialog for source `id`.
+    Rename(i64),
+    /// Apply a new name to source `id`.
+    RenameApply { id: i64, name: String },
+    /// Open the "change folder / music path" editor for a tab.
+    Edit(ActiveSource),
+    /// Apply a new root path to a local source (then reload it if active).
+    SetPath { id: i64, path: PathBuf },
+    /// Apply a new music subpath to a WebDAV source (then re-index it).
+    SetMusicPath { id: i64, path: String },
+    /// Confirm-then-remove a source (the context-menu delete entry).
+    Delete(i64),
+    /// Check reachability of the Nextcloud sources (periodically + at startup).
+    Check,
+    /// The "+" in the Files tab bar: add a local folder or connect a Nextcloud.
+    AddMenu,
+    /// Pick a local folder and add it as an extra source.
+    AddLocalFolder,
+    /// Open the Nextcloud setup dialog (QR scan or manual).
+    AddCloud,
+    /// The CloudPage component finished indexing a newly added source.
+    CloudIndexed,
+    /// Download a remote file offline (rel path in the active source).
+    DownloadRemote(String),
+}
+
 impl App {
+    /// Dispatch a [`SourceMsg`]. Split out of the monolithic `App::update` match.
+    pub(crate) fn update_source(
+        &mut self,
+        msg: SourceMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            SourceMsg::Select(sel) => {
+                if self.files.active_source != sel {
+                    self.apply_source(sel, sender);
+                }
+            }
+            SourceMsg::Changed => self.on_sources_changed(sender),
+            SourceMsg::Added(id) => {
+                self.on_sources_changed(sender);
+                self.apply_source(ActiveSource::Source(id), sender);
+            }
+            SourceMsg::DeleteConfirmed(id) => {
+                let _ = self.library.delete_source(id);
+                self.on_sources_changed(sender);
+            }
+            SourceMsg::ContextMenu(sel) => self.open_source_context_menu(sel, sender),
+            SourceMsg::Rename(id) => self.open_source_rename_dialog(id, root, sender),
+            SourceMsg::RenameApply { id, name } => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    let _ = self.library.set_source_name(id, name);
+                    self.on_sources_changed(sender);
+                }
+            }
+            SourceMsg::Edit(sel) => self.open_source_edit(sel, root, sender),
+            SourceMsg::SetPath { id, path } => self.on_source_set_path(id, path, sender),
+            SourceMsg::SetMusicPath { id, path } => self.on_source_set_music_path(id, path, sender),
+            SourceMsg::Delete(id) => confirm_destructive(
+                root,
+                &gettext("Remove this source?"),
+                &gettext("Remove"),
+                sender.clone(),
+                Msg::Source(SourceMsg::DeleteConfirmed(id)),
+            ),
+            SourceMsg::Check => self.on_check_sources(sender),
+            SourceMsg::AddMenu => self.open_add_source_menu(root, sender),
+            SourceMsg::AddLocalFolder => self.add_local_folder_dialog(root, sender),
+            SourceMsg::AddCloud => {
+                use crate::ui::cloud_page::CloudInput;
+                // Offer already-connected Nextcloud servers for reuse.
+                let existing = self
+                    .library
+                    .list_sources()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|s| s.kind == "webdav")
+                    .collect();
+                self.cloud_page.emit(CloudInput::Open {
+                    window: root.clone(),
+                    mobile: self.is_mobile(),
+                    existing,
+                });
+            }
+            SourceMsg::CloudIndexed => self.on_cloud_indexed(sender),
+            SourceMsg::DownloadRemote(rel) => self.on_ctx_download_remote(rel, sender),
+        }
+    }
+
     /// Rebuilds the source tab bar: a "Music" tab for the primary directory plus
     /// one per additional source (a linked radio group, only when there is more
     /// than one folder), followed by a trailing "+" that is always present so a
     /// folder/Nextcloud can be added straight from the Files view. A tab click
-    /// sends [`Msg::SelectSource`], the "+" sends [`Msg::AddSourceMenu`].
+    /// sends [`SourceMsg::Select`], the "+" sends [`SourceMsg::AddMenu`].
     pub(crate) fn rebuild_source_tabs(&mut self) {
         while let Some(c) = self.files.source_tabs.first_child() {
             self.files.source_tabs.remove(&c);
@@ -74,7 +181,7 @@ impl App {
                 let sel_cb = sel.clone();
                 btn.connect_toggled(move |b| {
                     if b.is_active() {
-                        let _ = input.send(Msg::SelectSource(sel_cb.clone()));
+                        let _ = input.send(Msg::Source(SourceMsg::Select(sel_cb.clone())));
                     }
                 });
                 // Long-press (touch) and right-click (mouse) open the tab's
@@ -86,7 +193,7 @@ impl App {
                     let lp = gtk::GestureLongPress::new();
                     lp.connect_pressed(move |g, _, _| {
                         g.set_state(gtk::EventSequenceState::Claimed);
-                        let _ = input.send(Msg::SourceContextMenu(sel_lp.clone()));
+                        let _ = input.send(Msg::Source(SourceMsg::ContextMenu(sel_lp.clone())));
                     });
                     btn.add_controller(lp);
                 }
@@ -97,7 +204,7 @@ impl App {
                     rc.set_button(gtk::gdk::BUTTON_SECONDARY);
                     rc.connect_pressed(move |g, _, _, _| {
                         g.set_state(gtk::EventSequenceState::Claimed);
-                        let _ = input.send(Msg::SourceContextMenu(sel_rc.clone()));
+                        let _ = input.send(Msg::Source(SourceMsg::ContextMenu(sel_rc.clone())));
                     });
                     btn.add_controller(rc);
                 }
@@ -121,7 +228,7 @@ impl App {
             .build();
         let input = self.input.clone();
         add.connect_clicked(move |_| {
-            let _ = input.send(Msg::AddSourceMenu);
+            let _ = input.send(Msg::Source(SourceMsg::AddMenu));
         });
         self.files.source_tabs.append(&add);
     }
@@ -153,8 +260,8 @@ impl App {
         {
             let sender = sender.clone();
             dialog.connect_response(None, move |_, resp| match resp {
-                "folder" => sender.input(Msg::AddLocalFolder),
-                "nextcloud" => sender.input(Msg::AddCloudSource),
+                "folder" => sender.input(Msg::Source(SourceMsg::AddLocalFolder)),
+                "nextcloud" => sender.input(Msg::Source(SourceMsg::AddCloud)),
                 _ => {}
             });
         }
@@ -196,13 +303,13 @@ impl App {
                         match lib.add_source(&src) {
                             // Switch to the freshly added tab and show its folder.
                             Ok(id) => {
-                                sender.input(Msg::SourceAdded(id));
+                                sender.input(Msg::Source(SourceMsg::Added(id)));
                                 return;
                             }
                             Err(e) => tracing::warn!("add local source failed: {e}"),
                         }
                     }
-                    sender.input(Msg::SourcesChanged);
+                    sender.input(Msg::Source(SourceMsg::Changed));
                 }
             }
         });
@@ -254,7 +361,7 @@ impl App {
                     if let Some(p) = pop2.upgrade() {
                         p.popdown();
                     }
-                    sender.input(Msg::SourceEdit(ActiveSource::Primary));
+                    sender.input(Msg::Source(SourceMsg::Edit(ActiveSource::Primary)));
                 });
                 menu.append(&edit);
             }
@@ -267,7 +374,7 @@ impl App {
                         if let Some(p) = p.upgrade() {
                             p.popdown();
                         }
-                        sender.input(Msg::SourceRename(id));
+                        sender.input(Msg::Source(SourceMsg::Rename(id)));
                     });
                 }
                 menu.append(&rename);
@@ -290,7 +397,7 @@ impl App {
                         if let Some(p) = p.upgrade() {
                             p.popdown();
                         }
-                        sender.input(Msg::SourceEdit(ActiveSource::Source(id)));
+                        sender.input(Msg::Source(SourceMsg::Edit(ActiveSource::Source(id))));
                     });
                 }
                 menu.append(&edit);
@@ -303,7 +410,7 @@ impl App {
                         if let Some(p) = p.upgrade() {
                             p.popdown();
                         }
-                        sender.input(Msg::SourceDelete(id));
+                        sender.input(Msg::Source(SourceMsg::Delete(id)));
                     });
                 }
                 menu.append(&del);
@@ -346,10 +453,10 @@ impl App {
             let sender = sender.clone();
             dialog.connect_response(None, move |_, resp| {
                 if resp == "rename" {
-                    sender.input(Msg::SourceRenameDo {
+                    sender.input(Msg::Source(SourceMsg::RenameApply {
                         id,
                         name: entry.text().to_string(),
-                    });
+                    }));
                 }
             });
         }
@@ -404,10 +511,10 @@ impl App {
                     let sender = sender.clone();
                     dialog.connect_response(None, move |_, resp| {
                         if resp == "save" {
-                            sender.input(Msg::SourceSetMusicPath {
+                            sender.input(Msg::Source(SourceMsg::SetMusicPath {
                                 id,
                                 path: entry.text().to_string(),
-                            });
+                            }));
                         }
                     });
                     dialog.present(Some(root));
@@ -419,7 +526,7 @@ impl App {
                     chooser.select_folder(Some(root), gtk::gio::Cancellable::NONE, move |res| {
                         if let Ok(f) = res {
                             if let Some(p) = f.path() {
-                                sender.input(Msg::SourceSetPath { id, path: p });
+                                sender.input(Msg::Source(SourceMsg::SetPath { id, path: p }));
                             }
                         }
                     });

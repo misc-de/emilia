@@ -3,6 +3,11 @@
 
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{cover_widget, App, Msg};
+use crate::ui::app_assistant::AssistantMsg;
+use crate::ui::app_mcp::McpSettingMsg;
+use crate::ui::app_sort::SortMsg;
+use crate::ui::app_tray::TrayMsg;
+use crate::ui::theme::DesignMsg;
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
@@ -267,7 +272,7 @@ impl App {
                     .get(r.selected() as usize)
                     .copied()
                     .unwrap_or("system");
-                sender.input(Msg::SetColorScheme(code.to_string()));
+                sender.input(Msg::Design(DesignMsg::ColorScheme(code.to_string())));
             });
         }
         theme_group.add(&theme_row);
@@ -285,7 +290,7 @@ impl App {
         {
             let sender = sender.clone();
             gallery_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetGalleryView(r.is_active()));
+                sender.input(Msg::Sort(SortMsg::GalleryView(r.is_active())));
             });
         }
         gallery_group.add(&gallery_row);
@@ -303,7 +308,7 @@ impl App {
         {
             let sender = sender.clone();
             cols_row.connect_value_notify(move |r| {
-                sender.input(Msg::SetGalleryColumns(r.value() as u32));
+                sender.input(Msg::Sort(SortMsg::GalleryColumns(r.value() as u32)));
             });
         }
         narrow_spin_value(&cols_row);
@@ -329,7 +334,7 @@ impl App {
         {
             let sender = sender.clone();
             scale_row.connect_value_notify(move |r| {
-                sender.input(Msg::SetUiScale(r.value() / 100.0));
+                sender.input(Msg::Design(DesignMsg::UiScale(r.value() / 100.0)));
             });
         }
         narrow_spin_value(&scale_row);
@@ -358,7 +363,7 @@ impl App {
         {
             let sender = sender.clone();
             menu_scale_row.connect_value_notify(move |r| {
-                sender.input(Msg::SetMenuIconScale(r.value() as i32));
+                sender.input(Msg::Design(DesignMsg::MenuIconScale(r.value() as i32)));
             });
         }
         scale_group.add(&menu_scale_row);
@@ -383,7 +388,7 @@ impl App {
         {
             let sender = sender.clone();
             tray_close_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayCloseHides(r.is_active()));
+                sender.input(Msg::Tray(TrayMsg::SetCloseHides(r.is_active())));
             });
         }
         tray_group.add(&tray_close_row);
@@ -395,7 +400,7 @@ impl App {
         {
             let sender = sender.clone();
             tray_hidden_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayStartHidden(r.is_active()));
+                sender.input(Msg::Tray(TrayMsg::SetStartHidden(r.is_active())));
             });
         }
         tray_group.add(&tray_hidden_row);
@@ -407,7 +412,7 @@ impl App {
         {
             let sender = sender.clone();
             tray_skip_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTraySkipTaskbar(r.is_active()));
+                sender.input(Msg::Tray(TrayMsg::SetSkipTaskbar(r.is_active())));
             });
         }
         tray_group.add(&tray_skip_row);
@@ -419,7 +424,7 @@ impl App {
         {
             let sender = sender.clone();
             tray_gray_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetTrayIconGray(r.is_active()));
+                sender.input(Msg::Tray(TrayMsg::SetIconGray(r.is_active())));
             });
         }
         tray_group.add(&tray_gray_row);
@@ -444,7 +449,7 @@ impl App {
             ];
             tray_enabled_row.connect_active_notify(move |r| {
                 let on = r.is_active();
-                sender.input(Msg::SetTrayEnabled(on));
+                sender.input(Msg::Tray(TrayMsg::SetEnabled(on)));
                 for row in &dependents {
                     row.set_visible(on);
                 }
@@ -504,7 +509,7 @@ impl App {
         {
             let sender = sender.clone();
             mcp_public_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetMcpPublic(r.is_active()));
+                sender.input(Msg::McpSetting(McpSettingMsg::SetPublic(r.is_active())));
             });
         }
         mcp_group.add(&mcp_public_row);
@@ -582,7 +587,7 @@ impl App {
                             let new = crate::core::sync::crypto::generate_token(32);
                             token_cell.replace(new.clone());
                             token_row.set_subtitle(&new);
-                            sender.input(Msg::SetMcpToken(new));
+                            sender.input(Msg::McpSetting(McpSettingMsg::SetToken(new)));
                         }
                     });
                     confirm.present(Some(&root));
@@ -612,7 +617,7 @@ impl App {
                 let on = mode != crate::core::mcp::McpMode::Off;
                 public_row.set_visible(on);
                 token_row.set_visible(on);
-                sender.input(Msg::SetMcpMode(mode));
+                sender.input(Msg::McpSetting(McpSettingMsg::SetMode(mode)));
             });
         }
         page.add(&mcp_group);
@@ -665,7 +670,9 @@ impl App {
         {
             let sender = sender.clone();
             asst_url_row.connect_apply(move |r| {
-                sender.input(Msg::SetAssistantBaseUrl(r.text().to_string()));
+                sender.input(Msg::Assistant(AssistantMsg::SetBaseUrl(
+                    r.text().to_string(),
+                )));
             });
         }
         asst_group.add(&asst_url_row);
@@ -683,7 +690,7 @@ impl App {
         {
             let sender = sender.clone();
             asst_model_row.connect_apply(move |r| {
-                sender.input(Msg::SetAssistantModel(r.text().to_string()));
+                sender.input(Msg::Assistant(AssistantMsg::SetModel(r.text().to_string())));
             });
         }
         asst_group.add(&asst_model_row);
@@ -702,7 +709,9 @@ impl App {
         {
             let sender = sender.clone();
             asst_key_row.connect_apply(move |r| {
-                sender.input(Msg::SetAssistantApiKey(r.text().to_string()));
+                sender.input(Msg::Assistant(AssistantMsg::SetApiKey(
+                    r.text().to_string(),
+                )));
             });
         }
         asst_group.add(&asst_key_row);
@@ -718,7 +727,9 @@ impl App {
                     .copied()
                     .unwrap_or("minimax");
                 url_row.set_visible(provider == "custom");
-                sender.input(Msg::SetAssistantProvider(provider.to_string()));
+                sender.input(Msg::Assistant(AssistantMsg::SetProvider(
+                    provider.to_string(),
+                )));
             });
         }
         page.add(&asst_group);
@@ -863,7 +874,7 @@ impl App {
         {
             let sender = sender.clone();
             cover_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetUseCoverBg(r.is_active()));
+                sender.input(Msg::Design(DesignMsg::UseCoverBg(r.is_active())));
             });
         }
 
@@ -911,7 +922,7 @@ impl App {
                 let v = s.value().round() as u32;
                 if v != last.get() {
                     last.set(v);
-                    sender.input(Msg::SetBgFilterStrength(v));
+                    sender.input(Msg::Design(DesignMsg::BgFilterStrength(v)));
                 }
             });
         }
@@ -929,7 +940,7 @@ impl App {
         {
             let sender = sender.clone();
             bg_nav_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetBgNav(r.is_active()));
+                sender.input(Msg::Design(DesignMsg::BgNav(r.is_active())));
             });
         }
 
@@ -945,7 +956,7 @@ impl App {
         {
             let sender = sender.clone();
             bg_titlebar_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetBgTitlebar(r.is_active()));
+                sender.input(Msg::Design(DesignMsg::BgTitlebar(r.is_active())));
             });
         }
 
@@ -965,7 +976,7 @@ impl App {
                     strength_scale.set_increments(5.0, 5.0);
                 }
                 strength_row.set_sensitive(r.selected() != 0);
-                sender.input(Msg::SetBgFilter(r.selected()));
+                sender.input(Msg::Design(DesignMsg::BgFilter(r.selected())));
             });
         }
 
@@ -1006,7 +1017,7 @@ impl App {
                             strength_row.set_sensitive(filter_row.selected() != 0);
                             nav_row.set_visible(true);
                             titlebar_row.set_visible(true);
-                            sender.input(Msg::SetCustomBg(Some(path)));
+                            sender.input(Msg::Design(DesignMsg::CustomBg(Some(path))));
                         }
                     }
                 });
@@ -1020,7 +1031,7 @@ impl App {
             bg_clear.connect_clicked(move |b| {
                 row.set_subtitle(&gettext("None (built-in default)"));
                 b.set_visible(false);
-                sender.input(Msg::SetCustomBg(None));
+                sender.input(Msg::Design(DesignMsg::CustomBg(None)));
             });
         }
 
@@ -1041,7 +1052,7 @@ impl App {
                 strength_row.set_visible(on);
                 nav_row.set_visible(on);
                 titlebar_row.set_visible(on);
-                sender.input(Msg::SetBackgroundOn(on));
+                sender.input(Msg::Design(DesignMsg::BackgroundOn(on)));
             });
         }
         bg_row.add_suffix(&bg_clear);
@@ -1176,7 +1187,7 @@ impl App {
             gettext("Text color"),
             None,
             &self.theme.design.text_color,
-            Msg::SetTextColor,
+            |c| Msg::Design(DesignMsg::TextColor(c)),
         );
         colors_group.add(&text_color_row);
 
@@ -1185,7 +1196,7 @@ impl App {
             gettext("Fields color"),
             Some(gettext("Background of tabs, navigation and list headings")),
             &self.theme.design.field_color,
-            Msg::SetFieldColor,
+            |c| Msg::Design(DesignMsg::FieldColor(c)),
         );
         colors_group.add(&field_color_row);
         let field_trans_row = adw::ActionRow::builder()
@@ -1196,7 +1207,7 @@ impl App {
         wire_scale(
             &field_trans_scale,
             self.theme.design.field_transparency,
-            Msg::SetFieldTransparency,
+            |v| Msg::Design(DesignMsg::FieldTransparency(v)),
         );
         field_trans_row.add_suffix(&field_trans_scale);
         colors_group.add(&field_trans_row);

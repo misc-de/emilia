@@ -11,8 +11,45 @@ use std::sync::Arc;
 
 use crate::core::mcp::{self, McpCommand, McpContext, McpMode};
 use crate::ui::app::{App, McpState, Msg, SleepChoice};
+use crate::ui::app_memo::MemoMsg;
+use crate::ui::app_playlist::PlaylistMsg;
+
+/// MCP-server settings messages, dispatched by [`App::update_mcp_setting`].
+/// Grouped out of the flat `Msg` enum (see `app.rs`); each persists a setting and
+/// restarts the embedded server. (The server's own commands are `Msg::Mcp`.)
+#[derive(Debug)]
+pub(crate) enum McpSettingMsg {
+    /// Change the MCP backend (off / JSON-RPC / SDK) → persist + restart.
+    SetMode(crate::core::mcp::McpMode),
+    /// Toggle LAN exposure of the MCP server → persist + restart.
+    SetPublic(bool),
+    /// Store a freshly generated MCP bearer token → persist + restart
+    /// (existing connections drop).
+    SetToken(String),
+}
 
 impl App {
+    /// Dispatch an [`McpSettingMsg`]. Split out of the monolithic `App::update`.
+    pub(crate) fn update_mcp_setting(&mut self, msg: McpSettingMsg) {
+        match msg {
+            McpSettingMsg::SetMode(mode) => {
+                let _ = self.library.set_setting("mcp_mode", mode.as_setting());
+                self.start_mcp_if_enabled();
+            }
+            McpSettingMsg::SetPublic(on) => {
+                let _ = self
+                    .library
+                    .set_setting("mcp_public", if on { "1" } else { "0" });
+                self.start_mcp_if_enabled();
+            }
+            McpSettingMsg::SetToken(token) => {
+                let _ = self.library.set_secret_setting("mcp_token", &token);
+                // Restart so the new token takes effect and existing connections drop.
+                self.start_mcp_if_enabled();
+            }
+        }
+    }
+
     /// Runs a single MCP command on the UI thread.
     pub(crate) fn handle_mcp(&mut self, cmd: McpCommand) {
         match cmd {
@@ -44,26 +81,32 @@ impl App {
             // refresh (reload_playlists) both happen, exactly as in the menu.
             McpCommand::PlayPlaylist { id, shuffle } => {
                 let _ = self.input.send(if shuffle {
-                    Msg::PlayPlaylistShuffled(id)
+                    Msg::Playlist(PlaylistMsg::PlayShuffled(id))
                 } else {
-                    Msg::PlayPlaylist(id)
+                    Msg::Playlist(PlaylistMsg::Play(id))
                 });
             }
             McpCommand::RenamePlaylist { id, name } => {
-                let _ = self.input.send(Msg::PlaylistRename { id, name });
+                let _ = self
+                    .input
+                    .send(Msg::Playlist(PlaylistMsg::Rename { id, name }));
             }
             McpCommand::DeletePlaylist(id) => {
-                let _ = self.input.send(Msg::PlaylistDeleteConfirmed(id));
+                let _ = self
+                    .input
+                    .send(Msg::Playlist(PlaylistMsg::DeleteConfirmed(id)));
             }
             McpCommand::SetPlaylistCover { id, path } => {
-                let _ = self.input.send(Msg::SetPlaylistCover { id, path });
+                let _ = self
+                    .input
+                    .send(Msg::Playlist(PlaylistMsg::SetCover { id, path }));
             }
             McpCommand::Enqueue(paths) => self.mcp_enqueue(paths),
             McpCommand::ToggleEpisodeListened { url, title } => {
                 let _ = self.input.send(Msg::ToggleEpisode { url, title });
             }
             McpCommand::DeleteMemo(id) => {
-                let _ = self.input.send(Msg::MemoDeleteConfirmed(id));
+                let _ = self.input.send(Msg::Memo(MemoMsg::DeleteConfirmed(id)));
             }
             McpCommand::DeleteRecording(id) => {
                 let _ = self.input.send(Msg::StreamRecordingReallyDelete(id));

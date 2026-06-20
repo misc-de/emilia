@@ -12,7 +12,97 @@ use gtk::glib;
 use crate::core::tray::{self, EmiliaTray, TrayCmd};
 use crate::ui::app::{App, Msg};
 
+/// Tray-icon settings + click actions, dispatched by [`App::update_tray`].
+/// Grouped out of the flat `Msg` enum (see `app.rs`): persisted bool prefs plus
+/// the three click bridges wired in [`App::start_tray`].
+#[derive(Debug)]
+pub(crate) enum TrayMsg {
+    /// Show/hide the desktop tray icon.
+    SetEnabled(bool),
+    /// Closing the window hides it into the tray instead of quitting.
+    SetCloseHides(bool),
+    /// Start with the window hidden (tray only).
+    SetStartHidden(bool),
+    /// Suppress the taskbar entry even while visible (X11 best-effort).
+    SetSkipTaskbar(bool),
+    /// Show the tray icon in grayscale instead of colored.
+    SetIconGray(bool),
+    /// Tray click / "Show / Hide": toggle the main window's visibility.
+    ToggleWindow,
+    /// Tray left click at (x, y): toggle the MPRIS-style media popup near the icon.
+    MediaPopup(i32, i32),
+    /// Tray "Quit": release the app-hold and quit for real.
+    Quit,
+}
+
 impl App {
+    /// Dispatch a [`TrayMsg`] (tray settings + click actions). Split out of the
+    /// monolithic `App::update` match.
+    pub(crate) fn update_tray(
+        &mut self,
+        msg: TrayMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            TrayMsg::SetEnabled(on) => {
+                self.tray.enabled = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_enabled", if on { "1" } else { "0" });
+                if on {
+                    self.start_tray(root, sender);
+                } else {
+                    self.stop_tray();
+                }
+            }
+            TrayMsg::SetCloseHides(on) => {
+                self.tray.close_hides = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_close_hides", if on { "1" } else { "0" });
+            }
+            TrayMsg::SetStartHidden(on) => {
+                self.tray.start_hidden = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_start_hidden", if on { "1" } else { "0" });
+            }
+            TrayMsg::SetSkipTaskbar(on) => {
+                self.tray.skip_taskbar = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_skip_taskbar", if on { "1" } else { "0" });
+                self.refresh_skip_taskbar(root);
+            }
+            TrayMsg::SetIconGray(on) => {
+                self.tray.icon_gray = on;
+                let _ = self
+                    .library
+                    .set_setting("tray_icon_gray", if on { "1" } else { "0" });
+                // Update the live tray icon (no respawn needed; ksni emits NewIcon).
+                let px = if on { gray_tray_icon() } else { Vec::new() };
+                if let Some(handle) = &self.tray.handle {
+                    handle.update(move |t| {
+                        t.icon_px = px;
+                    });
+                }
+            }
+            TrayMsg::ToggleWindow => self.tray_toggle_window(root),
+            TrayMsg::MediaPopup(x, y) => self.toggle_media_popup(x, y, root, sender),
+            TrayMsg::Quit => {
+                self.stop_tray();
+                // Same reason as the window close handler (see app_init.rs): the
+                // MPRIS/zbus service keeps the process alive past `app.quit()`, so
+                // force a full exit to avoid leaving a ghost instance behind.
+                if let Some(app) = root.application() {
+                    app.quit();
+                }
+                std::process::exit(0);
+            }
+        }
+    }
+
     /// Start the tray service (idempotent) and bridge its commands → `Msg`.
     pub(crate) fn start_tray(
         &mut self,
@@ -45,12 +135,12 @@ impl App {
         glib::spawn_future_local(async move {
             while let Ok(cmd) = rx.recv().await {
                 sender.input(match cmd {
-                    TrayCmd::Popup(x, y) => Msg::TrayMediaPopup(x, y),
-                    TrayCmd::ShowHide => Msg::TrayToggleWindow,
+                    TrayCmd::Popup(x, y) => Msg::Tray(TrayMsg::MediaPopup(x, y)),
+                    TrayCmd::ShowHide => Msg::Tray(TrayMsg::ToggleWindow),
                     TrayCmd::PlayPause => Msg::TogglePlay,
                     TrayCmd::Next => Msg::Next,
                     TrayCmd::Prev => Msg::Prev,
-                    TrayCmd::Quit => Msg::TrayQuit,
+                    TrayCmd::Quit => Msg::Tray(TrayMsg::Quit),
                 });
             }
         });

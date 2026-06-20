@@ -204,7 +204,122 @@ pub(crate) fn sort_dir_icon(desc: bool) -> &'static str {
     }
 }
 
+/// Sort + gallery messages, dispatched by [`App::update_sort`]. Grouped out of
+/// the flat `Msg` enum (see `app.rs`): the title-bar sort popover (criterion /
+/// direction / grouping / per-section gallery), the global gallery view, and the
+/// `*Changed` notifications mirrored from the extracted page components.
+#[derive(Debug)]
+pub(crate) enum SortMsg {
+    /// Gallery view (cover grid) on/off; rebuilds the lists.
+    GalleryView(bool),
+    /// Tiles per row in the gallery view (2–8); rebuilds the lists.
+    GalleryColumns(u32),
+    /// Rebuild the title-bar sort popover for the current section (or hide it).
+    MenuRefresh,
+    /// Change the sort criterion of the current section; persists and re-sorts.
+    SetCrit(SortCrit),
+    /// Change the sort direction of the current section (`true` = descending).
+    SetDir(bool),
+    /// Toggle section grouping for the current section (`true` = no grouping).
+    SetNoGroup(bool),
+    /// Toggle the gallery view for the current section only.
+    SectionGallery(bool),
+    /// The PodcastsPage updated its sort slot → mirror onto the title-bar button.
+    PodcastChanged,
+    /// The StreamPage updated its sort slot → mirror onto the title-bar button.
+    StreamChanged,
+    /// The YtPage updated its sort slot → mirror onto the title-bar button.
+    YtChanged,
+}
+
 impl App {
+    /// Dispatch a [`SortMsg`]. Split out of the monolithic `App::update` match.
+    pub(crate) fn update_sort(&mut self, msg: SortMsg, sender: &ComponentSender<Self>) {
+        match msg {
+            SortMsg::MenuRefresh => self.rebuild_sort_menu(),
+            // A component page updated its sort slot; mirror it onto the shared
+            // title-bar button, but only while that page's section is showing.
+            SortMsg::PodcastChanged => {
+                if self.current_section().as_deref() == Some("podcasts") {
+                    self.apply_component_sort(&self.nav.podcast_sort);
+                }
+            }
+            SortMsg::StreamChanged => {
+                if self.current_section().as_deref() == Some("streaming") {
+                    self.apply_component_sort(&self.nav.stream_sort);
+                }
+            }
+            SortMsg::YtChanged => {
+                if self.current_section().as_deref() == Some("youtube") {
+                    self.apply_component_sort(&self.nav.yt_sort);
+                }
+            }
+            SortMsg::SetCrit(crit) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                let (cur, desc) = self.libview.sort_for(&section);
+                if cur != crit {
+                    self.set_section_sort(&section, crit, desc, sender);
+                }
+            }
+            SortMsg::SetDir(desc) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                let (crit, cur) = self.libview.sort_for(&section);
+                if cur != desc {
+                    self.set_section_sort(&section, crit, desc, sender);
+                }
+            }
+            SortMsg::SetNoGroup(off) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                if self.libview.grouping_off(&section) != off {
+                    self.set_section_grouping(&section, off, sender);
+                }
+            }
+            SortMsg::SectionGallery(on) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                if self.libview.gallery_on(&section) != on {
+                    self.set_section_gallery(&section, on, sender);
+                }
+            }
+            SortMsg::GalleryView(on) => {
+                self.libview.gallery_view = on;
+                let _ = self
+                    .library
+                    .set_setting("gallery_view", if on { "1" } else { "0" });
+                self.rebuild_all_lists(sender);
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::SetGalleryView(on));
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::SetGalleryView(on));
+            }
+            SortMsg::GalleryColumns(n) => {
+                self.libview.gallery_columns = n.clamp(2, 8);
+                let _ = self
+                    .library
+                    .set_setting("gallery_columns", &self.libview.gallery_columns.to_string());
+                if self.libview.gallery_view {
+                    self.rebuild_all_lists(sender);
+                }
+                self.podcasts_page.emit(
+                    crate::ui::podcasts_page::PodcastsInput::SetGalleryColumns(
+                        self.libview.gallery_columns,
+                    ),
+                );
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::SetGalleryColumns(
+                        self.libview.gallery_columns,
+                    ));
+            }
+        }
+    }
+
     /// Name of the section currently shown in the main view stack.
     pub(crate) fn current_section(&self) -> Option<String> {
         self.nav
@@ -386,7 +501,7 @@ impl App {
                 } else {
                     gettext("Ascending")
                 }));
-                let _ = input.send(Msg::SetSortDir(desc));
+                let _ = input.send(Msg::Sort(SortMsg::SetDir(desc)));
             });
         }
         header.append(&dir);
@@ -405,7 +520,7 @@ impl App {
                 let input = self.input.clone();
                 cb.connect_toggled(move |b| {
                     if b.is_active() {
-                        let _ = input.send(Msg::SetSortCrit(crit));
+                        let _ = input.send(Msg::Sort(SortMsg::SetCrit(crit)));
                     }
                 });
             }
@@ -432,7 +547,7 @@ impl App {
             {
                 let input = self.input.clone();
                 no_group.connect_toggled(move |b| {
-                    let _ = input.send(Msg::SetSortNoGroup(b.is_active()));
+                    let _ = input.send(Msg::Sort(SortMsg::SetNoGroup(b.is_active())));
                 });
             }
             bx.append(&no_group);
@@ -447,7 +562,7 @@ impl App {
             {
                 let input = self.input.clone();
                 gallery.connect_toggled(move |b| {
-                    let _ = input.send(Msg::SetSectionGallery(b.is_active()));
+                    let _ = input.send(Msg::Sort(SortMsg::SectionGallery(b.is_active())));
                 });
             }
             bx.append(&gallery);
