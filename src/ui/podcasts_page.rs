@@ -128,6 +128,10 @@ pub(crate) struct PodcastsPage {
     newest_items: Vec<crate::model::EpisodeRef>,
     /// Container of the "Newest" list (filled imperatively in `reload_newest`).
     newest_list: gtk::Box,
+    /// Recently (partly) heard episodes (for the "Recently" view).
+    recent_items: Vec<crate::model::RecentEpisode>,
+    /// Container of the "Recently" list (filled imperatively in `reload_recent`).
+    recent_list: gtk::Box,
     /// Hits of the last podcast search (iTunes), for the subscribe dialog.
     podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
     /// The last podcast search hit a network/service error (vs. no hits).
@@ -277,6 +281,13 @@ impl Component for PodcastsPage {
                 add_css_class: "emilia-tabbar",
 
                 gtk::ToggleButton {
+                    set_label: &gettext("Recently"),
+                    set_hexpand: true,
+                    #[watch]
+                    set_active: model.podcast_view == PodcastView::Recent,
+                    connect_clicked => PodcastsInput::SetView(PodcastView::Recent),
+                },
+                gtk::ToggleButton {
                     set_label: &gettext("Newest"),
                     set_hexpand: true,
                     #[watch]
@@ -296,6 +307,31 @@ impl Component for PodcastsPage {
                     add_css_class: "flat",
                     connect_clicked => PodcastsInput::Subscribe,
                 },
+            },
+
+            // "Recently": recently (partly) heard episodes, with progress.
+            gtk::ScrolledWindow {
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.podcast_view == PodcastView::Recent && !model.recent_items.is_empty(),
+                #[local_ref]
+                recent_list -> gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 6,
+                    set_valign: gtk::Align::Start,
+                    set_margin_top: 10,
+                    set_margin_bottom: 12,
+                    set_margin_start: 12,
+                    set_margin_end: 12,
+                },
+            },
+            adw::StatusPage {
+                set_icon_name: Some("podcast-symbolic"),
+                set_title: &gettext("Nothing heard yet"),
+                set_description: Some(&gettext("Episodes you have started appear here, showing how far you have listened.")),
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.podcast_view == PodcastView::Recent && model.recent_items.is_empty(),
             },
 
             // "Newest": newest episodes across all subscriptions.
@@ -372,6 +408,7 @@ impl Component for PodcastsPage {
         let library = Library::open_or_memory();
         let podcasts_list = gtk::ListBox::new();
         let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let podcasts_gallery = gtk::FlowBox::new();
         // Restore the persisted overview sort (default: by name, ascending) + the
         // grouping/gallery choices.
@@ -413,6 +450,8 @@ impl Component for PodcastsPage {
             podcast_view: PodcastView::Newest,
             newest_items: Vec::new(),
             newest_list: newest_list.clone(),
+            recent_items: Vec::new(),
+            recent_list: recent_list.clone(),
             overview_sort,
             overview_no_group,
             gallery_override,
@@ -484,6 +523,11 @@ impl Component for PodcastsPage {
             PodcastsInput::SetWindow(w) => self.window = Some(w),
             PodcastsInput::SetView(view) => {
                 self.podcast_view = view;
+                // Refresh the progress when entering "Recently" (it changes as
+                // episodes are listened to).
+                if view == PodcastView::Recent {
+                    self.reload_recent(&sender);
+                }
                 // The sort button only shows on the subscription overview.
                 self.rebuild_sort(&sender);
             }
@@ -810,6 +854,7 @@ impl PodcastsPage {
             self.podcasts_list.invalidate_headers();
         }
         self.reload_newest(sender);
+        self.reload_recent(sender);
         // The overview's contents (and thus the sort button's visibility) may
         // have changed → refresh the title-bar sort control.
         self.rebuild_sort(sender);
@@ -970,6 +1015,102 @@ impl PodcastsPage {
             if let Some(g) = &group {
                 g.add(&row);
             }
+        }
+        self.refresh_episode_icons();
+    }
+
+    /// Builds the "Recently" list: episodes you have started (those with a
+    /// stored playback position), newest first, each with a progress bar that
+    /// visualizes how far you have already listened. The play button resumes;
+    /// long press / right click opens the episode detail.
+    fn reload_recent(&mut self, sender: &ComponentSender<Self>) {
+        self.recent_items = self.library.recent_episodes(150).unwrap_or_default();
+        while let Some(child) = self.recent_list.first_child() {
+            self.recent_list.remove(&child);
+        }
+        for ep in self.recent_items.clone() {
+            let total_secs = ep
+                .duration
+                .as_deref()
+                .and_then(crate::core::podcast::duration_secs)
+                .filter(|s| *s > 0);
+
+            let card = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(6)
+                .css_classes(["card"])
+                .build();
+            let top = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(12)
+                .margin_top(8)
+                .margin_bottom(8)
+                .margin_start(10)
+                .margin_end(10)
+                .build();
+            let cover = ep
+                .podcast_image
+                .as_deref()
+                .and_then(crate::core::online::podcast_image_path);
+            top.append(&cover_widget(cover.as_deref(), "microphone-symbolic"));
+
+            let text = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .hexpand(true)
+                .valign(gtk::Align::Center)
+                .build();
+            let title = gtk::Label::builder()
+                .label(&ep.title)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            title.add_css_class("heading");
+            text.append(&title);
+            // Subtitle: "podcast · elapsed [/ total]".
+            let mut sub = ep.podcast_title.clone();
+            sub.push_str(" · ");
+            sub.push_str(&crate::ui::app_helpers::fmt_duration(ep.position_ms));
+            if let Some(secs) = total_secs {
+                sub.push_str(" / ");
+                sub.push_str(&crate::ui::app_helpers::fmt_duration(secs * 1000));
+            }
+            let subtitle = gtk::Label::builder()
+                .label(&sub)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            subtitle.add_css_class("dim-label");
+            text.append(&subtitle);
+            top.append(&text);
+
+            top.append(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
+            card.append(&top);
+
+            // Progress bar — only when the total length is known (otherwise we
+            // cannot compute a fraction; the elapsed time still shows above).
+            if let Some(secs) = total_secs {
+                let frac = (ep.position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
+                let bar = gtk::ProgressBar::builder()
+                    .fraction(frac)
+                    .margin_start(10)
+                    .margin_end(10)
+                    .margin_bottom(8)
+                    .build();
+                bar.add_css_class("emilia-hourbar");
+                card.append(&bar);
+            }
+
+            let url = ep.audio_url.clone();
+            on_secondary_click(&card, {
+                let sender = sender.clone();
+                let url = url.clone();
+                move || sender.input(PodcastsInput::ShowEpisodeDetailByUrl { url: url.clone() })
+            });
+            on_long_press(&card, {
+                let sender = sender.clone();
+                move || sender.input(PodcastsInput::ShowEpisodeDetailByUrl { url: url.clone() })
+            });
+            self.recent_list.append(&card);
         }
         self.refresh_episode_icons();
     }

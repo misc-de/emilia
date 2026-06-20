@@ -255,6 +255,8 @@ const AUTO_ENRICH_INTERVAL_SECS: u32 = 60;
 /// Which view the podcast page shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PodcastView {
+    /// Recently (partly) heard episodes — "continue listening", with progress.
+    Recent,
     /// Newest episodes (entries) across all subscriptions.
     Newest,
     /// Overview of the subscribed podcasts.
@@ -2473,7 +2475,7 @@ impl Component for App {
                                         add_css_class: "emilia-tabbar",
 
                                         gtk::ToggleButton {
-                                            set_label: &gettext("Recent"),
+                                            set_label: &gettext("Recently"),
                                             set_hexpand: true,
                                             #[watch]
                                             set_active: model.memo.view == MemoView::Recent,

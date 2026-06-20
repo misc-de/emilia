@@ -568,7 +568,7 @@ impl Component for YtPage {
                 add_css_class: "emilia-tabbar",
 
                 gtk::ToggleButton {
-                    set_label: &gettext("Recent"),
+                    set_label: &gettext("Recently"),
                     set_hexpand: true,
                     #[watch]
                     set_active: model.yt_view == YtView::Recent,

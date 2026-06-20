@@ -144,6 +144,34 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Recently (partly) heard episodes for the podcast "Recently" list: those
+    /// with a stored playback position, newest first. Joined back to the
+    /// episode + podcast rows for display; a progress entry whose episode is no
+    /// longer present in any feed is dropped by the JOIN. A finished episode has
+    /// no row here at all (its progress is cleared on completion).
+    pub fn recent_episodes(&self, limit: usize) -> Result<Vec<crate::model::RecentEpisode>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.title, p.image_url, e.title, e.audio_url, e.duration, pr.position_ms
+             FROM episode_progress pr
+             JOIN episode e ON e.audio_url = pr.url
+             JOIN podcast p ON p.id = e.podcast_id
+             WHERE pr.position_ms > 0
+             ORDER BY pr.updated_at DESC, pr.rowid DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |r| {
+            Ok(crate::model::RecentEpisode {
+                podcast_title: r.get(0)?,
+                podcast_image: r.get(1)?,
+                title: r.get(2)?,
+                audio_url: r.get(3)?,
+                duration: r.get(4)?,
+                position_ms: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Records a downloaded episode (audio URL → local file path) for offline
     /// playback.
     pub fn set_episode_download(&self, url: &str, path: &str) -> Result<()> {

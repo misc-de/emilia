@@ -198,6 +198,20 @@ pub(crate) fn decode_entities(s: &str) -> String {
 /// "3600.0"). Returns `None` if nothing sensible can be determined – the
 /// caller then shows the original text.
 pub fn format_duration(raw: &str) -> Option<String> {
+    let total = duration_secs(raw)?;
+    let (h, m, sec) = (total / 3600, (total % 3600) / 60, total % 60);
+    Some(if h > 0 {
+        format!("{h}:{m:02}:{sec:02}")
+    } else {
+        format!("{m}:{sec:02}")
+    })
+}
+
+/// Parses a feed duration into **total seconds**. Accepts both `HH:MM:SS`/
+/// `MM:SS` and plain seconds (e.g. "3600" or "3600.0"). Returns `None` if
+/// nothing sensible can be determined. Shared by [`format_duration`] and the
+/// podcast "Recently" progress bar.
+pub fn duration_secs(raw: &str) -> Option<i64> {
     let s = raw.trim();
     if s.is_empty() {
         return None;
@@ -216,15 +230,7 @@ pub fn format_duration(raw: &str) -> Option<String> {
         // Plain seconds, possibly with decimals ("1234.5").
         s.split('.').next()?.trim().parse().ok()?
     };
-    if total < 0 {
-        return None;
-    }
-    let (h, m, sec) = (total / 3600, (total % 3600) / 60, total % 60);
-    Some(if h > 0 {
-        format!("{h}:{m:02}:{sec:02}")
-    } else {
-        format!("{m}:{sec:02}")
-    })
+    (total >= 0).then_some(total)
 }
 
 /// Converts an HTML description text (shownotes) into readable plain text:

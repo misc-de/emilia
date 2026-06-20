@@ -289,8 +289,11 @@ impl ThemeState {
             // The active tab (nav + in-page switcher) gets another 30 points of
             // opacity on top, so the current section stands out from the rest.
             let a_check = (a_head + 0.30).min(1.0);
-            // Dialogs & popovers ("same design") keep a readability floor.
-            let a_modal = a_head.max(0.55);
+            // Dialogs ("same design") use the same translucency as the rest of
+            // the chrome (tabs/headings level), so the configured blurred
+            // background shows through modals just like behind the main view —
+            // no extra opacity floor that would hide it.
+            let a_modal = a_head;
             // Note: `window` itself is NOT made transparent — the background
             // Picture (a child) already covers it, and a transparent `window`
             // would bleed into separate dialogs (e.g. the color chooser).

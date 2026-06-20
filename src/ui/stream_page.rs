@@ -285,18 +285,18 @@ impl Component for StreamPage {
                     connect_clicked => StreamInput::SetView(StreamView::Channels),
                 },
                 gtk::ToggleButton {
-                    set_label: &gettext("Recordings"),
-                    set_hexpand: true,
-                    #[watch]
-                    set_active: model.stream_view == StreamView::Recordings,
-                    connect_clicked => StreamInput::SetView(StreamView::Recordings),
-                },
-                gtk::ToggleButton {
                     set_label: &gettext("Recently"),
                     set_hexpand: true,
                     #[watch]
                     set_active: model.stream_view == StreamView::Heard,
                     connect_clicked => StreamInput::SetView(StreamView::Heard),
+                },
+                gtk::ToggleButton {
+                    set_label: &gettext("Recordings"),
+                    set_hexpand: true,
+                    #[watch]
+                    set_active: model.stream_view == StreamView::Recordings,
+                    connect_clicked => StreamInput::SetView(StreamView::Recordings),
                 },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",

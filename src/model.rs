@@ -191,6 +191,21 @@ pub struct YtRecent {
     pub total_duration: Option<i64>,
 }
 
+/// A recently (partly) heard podcast episode — an entry of the podcast
+/// "Recently" list. Sourced from `episode_progress` (only an in-progress episode
+/// carries a stored position), joined back to its episode/podcast for display.
+#[derive(Debug, Clone)]
+pub struct RecentEpisode {
+    pub podcast_title: String,
+    pub podcast_image: Option<String>,
+    pub title: String,
+    pub audio_url: String,
+    /// Total length text from the feed (for the progress fraction + label).
+    pub duration: Option<String>,
+    /// Stored playback position in milliseconds (> 0).
+    pub position_ms: i64,
+}
+
 /// A video together with its channel – for the cross-channel "Newest videos"
 /// view (mirrors [`EpisodeRef`]).
 #[derive(Debug, Clone)]
