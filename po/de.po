@@ -1605,9 +1605,49 @@ msgstr "Aktiviere YouTube in den Einstellungen, um das zu nutzen"
 msgid "Searching on YouTube …"
 msgstr "Suche auf YouTube …"
 
+#: src/ui/app_streaming.rs:801
+msgid "Looking online …"
+msgstr "Schaue im Netz nach …"
+
 #: src/ui/app_streaming.rs:819
 msgid "Not found on YouTube"
 msgstr "Auf YouTube nicht gefunden"
+
+#: src/ui/app_views.rs
+msgid "Missing — tap to add"
+msgstr "Fehlt – zum Hinzufügen tippen"
+
+#: src/ui/app_views.rs
+msgid "Checking for missing tracks …"
+msgstr "Prüfe auf fehlende Titel …"
+
+#: src/ui/app_views_handlers.rs
+msgid "Add missing track"
+msgstr "Fehlenden Titel hinzufügen"
+
+#: src/ui/app_views_handlers.rs
+msgid "Search & add"
+msgstr "Suchen & hinzufügen"
+
+#: src/ui/app_views_handlers.rs
+msgid ""
+"“{title}” is missing from this album. Search for it online and add it to the "
+"album?"
+msgstr ""
+"„{title}“ fehlt in diesem Album. Im Netz danach suchen und dem Album "
+"hinzufügen?"
+
+#: src/ui/app_views_handlers.rs
+msgid "Cannot determine the album folder"
+msgstr "Album-Ordner konnte nicht bestimmt werden"
+
+#: src/ui/app_views_handlers.rs
+msgid "Searching online …"
+msgstr "Suche im Netz …"
+
+#: src/ui/app_views_handlers.rs
+msgid "Track added"
+msgstr "Titel hinzugefügt"
 
 #: src/ui/app_views.rs:394
 msgid "No music folder set – please choose one in the settings"
@@ -1624,6 +1664,10 @@ msgstr "Für diesen Interpreten sind keine Lieder in der Bibliothek."
 #: src/ui/app_views.rs:999
 msgid "Singles"
 msgstr "Einzellieder"
+
+#: src/core/category.rs:51
+msgid "Compilations"
+msgstr "Kompilationen"
 
 #: src/ui/app_views.rs:1730 src/ui/app_views.rs:1756 src/ui/app_views.rs:2113
 #: src/ui/setup.rs:212
@@ -2242,9 +2286,16 @@ msgid "Record the current song while a station plays."
 msgstr "Nimm den aktuellen Titel auf, während ein Sender läuft."
 
 #: src/ui/stream_page.rs:392
-msgid "Songs recognized while a station plays appear here."
+msgid ""
+"Songs are recognized from the title a station broadcasts while it plays, and "
+"collected here — so you can play them back later (from your library, "
+"otherwise via YouTube). This only works for stations that transmit the "
+"current title."
 msgstr ""
-"Lieder, die beim Abspielen eines Senders erkannt werden, erscheinen hier."
+"Lieder werden aus dem Titel erkannt, den ein Sender während der Wiedergabe "
+"überträgt, und hier gesammelt – so kannst du sie später abspielen (aus "
+"deiner Bibliothek, sonst über YouTube). Das funktioniert nur bei Sendern, "
+"die den aktuellen Titel übertragen."
 
 #: src/ui/stream_page.rs:649
 msgid "Removed from the list"

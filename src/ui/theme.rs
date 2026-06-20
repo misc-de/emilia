@@ -289,11 +289,6 @@ impl ThemeState {
             // The active tab (nav + in-page switcher) gets another 30 points of
             // opacity on top, so the current section stands out from the rest.
             let a_check = (a_head + 0.30).min(1.0);
-            // Dialogs ("same design") use the same translucency as the rest of
-            // the chrome (tabs/headings level), so the configured blurred
-            // background shows through modals just like behind the main view —
-            // no extra opacity floor that would hide it.
-            let a_modal = a_head;
             // Note: `window` itself is NOT made transparent — the background
             // Picture (a child) already covers it, and a transparent `window`
             // would bleed into separate dialogs (e.g. the color chooser).
@@ -310,11 +305,19 @@ impl ThemeState {
                  label.emilia-list-section {{ background-color: transparent; }}\
                  windowcontrols button, button.titlebutton {{ background-color: transparent; }}"
             ));
-            // Same design for modal dialogs: tint them with the field color so the
-            // blurred background shows through there, too. (Popovers stay opaque.)
-            css.push_str(&format!(
-                "window.dialog, dialog {{ background-color: alpha({field}, {a_modal}); }}"
-            ));
+            // Same background as the main window for in-window modals
+            // (AdwDialog / AdwAlertDialog): make the dialog surface itself fully
+            // transparent so the background Picture *behind* it shows through,
+            // exactly like the main view. The chrome inside the dialog (rows,
+            // entries, headerbars) is already tinted by the rules above, so a
+            // modal ends up looking identical to the main window — not a more
+            // opaque field-colored panel as before. Real top-level dialog
+            // *windows* (file/color choosers) have no Picture behind them, so
+            // `window.dialog` keeps a solid background. (Popovers stay opaque.)
+            css.push_str(
+                "dialog, .dialog { background-color: transparent; background-image: none; }\
+                 window.dialog { background-color: @window_bg_color; }",
+            );
             // The tray media popup carries its own blurred background Picture, so
             // make its window transparent to let it show (the content floats over
             // it like the main window, tinted by the shared scrim).

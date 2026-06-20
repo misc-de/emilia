@@ -6,8 +6,8 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::i18n::gettext;
-use crate::ui::app::{online_available, ActiveSource, App, Cmd, CtxTarget};
+use crate::i18n::{gettext, gettext_f};
+use crate::ui::app::{online_available, ActiveSource, App, Cmd, CtxTarget, Msg};
 use crate::ui::app_views::natural_key;
 use crate::ui::fs_row::{FsEntry, FsInput, RowOpts};
 
@@ -694,5 +694,182 @@ impl App {
                 );
             }
         }
+    }
+
+    // ---- Missing-track recovery (greyed album entries) ----
+
+    /// Confirm dialog for a greyed "missing" track: offer to search & add it.
+    pub(crate) fn show_missing_track(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+    ) {
+        let body = gettext_f(
+            "“{title}” is missing from this album. Search for it online and add it to the album?",
+            &[("title", &title)],
+        );
+        let dialog = adw::AlertDialog::new(Some(&gettext("Add missing track")), Some(&body));
+        dialog.add_response("cancel", &gettext("Cancel"));
+        dialog.add_response("add", &gettext("Search & add"));
+        dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("add"));
+        dialog.set_close_response("cancel");
+        // `connect_response` is `Fn`; build the message once and take it on use.
+        let msg = std::cell::RefCell::new(Some(Msg::AddMissingTrack {
+            artist,
+            album,
+            disc,
+            position,
+            title,
+        }));
+        let sender = sender.clone();
+        dialog.connect_response(None, move |_, resp| {
+            if resp == "add" {
+                if let Some(m) = msg.borrow_mut().take() {
+                    sender.input(m);
+                }
+            }
+        });
+        dialog.present(Some(root));
+    }
+
+    /// Start adding a missing track: resolve it on YouTube, download it into the
+    /// album folder, tag + index it, then refresh the page. Shows a phase spinner.
+    pub(crate) fn add_missing_track(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+    ) {
+        if !self.youtube.enabled || !crate::core::youtube::available() {
+            self.toast(&gettext("Enable YouTube in the settings to use this"));
+            return;
+        }
+        // Album folder = a sibling track's directory (prefer the same disc).
+        let siblings = self.album_tracks_for_artist(&artist, &album);
+        let dest_dir = siblings
+            .iter()
+            .find(|t| crate::ui::app_views::track_disc(t) == disc)
+            .or_else(|| siblings.first())
+            .and_then(|t| {
+                std::path::Path::new(&t.path)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+            });
+        let Some(dest_dir) = dest_dir else {
+            self.toast(&gettext("Cannot determine the album folder"));
+            return;
+        };
+        let meta = self.library.get_album_meta(&artist, &album).ok().flatten();
+        let year = meta.as_ref().and_then(|m| m.year);
+        let cover = meta
+            .as_ref()
+            .and_then(|m| m.cover_path.clone())
+            .or_else(|| self.album_cover_for(&artist, &album));
+        let query = format!("{artist} {title}");
+
+        self.show_missing_busy(root, &gettext("Searching online …"));
+
+        let (artist_w, album_w, title_w) = (artist.clone(), album.clone(), title.clone());
+        sender.spawn_command(move |out| {
+            let video_id =
+                crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 1)
+                    .ok()
+                    .and_then(|v| v.into_iter().next())
+                    .map(|r| r.id);
+            let (ok, message) = match video_id {
+                None => (false, gettext("Not found on YouTube")),
+                Some(vid) => {
+                    let _ = out.send(Cmd::MissingTrackPhase(gettext("Downloading …")));
+                    match crate::core::youtube::add_video_to_album(
+                        &vid,
+                        &dest_dir,
+                        &artist_w,
+                        &album_w,
+                        &title_w,
+                        position,
+                        Some(disc),
+                        year,
+                        cover.as_deref(),
+                    ) {
+                        Ok(_) => (true, gettext("Track added")),
+                        Err(e) => (false, e),
+                    }
+                }
+            };
+            let _ = out.send(Cmd::MissingTrackDone {
+                artist: artist_w,
+                album: album_w,
+                ok,
+                message,
+            });
+        });
+    }
+
+    /// Build + show the phase spinner for the missing-track download.
+    fn show_missing_busy(&mut self, root: &adw::ApplicationWindow, text: &str) {
+        if let Some((d, _)) = self.libview.missing_busy.take() {
+            d.close();
+        }
+        let dialog = adw::Dialog::builder().content_width(300).build();
+        let vb = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(16)
+            .margin_top(28)
+            .margin_bottom(28)
+            .margin_start(28)
+            .margin_end(28)
+            .halign(gtk::Align::Center)
+            .build();
+        let spinner = gtk::Spinner::builder()
+            .width_request(32)
+            .height_request(32)
+            .build();
+        spinner.set_spinning(true);
+        let label = gtk::Label::builder()
+            .label(text)
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        vb.append(&spinner);
+        vb.append(&label);
+        dialog.set_child(Some(&vb));
+        dialog.present(Some(root));
+        self.libview.missing_busy = Some((dialog, label));
+    }
+
+    /// Update the missing-track spinner's phase label.
+    pub(crate) fn on_missing_track_phase(&mut self, phase: &str) {
+        if let Some((_, label)) = &self.libview.missing_busy {
+            label.set_label(phase);
+        }
+    }
+
+    /// A missing-track download finished: close the spinner, refresh the album
+    /// page (greyed entry → real track) and report the outcome.
+    pub(crate) fn on_missing_track_done(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        artist: String,
+        album: String,
+        ok: bool,
+        message: String,
+    ) {
+        if let Some((d, _)) = self.libview.missing_busy.take() {
+            d.close();
+        }
+        if ok {
+            self.refill_album_page(sender, &artist, &album);
+        }
+        self.toast(&message);
     }
 }

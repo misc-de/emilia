@@ -99,6 +99,18 @@ pub struct ReleaseMatch {
     pub year: Option<i32>,
 }
 
+/// One entry of a release's **canonical** tracklist (from MusicBrainz). Used to
+/// flag tracks that are missing from the local album.
+pub struct CanonicalTrack {
+    /// Medium / disc number (1-based).
+    pub disc: u32,
+    /// Track position within the disc (1-based).
+    pub position: u32,
+    pub title: String,
+    /// Track length in milliseconds, if MusicBrainz knows it.
+    pub length_ms: Option<i64>,
+}
+
 /// HTTP client with a shared connection pool and timeouts.
 /// Cloneable (the `ureq::Agent` shares the pool/configuration) – so it can be
 /// passed to multiple fetch threads.
@@ -176,6 +188,38 @@ impl OnlineClient {
                 year,
             }
         }))
+    }
+
+    /// Fetches the canonical tracklist of a MusicBrainz release
+    /// (`inc=recordings`): one entry per track with its disc, position, title and
+    /// length. `Ok(vec![])` when the release has no usable media (also for a 404).
+    pub fn fetch_release_tracks(&self, mbid: &str) -> Result<Vec<CanonicalTrack>> {
+        let url = format!(
+            "https://musicbrainz.org/ws/2/release/{}?inc=recordings&fmt=json",
+            percent_encode(mbid)
+        );
+        let rel: MbReleaseFull = match self.call_get(&url)? {
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
+            None => return Ok(Vec::new()),
+        };
+        let mut out = Vec::new();
+        for (idx, medium) in rel.media.iter().enumerate() {
+            let disc = medium.position.unwrap_or((idx as u32) + 1).max(1);
+            for t in &medium.tracks {
+                let title = t.title.trim();
+                let position = t.position.unwrap_or(0);
+                if title.is_empty() || position == 0 {
+                    continue;
+                }
+                out.push(CanonicalTrack {
+                    disc,
+                    position,
+                    title: title.to_string(),
+                    length_ms: t.length,
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// Loads the front cover (max. 500 px) for a release. Tries the concrete
@@ -1226,6 +1270,33 @@ struct MbReleaseGroup {
     /// over a specific release's `date`, which may be a reissue/remaster.
     #[serde(rename = "first-release-date", default)]
     first_release_date: Option<String>,
+}
+
+// ---- Full release with media/tracks (canonical tracklist) ----
+
+#[derive(Deserialize)]
+struct MbReleaseFull {
+    #[serde(default)]
+    media: Vec<MbMedium>,
+}
+
+#[derive(Deserialize)]
+struct MbMedium {
+    #[serde(default)]
+    position: Option<u32>,
+    #[serde(default)]
+    tracks: Vec<MbTrack>,
+}
+
+#[derive(Deserialize)]
+struct MbTrack {
+    #[serde(default)]
+    position: Option<u32>,
+    #[serde(default)]
+    title: String,
+    /// Track length in milliseconds.
+    #[serde(default)]
+    length: Option<i64>,
 }
 
 // ---- Deezer JSON (artist photos) ----

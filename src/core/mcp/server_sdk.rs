@@ -59,7 +59,9 @@ impl ServerHandler for EmiliaServer {
     ) -> Result<ListToolsResult, McpError> {
         // The shared registry already emits MCP-shaped tool descriptors
         // (camelCase `inputSchema`), so they deserialize straight into `Tool`.
-        let tools: Vec<Tool> = serde_json::from_value(tools::tool_list()).unwrap_or_default();
+        // `tool_list_enabled` drops the YouTube tools when that feature is off.
+        let tools: Vec<Tool> =
+            serde_json::from_value(tools::tool_list_enabled()).unwrap_or_default();
         Ok(ListToolsResult::with_all_items(tools))
     }
 

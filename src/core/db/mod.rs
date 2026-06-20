@@ -85,6 +85,12 @@ fn like_escape(s: &str) -> String {
 pub(crate) struct CategorySnapshot {
     map: std::collections::HashMap<(String, String), Vec<crate::core::category::Area>>,
     sample: std::collections::HashMap<(String, String), String>,
+    /// Lowercased album names classified (auto or overridden) as singles /
+    /// compilations. Drives the kind-aware default below, so an album with no
+    /// explicit category setting still surfaces in the Singles/Compilations
+    /// areas exactly as it does in those tabs.
+    single_names: std::collections::HashSet<String>,
+    comp_names: std::collections::HashSet<String>,
 }
 
 impl CategorySnapshot {
@@ -92,9 +98,26 @@ impl CategorySnapshot {
         self.map.get(&(scope.to_string(), key.to_string()))
     }
 
-    /// Album → artist → parent-folder chain (of a sample track) → default.
+    /// Default areas for an album with no explicit/inherited setting: the base
+    /// default plus the area implied by its classification (a compilation also
+    /// counts as Compilations; otherwise a single also counts as Singles).
+    fn kind_default(&self, album: &str) -> Vec<crate::core::category::Area> {
+        use crate::core::category::Area;
+        let mut areas = Area::DEFAULT.to_vec();
+        let lc = album.to_lowercase();
+        if self.comp_names.contains(&lc) {
+            areas.push(Area::Compilations);
+        } else if self.single_names.contains(&lc) {
+            areas.push(Area::Singles);
+        }
+        areas
+    }
+
+    /// Album → artist → parent-folder chain (of a sample track) → kind-aware
+    /// default. An explicit setting at any level wins verbatim (so the user's
+    /// own Singles/Compilations choices are honored).
     fn album_areas(&self, artist: &str, album: &str) -> Vec<crate::core::category::Area> {
-        use crate::core::category::{album_key, Area};
+        use crate::core::category::album_key;
         if let Some(v) = self.get("album", &album_key(artist, album)) {
             return v.clone();
         }
@@ -110,7 +133,7 @@ impl CategorySnapshot {
                 dir = d.parent();
             }
         }
-        Area::DEFAULT.to_vec()
+        self.kind_default(album)
     }
 
     /// Artist → default.
@@ -268,6 +291,29 @@ impl Library {
             -- `album_cover()` looks an album cover up by album name alone (the
             -- composite primary key can't serve that), called once per single track.
             CREATE INDEX IF NOT EXISTS idx_album_meta_album ON album_meta(album);
+
+            -- Canonical tracklist of an album (MusicBrainz), cached so the album
+            -- detail can flag tracks that are missing locally. Keyed by
+            -- (artist, album) like album_meta; one row per (disc, position).
+            CREATE TABLE IF NOT EXISTS album_tracklist (
+                artist    TEXT NOT NULL,
+                album     TEXT NOT NULL,
+                disc      INTEGER NOT NULL DEFAULT 1,
+                position  INTEGER NOT NULL,
+                title     TEXT NOT NULL,
+                length_ms INTEGER,
+                PRIMARY KEY (artist, album, disc, position)
+            );
+            -- Records that a tracklist fetch was attempted, so an album that has
+            -- no online match isn't re-queried on every open. status: 'ok'
+            -- (tracks stored) or 'none' (no match / empty result).
+            CREATE TABLE IF NOT EXISTS album_tracklist_fetch (
+                artist     TEXT NOT NULL,
+                album      TEXT NOT NULL,
+                status     TEXT NOT NULL,
+                fetched_at INTEGER,
+                PRIMARY KEY (artist, album)
+            );
 
             -- Artist photos (Deezer). Also kept separate from the files.
             CREATE TABLE IF NOT EXISTS artist_meta (
@@ -1273,6 +1319,9 @@ impl Library {
         // A purely numeric query is also treated as a year for the album match.
         let year: Option<i64> = q.parse::<i64>().ok().filter(|y| (1000..=9999).contains(y));
         let lim = limit as i64;
+        // Over-fetch so that dropping hidden items below still leaves a full page
+        // of visible results in the common case (few/no hidden matches).
+        let fetch = lim.saturating_mul(4).max(lim);
 
         // --- Artists (Interpreten) ---
         let mut artists = Vec::new();
@@ -1284,7 +1333,7 @@ impl Library {
                  ORDER BY artist COLLATE NOCASE
                  LIMIT ?2",
             )?;
-            let rows = stmt.query_map(rusqlite::params![like, lim], |r| r.get::<_, String>(0))?;
+            let rows = stmt.query_map(rusqlite::params![like, fetch], |r| r.get::<_, String>(0))?;
             for a in rows {
                 artists.push(a?);
             }
@@ -1304,7 +1353,7 @@ impl Library {
                  ORDER BY t.album COLLATE NOCASE
                  LIMIT ?3",
             )?;
-            let rows = stmt.query_map(rusqlite::params![like, year, lim], |r| {
+            let rows = stmt.query_map(rusqlite::params![like, year, fetch], |r| {
                 Ok(AlbumHit {
                     album: r.get(0)?,
                     artist: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
@@ -1326,7 +1375,7 @@ impl Library {
                  ORDER BY title COLLATE NOCASE
                  LIMIT ?2",
             )?;
-            let rows = stmt.query_map(rusqlite::params![like, lim], |r| {
+            let rows = stmt.query_map(rusqlite::params![like, fetch], |r| {
                 Ok(SongHit {
                     path: r.get(0)?,
                     title: r.get(1)?,
@@ -1338,6 +1387,24 @@ impl Library {
                 songs.push(s?);
             }
         }
+
+        // Hidden content (empty effective areas) must not surface in search — only
+        // the Settings "hidden content" manager lists it. Resolve artists/albums
+        // through one shared snapshot (kind-aware, O(1) per item) so dropping
+        // hidden hits doesn't run a classification scan per result; tracks use the
+        // cheap per-row resolution. Then trim back to the page size.
+        if let Ok(snap) = self.category_snapshot() {
+            artists.retain(|a| !snap.artist_areas(a).is_empty());
+            albums.retain(|a| !snap.album_areas(&a.artist, &a.album).is_empty());
+        }
+        songs.retain(|s| {
+            !self
+                .resolve_areas(s.artist.as_deref(), s.album.as_deref(), &s.path)
+                .is_empty()
+        });
+        artists.truncate(limit);
+        albums.truncate(limit);
+        songs.truncate(limit);
 
         // --- The user's own local collections: timeshift recordings and voice
         //     memos. These lists are personal and small, so they are filtered in
@@ -2692,15 +2759,137 @@ mod tests {
         let comps = lib.albums_classified(AlbumKind::Compilation).unwrap();
         assert!(comps.iter().any(|a| a.album == "Kill Bill"));
 
-        // The overview-by-kind bridge (covers/durations) agrees with the
-        // classification: the single shows up under Single, not under Album.
-        let single_cards = lib
-            .albums_overview_by_kind(AlbumKind::Single, None)
-            .unwrap();
+        // The area-based overview (covers/durations) agrees with the kind-aware
+        // default: a single shows up under the Singles area; a regular album does
+        // not. (Both still appear under Albums — Singles is an extra view.)
+        use crate::core::category::Area;
+        let single_cards = lib.albums_overview_in_area(Area::Singles, None).unwrap();
         assert!(single_cards.iter().any(|m| m.album == "Wildberry Lillet"));
-        let album_cards = lib.albums_overview_by_kind(AlbumKind::Album, None).unwrap();
-        assert!(album_cards.iter().all(|m| m.album != "Wildberry Lillet"));
+        assert!(single_cards.iter().all(|m| m.album != "Bambule"));
+        let album_cards = lib.albums_overview_in_area(Area::Albums, None).unwrap();
         assert!(album_cards.iter().any(|m| m.album == "Bambule"));
+        assert!(album_cards.iter().any(|m| m.album == "Wildberry Lillet"));
+    }
+
+    #[test]
+    fn search_excludes_hidden_items() {
+        use crate::core::category::album_key;
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_tracks(&[
+            track("/m/v.mp3", Some("Visible Artist"), Some("Visible Album")),
+            track("/m/h.mp3", Some("Hidden Artist"), Some("Hidden Album")),
+        ])
+        .unwrap();
+
+        // Sanity: visible items are found.
+        let r = lib.search_library("Visible", 50).unwrap();
+        assert!(r.artists.iter().any(|a| a == "Visible Artist"));
+        assert!(r.albums.iter().any(|a| a.album == "Visible Album"));
+
+        // Hide the second item at every level that could surface it (empty list).
+        lib.set_category("artist", "Hidden Artist", Some(""))
+            .unwrap();
+        lib.set_category(
+            "album",
+            &album_key("Hidden Artist", "Hidden Album"),
+            Some(""),
+        )
+        .unwrap();
+        lib.set_category("track", "/m/h.mp3", Some("")).unwrap();
+
+        // A hidden artist/album must not appear in search results.
+        let r = lib.search_library("Hidden", 50).unwrap();
+        assert!(r.artists.is_empty(), "hidden artist leaked into search");
+        assert!(r.albums.is_empty(), "hidden album leaked into search");
+
+        // Nor the hidden track (title "T") via a title search — the visible one stays.
+        let r = lib.search_library("T", 50).unwrap();
+        assert!(r.songs.iter().all(|s| s.path != "/m/h.mp3"));
+        assert!(r.songs.iter().any(|s| s.path == "/m/v.mp3"));
+    }
+
+    #[test]
+    fn singles_area_reflects_kind_and_override() {
+        use crate::core::category::{album_key, Area};
+        let lib = Library::open_in_memory().unwrap();
+        // A 1-track album → classified Single by the heuristic.
+        lib.upsert_tracks(&[track("/s/1.mp3", Some("Solo"), Some("My Single"))])
+            .unwrap();
+
+        // Auto-classified single: in the Singles area (and Albums) by default.
+        let singles = lib.albums_overview_in_area(Area::Singles, None).unwrap();
+        assert!(singles.iter().any(|m| m.album == "My Single"));
+        let albums = lib.albums_overview_in_area(Area::Albums, None).unwrap();
+        assert!(albums.iter().any(|m| m.album == "My Single"));
+
+        // An explicit "Available in" set that omits Singles removes it from that
+        // view, while it stays under Albums.
+        lib.set_category(
+            "album",
+            &album_key("Solo", "My Single"),
+            Some("filesystem,artists,albums"),
+        )
+        .unwrap();
+        let singles = lib.albums_overview_in_area(Area::Singles, None).unwrap();
+        assert!(singles.iter().all(|m| m.album != "My Single"));
+        let albums = lib.albums_overview_in_area(Area::Albums, None).unwrap();
+        assert!(albums.iter().any(|m| m.album == "My Single"));
+
+        // Conversely, a regular album can be filed into Singles explicitly.
+        lib.upsert_tracks(&[
+            track("/a/1.mp3", Some("Band"), Some("Big Album")),
+            track("/a/2.mp3", Some("Band"), Some("Big Album")),
+            track("/a/3.mp3", Some("Band"), Some("Big Album")),
+            track("/a/4.mp3", Some("Band"), Some("Big Album")),
+        ])
+        .unwrap();
+        let singles = lib.albums_overview_in_area(Area::Singles, None).unwrap();
+        assert!(singles.iter().all(|m| m.album != "Big Album"));
+        lib.set_category(
+            "album",
+            &album_key("Band", "Big Album"),
+            Some("filesystem,artists,albums,singles"),
+        )
+        .unwrap();
+        let singles = lib.albums_overview_in_area(Area::Singles, None).unwrap();
+        assert!(singles.iter().any(|m| m.album == "Big Album"));
+    }
+
+    #[test]
+    fn album_tracklist_roundtrip_and_fetch_marker() {
+        use crate::core::online::CanonicalTrack;
+        let lib = Library::open_in_memory().unwrap();
+        assert!(!lib.tracklist_fetched("A", "Alb"));
+        lib.set_album_tracklist(
+            "A",
+            "Alb",
+            &[
+                CanonicalTrack {
+                    disc: 1,
+                    position: 1,
+                    title: "One".into(),
+                    length_ms: Some(1000),
+                },
+                CanonicalTrack {
+                    disc: 1,
+                    position: 2,
+                    title: "Two".into(),
+                    length_ms: None,
+                },
+            ],
+        )
+        .unwrap();
+        assert!(lib.tracklist_fetched("A", "Alb"));
+        let tl = lib.album_tracklist("A", "Alb").unwrap();
+        assert_eq!(tl.len(), 2);
+        assert_eq!(tl[0], (1, 1, "One".to_string(), Some(1000)));
+        assert_eq!(tl[1].2, "Two");
+
+        // An empty result still records the attempt, so a no-match album isn't
+        // re-queried on every open.
+        lib.set_album_tracklist("B", "Bl", &[]).unwrap();
+        assert!(lib.tracklist_fetched("B", "Bl"));
+        assert!(lib.album_tracklist("B", "Bl").unwrap().is_empty());
     }
 
     #[test]

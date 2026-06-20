@@ -389,7 +389,7 @@ impl Component for StreamPage {
             adw::StatusPage {
                 set_icon_name: Some("audio-x-generic-symbolic"),
                 set_title: &gettext("Nothing heard yet"),
-                set_description: Some(&gettext("Songs recognized while a station plays appear here.")),
+                set_description: Some(&gettext("Songs are recognized from the title a station broadcasts while it plays, and collected here — so you can play them back later (from your library, otherwise via YouTube). This only works for stations that transmit the current title.")),
                 set_vexpand: true,
                 #[watch]
                 set_visible: model.stream_view == StreamView::Heard && model.heard_items.is_empty(),
@@ -1755,6 +1755,26 @@ impl StreamPage {
                 badge.set_css_classes(&["dim-label", "numeric"]);
                 row.add_suffix(&badge);
             }
+            // Direct play button on the right: plays the recognized song right
+            // away — a local copy (timeshift recording or library track) first,
+            // and only via YouTube when nothing local matches (see `play_heard`).
+            let play_btn = gtk::Button::builder()
+                .icon_name("media-playback-start-symbolic")
+                .tooltip_text(gettext("Play"))
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            {
+                let sender = sender.clone();
+                let (artist, title) = (h.artist.clone(), h.title.clone());
+                play_btn.connect_clicked(move |_| {
+                    let _ = sender.output(StreamOutput::PlayHeard {
+                        artist: artist.clone(),
+                        title: title.clone(),
+                    });
+                });
+            }
+            row.add_suffix(&play_btn);
             let id = h.id;
             {
                 let sender = sender.clone();

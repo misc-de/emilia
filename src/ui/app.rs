@@ -482,8 +482,9 @@ pub(crate) struct LibView {
     /// Album overview (same order as factory/gallery); index resolution for the gallery.
     pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) album_count: usize,
-    // Singles / Compilations: extra album views filtered by the classification
-    // (`albums_overview_by_kind`). Same machinery as the album overview above.
+    // Singles / Compilations: extra album views filtered by the matching area
+    // (`albums_overview_in_area`), whose kind-aware default reflects the
+    // classification. Same machinery as the album overview above.
     pub(crate) singles: FactoryVecDeque<AlbumCard>,
     pub(crate) singles_gallery: gtk::FlowBox,
     pub(crate) singles_gallery_box: gtk::Box,
@@ -542,6 +543,15 @@ pub(crate) struct LibView {
     pub(crate) loading_label: Option<String>,
     /// Galleries (artist/album) for which an on-demand fetch already ran this session.
     pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// The album track-list subpage currently rendered. Kept so a late
+    /// MusicBrainz tracklist fetch — or a freshly downloaded missing track — can
+    /// refill the same content box in place (no navigation flicker). `RefCell`
+    /// because the renderer runs behind a `&self`.
+    pub(crate) album_page:
+        std::rc::Rc<std::cell::RefCell<Option<crate::ui::app_views::AlbumPageRef>>>,
+    /// Modal phase-spinner shown while a missing track is searched/downloaded;
+    /// the label is updated as the phase advances, and it is closed when done.
+    pub(crate) missing_busy: Option<(adw::Dialog, gtk::Label)>,
 }
 
 impl LibView {
@@ -829,6 +839,9 @@ pub(crate) struct StreamingState {
     pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
     /// Size of the timeshift buffer in minutes (0 = off, max. 60).
     pub(crate) recording_buffer_minutes: u32,
+    /// Modal spinner shown while a "Recently heard" song is being resolved
+    /// online (no local copy → YouTube lookup). Closed when the result arrives.
+    pub(crate) resolve_busy: Option<adw::Dialog>,
 }
 
 /// Podcast playback state owned by the transport. The podcast *page* (lists,
@@ -1110,6 +1123,24 @@ pub enum Msg {
     OpenAlbumTracks {
         artist: String,
         album: String,
+    },
+    /// Tap on a greyed "missing" track row: confirm searching for it online and
+    /// adding it to the album.
+    ShowMissingTrack {
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+    },
+    /// Confirmed: search the missing track online, download it into the album
+    /// folder, tag it and index it.
+    AddMissingTrack {
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
     },
     /// Play a track from the artist overview (queue = all tracks
     /// of the artist, start at the tapped one). `close` pops the subpage
@@ -1859,6 +1890,22 @@ pub enum Cmd {
         video_id: Option<String>,
         title: String,
         download: bool,
+    },
+    /// The canonical (MusicBrainz) tracklist of an album finished fetching and
+    /// was cached → refill the album page so missing tracks show up.
+    AlbumTracklistFetched {
+        artist: String,
+        album: String,
+    },
+    /// Update the missing-track phase spinner's label (search → download → add).
+    MissingTrackPhase(String),
+    /// A missing track finished downloading (or failed) → close the spinner,
+    /// refill the album page, toast the outcome.
+    MissingTrackDone {
+        artist: String,
+        album: String,
+        ok: bool,
+        message: String,
     },
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
@@ -3538,6 +3585,8 @@ impl Component for App {
                 loading: false,
                 loading_label: None,
                 gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
+                album_page: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                missing_busy: None,
             },
             refresh_pending: 0,
             scanning: false,
@@ -3653,6 +3702,7 @@ impl Component for App {
                 recorder: None,
                 record_state: None,
                 recording_buffer_minutes,
+                resolve_busy: None,
             },
             memo: crate::ui::app_memo::MemoState::new(memos_list.clone(), rec_meter.clone()),
             youtube: YoutubeState {
@@ -3950,6 +4000,20 @@ impl Component for App {
                 self.fetch_focus_album(&sender, &artist, &album);
                 self.open_album_tracks(&sender, &artist, &album);
             }
+            Msg::ShowMissingTrack {
+                artist,
+                album,
+                disc,
+                position,
+                title,
+            } => self.show_missing_track(root, &sender, artist, album, disc, position, title),
+            Msg::AddMissingTrack {
+                artist,
+                album,
+                disc,
+                position,
+                title,
+            } => self.add_missing_track(root, &sender, artist, album, disc, position, title),
             Msg::OpenEntryTracks { scope, key } => match scope.as_str() {
                 "album" => {
                     // key = "Artist\u{1}Album"
@@ -4130,8 +4194,10 @@ impl Component for App {
             Msg::ReloadHeard => self
                 .stream_page
                 .emit(crate::ui::stream_page::StreamInput::ReloadHeard),
-            Msg::PlayHeard { artist, title } => self.play_heard(&sender, artist, title),
-            Msg::DownloadHeard { artist, title } => self.download_heard(&sender, artist, title),
+            Msg::PlayHeard { artist, title } => self.play_heard(&sender, root, artist, title),
+            Msg::DownloadHeard { artist, title } => {
+                self.download_heard(&sender, root, artist, title)
+            }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::ReplayPlay { start, end } => self.replay_play(start, end),
             Msg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
@@ -5141,6 +5207,16 @@ impl Component for App {
                 title,
                 download,
             } => self.on_heard_resolved(video_id, title, download),
+            Cmd::AlbumTracklistFetched { artist, album } => {
+                self.refill_album_page(&sender, &artist, &album);
+            }
+            Cmd::MissingTrackPhase(phase) => self.on_missing_track_phase(&phase),
+            Cmd::MissingTrackDone {
+                artist,
+                album,
+                ok,
+                message,
+            } => self.on_missing_track_done(&sender, artist, album, ok, message),
             Cmd::SourceStatus(status) => {
                 let mut changed = false;
                 for (id, ok) in status {

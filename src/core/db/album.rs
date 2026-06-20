@@ -336,6 +336,86 @@ impl Library {
         Ok(())
     }
 
+    // ---- Canonical tracklist (MusicBrainz cache, for missing-track detection) ----
+
+    /// Cached canonical tracklist of an album: `(disc, position, title,
+    /// length_ms)` ordered by disc then position. Empty when nothing is cached.
+    pub fn album_tracklist(
+        &self,
+        artist: &str,
+        album: &str,
+    ) -> Result<Vec<(u32, u32, String, Option<i64>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT disc, position, title, length_ms FROM album_tracklist
+             WHERE artist = ?1 AND album = ?2
+             ORDER BY disc, position",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![artist, album], |r| {
+            Ok((
+                r.get::<_, i64>(0)? as u32,
+                r.get::<_, i64>(1)? as u32,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+            ))
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Whether a tracklist fetch was already attempted for this album (any
+    /// status) — so an album with no online match isn't re-queried every open.
+    pub fn tracklist_fetched(&self, artist: &str, album: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM album_tracklist_fetch WHERE artist = ?1 AND album = ?2",
+                rusqlite::params![artist, album],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    /// Stores (replacing any previous) the canonical tracklist of an album and
+    /// records the fetch attempt (status `ok` when non-empty, else `none`).
+    pub fn set_album_tracklist(
+        &self,
+        artist: &str,
+        album: &str,
+        tracks: &[crate::core::online::CanonicalTrack],
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM album_tracklist WHERE artist = ?1 AND album = ?2",
+            rusqlite::params![artist, album],
+        )?;
+        {
+            let mut stmt = self.conn.prepare(
+                "INSERT OR REPLACE INTO album_tracklist
+                     (artist, album, disc, position, title, length_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for t in tracks {
+                stmt.execute(rusqlite::params![
+                    artist,
+                    album,
+                    t.disc,
+                    t.position,
+                    t.title,
+                    t.length_ms
+                ])?;
+            }
+        }
+        let status = if tracks.is_empty() { "none" } else { "ok" };
+        self.conn.execute(
+            "INSERT INTO album_tracklist_fetch (artist, album, status, fetched_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(artist, album) DO UPDATE SET
+                 status = excluded.status, fetched_at = excluded.fetched_at",
+            rusqlite::params![artist, album, status],
+        )?;
+        Ok(())
+    }
+
     /// Album overview for the UI: all unique albums from the library,
     /// enriched with (any available) online metadata and the track count.
     /// Sorted by album name (like the file view -- without artist groups).
@@ -345,6 +425,37 @@ impl Library {
         &self,
         snap: Option<&CategorySnapshot>,
     ) -> Result<Vec<AlbumMeta>> {
+        self.albums_overview_in_area(crate::core::category::Area::Albums, snap)
+    }
+
+    /// Album overview restricted to a single [`Area`] (Albums / Singles /
+    /// Compilations / Concerts / Audiobooks). Built once from
+    /// [`Self::albums_overview_all`], then kept to the albums whose resolved
+    /// areas include `area`. Singles/Compilations membership comes from the
+    /// kind-aware area resolution, so auto-classified albums show up there and an
+    /// explicit "Available in" override is honored.
+    pub(crate) fn albums_overview_in_area(
+        &self,
+        area: crate::core::category::Area,
+        snap: Option<&CategorySnapshot>,
+    ) -> Result<Vec<AlbumMeta>> {
+        let mut out = self.albums_overview_all()?;
+        let owned_snap;
+        let cats = match snap {
+            Some(s) => s,
+            None => {
+                owned_snap = self.category_snapshot()?;
+                &owned_snap
+            }
+        };
+        out.retain(|a| cats.album_areas(&a.artist, &a.album).contains(&area));
+        Ok(out)
+    }
+
+    /// Builds every album card (no area/visibility filter), enriched with online
+    /// metadata + track count, sorted by album name. The area-restricted
+    /// overviews ([`Self::albums_overview_in_area`]) filter this.
+    fn albums_overview_all(&self) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
                     COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms), MIN(t.year)
@@ -470,44 +581,8 @@ impl Library {
             meta.cover_path = artists.iter().find_map(|(_, i)| i.1.clone());
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
-        // Properties: only show albums that are visible in the "Albums" area.
-        // Resolve from one in-memory snapshot instead of querying per album.
-        let owned_snap;
-        let cats = match snap {
-            Some(s) => s,
-            None => {
-                owned_snap = self.category_snapshot()?;
-                &owned_snap
-            }
-        };
-        out.retain(|a| {
-            cats.album_areas(&a.artist, &a.album)
-                .contains(&crate::core::category::Area::Albums)
-        });
         out.sort_by_key(|a| a.album.to_lowercase());
         Ok(out)
-    }
-
-    /// The album overview restricted to one [`AlbumKind`], for the Singles /
-    /// Compilations pages. Reuses [`Self::albums_overview_with`] (covers,
-    /// durations, display artist, `Area::Albums` visibility) and keeps only the
-    /// albums the classification assigns to `kind` — so these pages are extra
-    /// filtered views; the main "Albums" page is unchanged.
-    pub(crate) fn albums_overview_by_kind(
-        &self,
-        kind: AlbumKind,
-        snap: Option<&CategorySnapshot>,
-    ) -> Result<Vec<AlbumMeta>> {
-        let names: std::collections::HashSet<String> = self
-            .albums_classified(kind)?
-            .into_iter()
-            .map(|c| c.album.to_lowercase())
-            .collect();
-        Ok(self
-            .albums_overview_with(snap)?
-            .into_iter()
-            .filter(|m| names.contains(&m.album.to_lowercase()))
-            .collect())
     }
 
     fn map_album_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumMeta> {

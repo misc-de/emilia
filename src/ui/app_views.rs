@@ -26,13 +26,52 @@ use crate::ui::fs_row::FsEntry;
 /// (`Artist`/`Name`) play only the tapped track; a `Folder` (audiobook/concert)
 /// keeps playing the whole folder so chapters continue.
 #[derive(Clone)]
-enum AlbumPlay {
+pub(crate) enum AlbumPlay {
     /// Artist context (artist → album).
     Artist,
     /// Albums overview (album name across artists).
     Name,
     /// Folder content (audiobook/concert): exactly the files in this folder.
     Folder(String),
+}
+
+/// Handle to the album track-list subpage currently rendered, so a late
+/// MusicBrainz tracklist fetch — or a freshly downloaded missing track — can
+/// refill the **same** content box in place (no navigation flicker).
+#[derive(Clone)]
+pub(crate) struct AlbumPageRef {
+    /// Artist the page was opened for (the opener's argument; may be empty for
+    /// the album-overview path).
+    pub name: String,
+    /// Display artist (most common across the album's tracks); the key for the
+    /// canonical-tracklist lookup together with `album`.
+    pub artist: String,
+    pub album: String,
+    pub play: AlbumPlay,
+    /// The content box that lives inside the pushed navigation page.
+    pub content: gtk::Box,
+}
+
+/// Worker-thread helper: resolve the album's MusicBrainz release (using the
+/// stored mbid hint, else a fresh search) and cache its canonical tracklist.
+/// Always records the fetch attempt (even on no match), so it runs at most once
+/// per album until the cache is cleared.
+fn fetch_and_store_tracklist(artist: &str, album: &str, mbid_hint: Option<&str>) {
+    let Ok(lib) = Library::open() else { return };
+    let client = crate::core::online::OnlineClient::new();
+    let mbid = match mbid_hint {
+        Some(m) if !m.trim().is_empty() => Some(m.to_string()),
+        _ => client
+            .match_release(artist, album)
+            .ok()
+            .flatten()
+            .map(|m| m.mbid),
+    };
+    let tracks = match mbid {
+        Some(m) => client.fetch_release_tracks(&m).unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let _ = lib.set_album_tracklist(artist, album, &tracks);
 }
 
 /// Album name without CD/disc suffix, so multi-CD albums collapse together:
@@ -174,11 +213,16 @@ fn sort_by_structure(tracks: &mut [Track]) {
             .unwrap_or_default()
     };
     tracks.sort_by(|a, b| {
-        parent(a)
-            .cmp(&parent(b))
+        // Compare folder and file paths **naturally** (digit runs as numbers) so
+        // that unpadded names ("Track 2" vs "Track 10", "CD2" vs "CD10") fall in
+        // the right order. Without this the raw byte comparison was the only
+        // tiebreak when track tags are missing/zero — the usual cause of an album
+        // playing out of order.
+        natural_key(&parent(a))
+            .cmp(&natural_key(&parent(b)))
             .then(track_disc(a).cmp(&track_disc(b)))
             .then(a.track_no.unwrap_or(0).cmp(&b.track_no.unwrap_or(0)))
-            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| natural_key(&a.path).cmp(&natural_key(&b.path)))
     });
 }
 
@@ -259,7 +303,7 @@ impl App {
     }
 
     pub(crate) fn reload_singles_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {
-        self.reload_kind_with(crate::model::AlbumKind::Single, "singles", snap);
+        self.reload_kind_with(crate::core::category::Area::Singles, "singles", snap);
     }
 
     pub(crate) fn reload_compilations(&mut self) {
@@ -271,22 +315,27 @@ impl App {
         &mut self,
         snap: Option<&crate::core::db::CategorySnapshot>,
     ) {
-        self.reload_kind_with(crate::model::AlbumKind::Compilation, "compilations", snap);
+        self.reload_kind_with(
+            crate::core::category::Area::Compilations,
+            "compilations",
+            snap,
+        );
     }
 
     /// Shared reload for the Singles / Compilations pages — mirrors
-    /// [`Self::reload_albums_with`] but pulls the classified subset and writes to
-    /// the section's own factory/overview/headers (chosen by `section`).
+    /// [`Self::reload_albums_with`] but pulls the albums filed in the section's
+    /// own [`Area`] (kind-aware default + any "Available in" override) and writes
+    /// to the section's own factory/overview/headers (chosen by `section`).
     fn reload_kind_with(
         &mut self,
-        kind: crate::model::AlbumKind,
+        area: crate::core::category::Area,
         section: &'static str,
         snap: Option<&crate::core::db::CategorySnapshot>,
     ) {
         let singles = section == "singles";
         let mut albums = self
             .library
-            .albums_overview_by_kind(kind, snap)
+            .albums_overview_in_area(area, snap)
             .unwrap_or_default();
         let meta_covers = self.library.album_meta_covers().unwrap_or_default();
         for album in &mut albums {
@@ -1264,8 +1313,106 @@ impl App {
         album: &str,
         play: AlbumPlay,
     ) {
-        // Cover/year live under the (most common) raw artist credit.
         let display_artist = most_common_artist(&tracks);
+
+        // The content box is kept (in `libview.album_page`) so a late tracklist
+        // fetch or a freshly downloaded track can refill it in place.
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        self.fill_album_content(sender, &content, &tracks, album, &play);
+
+        *self.libview.album_page.borrow_mut() = Some(AlbumPageRef {
+            name: name.to_string(),
+            artist: display_artist.clone(),
+            album: album.to_string(),
+            play: play.clone(),
+            content: content.clone(),
+        });
+
+        // For real albums (not folder audiobooks) fetch the canonical tracklist
+        // once in the background, so locally-missing tracks can be flagged — only
+        // when YouTube is enabled (otherwise the feature is hidden, so there is
+        // nothing to fetch for). The result refills the page above via
+        // `Cmd::AlbumTracklistFetched`.
+        if self.youtube.enabled
+            && !matches!(play, AlbumPlay::Folder(_))
+            && !display_artist.is_empty()
+            && !self.library.tracklist_fetched(&display_artist, album)
+        {
+            let artist = display_artist.clone();
+            let alb = album.to_string();
+            let mbid_hint = self
+                .library
+                .get_album_meta(&display_artist, album)
+                .ok()
+                .flatten()
+                .and_then(|m| m.mbid);
+            sender.spawn_command(move |out| {
+                fetch_and_store_tracklist(&artist, &alb, mbid_hint.as_deref());
+                let _ = out.send(Cmd::AlbumTracklistFetched { artist, album: alb });
+            });
+        }
+
+        // Header line: preferably the album artist, otherwise the page artist.
+        let header_artist = if display_artist.is_empty() {
+            name
+        } else {
+            display_artist.as_str()
+        };
+        let title = if header_artist.is_empty() {
+            album.to_string()
+        } else {
+            format!("{header_artist} – {album}")
+        };
+        self.push_subpage(&title, &content);
+    }
+
+    /// Re-fill the currently shown album page (same content box, no navigation)
+    /// when it matches `(artist, album)` — used after the canonical tracklist
+    /// arrives or a missing track was added.
+    pub(crate) fn refill_album_page(
+        &self,
+        sender: &ComponentSender<Self>,
+        artist: &str,
+        album: &str,
+    ) {
+        let page = self.libview.album_page.borrow().clone();
+        let Some(page) = page else { return };
+        if page.artist != artist || page.album != album {
+            return;
+        }
+        let tracks = match &page.play {
+            AlbumPlay::Name => self.album_tracks_by_name(album),
+            AlbumPlay::Artist => self.album_tracks_for_artist(&page.name, album),
+            AlbumPlay::Folder(f) => self.folder_tracks_ordered(f),
+        };
+        self.fill_album_content(sender, &page.content, &tracks, album, &page.play);
+    }
+
+    /// (Re)builds the rows of an album track-list `content` box: present tracks,
+    /// plus greyed "missing" placeholders for tracks the canonical (MusicBrainz)
+    /// tracklist has but the library lacks. Clears the box first so it can be
+    /// called again to refresh in place.
+    fn fill_album_content(
+        &self,
+        sender: &ComponentSender<Self>,
+        content: &gtk::Box,
+        tracks: &[Track],
+        album: &str,
+        play: &AlbumPlay,
+    ) {
+        use std::collections::HashSet;
+        while let Some(child) = content.first_child() {
+            content.remove(&child);
+        }
+
+        let display_artist = most_common_artist(tracks);
         let album_meta = self
             .library
             .get_album_meta(&display_artist, album)
@@ -1275,59 +1422,72 @@ impl App {
             .as_ref()
             .and_then(|m| m.cover_path.clone())
             .or_else(|| self.album_cover_for(&display_artist, album));
-        // Decode the album cover once and reuse it in all track rows.
         let cover = cover_path
             .as_deref()
             .and_then(crate::ui::widgets::thumb_cached);
 
-        // Audiobook? Then the title is shown on top instead of the number of songs.
         let is_audiobook = {
             use crate::core::category::Area;
-            let areas = match &play {
+            let areas = match play {
                 AlbumPlay::Folder(f) => self.library.folder_areas(f),
                 _ => self.library.album_areas(&display_artist, album),
             };
             areas.contains(&Area::Audiobooks)
         };
 
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(12)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-
-        // Line **above** the heading: the title only for audiobooks. For
-        // normal albums no header – the song count is in the heading
-        // ("Album (N)"), and the year is hidden in the song view.
-        let header_text = if is_audiobook {
-            album.to_string()
+        // Missing-track detection: only for real albums whose present tracks are
+        // all numbered (so canonical positions can be matched reliably). Gated on
+        // YouTube being enabled — adding a missing track needs it, so without it
+        // the greyed entries are hidden entirely (not just non-functional).
+        let is_album = !matches!(play, AlbumPlay::Folder(_)) && self.youtube.enabled;
+        let can_detect = is_album && tracks.iter().all(|t| t.track_no.is_some());
+        let cached = if is_album {
+            self.library
+                .album_tracklist(&display_artist, album)
+                .unwrap_or_default()
         } else {
-            String::new()
+            Vec::new()
         };
-        if !header_text.trim().is_empty() {
+        let present_pos: HashSet<(u32, u32)> = tracks
+            .iter()
+            .filter_map(|t| t.track_no.map(|n| (track_disc(t), n)))
+            .collect();
+        // (disc, position, title) for each canonical track with no local file.
+        let missing: Vec<(u32, u32, String)> = if can_detect {
+            cached
+                .iter()
+                .filter(|(d, p, _, _)| !present_pos.contains(&(*d, *p)))
+                .map(|(d, p, title, _)| (*d, *p, title.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // Still waiting for the first fetch → show a discreet hint at the bottom.
+        let pending = is_album
+            && cached.is_empty()
+            && !display_artist.is_empty()
+            && !self.library.tracklist_fetched(&display_artist, album);
+
+        // Title only for audiobooks; normal albums show the count in the heading.
+        if is_audiobook {
             let lbl = gtk::Label::builder()
-                .label(gtk::glib::markup_escape_text(&header_text).as_str())
+                .label(gtk::glib::markup_escape_text(album).as_str())
                 .xalign(0.0)
                 .wrap(true)
                 .margin_start(4)
                 .build();
-            lbl.add_css_class(if is_audiobook { "title-4" } else { "dim-label" });
+            lbl.add_css_class("title-4");
             content.append(&lbl);
         }
 
-        // Determine the existing discs (None counts as CD 1). More than one → the
-        // tracks are shown split by "CD 1" / "CD 2" ….
+        // Discs: union of present tracks and any (whole-disc) missing entries.
         let mut discs: Vec<u32> = tracks.iter().map(track_disc).collect();
+        discs.extend(missing.iter().map(|(d, _, _)| *d));
         discs.sort_unstable();
         discs.dedup();
         let multi_disc = discs.len() > 1;
 
-        // Builds a track row (cover, track number, duration, play + gestures).
-        // The row itself is not activatable: a track plays via its play button,
-        // and the detail view opens on long press / right click.
+        // Builds a present-track row (cover, track number, duration, play).
         let make_row = |t: &Track| -> adw::ActionRow {
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&t.title))
@@ -1353,7 +1513,6 @@ impl App {
                     row.add_suffix(&duration_label(ms));
                 }
             }
-            // Red "disconnected" indicator if the track comes from an offline source.
             if self.is_offline_path(&t.path) {
                 let badge = gtk::Image::from_icon_name("network-offline-symbolic");
                 badge.add_css_class("emilia-offline");
@@ -1362,17 +1521,10 @@ impl App {
                 row.add_suffix(&badge);
             }
             let path = t.path.clone();
-            // Builds the play message for this track. `close` separates a tap on
-            // the row (play + back to the main page) from a tap on the play
-            // button (play, but stay in the list).
             let build_msg = {
                 let play = play.clone();
                 move |path: String, close: bool| match &play {
-                    // Album tracks (artist page or album overview): play only the
-                    // selected track, never enqueue its siblings.
                     AlbumPlay::Artist | AlbumPlay::Name => Msg::PlayOneTrack { path, close },
-                    // A folder (audiobook/concert) keeps playing the whole folder
-                    // from here, so the next chapters continue.
                     AlbumPlay::Folder(f) => Msg::PlayFolderTrack {
                         folder: f.clone(),
                         path,
@@ -1380,7 +1532,6 @@ impl App {
                     },
                 }
             };
-            // Play button: plays from this track but keeps the list open.
             let play_btn = gtk::Button::builder()
                 .icon_name("media-playback-start-symbolic")
                 .tooltip_text(gettext("Play"))
@@ -1394,7 +1545,6 @@ impl App {
                 play_btn.connect_clicked(move |_| sender.input(build_msg(path.clone(), false)));
             }
             row.add_suffix(&play_btn);
-            // Long press (touch) / right click (mouse): song detail view.
             crate::ui::app::on_secondary_click(&row, {
                 let sender = sender.clone();
                 let path = path.clone();
@@ -1407,23 +1557,81 @@ impl App {
             row
         };
 
-        if multi_disc {
-            // Multiple CDs → one group per "CD 1" / "CD 2" … (the song count or
-            // the title is already shown above the sections).
-            for disc in &discs {
-                let disc_tracks: Vec<&Track> =
-                    tracks.iter().filter(|t| track_disc(t) == *disc).collect();
-                let group = adw::PreferencesGroup::builder()
-                    .title(format!("CD {disc} ({})", disc_tracks.len()))
-                    .build();
-                for t in disc_tracks {
-                    group.add(&make_row(t));
+        // Builds a greyed "missing" row: tapping it offers to fetch & add it.
+        let make_missing_row = |disc: u32, pos: u32, title: &str| -> adw::ActionRow {
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(title))
+                .subtitle(gettext("Missing — tap to add"))
+                .activatable(true)
+                .build();
+            row.add_css_class("emilia-flush");
+            // Greyed out so it reads as "not here yet" but still a real entry.
+            row.set_opacity(0.55);
+            row.add_prefix(
+                &gtk::Label::builder()
+                    .label(pos.to_string())
+                    .width_chars(2)
+                    .xalign(1.0)
+                    .css_classes(["dim-label", "numeric"])
+                    .build(),
+            );
+            let add_icon = gtk::Image::from_icon_name("list-add-symbolic");
+            add_icon.set_valign(gtk::Align::Center);
+            row.add_suffix(&add_icon);
+            let (artist, album, title) =
+                (display_artist.clone(), album.to_string(), title.to_string());
+            let sender = sender.clone();
+            row.connect_activated(move |_| {
+                sender.input(Msg::ShowMissingTrack {
+                    artist: artist.clone(),
+                    album: album.clone(),
+                    disc,
+                    position: pos,
+                    title: title.clone(),
+                });
+            });
+            row
+        };
+
+        // One entry of a (merged) disc, ordered by position.
+        enum Item<'a> {
+            Present(&'a Track),
+            Missing { pos: u32, title: String },
+        }
+
+        let render_disc = |group: &adw::PreferencesGroup, disc: u32| {
+            let mut items: Vec<(u32, Item)> = Vec::new();
+            for t in tracks.iter().filter(|t| track_disc(t) == disc) {
+                items.push((t.track_no.unwrap_or(0), Item::Present(t)));
+            }
+            for (_, pos, title) in missing.iter().filter(|(d, _, _)| *d == disc) {
+                items.push((
+                    *pos,
+                    Item::Missing {
+                        pos: *pos,
+                        title: title.clone(),
+                    },
+                ));
+            }
+            items.sort_by_key(|(p, _)| *p);
+            for (_, item) in items {
+                match item {
+                    Item::Present(t) => group.add(&make_row(t)),
+                    Item::Missing { pos, title } => group.add(&make_missing_row(disc, pos, &title)),
                 }
+            }
+        };
+
+        if multi_disc {
+            for disc in &discs {
+                let present = tracks.iter().filter(|t| track_disc(t) == *disc).count();
+                let group = adw::PreferencesGroup::builder()
+                    .title(format!("CD {disc} ({present})"))
+                    .build();
+                render_disc(&group, *disc);
                 content.append(&group);
             }
         } else {
-            // Single CD: for audiobooks without a repeated title heading (already
-            // shown on top), otherwise the album name as the group title.
             let group = if is_audiobook {
                 adw::PreferencesGroup::new()
             } else {
@@ -1438,24 +1646,20 @@ impl App {
                     )
                     .build()
             };
-            for t in &tracks {
-                group.add(&make_row(t));
-            }
+            let disc = discs.first().copied().unwrap_or(1);
+            render_disc(&group, disc);
             content.append(&group);
         }
 
-        // Header line: preferably the album artist, otherwise the page artist.
-        let header_artist = if display_artist.is_empty() {
-            name
-        } else {
-            display_artist.as_str()
-        };
-        let title = if header_artist.is_empty() {
-            album.to_string()
-        } else {
-            format!("{header_artist} – {album}")
-        };
-        self.push_subpage(&title, &content);
+        if pending {
+            let lbl = gtk::Label::builder()
+                .label(gettext("Checking for missing tracks …"))
+                .xalign(0.0)
+                .margin_start(4)
+                .build();
+            lbl.add_css_class("dim-label");
+            content.append(&lbl);
+        }
     }
 
     // ---- Target-dependent helpers for the detail view (file/folder, artist, album) ----
@@ -1909,23 +2113,42 @@ impl App {
                 }
                 ("track", path, eff)
             }
-            CtxTarget::Fs(e) => match self.fs_music_kind(e) {
-                Some(FsKind::Album { artist, album }) => (
-                    "album",
-                    album_key(&artist, &album),
-                    self.library.album_areas(&artist, &album),
-                ),
-                Some(FsKind::Artist(name)) => {
-                    ("artist", name.clone(), self.library.artist_areas(&name))
+            CtxTarget::Fs(e) => {
+                let dir_path = e.path()?.to_string_lossy().into_owned();
+                // If this exact folder already carries an explicit folder-level
+                // setting (e.g. it was filed under Concerts/Audiobooks *as a
+                // folder*), keep editing it at the folder level. Otherwise
+                // `fs_music_kind` may re-classify it as an album and write the
+                // hide to a different row, leaving the original folder entry in
+                // its category — the "I set it hidden but it still shows" bug.
+                if self
+                    .library
+                    .get_category("folder", &dir_path)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
+                    let eff = self.library.folder_areas(&dir_path);
+                    ("folder", dir_path, eff)
+                } else {
+                    match self.fs_music_kind(e) {
+                        Some(FsKind::Album { artist, album }) => (
+                            "album",
+                            album_key(&artist, &album),
+                            self.library.album_areas(&artist, &album),
+                        ),
+                        Some(FsKind::Artist(name)) => {
+                            ("artist", name.clone(), self.library.artist_areas(&name))
+                        }
+                        // Generic folder (e.g. first level): folder level,
+                        // inherited by everything below it.
+                        None => {
+                            let eff = self.library.folder_areas(&dir_path);
+                            ("folder", dir_path, eff)
+                        }
+                    }
                 }
-                // Generic folder (e.g. first level): folder level, inherited
-                // by everything below it.
-                None => {
-                    let path = e.path()?.to_string_lossy().into_owned();
-                    let eff = self.library.folder_areas(&path);
-                    ("folder", path, eff)
-                }
-            },
+            }
         };
         Some(self.build_area_group(scope, key, &effective, sender))
     }
@@ -2005,6 +2228,10 @@ impl App {
                     a.section()
                         .is_none_or(|s| !self.nav.hidden_sections.contains(s))
                 })
+                // Singles/Compilations are an album concept (the kind-aware
+                // resolution only augments album areas): only offer them for an
+                // album target, where they'd actually take effect.
+                .filter(|a| !matches!(a, Area::Singles | Area::Compilations) || scope == "album")
                 .collect(),
         );
         let group = adw::PreferencesGroup::builder().build();

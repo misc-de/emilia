@@ -35,12 +35,19 @@ const PORT_ATTEMPTS: u16 = 10;
 /// A running JSON-RPC server bound to a port, optionally TLS-wrapped.
 pub struct JsonRpcServer {
     listener: TcpListener,
+    /// Shared, per-connection state. Cloned (cheap `Arc`) into each connection
+    /// thread so a slow request never pins the accept loop.
+    handler: Arc<ConnHandler>,
+    stop: Arc<AtomicBool>,
+    port: u16,
+}
+
+/// Everything needed to serve one connection, independent of the accept loop.
+struct ConnHandler {
     /// `Some` in public (LAN) mode — every connection is TLS-wrapped.
     tls: Option<Arc<rustls::ServerConfig>>,
     token: String,
     ctx: Arc<McpContext>,
-    stop: Arc<AtomicBool>,
-    port: u16,
 }
 
 impl JsonRpcServer {
@@ -78,9 +85,7 @@ impl JsonRpcServer {
 
         Ok(Self {
             listener,
-            tls,
-            token,
-            ctx,
+            handler: Arc::new(ConnHandler { tls, token, ctx }),
             stop,
             port,
         })
@@ -95,9 +100,11 @@ impl JsonRpcServer {
         listener.set_nonblocking(true)?;
         Ok(Self {
             listener,
-            tls: None,
-            token,
-            ctx,
+            handler: Arc::new(ConnHandler {
+                tls: None,
+                token,
+                ctx,
+            }),
             stop,
             port,
         })
@@ -108,14 +115,19 @@ impl JsonRpcServer {
     }
 
     /// Blocking accept loop. Returns when the stop flag is set or the listener
-    /// errors. Each connection is handled inline (requests are tiny and quick).
+    /// errors. Each connection is served on its own short-lived thread so a slow
+    /// request (e.g. a `yt-dlp` network search that takes seconds) never stalls
+    /// the accept loop or blocks other in-flight requests behind it.
     pub fn run(self) {
         loop {
             if self.stop.load(Ordering::Relaxed) {
                 break;
             }
             match self.listener.accept() {
-                Ok((sock, _addr)) => self.serve_connection(sock),
+                Ok((sock, _addr)) => {
+                    let handler = Arc::clone(&self.handler);
+                    std::thread::spawn(move || handler.serve_connection(sock));
+                }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(ACCEPT_POLL);
                 }
@@ -123,7 +135,9 @@ impl JsonRpcServer {
             }
         }
     }
+}
 
+impl ConnHandler {
     /// Optionally TLS-wraps one accepted socket and serves a single request.
     fn serve_connection(&self, mut sock: TcpStream) {
         let _ = sock.set_nonblocking(false);

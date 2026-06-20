@@ -497,6 +497,22 @@ pub fn transcode_to_mp3(
     artist: Option<&str>,
     album: Option<&str>,
 ) -> Result<()> {
+    transcode_to_mp3_meta(source, dest, title, artist, album, None, None, None)
+}
+
+/// Like [`transcode_to_mp3`] but also embeds track/disc number and year — used
+/// when filling a specific slot of a known album (the missing-track feature).
+#[allow(clippy::too_many_arguments)]
+pub fn transcode_to_mp3_meta(
+    source: &Path,
+    dest: &Path,
+    title: &str,
+    artist: Option<&str>,
+    album: Option<&str>,
+    track_no: Option<u32>,
+    disc: Option<u32>,
+    year: Option<i32>,
+) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -512,6 +528,15 @@ pub fn transcode_to_mp3(
     }
     if let Some(al) = album.filter(|s| !s.trim().is_empty()) {
         cmd.args(["-metadata", &format!("album={al}")]);
+    }
+    if let Some(tn) = track_no {
+        cmd.args(["-metadata", &format!("track={tn}")]);
+    }
+    if let Some(d) = disc {
+        cmd.args(["-metadata", &format!("disc={d}")]);
+    }
+    if let Some(y) = year {
+        cmd.args(["-metadata", &format!("date={y}")]);
     }
     cmd.arg(dest);
     let status = proc::status_timeout(&mut cmd, DOWNLOAD_TIMEOUT)?;
@@ -1090,4 +1115,66 @@ pub fn add_to_library(
     }
     let _ = std::fs::remove_file(&source);
     Ok(AddOutcome::Added)
+}
+
+/// Downloads `video_id` and files it into an **existing album**: saved under
+/// `dest_dir` as `NN Title.mp3`, tagged with the album's metadata
+/// (title/artist/album/track/disc/year) + cover, then indexed into the library.
+/// UI-free (blocking) — call from a worker thread (the caller resolves the video
+/// id first, so it can show a separate "searching" phase). Returns the stored
+/// path on success.
+#[allow(clippy::too_many_arguments)]
+pub fn add_video_to_album(
+    video_id: &str,
+    dest_dir: &Path,
+    artist: &str,
+    album: &str,
+    title: &str,
+    track_no: u32,
+    disc: Option<u32>,
+    year: Option<i32>,
+    cover: Option<&str>,
+) -> Result<PathBuf, String> {
+    let source = match find_download(video_id) {
+        Some(p) => p,
+        None => download_audio(video_id).map_err(|e| e.to_string())?,
+    };
+
+    let mut dest = dest_dir.to_path_buf();
+    dest.push(format!("{track_no:02} {}.mp3", sanitize_filename(title)));
+    transcode_to_mp3_meta(
+        &source,
+        &dest,
+        title,
+        Some(artist),
+        Some(album),
+        Some(track_no),
+        disc,
+        year,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let dest_str = dest.to_string_lossy().into_owned();
+    if let Some(bytes) = cover.and_then(|c| std::fs::read(c).ok()) {
+        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
+    }
+    if let Ok(lib) = crate::core::db::Library::open() {
+        let track = crate::model::Track {
+            id: 0,
+            path: dest_str,
+            title: title.to_string(),
+            artist: Some(artist.to_string()),
+            album: Some(album.to_string()),
+            genre: None,
+            track_no: Some(track_no),
+            disc_no: disc,
+            duration_ms: None,
+            resume_ms: 0,
+            year,
+        };
+        let _ = lib.upsert_track(&track);
+        let _ = lib.delete_yt_download(video_id);
+    }
+    let _ = std::fs::remove_file(&source);
+    Ok(dest)
 }

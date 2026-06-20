@@ -41,6 +41,10 @@ fn req_i64(args: &Value, key: &str) -> Result<i64> {
     arg_i64(args, key).ok_or_else(|| anyhow!("missing required integer argument '{key}'"))
 }
 
+fn arg_bool(args: &Value, key: &str) -> Option<bool> {
+    args.get(key).and_then(|v| v.as_bool())
+}
+
 /// Gate for destructive tools: the caller must pass `"confirm": true`, so a
 /// model cannot delete something by reflex without an explicit acknowledgement.
 fn require_confirm(args: &Value) -> Result<()> {
@@ -105,7 +109,7 @@ pub fn handle_rpc(ctx: &McpContext, req: RpcRequest) -> Option<RpcResponse> {
         // Lifecycle notification after a successful initialize: no response.
         "notifications/initialized" | "notifications/cancelled" => None,
         "ping" => Some(RpcResponse::ok(id, json!({}))),
-        "tools/list" => Some(RpcResponse::ok(id, json!({ "tools": tool_list() }))),
+        "tools/list" => Some(RpcResponse::ok(id, json!({ "tools": tool_list_enabled() }))),
         "tools/call" => {
             let name = req
                 .params
@@ -149,12 +153,44 @@ pub fn handle_rpc(ctx: &McpContext, req: RpcRequest) -> Option<RpcResponse> {
     }
 }
 
+// ---- YouTube gating ----------------------------------------------------------
+
+/// The YouTube-backed tools. They are hidden from the advertised tool list and
+/// refused by [`dispatch`] when the integration is disabled, so a disabled
+/// YouTube feature is neither visible nor functional over MCP.
+pub(crate) const YOUTUBE_TOOLS: [&str; 4] = [
+    "list_youtube",
+    "play_youtube",
+    "search_youtube",
+    "download_youtube",
+];
+
+/// Reads the `youtube_enabled` UI setting (default: off, matching the app). Opens
+/// its own short-lived read connection — `tool_list`/`dispatch` are already
+/// per-request, so this adds at most one cheap WAL read.
+fn youtube_enabled() -> bool {
+    matches!(
+        Library::open()
+            .ok()
+            .and_then(|l| l.get_setting("youtube_enabled").ok().flatten())
+            .as_deref(),
+        Some("1")
+    )
+}
+
 // ---- tool execution ----------------------------------------------------------
 
 /// Runs a single tool and returns its structured result (the value that the
 /// backend wraps into an MCP `content` block). Errors surface to the caller as a
 /// tool execution error.
 pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
+    // A disabled YouTube integration is inert over MCP: its tools are not even
+    // advertised (see `tool_list_enabled`), and invoking one directly is refused.
+    if YOUTUBE_TOOLS.contains(&name) && !youtube_enabled() {
+        return Err(anyhow!(
+            "the YouTube integration is disabled in the app settings"
+        ));
+    }
     match name {
         // --- reads -----------------------------------------------------------
         "now_playing" => {
@@ -187,7 +223,22 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
 
         "list_artists" => {
             let lib = Library::open()?;
-            Ok(json!({ "artists": lib.distinct_artists()? }))
+            let names = lib.distinct_artists()?;
+            if arg_bool(args, "with_images") == Some(true) {
+                // Per-artist `has_image` flag so a caller can find artists whose
+                // photo is missing (e.g. to fill them in) over MCP alone.
+                let with_img = lib.artist_image_names()?;
+                let artists: Vec<Value> = names
+                    .into_iter()
+                    .map(|n| {
+                        let has_image = with_img.contains(&n);
+                        json!({ "name": n, "has_image": has_image })
+                    })
+                    .collect();
+                Ok(json!({ "artists": artists }))
+            } else {
+                Ok(json!({ "artists": names }))
+            }
         }
 
         "list_albums" => {
@@ -815,7 +866,24 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
 
 // ---- tool registry (advertised to the client) --------------------------------
 
-/// The list of tool descriptors returned by `tools/list`. Schemas are kept
+/// The advertised tool list, honoring the YouTube setting: when the integration
+/// is disabled the YouTube tools are dropped so a client never sees them. Use
+/// this (not [`tool_list`]) everywhere a list is returned to a client.
+pub fn tool_list_enabled() -> Value {
+    let mut list = tool_list();
+    if !youtube_enabled() {
+        if let Some(arr) = list.as_array_mut() {
+            arr.retain(|t| {
+                t.get("name")
+                    .and_then(|n| n.as_str())
+                    .is_none_or(|n| !YOUTUBE_TOOLS.contains(&n))
+            });
+        }
+    }
+    list
+}
+
+/// The full list of tool descriptors returned by `tools/list`. Schemas are kept
 /// hand-written (small, stable set) rather than derived.
 pub fn tool_list() -> Value {
     let obj = |props: Value, required: Value| json!({ "type": "object", "properties": props, "required": required });
@@ -840,8 +908,13 @@ pub fn tool_list() -> Value {
         },
         {
             "name": "list_artists",
-            "description": "List all distinct artists in the library.",
-            "inputSchema": empty(),
+            "description": "List all distinct artists in the library. By default returns an array of names. Set `with_images` to true to instead return objects `{ name, has_image }`, where `has_image` is false for artists that have no photo yet — use this to find artists whose image is missing.",
+            "inputSchema": obj(
+                json!({
+                    "with_images": { "type": "boolean", "description": "Return `{ name, has_image }` objects instead of plain names (default false)." },
+                }),
+                json!([]),
+            ),
         },
         {
             "name": "list_albums",
@@ -1167,12 +1240,12 @@ pub fn tool_list() -> Value {
         },
         {
             "name": "set_properties",
-            "description": "Set the library areas an item appears in (its properties). `scope` ∈ {track, album, artist}; `key` is the track path, the artist\\u0001album key, or the artist name. `areas` is the list of areas to show it in (from: filesystem, artists, albums, concerts, audiobooks); an empty list hides it.",
+            "description": "Set the library areas an item appears in (its properties). `scope` ∈ {track, album, artist}; `key` is the track path, the artist\\u0001album key, or the artist name. `areas` is the list of areas to show it in (from: filesystem, artists, albums, singles, compilations, concerts, audiobooks; singles/compilations apply to albums); an empty list hides it.",
             "inputSchema": obj(
                 json!({
                     "scope": { "type": "string", "enum": ["track", "album", "artist"] },
                     "key": { "type": "string", "description": "Item key (path | artist\\u0001album | artist name)." },
-                    "areas": { "type": "array", "items": { "type": "string", "enum": ["filesystem", "artists", "albums", "concerts", "audiobooks"] } },
+                    "areas": { "type": "array", "items": { "type": "string", "enum": ["filesystem", "artists", "albums", "singles", "compilations", "concerts", "audiobooks"] } },
                 }),
                 json!(["scope", "key", "areas"]),
             ),

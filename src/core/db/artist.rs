@@ -47,6 +47,19 @@ impl Library {
         Ok(meta)
     }
 
+    /// Set of artist names that currently have a non-empty photo path. Used to
+    /// expose a per-artist `has_image` flag (one query, no N+1) without pulling
+    /// full metadata for every artist.
+    pub fn artist_image_names(&self) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name FROM artist_meta WHERE image_path IS NOT NULL AND image_path <> ''",
+        )?;
+        let names = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<std::collections::HashSet<_>>>()?;
+        Ok(names)
+    }
+
     pub fn upsert_artist_meta(&self, m: &ArtistMeta) -> Result<()> {
         self.conn.execute(
             "INSERT INTO artist_meta (name, image_path, status, fetched_at, attempts)

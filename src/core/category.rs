@@ -13,21 +13,29 @@ pub enum Area {
     Filesystem,
     Artists,
     Albums,
+    Singles,
+    Compilations,
     Concerts,
     Audiobooks,
 }
 
 impl Area {
     /// All areas in display order.
-    pub const ALL: [Area; 5] = [
+    pub const ALL: [Area; 7] = [
         Area::Filesystem,
         Area::Artists,
         Area::Albums,
+        Area::Singles,
+        Area::Compilations,
         Area::Concerts,
         Area::Audiobooks,
     ];
 
-    /// Default visibility when nothing is set/inherited.
+    /// Default visibility when nothing is set/inherited. `Singles`/`Compilations`
+    /// are *not* part of the static default: an album is filed there from its
+    /// (auto/overridden) [`AlbumKind`] classification — see the kind-aware album
+    /// resolution in the DB layer — so the default switches reflect that without
+    /// it being a hard-coded base area.
     pub const DEFAULT: [Area; 3] = [Area::Filesystem, Area::Artists, Area::Albums];
 
     /// Stable storage value (DB).
@@ -36,6 +44,8 @@ impl Area {
             Area::Filesystem => "filesystem",
             Area::Artists => "artists",
             Area::Albums => "albums",
+            Area::Singles => "singles",
+            Area::Compilations => "compilations",
             Area::Concerts => "concerts",
             Area::Audiobooks => "audiobooks",
         }
@@ -48,6 +58,8 @@ impl Area {
             Area::Filesystem => "Files",
             Area::Artists => "Artists",
             Area::Albums => "Albums",
+            Area::Singles => "Singles",
+            Area::Compilations => "Compilations",
             Area::Concerts => "Concerts",
             Area::Audiobooks => "Audiobooks",
         }
@@ -62,6 +74,8 @@ impl Area {
             Area::Filesystem => Some("files"),
             Area::Artists => Some("artists"),
             Area::Albums => Some("albums"),
+            Area::Singles => Some("singles"),
+            Area::Compilations => Some("compilations"),
             Area::Concerts => Some("concerts"),
             Area::Audiobooks => None,
         }
@@ -72,6 +86,8 @@ impl Area {
             "filesystem" => Some(Area::Filesystem),
             "artists" => Some(Area::Artists),
             "albums" => Some(Area::Albums),
+            "singles" => Some(Area::Singles),
+            "compilations" => Some(Area::Compilations),
             "concerts" => Some(Area::Concerts),
             "audiobooks" => Some(Area::Audiobooks),
             _ => None,

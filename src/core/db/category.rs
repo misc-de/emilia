@@ -105,7 +105,7 @@ impl Library {
     /// without its own setting inherits the setting of a parent folder
     /// (non-destructive -- its own setting still wins).
     pub fn album_areas(&self, artist: &str, album: &str) -> Vec<crate::core::category::Area> {
-        use crate::core::category::{album_key, parse_areas, Area};
+        use crate::core::category::{album_key, parse_areas};
         if let Ok(Some(v)) = self.get_category("album", &album_key(artist, album)) {
             return parse_areas(&v);
         }
@@ -121,7 +121,30 @@ impl Library {
                 dir = d.parent();
             }
         }
-        Area::DEFAULT.to_vec()
+        self.album_kind_default(album)
+    }
+
+    /// Default areas for an album with no explicit/inherited setting, augmented
+    /// by its [`AlbumKind`] classification so an (auto-classified) single or
+    /// compilation appears in those areas without a stored override. Mirrors
+    /// [`CategorySnapshot`]'s kind-aware default; used for single lookups (e.g.
+    /// the "Available in" detail group) where no snapshot is at hand.
+    fn album_kind_default(&self, album: &str) -> Vec<crate::core::category::Area> {
+        use crate::core::category::Area;
+        use crate::model::AlbumKind;
+        let lc = album.to_lowercase();
+        let in_kind = |kind| {
+            self.albums_classified(kind)
+                .map(|v| v.iter().any(|c| c.album.to_lowercase() == lc))
+                .unwrap_or(false)
+        };
+        let mut areas = Area::DEFAULT.to_vec();
+        if in_kind(AlbumKind::Compilation) {
+            areas.push(Area::Compilations);
+        } else if in_kind(AlbumKind::Single) {
+            areas.push(Area::Singles);
+        }
+        areas
     }
 
     /// Path of a track of *this* artist's album (for folder inheritance).
@@ -190,6 +213,24 @@ impl Library {
                 sample.insert((artist, album), path);
             }
         }
-        Ok(CategorySnapshot { map, sample })
+
+        // Album-name sets for the kind-aware default: an album with no explicit
+        // category setting still surfaces in the Singles/Compilations areas based
+        // on its classification (same source of truth as those tabs).
+        use crate::model::AlbumKind;
+        let names = |kind| -> std::collections::HashSet<String> {
+            self.albums_classified(kind)
+                .map(|v| v.into_iter().map(|c| c.album.to_lowercase()).collect())
+                .unwrap_or_default()
+        };
+        let single_names = names(AlbumKind::Single);
+        let comp_names = names(AlbumKind::Compilation);
+
+        Ok(CategorySnapshot {
+            map,
+            sample,
+            single_names,
+            comp_names,
+        })
     }
 }

@@ -744,6 +744,7 @@ impl App {
     pub(crate) fn play_heard(
         &mut self,
         sender: &ComponentSender<Self>,
+        root: &adw::ApplicationWindow,
         artist: Option<String>,
         title: String,
     ) {
@@ -762,17 +763,18 @@ impl App {
             }
         }
         // 3) Nothing saved → resolve and stream it via YouTube.
-        self.resolve_heard_youtube(sender, artist, title, false);
+        self.resolve_heard_youtube(sender, root, artist, title, false);
     }
 
     /// Download a recognized song via YouTube into the music library.
     pub(crate) fn download_heard(
         &mut self,
         sender: &ComponentSender<Self>,
+        root: &adw::ApplicationWindow,
         artist: Option<String>,
         title: String,
     ) {
-        self.resolve_heard_youtube(sender, artist, title, true);
+        self.resolve_heard_youtube(sender, root, artist, title, true);
     }
 
     /// Searches YouTube for `artist title` in the background; the first hit comes
@@ -780,6 +782,7 @@ impl App {
     fn resolve_heard_youtube(
         &mut self,
         sender: &ComponentSender<Self>,
+        root: &adw::ApplicationWindow,
         artist: Option<String>,
         title: String,
         download: bool,
@@ -792,7 +795,9 @@ impl App {
             Some(a) => format!("{a} {title}"),
             None => title.clone(),
         };
-        self.toast(&gettext("Searching on YouTube …"));
+        // No local copy → show a spinner while the online lookup runs; it is
+        // closed again in `on_heard_resolved` once the search returns.
+        self.show_resolve_busy(root, &gettext("Looking online …"));
         sender.spawn_command(move |out| {
             let video_id =
                 crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 1)
@@ -815,6 +820,8 @@ impl App {
         title: String,
         download: bool,
     ) {
+        // The online lookup returned → take down the spinner.
+        self.close_resolve_busy();
         let Some(video_id) = video_id else {
             self.toast(&gettext("Not found on YouTube"));
             return;
@@ -824,6 +831,47 @@ impl App {
                 .emit(crate::ui::yt_page::YtInput::AddToLibrary { video_id, title });
         } else {
             self.yt_play_video(video_id, title);
+        }
+    }
+
+    /// Show a small modal spinner with `text` while a "Recently heard" song is
+    /// being resolved online. Any previous one is closed first; the dialog is
+    /// taken down in [`Self::close_resolve_busy`] when the lookup returns.
+    fn show_resolve_busy(&mut self, root: &adw::ApplicationWindow, text: &str) {
+        if let Some(d) = self.streaming.resolve_busy.take() {
+            d.close();
+        }
+        let dialog = adw::Dialog::builder().content_width(280).build();
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(16)
+            .margin_top(28)
+            .margin_bottom(28)
+            .margin_start(28)
+            .margin_end(28)
+            .halign(gtk::Align::Center)
+            .build();
+        let spinner = gtk::Spinner::builder()
+            .width_request(32)
+            .height_request(32)
+            .build();
+        spinner.set_spinning(true);
+        let label = gtk::Label::builder()
+            .label(text)
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build();
+        content.append(&spinner);
+        content.append(&label);
+        dialog.set_child(Some(&content));
+        dialog.present(Some(root));
+        self.streaming.resolve_busy = Some(dialog);
+    }
+
+    /// Close the online-resolution spinner (if showing).
+    fn close_resolve_busy(&mut self) {
+        if let Some(d) = self.streaming.resolve_busy.take() {
+            d.close();
         }
     }
 }
