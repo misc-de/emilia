@@ -12,6 +12,7 @@ pub mod online;
 pub mod output;
 pub mod player;
 pub mod podcast;
+pub mod proc;
 pub mod recorder;
 pub mod scanner;
 pub mod secrets;
