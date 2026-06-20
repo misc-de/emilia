@@ -137,6 +137,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.0" date="2026-06-20">
+      <description>
+        <p>Emilia can now be controlled from outside: a built-in server speaks the Model Context Protocol, so an AI assistant or another tool can browse your library and drive playback. It can be switched on, kept to the local machine or opened to the network, and protected with a token in Settings.</p>
+        <p xml:lang="de">Emilia lässt sich jetzt von außen steuern: Ein eingebauter Server spricht das Model Context Protocol, sodass ein KI-Assistent oder ein anderes Werkzeug die Bibliothek durchsuchen und die Wiedergabe steuern kann. Er lässt sich einschalten, auf den lokalen Rechner beschränken oder ins Netzwerk öffnen und in den Einstellungen mit einem Token schützen.</p>
+        <p>The library gained dedicated Singles and Compilations pages, with the album type switchable from the context menu, plus "Recently" tabs for songs and podcasts you came across while listening. Radio now has its own equalizer, voice memos finally show their real length instead of 0:00, and browsing is noticeably faster thanks to a bounded thumbnail cache and leaner database queries.</p>
+        <p xml:lang="de">Die Bibliothek hat eigene Seiten für Singles und Kompilationen bekommen, der Albumtyp lässt sich im Kontextmenü umschalten, dazu „Kürzlich"-Tabs für Songs und Podcasts, die beim Hören aufgetaucht sind. Das Radio hat jetzt einen eigenen Equalizer, Sprachmemos zeigen endlich ihre echte Länge statt 0:00, und das Stöbern ist dank begrenztem Thumbnail-Cache und schlankeren Datenbankabfragen spürbar schneller.</p>
+      </description>
+    </release>
     <release version="0.7.7" date="2026-06-19">
       <description>
         <p>When sharing to another device, the confirmation window now sizes itself to its content instead of collapsing to a single line, and the transfer summary lists everything the share actually contains — podcasts, playlists, favourites, radio stations, recordings, voice memos and more — not just audio files, together with a note explaining what happens after you press Send.</p>
