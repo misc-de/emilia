@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
+use crate::core::net;
 use crate::model::Episode;
 
 /// Converts an RFC-2822 publication date ("Fri, 29 May 2026 22:00:00 -0000")
@@ -365,11 +366,12 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
         .timeout_connect(Duration::from_secs(8))
         .timeout_read(Duration::from_secs(20))
         .build();
+    // Retry transient failures (5xx/429/transport) like every other fetch; a
+    // 404 means the feed is gone.
+    let resp = net::get_with_retry(&agent, url, None, "podcast feed")?
+        .ok_or_else(|| anyhow!("podcast feed not found"))?;
     let mut bytes = Vec::new();
-    agent
-        .get(url)
-        .call()?
-        .into_reader()
+    resp.into_reader()
         .take(16 * 1024 * 1024) // Cap against a hostile/broken feed streaming endlessly (OOM).
         .read_to_end(&mut bytes)?;
     parse_feed(&bytes)
@@ -382,7 +384,6 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
 /// capped at [`crate::core::net::MAX_DOWNLOAD_BYTES`] so a hostile or broken
 /// feed cannot fill the disk. Returns the number of bytes written.
 pub fn download_episode(url: &str, dest: &std::path::Path) -> Result<u64> {
-    use crate::core::net;
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         // No read timeout: a large episode over a slow link may legitimately
