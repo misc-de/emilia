@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.7.24"
+version = "0.7.25"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -28,6 +28,7 @@ zbus = "5"
 rss = { version = "2.0.13", default-features = false }
 gettext-rs = { version = "0.7", features = ["gettext-system"] }
 httparse = "1"
+socket2 = "0.6"
 rcgen = { version = "0.14.8", default-features = false, features = ["ring", "pem"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging"] }
 x509-parser = "0.18.1"

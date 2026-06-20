@@ -37,6 +37,63 @@ impl App {
             McpCommand::PlayAlbum { artist, album } => self.on_play_album(artist, album),
             McpCommand::PlayArtist(name) => self.mcp_play_artist(name),
             McpCommand::PlayTrack(path) => self.on_play_one_track(path, false),
+            McpCommand::PlayEpisode { url, title } => self.play_episode(&url, &title),
+            McpCommand::PlayMemo(path) => self.play_recording(path),
+            McpCommand::PlayYoutube { video_id, title } => self.yt_play_video(video_id, title),
+            // Route through the existing messages so the DB change and the UI
+            // refresh (reload_playlists) both happen, exactly as in the menu.
+            McpCommand::PlayPlaylist { id, shuffle } => {
+                let _ = self.input.send(if shuffle {
+                    Msg::PlayPlaylistShuffled(id)
+                } else {
+                    Msg::PlayPlaylist(id)
+                });
+            }
+            McpCommand::RenamePlaylist { id, name } => {
+                let _ = self.input.send(Msg::PlaylistRename { id, name });
+            }
+            McpCommand::DeletePlaylist(id) => {
+                let _ = self.input.send(Msg::PlaylistDeleteConfirmed(id));
+            }
+            McpCommand::SetPlaylistCover { id, path } => {
+                let _ = self.input.send(Msg::SetPlaylistCover { id, path });
+            }
+            McpCommand::Enqueue(paths) => self.mcp_enqueue(paths),
+            McpCommand::ToggleEpisodeListened { url, title } => {
+                let _ = self.input.send(Msg::ToggleEpisode { url, title });
+            }
+            McpCommand::DeleteMemo(id) => {
+                let _ = self.input.send(Msg::MemoDeleteConfirmed(id));
+            }
+            McpCommand::DeleteRecording(id) => {
+                let _ = self.input.send(Msg::StreamRecordingReallyDelete(id));
+            }
+            McpCommand::SetAlbumCover {
+                artist,
+                album,
+                path,
+            } => {
+                let _ = self.input.send(Msg::SetAlbumCover {
+                    artist,
+                    album,
+                    path,
+                });
+            }
+            McpCommand::SetArtistImage { name, path } => {
+                let _ = self.input.send(Msg::SetArtistImage { name, path });
+            }
+            McpCommand::SetAreas { scope, key, value } => {
+                // `Msg::SetAreas` needs a `&'static` scope; map the known ones.
+                let scope: Option<&'static str> = match scope.as_str() {
+                    "track" => Some("track"),
+                    "album" => Some("album"),
+                    "artist" => Some("artist"),
+                    _ => None,
+                };
+                if let Some(scope) = scope {
+                    let _ = self.input.send(Msg::SetAreas { scope, key, value });
+                }
+            }
             McpCommand::SetSleepTimer(minutes) => {
                 let choice = if minutes == 0 {
                     SleepChoice::Off
@@ -62,6 +119,17 @@ impl App {
         if let Some(path) = first {
             self.on_play_artist_track(name, path, false);
         }
+    }
+
+    /// Appends tracks to the user queue (play next), mirroring the context-menu
+    /// "Add to queue" action but addressed by path from MCP.
+    fn mcp_enqueue(&mut self, paths: Vec<String>) {
+        let mut paths: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        self.transport.user_queue.append(&mut paths);
+        self.reload_queue_list();
+        self.refresh_queue_icons();
+        self.save_queue();
     }
 
     /// Copies the live mini-player state into the shared now-playing snapshot the
@@ -119,6 +187,8 @@ impl App {
                         let port = server.port();
                         std::thread::spawn(move || server.run());
                         self.mcp.stop = Some(stop);
+                        // Publish the actual port so it can be checked/matched.
+                        let _ = self.library.set_setting("mcp_port", &port.to_string());
                         tracing::info!("MCP JSON-RPC server listening on {bind}:{port}");
                     }
                     Err(e) => tracing::error!("MCP server failed to start: {e}"),
@@ -127,6 +197,8 @@ impl App {
             McpMode::Sdk => match mcp::server_sdk::start(ctx, token, public, stop.clone()) {
                 Ok(port) => {
                     self.mcp.stop = Some(stop);
+                    // Publish the actual port so it can be checked/matched.
+                    let _ = self.library.set_setting("mcp_port", &port.to_string());
                     tracing::info!("MCP SDK (rmcp) server listening on {bind}:{port}");
                 }
                 Err(e) => tracing::error!("MCP SDK server failed to start: {e}"),

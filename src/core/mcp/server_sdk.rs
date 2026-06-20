@@ -72,13 +72,24 @@ impl ServerHandler for EmiliaServer {
             .arguments
             .map(Value::Object)
             .unwrap_or_else(|| json!({}));
-        match tools::dispatch(&self.ctx, request.name.as_ref(), &args) {
-            Ok(value) => {
+        // `dispatch` does blocking SQLite I/O; run it on the blocking pool so it
+        // never stalls this runtime's single worker thread (which also drives the
+        // SSE response streams and keep-alives for every other live session).
+        let ctx = self.ctx.clone();
+        let name = request.name.to_string();
+        let dispatched =
+            tokio::task::spawn_blocking(move || tools::dispatch(&ctx, &name, &args)).await;
+        match dispatched {
+            Ok(Ok(value)) => {
                 let text = serde_json::to_string_pretty(&value).unwrap_or_default();
                 Ok(CallToolResult::success(vec![Content::text(text)]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Ok(Err(e)) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "error: {e}"
+            ))])),
+            // The blocking task panicked or was cancelled — surface it as a tool error.
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                "error: dispatch task failed: {e}"
             ))])),
         }
     }
@@ -96,7 +107,7 @@ pub fn start(
     let mut bound: Option<(StdTcpListener, u16)> = None;
     let mut port = PORT;
     for _ in 0..PORT_ATTEMPTS {
-        if let Ok(listener) = StdTcpListener::bind((bind_ip, port)) {
+        if let Ok(listener) = super::bind_reuse(bind_ip, port) {
             bound = Some((listener, port));
             break;
         }

@@ -37,6 +37,233 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Distinct albums with their release year, optionally narrowed by `artist`
+    /// and/or an inclusive `[year_from, year_to]` range. The album's year is the
+    /// **earliest** `track.year` among its tracks — robust against reissue tags
+    /// (a 1991 remaster of a 1984 album still reports 1984), matching the
+    /// library's metadata date-sort convention.
+    ///
+    /// A year bound only matches a *known* year, so it drops albums whose tracks
+    /// carry no year tag. Without any year filter the result is ordered by artist
+    /// then album; with one it is ordered chronologically (year, then album).
+    /// Returns `(artist, album, year)`; `year` is `None` only for an unfiltered
+    /// album that has no tagged year.
+    pub fn albums_with_year(
+        &self,
+        artist: Option<&str>,
+        year_from: Option<i64>,
+        year_to: Option<i64>,
+    ) -> Result<Vec<(String, String, Option<i64>)>> {
+        // Each `?n` placeholder is referenced twice (the `IS NULL OR …` guard),
+        // which lets one bound parameter switch a filter on or off without
+        // rebuilding the SQL string. `MIN(year)` ignores NULLs, so an album keeps
+        // its earliest tagged year even when some tracks are untagged.
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(artist, '') AS a, album, MIN(year) AS y
+               FROM track
+              WHERE album IS NOT NULL AND album <> ''
+                AND (?1 IS NULL OR artist = ?1)
+              GROUP BY a, album
+             HAVING (?2 IS NULL OR y >= ?2)
+                AND (?3 IS NULL OR y <= ?3)
+              ORDER BY CASE WHEN ?2 IS NULL AND ?3 IS NULL THEN NULL ELSE y END, a, album",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![artist, year_from, year_to], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// One album's tallies: track count, total runtime (ms), and release year
+    /// (earliest tagged track year — see [`Self::albums_with_year`]). `album` is
+    /// matched case-insensitively; pass `artist` to disambiguate a name shared
+    /// across artists (e.g. "Greatest Hits"), otherwise all tracks under that
+    /// album name are aggregated. Returns `(0, 0, None)` for an unknown album.
+    pub fn album_summary(
+        &self,
+        artist: Option<&str>,
+        album: &str,
+    ) -> Result<(u32, i64, Option<i64>)> {
+        let (count, dur, year): (i64, i64, Option<i64>) = self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0), MIN(year)
+               FROM track
+              WHERE album = ?1 COLLATE NOCASE
+                AND (?2 IS NULL OR artist = ?2)",
+            rusqlite::params![album, artist],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        Ok((count as u32, dur, year))
+    }
+
+    /// Force an album's classification (by album name, case-insensitive),
+    /// overriding the heuristic. See [`Self::albums_classified`].
+    pub fn set_album_kind(&self, album: &str, kind: AlbumKind) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO album_kind (album, kind) VALUES (?1, ?2)
+             ON CONFLICT(album) DO UPDATE SET kind = excluded.kind",
+            rusqlite::params![album.to_lowercase(), kind.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Drop a manual album-type override, reverting to the heuristic.
+    pub fn clear_album_kind(&self, album: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM album_kind WHERE album = ?1",
+            [album.to_lowercase()],
+        )?;
+        Ok(())
+    }
+
+    /// All manual album-type overrides, keyed by lowercased album name.
+    fn album_kind_overrides(&self) -> Result<std::collections::HashMap<String, AlbumKind>> {
+        let mut stmt = self.conn.prepare("SELECT album, kind FROM album_kind")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = std::collections::HashMap::new();
+        for (album, kind) in rows.flatten() {
+            if let Some(k) = AlbumKind::from_str(&kind) {
+                out.insert(album, k);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Albums of one [`AlbumKind`], derived heuristically (the library stores no
+    /// album-type tags). A **compilation** is an album name whose tracks carry
+    /// more than one *primary* artist with none dominant — so a solo album with
+    /// "feat." guests ("Beginner feat. …") is **not** a compilation; a **single**
+    /// is a one-artist album with at most `SINGLE_MAX` tracks that is not part of
+    /// a compilation; everything else is a regular album. Compilations come back
+    /// merged per name (artist = "Various Artists"); singles/albums per
+    /// artist+album. Sorted by album, then artist. A manual override
+    /// ([`Self::set_album_kind`]) wins over the heuristic.
+    pub fn albums_classified(&self, kind: AlbumKind) -> Result<Vec<ClassifiedAlbum>> {
+        use crate::core::artist::{norm_key, primary_artist};
+        const SINGLE_MAX: u32 = 3;
+
+        let overrides = self.album_kind_overrides()?;
+
+        /// Minimum of two optional years (a missing year never wins).
+        fn min_year(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+            match (a, b) {
+                (Some(x), Some(y)) => Some(x.min(y)),
+                (None, y) => y,
+                (x, None) => x,
+            }
+        }
+
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(artist, ''), album, year FROM track
+             WHERE album IS NOT NULL AND album <> ''",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+
+        // album-name (lowercased) -> (primary artist -> track count). Drives the
+        // compilation test: several primaries *and* none of them dominant.
+        let mut name_primaries: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, u32>,
+        > = std::collections::HashMap::new();
+        // (artist, album) -> (track count, earliest year), for singles/albums.
+        let mut pairs: std::collections::BTreeMap<(String, String), (u32, Option<i64>)> =
+            std::collections::BTreeMap::new();
+        // album-name (lowercased) -> (display name, track count, earliest year),
+        // merged across artists, for compilations.
+        let mut name_agg: std::collections::BTreeMap<String, (String, u32, Option<i64>)> =
+            std::collections::BTreeMap::new();
+
+        for (artist, album, year) in rows.flatten() {
+            let key = album.to_lowercase();
+            let primary = primary_artist(&artist);
+            *name_primaries
+                .entry(key.clone())
+                .or_default()
+                .entry(norm_key(&primary))
+                .or_insert(0) += 1;
+            // Group by *primary* artist so a "feat." track stays with its album
+            // instead of splitting the count off into a phantom single.
+            let p = pairs.entry((primary, album.clone())).or_insert((0, None));
+            p.0 += 1;
+            p.1 = min_year(p.1, year);
+            let na = name_agg.entry(key).or_insert((album, 0, None));
+            na.1 += 1;
+            na.2 = min_year(na.2, year);
+        }
+
+        // A manual override wins; otherwise a genuine compilation has several
+        // primary artists where none owns the bulk of the tracks (if one
+        // dominates ≥70%, it is that artist's album with guests).
+        const DOMINANCE: f64 = 0.7;
+        let is_comp = |key: &str| match overrides.get(key) {
+            Some(ov) => *ov == AlbumKind::Compilation,
+            None => name_primaries.get(key).is_some_and(|m| {
+                if m.len() <= 1 {
+                    return false;
+                }
+                let total: u32 = m.values().sum();
+                let max = m.values().copied().max().unwrap_or(0);
+                (max as f64) < DOMINANCE * (total as f64)
+            }),
+        };
+
+        let mut out = Vec::new();
+        match kind {
+            AlbumKind::Compilation => {
+                for (key, (display, tracks, year)) in &name_agg {
+                    if is_comp(key) {
+                        out.push(ClassifiedAlbum {
+                            artist: "Various Artists".to_string(),
+                            album: display.clone(),
+                            year: *year,
+                            tracks: *tracks,
+                            kind: AlbumKind::Compilation,
+                        });
+                    }
+                }
+            }
+            AlbumKind::Single | AlbumKind::Album => {
+                for ((artist, album), (tracks, year)) in &pairs {
+                    let akey = album.to_lowercase();
+                    if is_comp(&akey) {
+                        continue; // these tracks belong to a compilation
+                    }
+                    // A manual override forces single/album regardless of count.
+                    let this = match overrides.get(&akey) {
+                        Some(ov) => *ov,
+                        None if *tracks <= SINGLE_MAX => AlbumKind::Single,
+                        None => AlbumKind::Album,
+                    };
+                    if this == kind {
+                        out.push(ClassifiedAlbum {
+                            artist: artist.clone(),
+                            album: album.clone(),
+                            year: *year,
+                            tracks: *tracks,
+                            kind,
+                        });
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| {
+            a.album
+                .to_lowercase()
+                .cmp(&b.album.to_lowercase())
+                .then_with(|| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+        });
+        Ok(out)
+    }
+
     pub fn album_cover(&self, album: &str) -> Result<Option<String>> {
         let cover = self
             .conn

@@ -56,7 +56,7 @@ impl JsonRpcServer {
         let mut bound: Option<(TcpListener, u16)> = None;
         let mut port = PORT;
         for _ in 0..PORT_ATTEMPTS {
-            match TcpListener::bind((bind_ip, port)) {
+            match super::bind_reuse(bind_ip, port) {
                 Ok(listener) => {
                     bound = Some((listener, port));
                     break;

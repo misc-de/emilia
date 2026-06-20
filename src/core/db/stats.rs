@@ -317,4 +317,49 @@ impl Library {
         }
         Ok(out)
     }
+
+    /// Whole-library inventory (counts + total runtime per content type) for the
+    /// MCP `library_overview` tool. `artists` matches the "Artists" view —
+    /// composite "feat." credits split into individuals via
+    /// [`Self::distinct_artists`] — while the rest are direct COUNT/SUM
+    /// aggregates over their tables.
+    pub fn library_overview(&self) -> Result<LibraryOverview> {
+        let scalar = |sql: &str| -> Result<i64> {
+            self.conn
+                .query_row(sql, [], |r| r.get(0))
+                .map_err(Into::into)
+        };
+        let (tracks, music_duration_ms): (i64, i64) = self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM track",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        // Distinct (artist, album) pairs — the same notion of "album" the
+        // library uses, so a shared name under two artists counts twice.
+        let albums = scalar(
+            "SELECT COUNT(*) FROM (
+                 SELECT 1 FROM track
+                  WHERE album IS NOT NULL AND album <> ''
+                  GROUP BY COALESCE(artist, ''), album
+             )",
+        )?;
+        let (memos, memos_duration_ms): (i64, i64) = self.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM memo",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok(LibraryOverview {
+            tracks,
+            artists: self.distinct_artists()?.len() as i64,
+            albums,
+            music_duration_ms,
+            playlists: scalar("SELECT COUNT(*) FROM playlist")?,
+            podcasts: scalar("SELECT COUNT(*) FROM podcast")?,
+            episodes: scalar("SELECT COUNT(*) FROM episode")?,
+            memos,
+            memos_duration_ms,
+            youtube_channels: scalar("SELECT COUNT(*) FROM yt_channel")?,
+            youtube_videos: scalar("SELECT COUNT(*) FROM yt_video")?,
+        })
+    }
 }

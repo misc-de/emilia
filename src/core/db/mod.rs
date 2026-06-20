@@ -321,6 +321,14 @@ impl Library {
                 PRIMARY KEY (scope, key)
             );
 
+            -- Manual overrides for the Singles/Compilations classification
+            -- (the heuristic in `albums_classified` is the default). Keyed by the
+            -- lowercased album name; kind ∈ 'album' | 'single' | 'compilation'.
+            CREATE TABLE IF NOT EXISTS album_kind (
+                album TEXT PRIMARY KEY,
+                kind  TEXT NOT NULL
+            );
+
             -- Equalizer settings per output and level (10 bands as JSON).
             -- Inheritance track → album → artist → global; additionally a
             -- device-specific output falls back to the default output ('').
@@ -2530,6 +2538,158 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(lib.track_by_path("/m%/keep.mp3").unwrap().is_none());
         assert!(lib.track_by_path("/mX/other.mp3").unwrap().is_some());
+    }
+
+    #[test]
+    fn albums_with_year_filters_by_artist_and_range() {
+        let lib = Library::open_in_memory().unwrap();
+        let yt = |path: &str, artist: &str, album: &str, year: Option<i32>| Track {
+            year,
+            ..track(path, Some(artist), Some(album))
+        };
+        lib.upsert_tracks(&[
+            // "The Game": one track tagged 1980, a reissue track tagged 1991 →
+            // MIN() must report the original 1980.
+            yt("/q/game1.mp3", "Queen", "The Game", Some(1980)),
+            yt("/q/game2.mp3", "Queen", "The Game", Some(1991)),
+            yt("/q/works.mp3", "Queen", "The Works", Some(1984)),
+            yt("/q/magic.mp3", "Queen", "A Kind of Magic", Some(1986)),
+            yt("/q/untagged.mp3", "Queen", "Mystery", None),
+            yt("/b/bowie.mp3", "David Bowie", "Let's Dance", Some(1983)),
+        ])
+        .unwrap();
+
+        // Artist + inclusive range: "The Works" (1984) is in, the 1991 reissue
+        // does not push "The Game" out (earliest year wins), 1986 is excluded,
+        // and the untagged album is excluded because a year filter needs a year.
+        let in_range = lib
+            .albums_with_year(Some("Queen"), Some(1980), Some(1985))
+            .unwrap();
+        assert_eq!(
+            in_range,
+            vec![
+                ("Queen".into(), "The Game".into(), Some(1980)),
+                ("Queen".into(), "The Works".into(), Some(1984)),
+            ]
+        );
+
+        // The artist filter is exact: David Bowie's 1983 album is not returned.
+        assert!(in_range.iter().all(|(a, _, _)| a == "Queen"));
+
+        // No filter at all keeps untagged albums (year = None) and orders by
+        // artist then album.
+        let all = lib.albums_with_year(None, None, None).unwrap();
+        assert!(all.iter().any(|(_, al, y)| al == "Mystery" && y.is_none()));
+        assert!(all.iter().any(|(a, _, _)| a == "David Bowie"));
+    }
+
+    #[test]
+    fn summaries_count_collaborations_and_runtime() {
+        let lib = Library::open_in_memory().unwrap();
+        let yt = |path: &str, artist: &str, album: &str, year: i32, dur: i64| Track {
+            year: Some(year),
+            duration_ms: Some(dur),
+            ..track(path, Some(artist), Some(album))
+        };
+        lib.upsert_tracks(&[
+            yt("/q/1.mp3", "Queen", "The Game", 1980, 200_000),
+            yt("/q/2.mp3", "Queen", "The Game", 1980, 100_000),
+            yt("/q/3.mp3", "Queen", "Hot Space", 1982, 300_000),
+            // A collaboration: contributes to BOTH Queen and David Bowie.
+            yt("/q/4.mp3", "Queen & David Bowie", "Hot Space", 1982, 60_000),
+        ])
+        .unwrap();
+
+        // Queen: 2 distinct albums, all 4 songs (incl. the collab), full runtime.
+        let (albums, songs, dur) = lib.artist_summary("queen").unwrap();
+        assert_eq!((albums, songs), (2, 4));
+        assert_eq!(dur, 660_000);
+        // David Bowie picks up only the collaboration track.
+        assert_eq!(lib.artist_summary("David Bowie").unwrap(), (1, 1, 60_000));
+
+        // album_summary: "The Game" (disambiguated by artist) → 2 tracks, runtime,
+        // earliest year.
+        assert_eq!(
+            lib.album_summary(Some("Queen"), "the game").unwrap(),
+            (2, 300_000, Some(1980))
+        );
+
+        // Overview: 4 tracks, 2 individual artists (Queen, David Bowie via split),
+        // 3 distinct (artist, album) pairs, summed runtime.
+        let o = lib.library_overview().unwrap();
+        assert_eq!((o.tracks, o.artists, o.albums), (4, 2, 3));
+        assert_eq!(o.music_duration_ms, 660_000);
+    }
+
+    #[test]
+    fn album_classification_uses_primary_artist() {
+        use crate::model::AlbumKind;
+        let lib = Library::open_in_memory().unwrap();
+        let yt = |path: &str, artist: &str, album: &str| Track {
+            year: Some(2000),
+            ..track(path, Some(artist), Some(album))
+        };
+        lib.upsert_tracks(&[
+            // Compilation: one album name, several primary artists.
+            yt("/c/1.mp3", "Al Hirt", "Kill Bill"),
+            yt("/c/2.mp3", "Charlie Feathers", "Kill Bill"),
+            yt("/c/3.mp3", "Santa Esmeralda", "Kill Bill"),
+            // Solo album WITH a feat. guest → one primary, so NOT a compilation,
+            // and the guest track must not split off the count (4 tracks total).
+            yt("/b/1.mp3", "Beginner", "Bambule"),
+            yt("/b/2.mp3", "Beginner feat. Samy Deluxe", "Bambule"),
+            yt("/b/3.mp3", "Beginner", "Bambule"),
+            yt("/b/4.mp3", "Beginner", "Bambule"),
+            // Single: one artist, ≤3 tracks.
+            yt("/s/1.mp3", "Nina Chuba", "Wildberry Lillet"),
+            // Best-of with one guest credit: a second primary, but the main
+            // artist owns ≥70% → a regular album (>3 tracks), NOT a compilation.
+            yt("/d/1.mp3", "Die Ärzte", "Bäst of"),
+            yt("/d/2.mp3", "Die Ärzte", "Bäst of"),
+            yt("/d/3.mp3", "Die Ärzte", "Bäst of"),
+            yt("/d/4.mp3", "Die Ärzte", "Bäst of"),
+            yt("/d/5.mp3", "Götz Alsmann feat. Die Ärzte", "Bäst of"),
+        ])
+        .unwrap();
+
+        let comps = lib.albums_classified(AlbumKind::Compilation).unwrap();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].album, "Kill Bill");
+        assert_eq!(comps[0].artist, "Various Artists");
+        assert_eq!(comps[0].tracks, 3);
+
+        // "Wildberry Lillet" is a single; "Bambule" (4 via primary) and the
+        // compilation are not.
+        let singles = lib.albums_classified(AlbumKind::Single).unwrap();
+        assert!(singles.iter().any(|a| a.album == "Wildberry Lillet"));
+        assert!(singles
+            .iter()
+            .all(|a| a.album != "Bambule" && a.album != "Kill Bill"));
+
+        // "Bambule" is a regular album; the compilation is excluded; and the
+        // dominated best-of is the main artist's album, not a compilation.
+        let albums = lib.albums_classified(AlbumKind::Album).unwrap();
+        assert!(albums.iter().any(|a| a.album == "Bambule" && a.tracks == 4));
+        assert!(albums.iter().all(|a| a.album != "Kill Bill"));
+        assert!(albums
+            .iter()
+            .any(|a| a.album == "Bäst of" && a.artist == "Die Ärzte"));
+
+        // Manual override wins over the heuristic: force "Kill Bill" to album,
+        // and "Wildberry Lillet" (a single) to compilation.
+        lib.set_album_kind("kill bill", AlbumKind::Album).unwrap();
+        lib.set_album_kind("Wildberry Lillet", AlbumKind::Compilation)
+            .unwrap();
+        let comps = lib.albums_classified(AlbumKind::Compilation).unwrap();
+        assert!(comps.iter().any(|a| a.album == "Wildberry Lillet"));
+        assert!(comps.iter().all(|a| a.album != "Kill Bill"));
+        let albums = lib.albums_classified(AlbumKind::Album).unwrap();
+        assert!(albums.iter().any(|a| a.album == "Kill Bill"));
+
+        // Reverting the override restores the heuristic.
+        lib.clear_album_kind("kill bill").unwrap();
+        let comps = lib.albums_classified(AlbumKind::Compilation).unwrap();
+        assert!(comps.iter().any(|a| a.album == "Kill Bill"));
     }
 
     #[test]

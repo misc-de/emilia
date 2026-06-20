@@ -141,6 +141,41 @@ impl Library {
             .collect())
     }
 
+    /// One artist's tallies: distinct albums, song count, and total track
+    /// runtime (ms). Counts composite credits ("A feat. B" contributes to both
+    /// A and B), matching [`Self::distinct_artists`]/[`Self::artist_counts`], so
+    /// a collaboration still counts toward the named artist. `name` is matched
+    /// case-insensitively via [`crate::core::artist::norm_key`]. Returns zeros
+    /// for an unknown artist.
+    pub fn artist_summary(&self, name: &str) -> Result<(u32, u32, i64)> {
+        use crate::core::artist::{norm_key, split_artists};
+        let key = norm_key(name);
+        let mut stmt = self.conn.prepare(
+            "SELECT artist, album, duration_ms FROM track
+             WHERE artist IS NOT NULL AND artist <> ''",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        let mut albums = std::collections::HashSet::new();
+        let mut songs = 0u32;
+        let mut duration_ms = 0i64;
+        for (artist, album, dur) in rows.flatten() {
+            if split_artists(&artist).iter().any(|n| norm_key(n) == key) {
+                songs += 1;
+                duration_ms += dur.unwrap_or(0);
+                if let Some(al) = album.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    albums.insert(al.to_lowercase());
+                }
+            }
+        }
+        Ok((albums.len() as u32, songs, duration_ms))
+    }
+
     fn map_artist_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtistMeta> {
         Ok(ArtistMeta {
             name: r.get(0)?,

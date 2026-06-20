@@ -318,6 +318,70 @@ pub struct StatTotals {
     pub distinct_albums: i64,
 }
 
+/// A whole-library inventory: counts and total runtime across every content
+/// type, for the MCP `library_overview` tool. Cheap aggregate queries, no scan
+/// of full row sets.
+#[derive(Debug, Clone, Default)]
+pub struct LibraryOverview {
+    pub tracks: i64,
+    pub artists: i64,
+    pub albums: i64,
+    /// Summed `track.duration_ms` over the whole music library.
+    pub music_duration_ms: i64,
+    pub playlists: i64,
+    pub podcasts: i64,
+    pub episodes: i64,
+    pub memos: i64,
+    /// Summed `memo.duration_ms`.
+    pub memos_duration_ms: i64,
+    pub youtube_channels: i64,
+    pub youtube_videos: i64,
+}
+
+/// How an album is classified by the heuristic (see
+/// [`crate::core::db::Library::albums_classified`]). The library has no explicit
+/// album-type metadata, so this is derived from the tracks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumKind {
+    /// A regular studio/full album: one primary artist, more than a few tracks.
+    Album,
+    /// A single/EP: one primary artist with at most a handful of tracks.
+    Single,
+    /// A compilation/soundtrack: one album name with several primary artists.
+    Compilation,
+}
+
+impl AlbumKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlbumKind::Album => "album",
+            AlbumKind::Single => "single",
+            AlbumKind::Compilation => "compilation",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<AlbumKind> {
+        match s {
+            "album" => Some(AlbumKind::Album),
+            "single" => Some(AlbumKind::Single),
+            "compilation" => Some(AlbumKind::Compilation),
+            _ => None,
+        }
+    }
+}
+
+/// A classified album row: an artist+album for singles/albums, or one merged
+/// entry per name (artist = "Various Artists") for compilations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedAlbum {
+    pub artist: String,
+    pub album: String,
+    /// Earliest tagged track year (release year), if any.
+    pub year: Option<i64>,
+    pub tracks: u32,
+    pub kind: AlbumKind,
+}
+
 /// An entry of a ranking (top tracks/albums/artists).
 #[derive(Debug, Clone)]
 pub struct StatEntry {

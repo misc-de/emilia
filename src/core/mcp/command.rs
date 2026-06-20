@@ -31,6 +31,43 @@ pub enum McpCommand {
     PlayArtist(String),
     /// Play a single track by its library path.
     PlayTrack(String),
+    /// Stream a podcast episode by its audio URL (`title` for display).
+    PlayEpisode { url: String, title: String },
+    /// Play a voice memo / recording by its file path.
+    PlayMemo(String),
+    /// Play a YouTube video by its id (`title` for display).
+    PlayYoutube { video_id: String, title: String },
+    /// Play a playlist by id, optionally shuffled.
+    PlayPlaylist { id: i64, shuffle: bool },
+    /// Rename a playlist.
+    RenamePlaylist { id: i64, name: String },
+    /// Delete a playlist (destructive; the tool gate requires confirmation).
+    DeletePlaylist(i64),
+    /// Set a playlist's cover image from a file path.
+    SetPlaylistCover { id: i64, path: String },
+    /// Append tracks (by library path) to the user queue (play next).
+    Enqueue(Vec<String>),
+    /// Toggle a podcast episode's listened/unlistened state.
+    ToggleEpisodeListened { url: String, title: String },
+    /// Delete a voice memo by id (destructive; gated by confirmation).
+    DeleteMemo(i64),
+    /// Delete a stream recording by id (destructive; gated by confirmation).
+    DeleteRecording(i64),
+    /// Set an album's cover image from a file path.
+    SetAlbumCover {
+        artist: String,
+        album: String,
+        path: String,
+    },
+    /// Set an artist's photo from a file path.
+    SetArtistImage { name: String, path: String },
+    /// Set the areas (properties) an item appears in. `scope` ∈ {track, album,
+    /// artist}; `value` is a comma-separated area list (empty = hidden).
+    SetAreas {
+        scope: String,
+        key: String,
+        value: String,
+    },
     /// Arm the sleep timer for this many minutes; `0` turns it off.
     SetSleepTimer(u32),
 }

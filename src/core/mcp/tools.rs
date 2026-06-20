@@ -37,6 +37,34 @@ fn arg_i64(args: &Value, key: &str) -> Option<i64> {
     args.get(key).and_then(|v| v.as_i64())
 }
 
+fn req_i64(args: &Value, key: &str) -> Result<i64> {
+    arg_i64(args, key).ok_or_else(|| anyhow!("missing required integer argument '{key}'"))
+}
+
+/// Gate for destructive tools: the caller must pass `"confirm": true`, so a
+/// model cannot delete something by reflex without an explicit acknowledgement.
+fn require_confirm(args: &Value) -> Result<()> {
+    if args.get("confirm").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "destructive action: pass \"confirm\": true to proceed"
+        ))
+    }
+}
+
+/// Human-readable `H:MM:SS` (or `M:SS`) rendering of a millisecond duration,
+/// emitted alongside the raw `*_ms` value by the analysis tools.
+fn fmt_hms(ms: i64) -> String {
+    let secs = ms.max(0) / 1000;
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
 fn track_json(t: &Track) -> Value {
     json!({
         "path": t.path,
@@ -163,27 +191,57 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
         }
 
         "list_albums" => {
+            // Cap the response so a large library never dumps its whole album list
+            // into one call. `total`/`truncated` keep the cap transparent, so the
+            // caller can narrow (artist, year range, kind) or raise `limit`.
+            let limit = arg_i64(args, "limit").unwrap_or(100).clamp(1, 1000) as usize;
+            let year_from = arg_i64(args, "year_from");
+            let year_to = arg_i64(args, "year_to");
             let lib = Library::open()?;
-            let albums: Vec<Value> = match arg_str(args, "artist") {
-                Some(artist) => lib
-                    .albums_of_artist(artist)?
-                    .into_iter()
-                    .map(|album| json!({ "artist": artist, "album": album }))
-                    .collect(),
-                None => {
-                    // Distinct (artist, album) over the whole library.
-                    let mut seen = std::collections::BTreeSet::new();
-                    for t in lib.all_tracks()? {
-                        if let Some(album) = t.album.filter(|s| !s.is_empty()) {
-                            seen.insert((t.artist.unwrap_or_default(), album));
-                        }
-                    }
-                    seen.into_iter()
-                        .map(|(artist, album)| json!({ "artist": artist, "album": album }))
-                        .collect()
+            match arg_str(args, "kind") {
+                // Classified view: albums / singles / compilations.
+                Some(kind_str) => {
+                    let kind = crate::model::AlbumKind::from_str(kind_str).ok_or_else(|| {
+                        anyhow!("unknown kind '{kind_str}' (use album|single|compilation)")
+                    })?;
+                    let all: Vec<_> = lib
+                        .albums_classified(kind)?
+                        .into_iter()
+                        .filter(|a| year_from.map_or(true, |f| a.year.map_or(false, |y| y >= f)))
+                        .filter(|a| year_to.map_or(true, |t| a.year.map_or(false, |y| y <= t)))
+                        .collect();
+                    let total = all.len();
+                    let albums: Vec<Value> = all
+                        .into_iter()
+                        .take(limit)
+                        .map(|a| {
+                            json!({
+                                "artist": a.artist,
+                                "album": a.album,
+                                "year": a.year,
+                                "tracks": a.tracks,
+                                "kind": a.kind.as_str(),
+                            })
+                        })
+                        .collect();
+                    let truncated = total > albums.len();
+                    Ok(json!({ "albums": albums, "total": total, "truncated": truncated }))
                 }
-            };
-            Ok(json!({ "albums": albums }))
+                // Plain view: every (artist, album) pair, with its year.
+                None => {
+                    let all = lib.albums_with_year(arg_str(args, "artist"), year_from, year_to)?;
+                    let total = all.len();
+                    let albums: Vec<Value> = all
+                        .into_iter()
+                        .take(limit)
+                        .map(|(artist, album, year)| {
+                            json!({ "artist": artist, "album": album, "year": year })
+                        })
+                        .collect();
+                    let truncated = total > albums.len();
+                    Ok(json!({ "albums": albums, "total": total, "truncated": truncated }))
+                }
+            }
         }
 
         "list_tracks" => {
@@ -221,6 +279,164 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
                 "distinct_artists": t.distinct_artists,
                 "distinct_albums": t.distinct_albums,
             }))
+        }
+
+        "library_overview" => {
+            let lib = Library::open()?;
+            let o = lib.library_overview()?;
+            Ok(json!({
+                "tracks": o.tracks,
+                "artists": o.artists,
+                "albums": o.albums,
+                "music_duration_ms": o.music_duration_ms,
+                "music_duration": fmt_hms(o.music_duration_ms),
+                "playlists": o.playlists,
+                "podcasts": o.podcasts,
+                "episodes": o.episodes,
+                "memos": o.memos,
+                "memos_duration_ms": o.memos_duration_ms,
+                "memos_duration": fmt_hms(o.memos_duration_ms),
+                "youtube_channels": o.youtube_channels,
+                "youtube_videos": o.youtube_videos,
+            }))
+        }
+
+        "artist_info" => {
+            let name = req_str(args, "name")?;
+            let lib = Library::open()?;
+            let (albums, songs, duration_ms) = lib.artist_summary(name)?;
+            Ok(json!({
+                "artist": name,
+                "albums": albums,
+                "songs": songs,
+                "total_duration_ms": duration_ms,
+                "total_duration": fmt_hms(duration_ms),
+            }))
+        }
+
+        "album_info" => {
+            let album = req_str(args, "album")?;
+            let artist = arg_str(args, "artist");
+            let lib = Library::open()?;
+            let (tracks, duration_ms, year) = lib.album_summary(artist, album)?;
+            Ok(json!({
+                "album": album,
+                "artist": artist,
+                "tracks": tracks,
+                "year": year,
+                "total_duration_ms": duration_ms,
+                "total_duration": fmt_hms(duration_ms),
+            }))
+        }
+
+        "get_top" => {
+            let kind = req_str(args, "kind")?;
+            let days = arg_i64(args, "days").unwrap_or(30).clamp(1, 36500);
+            let limit = arg_i64(args, "limit").unwrap_or(10).clamp(1, 100) as usize;
+            let since = crate::core::sync::now_unix() as i64 - days * 86_400;
+            let lib = Library::open()?;
+            let entries = match kind {
+                "tracks" => lib.stats_top_tracks(since, limit)?,
+                "albums" => lib.stats_top_albums(since, limit)?,
+                "artists" => lib.stats_top_artists(since, limit)?,
+                "genres" => lib.stats_top_genres(since, limit)?,
+                other => {
+                    return Err(anyhow!(
+                        "unknown top kind '{other}' (use tracks|albums|artists|genres)"
+                    ))
+                }
+            };
+            let items: Vec<Value> = entries
+                .iter()
+                .map(|e| {
+                    json!({
+                        "name": e.name,
+                        "detail": e.detail,
+                        "plays": e.plays,
+                        "played_ms": e.played_ms,
+                        "played": fmt_hms(e.played_ms),
+                    })
+                })
+                .collect();
+            Ok(json!({ "kind": kind, "since_days": days, "items": items }))
+        }
+
+        "list_podcasts" => {
+            let lib = Library::open()?;
+            let items: Vec<Value> = lib
+                .podcasts()?
+                .into_iter()
+                .map(|(id, title, image_url, episodes)| {
+                    json!({ "id": id, "title": title, "image_url": image_url, "episodes": episodes })
+                })
+                .collect();
+            Ok(json!({ "podcasts": items }))
+        }
+
+        "list_episodes" => {
+            let podcast_id = arg_i64(args, "podcast_id")
+                .ok_or_else(|| anyhow!("missing required integer argument 'podcast_id'"))?;
+            let limit = arg_i64(args, "limit").unwrap_or(50).clamp(1, 500) as usize;
+            let lib = Library::open()?;
+            let all = lib.episodes(podcast_id)?;
+            let total = all.len();
+            let items: Vec<Value> = all
+                .into_iter()
+                .take(limit)
+                .map(|e| {
+                    json!({
+                        "title": e.title,
+                        "url": e.audio_url,
+                        "published": e.published,
+                        "duration": e.duration,
+                    })
+                })
+                .collect();
+            let truncated = total > items.len();
+            Ok(json!({ "episodes": items, "total": total, "truncated": truncated }))
+        }
+
+        "list_memos" => {
+            let lib = Library::open()?;
+            let items: Vec<Value> = lib
+                .memos()?
+                .into_iter()
+                .map(|m| {
+                    json!({
+                        "id": m.id,
+                        "title": m.title,
+                        "path": m.path,
+                        "recorded_at": m.recorded_at,
+                        "duration_ms": m.duration_ms,
+                        "duration": fmt_hms(m.duration_ms),
+                    })
+                })
+                .collect();
+            Ok(json!({ "memos": items }))
+        }
+
+        "list_youtube" => {
+            let limit = arg_i64(args, "limit").unwrap_or(30).clamp(1, 200) as usize;
+            let lib = Library::open()?;
+            let items: Vec<Value> = lib
+                .recent_videos(limit)?
+                .into_iter()
+                .map(|v| {
+                    // Videos carry their own duration; playlists a summed runtime.
+                    let secs = v.duration.or(v.total_duration).unwrap_or(0);
+                    json!({
+                        "id": v.video_id,
+                        "title": v.title,
+                        "artist": v.artist,
+                        "kind": v.kind,
+                        "count": v.count,
+                        "duration_s": v.duration,
+                        "total_duration_s": v.total_duration,
+                        "duration": fmt_hms(secs * 1000),
+                    })
+                })
+                .collect();
+            Ok(json!({ "youtube": items }))
         }
 
         // --- playback control (forwarded to the UI) --------------------------
@@ -262,6 +478,39 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let path = req_str(args, "path")?.to_string();
             (ctx.control)(McpCommand::PlayTrack(path));
             Ok(json!({ "ok": true }))
+        }
+
+        "play_episode" => {
+            let url = req_str(args, "url")?.to_string();
+            let title = arg_str(args, "title")
+                .unwrap_or("Podcast episode")
+                .to_string();
+            (ctx.control)(McpCommand::PlayEpisode { url, title });
+            Ok(json!({ "ok": true }))
+        }
+
+        "play_memo" => {
+            let path = req_str(args, "path")?.to_string();
+            (ctx.control)(McpCommand::PlayMemo(path));
+            Ok(json!({ "ok": true }))
+        }
+
+        "play_youtube" => {
+            let raw = req_str(args, "id")?;
+            // Accept a full watch URL as well as a bare video id.
+            let video_id =
+                crate::core::youtube::video_id_from_url(raw).unwrap_or_else(|| raw.to_string());
+            let title = match arg_str(args, "title") {
+                Some(t) => t.to_string(),
+                None => Library::open()?
+                    .yt_title(&video_id)?
+                    .unwrap_or_else(|| "YouTube".to_string()),
+            };
+            (ctx.control)(McpCommand::PlayYoutube {
+                video_id: video_id.clone(),
+                title,
+            });
+            Ok(json!({ "ok": true, "video_id": video_id }))
         }
 
         "set_sleep_timer" => {
@@ -308,6 +557,141 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             Ok(json!({ "favorite": now_on }))
         }
 
+        // --- playlist actions (routed through the UI so it stays in sync) ----
+        "play_playlist" => {
+            let id = req_i64(args, "playlist_id")?;
+            let shuffle = args
+                .get("shuffle")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            (ctx.control)(McpCommand::PlayPlaylist { id, shuffle });
+            Ok(json!({ "ok": true }))
+        }
+
+        "rename_playlist" => {
+            let id = req_i64(args, "playlist_id")?;
+            let name = req_str(args, "name")?.to_string();
+            (ctx.control)(McpCommand::RenamePlaylist { id, name });
+            Ok(json!({ "ok": true }))
+        }
+
+        "delete_playlist" => {
+            let id = req_i64(args, "playlist_id")?;
+            require_confirm(args)?;
+            (ctx.control)(McpCommand::DeletePlaylist(id));
+            Ok(json!({ "ok": true, "deleted": id }))
+        }
+
+        "set_playlist_cover" => {
+            let id = req_i64(args, "playlist_id")?;
+            let path = req_str(args, "path")?.to_string();
+            (ctx.control)(McpCommand::SetPlaylistCover { id, path });
+            Ok(json!({ "ok": true }))
+        }
+
+        // --- queue / item actions -------------------------------------------
+        "enqueue" => {
+            let paths: Vec<String> = args
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if paths.is_empty() {
+                return Err(anyhow!("'paths' must be a non-empty array of track paths"));
+            }
+            let n = paths.len();
+            (ctx.control)(McpCommand::Enqueue(paths));
+            Ok(json!({ "ok": true, "enqueued": n }))
+        }
+
+        "toggle_episode" => {
+            let url = req_str(args, "url")?.to_string();
+            let title = arg_str(args, "title")
+                .unwrap_or("Podcast episode")
+                .to_string();
+            (ctx.control)(McpCommand::ToggleEpisodeListened { url, title });
+            Ok(json!({ "ok": true }))
+        }
+
+        "delete_memo" => {
+            let id = req_i64(args, "memo_id")?;
+            require_confirm(args)?;
+            (ctx.control)(McpCommand::DeleteMemo(id));
+            Ok(json!({ "ok": true, "deleted": id }))
+        }
+
+        "delete_recording" => {
+            let id = req_i64(args, "recording_id")?;
+            require_confirm(args)?;
+            (ctx.control)(McpCommand::DeleteRecording(id));
+            Ok(json!({ "ok": true, "deleted": id }))
+        }
+
+        "set_album_cover" => {
+            let artist = req_str(args, "artist")?.to_string();
+            let album = req_str(args, "album")?.to_string();
+            let path = req_str(args, "path")?.to_string();
+            (ctx.control)(McpCommand::SetAlbumCover {
+                artist,
+                album,
+                path,
+            });
+            Ok(json!({ "ok": true }))
+        }
+
+        "set_artist_image" => {
+            let name = req_str(args, "name")?.to_string();
+            let path = req_str(args, "path")?.to_string();
+            (ctx.control)(McpCommand::SetArtistImage { name, path });
+            Ok(json!({ "ok": true }))
+        }
+
+        "set_properties" => {
+            let scope = req_str(args, "scope")?;
+            if !matches!(scope, "track" | "album" | "artist") {
+                return Err(anyhow!("scope must be one of: track, album, artist"));
+            }
+            let key = req_str(args, "key")?.to_string();
+            // Comma-separated area list (empty = hidden). Unknown areas are
+            // dropped by the UI's own parser.
+            let value: String = args
+                .get("areas")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            (ctx.control)(McpCommand::SetAreas {
+                scope: scope.to_string(),
+                key,
+                value,
+            });
+            Ok(json!({ "ok": true }))
+        }
+
+        "set_album_kind" => {
+            let album = req_str(args, "album")?;
+            let kind_str = req_str(args, "kind")?;
+            let lib = Library::open()?;
+            if kind_str == "auto" {
+                lib.clear_album_kind(album)?;
+                Ok(json!({ "ok": true, "album": album, "kind": "auto" }))
+            } else {
+                let kind = crate::model::AlbumKind::from_str(kind_str).ok_or_else(|| {
+                    anyhow!("kind must be one of: album, single, compilation, auto")
+                })?;
+                lib.set_album_kind(album, kind)?;
+                Ok(json!({ "ok": true, "album": album, "kind": kind.as_str() }))
+            }
+        }
+
         other => Err(anyhow!("unknown tool '{other}'")),
     }
 }
@@ -344,9 +728,15 @@ pub fn tool_list() -> Value {
         },
         {
             "name": "list_albums",
-            "description": "List albums; optionally only those of a given artist.",
+            "description": "List albums, each with its release year (the earliest tagged track year). Optionally narrow by `artist` and/or an inclusive `year_from`/`year_to` range. Set `kind` to 'single' or 'compilation' (or 'album' for regular albums) to use the album-type classification — compilations are merged per name and carry a `tracks` count. Returns at most `limit` (default 100); the response carries the full `total` and a `truncated` flag.",
             "inputSchema": obj(
-                json!({ "artist": { "type": "string", "description": "Restrict to this artist (optional)." } }),
+                json!({
+                    "artist": { "type": "string", "description": "Restrict to this exact artist (optional; ignored when `kind` is set)." },
+                    "kind": { "type": "string", "enum": ["album", "single", "compilation"], "description": "Album-type classification (optional)." },
+                    "year_from": { "type": "integer", "description": "Earliest release year, inclusive (optional)." },
+                    "year_to": { "type": "integer", "description": "Latest release year, inclusive (optional)." },
+                    "limit": { "type": "integer", "description": "Max albums returned (default 100).", "minimum": 1, "maximum": 1000 },
+                }),
                 json!([]),
             ),
         },
@@ -368,6 +758,71 @@ pub fn tool_list() -> Value {
             "description": "Aggregated listening statistics over the last N days (default 30).",
             "inputSchema": obj(
                 json!({ "days": { "type": "integer", "description": "Look-back window in days.", "minimum": 1 } }),
+                json!([]),
+            ),
+        },
+        {
+            "name": "library_overview",
+            "description": "Whole-library inventory: counts and total runtime for tracks/artists/albums, playlists, podcasts & episodes, memos, and YouTube. Durations are given as raw `*_ms` and a human-readable string.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "artist_info",
+            "description": "Tallies for one artist: number of albums and songs, plus total track runtime. Counts collaborations (\"feat.\") toward the named artist.",
+            "inputSchema": obj(
+                json!({ "name": { "type": "string", "description": "Artist name (case-insensitive)." } }),
+                json!(["name"]),
+            ),
+        },
+        {
+            "name": "album_info",
+            "description": "Tallies for one album: track count, total runtime, and release year. Pass `artist` to disambiguate an album name shared by several artists.",
+            "inputSchema": obj(
+                json!({
+                    "album": { "type": "string", "description": "Album name (case-insensitive)." },
+                    "artist": { "type": "string", "description": "Restrict to this artist (optional)." },
+                }),
+                json!(["album"]),
+            ),
+        },
+        {
+            "name": "get_top",
+            "description": "Top-played rankings from the listening history over the last N days (default 30): most-played tracks, albums, artists, or genres.",
+            "inputSchema": obj(
+                json!({
+                    "kind": { "type": "string", "enum": ["tracks", "albums", "artists", "genres"] },
+                    "days": { "type": "integer", "description": "Look-back window in days (default 30).", "minimum": 1 },
+                    "limit": { "type": "integer", "description": "Max entries (default 10).", "minimum": 1, "maximum": 100 },
+                }),
+                json!(["kind"]),
+            ),
+        },
+        {
+            "name": "list_podcasts",
+            "description": "List subscribed podcasts with their episode counts. Use the returned `id` with `list_episodes`.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "list_episodes",
+            "description": "List a podcast's episodes (newest first) by its `podcast_id` (from `list_podcasts`). Each carries a `url` usable to play it. Returns at most `limit` (default 50) with `total`/`truncated`.",
+            "inputSchema": obj(
+                json!({
+                    "podcast_id": { "type": "integer", "description": "Podcast id from list_podcasts." },
+                    "limit": { "type": "integer", "description": "Max episodes (default 50).", "minimum": 1, "maximum": 500 },
+                }),
+                json!(["podcast_id"]),
+            ),
+        },
+        {
+            "name": "list_memos",
+            "description": "List voice memos / recordings with their playback length.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "list_youtube",
+            "description": "List recently played YouTube videos and playlists (the library's YouTube 'Recently' list), with cached runtime.",
+            "inputSchema": obj(
+                json!({ "limit": { "type": "integer", "description": "Max entries (default 30).", "minimum": 1, "maximum": 200 } }),
                 json!([]),
             ),
         },
@@ -415,6 +870,36 @@ pub fn tool_list() -> Value {
             ),
         },
         {
+            "name": "play_episode",
+            "description": "Play a podcast episode by its audio URL (from list_episodes); resumes at the remembered position.",
+            "inputSchema": obj(
+                json!({
+                    "url": { "type": "string", "description": "Episode audio URL (the `url` field from list_episodes)." },
+                    "title": { "type": "string", "description": "Display title (optional)." },
+                }),
+                json!(["url"]),
+            ),
+        },
+        {
+            "name": "play_memo",
+            "description": "Play a voice memo / recording by its file path (from list_memos).",
+            "inputSchema": obj(
+                json!({ "path": { "type": "string", "description": "Memo file path (the `path` field from list_memos)." } }),
+                json!(["path"]),
+            ),
+        },
+        {
+            "name": "play_youtube",
+            "description": "Play a YouTube video by its id or watch URL (from list_youtube). Resolves a fresh audio stream.",
+            "inputSchema": obj(
+                json!({
+                    "id": { "type": "string", "description": "YouTube video id or watch URL." },
+                    "title": { "type": "string", "description": "Display title (optional; looked up if omitted)." },
+                }),
+                json!(["id"]),
+            ),
+        },
+        {
             "name": "set_sleep_timer",
             "description": "Arm the sleep timer for N minutes; 0 turns it off.",
             "inputSchema": obj(
@@ -451,6 +936,139 @@ pub fn tool_list() -> Value {
                     "title": { "type": "string", "description": "Display name (optional)." },
                 }),
                 json!(["scope", "key"]),
+            ),
+        },
+        {
+            "name": "play_playlist",
+            "description": "Play a playlist by its id (from list_playlists), optionally shuffled.",
+            "inputSchema": obj(
+                json!({
+                    "playlist_id": { "type": "integer", "description": "Playlist id." },
+                    "shuffle": { "type": "boolean", "description": "Shuffle playback (default false)." },
+                }),
+                json!(["playlist_id"]),
+            ),
+        },
+        {
+            "name": "rename_playlist",
+            "description": "Rename a playlist.",
+            "inputSchema": obj(
+                json!({
+                    "playlist_id": { "type": "integer", "description": "Playlist id." },
+                    "name": { "type": "string", "description": "New name." },
+                }),
+                json!(["playlist_id", "name"]),
+            ),
+        },
+        {
+            "name": "delete_playlist",
+            "description": "Delete a playlist. Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "playlist_id": { "type": "integer", "description": "Playlist id." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually delete." },
+                }),
+                json!(["playlist_id", "confirm"]),
+            ),
+        },
+        {
+            "name": "set_playlist_cover",
+            "description": "Set a playlist's cover image from a local file path.",
+            "inputSchema": obj(
+                json!({
+                    "playlist_id": { "type": "integer", "description": "Playlist id." },
+                    "path": { "type": "string", "description": "Image file path." },
+                }),
+                json!(["playlist_id", "path"]),
+            ),
+        },
+        {
+            "name": "enqueue",
+            "description": "Append tracks (by library path) to the play-next queue, without interrupting playback.",
+            "inputSchema": obj(
+                json!({
+                    "paths": { "type": "array", "items": { "type": "string" }, "description": "Track paths to enqueue." },
+                }),
+                json!(["paths"]),
+            ),
+        },
+        {
+            "name": "toggle_episode",
+            "description": "Toggle a podcast episode's listened/unlistened state (by its audio URL).",
+            "inputSchema": obj(
+                json!({
+                    "url": { "type": "string", "description": "Episode audio URL." },
+                    "title": { "type": "string", "description": "Display title (optional)." },
+                }),
+                json!(["url"]),
+            ),
+        },
+        {
+            "name": "delete_memo",
+            "description": "Delete a voice memo by id (from list_memos). Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "memo_id": { "type": "integer", "description": "Memo id." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually delete." },
+                }),
+                json!(["memo_id", "confirm"]),
+            ),
+        },
+        {
+            "name": "delete_recording",
+            "description": "Delete a stream recording by id. Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "recording_id": { "type": "integer", "description": "Recording id." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually delete." },
+                }),
+                json!(["recording_id", "confirm"]),
+            ),
+        },
+        {
+            "name": "set_album_cover",
+            "description": "Set an album's cover image from a local file path.",
+            "inputSchema": obj(
+                json!({
+                    "artist": { "type": "string", "description": "Album artist." },
+                    "album": { "type": "string", "description": "Album name." },
+                    "path": { "type": "string", "description": "Image file path." },
+                }),
+                json!(["artist", "album", "path"]),
+            ),
+        },
+        {
+            "name": "set_artist_image",
+            "description": "Set an artist's photo from a local file path.",
+            "inputSchema": obj(
+                json!({
+                    "name": { "type": "string", "description": "Artist name." },
+                    "path": { "type": "string", "description": "Image file path." },
+                }),
+                json!(["name", "path"]),
+            ),
+        },
+        {
+            "name": "set_properties",
+            "description": "Set the library areas an item appears in (its properties). `scope` ∈ {track, album, artist}; `key` is the track path, the artist\\u0001album key, or the artist name. `areas` is the list of areas to show it in (from: filesystem, artists, albums, concerts, audiobooks); an empty list hides it.",
+            "inputSchema": obj(
+                json!({
+                    "scope": { "type": "string", "enum": ["track", "album", "artist"] },
+                    "key": { "type": "string", "description": "Item key (path | artist\\u0001album | artist name)." },
+                    "areas": { "type": "array", "items": { "type": "string", "enum": ["filesystem", "artists", "albums", "concerts", "audiobooks"] } },
+                }),
+                json!(["scope", "key", "areas"]),
+            ),
+        },
+        {
+            "name": "set_album_kind",
+            "description": "Override an album's classification as 'single', 'compilation' or 'album' (or 'auto' to revert to the heuristic). Matches by album name (case-insensitive); affects list_albums with `kind`.",
+            "inputSchema": obj(
+                json!({
+                    "album": { "type": "string", "description": "Album name." },
+                    "kind": { "type": "string", "enum": ["album", "single", "compilation", "auto"] },
+                }),
+                json!(["album", "kind"]),
             ),
         },
     ])

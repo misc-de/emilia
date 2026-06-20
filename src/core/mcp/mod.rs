@@ -30,6 +30,28 @@ pub use state::{new_handle, NowPlayingHandle};
 /// Preferred TCP port (next to the sync server's 8765).
 pub const PORT: u16 = 8770;
 
+/// Binds a TCP listener with `SO_REUSEADDR` set. Without it, a freshly
+/// restarted Emilia would find its previous port still lingering in `TIME_WAIT`
+/// and skip to the next one (8770 → 8771 → …), leaving the configured MCP
+/// client pointing at the wrong port. `SO_REUSEADDR` lets the restart reclaim
+/// the *same* port immediately, so it stays deterministic across restarts.
+pub fn bind_reuse(ip: &str, port: u16) -> std::io::Result<std::net::TcpListener> {
+    use socket2::{Domain, Socket, Type};
+    let addr: std::net::SocketAddr = format!("{ip}:{port}")
+        .parse()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let domain = if addr.is_ipv6() {
+        Domain::IPV6
+    } else {
+        Domain::IPV4
+    };
+    let sock = Socket::new(domain, Type::STREAM, None)?;
+    sock.set_reuse_address(true)?;
+    sock.bind(&addr.into())?;
+    sock.listen(128)?;
+    Ok(sock.into())
+}
+
 /// Which MCP backend (if any) serves requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum McpMode {
