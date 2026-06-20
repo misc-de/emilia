@@ -21,10 +21,12 @@ use serde::Deserialize;
 use crate::core::cover;
 use crate::core::db::Library;
 use crate::core::fingerprint;
+use crate::core::net;
 use crate::model::{AlbumMeta, ArtistMeta, TrackMeta};
 
-/// MusicBrainz requires a meaningful User-Agent with contact info.
-const USER_AGENT: &str = "Emilia/0.1.38 ( https://cais.de )";
+/// MusicBrainz requires a meaningful User-Agent with contact info. The version
+/// is taken from the crate so it never drifts out of date.
+const USER_AGENT: &str = concat!("Emilia/", env!("CARGO_PKG_VERSION"), " ( https://cais.de )");
 
 /// MusicBrainz policy: at most one request per second.
 pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
@@ -147,7 +149,7 @@ impl OnlineClient {
         );
 
         let search: MbSearch = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
 
@@ -217,7 +219,7 @@ impl OnlineClient {
             percent_encode(name)
         );
         let search: DzSearch = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
         let Some(artist) = search.data.into_iter().next() else {
@@ -272,7 +274,7 @@ impl OnlineClient {
                 url.push_str(&format!("&album_name={}", percent_encode(al)));
             }
             if let Some(resp) = self.call_get(&url)? {
-                let r: LrcLibItem = resp.into_json()?;
+                let r: LrcLibItem = net::json_capped(resp, net::MAX_JSON_BYTES)?;
                 let lyr = Lyrics::from_parts(r.plain_lyrics, r.synced_lyrics);
                 if lyr.has_any() {
                     return Ok(Some(lyr));
@@ -291,7 +293,7 @@ impl OnlineClient {
             percent_encode(title)
         );
         let hits: Vec<LrcLibItem> = match self.call_get(&url)? {
-            Some(resp) => resp.into_json().unwrap_or_default(),
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES).unwrap_or_default(),
             None => return Ok(None),
         };
         let has_synced = |h: &&LrcLibItem| {
@@ -358,7 +360,7 @@ impl OnlineClient {
             percent_encode(&q)
         );
         let search: DzTrackSearch = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
         let Some(album) = search.data.into_iter().next().and_then(|t| t.album) else {
@@ -379,7 +381,7 @@ impl OnlineClient {
     pub fn fetch_album_gallery(&self, mbid: &str) -> Result<Vec<(Vec<u8>, String)>> {
         let url = format!("https://coverartarchive.org/release/{mbid}");
         let list: CaaList = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(Vec::new()),
         };
         let mut out = Vec::new();
@@ -408,7 +410,7 @@ impl OnlineClient {
             percent_encode(&query)
         );
         let search: MbArtistSearch = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
         Ok(search
@@ -427,7 +429,7 @@ impl OnlineClient {
     ) -> Result<Vec<(Vec<u8>, String)>> {
         let url = format!("https://webservice.fanart.tv/v3/music/{mbid}?api_key={api_key}");
         let fa: FanartArtist = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(Vec::new()),
         };
         let mut out = Vec::new();
@@ -459,7 +461,7 @@ impl OnlineClient {
             percent_encode(&fp.fingerprint),
         );
         let resp: AcoustIdResp = match self.call_get(&url)? {
-            Some(resp) => resp.into_json()?,
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
 
