@@ -2609,3 +2609,11 @@ msgstr ""
 #: src/ui/yt_page.rs:2774
 msgid "Could not load playlist"
 msgstr ""
+
+#: src/ui/app_views_handlers.rs
+msgid "Choose a version"
+msgstr ""
+
+#: src/ui/app_views_handlers.rs
+msgid "Pick the version of “{title}” to add"
+msgstr ""

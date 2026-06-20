@@ -69,6 +69,23 @@ impl App {
         info_group.add(&expander);
         content.append(&info_group);
 
+        // Assistant — opens an AI chat scoped to this object.
+        let asst_group = adw::PreferencesGroup::new();
+        let asst_row = adw::ActionRow::builder()
+            .title(gettext("Assistant"))
+            .subtitle(gettext("Ask the AI to do something with this"))
+            .activatable(true)
+            .build();
+        asst_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+        {
+            let sender = sender.clone();
+            asst_row.connect_activated(move |_| {
+                sender.input(Msg::OpenAssistantChat);
+            });
+        }
+        asst_group.add(&asst_row);
+        content.append(&asst_group);
+
         // Lyrics – expandable pulldown below the info (like the properties).
         // Source priority: embedded tags → DB cache (filled while playing). When
         // nothing is available yet, the pulldown starts hidden and an LRCLIB

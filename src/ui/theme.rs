@@ -262,6 +262,20 @@ impl ThemeState {
             ));
         }
 
+        // ---- Record (rec) icons: darker red on the light theme ----
+        // The record dot uses libadwaita's `@error_color`, which on the *light*
+        // theme is a fairly bright red (Adwaita red 4, #c01c28) that the user
+        // finds too light. Override it one palette step darker (red 5, #a51d2d)
+        // here at PRIORITY_USER. Only on light: the dark theme's lighter error red
+        // is the right contrast against a dark background, so leave it. Re-built on
+        // every light/dark flip (this CSS is reapplied via `ReloadDesign`), so the
+        // override tracks the current scheme.
+        if !adw::StyleManager::default().is_dark() {
+            css.push_str(
+                "button.emilia-record-dot image, image.emilia-record-dot { color: #a51d2d; }",
+            );
+        }
+
         // ---- Text color ----
         // Also override `sidebar_fg_color` (the sidebar/main-nav text uses that,
         // not `window_fg_color`) and color the list section headings explicitly.
@@ -305,19 +319,29 @@ impl ThemeState {
                  label.emilia-list-section {{ background-color: transparent; }}\
                  windowcontrols button, button.titlebutton {{ background-color: transparent; }}"
             ));
-            // Same background as the main window for in-window modals
-            // (AdwDialog / AdwAlertDialog): make the dialog surface itself fully
-            // transparent so the background Picture *behind* it shows through,
-            // exactly like the main view. The chrome inside the dialog (rows,
-            // entries, headerbars) is already tinted by the rules above, so a
-            // modal ends up looking identical to the main window — not a more
-            // opaque field-colored panel as before. Real top-level dialog
-            // *windows* (file/color choosers) have no Picture behind them, so
+            // In-window modals (AdwDialog / AdwAlertDialog / AdwPreferencesDialog).
+            // A fully transparent dialog let the *main view* behind it show through
+            // (the background Picture is a child of the window, but so is the whole
+            // content area — so a see-through modal exposed the lists/info beneath
+            // it, which is confusing). Instead give the modal its own solid,
+            // app-tinted surface so the content behind it is covered, while it still
+            // matches the app's look (chrome rows/entries/headerbars inside are
+            // tinted by the rules above; the field colour is the same one used for
+            // entries/rows). The solid surface libadwaita draws lives on the inner
+            // `sheet` node (an AdwGizmo wrapped in floating-sheet/bottom-sheet), not
+            // on the outer `dialog` node — and `dialog` carries no `.background`
+            // class, so we target `sheet` directly. The outer `dialog`/`.dialog`
+            // node stays transparent so the rounded sheet isn't backed by a solid
+            // rectangle and the dimming/Picture around it shows. Our provider loads
+            // at PRIORITY_USER (above the theme), so this wins, and `sheet`'s own
+            // shadow/radius/outline are untouched. Real top-level dialog *windows*
+            // (file/color choosers) are GtkWindows with no `sheet` node, so
             // `window.dialog` keeps a solid background. (Popovers stay opaque.)
-            css.push_str(
-                "dialog, .dialog { background-color: transparent; background-image: none; }\
-                 window.dialog { background-color: @window_bg_color; }",
-            );
+            css.push_str(&format!(
+                "dialog, .dialog {{ background-color: transparent; background-image: none; }}\
+                 sheet {{ background-color: {field}; background-image: none; }}\
+                 window.dialog {{ background-color: @window_bg_color; }}",
+            ));
             // The tray media popup carries its own blurred background Picture, so
             // make its window transparent to let it show (the content floats over
             // it like the main window, tinted by the shared scrim).

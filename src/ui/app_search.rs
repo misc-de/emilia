@@ -3,6 +3,7 @@
 
 use crate::core::db::Library;
 use crate::i18n::gettext;
+use crate::model::AlbumHit;
 use crate::ui::app::{App, Msg};
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -110,37 +111,51 @@ impl App {
                 results.append(&group);
             }
 
-            // --- Albums ---
-            if !res.albums.is_empty() {
-                let group = adw::PreferencesGroup::builder()
-                    .title(format!("{} ({})", gettext("Albums"), res.albums.len()))
-                    .build();
-                for a in &res.albums {
-                    let mut sub = a.artist.clone();
-                    if let Some(y) = a.year {
-                        sub = if sub.trim().is_empty() {
-                            y.to_string()
-                        } else {
-                            format!("{sub} · {y}")
-                        };
-                    }
-                    let row = adw::ActionRow::builder()
-                        .title(gtk::glib::markup_escape_text(&a.album))
-                        .subtitle(gtk::glib::markup_escape_text(&sub))
-                        .activatable(true)
-                        .build();
-                    row.add_prefix(&gtk::Image::from_icon_name("media-optical-symbolic"));
-                    let sender = sender.clone();
-                    let dlg = dlg.clone();
-                    let album = a.album.clone();
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::SearchOpenAlbum(album.clone()));
-                        dlg.close();
-                    });
-                    group.add(&row);
-                }
-                results.append(&group);
-            }
+            // Album-like categories — same row layout, one heading each, in the
+            // navigation's order. Every hit opens by album name
+            // (`SearchOpenAlbum`), which renders the right track list for each
+            // kind: singles/compilations open exactly like albums, concerts/
+            // audiobooks open their album's tracks. Icons match the nav sections.
+            add_album_group(
+                &results,
+                &gettext("Albums"),
+                "media-optical-symbolic",
+                &res.albums,
+                &sender,
+                &dlg,
+            );
+            add_album_group(
+                &results,
+                &gettext("Singles"),
+                "audio-x-generic-symbolic",
+                &res.singles,
+                &sender,
+                &dlg,
+            );
+            add_album_group(
+                &results,
+                &gettext("Compilations"),
+                "view-grid-symbolic",
+                &res.compilations,
+                &sender,
+                &dlg,
+            );
+            add_album_group(
+                &results,
+                &gettext("Concerts"),
+                "ticket-special-symbolic",
+                &res.concerts,
+                &sender,
+                &dlg,
+            );
+            add_album_group(
+                &results,
+                &gettext("Audiobooks"),
+                "emilia-audiobook-symbolic",
+                &res.audiobooks,
+                &sender,
+                &dlg,
+            );
 
             // --- Songs ---
             if !res.songs.is_empty() {
@@ -246,6 +261,52 @@ impl App {
         dialog.present(Some(root));
         entry.grab_focus();
     }
+}
+
+/// Appends one album-like result group (Albums / Singles / Compilations /
+/// Concerts / Audiobooks) with `label`, `icon` and a row per hit. Nothing is
+/// added for an empty group. Activating a row opens the album's track list and
+/// closes the dialog. Shared by all album-kind categories — they differ only in
+/// heading and icon, never in how a hit is opened.
+fn add_album_group(
+    results: &gtk::Box,
+    label: &str,
+    icon: &str,
+    hits: &[AlbumHit],
+    sender: &ComponentSender<App>,
+    dlg: &adw::Dialog,
+) {
+    if hits.is_empty() {
+        return;
+    }
+    let group = adw::PreferencesGroup::builder()
+        .title(format!("{label} ({})", hits.len()))
+        .build();
+    for a in hits {
+        let mut sub = a.artist.clone();
+        if let Some(y) = a.year {
+            sub = if sub.trim().is_empty() {
+                y.to_string()
+            } else {
+                format!("{sub} · {y}")
+            };
+        }
+        let row = adw::ActionRow::builder()
+            .title(gtk::glib::markup_escape_text(&a.album))
+            .subtitle(gtk::glib::markup_escape_text(&sub))
+            .activatable(true)
+            .build();
+        row.add_prefix(&gtk::Image::from_icon_name(icon));
+        let sender = sender.clone();
+        let dlg = dlg.clone();
+        let album = a.album.clone();
+        row.connect_activated(move |_| {
+            sender.input(Msg::SearchOpenAlbum(album.clone()));
+            dlg.close();
+        });
+        group.add(&row);
+    }
+    results.append(&group);
 }
 
 /// The idle/empty hint shown in the search dialog before anything is typed.

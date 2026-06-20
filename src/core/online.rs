@@ -491,6 +491,31 @@ impl OnlineClient {
         Ok(out)
     }
 
+    /// Lists fanart.tv artist-image **URLs** (thumbs then backgrounds) *without*
+    /// downloading them — for offering image candidates to pick from, where the
+    /// full byte fetch of [`fetch_artist_gallery`] would be wasteful. Capped at
+    /// `limit` (and the gallery ceiling). Needs the (free) personal API key.
+    pub fn artist_gallery_urls(
+        &self,
+        api_key: &str,
+        mbid: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let url = format!("https://webservice.fanart.tv/v3/music/{mbid}?api_key={api_key}");
+        let fa: FanartArtist = match self.call_get(&url)? {
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
+            None => return Ok(Vec::new()),
+        };
+        Ok(fa
+            .artistthumb
+            .into_iter()
+            .chain(fa.artistbackground)
+            .map(|t| t.url)
+            .filter(|u| !u.is_empty())
+            .take(limit.min(MAX_GALLERY))
+            .collect())
+    }
+
     /// Queries AcoustID with a Chromaprint fingerprint and returns the best
     /// match (recording incl. artist/album, where available).
     pub fn acoustid_lookup(

@@ -210,11 +210,26 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let limit = arg_i64(args, "limit").unwrap_or(20).clamp(1, 200) as usize;
             let lib = Library::open()?;
             let r = lib.search_library(query, limit)?;
+            // The library splits album-like hits into categories (album / single /
+            // compilation / concert / audiobook). Re-merge them into one "albums"
+            // list, tagging each with its `category`, so a caller still finds every
+            // album-like hit in one place while learning what kind it is.
+            let tag =
+                |hits: &[crate::model::AlbumHit], cat: &str| -> Vec<Value> {
+                    hits.iter()
+                    .map(|a| json!({
+                        "album": a.album, "artist": a.artist, "year": a.year, "category": cat,
+                    }))
+                    .collect()
+                };
+            let mut albums = tag(&r.albums, "album");
+            albums.extend(tag(&r.singles, "single"));
+            albums.extend(tag(&r.compilations, "compilation"));
+            albums.extend(tag(&r.concerts, "concert"));
+            albums.extend(tag(&r.audiobooks, "audiobook"));
             Ok(json!({
                 "artists": r.artists,
-                "albums": r.albums.iter().map(|a| json!({
-                    "album": a.album, "artist": a.artist, "year": a.year,
-                })).collect::<Vec<_>>(),
+                "albums": albums,
                 "songs": r.songs.iter().map(|s| json!({
                     "path": s.path, "title": s.title, "artist": s.artist, "album": s.album,
                 })).collect::<Vec<_>>(),
@@ -705,6 +720,45 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let path = req_str(args, "path")?.to_string();
             (ctx.control)(McpCommand::SetArtistImage { name, path });
             Ok(json!({ "ok": true }))
+        }
+
+        "list_artist_image_candidates" => {
+            let artist = req_str(args, "artist")?;
+            let limit = arg_i64(args, "limit").unwrap_or(5).clamp(1, 8) as usize;
+            // Needs the user's (free) fanart.tv key — read from the per-request
+            // library, same as the enrichment UI path.
+            let key = Library::open()?
+                .get_secret_setting("fanart_key")
+                .ok()
+                .flatten()
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    anyhow!("no fanart.tv API key configured — set one in the enrichment settings to look up artist images")
+                })?;
+            let client = crate::core::online::OnlineClient::new();
+            let mbid = client
+                .artist_mbid(artist)?
+                .ok_or_else(|| anyhow!("no MusicBrainz match for artist '{artist}'"))?;
+            let images = client.artist_gallery_urls(&key, &mbid, limit)?;
+            Ok(json!({ "artist": artist, "count": images.len(), "images": images }))
+        }
+
+        "enrich_artist_images" => {
+            let artist = req_str(args, "artist")?.to_string();
+            let lib = Library::open()?;
+            let key = lib
+                .get_secret_setting("fanart_key")
+                .ok()
+                .flatten()
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    anyhow!("no fanart.tv API key configured — set one in the enrichment settings to fetch artist images")
+                })?;
+            let client = crate::core::online::OnlineClient::new();
+            // Same path the enrichment UI uses: MBID → fanart gallery → store
+            // (replacing any previously fetched gallery for this artist).
+            let added = crate::core::online::enrich_artist_gallery(&client, &lib, &artist, &key);
+            Ok(json!({ "artist": artist, "added": added }))
         }
 
         "set_properties" => {
@@ -1242,6 +1296,27 @@ pub fn tool_list() -> Value {
                     "path": { "type": "string", "description": "Image file path." },
                 }),
                 json!(["name", "path"]),
+            ),
+        },
+        {
+            "name": "list_artist_image_candidates",
+            "description": "Find additional photo candidates for an artist on fanart.tv (matched via MusicBrainz). Returns a list of image URLs to choose from — does not download or set them. Requires a configured fanart.tv API key.",
+            "inputSchema": obj(
+                json!({
+                    "artist": { "type": "string", "description": "Artist name." },
+                    "limit": { "type": "integer", "description": "Max candidates to return (default 5, max 8).", "minimum": 1, "maximum": 8 },
+                }),
+                json!(["artist"]),
+            ),
+        },
+        {
+            "name": "enrich_artist_images",
+            "description": "Fetch an artist's photo gallery from fanart.tv (matched via MusicBrainz) and store it as the artist's image gallery on the detail view, replacing any previously fetched gallery. Returns how many images were added. Requires a configured fanart.tv API key. Use list_artist_image_candidates first if the user should preview the photos before saving.",
+            "inputSchema": obj(
+                json!({
+                    "artist": { "type": "string", "description": "Artist name." },
+                }),
+                json!(["artist"]),
             ),
         },
         {

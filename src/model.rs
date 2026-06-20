@@ -431,10 +431,21 @@ pub struct AlbumHit {
 /// recordings and voice memos. Streaming stations and YouTube channels/videos
 /// are deliberately excluded – they have their own dedicated sections. Each
 /// group is capped. See [`crate::core::db::Library::search_library`].
+///
+/// Album-like hits are split into the same library categories the navigation
+/// uses (Albums / Singles / Compilations / Concerts / Audiobooks): a hit lands
+/// in exactly **one** group, by its most specific resolved [`Area`], so a
+/// concert/audiobook no longer shows up — and opens — as a plain album.
+///
+/// [`Area`]: crate::core::category::Area
 #[derive(Debug, Clone, Default)]
 pub struct SearchResults {
     pub artists: Vec<String>,
     pub albums: Vec<AlbumHit>,
+    pub singles: Vec<AlbumHit>,
+    pub compilations: Vec<AlbumHit>,
+    pub concerts: Vec<AlbumHit>,
+    pub audiobooks: Vec<AlbumHit>,
     pub songs: Vec<SongHit>,
     /// Timeshift recordings (title/artist/station match).
     pub recordings: Vec<RecordingItem>,
@@ -446,6 +457,10 @@ impl SearchResults {
     pub fn is_empty(&self) -> bool {
         self.artists.is_empty()
             && self.albums.is_empty()
+            && self.singles.is_empty()
+            && self.compilations.is_empty()
+            && self.concerts.is_empty()
+            && self.audiobooks.is_empty()
             && self.songs.is_empty()
             && self.recordings.is_empty()
             && self.memos.is_empty()

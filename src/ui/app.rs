@@ -1062,6 +1062,7 @@ pub struct App {
     pub(crate) media_popup: Option<crate::ui::tray_popup::MediaPopup>,
     /// Embedded MCP server state (now-playing snapshot + stop flag).
     pub(crate) mcp: McpState,
+    pub(crate) assistant: AssistantState,
 }
 
 /// Desktop tray-icon options + the running service handle. The bool prefs are
@@ -1091,6 +1092,31 @@ pub(crate) struct McpState {
     /// Background-job registry (downloads), kept across server restarts.
     pub(crate) jobs: std::sync::Arc<crate::core::mcp::jobs::Jobs>,
     pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+/// State of the in-app assistant chat. The transcript lives here (not in the
+/// dialog widget) so it survives the detail dialog's rebuilds and the chat can
+/// be re-opened with its history intact.
+#[derive(Default)]
+pub(crate) struct AssistantState {
+    /// Full conversation (system + user/assistant/tool turns) of the open chat.
+    pub(crate) history: Vec<crate::core::assistant::llm::Message>,
+    /// Which artist/album/… the open chat is about (drives the system prompt;
+    /// a different subject starts a fresh transcript).
+    pub(crate) subject: Option<String>,
+    /// An agent run is in flight: the input is disabled and a spinner shows.
+    pub(crate) busy: bool,
+    /// Live widgets of the open chat, kept so replies re-render the message list
+    /// in place. `None` while no chat is open.
+    pub(crate) ui: std::rc::Rc<std::cell::RefCell<Option<AssistantUi>>>,
+}
+
+/// The mutable widgets of an open assistant chat.
+pub(crate) struct AssistantUi {
+    /// The vertical box holding the message bubbles (cleared + refilled on render).
+    pub(crate) msg_box: gtk::Box,
+    /// Its scroller, used to keep the view pinned to the newest message.
+    pub(crate) scroller: gtk::ScrolledWindow,
 }
 
 #[derive(Debug)]
@@ -1133,14 +1159,25 @@ pub enum Msg {
         position: u32,
         title: String,
     },
-    /// Confirmed: search the missing track online, download it into the album
-    /// folder, tag it and index it.
+    /// Confirmed: search the missing track online and offer the top hits so the
+    /// user picks which version to add (search only — the download happens once
+    /// a candidate is chosen, see [`Msg::DownloadMissingTrack`]).
     AddMissingTrack {
         artist: String,
         album: String,
         disc: u32,
         position: u32,
         title: String,
+    },
+    /// A YouTube candidate was picked from the missing-track chooser: download
+    /// that video into the album folder, tag it and index it.
+    DownloadMissingTrack {
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+        video_id: String,
     },
     /// Play a track from the artist overview (queue = all tracks
     /// of the artist, start at the tapped one). `close` pops the subpage
@@ -1220,6 +1257,18 @@ pub enum Msg {
     /// Settings: store a freshly generated MCP bearer token → persist + restart
     /// (existing connections drop).
     SetMcpToken(String),
+    /// Settings: pick the assistant LLM provider preset (`minimax` / `custom`).
+    SetAssistantProvider(String),
+    /// Settings: persist the assistant API base URL (custom provider only).
+    SetAssistantBaseUrl(String),
+    /// Settings: persist the assistant model name.
+    SetAssistantModel(String),
+    /// Settings: persist the assistant API key (Secret Service).
+    SetAssistantApiKey(String),
+    /// Open the assistant chat for the currently shown detail object.
+    OpenAssistantChat,
+    /// Send a user message in the open assistant chat → run the agent.
+    AssistantSend(String),
     /// 1-s tick: update position/duration of the seek bar.
     Tick,
     /// Periodic, quiet background backfill: fetch missing artist photos (first)
@@ -1897,8 +1946,16 @@ pub enum Cmd {
         artist: String,
         album: String,
     },
-    /// Update the missing-track phase spinner's label (search → download → add).
-    MissingTrackPhase(String),
+    /// Top YouTube hits for a missing track → present a chooser so the user
+    /// picks which version to download.
+    MissingTrackCandidates {
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+        results: Vec<crate::core::youtube::YtResult>,
+    },
     /// A missing track finished downloading (or failed) → close the spinner,
     /// refill the album page, toast the outcome.
     MissingTrackDone {
@@ -1920,6 +1977,12 @@ pub enum Cmd {
     LyricsLoaded {
         path: String,
         lyrics: Option<crate::core::lyrics::Lyrics>,
+    },
+    /// A background assistant agent run finished. Carries the updated transcript
+    /// (it ran on a clone) and an error message if the run failed.
+    AssistantReplied {
+        history: Vec<crate::core::assistant::llm::Message>,
+        error: Option<String>,
     },
 }
 
@@ -3545,6 +3608,7 @@ impl Component for App {
             mpris,
             input: sender.input_sender().clone(),
             mcp: McpState::new(),
+            assistant: AssistantState::default(),
             libview: LibView {
                 entries,
                 albums,
@@ -4014,6 +4078,16 @@ impl Component for App {
                 position,
                 title,
             } => self.add_missing_track(root, &sender, artist, album, disc, position, title),
+            Msg::DownloadMissingTrack {
+                artist,
+                album,
+                disc,
+                position,
+                title,
+                video_id,
+            } => self.download_missing_track(
+                root, &sender, artist, album, disc, position, title, video_id,
+            ),
             Msg::OpenEntryTracks { scope, key } => match scope.as_str() {
                 "album" => {
                     // key = "Artist\u{1}Album"
@@ -4503,6 +4577,29 @@ impl Component for App {
                 // Restart so the new token takes effect and existing connections drop.
                 self.start_mcp_if_enabled();
             }
+            Msg::SetAssistantProvider(provider) => {
+                let _ = self.library.set_setting("assistant_provider", &provider);
+                // MiniMax has a fixed endpoint: prefill it so the user needn't know it.
+                if provider == "minimax" {
+                    let _ = self.library.set_setting(
+                        "assistant_base_url",
+                        crate::core::assistant::MINIMAX_BASE_URL,
+                    );
+                }
+            }
+            Msg::SetAssistantBaseUrl(url) => {
+                let _ = self.library.set_setting("assistant_base_url", url.trim());
+            }
+            Msg::SetAssistantModel(model) => {
+                let _ = self.library.set_setting("assistant_model", model.trim());
+            }
+            Msg::SetAssistantApiKey(key) => {
+                let _ = self
+                    .library
+                    .set_secret_setting("assistant_api_key", key.trim());
+            }
+            Msg::OpenAssistantChat => self.open_assistant_chat(root, &sender),
+            Msg::AssistantSend(text) => self.assistant_send(&sender, text),
             Msg::Next => self.skip_next(),
             Msg::Prev => self.skip_prev(),
             Msg::ToggleShuffle => {
@@ -5143,6 +5240,9 @@ impl Component for App {
             Cmd::ReloadViews => {
                 self.reload_library_overviews();
             }
+            Cmd::AssistantReplied { history, error } => {
+                self.on_assistant_replied(root, &sender, history, error)
+            }
             Cmd::ScanDone {
                 then_enrich,
                 manual,
@@ -5210,7 +5310,16 @@ impl Component for App {
             Cmd::AlbumTracklistFetched { artist, album } => {
                 self.refill_album_page(&sender, &artist, &album);
             }
-            Cmd::MissingTrackPhase(phase) => self.on_missing_track_phase(&phase),
+            Cmd::MissingTrackCandidates {
+                artist,
+                album,
+                disc,
+                position,
+                title,
+                results,
+            } => self.show_missing_candidates(
+                root, &sender, artist, album, disc, position, title, results,
+            ),
             Cmd::MissingTrackDone {
                 artist,
                 album,

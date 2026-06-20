@@ -19,7 +19,7 @@ impl App {
         let raw = self
             .library
             .area_entries(crate::core::category::Area::Concerts, true, false);
-        let mut items = self.expand_area_items(raw);
+        let mut items = self.expand_area_items(crate::core::category::Area::Concerts, raw);
         self.sort_entries("concerts", &mut items);
         self.concerts.concert_items = items.clone();
         // Alphabetical section headings (by name) – shared by the list and the

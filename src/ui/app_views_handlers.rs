@@ -738,8 +738,9 @@ impl App {
         dialog.present(Some(root));
     }
 
-    /// Start adding a missing track: resolve it on YouTube, download it into the
-    /// album folder, tag + index it, then refresh the page. Shows a phase spinner.
+    /// Start adding a missing track: search YouTube for the top hits and let the
+    /// user choose which version to add. The actual download happens once a
+    /// candidate is picked (see [`Self::download_missing_track`]).
     pub(crate) fn add_missing_track(
         &mut self,
         root: &adw::ApplicationWindow,
@@ -754,8 +755,40 @@ impl App {
             self.toast(&gettext("Enable YouTube in the settings to use this"));
             return;
         }
-        // Album folder = a sibling track's directory (prefer the same disc).
-        let siblings = self.album_tracks_for_artist(&artist, &album);
+        // Fail early if no sibling track pins down the album folder.
+        if self.missing_track_dest(&artist, &album, disc).is_none() {
+            self.toast(&gettext("Cannot determine the album folder"));
+            return;
+        }
+        let query = format!("{artist} {title}");
+
+        self.show_missing_busy(root, &gettext("Searching online …"));
+
+        sender.spawn_command(move |out| {
+            let results =
+                crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 10)
+                    .unwrap_or_default();
+            let _ = out.send(Cmd::MissingTrackCandidates {
+                artist,
+                album,
+                disc,
+                position,
+                title,
+                results,
+            });
+        });
+    }
+
+    /// Where a missing track would be added: the album folder (a sibling track's
+    /// directory, preferring the same disc) plus the album's year/cover for
+    /// tagging. `None` when no sibling track pins down the folder.
+    fn missing_track_dest(
+        &self,
+        artist: &str,
+        album: &str,
+        disc: u32,
+    ) -> Option<(std::path::PathBuf, Option<i32>, Option<String>)> {
+        let siblings = self.album_tracks_for_artist(artist, album);
         let dest_dir = siblings
             .iter()
             .find(|t| crate::ui::app_views::track_disc(t) == disc)
@@ -764,51 +797,153 @@ impl App {
                 std::path::Path::new(&t.path)
                     .parent()
                     .map(|p| p.to_path_buf())
-            });
-        let Some(dest_dir) = dest_dir else {
-            self.toast(&gettext("Cannot determine the album folder"));
-            return;
-        };
-        let meta = self.library.get_album_meta(&artist, &album).ok().flatten();
+            })?;
+        let meta = self.library.get_album_meta(artist, album).ok().flatten();
         let year = meta.as_ref().and_then(|m| m.year);
         let cover = meta
             .as_ref()
             .and_then(|m| m.cover_path.clone())
-            .or_else(|| self.album_cover_for(&artist, &album));
-        let query = format!("{artist} {title}");
+            .or_else(|| self.album_cover_for(artist, album));
+        Some((dest_dir, year, cover))
+    }
 
-        self.show_missing_busy(root, &gettext("Searching online …"));
+    /// Chooser for a missing track: list the top YouTube hits (title, uploader,
+    /// duration) so the user decides which version to add. Selecting a row
+    /// downloads that video into the album folder.
+    pub(crate) fn show_missing_candidates(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+        results: Vec<crate::core::youtube::YtResult>,
+    ) {
+        // Close the "Searching …" spinner first.
+        if let Some((d, _)) = self.libview.missing_busy.take() {
+            d.close();
+        }
+        if results.is_empty() {
+            self.toast(&gettext("Not found on YouTube"));
+            return;
+        }
 
-        let (artist_w, album_w, title_w) = (artist.clone(), album.clone(), title.clone());
-        sender.spawn_command(move |out| {
-            let video_id =
-                crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 1)
-                    .ok()
-                    .and_then(|v| v.into_iter().next())
-                    .map(|r| r.id);
-            let (ok, message) = match video_id {
-                None => (false, gettext("Not found on YouTube")),
-                Some(vid) => {
-                    let _ = out.send(Cmd::MissingTrackPhase(gettext("Downloading …")));
-                    match crate::core::youtube::add_video_to_album(
-                        &vid,
-                        &dest_dir,
-                        &artist_w,
-                        &album_w,
-                        &title_w,
-                        position,
-                        Some(disc),
-                        year,
-                        cover.as_deref(),
-                    ) {
-                        Ok(_) => (true, gettext("Track added")),
-                        Err(e) => (false, e),
-                    }
+        let dialog = adw::Dialog::builder()
+            .title(gettext("Choose a version"))
+            .content_width(420)
+            .build();
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .margin_top(16)
+            .margin_bottom(16)
+            .margin_start(16)
+            .margin_end(16)
+            .build();
+        content.append(
+            &gtk::Label::builder()
+                .label(gettext_f(
+                    "Pick the version of “{title}” to add",
+                    &[("title", &title)],
+                ))
+                .wrap(true)
+                .xalign(0.0)
+                .css_classes(["dim-label"])
+                .build(),
+        );
+
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
+            .build();
+        let rows = results.len() as i32;
+        dialog.set_content_height((220 + rows * 64).min(720));
+
+        for r in &results {
+            let mut subtitle = String::new();
+            if let Some(u) = r.uploader.as_deref().filter(|s| !s.trim().is_empty()) {
+                subtitle.push_str(u);
+            }
+            if let Some(d) = r.duration {
+                if !subtitle.is_empty() {
+                    subtitle.push_str(" · ");
                 }
+                subtitle.push_str(&crate::ui::yt_page::fmt_duration(d));
+            }
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&r.title))
+                .subtitle(gtk::glib::markup_escape_text(&subtitle))
+                .activatable(true)
+                .build();
+            row.add_prefix(&gtk::Image::from_icon_name("video-x-generic-symbolic"));
+            {
+                let (sender, dialog, video_id) = (sender.clone(), dialog.clone(), r.id.clone());
+                let (artist, album, title) = (artist.clone(), album.clone(), title.clone());
+                row.connect_activated(move |_| {
+                    sender.input(Msg::DownloadMissingTrack {
+                        artist: artist.clone(),
+                        album: album.clone(),
+                        disc,
+                        position,
+                        title: title.clone(),
+                        video_id: video_id.clone(),
+                    });
+                    dialog.close();
+                });
+            }
+            list.append(&row);
+        }
+
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&list)
+            .build();
+        content.append(&scroller);
+        dialog.set_child(Some(&content));
+        dialog.present(Some(root));
+    }
+
+    /// Download the chosen YouTube video into the album folder, tag + index it,
+    /// then refresh the page. Shows a phase spinner.
+    pub(crate) fn download_missing_track(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        artist: String,
+        album: String,
+        disc: u32,
+        position: u32,
+        title: String,
+        video_id: String,
+    ) {
+        let Some((dest_dir, year, cover)) = self.missing_track_dest(&artist, &album, disc) else {
+            self.toast(&gettext("Cannot determine the album folder"));
+            return;
+        };
+
+        self.show_missing_busy(root, &gettext("Downloading …"));
+
+        sender.spawn_command(move |out| {
+            let (ok, message) = match crate::core::youtube::add_video_to_album(
+                &video_id,
+                &dest_dir,
+                &artist,
+                &album,
+                &title,
+                position,
+                Some(disc),
+                year,
+                cover.as_deref(),
+            ) {
+                Ok(_) => (true, gettext("Track added")),
+                Err(e) => (false, e),
             };
             let _ = out.send(Cmd::MissingTrackDone {
-                artist: artist_w,
-                album: album_w,
+                artist,
+                album,
                 ok,
                 message,
             });
@@ -845,13 +980,6 @@ impl App {
         dialog.set_child(Some(&vb));
         dialog.present(Some(root));
         self.libview.missing_busy = Some((dialog, label));
-    }
-
-    /// Update the missing-track spinner's phase label.
-    pub(crate) fn on_missing_track_phase(&mut self, phase: &str) {
-        if let Some((_, label)) = &self.libview.missing_busy {
-            label.set_label(phase);
-        }
     }
 
     /// A missing-track download finished: close the spinner, refresh the album

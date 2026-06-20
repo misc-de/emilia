@@ -129,7 +129,7 @@ impl App {
         let raw = self
             .library
             .area_entries(crate::core::category::Area::Audiobooks, true, false);
-        let mut items = self.expand_area_items(raw);
+        let mut items = self.expand_area_items(crate::core::category::Area::Audiobooks, raw);
         self.sort_entries("audiobooks", &mut items);
         self.favorites.audiobook_items = items.clone();
         // Alphabetical section headings (by name) – shared by the list and the

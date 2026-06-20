@@ -1393,9 +1393,41 @@ impl Library {
         // through one shared snapshot (kind-aware, O(1) per item) so dropping
         // hidden hits doesn't run a classification scan per result; tracks use the
         // cheap per-row resolution. Then trim back to the page size.
+        //
+        // Album hits are also *split* by their most specific resolved area into the
+        // same categories the navigation uses, so a single/compilation/concert/
+        // audiobook surfaces (and later opens) under its own heading instead of
+        // pooling into a generic "Albums" list. The snapshot already does the
+        // kind-aware + folder-inherited resolution, so this is free here.
+        use crate::core::category::Area;
+        let mut singles = Vec::new();
+        let mut compilations = Vec::new();
+        let mut concerts = Vec::new();
+        let mut audiobooks = Vec::new();
         if let Ok(snap) = self.category_snapshot() {
             artists.retain(|a| !snap.artist_areas(a).is_empty());
-            albums.retain(|a| !snap.album_areas(&a.artist, &a.album).is_empty());
+            let mut plain = Vec::new();
+            for a in albums {
+                let areas = snap.album_areas(&a.artist, &a.album);
+                if areas.is_empty() {
+                    continue; // hidden
+                }
+                // Most specific wins: a concert that is *also* filed under Albums
+                // belongs in Concerts here, never in both.
+                let bucket = if areas.contains(&Area::Audiobooks) {
+                    &mut audiobooks
+                } else if areas.contains(&Area::Concerts) {
+                    &mut concerts
+                } else if areas.contains(&Area::Compilations) {
+                    &mut compilations
+                } else if areas.contains(&Area::Singles) {
+                    &mut singles
+                } else {
+                    &mut plain
+                };
+                bucket.push(a);
+            }
+            albums = plain;
         }
         songs.retain(|s| {
             !self
@@ -1404,6 +1436,10 @@ impl Library {
         });
         artists.truncate(limit);
         albums.truncate(limit);
+        singles.truncate(limit);
+        compilations.truncate(limit);
+        concerts.truncate(limit);
+        audiobooks.truncate(limit);
         songs.truncate(limit);
 
         // --- The user's own local collections: timeshift recordings and voice
@@ -1434,6 +1470,10 @@ impl Library {
         Ok(SearchResults {
             artists,
             albums,
+            singles,
+            compilations,
+            concerts,
+            audiobooks,
             songs,
             recordings,
             memos,
@@ -2776,7 +2816,13 @@ mod tests {
         use crate::core::category::album_key;
         let lib = Library::open_in_memory().unwrap();
         lib.upsert_tracks(&[
+            // 4 tracks so "Visible Album" stays a real Album (> SINGLE_MAX) and
+            // lands in `albums`, not the Singles bucket — search now files
+            // album-like hits by category.
             track("/m/v.mp3", Some("Visible Artist"), Some("Visible Album")),
+            track("/m/v2.mp3", Some("Visible Artist"), Some("Visible Album")),
+            track("/m/v3.mp3", Some("Visible Artist"), Some("Visible Album")),
+            track("/m/v4.mp3", Some("Visible Artist"), Some("Visible Album")),
             track("/m/h.mp3", Some("Hidden Artist"), Some("Hidden Album")),
         ])
         .unwrap();
@@ -2806,6 +2852,42 @@ mod tests {
         let r = lib.search_library("T", 50).unwrap();
         assert!(r.songs.iter().all(|s| s.path != "/m/h.mp3"));
         assert!(r.songs.iter().any(|s| s.path == "/m/v.mp3"));
+    }
+
+    #[test]
+    fn search_files_album_hits_by_category() {
+        use crate::core::category::{album_key, Area};
+        let lib = Library::open_in_memory().unwrap();
+        lib.upsert_tracks(&[
+            // A 4-track album → stays a plain Album.
+            track("/m/rec/1.mp3", Some("Band"), Some("Record")),
+            track("/m/rec/2.mp3", Some("Band"), Some("Record")),
+            track("/m/rec/3.mp3", Some("Band"), Some("Record")),
+            track("/m/rec/4.mp3", Some("Band"), Some("Record")),
+            // A 1-track album → classified Single by the heuristic.
+            track("/m/sng/1.mp3", Some("Band"), Some("Record Single")),
+            // An album re-filed as a Concert via an explicit override.
+            track("/m/liv/1.mp3", Some("Band"), Some("Record Live")),
+            track("/m/liv/2.mp3", Some("Band"), Some("Record Live")),
+            track("/m/liv/3.mp3", Some("Band"), Some("Record Live")),
+            track("/m/liv/4.mp3", Some("Band"), Some("Record Live")),
+        ])
+        .unwrap();
+        lib.set_category("album", &album_key("Band", "Record Live"), Some("concerts"))
+            .unwrap();
+
+        let r = lib.search_library("Record", 50).unwrap();
+        // Each album-like hit appears in exactly one bucket, by its category.
+        assert!(r.albums.iter().any(|a| a.album == "Record"));
+        assert!(r.albums.iter().all(|a| a.album != "Record Single"));
+        assert!(r.singles.iter().any(|a| a.album == "Record Single"));
+        assert!(r.concerts.iter().any(|a| a.album == "Record Live"));
+        // The concert must not also leak into the generic Albums list.
+        assert!(r.albums.iter().all(|a| a.album != "Record Live"));
+        // Sanity on the override semantics used above.
+        assert!(lib
+            .album_areas("Band", "Record Live")
+            .contains(&Area::Concerts));
     }
 
     #[test]

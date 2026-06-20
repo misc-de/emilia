@@ -2856,6 +2856,13 @@ msgstr "Überschreiben"
 msgid "Could not load playlist"
 msgstr "Playlist konnte nicht geladen werden"
 
+# --- Missing-track chooser: pick a YouTube version (de) ---
+msgid "Choose a version"
+msgstr "Version auswählen"
+
+msgid "Pick the version of “{title}” to add"
+msgstr "Wähle die Version von „{title}“, die hinzugefügt werden soll"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

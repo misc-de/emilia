@@ -1700,6 +1700,7 @@ impl App {
     /// Deduplicated by (scope, key), alphabetically by title.
     pub(crate) fn expand_area_items(
         &self,
+        area: crate::core::category::Area,
         raw: Vec<(String, String, String, bool)>,
     ) -> Vec<(String, String, String, bool)> {
         use std::collections::HashSet;
@@ -1712,6 +1713,14 @@ impl App {
                 _ => vec![], // do not list "artist" and the like as such
             };
             for e in expanded {
+                // Honor a more specific (album/track-level) override: a child that
+                // was individually hidden or re-filed no longer resolves to `area`,
+                // even though the parent folder still carries the marker. Without
+                // this, a hidden audiobook/concert inside a marked folder keeps
+                // showing ("I set it hidden but it still shows").
+                if !self.entry_in_area(&e.0, &e.1, e.3, area) {
+                    continue;
+                }
                 if seen.insert((e.0.clone(), e.1.clone())) {
                     out.push(e);
                 }
@@ -1719,6 +1728,31 @@ impl App {
         }
         out.sort_by_key(|a| a.2.to_lowercase());
         out
+    }
+
+    /// Whether an expanded entry stays in `area` after honoring a **more
+    /// specific** hide/recategorization. The entry only got here because a parent
+    /// (folder) marker put it into `area`; the user can still hide or re-file the
+    /// individual album/track/subfolder via its detail view. We resolve the exact
+    /// level that detail view writes to ([`Self::ctx_area_level`]) and honor an
+    /// explicit override stored there. With no own override the entry stays
+    /// (trust the inherited marker — re-deriving it can misfire for loose-file
+    /// albums and wrongly hide a visible book).
+    fn entry_in_area(
+        &self,
+        scope: &str,
+        key: &str,
+        is_dir: bool,
+        area: crate::core::category::Area,
+    ) -> bool {
+        let target = self.entry_target(scope, key, is_dir);
+        let Some((w_scope, w_key, _)) = self.ctx_area_level(&target) else {
+            return true; // unclassifiable (e.g. the file vanished) → keep listed
+        };
+        match self.library.get_category(w_scope, &w_key).ok().flatten() {
+            Some(v) => crate::core::category::parse_areas(&v).contains(&area),
+            None => true, // no explicit override at the write level → trust marker
+        }
     }
 
     /// Resolves a folder into **albums** and **individual pieces**:
@@ -2088,8 +2122,22 @@ impl App {
         target: &CtxTarget,
         sender: &ComponentSender<Self>,
     ) -> Option<adw::PreferencesGroup> {
+        let (scope, key, effective) = self.ctx_area_level(target)?;
+        Some(self.build_area_group(scope, key, &effective, sender))
+    }
+
+    /// The category level — `(scope, key)` — a properties/hide change for
+    /// `target` is written to, plus the areas currently in force there. Single
+    /// source of truth for the level + inheritance resolution, shared by the
+    /// detail dialog and the concert/audiobook views, so a per-item hide is read
+    /// back exactly where it was written. `None` if the target can't be
+    /// classified (e.g. the underlying file vanished).
+    fn ctx_area_level(
+        &self,
+        target: &CtxTarget,
+    ) -> Option<(&'static str, String, Vec<crate::core::category::Area>)> {
         use crate::core::category::{album_key, Area};
-        let (scope, key, effective): (&'static str, String, Vec<Area>) = match target {
+        let res: (&'static str, String, Vec<Area>) = match target {
             CtxTarget::Artist(m) => ("artist", m.name.clone(), self.library.artist_areas(&m.name)),
             CtxTarget::Album(m) => (
                 "album",
@@ -2150,7 +2198,7 @@ impl App {
                 }
             }
         };
-        Some(self.build_area_group(scope, key, &effective, sender))
+        Some(res)
     }
 
     /// Type switch (Automatic / Album / Single / Compilation) for the album
