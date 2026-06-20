@@ -238,6 +238,34 @@ impl App {
         );
     }
 
+    /// Per-station equalizer (from an internet-radio station's detail dialog).
+    /// A station has no track metadata, so its only level is `stream` (keyed by
+    /// the station id); it inherits from the global EQ during playback.
+    pub(crate) fn open_stream_eq(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        id: i64,
+    ) {
+        let name = self
+            .library
+            .streams()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|s| s.id == id)
+            .map(|s| s.name)
+            .unwrap_or_default();
+        self.open_eq_editor(
+            root,
+            sender,
+            "the station",
+            &name,
+            Some("Applies while this station plays."),
+            "stream",
+            id.to_string(),
+        );
+    }
+
     /// Equalizer editor for exactly one level (scope/key) with output selection.
     /// Used by the detail EQ (artist/album/track) and by the global EQ.
     pub(crate) fn open_eq_editor(

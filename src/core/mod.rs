@@ -1,5 +1,4 @@
 pub mod artist;
-pub mod assistant;
 pub mod category;
 pub mod concert;
 pub mod cover;

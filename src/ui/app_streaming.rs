@@ -78,6 +78,11 @@ impl App {
                 } else {
                     None
                 };
+                // Apply the per-station equalizer (station → global) on the
+                // current output, like a normal track start does.
+                self.settings.active_output =
+                    crate::core::output::default_output().unwrap_or_default();
+                self.apply_current_eq();
             }
             Err(e) => tracing::error!("Failed to play stream: {e}"),
         }

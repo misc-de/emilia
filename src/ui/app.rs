@@ -1062,7 +1062,6 @@ pub struct App {
     pub(crate) media_popup: Option<crate::ui::tray_popup::MediaPopup>,
     /// Embedded MCP server state (now-playing snapshot + stop flag).
     pub(crate) mcp: McpState,
-    pub(crate) assistant: AssistantState,
 }
 
 /// Desktop tray-icon options + the running service handle. The bool prefs are
@@ -1092,31 +1091,6 @@ pub(crate) struct McpState {
     /// Background-job registry (downloads), kept across server restarts.
     pub(crate) jobs: std::sync::Arc<crate::core::mcp::jobs::Jobs>,
     pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-}
-
-/// State of the in-app assistant chat. The transcript lives here (not in the
-/// dialog widget) so it survives the detail dialog's rebuilds and the chat can
-/// be re-opened with its history intact.
-#[derive(Default)]
-pub(crate) struct AssistantState {
-    /// Full conversation (system + user/assistant/tool turns) of the open chat.
-    pub(crate) history: Vec<crate::core::assistant::llm::Message>,
-    /// Which artist/album/… the open chat is about (drives the system prompt;
-    /// a different subject starts a fresh transcript).
-    pub(crate) subject: Option<String>,
-    /// An agent run is in flight: the input is disabled and a spinner shows.
-    pub(crate) busy: bool,
-    /// Live widgets of the open chat, kept so replies re-render the message list
-    /// in place. `None` while no chat is open.
-    pub(crate) ui: std::rc::Rc<std::cell::RefCell<Option<AssistantUi>>>,
-}
-
-/// The mutable widgets of an open assistant chat.
-pub(crate) struct AssistantUi {
-    /// The vertical box holding the message bubbles (cleared + refilled on render).
-    pub(crate) msg_box: gtk::Box,
-    /// Its scroller, used to keep the view pinned to the newest message.
-    pub(crate) scroller: gtk::ScrolledWindow,
 }
 
 #[derive(Debug)]
@@ -1253,9 +1227,6 @@ pub enum Msg {
     /// MCP-server settings (backend mode / LAN exposure / bearer token)
     /// (see [`crate::ui::app_mcp`]).
     McpSetting(crate::ui::app_mcp::McpSettingMsg),
-    /// In-app assistant: provider/model/key settings + open chat / send a turn
-    /// (see [`crate::ui::app_assistant`]).
-    Assistant(crate::ui::app_assistant::AssistantMsg),
     /// 1-s tick: update position/duration of the seek bar.
     Tick,
     /// Periodic, quiet background backfill: fetch missing artist photos (first)
@@ -1589,6 +1560,8 @@ pub enum Msg {
     ReloadRecordings,
     /// Open the replay subpage of a station.
     OpenStreamReplay(i64),
+    /// Open the equalizer editor for a station (per-station EQ).
+    OpenStreamEq(i64),
     /// Preview a buffered song (absolute byte range).
     ReplayPlay {
         start: u64,
@@ -1766,12 +1739,6 @@ pub enum Cmd {
     LyricsLoaded {
         path: String,
         lyrics: Option<crate::core::lyrics::Lyrics>,
-    },
-    /// A background assistant agent run finished. Carries the updated transcript
-    /// (it ran on a clone) and an error message if the run failed.
-    AssistantReplied {
-        history: Vec<crate::core::assistant::llm::Message>,
-        error: Option<String>,
     },
 }
 
@@ -3350,6 +3317,7 @@ impl Component for App {
                     O::ToggleStream(id) => Msg::ToggleStream(id),
                     O::PlayRecording(path) => Msg::PlayRecording(path),
                     O::OpenReplay(id) => Msg::OpenStreamReplay(id),
+                    O::OpenEqualizer(id) => Msg::OpenStreamEq(id),
                     O::EditRecording(id) => Msg::EditRecording(id),
                     O::StreamDeleteUndo(id) => Msg::StreamDeleteUndo(id),
                     O::RecordingDeleteUndo(id) => Msg::RecordingDeleteUndo(id),
@@ -3401,7 +3369,6 @@ impl Component for App {
             mpris,
             input: sender.input_sender().clone(),
             mcp: McpState::new(),
-            assistant: AssistantState::default(),
             libview: LibView {
                 entries,
                 albums,
@@ -3859,6 +3826,7 @@ impl Component for App {
                 self.download_heard(&sender, root, artist, title)
             }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
+            Msg::OpenStreamEq(id) => self.open_stream_eq(root, &sender, id),
             Msg::ReplayPlay { start, end } => self.replay_play(start, end),
             Msg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
             Msg::PlayRecording(path) => self.play_recording(path),
@@ -4089,7 +4057,6 @@ impl Component for App {
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
             Msg::Mcp(cmd) => self.handle_mcp(cmd),
             Msg::McpSetting(m) => self.update_mcp_setting(m),
-            Msg::Assistant(m) => self.update_assistant(m, root, &sender),
             Msg::Next => self.skip_next(),
             Msg::Prev => self.skip_prev(),
             Msg::ToggleShuffle => {
@@ -4393,9 +4360,6 @@ impl Component for App {
             }
             Cmd::ReloadViews => {
                 self.reload_library_overviews();
-            }
-            Cmd::AssistantReplied { history, error } => {
-                self.on_assistant_replied(root, &sender, history, error)
             }
             Cmd::ScanDone {
                 then_enrich,

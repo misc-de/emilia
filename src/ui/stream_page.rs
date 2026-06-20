@@ -216,6 +216,8 @@ pub(crate) enum StreamOutput {
     PlayRecording(String),
     /// Transport: open the timeshift replay subpage of a station (reads the recorder).
     OpenReplay(i64),
+    /// Open the equalizer editor (a parent dialog) for a station (per-station EQ).
+    OpenEqualizer(i64),
     /// Open the waveform editor (a parent subpage) for a recording.
     EditRecording(i64),
     /// Show the "station removed" undo toast; the deferred deletion runs in the
@@ -1070,6 +1072,18 @@ impl StreamPage {
             });
         }
         actions.add(&rename);
+        let eq = action_row(
+            &gettext("Equalizer settings"),
+            "multimedia-equalizer-symbolic",
+        );
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            eq.connect_activated(move |_| {
+                let _ = sender.output(StreamOutput::OpenEqualizer(id));
+                dialog.close();
+            });
+        }
+        actions.add(&eq);
         let share = action_row(&gettext("Share"), "emilia-share-symbolic");
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());

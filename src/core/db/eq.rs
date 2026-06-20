@@ -138,6 +138,28 @@ impl Library {
         None
     }
 
+    /// Effective equalizer for an internet-radio station + output. A station
+    /// carries no track metadata, so the inheritance is just station → global,
+    /// per output: first the concrete output (station→global), then the default
+    /// output ('') as the basis. `None` if nothing is set (→ neutral).
+    pub fn resolve_eq_stream(&self, output: &str, station: &str) -> Option<[f64; 10]> {
+        let mut outputs: Vec<&str> = Vec::new();
+        if !output.is_empty() {
+            outputs.push(output);
+        }
+        outputs.push("");
+
+        for out in outputs {
+            if let Some(b) = self.resolve_eq_setting(out, "stream", station) {
+                return Some(b);
+            }
+            if let Some(b) = self.resolve_eq_setting(out, "global", "") {
+                return Some(b);
+            }
+        }
+        None
+    }
+
     fn resolve_eq_setting(&self, output: &str, scope: &str, key: &str) -> Option<[f64; 10]> {
         let bands = self.get_eq(output, scope, key).ok().flatten()?;
         if self.eq_enabled(output, scope, key).unwrap_or(true) {

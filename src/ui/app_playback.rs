@@ -1053,6 +1053,16 @@ impl App {
     /// (track→album→artist→global, then default output) and applies it live.
     /// Without any setting: neutral (all bands 0).
     pub(crate) fn apply_current_eq(&self) {
+        // Internet radio has no queue/track metadata: resolve the per-station EQ
+        // (station → global) keyed by the running station id and apply it.
+        if let Some(id) = self.streaming.playing_stream {
+            let bands = self
+                .library
+                .resolve_eq_stream(&self.settings.active_output, &id.to_string())
+                .unwrap_or([0.0; 10]);
+            self.player.set_eq_bands(&bands);
+            return;
+        }
         let Some(path) = self.transport.queue.get(self.transport.queue_pos) else {
             return;
         };

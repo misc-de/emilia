@@ -382,7 +382,7 @@ impl Library {
             -- artist name | artist\1album | path.
             CREATE TABLE IF NOT EXISTS eq_setting (
                 output TEXT NOT NULL DEFAULT '',
-                scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track')),
+                scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream')),
                 key    TEXT NOT NULL,
                 bands  TEXT NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
@@ -712,6 +712,39 @@ impl Library {
         if !has_eq_enabled {
             self.conn.execute_batch(
                 "ALTER TABLE eq_setting ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;",
+            )?;
+        }
+
+        // Migration: allow the 'stream' scope (per-station equalizer). The old
+        // CHECK constraint only listed global/artist/album/track; SQLite can't
+        // alter a CHECK in place, so rebuild the table when it's still the old
+        // shape (detected by the stored schema SQL). Atomic, like above.
+        let eq_schema: String = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'eq_setting'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        if !eq_schema.contains("'stream'") {
+            self.conn.execute_batch(
+                r#"
+                BEGIN;
+                ALTER TABLE eq_setting RENAME TO eq_setting_old;
+                CREATE TABLE eq_setting (
+                    output TEXT NOT NULL DEFAULT '',
+                    scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream')),
+                    key    TEXT NOT NULL,
+                    bands  TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (output, scope, key)
+                );
+                INSERT INTO eq_setting (output, scope, key, bands, enabled)
+                    SELECT output, scope, key, bands, enabled FROM eq_setting_old;
+                DROP TABLE eq_setting_old;
+                COMMIT;
+                "#,
             )?;
         }
 
@@ -2574,6 +2607,31 @@ mod tests {
             lib.resolve_eq("sink1", Some("X"), Some("Y"), "/a/1.mp3"),
             Some(bands(1.0))
         );
+    }
+
+    #[test]
+    fn eq_stream_station_over_global_with_output_cascade() {
+        let lib = Library::open_in_memory().unwrap();
+        // A per-station setting wins over the global one.
+        lib.set_eq("", "global", "", &bands(1.0)).unwrap();
+        lib.set_eq("", "stream", "42", &bands(5.0)).unwrap();
+        assert_eq!(lib.resolve_eq_stream("", "42"), Some(bands(5.0)));
+        // A station without its own setting inherits the global.
+        assert_eq!(lib.resolve_eq_stream("", "99"), Some(bands(1.0)));
+        // Concrete output is resolved fully first (its global beats the default
+        // output's station), then the default output is the basis.
+        lib.set_eq("sink1", "global", "", &bands(7.0)).unwrap();
+        assert_eq!(lib.resolve_eq_stream("sink1", "42"), Some(bands(7.0)));
+        // An output with nothing of its own falls back to the default output's
+        // global as the basis.
+        assert_eq!(lib.resolve_eq_stream("sink2", "7"), Some(bands(1.0)));
+    }
+
+    #[test]
+    fn eq_stream_none_when_unset() {
+        let lib = Library::open_in_memory().unwrap();
+        // No stream and no global anywhere → neutral (None).
+        assert_eq!(lib.resolve_eq_stream("sink1", "42"), None);
     }
 
     #[test]

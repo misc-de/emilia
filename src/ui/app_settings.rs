@@ -3,7 +3,6 @@
 
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{cover_widget, App, Msg};
-use crate::ui::app_assistant::AssistantMsg;
 use crate::ui::app_mcp::McpSettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::app_tray::TrayMsg;
@@ -621,118 +620,6 @@ impl App {
             });
         }
         page.add(&mcp_group);
-
-        // --- Assistant (in-app AI on the detail views) ---
-        let asst_group = adw::PreferencesGroup::builder()
-            .title(gettext("Assistant"))
-            .description(gettext(
-                "An in-app AI assistant on the detail views. Talks to an \
-                 OpenAI-compatible chat endpoint (MiniMax, or a custom/local \
-                 server) and can act through the library tools.",
-            ))
-            .build();
-
-        let asst_providers = ["minimax", "custom"];
-        let asst_provider_labels = [gettext("MiniMax"), gettext("Custom (OpenAI-compatible)")];
-        let asst_provider_refs: Vec<&str> =
-            asst_provider_labels.iter().map(String::as_str).collect();
-        let asst_provider_row = adw::ComboRow::builder()
-            .title(gettext("Provider"))
-            .model(&gtk::StringList::new(&asst_provider_refs))
-            .build();
-        let cur_provider = self
-            .library
-            .get_setting("assistant_provider")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "minimax".into());
-        let cur_provider_idx = asst_providers
-            .iter()
-            .position(|p| *p == cur_provider)
-            .unwrap_or(0);
-        asst_provider_row.set_selected(cur_provider_idx as u32);
-        asst_group.add(&asst_provider_row);
-
-        // Base URL — editable only for a custom provider; MiniMax uses a fixed
-        // endpoint, so the row is hidden for it.
-        let asst_url_row = adw::EntryRow::builder()
-            .title(gettext("API base URL"))
-            .build();
-        asst_url_row.set_text(
-            &self
-                .library
-                .get_setting("assistant_base_url")
-                .ok()
-                .flatten()
-                .unwrap_or_default(),
-        );
-        asst_url_row.set_show_apply_button(true);
-        {
-            let sender = sender.clone();
-            asst_url_row.connect_apply(move |r| {
-                sender.input(Msg::Assistant(AssistantMsg::SetBaseUrl(
-                    r.text().to_string(),
-                )));
-            });
-        }
-        asst_group.add(&asst_url_row);
-
-        let asst_model_row = adw::EntryRow::builder().title(gettext("Model")).build();
-        asst_model_row.set_text(
-            &self
-                .library
-                .get_setting("assistant_model")
-                .ok()
-                .flatten()
-                .unwrap_or_default(),
-        );
-        asst_model_row.set_show_apply_button(true);
-        {
-            let sender = sender.clone();
-            asst_model_row.connect_apply(move |r| {
-                sender.input(Msg::Assistant(AssistantMsg::SetModel(r.text().to_string())));
-            });
-        }
-        asst_group.add(&asst_model_row);
-
-        // API key — stored in the Secret Service, like the other credentials.
-        let asst_key_row = adw::EntryRow::builder().title(gettext("API key")).build();
-        asst_key_row.set_text(
-            &self
-                .library
-                .get_secret_setting("assistant_api_key")
-                .ok()
-                .flatten()
-                .unwrap_or_default(),
-        );
-        asst_key_row.set_show_apply_button(true);
-        {
-            let sender = sender.clone();
-            asst_key_row.connect_apply(move |r| {
-                sender.input(Msg::Assistant(AssistantMsg::SetApiKey(
-                    r.text().to_string(),
-                )));
-            });
-        }
-        asst_group.add(&asst_key_row);
-
-        asst_url_row.set_visible(cur_provider == "custom");
-        {
-            // Connect after `set_selected`, so the preselection doesn't fire.
-            let sender = sender.clone();
-            let url_row = asst_url_row.clone();
-            asst_provider_row.connect_selected_notify(move |r| {
-                let provider = asst_providers
-                    .get(r.selected() as usize)
-                    .copied()
-                    .unwrap_or("minimax");
-                url_row.set_visible(provider == "custom");
-                sender.input(Msg::Assistant(AssistantMsg::SetProvider(
-                    provider.to_string(),
-                )));
-            });
-        }
-        page.add(&asst_group);
 
         let view_page = page;
 

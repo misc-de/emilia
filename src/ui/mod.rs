@@ -1,6 +1,5 @@
 pub mod album_row;
 pub mod app;
-pub mod app_assistant;
 pub mod app_concert;
 pub mod app_covers;
 pub mod app_dialogs;
