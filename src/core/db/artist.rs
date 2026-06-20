@@ -163,11 +163,17 @@ impl Library {
     pub fn artist_summary(&self, name: &str) -> Result<(u32, u32, i64)> {
         use crate::core::artist::{norm_key, split_artists};
         let key = norm_key(name);
+        // Prefilter the scan to tracks whose raw `artist` string contains the
+        // name (SQLite LIKE is ASCII case-insensitive). This is a *superset*: a
+        // track that splits/normalizes to `key` necessarily contains the trimmed
+        // name as a substring, so the exact feat.-aware check below still decides
+        // membership — the LIKE only spares us scanning the whole track table.
+        let like = format!("%{}%", name.trim());
         let mut stmt = self.conn.prepare(
             "SELECT artist, album, duration_ms FROM track
-             WHERE artist IS NOT NULL AND artist <> ''",
+             WHERE artist IS NOT NULL AND artist <> '' AND artist LIKE ?1",
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([&like], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, Option<String>>(1)?,

@@ -10,17 +10,43 @@ use relm4::{adw, gtk};
 /// covers HiDPI and keeps the cache small (≈64 KB instead of ≈1 MB per full-size cover).
 const THUMB_PX: i32 = 128;
 
+/// Upper bound on cached thumbnails. Each entry is a 128 px texture (≈64 KB),
+/// so a full cache stays well under ~70 MB. Without a bound the map grew for the
+/// whole process lifetime — one entry per cover ever shown.
+const THUMB_CACHE_MAX: usize = 1024;
+/// How many least-recently-used entries to drop once the cap is hit, so the
+/// O(n) eviction scan runs only once every `THUMB_CACHE_EVICT` inserts past the
+/// cap instead of on every insert.
+const THUMB_CACHE_EVICT: usize = 256;
+
+/// Size-bounded LRU map: each value carries the access `tick` of its last use.
+struct ThumbCache {
+    map: HashMap<String, (gtk::gdk::Texture, u64)>,
+    tick: u64,
+}
+
 thread_local! {
-    /// Process-wide cache of decoded list thumbnails (file path → texture).
-    /// Used exclusively on the UI thread (card `init_model`/`update_cmd`),
-    /// so `thread_local` without locks suffices. Prevents repeated decoding
-    /// and the flashing of placeholders on every list rebuild.
-    static THUMB_CACHE: RefCell<HashMap<String, gtk::gdk::Texture>> = RefCell::new(HashMap::new());
+    /// Process-wide, **size-bounded** cache of decoded list thumbnails
+    /// (file path → texture). Used exclusively on the UI thread (card
+    /// `init_model`/`update_cmd`), so `thread_local` without locks suffices.
+    /// Prevents repeated decoding and the flashing of placeholders on every list
+    /// rebuild; evicts the least-recently-used entries once it exceeds the cap.
+    static THUMB_CACHE: RefCell<ThumbCache> =
+        RefCell::new(ThumbCache { map: HashMap::new(), tick: 0 });
 }
 
 /// Already cached thumbnail (if present) – immediately, without decoding.
+/// A cache hit refreshes the entry's recency so it survives eviction longer.
 pub fn cached_thumb(path: &str) -> Option<gtk::gdk::Texture> {
-    THUMB_CACHE.with(|c| c.borrow().get(path).cloned())
+    THUMB_CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.tick += 1;
+        let tick = c.tick;
+        c.map.get_mut(path).map(|e| {
+            e.1 = tick;
+            e.0.clone()
+        })
+    })
 }
 
 /// Thumbnail from the cache or – on a cache miss – decoded **synchronously**
@@ -36,10 +62,24 @@ pub fn thumb_cached(path: &str) -> Option<gtk::gdk::Texture> {
     Some(texture)
 }
 
-/// Stores a decoded thumbnail in the cache.
+/// Stores a decoded thumbnail in the cache, evicting the least-recently-used
+/// entries in one batch once the size cap is exceeded.
 pub fn store_thumb(path: String, texture: gtk::gdk::Texture) {
     THUMB_CACHE.with(|c| {
-        c.borrow_mut().insert(path, texture);
+        let mut c = c.borrow_mut();
+        c.tick += 1;
+        let tick = c.tick;
+        c.map.insert(path, (texture, tick));
+        if c.map.len() > THUMB_CACHE_MAX {
+            // Drop the `THUMB_CACHE_EVICT` entries with the oldest access tick.
+            // Ticks are unique per entry (every access/store bumps the counter),
+            // so the cutoff removes exactly that many.
+            let mut ticks: Vec<u64> = c.map.values().map(|(_, t)| *t).collect();
+            let cut = THUMB_CACHE_EVICT.min(ticks.len().saturating_sub(1));
+            ticks.select_nth_unstable(cut);
+            let cutoff = ticks[cut];
+            c.map.retain(|_, (_, t)| *t > cutoff);
+        }
     });
 }
 

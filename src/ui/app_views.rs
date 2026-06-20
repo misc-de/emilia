@@ -338,6 +338,25 @@ impl App {
             .albums_overview_in_area(area, snap)
             .unwrap_or_default();
         let meta_covers = self.library.album_meta_covers().unwrap_or_default();
+        // Batch the local-cover fallback too: one query for the track paths of
+        // every still-coverless album, instead of a `album_track_paths` query per
+        // album. (The covers themselves are still read per album — that's file
+        // I/O on the first track with embedded/folder art.)
+        let coverless: Vec<String> = albums
+            .iter()
+            .filter(|a| {
+                a.cover_path.as_deref().is_none_or(|p| p.trim().is_empty())
+                    && !meta_covers.contains_key(&a.album.to_lowercase())
+            })
+            .map(|a| a.album.clone())
+            .collect();
+        let local_paths = if coverless.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            self.library
+                .album_track_paths_by_names(&coverless)
+                .unwrap_or_default()
+        };
         for album in &mut albums {
             if album
                 .cover_path
@@ -347,7 +366,15 @@ impl App {
                 album.cover_path = meta_covers
                     .get(&album.album.to_lowercase())
                     .cloned()
-                    .or_else(|| self.album_local_cover(&album.artist, &album.album));
+                    .or_else(|| {
+                        local_paths
+                            .get(&album.album.to_lowercase())
+                            .and_then(|paths| {
+                                paths
+                                    .iter()
+                                    .find_map(|p| crate::core::online::local_track_cover(p))
+                            })
+                    });
             }
         }
         self.sort_album_metas(section, &mut albums);
@@ -422,6 +449,25 @@ impl App {
         // query (instead of an `album_cover` lookup per album), and only fall
         // back to the per-track local-cover scan for albums still without one.
         let meta_covers = self.library.album_meta_covers().unwrap_or_default();
+        // Batch the local-cover fallback too: one query for the track paths of
+        // every still-coverless album, instead of a `album_track_paths` query per
+        // album. (The covers themselves are still read per album — that's file
+        // I/O on the first track with embedded/folder art.)
+        let coverless: Vec<String> = albums
+            .iter()
+            .filter(|a| {
+                a.cover_path.as_deref().is_none_or(|p| p.trim().is_empty())
+                    && !meta_covers.contains_key(&a.album.to_lowercase())
+            })
+            .map(|a| a.album.clone())
+            .collect();
+        let local_paths = if coverless.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            self.library
+                .album_track_paths_by_names(&coverless)
+                .unwrap_or_default()
+        };
         for album in &mut albums {
             if album
                 .cover_path
@@ -431,7 +477,15 @@ impl App {
                 album.cover_path = meta_covers
                     .get(&album.album.to_lowercase())
                     .cloned()
-                    .or_else(|| self.album_local_cover(&album.artist, &album.album));
+                    .or_else(|| {
+                        local_paths
+                            .get(&album.album.to_lowercase())
+                            .and_then(|paths| {
+                                paths
+                                    .iter()
+                                    .find_map(|p| crate::core::online::local_track_cover(p))
+                            })
+                    });
             }
         }
         // Apply the chosen sort order (criterion + direction). The DB already
@@ -1726,7 +1780,7 @@ impl App {
                 }
             }
         }
-        out.sort_by_key(|a| a.2.to_lowercase());
+        out.sort_by_cached_key(|a| a.2.to_lowercase());
         out
     }
 

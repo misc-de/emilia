@@ -137,20 +137,35 @@ impl Library {
             return Vec::new();
         };
 
+        // Materialize the kept rows first, then resolve all track titles in a
+        // single batched query instead of a `track_by_path` per track-scoped
+        // entry (this runs on every audiobook/concert/favorites refresh).
+        let kept: Vec<(String, String)> = rows
+            .flatten()
+            .filter(|(_, _, value)| keep(&parse_areas(value)))
+            .map(|(scope, key, _)| (scope, key))
+            .collect();
+        let track_titles = {
+            let paths: Vec<String> = kept
+                .iter()
+                .filter(|(scope, _)| scope == "track")
+                .map(|(_, key)| key.clone())
+                .collect();
+            if paths.is_empty() {
+                std::collections::HashMap::new()
+            } else {
+                self.tracks_by_paths(&paths).unwrap_or_default()
+            }
+        };
+
         let mut seen = std::collections::HashSet::new();
         let mut out: Vec<(String, String, String, bool)> = Vec::new();
-        for row in rows.flatten() {
-            let (scope, key, value) = row;
-            if !keep(&parse_areas(&value)) {
-                continue;
-            }
+        for (scope, key) in kept {
             let entry = match scope.as_str() {
                 "track" => {
-                    let title = self
-                        .track_by_path(&key)
-                        .ok()
-                        .flatten()
-                        .map(|t| t.title)
+                    let title = track_titles
+                        .get(&key)
+                        .map(|t| t.title.clone())
                         .filter(|s| !s.trim().is_empty())
                         .unwrap_or_else(|| file_stem_of(&key));
                     Some(("track", title, false))
@@ -174,7 +189,7 @@ impl Library {
                 }
             }
         }
-        out.sort_by_key(|a| a.2.to_lowercase());
+        out.sort_by_cached_key(|a| a.2.to_lowercase());
         out
     }
 }

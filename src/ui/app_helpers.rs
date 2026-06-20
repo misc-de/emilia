@@ -465,9 +465,22 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
             out.push(FsEntry::dir_album(d, album, total_ms));
         }
     }
+    // Resolve the files' track rows in one batched query instead of a
+    // `track_by_path` per file (a folder with many songs otherwise issued one
+    // query each). `resolve_areas` below only does fast indexed PK lookups.
+    let file_tracks = match &lib {
+        Some(lib) => {
+            let paths: Vec<String> = files
+                .iter()
+                .map(|f| f.to_string_lossy().into_owned())
+                .collect();
+            lib.tracks_by_paths(&paths).unwrap_or_default()
+        }
+        None => std::collections::HashMap::new(),
+    };
     for f in files {
         let visible = match &lib {
-            Some(lib) => match lib.track_by_path(&f.to_string_lossy()).ok().flatten() {
+            Some(lib) => match file_tracks.get(f.to_string_lossy().as_ref()) {
                 Some(t) => lib
                     .resolve_areas(t.artist.as_deref(), t.album.as_deref(), &t.path)
                     .contains(&crate::core::category::Area::Filesystem),

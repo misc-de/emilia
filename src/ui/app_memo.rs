@@ -442,8 +442,8 @@ impl App {
                 // Alphabetical headings (by name) for the flat Recent list; none
                 // for the date/length sorts or when grouping is off.
                 *self.libview.memo_headers.borrow_mut() = self.memo_section_headers();
-                for m in self.memo.memo_items.clone() {
-                    let row = self.build_memo_row(&m, sender, true);
+                for m in &self.memo.memo_items {
+                    let row = self.build_memo_row(m, sender, true);
                     self.memo.memos_list.append(&row);
                 }
             }

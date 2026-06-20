@@ -689,4 +689,34 @@ impl Library {
         let rows = stmt.query_map([album], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// Batched [`Self::album_track_paths_by_name`]: track paths for many album
+    /// names at once, keyed by lowercased album name. Lets the album overview's
+    /// local-cover fallback resolve every coverless album in one query instead
+    /// of one per album.
+    pub fn album_track_paths_by_names(
+        &self,
+        albums: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<String>>> {
+        let mut out: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        // SQLite caps the number of bound parameters; chunk well under the limit.
+        for chunk in albums.chunks(900) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!(
+                "SELECT album, path FROM track
+                 WHERE album IN ({placeholders})
+                 ORDER BY album, path"
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (album, path) = row?;
+                out.entry(album.to_lowercase()).or_default().push(path);
+            }
+        }
+        Ok(out)
+    }
 }
