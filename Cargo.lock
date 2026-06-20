@@ -539,7 +539,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "emilia"
-version = "0.7.10"
+version = "0.7.13"
 dependencies = [
  "anyhow",
  "async-channel",

@@ -12,6 +12,7 @@ use std::io::{Read, Write};
 use std::time::Duration;
 
 use anyhow::{bail, Result};
+use serde::de::DeserializeOwned;
 
 /// Max attempts before a transient-failure retry gives up (see [`get_with_retry`]).
 const RETRY_MAX: usize = 4;
@@ -96,6 +97,28 @@ pub fn check_content_length(resp: &ureq::Response, limit: u64) -> Result<Option<
         Some(len) => Ok(Some(len)),
         None => Ok(None),
     }
+}
+
+/// Ceiling for a JSON API response body (16 MiB). Metadata bodies (MusicBrainz,
+/// Deezer, AcoustID, …) are far smaller in practice; this only bounds a hostile
+/// or broken server that would otherwise stream an unbounded body into memory.
+pub const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Deserializes a JSON response body, reading **at most** `limit` bytes. Unlike
+/// `ureq::Response::into_json()`, which reads the whole body unbounded, this caps
+/// the read so a malicious or broken server cannot exhaust memory. Errors if the
+/// body exceeds `limit` or is not valid JSON.
+pub fn json_capped<T: DeserializeOwned>(resp: ureq::Response, limit: u64) -> Result<T> {
+    let mut buf = Vec::new();
+    // `+ 1` so a body of exactly `limit` bytes still parses, while anything
+    // larger is detected (we read one byte past the limit, then bail).
+    resp.into_reader()
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut buf)?;
+    if buf.len() as u64 > limit {
+        bail!("JSON response exceeds the {limit}-byte limit");
+    }
+    Ok(serde_json::from_slice(&buf)?)
 }
 
 /// Streams `reader` into `writer`, reading **at most** `limit` bytes. Returns

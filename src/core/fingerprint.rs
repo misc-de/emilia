@@ -5,9 +5,19 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
+
+use crate::core::proc;
+
+/// `fpcalc -version` is a trivial probe; a few seconds is plenty.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// `fpcalc` only fingerprints the first ~2 min of audio, so even long
+/// audiobook files finish quickly; this is a generous backstop against a
+/// binary that hangs on a corrupt/undecodable input.
+const COMPUTE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Result of `fpcalc -json`.
 #[derive(Debug, Clone, Deserialize)]
@@ -20,16 +30,18 @@ pub struct Fingerprint {
 
 /// Checks whether `fpcalc` (Chromaprint) is available in the path.
 pub fn available() -> bool {
-    Command::new("fpcalc")
-        .arg("-version")
-        .output()
+    let mut cmd = Command::new("fpcalc");
+    cmd.arg("-version");
+    proc::output_timeout(&mut cmd, PROBE_TIMEOUT)
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
 /// Computes the Chromaprint fingerprint of an audio file.
 pub fn compute(path: &Path) -> Result<Fingerprint> {
-    let output = Command::new("fpcalc").arg("-json").arg(path).output()?;
+    let mut cmd = Command::new("fpcalc");
+    cmd.arg("-json").arg(path);
+    let output = proc::output_timeout(&mut cmd, COMPUTE_TIMEOUT)?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!("fpcalc failed: {}", err.trim()));

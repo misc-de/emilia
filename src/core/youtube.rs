@@ -24,9 +24,25 @@ use std::time::{Duration, SystemTime};
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
+use crate::core::proc;
+
 /// Official "latest" zipapp asset (a self-contained Python program; needs the
 /// runtime's `python3`, which the GNOME Platform provides).
 const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+
+/// `yt-dlp --version` (a `python3` cold start, no network) — generous probe.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(20);
+/// Resolving a stream URL hits the network but downloads no media.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(90);
+/// Listing playlist/search entries (`--dump-json`) over the network.
+const DUMP_TIMEOUT: Duration = Duration::from_secs(120);
+/// A full audio download / ffmpeg transcode can legitimately take minutes on a
+/// long track or slow link; this is only a backstop against a fully hung
+/// process. Network stalls are caught sooner by yt-dlp's `--socket-timeout`.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(1800);
+/// Per-socket stall timeout passed to yt-dlp so a dead connection aborts in
+/// seconds instead of waiting out the wall-clock backstop.
+const SOCKET_TIMEOUT_SECS: &str = "30";
 
 /// `$XDG_DATA_HOME/emilia/bin` – where the managed `yt-dlp` zipapp lives.
 pub fn ytdlp_dir() -> PathBuf {
@@ -77,7 +93,9 @@ pub fn available() -> bool {
 /// The installed `yt-dlp` version string (e.g. `2026.03.17`), or `None` if it is
 /// not installed/runnable. Spawns the binary – cheap, but prefer a worker thread.
 pub fn version() -> Option<String> {
-    let out = ytdlp().arg("--version").output().ok()?;
+    let mut cmd = ytdlp();
+    cmd.arg("--version");
+    let out = proc::output_timeout(&mut cmd, VERSION_TIMEOUT).ok()?;
     if !out.status.success() {
         return None;
     }
@@ -396,18 +414,20 @@ pub fn list_entries(url: &str, limit: usize) -> Result<Vec<YtResult>> {
 /// is resolved fresh on every play and never cached. **Network – worker only.**
 pub fn resolve_audio_url(video_id_or_url: &str) -> Result<String> {
     let url = to_url(video_id_or_url);
-    let out = ytdlp()
-        .args([
-            "--ignore-config",
-            "--no-warnings",
-            "--no-playlist",
-            "-f",
-            "bestaudio/best",
-            "-g",
-        ])
-        .arg("--")
-        .arg(&url)
-        .output()?;
+    let mut cmd = ytdlp();
+    cmd.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--no-playlist",
+        "--socket-timeout",
+        SOCKET_TIMEOUT_SECS,
+        "-f",
+        "bestaudio/best",
+        "-g",
+    ])
+    .arg("--")
+    .arg(&url);
+    let out = proc::output_timeout(&mut cmd, RESOLVE_TIMEOUT)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         note_extraction(false, &err);
@@ -433,19 +453,21 @@ pub fn download_audio(video_id: &str) -> Result<PathBuf> {
         let _ = std::fs::remove_file(old);
     }
     let template = dir.join(format!("{video_id}.%(ext)s"));
-    let status = ytdlp()
-        .args([
-            "--ignore-config",
-            "--no-warnings",
-            "--no-playlist",
-            "-f",
-            "bestaudio/best",
-            "-o",
-        ])
-        .arg(&template)
-        .arg("--")
-        .arg(watch_url(video_id))
-        .status()?;
+    let mut cmd = ytdlp();
+    cmd.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--no-playlist",
+        "--socket-timeout",
+        SOCKET_TIMEOUT_SECS,
+        "-f",
+        "bestaudio/best",
+        "-o",
+    ])
+    .arg(&template)
+    .arg("--")
+    .arg(watch_url(video_id));
+    let status = proc::status_timeout(&mut cmd, DOWNLOAD_TIMEOUT)?;
     if !status.success() {
         return Err(anyhow!("yt-dlp download failed"));
     }
@@ -491,7 +513,7 @@ pub fn transcode_to_mp3(
         cmd.args(["-metadata", &format!("album={al}")]);
     }
     cmd.arg(dest);
-    let status = cmd.status()?;
+    let status = proc::status_timeout(&mut cmd, DOWNLOAD_TIMEOUT)?;
     if !status.success() {
         return Err(anyhow!("ffmpeg transcode failed"));
     }
@@ -842,15 +864,17 @@ fn dump_entries(args: &[&str]) -> Result<Vec<RawEntry>> {
     if !available() {
         return Err(anyhow!("yt-dlp is not installed"));
     }
-    let out = ytdlp()
-        .args([
-            "--ignore-config",
-            "--no-warnings",
-            "--ignore-errors",
-            "--dump-json",
-        ])
-        .args(args)
-        .output()?;
+    let mut cmd = ytdlp();
+    cmd.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--ignore-errors",
+        "--socket-timeout",
+        SOCKET_TIMEOUT_SECS,
+        "--dump-json",
+    ])
+    .args(args);
+    let out = proc::output_timeout(&mut cmd, DUMP_TIMEOUT)?;
     // yt-dlp exits non-zero on partial failures (`--ignore-errors`); as long as
     // we got some parseable lines we use them.
     let stdout = String::from_utf8_lossy(&out.stdout);
