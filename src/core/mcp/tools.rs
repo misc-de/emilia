@@ -258,8 +258,8 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
                     let all: Vec<_> = lib
                         .albums_classified(kind)?
                         .into_iter()
-                        .filter(|a| year_from.map_or(true, |f| a.year.map_or(false, |y| y >= f)))
-                        .filter(|a| year_to.map_or(true, |t| a.year.map_or(false, |y| y <= t)))
+                        .filter(|a| year_from.is_none_or(|f| a.year.is_some_and(|y| y >= f)))
+                        .filter(|a| year_to.is_none_or(|t| a.year.is_some_and(|y| y <= t)))
                         .collect();
                     let total = all.len();
                     let albums: Vec<Value> = all
@@ -320,7 +320,13 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let days = arg_i64(args, "days").unwrap_or(30).clamp(1, 36500);
             let since = crate::core::sync::now_unix() as i64 - days * 86_400;
             let lib = Library::open()?;
-            let t = lib.stats_totals(since)?;
+            let mut t = lib.stats_totals(since)?;
+            // stats_totals leaves distinct_artists/_albums at 0 by contract --
+            // the count is the length of the full (feat./album-name-folded)
+            // ranking, so fill them from the top lists exactly as the GUI stats
+            // page does (see stats_page.rs).
+            t.distinct_artists = lib.stats_top_artists(since, usize::MAX)?.len() as i64;
+            t.distinct_albums = lib.stats_top_albums(since, usize::MAX)?.len() as i64;
             Ok(json!({
                 "since_days": days,
                 "total_played_ms": t.total_played_ms,
