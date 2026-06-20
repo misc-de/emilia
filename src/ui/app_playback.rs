@@ -1387,6 +1387,8 @@ impl App {
             if let Some(dur) = self.player.duration_ms() {
                 self.mini.track_duration_ms = dur;
             }
+            // Keep the MCP now-playing snapshot fresh (position + state).
+            self.publish_now_playing();
             // Carry the close snapshot along.
             if let Some(entry) = self.transport.close_resume.borrow_mut().as_mut() {
                 entry.1 = self.mini.position_ms;
@@ -1475,5 +1477,7 @@ impl App {
         self.sync_stream_page_icons();
         // Keep the tray's Play/Pause label in sync.
         self.refresh_tray_state();
+        // Mirror the pause/resume into the MCP now-playing snapshot.
+        self.publish_now_playing();
     }
 }

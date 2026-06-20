@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.7.20"
+version = "0.7.23"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -51,6 +51,16 @@ ksni = "0.2"
 # the EWMH client message ourselves; no-op on Wayland. See src/ui/app_tray.rs.
 gdk4-x11 = "0.9"
 x11rb = "0.13"
+# Optional "Tokio SDK" MCP backend (the lean JSON-RPC backend needs none of
+# this). rmcp's streamable-HTTP transport pulls in an async (tokio/axum) HTTP
+# stack; it is always compiled in but only runs when the user selects it. The
+# lean default on phones (aarch64) keeps this dormant. See src/core/mcp.
+rmcp = { version = "1", default-features = false, features = ["server", "transport-streamable-http-server"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# TLS for the "public (LAN)" SDK case, reusing the same rustls 0.23 identity as
+# device sync. Pinned to the matching rustls major.
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "time", "io-util"] }
 
 [profile.release]
 opt-level = "s"

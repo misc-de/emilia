@@ -5,6 +5,7 @@ pub mod cover;
 pub mod db;
 pub mod fingerprint;
 pub mod lyrics;
+pub mod mcp;
 pub mod mic;
 pub mod mpris;
 pub mod net;

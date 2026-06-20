@@ -12,6 +12,7 @@ pub mod app_gapless;
 pub mod app_helpers;
 pub mod app_init;
 pub mod app_lyrics;
+pub mod app_mcp;
 pub mod app_memo;
 pub mod app_nav;
 pub mod app_playback;

@@ -1016,6 +1016,8 @@ pub struct App {
     pub(crate) tray: TrayState,
     /// MPRIS-style media popup opened by a left click on the tray icon (lazy).
     pub(crate) media_popup: Option<crate::ui::tray_popup::MediaPopup>,
+    /// Embedded MCP server state (now-playing snapshot + stop flag).
+    pub(crate) mcp: McpState,
 }
 
 /// Desktop tray-icon options + the running service handle. The bool prefs are
@@ -1035,6 +1037,14 @@ pub(crate) struct TrayState {
     pub(crate) handle: Option<ksni::Handle<crate::core::tray::EmiliaTray>>,
     /// App-hold guard keeping the process alive while only the tray remains.
     pub(crate) hold: Option<gtk::gio::ApplicationHoldGuard>,
+}
+
+/// Embedded MCP server runtime state. `now` is the snapshot the server thread
+/// reads (published from the UI thread); `stop` flags a running backend to shut
+/// down. See [`crate::ui::app_mcp`].
+pub(crate) struct McpState {
+    pub(crate) now: crate::core::mcp::NowPlayingHandle,
+    pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[derive(Debug)]
@@ -1131,6 +1141,15 @@ pub enum Msg {
     PersistResume,
     /// Command from the lock screen / from media keys (MPRIS).
     Mpris(crate::core::mpris::MprisCommand),
+    /// Command from the embedded MCP server (see [`crate::ui::app_mcp`]).
+    Mcp(crate::core::mcp::McpCommand),
+    /// Settings: change the MCP backend (off / JSON-RPC / SDK) → persist + restart.
+    SetMcpMode(crate::core::mcp::McpMode),
+    /// Settings: toggle LAN exposure of the MCP server → persist + restart.
+    SetMcpPublic(bool),
+    /// Settings: store a freshly generated MCP bearer token → persist + restart
+    /// (existing connections drop).
+    SetMcpToken(String),
     /// 1-s tick: update position/duration of the seek bar.
     Tick,
     /// Periodic, quiet background backfill: fetch missing artist photos (first)
@@ -3329,6 +3348,7 @@ impl Component for App {
             player,
             mpris,
             input: sender.input_sender().clone(),
+            mcp: McpState::new(),
             libview: LibView {
                 entries,
                 albums,
@@ -3733,6 +3753,8 @@ impl Component for App {
                 setup_sender.emit(crate::ui::setup::SetupInput::Open(win));
             });
         }
+        // Start the embedded MCP server if enabled (reads the persisted mode).
+        model.start_mcp_if_enabled();
         ComponentParts { model, widgets }
     }
 
@@ -4228,6 +4250,22 @@ impl Component for App {
                 }
             }
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
+            Msg::Mcp(cmd) => self.handle_mcp(cmd),
+            Msg::SetMcpMode(mode) => {
+                let _ = self.library.set_setting("mcp_mode", mode.as_setting());
+                self.start_mcp_if_enabled();
+            }
+            Msg::SetMcpPublic(on) => {
+                let _ = self
+                    .library
+                    .set_setting("mcp_public", if on { "1" } else { "0" });
+                self.start_mcp_if_enabled();
+            }
+            Msg::SetMcpToken(token) => {
+                let _ = self.library.set_secret_setting("mcp_token", &token);
+                // Restart so the new token takes effect and existing connections drop.
+                self.start_mcp_if_enabled();
+            }
             Msg::Next => self.skip_next(),
             Msg::Prev => self.skip_prev(),
             Msg::ToggleShuffle => {
