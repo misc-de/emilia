@@ -76,6 +76,47 @@ pub fn duration_secs(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
+/// Playback duration of an audio file in **milliseconds**, probed by prerolling
+/// it through GStreamer's `decodebin`. Unlike the lofty header read in
+/// [`duration_secs`], this reports a correct length for short self-recorded
+/// Ogg/Opus memos, whose container headers make lofty report 0. Heavier than
+/// `duration_secs` (it builds a pipeline and prerolls to PAUSED) but it does not
+/// decode the whole stream, and the bus wait is capped so a broken file can
+/// never hang the caller. Returns `None` if the duration cannot be determined.
+pub fn probe_duration_ms(path: &Path) -> Option<i64> {
+    use gstreamer as gst;
+    use gstreamer::prelude::*;
+
+    let _ = gst::init();
+    let pipeline =
+        gst::parse::launch("filesrc name=src ! decodebin ! fakesink name=sink sync=false")
+            .ok()?
+            .downcast::<gst::Pipeline>()
+            .ok()?;
+    pipeline
+        .by_name("src")?
+        .set_property("location", path.to_string_lossy().as_ref());
+
+    if pipeline.set_state(gst::State::Paused).is_err() {
+        let _ = pipeline.set_state(gst::State::Null);
+        return None;
+    }
+    // Wait for preroll so the duration becomes queryable (cap the wait so a
+    // broken/partial file can never hang the caller).
+    if let Some(bus) = pipeline.bus() {
+        let _ = bus.timed_pop_filtered(
+            gst::ClockTime::from_seconds(5),
+            &[gst::MessageType::AsyncDone, gst::MessageType::Error],
+        );
+    }
+    let dur = pipeline
+        .query_duration::<gst::ClockTime>()
+        .map(|t| t.mseconds() as i64)
+        .filter(|&ms| ms > 0);
+    let _ = pipeline.set_state(gst::State::Null);
+    dur
+}
+
 pub fn is_audio(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())

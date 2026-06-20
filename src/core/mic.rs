@@ -211,12 +211,24 @@ impl MicRecorder {
             }
         };
 
+        // The pipeline position after EOS is the exact recorded length, accurate
+        // to the sample — query it *before* tearing the pipeline down. lofty's
+        // header probe reads 0 for these short Ogg/Opus clips, so fall back to a
+        // decode-based probe (not `duration_secs`) if the position is missing.
+        let pos_ms = self
+            .pipeline
+            .query_position::<gst::ClockTime>()
+            .map(|t| t.mseconds() as i64)
+            .filter(|&ms| ms > 0);
+
         let _ = self.pipeline.set_state(gst::State::Null);
         if let Err(e) = res {
             let _ = std::fs::remove_file(&self.path);
             return Err(e);
         }
-        let duration_ms = crate::core::scanner::duration_secs(&self.path) as i64 * 1000;
+        let duration_ms = pos_ms
+            .or_else(|| crate::core::scanner::probe_duration_ms(&self.path))
+            .unwrap_or(0);
         Ok((self.path.clone(), duration_ms))
     }
 }

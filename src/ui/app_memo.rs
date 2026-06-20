@@ -306,12 +306,15 @@ impl App {
     pub(crate) fn reload_memos(&mut self, sender: &ComponentSender<Self>) {
         self.memo.memo_items = self.library.memos().unwrap_or_default();
 
-        // Backfill the playback length for rows stored without one.
+        // Backfill the playback length for rows stored without one. Use the
+        // decode-based probe, not lofty's header read: memos are short Ogg/Opus
+        // clips whose headers make lofty report 0 (which is what left these rows
+        // at 0 in the first place).
         for m in &mut self.memo.memo_items {
             if m.duration_ms <= 0 {
-                let ms = crate::core::scanner::duration_secs(std::path::Path::new(&m.path)) as i64
-                    * 1000;
-                if ms > 0 {
+                if let Some(ms) =
+                    crate::core::scanner::probe_duration_ms(std::path::Path::new(&m.path))
+                {
                     let _ = self.library.set_memo_duration(m.id, ms);
                     m.duration_ms = ms;
                 }
