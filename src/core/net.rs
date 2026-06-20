@@ -15,10 +15,21 @@ use anyhow::{bail, Result};
 use serde::de::DeserializeOwned;
 
 /// Max attempts before a transient-failure retry gives up (see [`get_with_retry`]).
-const RETRY_MAX: usize = 4;
+pub const RETRY_MAX: usize = 4;
 /// First backoff delay; doubles each retry, capped at [`RETRY_MAX_BACKOFF`].
-const RETRY_BASE_BACKOFF: Duration = Duration::from_millis(1500);
-const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(30);
+pub const RETRY_BASE_BACKOFF: Duration = Duration::from_millis(1500);
+pub const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Whether a `ureq` error is a **transient** failure worth retrying: a transport
+/// error (connection refused, timeout, DNS, reset) or a server/rate-limit status
+/// (`429`/`5xx`). Client `4xx` (other than 429) won't change on a retry. Shared
+/// by [`get_with_retry`] and the WebDAV verb-specific retry loops.
+pub fn is_transient(err: &ureq::Error) -> bool {
+    match err {
+        ureq::Error::Transport(_) => true,
+        ureq::Error::Status(code, _) => matches!(code, 429 | 500 | 502 | 503 | 504),
+    }
+}
 
 /// Runs a `GET url` on `agent` with defensive retry + exponential backoff
 /// against **transient** failures: network/transport errors, server `5xx`, and
@@ -46,15 +57,8 @@ pub fn get_with_retry(
             // No content (404) – not an error, and not worth retrying.
             Err(ureq::Error::Status(404, _)) => return Ok(None),
             Err(e) => {
-                let retryable = match &e {
-                    // Connection refused, timeout, DNS, reset, … – usually transient.
-                    ureq::Error::Transport(_) => true,
-                    // Server-side / rate-limit codes; client 4xx (except those
-                    // above) are not retried – they won't change on a retry.
-                    ureq::Error::Status(code, _) => matches!(code, 429 | 500 | 502 | 503 | 504),
-                };
                 attempt += 1;
-                if !retryable || attempt > RETRY_MAX {
+                if !is_transient(&e) || attempt > RETRY_MAX {
                     return Err(e.into());
                 }
                 // Honour Retry-After on rate limits; otherwise exponential backoff.

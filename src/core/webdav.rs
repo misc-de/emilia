@@ -16,6 +16,7 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 
+use crate::core::net;
 use crate::core::scanner;
 use crate::model::Source;
 
@@ -205,6 +206,76 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+/// Retries a request-producing closure against **transient** `ureq` failures
+/// (5xx/429/transport) with the shared backoff policy, so the per-verb call
+/// sites (PROPFIND, range GET) carry no duplicated retry bookkeeping. The WebDAV
+/// verbs have no typed `ureq` helper, so [`net::get_with_retry`] can't be used
+/// directly; this is its non-GET sibling. `label` names the operation for the
+/// error message.
+fn with_retry(
+    label: &str,
+    // The `Err` is boxed so the large `ureq::Error` (≈272 B) stays small across
+    // the closure boundary (clippy `result_large_err`); call sites add
+    // `.map_err(Box::new)`.
+    mut send: impl FnMut() -> std::result::Result<ureq::Response, Box<ureq::Error>>,
+) -> Result<ureq::Response> {
+    let mut backoff = net::RETRY_BASE_BACKOFF;
+    let mut attempt = 0usize;
+    loop {
+        match send() {
+            Ok(resp) => return Ok(resp),
+            Err(e) => {
+                attempt += 1;
+                if !net::is_transient(&e) || attempt > net::RETRY_MAX {
+                    return Err(anyhow!("{label} failed: {e}"));
+                }
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(net::RETRY_MAX_BACKOFF);
+            }
+        }
+    }
+}
+
+/// Issues a `PROPFIND` with transient-failure retry and returns the response
+/// body.
+fn propfind(c: &Creds, rel: &str, depth: &str) -> Result<String> {
+    let url = url_for(c, rel);
+    let auth = auth_header(c);
+    let agent = agent();
+    with_retry("PROPFIND", || {
+        agent
+            .request("PROPFIND", &url)
+            .set("Depth", depth)
+            .set("Authorization", &auth)
+            .set("Content-Type", "application/xml")
+            .send_string(PROPFIND_BODY)
+            .map_err(Box::new)
+    })?
+    .into_string()
+    .map_err(|e| anyhow!("Response not readable: {e}"))
+}
+
+/// Range-GETs the first bytes of a remote file with transient-failure retry.
+/// `Ok(buf)` on success (the buffer may be shorter than `max` for small files);
+/// `Err` only on a **final** transport/HTTP failure — so a caller can tell a
+/// genuine network problem apart from a file that merely has no readable tags.
+fn fetch_prefix(c: &Creds, rel: &str, range: &str, max: u64) -> Result<Vec<u8>> {
+    let url = url_for(c, rel);
+    let auth = auth_header(c);
+    let agent = agent();
+    let resp = with_retry("range GET", || {
+        agent
+            .get(&url)
+            .set("Authorization", &auth)
+            .set("Range", range)
+            .call()
+            .map_err(Box::new)
+    })?;
+    let mut buf = Vec::new();
+    resp.into_reader().take(max).read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
 // ---------------------------------------------------------------------------
 // PROPFIND – list directory
 // ---------------------------------------------------------------------------
@@ -286,16 +357,7 @@ fn local_name(qname: &[u8]) -> String {
 /// Lists a directory (Depth: 1) relative to the music root. Returns only
 /// folders and audio files; the self-entry is filtered out.
 pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
-    let url = url_for(c, rel);
-    let body = agent()
-        .request("PROPFIND", &url)
-        .set("Depth", "1")
-        .set("Authorization", &auth_header(c))
-        .set("Content-Type", "application/xml")
-        .send_string(PROPFIND_BODY)
-        .map_err(|e| anyhow!("PROPFIND failed: {e}"))?
-        .into_string()
-        .map_err(|e| anyhow!("Response not readable: {e}"))?;
+    let body = propfind(c, rel, "1")?;
 
     let prefix = req_path_decoded(c, rel);
     let prefix = prefix.trim_end_matches('/');
@@ -334,13 +396,7 @@ pub fn list(c: &Creds, rel: &str) -> Result<Vec<DavEntry>> {
 /// Connection test: PROPFIND (Depth 0) on the music root. `Ok` = reachable
 /// and authenticated.
 pub fn test_connection(c: &Creds) -> Result<()> {
-    agent()
-        .request("PROPFIND", &url_for(c, ""))
-        .set("Depth", "0")
-        .set("Authorization", &auth_header(c))
-        .set("Content-Type", "application/xml")
-        .send_string(PROPFIND_BODY)
-        .map_err(|e| anyhow!("{e}"))?;
+    propfind(c, "", "0")?;
     Ok(())
 }
 
@@ -353,21 +409,10 @@ pub fn test_connection(c: &Creds) -> Result<()> {
 /// formats with metadata at the end of the file (e.g. unoptimized MP4) this
 /// fails and returns `None` – the callers then fall back to the file name.
 pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Option<i64>) {
-    let url = url_for(c, rel);
-    let resp = agent()
-        .get(&url)
-        .set("Authorization", &auth_header(c))
-        .set("Range", "bytes=0-524287")
-        .call();
-    let mut buf = Vec::new();
-    match resp {
-        Ok(r) => {
-            if r.into_reader().take(600_000).read_to_end(&mut buf).is_err() {
-                return (None, None, None);
-            }
-        }
+    let buf = match fetch_prefix(c, rel, "bytes=0-524287", 600_000) {
+        Ok(b) => b,
         Err(_) => return (None, None, None),
-    }
+    };
     // `lofty::read_from` expects a `File`; with an in-memory buffer it works
     // via `Probe` (Read + Seek on the `Cursor`, purely local – no HTTP seek).
     let tagged = match lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type() {
@@ -411,22 +456,17 @@ pub struct RemoteMeta {
 
 /// Like [`read_tags`], but reads **all** fields needed for the library
 /// (additionally album, genre, track/CD no.) from the first ~512 KB of the file.
-pub fn read_meta(c: &Creds, rel: &str) -> RemoteMeta {
-    let url = url_for(c, rel);
-    let resp = agent()
-        .get(&url)
-        .set("Authorization", &auth_header(c))
-        .set("Range", "bytes=0-524287")
-        .call();
-    let mut buf = Vec::new();
-    match resp {
-        Ok(r) => {
-            if r.into_reader().take(600_000).read_to_end(&mut buf).is_err() {
-                return RemoteMeta::default();
-            }
-        }
-        Err(_) => return RemoteMeta::default(),
-    }
+/// `Err` signals a **network** failure (so a caller indexing into the DB can
+/// skip the track instead of storing a degraded, tag-less entry); a reachable
+/// file with no readable tags yields `Ok` with default fields.
+pub fn read_meta(c: &Creds, rel: &str) -> Result<RemoteMeta> {
+    let buf = fetch_prefix(c, rel, "bytes=0-524287", 600_000)?;
+    Ok(parse_remote_meta(buf))
+}
+
+/// Runs `lofty` over an in-memory file prefix and pulls the library fields out.
+/// Unreadable/absent tags are not an error here — they just leave fields empty.
+fn parse_remote_meta(buf: Vec<u8>) -> RemoteMeta {
     let tagged = match lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type() {
         Ok(p) => match p.read() {
             Ok(t) => t,
@@ -468,18 +508,7 @@ pub fn nc_path(source_id: i64, rel: &str) -> String {
 /// extracts the picture via lofty from the in-memory buffer. **Blocking** –
 /// only from worker threads.
 pub fn fetch_cover(c: &Creds, rel: &str) -> Option<Vec<u8>> {
-    let url = url_for(c, rel);
-    let resp = agent()
-        .get(&url)
-        .set("Authorization", &auth_header(c))
-        .set("Range", "bytes=0-4194303")
-        .call()
-        .ok()?;
-    let mut buf = Vec::new();
-    resp.into_reader()
-        .take(4_400_000)
-        .read_to_end(&mut buf)
-        .ok()?;
+    let buf = fetch_prefix(c, rel, "bytes=0-4194303", 4_400_000).ok()?;
     let tagged = lofty::probe::Probe::new(Cursor::new(buf))
         .guess_file_type()
         .ok()?
@@ -541,7 +570,17 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
     let mut batch: Vec<crate::model::Track> = Vec::with_capacity(BATCH.min(files.len()));
     let mut n = 0;
     for rel in files {
-        let meta = read_meta(&c, &rel);
+        // A network failure must not produce a degraded entry (filename as
+        // title, no tags) that then sticks in the DB; skip the track so a later
+        // re-index picks it up once the source is reachable again. A reachable
+        // file with no tags still indexes (Ok with empty fields).
+        let meta = match read_meta(&c, &rel) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("skipping {rel}: metadata read failed: {e}");
+                continue;
+            }
+        };
         let name = rel.rsplit('/').next().unwrap_or(&rel);
         let title = meta.title.unwrap_or_else(|| {
             Path::new(name)

@@ -24,6 +24,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
+use crate::core::net;
 use crate::core::proc;
 
 /// Official "latest" zipapp asset (a self-contained Python program; needs the
@@ -562,9 +563,12 @@ pub fn channel_rss_published(channel_id: &str) -> std::collections::HashMap<Stri
     let url = format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}");
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(20))
         .build();
-    let body = match agent.get(&url).call() {
-        Ok(resp) => {
+    // Best effort: retry transient failures, but any final error (or a 404 →
+    // Ok(None)) just yields an empty map — the caller treats it as "no dates".
+    let body = match net::get_with_retry(&agent, &url, None, "youtube channel feed") {
+        Ok(Some(resp)) => {
             let mut s = String::new();
             if resp
                 .into_reader()
@@ -576,7 +580,7 @@ pub fn channel_rss_published(channel_id: &str) -> std::collections::HashMap<Stri
             }
             s
         }
-        Err(_) => return std::collections::HashMap::new(),
+        _ => return std::collections::HashMap::new(),
     };
     parse_atom_published(&body)
 }
