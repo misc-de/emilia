@@ -5,7 +5,7 @@
 use std::io::Read;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 /// A station search result (Radio-Browser): enough to display it and –
 /// when selected – save it as a station.
@@ -23,8 +23,15 @@ pub struct StationResult {
     pub bitrate: Option<i64>,
 }
 
-/// Preferred Radio-Browser mirror. There are several; one is enough.
-const API_BASE: &str = "https://de1.api.radio-browser.info";
+/// Radio-Browser mirrors, tried in order. `all.` is the official DNS round-robin
+/// entry (resolves to a different server each time); the country mirrors are
+/// stable fallbacks. A mirror that still fails after its own retry budget moves
+/// on to the next, so a single dead server no longer blanks the search.
+const API_MIRRORS: [&str; 3] = [
+    "https://de1.api.radio-browser.info",
+    "https://all.api.radio-browser.info",
+    "https://nl1.api.radio-browser.info",
+];
 
 /// Searches stations via the Radio-Browser API. **Blocking** – only call
 /// from worker threads. An empty search term yields an empty list.
@@ -34,8 +41,8 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
         return Ok(Vec::new());
     }
     // Sorted by popularity (votes); hide broken stations.
-    let url = format!(
-        "{API_BASE}/json/stations/search?limit=60&hidebroken=true&order=votes&reverse=true&name={}",
+    let query = format!(
+        "/json/stations/search?limit=60&hidebroken=true&order=votes&reverse=true&name={}",
         crate::core::online::percent_encode(term),
     );
     let agent = ureq::AgentBuilder::new()
@@ -44,15 +51,23 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
         .build();
     // The API asks for a meaningful User-Agent.
     let ua = format!("Emilia/{}", env!("CARGO_PKG_VERSION"));
-    // Defensive retry/backoff so a transient hiccup doesn't blank the search.
-    let Some(resp) = crate::core::net::get_with_retry(&agent, &url, Some(&ua), API_BASE)? else {
-        return Ok(Vec::new());
-    };
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .take(8 * 1024 * 1024) // Cap against unexpectedly large responses.
-        .read_to_end(&mut bytes)?;
-    parse_stations(&bytes)
+    let mut last_err = None;
+    for base in API_MIRRORS {
+        let url = format!("{base}{query}");
+        // Defensive retry/backoff so a transient hiccup doesn't blank the search.
+        match crate::core::net::get_with_retry(&agent, &url, Some(&ua), base) {
+            Ok(Some(resp)) => {
+                let mut bytes = Vec::new();
+                resp.into_reader()
+                    .take(8 * 1024 * 1024) // Cap against unexpectedly large responses.
+                    .read_to_end(&mut bytes)?;
+                return parse_stations(&bytes);
+            }
+            Ok(None) => return Ok(Vec::new()), // 404 (unlikely) — no results
+            Err(e) => last_err = Some(e),      // mirror unreachable — try the next
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow!("no Radio-Browser mirror reachable")))
 }
 
 /// Parses the Radio-Browser response. Results without a playable URL are

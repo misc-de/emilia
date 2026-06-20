@@ -96,6 +96,9 @@ pub struct Recorder {
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
     buffer_path: PathBuf,
+    /// Worker thread handle. Joined on drop (off the calling thread) so the
+    /// buffer file is only removed once the worker has stopped writing to it.
+    worker: Option<std::thread::JoinHandle<()>>,
     /// Extension of the buffered audio data (e.g. "mp3"/"aac"). Set by the
     /// worker as soon as the Content-Type is known – therefore shared and read
     /// fresh when saving.
@@ -107,7 +110,11 @@ impl Recorder {
     /// minutes. Returns immediately; the worker runs in the background.
     pub fn start(url: &str, cap_minutes: u32, station: Option<&str>) -> Recorder {
         let n = BUFFER_SEQ.fetch_add(1, Ordering::Relaxed);
-        let mut buffer_path = crate::core::online::cover_cache_dir();
+        let cache_dir = crate::core::online::cover_cache_dir();
+        // Sweep ring-buffer files orphaned by a previous run (a hard kill leaves
+        // the off-thread `Drop` cleanup unfinished); ours are reaped on drop.
+        cleanup_stale_buffers(&cache_dir);
+        let mut buffer_path = cache_dir;
         buffer_path.push(format!("stream_buffer_{}_{n}.dat", std::process::id()));
 
         let shared = Arc::new(Mutex::new(Shared::default()));
@@ -116,7 +123,7 @@ impl Recorder {
         // as a sensible default "mp3" (most common ICY codec).
         let ext = Arc::new(Mutex::new(String::from("mp3")));
 
-        {
+        let worker = {
             let (url, station, shared, stop, buffer_path, ext) = (
                 url.to_string(),
                 station.map(str::to_string),
@@ -138,13 +145,14 @@ impl Recorder {
                     tracing::info!("Stream recorder ended: {e}");
                 }
                 shared.lock_or_recover().ended = true;
-            });
-        }
+            })
+        };
 
         Recorder {
             shared,
             stop,
             buffer_path,
+            worker: Some(worker),
             ext,
         }
     }
@@ -233,7 +241,45 @@ impl Recorder {
 impl Drop for Recorder {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        let _ = std::fs::remove_file(&self.buffer_path);
+        // Join off the calling thread (Drop usually runs on the GTK main thread
+        // when switching stations): the worker may sit in a blocking read for up
+        // to its read timeout, and we must not stall the UI. Removing the buffer
+        // file only *after* the worker has stopped also avoids deleting a file it
+        // is still appending to.
+        let worker = self.worker.take();
+        let path = std::mem::take(&mut self.buffer_path);
+        std::thread::spawn(move || {
+            if let Some(h) = worker {
+                let _ = h.join();
+            }
+            let _ = std::fs::remove_file(&path);
+        });
+    }
+}
+
+/// Removes orphaned ring-buffer files in `dir` left by a previous run. A file is
+/// kept only while its owning process is still alive (`/proc/<pid>`), so a
+/// concurrently running second instance is never disturbed; everything else is
+/// stale and removed. Best effort — any I/O error is ignored.
+fn cleanup_stale_buffers(dir: &Path) {
+    let me = std::process::id();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // Expected shape: `stream_buffer_<pid>_<seq>.dat`.
+        let Some(rest) = name.strip_prefix("stream_buffer_") else {
+            continue;
+        };
+        let Some(pid) = rest.split('_').next().and_then(|p| p.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == me || Path::new(&format!("/proc/{pid}")).exists() {
+            continue; // ours, or owned by another live instance
+        }
+        let _ = std::fs::remove_file(entry.path());
     }
 }
 

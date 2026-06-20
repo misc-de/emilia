@@ -589,6 +589,14 @@ pub fn podcast_image_path(url: &str) -> Option<String> {
     p.exists().then(|| p.to_string_lossy().into_owned())
 }
 
+/// A process-wide [`OnlineClient`] for the on-demand image/cover cache helpers
+/// below. Reuses one connection pool across all thumbnail/cover downloads
+/// instead of building a fresh agent (and pool) on every call.
+fn shared_client() -> &'static OnlineClient {
+    static CLIENT: std::sync::OnceLock<OnlineClient> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(OnlineClient::new)
+}
+
 /// Loads the podcast image (RSS/iTunes) into the cache on demand and returns the
 /// local path. **Network access** – only call from worker/background threads.
 /// Already cached images are not loaded again.
@@ -599,7 +607,7 @@ pub fn cache_podcast_image(url: &str) -> Option<String> {
     if url.trim().is_empty() {
         return None;
     }
-    let bytes = OnlineClient::new().get_image(url).ok().flatten()?;
+    let bytes = shared_client().get_image(url).ok().flatten()?;
     let mut p = cover_cache_dir();
     p.push(format!("podcast_{}.img", name_hash(url)));
     std::fs::write(&p, &bytes).ok()?;
@@ -627,7 +635,7 @@ pub fn cache_station_image(url: &str) -> Option<String> {
     if url.trim().is_empty() {
         return None;
     }
-    let bytes = OnlineClient::new().get_image(url).ok().flatten()?;
+    let bytes = shared_client().get_image(url).ok().flatten()?;
     let mut p = cover_cache_dir();
     p.push(format!("station_{}.img", name_hash(url)));
     std::fs::write(&p, &bytes).ok()?;
@@ -671,7 +679,7 @@ pub fn cache_youtube_thumb(url: &str) -> Option<String> {
     if url.trim().is_empty() {
         return None;
     }
-    let bytes = OnlineClient::new().get_image(url).ok().flatten()?;
+    let bytes = shared_client().get_image(url).ok().flatten()?;
     let mut p = cover_cache_dir();
     p.push(format!("yt_{}.img", name_hash(url)));
     std::fs::write(&p, &bytes).ok()?;
@@ -687,7 +695,7 @@ pub fn track_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>
     if title.trim().is_empty() {
         return None;
     }
-    OnlineClient::new()
+    shared_client()
         .fetch_track_cover(artist, title)
         .ok()
         .flatten()
@@ -697,7 +705,7 @@ pub fn recording_cover(
     raw_title: &str,
     station: Option<&str>,
 ) -> Option<(Vec<u8>, Option<String>)> {
-    let client = OnlineClient::new();
+    let client = shared_client();
     let candidates = recording_query_candidates(raw_title, station);
     // The first candidate is also the best guess for storage/display – the cover
     // is cached under it so the recordings list finds it ([`recording_cover_path`]).

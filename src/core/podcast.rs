@@ -386,8 +386,12 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
 pub fn download_episode(url: &str, dest: &std::path::Path) -> Result<u64> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
-        // No read timeout: a large episode over a slow link may legitimately
-        // take a while; the user triggered it deliberately.
+        // Generous *per-read* timeout: a large episode over a slow link may take
+        // a while, and the timeout resets on every chunk — so a legitimately slow
+        // but progressing download is never killed. It only fires on a true stall
+        // (a server that connects then sends nothing) so the worker can't hang
+        // forever on a half-open socket.
+        .timeout_read(Duration::from_secs(120))
         .build();
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
