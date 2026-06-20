@@ -7,6 +7,36 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+/// Keep an `adw::SpinRow`'s value field as narrow as its digits instead of
+/// letting it stretch across the whole row. By default the inner `gtk::Text`
+/// is `hexpand`, so a tiny integer like "5" or "100" still claims the full
+/// width; this walks to that `gtk::Text` and sizes it to its content.
+fn narrow_spin_value(row: &adw::SpinRow) {
+    fn inner_text(w: &gtk::Widget) -> Option<gtk::Text> {
+        if let Ok(t) = w.clone().downcast::<gtk::Text>() {
+            return Some(t);
+        }
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            if let Some(t) = inner_text(&c) {
+                return Some(t);
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+    let mut child = row.first_child();
+    while let Some(c) = child {
+        if let Some(text) = inner_text(&c) {
+            text.set_hexpand(false);
+            text.set_halign(gtk::Align::End);
+            text.set_max_width_chars(4);
+            break;
+        }
+        child = c.next_sibling();
+    }
+}
+
 impl App {
     pub(crate) fn open_settings(
         &self,
@@ -73,6 +103,7 @@ impl App {
         xfade_row.set_title(&gettext("Crossfade"));
         xfade_row.set_subtitle(&gettext("Seconds to overlap tracks (0 = off)"));
         xfade_row.set_value(self.settings.crossfade_secs);
+        narrow_spin_value(&xfade_row);
         {
             let sender = sender.clone();
             xfade_row.connect_value_notify(move |r| {
@@ -275,6 +306,7 @@ impl App {
                 sender.input(Msg::SetGalleryColumns(r.value() as u32));
             });
         }
+        narrow_spin_value(&cols_row);
         gallery_group.add(&cols_row);
         // Added to this "View" page below, right after "Scaling".
 
@@ -300,6 +332,7 @@ impl App {
                 sender.input(Msg::SetUiScale(r.value() / 100.0));
             });
         }
+        narrow_spin_value(&scale_row);
         scale_group.add(&scale_row);
         // Mobile only: scale just the top-bar menu icons, -50 .. +50 % in 10 %
         // steps. Hidden on desktop, where the sidebar shows icon + label.
@@ -321,6 +354,7 @@ impl App {
             ))
             .build();
         menu_scale_row.set_visible(self.nav.narrow.get());
+        narrow_spin_value(&menu_scale_row);
         {
             let sender = sender.clone();
             menu_scale_row.connect_value_notify(move |r| {
