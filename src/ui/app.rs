@@ -1435,6 +1435,12 @@ pub enum Msg {
         key: String,
         value: String,
     },
+    /// Override an album's classification (Singles/Compilations) from the album
+    /// context menu; `kind` = `None` reverts to the automatic heuristic.
+    SetAlbumKind {
+        album: String,
+        kind: Option<crate::model::AlbumKind>,
+    },
     /// Save and apply the equalizer bands of an output + a level.
     SetEq {
         output: String,
@@ -4875,6 +4881,21 @@ impl Component for App {
                     ));
             }
             Msg::SetAreas { scope, key, value } => self.set_areas(&sender, scope, key, value),
+            Msg::SetAlbumKind { album, kind } => {
+                match kind {
+                    Some(k) => {
+                        let _ = self.library.set_album_kind(&album, k);
+                    }
+                    None => {
+                        let _ = self.library.clear_album_kind(&album);
+                    }
+                }
+                // Refresh all three album views so the moved album appears in its
+                // new category (and disappears from the old one).
+                self.reload_albums();
+                self.reload_singles();
+                self.reload_compilations();
+            }
             Msg::SetEq {
                 output,
                 scope,

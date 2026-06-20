@@ -119,6 +119,21 @@ impl Library {
         Ok(())
     }
 
+    /// The manual override for an album name, or `None` when it follows the
+    /// heuristic ("automatic"). For the in-app type switch.
+    pub fn album_kind_override(&self, album: &str) -> Option<AlbumKind> {
+        self.conn
+            .query_row(
+                "SELECT kind FROM album_kind WHERE album = ?1",
+                [album.to_lowercase()],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .and_then(|k| AlbumKind::from_str(&k))
+    }
+
     /// All manual album-type overrides, keyed by lowercased album name.
     fn album_kind_overrides(&self) -> Result<std::collections::HashMap<String, AlbumKind>> {
         let mut stmt = self.conn.prepare("SELECT album, kind FROM album_kind")?;

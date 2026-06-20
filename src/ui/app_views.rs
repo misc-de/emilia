@@ -1930,6 +1930,57 @@ impl App {
         Some(self.build_area_group(scope, key, &effective, sender))
     }
 
+    /// Type switch (Automatic / Album / Single / Compilation) for the album
+    /// context menu — writes the manual `album_kind` override so the user can
+    /// correct the heuristic. Automatic clears the override.
+    pub(crate) fn ctx_album_kind_group(
+        &self,
+        target: &CtxTarget,
+        sender: &ComponentSender<Self>,
+    ) -> Option<adw::PreferencesGroup> {
+        use crate::model::AlbumKind;
+        let CtxTarget::Album(m) = target else {
+            return None;
+        };
+        let album = m.album.clone();
+        let group = adw::PreferencesGroup::builder()
+            .title(gettext("Category"))
+            .build();
+        let row = adw::ComboRow::builder()
+            .title(gettext("Type"))
+            .subtitle(gettext(
+                "Where this album is filed (Singles / Compilations)",
+            ))
+            .build();
+        let auto = gettext("Automatic");
+        let alb = gettext("Album");
+        let sng = gettext("Single");
+        let cmp = gettext("Compilation");
+        let model = gtk::StringList::new(&[&auto, &alb, &sng, &cmp]);
+        row.set_model(Some(&model));
+        row.set_selected(match self.library.album_kind_override(&album) {
+            None => 0,
+            Some(AlbumKind::Album) => 1,
+            Some(AlbumKind::Single) => 2,
+            Some(AlbumKind::Compilation) => 3,
+        });
+        let sender = sender.clone();
+        row.connect_selected_notify(move |r| {
+            let kind = match r.selected() {
+                1 => Some(AlbumKind::Album),
+                2 => Some(AlbumKind::Single),
+                3 => Some(AlbumKind::Compilation),
+                _ => None,
+            };
+            sender.input(Msg::SetAlbumKind {
+                album: album.clone(),
+                kind,
+            });
+        });
+        group.add(&row);
+        Some(group)
+    }
+
     /// Area selection (one switch per area) for a level. All switches
     /// off = hidden.
     fn build_area_group(

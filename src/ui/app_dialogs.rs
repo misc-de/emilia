@@ -110,6 +110,11 @@ impl App {
             content.append(&merkmale);
         }
 
+        // Album type switch (Automatic / Album / Single / Compilation).
+        if let Some(kind_group) = self.ctx_album_kind_group(entry, sender) {
+            content.append(&kind_group);
+        }
+
         // Actions
         let action_group = adw::PreferencesGroup::new();
         // Determine the target's playback kind (label + order of the play action).
