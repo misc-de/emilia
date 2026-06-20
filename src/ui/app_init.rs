@@ -188,10 +188,20 @@ impl App {
                     .collect()
             })
             .unwrap_or_default();
-        for (name, _, _) in SECTIONS {
-            if !section_order.contains(&name) {
-                section_order.push(name);
+        // Insert sections missing from the saved order at their SECTIONS-relative
+        // position — right after the nearest preceding section already present —
+        // instead of appending. So a newly added category (e.g. Singles between
+        // Artists and Albums) lands next to its neighbours, not at the very end.
+        for (i, (name, _, _)) in SECTIONS.iter().enumerate() {
+            if section_order.contains(name) {
+                continue;
             }
+            let insert_at = SECTIONS[..i]
+                .iter()
+                .rev()
+                .find_map(|(prev, _, _)| section_order.iter().position(|n| n == prev))
+                .map_or(section_order.len(), |pos| pos + 1);
+            section_order.insert(insert_at, *name);
         }
         // Automatic online fetch (default: on; only "0" turns it off).
         let auto_enrich = !matches!(
