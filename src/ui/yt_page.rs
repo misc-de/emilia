@@ -37,93 +37,6 @@ const PLAYLIST_INDEX_LIMIT: usize = 200;
 /// background refresh is kicked off on the next open (6 hours).
 const PLAYLIST_CACHE_TTL_SECS: i64 = 6 * 60 * 60;
 
-/// Outcome of a library-add attempt: the file was written, or the destination
-/// already holds a (different) file and the user must decide whether to overwrite.
-enum AddOutcome {
-    Added,
-    Exists(std::path::PathBuf),
-}
-
-/// Downloads a video (if no local copy yet), transcodes it into the on-disk
-/// music library under `<music>/YouTube/<Artist>/<Album>/<Title>.mp3`, tags it,
-/// gives it the enriched cover, indexes it, and removes the temporary download.
-/// With `overwrite == false` a pre-existing destination is reported back. Worker only.
-fn library_add_one(
-    video_id: &str,
-    title_hint: &str,
-    music_dir: &str,
-    cover: Option<&str>,
-    overwrite: bool,
-) -> Result<AddOutcome, String> {
-    let meta = youtube::video_meta(video_id).ok();
-    let artist = meta
-        .as_ref()
-        .and_then(|m| m.uploader.clone())
-        .map(|c| youtube::clean_channel_name(&c))
-        .filter(|s| !s.trim().is_empty());
-    let title = meta
-        .as_ref()
-        .map(|m| m.title.clone())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| title_hint.to_string());
-
-    let (album, dz_cover) = match artist.as_deref() {
-        Some(a) => match crate::core::online::track_cover(a, &title) {
-            Some((bytes, alb)) => (alb.filter(|s| !s.trim().is_empty()), Some(bytes)),
-            None => (None, None),
-        },
-        None => (None, None),
-    };
-
-    let mut dest = std::path::PathBuf::from(music_dir);
-    dest.push("YouTube");
-    if let Some(a) = artist.as_deref().filter(|s| !s.trim().is_empty()) {
-        dest.push(youtube::sanitize_filename(a));
-    }
-    if let Some(al) = album.as_deref() {
-        dest.push(youtube::sanitize_filename(al));
-    }
-    dest.push(format!("{}.mp3", youtube::sanitize_filename(&title)));
-
-    if dest.exists() && !overwrite {
-        return Ok(AddOutcome::Exists(dest));
-    }
-
-    let source = match youtube::find_download(video_id) {
-        Some(p) => p,
-        None => youtube::download_audio(video_id).map_err(|e| e.to_string())?,
-    };
-    youtube::transcode_to_mp3(&source, &dest, &title, artist.as_deref(), album.as_deref())
-        .map_err(|e| e.to_string())?;
-    let dest_str = dest.to_string_lossy().into_owned();
-    if let Some(bytes) = cover.and_then(|c| std::fs::read(c).ok()) {
-        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
-    } else if let Some(bytes) = dz_cover {
-        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
-    }
-    if let Ok(lib) = Library::open() {
-        let track = crate::model::Track {
-            id: 0,
-            path: dest_str,
-            title,
-            artist,
-            album,
-            genre: None,
-            track_no: None,
-            disc_no: None,
-            duration_ms: meta
-                .and_then(|m| m.duration)
-                .map(|s| s.saturating_mul(1000)),
-            resume_ms: 0,
-            year: None,
-        };
-        let _ = lib.upsert_track(&track);
-        let _ = lib.delete_yt_download(video_id);
-    }
-    let _ = std::fs::remove_file(&source);
-    Ok(AddOutcome::Added)
-}
-
 /// Content box for the detail dialogs (uniform margins).
 fn detail_box() -> gtk::Box {
     gtk::Box::builder()
@@ -2579,21 +2492,22 @@ impl YtPage {
         let cover = crate::core::online::youtube_cover_path(&video_id);
         let vid = video_id;
         sender.spawn_command(move |out| {
-            let cmd = match library_add_one(&vid, &title, &music, cover.as_deref(), overwrite) {
-                Ok(AddOutcome::Added) => YtCmd::LibraryAdded {
-                    video_id: Some(vid),
-                    result: Ok(1),
-                },
-                Ok(AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
-                    video_id: vid,
-                    title,
-                    dest: dest.to_string_lossy().into_owned(),
-                },
-                Err(e) => YtCmd::LibraryAdded {
-                    video_id: Some(vid),
-                    result: Err(e),
-                },
-            };
+            let cmd =
+                match youtube::add_to_library(&vid, &title, &music, cover.as_deref(), overwrite) {
+                    Ok(youtube::AddOutcome::Added) => YtCmd::LibraryAdded {
+                        video_id: Some(vid),
+                        result: Ok(1),
+                    },
+                    Ok(youtube::AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
+                        video_id: vid,
+                        title,
+                        dest: dest.to_string_lossy().into_owned(),
+                    },
+                    Err(e) => YtCmd::LibraryAdded {
+                        video_id: Some(vid),
+                        result: Err(e),
+                    },
+                };
             let _ = out.send(cmd);
         });
     }
@@ -2619,8 +2533,8 @@ impl YtPage {
                 let _ = out.send(YtCmd::LibraryProgress { done: 0, total });
                 for (i, v) in videos.into_iter().enumerate() {
                     let cover = crate::core::online::youtube_cover_path(&v.id);
-                    if let Ok(AddOutcome::Added) =
-                        library_add_one(&v.id, &v.title, &music, cover.as_deref(), false)
+                    if let Ok(youtube::AddOutcome::Added) =
+                        youtube::add_to_library(&v.id, &v.title, &music, cover.as_deref(), false)
                     {
                         n += 1;
                     }

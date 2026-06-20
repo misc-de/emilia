@@ -176,6 +176,7 @@ impl App {
         let ctx = Arc::new(McpContext {
             now: self.mcp.now.clone(),
             control,
+            jobs: self.mcp.jobs.clone(),
         });
         let stop = Arc::new(AtomicBool::new(false));
         let bind = if public { "0.0.0.0" } else { "127.0.0.1" };
@@ -233,6 +234,7 @@ impl McpState {
     pub(crate) fn new() -> Self {
         Self {
             now: mcp::new_handle(),
+            jobs: std::sync::Arc::new(mcp::jobs::Jobs::default()),
             stop: None,
         }
     }

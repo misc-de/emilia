@@ -745,6 +745,70 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             Ok(json!({ "results": items }))
         }
 
+        // --- downloads (long-running → background job + list_jobs status) ----
+        "download_youtube" => {
+            use crate::core::youtube;
+            if !youtube::available() {
+                return Err(anyhow!("yt-dlp is not available on this system"));
+            }
+            let raw = req_str(args, "id")?;
+            let video_id = youtube::video_id_from_url(raw).unwrap_or_else(|| raw.to_string());
+            let music = Library::open()?
+                .get_setting("music_dir")?
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| anyhow!("no music folder configured"))?;
+            let jobs = ctx.jobs.clone();
+            let job_id = jobs.start("youtube_download", &video_id);
+            let vid = video_id.clone();
+            std::thread::spawn(move || {
+                let res =
+                    youtube::add_to_library(&vid, &vid, &music, None, false).map(|o| match o {
+                        youtube::AddOutcome::Added => "added to library".to_string(),
+                        youtube::AddOutcome::Exists(p) => {
+                            format!("already present: {}", p.display())
+                        }
+                    });
+                jobs.finish(job_id, res);
+            });
+            Ok(json!({ "ok": true, "job_id": job_id, "video_id": video_id }))
+        }
+
+        "download_episode" => {
+            let url = req_str(args, "url")?.to_string();
+            let jobs = ctx.jobs.clone();
+            let job_id = jobs.start("episode_download", &url);
+            std::thread::spawn(move || {
+                let res = (|| -> Result<String> {
+                    let dest = crate::core::online::episode_download_dest(&url);
+                    crate::core::podcast::download_episode(&url, &dest)?;
+                    let path = dest.to_string_lossy().into_owned();
+                    Library::open()?.set_episode_download(&url, &path)?;
+                    Ok(path)
+                })()
+                .map_err(|e| e.to_string());
+                jobs.finish(job_id, res);
+            });
+            Ok(json!({ "ok": true, "job_id": job_id }))
+        }
+
+        "list_jobs" => {
+            let items: Vec<Value> = ctx
+                .jobs
+                .snapshot()
+                .iter()
+                .map(|j| {
+                    json!({
+                        "id": j.id,
+                        "kind": j.kind,
+                        "label": j.label,
+                        "state": j.state.as_str(),
+                        "detail": j.detail,
+                    })
+                })
+                .collect();
+            Ok(json!({ "jobs": items }))
+        }
+
         other => Err(anyhow!("unknown tool '{other}'")),
     }
 }
@@ -1147,6 +1211,27 @@ pub fn tool_list() -> Value {
                 json!(["query"]),
             ),
         },
+        {
+            "name": "download_youtube",
+            "description": "Download a YouTube video (by id or watch URL) into the music library (transcode to mp3, tag, index). Long-running: returns a `job_id` immediately; poll `list_jobs` for progress.",
+            "inputSchema": obj(
+                json!({ "id": { "type": "string", "description": "YouTube video id or watch URL." } }),
+                json!(["id"]),
+            ),
+        },
+        {
+            "name": "download_episode",
+            "description": "Download a podcast episode for offline playback (by its audio URL, from list_episodes). Long-running: returns a `job_id`; poll `list_jobs`.",
+            "inputSchema": obj(
+                json!({ "url": { "type": "string", "description": "Episode audio URL." } }),
+                json!(["url"]),
+            ),
+        },
+        {
+            "name": "list_jobs",
+            "description": "List background download jobs and their state (running / done / error), newest first.",
+            "inputSchema": empty(),
+        },
     ])
 }
 
@@ -1164,6 +1249,7 @@ mod tests {
         let ctx = McpContext {
             now: state::new_handle(),
             control: Arc::new(move |c| sink.lock().unwrap().push(c)),
+            jobs: Arc::new(crate::core::mcp::jobs::Jobs::default()),
         };
         (ctx, log)
     }

@@ -203,6 +203,7 @@ mod tests {
         let ctx = Arc::new(McpContext {
             now: state::new_handle(),
             control: Arc::new(move |c| sink.lock().unwrap().push(c)),
+            jobs: Arc::new(crate::core::mcp::jobs::Jobs::default()),
         });
         (ctx, log)
     }

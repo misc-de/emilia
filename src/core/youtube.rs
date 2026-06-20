@@ -1005,3 +1005,89 @@ impl RawEntry {
         YtKind::Video
     }
 }
+
+/// Result of [`add_to_library`].
+pub enum AddOutcome {
+    Added,
+    Exists(PathBuf),
+}
+
+/// Downloads a video (if no local copy yet), transcodes it into the on-disk
+/// music library under `<music>/YouTube/<Artist>/<Album>/<Title>.mp3`, tags it,
+/// gives it the enriched cover, indexes it, and removes the temporary download.
+/// UI-free, so both the YouTube page and the MCP download job use it.
+pub fn add_to_library(
+    video_id: &str,
+    title_hint: &str,
+    music_dir: &str,
+    cover: Option<&str>,
+    overwrite: bool,
+) -> Result<AddOutcome, String> {
+    let meta = video_meta(video_id).ok();
+    let artist = meta
+        .as_ref()
+        .and_then(|m| m.uploader.clone())
+        .map(|c| clean_channel_name(&c))
+        .filter(|s| !s.trim().is_empty());
+    let title = meta
+        .as_ref()
+        .map(|m| m.title.clone())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| title_hint.to_string());
+
+    let (album, dz_cover) = match artist.as_deref() {
+        Some(a) => match crate::core::online::track_cover(a, &title) {
+            Some((bytes, alb)) => (alb.filter(|s| !s.trim().is_empty()), Some(bytes)),
+            None => (None, None),
+        },
+        None => (None, None),
+    };
+
+    let mut dest = PathBuf::from(music_dir);
+    dest.push("YouTube");
+    if let Some(a) = artist.as_deref().filter(|s| !s.trim().is_empty()) {
+        dest.push(sanitize_filename(a));
+    }
+    if let Some(al) = album.as_deref() {
+        dest.push(sanitize_filename(al));
+    }
+    dest.push(format!("{}.mp3", sanitize_filename(&title)));
+
+    if dest.exists() && !overwrite {
+        return Ok(AddOutcome::Exists(dest));
+    }
+
+    let source = match find_download(video_id) {
+        Some(p) => p,
+        None => download_audio(video_id).map_err(|e| e.to_string())?,
+    };
+    transcode_to_mp3(&source, &dest, &title, artist.as_deref(), album.as_deref())
+        .map_err(|e| e.to_string())?;
+    let dest_str = dest.to_string_lossy().into_owned();
+    if let Some(bytes) = cover.and_then(|c| std::fs::read(c).ok()) {
+        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
+    } else if let Some(bytes) = dz_cover {
+        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
+    }
+    if let Ok(lib) = crate::core::db::Library::open() {
+        let track = crate::model::Track {
+            id: 0,
+            path: dest_str,
+            title,
+            artist,
+            album,
+            genre: None,
+            track_no: None,
+            disc_no: None,
+            duration_ms: meta
+                .and_then(|m| m.duration)
+                .map(|s| s.saturating_mul(1000)),
+            resume_ms: 0,
+            year: None,
+        };
+        let _ = lib.upsert_track(&track);
+        let _ = lib.delete_yt_download(video_id);
+    }
+    let _ = std::fs::remove_file(&source);
+    Ok(AddOutcome::Added)
+}

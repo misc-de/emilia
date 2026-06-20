@@ -1075,6 +1075,8 @@ pub(crate) struct TrayState {
 /// down. See [`crate::ui::app_mcp`].
 pub(crate) struct McpState {
     pub(crate) now: crate::core::mcp::NowPlayingHandle,
+    /// Background-job registry (downloads), kept across server restarts.
+    pub(crate) jobs: std::sync::Arc<crate::core::mcp::jobs::Jobs>,
     pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 

@@ -18,6 +18,7 @@
 
 pub mod command;
 pub mod http;
+pub mod jobs;
 pub mod protocol;
 pub mod server_jsonrpc;
 pub mod server_sdk;
@@ -92,6 +93,8 @@ impl McpMode {
 pub struct McpContext {
     pub now: NowPlayingHandle,
     pub control: ControlFn,
+    /// Registry of long-running background jobs (downloads).
+    pub jobs: std::sync::Arc<jobs::Jobs>,
 }
 
 #[cfg(test)]
