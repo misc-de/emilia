@@ -206,9 +206,9 @@ pub(crate) fn set_design(lib: &Library, base: &str, value: &str) {
 /// so each theme keeps its own appearance.
 pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
     // Fresh-install defaults differ per theme (the maintainer's shipped look):
-    // dark gets a dark blue field tint; light a light grey one that is a touch
-    // more see-through. Both use a barely-there blur on the built-in concert
-    // background.
+    // dark gets a deep indigo field tint; light a plain white one that is a
+    // touch more see-through. Both use a barely-there blur on the built-in
+    // concert background.
     let dark = adw::StyleManager::default().is_dark();
     crate::ui::theme::DesignSettings {
         background_on: get_design(lib, "design_background_on")
@@ -238,13 +238,13 @@ pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSet
         // Default field tint for a fresh install. `None` = never set; `Some("")`
         // = explicitly cleared via the reset button, which must stay cleared.
         field_color: match get_design(lib, "design_field_color") {
-            None => Some(if dark { "#33325b" } else { "#c0bfbc" }.to_string()),
+            None => Some(if dark { "#241f31" } else { "#ffffff" }.to_string()),
             Some(s) if s.is_empty() => None,
             Some(s) => Some(s),
         },
         field_transparency: get_design(lib, "design_chrome_transparency")
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(if dark { 75 } else { 90 })
+            .unwrap_or(if dark { 60 } else { 90 })
             .min(100),
     }
 }

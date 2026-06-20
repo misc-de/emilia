@@ -54,7 +54,10 @@ smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both. W
   - **Artists** – a single tap opens a subpage with the artist's **albums** (with
     covers) and, below them, the **single tracks** (guest/feature tracks and
     tracks without an album). An album opens its track list.
-  - **Albums** – all albums with covers.
+  - **Albums** – all full albums with covers.
+  - **Singles** & **Compilations** – one-artist singles/EPs and various-artists
+    compilations are split off into their own sections, classified automatically
+    from the tags (and overridable per album).
   - **Concerts** – mark and collect live/unplugged recordings; an import suggests
     likely candidates.
   - **Favorites**, **Audiobooks**, **Statistics**.
@@ -72,8 +75,12 @@ smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both. W
 - **Sleep timer** – the header "zzz" button starts a countdown from a preset; the
   volume gently **fades out** over the final two minutes before playback stops.
 - **Quick filter** – a funnel button reveals an inline search bar that filters the
-  list you're looking at (Files / Artists / Albums) live, separate from the global
+  list you're looking at (Files / Artists / Albums …) live, separate from the global
   search dialog.
+- **Appearance** – an optional blurred **background** (the built-in concert photo,
+  your own image, or the now-playing cover) with several blur styles, custom
+  **chrome & text colors** stored separately for the **light and dark** theme,
+  whole-app **UI scaling**, and a **system-tray** icon with close-/start-to-tray.
 - **Lock screen & media keys** – control via **MPRIS** (play/pause, next/previous,
   seek) including title/album display.
 - **Playlists** – create your own playlists, add tracks/albums/folders via the
@@ -111,6 +118,9 @@ smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both. W
   covers and photos are cached locally for performance.
 - **Device sync** – share library/resume data between devices over the LAN with a
   QR-code pairing handshake.
+- **MCP server** (optional) – expose the library and playback to an **MCP host**
+  (e.g. Claude) over a local, token-protected endpoint, to browse and control
+  Emilia by natural language. Off by default; enable it under **Settings**.
 - **Equalizer with cascade** – 10-band EQ (`equalizer-10bands`), live during
   playback. Settings apply in the order **Global → Artist → Album → Track** (the
   most specific level wins), additionally per **output device/headphones**
