@@ -15,6 +15,7 @@ mod category;
 mod eq;
 mod favorites;
 mod gallery;
+mod heard;
 mod memo;
 mod playlist;
 mod podcast;
@@ -438,6 +439,22 @@ impl Library {
                 duration_ms INTEGER NOT NULL DEFAULT 0,
                 incomplete  INTEGER NOT NULL DEFAULT 0
             );
+
+            -- Log of songs *recognized* (from a station's ICY title) while
+            -- streaming — the "Recently heard" history. Unlike `recording`,
+            -- nothing is captured to disk: this is just metadata about what
+            -- played. One row per song (deduped on artist+title, case-folded);
+            -- hearing it again only bumps `heard_at`/`station` and `count`.
+            -- Purely local, like the play statistics.
+            CREATE TABLE IF NOT EXISTS heard (
+                id       INTEGER PRIMARY KEY,
+                artist   TEXT,
+                title    TEXT NOT NULL,
+                station  TEXT,
+                heard_at INTEGER NOT NULL DEFAULT 0,
+                count    INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_heard_time ON heard(heard_at);
 
             -- Listening statistics: one event per played track (raw; nothing is
             -- precomputed). Stays purely local -- never leaves the device. Artist/

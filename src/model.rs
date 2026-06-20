@@ -235,6 +235,22 @@ pub struct RecordingItem {
     pub incomplete: bool,
 }
 
+/// A song recognized from a station's ICY title while streaming — an entry in
+/// the "Recently heard" history. Unlike a [`RecordingItem`] nothing is captured
+/// to disk; this is purely metadata about what played. One row per song.
+#[derive(Debug, Clone)]
+pub struct HeardItem {
+    pub id: i64,
+    pub artist: Option<String>,
+    pub title: String,
+    /// Station it was last heard on.
+    pub station: Option<String>,
+    /// Last time it was heard (Unix seconds; newest first).
+    pub heard_at: i64,
+    /// How often it has been recognized (across stations).
+    pub count: i64,
+}
+
 /// A user-created category for organising voice memos. Each memo has at most
 /// one (optional); a memo without one falls back to "General" — represented by
 /// a NULL `category_id`, only ever shown as a label, never a real row, so it

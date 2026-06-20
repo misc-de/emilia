@@ -268,6 +268,8 @@ pub(crate) enum StreamView {
     Channels,
     /// Timeshift recordings.
     Recordings,
+    /// Songs recognized while streaming ("Recently heard").
+    Heard,
 }
 
 /// What the (shared) waveform editor is currently editing. The editor body is
@@ -1627,6 +1629,21 @@ pub enum Msg {
     },
     /// Play a saved recording (path).
     PlayRecording(String),
+    /// A background job touched the "Recently heard" history (e.g. a cover
+    /// landed) → reload the "Recently" list. Sent from a worker via `self.input`.
+    ReloadHeard,
+    /// Play a recognized song from the "Recently" list: prefer a saved timeshift
+    /// recording, then a matching library track, otherwise stream via YouTube.
+    PlayHeard {
+        artist: Option<String>,
+        title: String,
+    },
+    /// Download a recognized song from the "Recently" list via YouTube into the
+    /// music library (resolves the best match, then reuses the YouTube import).
+    DownloadHeard {
+        artist: Option<String>,
+        title: String,
+    },
     // --- bridge from the StreamPage component to the shared parent chrome ---
     /// The page confirmed a station removal → show the "station removed" undo toast.
     StreamDeleteUndo(i64),
@@ -1771,6 +1788,14 @@ pub enum Cmd {
     },
     /// Startup background refresh finished → tell the YtPage component to reload.
     YtReload,
+    /// A recognized song ("Recently heard") was resolved to a YouTube video:
+    /// `video_id` is `None` when nothing matched. `download` distinguishes the
+    /// two actions — play the stream, or import it into the library.
+    HeardResolved {
+        video_id: Option<String>,
+        title: String,
+        download: bool,
+    },
     /// Reachability of the sources (source id → reachable?).
     SourceStatus(Vec<(i64, bool)>),
     /// Cloud sources were re-indexed → rebuild views + covers. `manual` = the
@@ -3258,6 +3283,8 @@ impl Component for App {
                     O::StreamDeleteUndo(id) => Msg::StreamDeleteUndo(id),
                     O::RecordingDeleteUndo(id) => Msg::RecordingDeleteUndo(id),
                     O::LibraryChanged => Msg::StreamLibraryChanged,
+                    O::PlayHeard { artist, title } => Msg::PlayHeard { artist, title },
+                    O::DownloadHeard { artist, title } => Msg::DownloadHeard { artist, title },
                     O::Share(sel) => Msg::ShareItems(*sel),
                     O::Toast(s) => Msg::StreamToast(s),
                     O::SortChanged => Msg::StreamSortChanged,
@@ -3604,6 +3631,7 @@ impl Component for App {
             ));
             model.stream_page.emit(SI::Reload);
             model.stream_page.emit(SI::ReloadRecordings);
+            model.stream_page.emit(SI::ReloadHeard);
         }
         // Seed the starter memo categories once (localized; i18n is ready here),
         // then load categories + memos for the Memo page.
@@ -3906,6 +3934,11 @@ impl Component for App {
             Msg::ReloadRecordings => self
                 .stream_page
                 .emit(crate::ui::stream_page::StreamInput::ReloadRecordings),
+            Msg::ReloadHeard => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::ReloadHeard),
+            Msg::PlayHeard { artist, title } => self.play_heard(&sender, artist, title),
+            Msg::DownloadHeard { artist, title } => self.download_heard(&sender, artist, title),
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::ReplayPlay { start, end } => self.replay_play(start, end),
             Msg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
@@ -4879,6 +4912,11 @@ impl Component for App {
                 items,
                 total_duration,
             } => self.on_cmd_yt_playlist_start(url, title, items, total_duration, &sender),
+            Cmd::HeardResolved {
+                video_id,
+                title,
+                download,
+            } => self.on_heard_resolved(video_id, title, download),
             Cmd::SourceStatus(status) => {
                 let mut changed = false;
                 for (id, ok) in status {

@@ -607,7 +607,8 @@ impl App {
         }
     }
 
-    /// ICY `StreamTitle` update while a station is running → mini player + MPRIS.
+    /// ICY `StreamTitle` update while a station is running → mini player + MPRIS,
+    /// and (for real songs) the "Recently heard" history.
     pub(crate) fn stream_title(&mut self, title: String) {
         let title = title.trim().to_string();
         if let Some(id) = self.streaming.playing_stream {
@@ -620,8 +621,46 @@ impl App {
                 });
                 self.mpris
                     .set_metadata(0, &title, station.as_deref(), None, None, None);
+                self.note_heard_song(&title, station.as_deref());
             }
         }
+    }
+
+    /// Logs an ICY title to the "Recently heard" history — but only when it
+    /// parses into an `Artist – Title` song, which filters out station
+    /// idents/jingles (those lack that structure). Refreshes the page and, once
+    /// per new song, fetches a cover in the background (cached by artist+title,
+    /// shared with the recordings cover cache).
+    fn note_heard_song(&self, raw_title: &str, station: Option<&str>) {
+        let Some((artist, title)) =
+            crate::core::online::recording_query_candidates(raw_title, station)
+                .into_iter()
+                .find(|(a, t)| a.is_some() && !t.trim().is_empty())
+        else {
+            return;
+        };
+        if self
+            .library
+            .note_heard(artist.as_deref(), &title, station)
+            .is_err()
+        {
+            return;
+        }
+        self.stream_page
+            .emit(crate::ui::stream_page::StreamInput::ReloadHeard);
+        // Already have a cover (e.g. the song was recorded earlier) → done.
+        if crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &title)
+            .is_some()
+        {
+            return;
+        }
+        let (raw, st) = (raw_title.to_string(), station.map(str::to_string));
+        let input = self.input.clone();
+        std::thread::spawn(move || {
+            if crate::core::online::recording_cover(&raw, st.as_deref()).is_some() {
+                let _ = input.send(Msg::ReloadHeard);
+            }
+        });
     }
 
     /// Remove a station (stopping it first if it is the running one).
@@ -696,6 +735,95 @@ impl App {
             self.play_current();
         } else {
             self.toast(&gettext("File not found"));
+        }
+    }
+
+    /// Play a recognized song from the "Recently heard" list. Prefers a locally
+    /// saved variant — a timeshift recording of the same song, then a matching
+    /// library track — and only streams it via YouTube if neither exists.
+    pub(crate) fn play_heard(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        artist: Option<String>,
+        title: String,
+    ) {
+        // 1) A saved timeshift recording of this song.
+        // 2) Otherwise a matching library track (real local file only — a
+        //    cloud/`nc:` path won't pass the existence check and falls through).
+        for found in [
+            self.library.find_recording(artist.as_deref(), &title),
+            self.library.find_track(artist.as_deref(), &title),
+        ] {
+            if let Ok(Some(path)) = found {
+                if std::path::Path::new(&path).exists() {
+                    self.play_recording(path);
+                    return;
+                }
+            }
+        }
+        // 3) Nothing saved → resolve and stream it via YouTube.
+        self.resolve_heard_youtube(sender, artist, title, false);
+    }
+
+    /// Download a recognized song via YouTube into the music library.
+    pub(crate) fn download_heard(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        artist: Option<String>,
+        title: String,
+    ) {
+        self.resolve_heard_youtube(sender, artist, title, true);
+    }
+
+    /// Searches YouTube for `artist title` in the background; the first hit comes
+    /// back as [`Cmd::HeardResolved`] and is then played or imported.
+    fn resolve_heard_youtube(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        artist: Option<String>,
+        title: String,
+        download: bool,
+    ) {
+        if !self.youtube.enabled || !crate::core::youtube::available() {
+            self.toast(&gettext("Enable YouTube in the settings to use this"));
+            return;
+        }
+        let query = match artist.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(a) => format!("{a} {title}"),
+            None => title.clone(),
+        };
+        self.toast(&gettext("Searching on YouTube …"));
+        sender.spawn_command(move |out| {
+            let video_id =
+                crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 1)
+                    .ok()
+                    .and_then(|mut v| v.drain(..).next())
+                    .map(|r| r.id);
+            let _ = out.send(crate::ui::app::Cmd::HeardResolved {
+                video_id,
+                title,
+                download,
+            });
+        });
+    }
+
+    /// A "Recently heard" song was resolved to a YouTube video → play it or hand
+    /// it to the YouTube library import.
+    pub(crate) fn on_heard_resolved(
+        &mut self,
+        video_id: Option<String>,
+        title: String,
+        download: bool,
+    ) {
+        let Some(video_id) = video_id else {
+            self.toast(&gettext("Not found on YouTube"));
+            return;
+        };
+        if download {
+            self.yt_page
+                .emit(crate::ui::yt_page::YtInput::AddToLibrary { video_id, title });
+        } else {
+            self.yt_play_video(video_id, title);
         }
     }
 }

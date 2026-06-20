@@ -22,7 +22,7 @@ use std::rc::Rc;
 use crate::core::db::Library;
 use crate::core::streaming::StationResult;
 use crate::i18n::{gettext, gettext_f};
-use crate::model::{RecordingItem, StreamItem};
+use crate::model::{HeardItem, RecordingItem, StreamItem};
 use crate::ui::app::{SortCrit, StreamView};
 use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
@@ -127,6 +127,10 @@ pub(crate) struct StreamPage {
     stream_search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     recording_items: Vec<RecordingItem>,
     recordings_list: gtk::ListBox,
+    /// "Recently heard": songs recognized from a station's ICY title while
+    /// streaming (no audio captured — pure history).
+    heard_items: Vec<HeardItem>,
+    heard_list: gtk::ListBox,
     stream_play_buttons: Rc<RefCell<Vec<(i64, gtk::Button)>>>,
     rec_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
     /// Per-sub-view sort (criterion + descending): stations by name; recordings by
@@ -134,18 +138,21 @@ pub(crate) struct StreamPage {
     /// "sort_recordings[_desc]".
     stations_sort: (SortCrit, bool),
     recordings_sort: (SortCrit, bool),
+    heard_sort: (SortCrit, bool),
     /// "Without grouping" per sub-view (no alphabetical headings). Persisted as
-    /// "nogroup_stations" / "nogroup_recordings".
+    /// "nogroup_stations" / "nogroup_recordings" / "nogroup_heard".
     stations_no_group: bool,
     recordings_no_group: bool,
+    heard_no_group: bool,
     /// Stations gallery on/off (cover grid of station logos). Persisted as
     /// "gallery_stations". Recordings carry no covers, so they have no gallery.
     stations_gallery: bool,
     /// Tiles per row in the stations gallery (mirrors the global setting).
     gallery_columns: u32,
-    /// Per-row alphabetical headings of the stations / recordings lists (name sort).
+    /// Per-row alphabetical headings of the stations / recordings / heard lists.
     station_headers: Rc<RefCell<Option<Vec<String>>>>,
     recording_headers: Rc<RefCell<Option<Vec<String>>>>,
+    heard_headers: Rc<RefCell<Option<Vec<String>>>>,
     /// Gallery variant of the stations (logo grid). Its container box lives only
     /// in the view tree (a `#[local_ref]`); the flow box is filled imperatively.
     streams_gallery: gtk::FlowBox,
@@ -192,6 +199,13 @@ pub(crate) enum StreamInput {
     RecordingDelete(i64),
     RecordingDeleteConfirmed(i64),
     AddRecordingToLibrary(i64),
+    /// Rebuild the "Recently heard" list (a new song was recognized or a cover
+    /// landed).
+    ReloadHeard,
+    /// Open the detail dialog of a recognized song.
+    OpenHeard(i64),
+    /// Remove one entry from the "Recently heard" history.
+    HeardDelete(i64),
 }
 
 #[derive(Debug)]
@@ -212,6 +226,17 @@ pub(crate) enum StreamOutput {
     RecordingDeleteUndo(i64),
     /// A recording was copied into the music library → reload artist/album views.
     LibraryChanged,
+    /// Play a recognized song: the transport prefers a saved recording, then a
+    /// library track, otherwise streams it via YouTube.
+    PlayHeard {
+        artist: Option<String>,
+        title: String,
+    },
+    /// Download a recognized song via YouTube into the music library.
+    DownloadHeard {
+        artist: Option<String>,
+        title: String,
+    },
     /// Share a selection (a station) over device sync. Boxed: `Selection` is far
     /// larger than the other variants (`clippy::large_enum_variant`).
     Share(Box<crate::core::sync::share::Selection>),
@@ -265,6 +290,13 @@ impl Component for StreamPage {
                     #[watch]
                     set_active: model.stream_view == StreamView::Recordings,
                     connect_clicked => StreamInput::SetView(StreamView::Recordings),
+                },
+                gtk::ToggleButton {
+                    set_label: &gettext("Recently"),
+                    set_hexpand: true,
+                    #[watch]
+                    set_active: model.stream_view == StreamView::Heard,
+                    connect_clicked => StreamInput::SetView(StreamView::Heard),
                 },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
@@ -338,6 +370,30 @@ impl Component for StreamPage {
                 #[watch]
                 set_visible: model.stream_view == StreamView::Recordings && model.recording_items.is_empty() && model.live_recording.is_none(),
             },
+
+            // Recently heard (recognized songs).
+            gtk::ScrolledWindow {
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.stream_view == StreamView::Heard && !model.heard_items.is_empty(),
+                #[local_ref]
+                heard_list -> gtk::ListBox {
+                    set_valign: gtk::Align::Start,
+                    set_margin_top: 10,
+                    set_margin_bottom: 12,
+                    set_margin_start: 12,
+                    set_margin_end: 12,
+                    set_css_classes: &["boxed-list"],
+                },
+            },
+            adw::StatusPage {
+                set_icon_name: Some("audio-x-generic-symbolic"),
+                set_title: &gettext("Nothing heard yet"),
+                set_description: Some(&gettext("Songs recognized while a station plays appear here.")),
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.stream_view == StreamView::Heard && model.heard_items.is_empty(),
+            },
         }
     }
 
@@ -349,12 +405,15 @@ impl Component for StreamPage {
         let library = Library::open_or_memory();
         let streams_list = gtk::ListBox::new();
         let recordings_list = gtk::ListBox::new();
+        let heard_list = gtk::ListBox::new();
         let streams_gallery = gtk::FlowBox::new();
         let streams_gallery_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         // Restore the per-sub-view sorts. Stations default to name-ascending;
         // recordings to newest-first (recording date, descending).
         let stations_sort = read_sort(&library, "stations", SortCrit::Name, false);
         let recordings_sort = read_sort(&library, "recordings", SortCrit::Release, true);
+        // The "Recently" list defaults to newest-first (last heard, descending).
+        let heard_sort = read_sort(&library, "heard", SortCrit::Release, true);
         let stations_no_group = matches!(
             library
                 .get_setting("nogroup_stations")
@@ -366,6 +425,14 @@ impl Component for StreamPage {
         let recordings_no_group = matches!(
             library
                 .get_setting("nogroup_recordings")
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("1")
+        );
+        let heard_no_group = matches!(
+            library
+                .get_setting("nogroup_heard")
                 .ok()
                 .flatten()
                 .as_deref(),
@@ -388,11 +455,15 @@ impl Component for StreamPage {
             .clamp(2, 8);
         let station_headers = Rc::new(RefCell::new(None));
         let recording_headers = Rc::new(RefCell::new(None));
+        let heard_headers = Rc::new(RefCell::new(None));
         streams_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             station_headers.clone(),
         ));
         recordings_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             recording_headers.clone(),
+        ));
+        heard_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
+            heard_headers.clone(),
         ));
         let model = StreamPage {
             library,
@@ -411,16 +482,21 @@ impl Component for StreamPage {
             stream_search: Rc::new(RefCell::new(None)),
             recording_items: Vec::new(),
             recordings_list: recordings_list.clone(),
+            heard_items: Vec::new(),
+            heard_list: heard_list.clone(),
             stream_play_buttons: Rc::new(RefCell::new(Vec::new())),
             rec_play_buttons: Rc::new(RefCell::new(Vec::new())),
             stations_sort,
             recordings_sort,
+            heard_sort,
             stations_no_group,
             recordings_no_group,
+            heard_no_group,
             stations_gallery: stations_gallery_on,
             gallery_columns,
             station_headers,
             recording_headers,
+            heard_headers,
             streams_gallery: streams_gallery.clone(),
             sort_slot,
         };
@@ -473,6 +549,7 @@ impl Component for StreamPage {
                 let (key, slot) = match self.stream_view {
                     StreamView::Channels => ("stations", &mut self.stations_sort),
                     StreamView::Recordings => ("recordings", &mut self.recordings_sort),
+                    StreamView::Heard => ("heard", &mut self.heard_sort),
                 };
                 if *slot != (crit, desc) {
                     *slot = (crit, desc);
@@ -485,6 +562,7 @@ impl Component for StreamPage {
                     match self.stream_view {
                         StreamView::Channels => self.reload_streams(&sender),
                         StreamView::Recordings => self.reload_recordings(&sender),
+                        StreamView::Heard => self.reload_heard(&sender),
                     }
                 }
             }
@@ -492,6 +570,7 @@ impl Component for StreamPage {
                 let (key, slot) = match self.stream_view {
                     StreamView::Channels => ("stations", &mut self.stations_no_group),
                     StreamView::Recordings => ("recordings", &mut self.recordings_no_group),
+                    StreamView::Heard => ("heard", &mut self.heard_no_group),
                 };
                 if *slot != off {
                     *slot = off;
@@ -501,6 +580,7 @@ impl Component for StreamPage {
                     match self.stream_view {
                         StreamView::Channels => self.reload_streams(&sender),
                         StreamView::Recordings => self.reload_recordings(&sender),
+                        StreamView::Heard => self.reload_heard(&sender),
                     }
                 }
             }
@@ -561,6 +641,13 @@ impl Component for StreamPage {
                 self.reload_recordings(&sender);
             }
             StreamInput::AddRecordingToLibrary(id) => self.add_recording_to_library(&sender, id),
+            StreamInput::ReloadHeard => self.reload_heard(&sender),
+            StreamInput::OpenHeard(id) => self.open_heard(&sender, id),
+            StreamInput::HeardDelete(id) => {
+                let _ = self.library.delete_heard(id);
+                self.reload_heard(&sender);
+                let _ = sender.output(StreamOutput::Toast(gettext("Removed from the list")));
+            }
         }
     }
 
@@ -637,6 +724,14 @@ impl StreamPage {
                 ],
                 self.recordings_no_group,
             ),
+            StreamView::Heard => (
+                self.heard_sort,
+                vec![
+                    (SortCrit::Name, gettext("Name")),
+                    (SortCrit::Release, gettext("Date")),
+                ],
+                self.heard_no_group,
+            ),
         };
         let (crit, desc) = state;
         let input = sender.input_sender().clone();
@@ -674,6 +769,7 @@ impl StreamPage {
         let visible = match self.stream_view {
             StreamView::Channels => !self.stream_items.is_empty(),
             StreamView::Recordings => !self.recording_items.is_empty(),
+            StreamView::Heard => !self.heard_items.is_empty(),
         };
         *self.sort_slot.borrow_mut() = visible.then_some((popover, desc));
         let _ = sender.output(StreamOutput::SortChanged);
@@ -706,6 +802,23 @@ impl StreamPage {
                 self.recording_items
                     .iter()
                     .map(|r| crate::ui::app_sort::alpha_header(&r.title))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Per-row alphabetical headings (by title) for the "Recently heard" list;
+    /// none for the date sort or when grouping is off.
+    fn heard_section_headers(&self) -> Option<Vec<String>> {
+        if self.heard_no_group {
+            return None;
+        }
+        match self.heard_sort.0 {
+            SortCrit::Name => Some(
+                self.heard_items
+                    .iter()
+                    .map(|h| crate::ui::app_sort::alpha_header(&h.title))
                     .collect(),
             ),
             _ => None,
@@ -795,6 +908,21 @@ impl StreamPage {
         }
         if desc {
             self.recording_items.reverse();
+        }
+    }
+
+    /// Orders the "Recently heard" list by the chosen sort (title or last-heard).
+    fn sort_heard_items(&mut self) {
+        let (crit, desc) = self.heard_sort;
+        match crit {
+            SortCrit::Release => self.heard_items.sort_by_key(|h| h.heard_at),
+            // Name is the remaining criterion.
+            _ => self
+                .heard_items
+                .sort_by_cached_key(|h| natural_key(&h.title)),
+        }
+        if desc {
+            self.heard_items.reverse();
         }
     }
 
@@ -1587,5 +1715,149 @@ impl StreamPage {
             let _ = std::fs::remove_file(&dest);
             let _ = sender.output(StreamOutput::Toast(gettext("Could not add to the library")));
         }
+    }
+
+    /// Rebuilds the "Recently heard" list (recognized songs). No live entry,
+    /// no audio files — each row just opens the detail dialog (tap or long press).
+    fn reload_heard(&mut self, sender: &ComponentSender<Self>) {
+        self.heard_items = self.library.heard_songs().unwrap_or_default();
+        self.sort_heard_items();
+        // Refresh the title-bar sort control (visibility depends on emptiness).
+        self.rebuild_sort(sender);
+        *self.heard_headers.borrow_mut() = self.heard_section_headers();
+        while let Some(child) = self.heard_list.first_child() {
+            self.heard_list.remove(&child);
+        }
+        for h in self.heard_items.clone() {
+            let row = adw::ActionRow::builder()
+                .title(gtk::glib::markup_escape_text(&h.title))
+                .activatable(true)
+                .build();
+            row.add_css_class("emilia-flush");
+            let mut sub: Vec<String> = Vec::new();
+            if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
+                sub.push(a.to_string());
+            }
+            if let Some(s) = h.station.as_deref().filter(|s| !s.trim().is_empty()) {
+                sub.push(s.to_string());
+            }
+            sub.push(format_datetime(h.heard_at));
+            row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
+            let cover = crate::core::online::recording_cover_path(
+                h.artist.as_deref().unwrap_or(""),
+                &h.title,
+            );
+            row.add_prefix(&cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
+            if h.count > 1 {
+                let badge =
+                    gtk::Label::new(Some(&gettext_f("{n}×", &[("n", &h.count.to_string())])));
+                badge.set_valign(gtk::Align::Center);
+                badge.set_css_classes(&["dim-label", "numeric"]);
+                row.add_suffix(&badge);
+            }
+            let id = h.id;
+            {
+                let sender = sender.clone();
+                row.connect_activated(move |_| sender.input(StreamInput::OpenHeard(id)));
+            }
+            on_secondary_click(&row, {
+                let sender = sender.clone();
+                move || sender.input(StreamInput::OpenHeard(id))
+            });
+            on_long_press(&row, {
+                let sender = sender.clone();
+                move || sender.input(StreamInput::OpenHeard(id))
+            });
+            self.heard_list.append(&row);
+        }
+        self.heard_list.invalidate_headers();
+    }
+
+    /// Detail dialog of a recognized song: which station it was heard on, when,
+    /// info about the song, and the Play / Download / Remove actions.
+    fn open_heard(&self, sender: &ComponentSender<Self>, id: i64) {
+        let Some(root) = self.window.clone() else {
+            return;
+        };
+        let Some(h) = self.heard_items.iter().find(|x| x.id == id).cloned() else {
+            return;
+        };
+        let dialog = adw::Dialog::builder()
+            .title(gtk::glib::markup_escape_text(&h.title))
+            .build();
+        self.adapt_detail_dialog(&dialog);
+        let content = detail_box();
+
+        let info = adw::PreferencesGroup::new();
+        let head = adw::ActionRow::builder()
+            .title(gtk::glib::markup_escape_text(&h.title))
+            .build();
+        if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
+            head.set_subtitle(&gtk::glib::markup_escape_text(a));
+        }
+        let cover =
+            crate::core::online::recording_cover_path(h.artist.as_deref().unwrap_or(""), &h.title);
+        head.add_prefix(&cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
+        info.add(&head);
+        content.append(&info);
+
+        let details = adw::PreferencesGroup::new();
+        let info_row = |label: &str, value: &str| {
+            let r = adw::ActionRow::builder().title(label).build();
+            r.set_subtitle(&gtk::glib::markup_escape_text(value));
+            r.add_css_class("property");
+            r
+        };
+        if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
+            details.add(&info_row(&gettext("Artist"), a));
+        }
+        if let Some(s) = h.station.as_deref().filter(|s| !s.trim().is_empty()) {
+            details.add(&info_row(&gettext("Station"), s));
+        }
+        details.add(&info_row(&gettext("Heard"), &format_datetime(h.heard_at)));
+        if h.count > 1 {
+            details.add(&info_row(&gettext("Times heard"), &h.count.to_string()));
+        }
+        content.append(&details);
+
+        let actions = adw::PreferencesGroup::new();
+        let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            let (artist, title) = (h.artist.clone(), h.title.clone());
+            play.connect_activated(move |_| {
+                let _ = sender.output(StreamOutput::PlayHeard {
+                    artist: artist.clone(),
+                    title: title.clone(),
+                });
+                dialog.close();
+            });
+        }
+        actions.add(&play);
+        let dl = action_row(&gettext("Download via YouTube"), "folder-download-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            let (artist, title) = (h.artist.clone(), h.title.clone());
+            dl.connect_activated(move |_| {
+                let _ = sender.output(StreamOutput::DownloadHeard {
+                    artist: artist.clone(),
+                    title: title.clone(),
+                });
+                dialog.close();
+            });
+        }
+        actions.add(&dl);
+        let remove = action_row(&gettext("Remove from list"), "user-trash-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            remove.connect_activated(move |_| {
+                sender.input(StreamInput::HeardDelete(id));
+                dialog.close();
+            });
+        }
+        actions.add(&remove);
+        content.append(&actions);
+
+        present_dialog(&dialog, &content, &root);
     }
 }
