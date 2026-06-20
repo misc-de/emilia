@@ -1,7 +1,7 @@
 # Emilia
 
-**Adaptive music, podcast, streaming and audio-drama player for Linux Phosh smartphones** (Librem 5,
-PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
+**Adaptive music, podcast, streaming and audio-drama player for the Linux desktop and Phosh
+smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both. Written in **Rust**
 
 ⚠️ **AI-assisted project**  
 
@@ -11,13 +11,28 @@ PinePhone & co.) – runs equally well on the desktop. Written in **Rust**
 
 ## Screenshots
 
-| | |
-|:-:|:-:|
-| <img src="data/screenshots/desktop_artists.png" width="420"><br>*Library by artist* | <img src="data/screenshots/desktop_albums.png" width="420"><br>*All albums with covers* |
-| <img src="data/screenshots/desktop_podcast.png" width="420"><br>*Podcasts* | <img src="data/screenshots/desktop_streaming.png" width="420"><br>*Internet radio &amp; recordings* |
-| <img src="data/screenshots/desktop_youtube.png" width="420"><br>*YouTube as a music source* | <img src="data/screenshots/desktop_memo.png" width="420"><br>*Voice memos* |
-| <img src="data/screenshots/desktop_sync.png" width="420"><br>*Share between devices over the LAN* | <img src="data/screenshots/desktop_equalizer.png" width="420"><br>*10-band equalizer with cascade* |
-| <img src="data/screenshots/desktop_statistics.png" width="420"><br>*Listening statistics* | <img src="data/screenshots/desktop_preferences.png" width="420"><br>*Preferences* |
+<table>
+  <tr>
+    <td align="center"><img src="data/screenshots/desktop_artists.png" width="420"><br><em>Library by artist — light &amp; dark theme</em></td>
+    <td align="center"><img src="data/screenshots/desktop_albums.png" width="420"><br><em>All albums with covers</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="data/screenshots/desktop_podcast.png" width="420"><br><em>Podcasts</em></td>
+    <td align="center"><img src="data/screenshots/desktop_streaming.png" width="420"><br><em>Internet radio &amp; recordings</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="data/screenshots/desktop_youtube.png" width="420"><br><em>YouTube as a music source</em></td>
+    <td align="center"><img src="data/screenshots/desktop_memo.png" width="420"><br><em>Voice memos</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="data/screenshots/desktop_statistics.png" width="420"><br><em>Listening statistics</em></td>
+    <td align="center"><img src="data/screenshots/desktop_equalizer.png" width="420"><br><em>10-band equalizer with cascade</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="data/screenshots/desktop_sync.png" width="420"><br><em>Share between devices over the LAN</em></td>
+    <td align="center"><img src="data/screenshots/desktop_preferences.png" width="420"><br><em>Preferences</em></td>
+  </tr>
+</table>
 
 <p align="center">
   <img src="data/screenshots/mobile_artists.png" width="240"><br>
