@@ -1911,7 +1911,7 @@ impl Component for App {
                         },
                         pack_start = &gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
-                            set_tooltip_text: Some(&gettext("Rescan folder")),
+                            set_tooltip_text: Some(&gettext("Refresh")),
                             connect_clicked => Msg::Refresh,
                             // Disabled while a manual refresh is still running, so
                             // a second click can't reset the spinner counter.

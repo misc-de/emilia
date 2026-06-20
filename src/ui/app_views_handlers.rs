@@ -284,36 +284,60 @@ impl App {
     /// Pull-to-refresh: reload the current dir, rescan the library, re-index
     /// cloud sources and refresh podcast/YouTube subscriptions.
     pub(crate) fn on_refresh(&mut self, sender: &ComponentSender<Self>) {
+        // The header "refresh" button is context-aware: a full library re-scan
+        // (local files + cloud sources) only belongs to the library views. Every
+        // other section refreshes just its own content, so e.g. a podcast refresh
+        // no longer re-indexes the whole music library.
+        match self.current_section().as_deref() {
+            // Podcasts: pull new episodes for every subscribed feed. Reports its
+            // worker start/finish via `PodcastRefreshStarted/Finished`, which
+            // drive `refresh_pending` (the spinner) on their own.
+            Some("podcasts") => {
+                if online_available() {
+                    self.podcasts_page
+                        .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
+                }
+            }
+            // YouTube: refresh the subscribed channels (start/finish via
+            // `YtRefreshStarted/Finished`).
+            Some("youtube") => {
+                if online_available() && self.youtube.enabled {
+                    self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshAll);
+                }
+            }
+            // Streaming: reload the saved station lists.
+            Some("streaming") => {
+                self.stream_page
+                    .emit(crate::ui::stream_page::StreamInput::Reload);
+            }
+            // Files / Artists / Albums: re-scan local files + cloud sources.
+            Some("files") | Some("artists") | Some("albums") => {
+                self.refresh_library(sender);
+            }
+            // Any other view (favorites, concerts, audiobooks, playlists, memo,
+            // stats): just reload the overviews from the DB — never a disk re-scan.
+            _ => self.reload_library_overviews(),
+        }
+    }
+
+    /// Full library refresh used by the header refresh button on the library
+    /// views: re-scan the local music folder and re-index the cloud sources.
+    /// Each helper reports whether it spawned a background worker; we count
+    /// those so the loading spinner stays up until the last one reports back
+    /// (see the matching `Cmd::*` arms).
+    pub(crate) fn refresh_library(&mut self, sender: &ComponentSender<Self>) {
         self.load_dir(sender);
-        // Each helper reports whether it actually spawned a background
-        // worker; we count those so the loading spinner stays up until
-        // the last one reports back (see the matching `Cmd::*` arms).
         let mut pending = 0u32;
-        // Re-index the cloud sources too, so their structure and covers
-        // update (existing sources are only indexed when first added).
-        // On completion this rebuilds the views and fetches covers.
-        // `manual` → fetch online regardless of the auto-enrich setting.
+        // Re-index the cloud sources too, so their structure and covers update
+        // (existing sources are only indexed when first added). On completion
+        // this rebuilds the views and fetches covers. `manual` → fetch online
+        // regardless of the auto-enrich setting.
         if self.reindex_cloud_sources(sender, true) {
             pending += 1;
         }
         // "Rescan" also updates the local library (artists/albums).
         if self.start_scan(sender, false, true) {
             pending += 1;
-        }
-        // Also pull new content for the media subscriptions: every
-        // podcast feed and every YouTube channel (background workers;
-        // both need a connection, so skip them when offline).
-        if online_available() {
-            // Podcasts refresh in their own component; it reports back whether a
-            // worker started (`PodcastRefreshStarted`) and when it finished
-            // (`PodcastRefreshFinished`), which adjust `refresh_pending` then.
-            self.podcasts_page
-                .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
-            // YouTube refreshes in its own component too (reports start/finish via
-            // `YtRefreshStarted`/`YtRefreshFinished`, which adjust the spinner).
-            if self.youtube.enabled {
-                self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshAll);
-            }
         }
         self.refresh_pending = pending;
     }
