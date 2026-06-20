@@ -692,6 +692,59 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             }
         }
 
+        // --- online search (network; blocking, run off the async worker) ----
+        "search_youtube" => {
+            use crate::core::youtube::{self, YtKind};
+            if !youtube::available() {
+                return Err(anyhow!("yt-dlp is not available on this system"));
+            }
+            let query = req_str(args, "query")?;
+            let limit = arg_i64(args, "limit").unwrap_or(15).clamp(1, 50) as usize;
+            let kind = match arg_str(args, "kind") {
+                Some("playlist") => YtKind::Playlist,
+                Some("channel") => YtKind::Channel,
+                _ => YtKind::Video,
+            };
+            let kind_str = |k: &YtKind| match k {
+                YtKind::Video => "video",
+                YtKind::Playlist => "playlist",
+                YtKind::Channel => "channel",
+            };
+            let results = youtube::search(query, kind, limit)?;
+            let items: Vec<Value> = results
+                .iter()
+                .map(|r| {
+                    json!({
+                        "id": r.id,
+                        "url": r.url,
+                        "title": r.title,
+                        "uploader": r.uploader,
+                        "duration_s": r.duration,
+                        "kind": kind_str(&r.kind),
+                    })
+                })
+                .collect();
+            Ok(json!({ "results": items }))
+        }
+
+        "search_podcasts" => {
+            let query = req_str(args, "query")?;
+            let limit = arg_i64(args, "limit").unwrap_or(25).clamp(1, 50) as usize;
+            let results = crate::core::podcast::search_podcasts(query)?;
+            let items: Vec<Value> = results
+                .iter()
+                .take(limit)
+                .map(|r| {
+                    json!({
+                        "title": r.title,
+                        "author": r.author,
+                        "feed_url": r.feed_url,
+                    })
+                })
+                .collect();
+            Ok(json!({ "results": items }))
+        }
+
         other => Err(anyhow!("unknown tool '{other}'")),
     }
 }
@@ -1069,6 +1122,29 @@ pub fn tool_list() -> Value {
                     "kind": { "type": "string", "enum": ["album", "single", "compilation", "auto"] },
                 }),
                 json!(["album", "kind"]),
+            ),
+        },
+        {
+            "name": "search_youtube",
+            "description": "Search YouTube online via yt-dlp for videos (default), playlists or channels. Returns id/url/title/uploader/duration — use play_youtube with an id to play one. Network call; may take a few seconds.",
+            "inputSchema": obj(
+                json!({
+                    "query": { "type": "string", "description": "Search text." },
+                    "kind": { "type": "string", "enum": ["video", "playlist", "channel"], "description": "What to search for (default video)." },
+                    "limit": { "type": "integer", "description": "Max results (default 15).", "minimum": 1, "maximum": 50 },
+                }),
+                json!(["query"]),
+            ),
+        },
+        {
+            "name": "search_podcasts",
+            "description": "Search for podcasts online (iTunes directory) by name. Returns title/author/feed_url. Network call.",
+            "inputSchema": obj(
+                json!({
+                    "query": { "type": "string", "description": "Podcast name or keywords." },
+                    "limit": { "type": "integer", "description": "Max results (default 25).", "minimum": 1, "maximum": 50 },
+                }),
+                json!(["query"]),
             ),
         },
     ])

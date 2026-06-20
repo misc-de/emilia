@@ -1,3 +1,7 @@
+// The MCP `tool_list()` builds one large nested `serde_json::json!` literal;
+// with ~40 tools it exceeds the default macro recursion limit (128).
+#![recursion_limit = "512"]
+
 mod core;
 mod i18n;
 mod model;
