@@ -473,6 +473,28 @@ impl Library {
         Ok(out)
     }
 
+    /// The album overview restricted to one [`AlbumKind`], for the Singles /
+    /// Compilations pages. Reuses [`Self::albums_overview_with`] (covers,
+    /// durations, display artist, `Area::Albums` visibility) and keeps only the
+    /// albums the classification assigns to `kind` — so these pages are extra
+    /// filtered views; the main "Albums" page is unchanged.
+    pub(crate) fn albums_overview_by_kind(
+        &self,
+        kind: AlbumKind,
+        snap: Option<&CategorySnapshot>,
+    ) -> Result<Vec<AlbumMeta>> {
+        let names: std::collections::HashSet<String> = self
+            .albums_classified(kind)?
+            .into_iter()
+            .map(|c| c.album.to_lowercase())
+            .collect();
+        Ok(self
+            .albums_overview_with(snap)?
+            .into_iter()
+            .filter(|m| names.contains(&m.album.to_lowercase()))
+            .collect())
+    }
+
     fn map_album_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumMeta> {
         Ok(AlbumMeta {
             artist: r.get::<_, Option<String>>(0)?.unwrap_or_default(),

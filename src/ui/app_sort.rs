@@ -237,6 +237,8 @@ impl App {
         match key {
             "files" => self.resort_entries(),
             "albums" => self.reload_albums(),
+            "singles" => self.reload_singles(),
+            "compilations" => self.reload_compilations(),
             "artists" => self.reload_artists(),
             "concerts" => self.load_concerts(sender),
             "audiobooks" => self.load_audiobooks(sender),
@@ -266,6 +268,8 @@ impl App {
         match key {
             "files" => self.resort_entries(),
             "albums" => self.reload_albums(),
+            "singles" => self.reload_singles(),
+            "compilations" => self.reload_compilations(),
             "artists" => self.reload_artists(),
             "concerts" => self.load_concerts(sender),
             "audiobooks" => self.load_audiobooks(sender),
@@ -295,6 +299,8 @@ impl App {
             .set_setting(&format!("gallery_{key}"), if on { "1" } else { "0" });
         match key {
             "albums" => self.reload_albums(),
+            "singles" => self.reload_singles(),
+            "compilations" => self.reload_compilations(),
             "artists" => self.reload_artists(),
             "concerts" => self.load_concerts(sender),
             "audiobooks" => self.load_audiobooks(sender),
@@ -458,10 +464,20 @@ impl App {
     /// Same length/order as `albums`, so it indexes the list rows and gallery
     /// tiles 1:1.
     pub(crate) fn album_section_headers(&self, albums: &[AlbumMeta]) -> Option<Vec<String>> {
-        if self.libview.grouping_off("albums") {
+        self.album_meta_headers("albums", albums)
+    }
+
+    /// Per-row section headings for an album-meta overview (albums / singles /
+    /// compilations) by the given section's chosen sort.
+    pub(crate) fn album_meta_headers(
+        &self,
+        section: &str,
+        albums: &[AlbumMeta],
+    ) -> Option<Vec<String>> {
+        if self.libview.grouping_off(section) {
             return None;
         }
-        match self.libview.sort_for("albums").0 {
+        match self.libview.sort_for(section).0 {
             SortCrit::Name => Some(albums.iter().map(|a| alpha_header(&a.album)).collect()),
             SortCrit::Release => Some(
                 albums
@@ -517,7 +533,13 @@ impl App {
 
     /// Orders the album overview in place by the section's chosen sort.
     pub(crate) fn sort_albums(&self, albums: &mut [AlbumMeta]) {
-        let (crit, desc) = self.libview.sort_for("albums");
+        self.sort_album_metas("albums", albums);
+    }
+
+    /// Orders an album-meta overview (albums / singles / compilations) in place
+    /// by the given section's chosen sort.
+    pub(crate) fn sort_album_metas(&self, section: &str, albums: &mut [AlbumMeta]) {
+        let (crit, desc) = self.libview.sort_for(section);
         match crit {
             SortCrit::Name => albums.sort_by_cached_key(|a| natural_key(&a.album)),
             SortCrit::Length => albums.sort_by_key(|a| a.total_duration_ms.unwrap_or(0)),

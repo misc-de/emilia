@@ -81,11 +81,13 @@ pub(crate) enum FsKind {
 /// and can be reordered by the user.
 // The labels are English gettext `msgid`s; translate them at the display site
 // with `gettext()` (see usage in `build_nav` / `win_title`).
-pub(crate) const SECTIONS: [(&str, &str, &str); 12] = [
+pub(crate) const SECTIONS: [(&str, &str, &str); 14] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
     ("files", "Files", "folder-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
+    ("singles", "Singles", "audio-x-generic-symbolic"),
+    ("compilations", "Compilations", "view-grid-symbolic"),
     ("concerts", "Concerts", "ticket-special-symbolic"),
     ("podcasts", "Podcasts", "podcast-symbolic"),
     ("streaming", "Streaming", "internet-radio-symbolic"),
@@ -379,6 +381,8 @@ pub(crate) const SORTABLE_SECTIONS: &[&str] = &[
     "files",
     "artists",
     "albums",
+    "singles",
+    "compilations",
     "concerts",
     "audiobooks",
     "favorites",
@@ -395,7 +399,9 @@ pub(crate) fn section_sort_criteria(section: &str) -> &'static [SortCrit] {
     match section {
         // File browser: by name or by runtime; folders stay above files either way.
         "files" => &[Name, Length],
-        "albums" | "concerts" | "audiobooks" => &[Name, Length, Release, Songs],
+        "albums" | "singles" | "compilations" | "concerts" | "audiobooks" => {
+            &[Name, Length, Release, Songs]
+        }
         "artists" => &[Name, Songs, Length],
         "playlists" => &[Name, Songs, Length],
         // For memos `Release` is the recording date (label "Date"); no song count.
@@ -414,6 +420,8 @@ pub(crate) fn section_has_grouping(section: &str) -> bool {
         section,
         "artists"
             | "albums"
+            | "singles"
+            | "compilations"
             | "concerts"
             | "audiobooks"
             | "favorites"
@@ -429,7 +437,14 @@ pub(crate) fn section_has_grouping(section: &str) -> bool {
 pub(crate) fn section_has_gallery(section: &str) -> bool {
     matches!(
         section,
-        "artists" | "albums" | "concerts" | "audiobooks" | "favorites" | "playlists"
+        "artists"
+            | "albums"
+            | "singles"
+            | "compilations"
+            | "concerts"
+            | "audiobooks"
+            | "favorites"
+            | "playlists"
     )
 }
 
@@ -467,6 +482,20 @@ pub(crate) struct LibView {
     /// Album overview (same order as factory/gallery); index resolution for the gallery.
     pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) album_count: usize,
+    // Singles / Compilations: extra album views filtered by the classification
+    // (`albums_overview_by_kind`). Same machinery as the album overview above.
+    pub(crate) singles: FactoryVecDeque<AlbumCard>,
+    pub(crate) singles_gallery: gtk::FlowBox,
+    pub(crate) singles_gallery_box: gtk::Box,
+    pub(crate) single_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(crate) singles_overview: Vec<crate::model::AlbumMeta>,
+    pub(crate) single_count: usize,
+    pub(crate) compilations: FactoryVecDeque<AlbumCard>,
+    pub(crate) compilations_gallery: gtk::FlowBox,
+    pub(crate) compilations_gallery_box: gtk::Box,
+    pub(crate) compilation_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(crate) compilations_overview: Vec<crate::model::AlbumMeta>,
+    pub(crate) compilation_count: usize,
     pub(crate) artists: FactoryVecDeque<ArtistCard>,
     /// Gallery variant of the artists (photo grid).
     pub(crate) artists_gallery: gtk::FlowBox,
@@ -1065,6 +1094,12 @@ pub enum Msg {
     ShowTrackDetail(String),
     /// Open the songs subpage of an album from the album overview (short tap).
     ShowAlbumTracks(usize),
+    /// Singles / Compilations overviews — same behaviour as the album overview,
+    /// indexing into their own factory/overview.
+    ShowSingleTracks(usize),
+    ShowSingleDetail(usize),
+    ShowCompilationTracks(usize),
+    ShowCompilationDetail(usize),
     ShowConcertDetail(usize),
     /// Short tap on an artist: list its albums & songs.
     OpenArtistTracks(usize),
@@ -2222,6 +2257,96 @@ impl Component for App {
                                         },
                                     },
                                 },
+                            add_titled_with_icon[Some("singles"), &gettext("Singles"), "audio-x-generic-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    adw::StatusPage {
+                                        set_icon_name: Some("audio-x-generic-symbolic"),
+                                        set_title: &gettext("No singles"),
+                                        set_description: Some(
+                                            &gettext("Singles are one-artist releases with just a few tracks"),
+                                        ),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.libview.single_count == 0,
+                                    },
+
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.libview.single_count > 0 && !model.libview.gallery_on("singles"),
+                                        #[local_ref]
+                                        singles_box -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.libview.single_count > 0 && model.libview.gallery_on("singles"),
+                                        #[local_ref]
+                                        singles_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                        },
+                                    },
+                                },
+                            add_titled_with_icon[Some("compilations"), &gettext("Compilations"), "view-grid-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+
+                                    adw::StatusPage {
+                                        set_icon_name: Some("view-grid-symbolic"),
+                                        set_title: &gettext("No compilations"),
+                                        set_description: Some(
+                                            &gettext("Compilations are albums with tracks by several artists"),
+                                        ),
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.libview.compilation_count == 0,
+                                    },
+
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.libview.compilation_count > 0 && !model.libview.gallery_on("compilations"),
+                                        #[local_ref]
+                                        compilations_box -> gtk::ListBox {
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                            set_css_classes: &["boxed-list"],
+                                        },
+                                    },
+                                    gtk::ScrolledWindow {
+                                        set_vexpand: true,
+                                        #[watch]
+                                        set_visible: model.libview.compilation_count > 0 && model.libview.gallery_on("compilations"),
+                                        #[local_ref]
+                                        compilations_gallery_box -> gtk::Box {
+                                            set_orientation: gtk::Orientation::Vertical,
+                                            set_spacing: 6,
+                                            set_valign: gtk::Align::Start,
+                                            set_margin_top: 0,
+                                            set_margin_bottom: 12,
+                                            set_margin_start: 12,
+                                            set_margin_end: 12,
+                                        },
+                                    },
+                                },
                             add_titled_with_icon[Some("concerts"), &gettext("Concerts"), "ticket-special-symbolic"] =
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
@@ -3091,6 +3216,20 @@ impl Component for App {
                 AlbumOutput::LongPress(index) => Msg::ShowAlbumDetail(index.current_index()),
             });
 
+        let singles = FactoryVecDeque::builder()
+            .launch(gtk::ListBox::default())
+            .forward(sender.input_sender(), |out| match out {
+                AlbumOutput::Activated(index) => Msg::ShowSingleTracks(index.current_index()),
+                AlbumOutput::LongPress(index) => Msg::ShowSingleDetail(index.current_index()),
+            });
+
+        let compilations = FactoryVecDeque::builder()
+            .launch(gtk::ListBox::default())
+            .forward(sender.input_sender(), |out| match out {
+                AlbumOutput::Activated(index) => Msg::ShowCompilationTracks(index.current_index()),
+                AlbumOutput::LongPress(index) => Msg::ShowCompilationDetail(index.current_index()),
+            });
+
         let artists = FactoryVecDeque::builder()
             .launch(gtk::ListBox::default())
             .forward(sender.input_sender(), |out| match out {
@@ -3359,6 +3498,18 @@ impl Component for App {
                 album_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 albums_overview: Vec::new(),
                 album_count: 0,
+                singles,
+                singles_gallery: gtk::FlowBox::new(),
+                singles_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
+                single_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                singles_overview: Vec::new(),
+                single_count: 0,
+                compilations,
+                compilations_gallery: gtk::FlowBox::new(),
+                compilations_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
+                compilation_headers: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                compilations_overview: Vec::new(),
+                compilation_count: 0,
                 artists,
                 artists_gallery: gtk::FlowBox::new(),
                 artists_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
@@ -3728,8 +3879,12 @@ impl Component for App {
 
         let entries_box = model.libview.entries.widget();
         let albums_box = model.libview.albums.widget();
+        let singles_box = model.libview.singles.widget();
+        let compilations_box = model.libview.compilations.widget();
         let artists_box = model.libview.artists.widget();
         let albums_gallery_box = model.libview.albums_gallery_box.clone();
+        let singles_gallery_box = model.libview.singles_gallery_box.clone();
+        let compilations_gallery_box = model.libview.compilations_gallery_box.clone();
         let artists_gallery_box = model.libview.artists_gallery_box.clone();
         let concerts_gallery_box = model.concerts.concerts_gallery_box.clone();
         let audiobooks_gallery_box = model.favorites.audiobooks_gallery_box.clone();
@@ -3775,6 +3930,12 @@ impl Component for App {
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowAlbumTracks(index) => self.on_show_album_tracks(index, &sender),
+            Msg::ShowSingleTracks(index) => self.on_show_single_tracks(index, &sender),
+            Msg::ShowSingleDetail(index) => self.on_show_single_detail(index, root, &sender),
+            Msg::ShowCompilationTracks(index) => self.on_show_compilation_tracks(index, &sender),
+            Msg::ShowCompilationDetail(index) => {
+                self.on_show_compilation_detail(index, root, &sender)
+            }
             Msg::ShowConcertDetail(index) => self.on_show_concert_detail(index, root, &sender),
             Msg::OpenArtistTracks(index) => self.on_open_artist_tracks(index, &sender),
             Msg::OpenAlbumTracks { artist, album } => {

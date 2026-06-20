@@ -2686,10 +2686,21 @@ mod tests {
         let albums = lib.albums_classified(AlbumKind::Album).unwrap();
         assert!(albums.iter().any(|a| a.album == "Kill Bill"));
 
-        // Reverting the override restores the heuristic.
+        // Reverting the overrides restores the heuristic.
         lib.clear_album_kind("kill bill").unwrap();
+        lib.clear_album_kind("Wildberry Lillet").unwrap();
         let comps = lib.albums_classified(AlbumKind::Compilation).unwrap();
         assert!(comps.iter().any(|a| a.album == "Kill Bill"));
+
+        // The overview-by-kind bridge (covers/durations) agrees with the
+        // classification: the single shows up under Single, not under Album.
+        let single_cards = lib
+            .albums_overview_by_kind(AlbumKind::Single, None)
+            .unwrap();
+        assert!(single_cards.iter().any(|m| m.album == "Wildberry Lillet"));
+        let album_cards = lib.albums_overview_by_kind(AlbumKind::Album, None).unwrap();
+        assert!(album_cards.iter().all(|m| m.album != "Wildberry Lillet"));
+        assert!(album_cards.iter().any(|m| m.album == "Bambule"));
     }
 
     #[test]

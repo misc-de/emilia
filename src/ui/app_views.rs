@@ -249,6 +249,122 @@ impl App {
         let snap = self.library.category_snapshot().ok();
         self.reload_albums_with(snap.as_ref());
         self.reload_artists_with(snap.as_ref());
+        self.reload_singles_with(snap.as_ref());
+        self.reload_compilations_with(snap.as_ref());
+    }
+
+    pub(crate) fn reload_singles(&mut self) {
+        let snap = self.library.category_snapshot().ok();
+        self.reload_singles_with(snap.as_ref());
+    }
+
+    pub(crate) fn reload_singles_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {
+        self.reload_kind_with(crate::model::AlbumKind::Single, "singles", snap);
+    }
+
+    pub(crate) fn reload_compilations(&mut self) {
+        let snap = self.library.category_snapshot().ok();
+        self.reload_compilations_with(snap.as_ref());
+    }
+
+    pub(crate) fn reload_compilations_with(
+        &mut self,
+        snap: Option<&crate::core::db::CategorySnapshot>,
+    ) {
+        self.reload_kind_with(crate::model::AlbumKind::Compilation, "compilations", snap);
+    }
+
+    /// Shared reload for the Singles / Compilations pages — mirrors
+    /// [`Self::reload_albums_with`] but pulls the classified subset and writes to
+    /// the section's own factory/overview/headers (chosen by `section`).
+    fn reload_kind_with(
+        &mut self,
+        kind: crate::model::AlbumKind,
+        section: &'static str,
+        snap: Option<&crate::core::db::CategorySnapshot>,
+    ) {
+        let singles = section == "singles";
+        let mut albums = self
+            .library
+            .albums_overview_by_kind(kind, snap)
+            .unwrap_or_default();
+        let meta_covers = self.library.album_meta_covers().unwrap_or_default();
+        for album in &mut albums {
+            if album
+                .cover_path
+                .as_deref()
+                .is_none_or(|p| p.trim().is_empty())
+            {
+                album.cover_path = meta_covers
+                    .get(&album.album.to_lowercase())
+                    .cloned()
+                    .or_else(|| self.album_local_cover(&album.artist, &album.album));
+            }
+        }
+        self.sort_album_metas(section, &mut albums);
+        let headers = self.album_meta_headers(section, &albums);
+        let icon = if singles {
+            "audio-x-generic-symbolic"
+        } else {
+            "view-grid-symbolic"
+        };
+        let (show_tracks, show_detail): (fn(usize) -> Msg, fn(usize) -> Msg) = if singles {
+            (Msg::ShowSingleTracks, Msg::ShowSingleDetail)
+        } else {
+            (Msg::ShowCompilationTracks, Msg::ShowCompilationDetail)
+        };
+        if singles {
+            self.libview.single_count = albums.len();
+            self.libview.singles_overview = albums.clone();
+            *self.libview.single_headers.borrow_mut() = headers.clone();
+        } else {
+            self.libview.compilation_count = albums.len();
+            self.libview.compilations_overview = albums.clone();
+            *self.libview.compilation_headers.borrow_mut() = headers.clone();
+        }
+        if self.libview.gallery_on(section) {
+            let items: Vec<(Option<String>, &'static str, String)> = albums
+                .iter()
+                .map(|a| (a.cover_path.clone(), icon, a.album.clone()))
+                .collect();
+            let (gbox, gal) = if singles {
+                (
+                    &self.libview.singles_gallery_box,
+                    &self.libview.singles_gallery,
+                )
+            } else {
+                (
+                    &self.libview.compilations_gallery_box,
+                    &self.libview.compilations_gallery,
+                )
+            };
+            self.fill_sectioned_gallery(
+                gbox,
+                gal,
+                &items,
+                headers.as_deref(),
+                show_tracks,
+                show_detail,
+            );
+        } else {
+            let offline_keys = self.offline_album_keys();
+            let mut guard = if singles {
+                self.libview.singles.guard()
+            } else {
+                self.libview.compilations.guard()
+            };
+            guard.clear();
+            for a in albums {
+                let offline = offline_keys.contains(&(a.artist.clone(), a.album.clone()));
+                guard.push_back((a, offline));
+            }
+            drop(guard);
+            if singles {
+                self.libview.singles.widget().invalidate_headers();
+            } else {
+                self.libview.compilations.widget().invalidate_headers();
+            }
+        }
     }
 
     pub(crate) fn reload_albums_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {

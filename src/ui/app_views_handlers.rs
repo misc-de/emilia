@@ -212,6 +212,86 @@ impl App {
         }
     }
 
+    pub(crate) fn on_show_single_tracks(&mut self, index: usize, sender: &ComponentSender<Self>) {
+        let album = self
+            .libview
+            .singles
+            .guard()
+            .get(index)
+            .map(|c| c.meta.album.clone())
+            .or_else(|| {
+                self.libview
+                    .singles_overview
+                    .get(index)
+                    .map(|m| m.album.clone())
+            });
+        if let Some(album) = album {
+            self.open_album_by_name(sender, &album);
+        }
+    }
+
+    pub(crate) fn on_show_compilation_tracks(
+        &mut self,
+        index: usize,
+        sender: &ComponentSender<Self>,
+    ) {
+        let album = self
+            .libview
+            .compilations
+            .guard()
+            .get(index)
+            .map(|c| c.meta.album.clone())
+            .or_else(|| {
+                self.libview
+                    .compilations_overview
+                    .get(index)
+                    .map(|m| m.album.clone())
+            });
+        if let Some(album) = album {
+            self.open_album_by_name(sender, &album);
+        }
+    }
+
+    pub(crate) fn on_show_single_detail(
+        &mut self,
+        index: usize,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let meta = self
+            .libview
+            .singles
+            .guard()
+            .get(index)
+            .map(|c| c.meta.clone())
+            .or_else(|| self.libview.singles_overview.get(index).cloned());
+        if let Some(meta) = meta {
+            self.fetch_focus_album(sender, &meta.artist, &meta.album);
+            self.nav.context_target = Some(CtxTarget::Album(meta));
+            self.open_context_menu(root, sender);
+        }
+    }
+
+    pub(crate) fn on_show_compilation_detail(
+        &mut self,
+        index: usize,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        let meta = self
+            .libview
+            .compilations
+            .guard()
+            .get(index)
+            .map(|c| c.meta.clone())
+            .or_else(|| self.libview.compilations_overview.get(index).cloned());
+        if let Some(meta) = meta {
+            self.fetch_focus_album(sender, &meta.artist, &meta.album);
+            self.nav.context_target = Some(CtxTarget::Album(meta));
+            self.open_context_menu(root, sender);
+        }
+    }
+
     /// Open the detail/context menu for a concert entry (by index).
     pub(crate) fn on_show_concert_detail(
         &mut self,
