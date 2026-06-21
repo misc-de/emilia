@@ -1,7 +1,8 @@
 # Emilia
 
-**Adaptive music, podcast, streaming and audio-drama player for the Linux desktop and Phosh
-smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both. Written in **Rust**
+**Adaptive music, podcast and streaming player plus memo recorder for the Linux desktop and
+Phosh smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both, with a
+built-in MCP server for remote control by an AI assistant (e.g. Claude).
 
 ⚠️ **AI-assisted project**  
 
