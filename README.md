@@ -14,23 +14,26 @@ smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both. W
 <table>
   <tr>
     <td align="center"><img src="data/screenshots/desktop_artists.png" width="420"><br><em>Library by artist — light &amp; dark theme</em></td>
+    <td align="center"><img src="data/screenshots/desktop_artist_detail.png" width="420"><br><em>Artist detail — photo, play options &amp; properties</em></td>
+  </tr>
+  <tr>
     <td align="center"><img src="data/screenshots/desktop_albums.png" width="420"><br><em>All albums with covers</em></td>
-  </tr>
-  <tr>
     <td align="center"><img src="data/screenshots/desktop_podcast.png" width="420"><br><em>Podcasts</em></td>
+  </tr>
+  <tr>
     <td align="center"><img src="data/screenshots/desktop_streaming.png" width="420"><br><em>Internet radio &amp; recordings</em></td>
-  </tr>
-  <tr>
     <td align="center"><img src="data/screenshots/desktop_youtube.png" width="420"><br><em>YouTube as a music source</em></td>
+  </tr>
+  <tr>
     <td align="center"><img src="data/screenshots/desktop_memo.png" width="420"><br><em>Voice memos</em></td>
-  </tr>
-  <tr>
     <td align="center"><img src="data/screenshots/desktop_statistics.png" width="420"><br><em>Listening statistics</em></td>
-    <td align="center"><img src="data/screenshots/desktop_equalizer.png" width="420"><br><em>10-band equalizer with cascade</em></td>
   </tr>
   <tr>
+    <td align="center"><img src="data/screenshots/desktop_equalizer.png" width="420"><br><em>10-band equalizer with cascade</em></td>
     <td align="center"><img src="data/screenshots/desktop_sync.png" width="420"><br><em>Share between devices over the LAN</em></td>
-    <td align="center"><img src="data/screenshots/desktop_preferences.png" width="420"><br><em>Preferences</em></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="data/screenshots/desktop_preferences.png" width="420"><br><em>Preferences — appearance &amp; design</em></td>
   </tr>
 </table>
 
