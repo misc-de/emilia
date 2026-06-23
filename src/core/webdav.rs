@@ -255,6 +255,18 @@ fn propfind(c: &Creds, rel: &str, depth: &str) -> Result<String> {
     .map_err(|e| anyhow!("Response not readable: {e}"))
 }
 
+/// Whether an `UnexpectedEof` while reading a range body may be ignored: it may,
+/// when the server already delivered every advertised byte. Some servers (e.g.
+/// Nextcloud on php-legacy) finish a range response and then close the TCP
+/// connection without the TLS `close_notify` alert; rustls reports that as
+/// `UnexpectedEof`. For a prefix read (tags sit at the file start) a missing
+/// alert on an otherwise complete body is cosmetic, so the data is kept. A short
+/// read is a real truncation and stays an error.
+fn eof_is_benign(err: &std::io::Error, got: usize, advertised: Option<u64>, max: u64) -> bool {
+    err.kind() == std::io::ErrorKind::UnexpectedEof
+        && advertised.is_some_and(|n| got as u64 >= n.min(max))
+}
+
 /// Range-GETs the first bytes of a remote file with transient-failure retry.
 /// `Ok(buf)` on success (the buffer may be shorter than `max` for small files);
 /// `Err` only on a **final** transport/HTTP failure — so a caller can tell a
@@ -271,8 +283,22 @@ fn fetch_prefix(c: &Creds, rel: &str, range: &str, max: u64) -> Result<Vec<u8>> 
             .call()
             .map_err(Box::new)
     })?;
+    // The length the server says this (range) body has, so a stream that ends
+    // early can be told apart from a genuine truncation below.
+    let advertised = resp
+        .header("Content-Length")
+        .and_then(|s| s.trim().parse::<u64>().ok());
     let mut buf = Vec::new();
-    resp.into_reader().take(max).read_to_end(&mut buf)?;
+    if let Err(e) = resp.into_reader().take(max).read_to_end(&mut buf) {
+        // Tolerate a missing TLS `close_notify` once every advertised byte has
+        // arrived: the track stays indexable instead of being dropped over a
+        // cosmetic shutdown quirk. A short read is still a real failure, so the
+        // track is skipped and retried on the next pass rather than stored
+        // tag-less.
+        if !eof_is_benign(&e, buf.len(), advertised, max) {
+            return Err(e.into());
+        }
+    }
     Ok(buf)
 }
 
@@ -743,6 +769,27 @@ mod tests {
             names,
             vec![("Alben".to_string(), true), ("song.mp3".to_string(), false)]
         );
+    }
+
+    #[test]
+    fn unexpected_eof_is_benign_only_on_a_complete_body() {
+        use std::io::{Error, ErrorKind};
+        let eof = || Error::from(ErrorKind::UnexpectedEof);
+
+        // Full advertised body arrived → missing close_notify is cosmetic, keep it.
+        assert!(eof_is_benign(&eof(), 524_288, Some(524_288), 600_000));
+        // Read past the advertised length (cap higher) still counts as complete.
+        assert!(eof_is_benign(&eof(), 524_290, Some(524_288), 600_000));
+        // Server advertised more than our read cap: reaching the cap is enough.
+        assert!(eof_is_benign(&eof(), 600_000, Some(900_000), 600_000));
+
+        // A short read is a real truncation, not cosmetic.
+        assert!(!eof_is_benign(&eof(), 100, Some(524_288), 600_000));
+        // No Content-Length → can't prove completeness, stay conservative.
+        assert!(!eof_is_benign(&eof(), 524_288, None, 600_000));
+        // A different I/O error is never silently swallowed.
+        let reset = Error::from(ErrorKind::ConnectionReset);
+        assert!(!eof_is_benign(&reset, 524_288, Some(524_288), 600_000));
     }
 
     #[test]
