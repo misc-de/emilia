@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.1" date="2026-06-26">
+      <description>
+        <p>Emilia now ships with a freshly tuned light and dark appearance as the default look. The first-run setup applies your chosen language right away. YouTube search shows a spinner while it works and marks songs you have already downloaded as part of your library, and connections to Nextcloud/WebDAV sources are more robust.</p>
+        <p xml:lang="de">Emilia kommt jetzt mit einem frisch abgestimmten hellen und dunklen Erscheinungsbild als Standard. Die Ersteinrichtung übernimmt die gewählte Sprache sofort. Die YouTube-Suche zeigt während der Suche einen Spinner und markiert bereits heruntergeladene Songs als Teil deiner Bibliothek, und Verbindungen zu Nextcloud/WebDAV-Quellen sind robuster.</p>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-06-20">
       <description>
         <p>Emilia can now be controlled from outside: a built-in server speaks the Model Context Protocol, so an AI assistant or another tool can browse your library and drive playback. It can be switched on, kept to the local machine or opened to the network, and protected with a token in Settings.</p>
