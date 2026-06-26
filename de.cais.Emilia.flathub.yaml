@@ -165,7 +165,7 @@ modules:
       - type: git
         url: https://github.com/misc-de/emilia.git
         tag: v0.8.1
-        commit: b28b15ddf8b23b0ff098106fe1d82cfddf7e8e71
+        commit: c1b8930da910f608ddbbb64def42ba49982bdcec
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json
