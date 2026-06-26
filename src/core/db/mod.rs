@@ -2148,6 +2148,28 @@ mod tests {
     }
 
     #[test]
+    fn yt_download_links_video_to_local_path_and_upserts() {
+        let lib = Library::open_in_memory().unwrap();
+        // Unknown video → no local copy (playback streams it).
+        assert_eq!(lib.yt_download("vid").unwrap(), None);
+        // Recording a download links the id to its on-disk path; this is what
+        // makes a `yt:<id>` track play locally and hides "Add to library".
+        lib.set_yt_download("vid", "/music/YouTube/A/song.mp3")
+            .unwrap();
+        assert_eq!(
+            lib.yt_download("vid").unwrap().as_deref(),
+            Some("/music/YouTube/A/song.mp3")
+        );
+        // Re-adding the same id (e.g. overwrite) updates the path, no duplicate.
+        lib.set_yt_download("vid", "/music/YouTube/A/song-v2.mp3")
+            .unwrap();
+        assert_eq!(
+            lib.yt_download("vid").unwrap().as_deref(),
+            Some("/music/YouTube/A/song-v2.mp3")
+        );
+    }
+
+    #[test]
     fn youtube_recent_history_orders_and_enriches() {
         let lib = Library::open_in_memory().unwrap();
         lib.add_recent_video("a", "First", None).unwrap();

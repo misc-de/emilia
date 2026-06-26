@@ -279,7 +279,7 @@ pub(crate) struct YtPage {
     search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     video_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
     ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
-    ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
+    ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, gtk::Image, String)>>>,
     ctx_video_meta: Rc<RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>>,
     downloading_videos: HashSet<String>,
     playlist_songs_cache: HashMap<String, Vec<YtResult>>,
@@ -2041,7 +2041,15 @@ impl YtPage {
             .replace(Some((play.clone(), video_id.to_string())));
         actions.add(&play);
 
-        let off = action_row(&gettext("Add to library"), "list-add-symbolic");
+        // Built inline (not via `action_row`) so we keep a handle on the prefix
+        // icon: `refresh_yt_download_row` swaps title + icon + sensitivity to
+        // reflect "Add to library" / "Adding …" / "Already in your library".
+        let off = adw::ActionRow::builder()
+            .title(gettext("Add to library"))
+            .activatable(true)
+            .build();
+        let off_icon = gtk::Image::from_icon_name("list-add-symbolic");
+        off.add_prefix(&off_icon);
         {
             let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
             off.connect_activated(move |_| {
@@ -2096,8 +2104,11 @@ impl YtPage {
         }
         content.append(&actions);
 
-        self.ctx_video_download
-            .replace(Some((off.clone(), video_id.to_string())));
+        self.ctx_video_download.replace(Some((
+            off.clone(),
+            off_icon.clone(),
+            video_id.to_string(),
+        )));
         self.ctx_video_meta.replace(Some((
             video_id.to_string(),
             cover_box,
@@ -2423,18 +2434,34 @@ impl YtPage {
         }
     }
 
-    /// Updates the "Add to library" row of an open video detail dialog.
+    /// Updates the "Add to library" row of an open video detail dialog to reflect
+    /// the current state: already offline (greyed out with a checkmark, not
+    /// addable again), downloading, or addable.
     fn refresh_yt_download_row(&self) {
         let guard = self.ctx_video_download.borrow();
-        let Some((row, vid)) = guard.as_ref() else {
+        let Some((row, icon, vid)) = guard.as_ref() else {
             return;
         };
-        let text = if self.downloading_videos.contains(vid) {
-            gettext("Adding to library …")
+        let is_local = self
+            .library
+            .yt_download(vid)
+            .ok()
+            .flatten()
+            .map(|p| std::path::Path::new(&p).exists())
+            .unwrap_or(false);
+        if is_local {
+            row.set_title(&gettext("Already in your library"));
+            icon.set_icon_name(Some("object-select-symbolic"));
+            row.set_sensitive(false);
+        } else if self.downloading_videos.contains(vid) {
+            row.set_title(&gettext("Adding to library …"));
+            icon.set_icon_name(Some("list-add-symbolic"));
+            row.set_sensitive(false);
         } else {
-            gettext("Add to library")
-        };
-        row.set_title(&text);
+            row.set_title(&gettext("Add to library"));
+            icon.set_icon_name(Some("list-add-symbolic"));
+            row.set_sensitive(true);
+        }
     }
 
     /// Fills an open video detail dialog with metadata that arrived async.

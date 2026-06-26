@@ -2617,3 +2617,7 @@ msgstr ""
 #: src/ui/app_views_handlers.rs
 msgid "Pick the version of “{title}” to add"
 msgstr ""
+
+#: src/ui/yt_page.rs
+msgid "Already in your library"
+msgstr ""

@@ -2863,6 +2863,10 @@ msgstr "Version auswählen"
 msgid "Pick the version of “{title}” to add"
 msgstr "Wähle die Version von „{title}“, die hinzugefügt werden soll"
 
+# --- YouTube detail: video already downloaded into the library (de) ---
+msgid "Already in your library"
+msgstr "Bereits in deiner Bibliothek"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

@@ -1079,6 +1079,12 @@ pub fn add_to_library(
     dest.push(format!("{}.mp3", sanitize_filename(&title)));
 
     if dest.exists() && !overwrite {
+        // Already on disk — make sure the `video_id → path` link exists so the
+        // detail dialog hides "Add to library" and playback uses the local file
+        // (covers copies downloaded before this link was recorded).
+        if let Ok(lib) = crate::core::db::Library::open() {
+            let _ = lib.set_yt_download(video_id, &dest.to_string_lossy());
+        }
         return Ok(AddOutcome::Exists(dest));
     }
 
@@ -1111,7 +1117,10 @@ pub fn add_to_library(
             year: None,
         };
         let _ = lib.upsert_track(&track);
-        let _ = lib.delete_yt_download(video_id);
+        // Link the video id to its on-disk copy so a later `yt:<id>` selection
+        // plays the local file instead of re-streaming, and the detail dialog
+        // shows it as already in the library.
+        let _ = lib.set_yt_download(video_id, &dest.to_string_lossy());
     }
     let _ = std::fs::remove_file(&source);
     Ok(AddOutcome::Added)
@@ -1173,7 +1182,8 @@ pub fn add_video_to_album(
             year,
         };
         let _ = lib.upsert_track(&track);
-        let _ = lib.delete_yt_download(video_id);
+        // Link the video id to its on-disk copy (see `add_to_library`).
+        let _ = lib.set_yt_download(video_id, &dest.to_string_lossy());
     }
     let _ = std::fs::remove_file(&source);
     Ok(dest)

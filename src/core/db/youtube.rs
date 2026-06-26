@@ -165,15 +165,19 @@ impl Library {
             .optional()?)
     }
 
-    /// Removes the download record for a video and returns its stored file path
-    /// (so the caller can delete the file). `None` if it wasn't downloaded.
-    pub fn delete_yt_download(&self, video_id: &str) -> Result<Option<String>> {
-        let path = self.yt_download(video_id)?;
-        if path.is_some() {
-            self.conn
-                .execute("DELETE FROM yt_download WHERE video_id = ?1", [video_id])?;
-        }
-        Ok(path)
+    /// Records that `video_id` has a local copy at `path` (an offline download or
+    /// a track filed into the library). This is what marks a `yt:<id>` track as
+    /// "available offline": both playback (`start_track_playback`) and the detail
+    /// dialog consult it to play the local file instead of streaming.
+    pub fn set_yt_download(&self, video_id: &str, path: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_download (video_id, path, downloaded_at)
+             VALUES (?1, ?2, strftime('%s','now'))
+             ON CONFLICT(video_id) DO UPDATE SET
+                path = excluded.path, downloaded_at = excluded.downloaded_at",
+            rusqlite::params![video_id, path],
+        )?;
+        Ok(())
     }
 
     const RECENT_CAP: i64 = 100;
