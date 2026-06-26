@@ -1129,12 +1129,15 @@ impl App {
         let dir = music_dir.to_string_lossy().into_owned();
         let _ = self.library.set_setting("music_dir", &dir);
 
-        if lang_code != crate::i18n::system_language_code() {
-            // The chosen language differs from the active (system) one.
-            // gettext only reads the catalog at startup, so relaunch to
-            // rebuild the UI in the chosen language; setup is complete now
-            // (persisted above), so the assistant won't reappear and the
-            // normal startup re-roots the folder and scans.
+        if lang_code != crate::i18n::startup_language_code() {
+            // The chosen language differs from the one the app started in. The
+            // setup wizard already switched its *own* widgets live, but the main
+            // window was built at startup in the old language, so relaunch to
+            // rebuild it in the chosen language; setup is complete now (persisted
+            // above), so the assistant won't reappear and the normal startup
+            // re-roots the folder and scans. (Compared against the *startup*
+            // language, not the live `system_language_code()`, because the live
+            // switch already changed the `LANGUAGE` env the latter reads.)
             relaunch_for_language_change();
         }
 

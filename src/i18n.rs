@@ -5,6 +5,7 @@
 //! entry is missing, the English original text automatically appears.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use gettextrs::{bind_textdomain_codeset, bindtextdomain, setlocale, textdomain, LocaleCategory};
 
@@ -66,6 +67,19 @@ pub fn system_language_code() -> &'static str {
 /// `lang`: `None` follows the system locale (`LANG`/`LC_*`); `Some("de"|"en")`
 /// forces the respective language via the `LANGUAGE` environment variable.
 pub fn init(lang: Option<&str>) {
+    // Remember the language the UI is actually built in, *before* a later
+    // `switch_language` mutates the environment. The relaunch decision after the
+    // first-run setup needs this baseline, not the live (now-mutable) `LANGUAGE`.
+    let startup = match lang {
+        Some(code) => LANGUAGES
+            .iter()
+            .map(|(c, _)| *c)
+            .find(|c| *c == code)
+            .unwrap_or("en"),
+        None => system_language_code(),
+    };
+    let _ = STARTUP_LANG.set(startup);
+
     if let Some(code) = lang {
         // gettext evaluates LANGUAGE before LC_MESSAGES (as long as the locale is
         // not C/POSIX) – this way the language can be chosen independently of the system.
@@ -102,6 +116,48 @@ pub fn init(lang: Option<&str>) {
     let _ = bindtextdomain(DOMAIN, dir);
     let _ = bind_textdomain_codeset(DOMAIN, "UTF-8");
     let _ = textdomain(DOMAIN);
+}
+
+/// The display language the UI was actually built in, captured by [`init`]
+/// before any runtime [`switch_language`] changed the environment. Use this —
+/// not [`system_language_code`], which reads the now-mutable `LANGUAGE` — to
+/// decide whether a restart is needed to rebuild the already-built main window.
+pub fn startup_language_code() -> &'static str {
+    STARTUP_LANG
+        .get()
+        .copied()
+        .unwrap_or_else(system_language_code)
+}
+
+/// Set once by [`init`]; see [`startup_language_code`].
+static STARTUP_LANG: OnceLock<&'static str> = OnceLock::new();
+
+/// Switch the catalog language at runtime — used by the first-run setup so the
+/// wizard itself flips to the chosen language immediately, instead of only after
+/// the final restart. Sets `LANGUAGE` and flushes glibc's gettext catalog cache.
+///
+/// gettext does **not** retranslate already-built widgets: it only affects the
+/// strings looked up *after* this call, so the caller must rebuild whatever is
+/// currently on screen. On non-glibc targets the cache can't be flushed, so the
+/// change takes effect on the next launch (the setup persists the choice anyway).
+pub fn switch_language(code: &str) {
+    // gettext only honors `LANGUAGE` when the LC_MESSAGES locale isn't C/POSIX;
+    // `init` already pinned a real UTF-8 locale at startup, so this is enough.
+    std::env::set_var("LANGUAGE", code);
+    // glibc caches loaded catalogs and only re-reads them when its internal
+    // generation counter changes; bumping it makes the next `gettext()` pick up
+    // the new `LANGUAGE`. This is the documented way (GNU gettext manual,
+    // "Changing the language at run time") to switch without a restart.
+    #[cfg(target_env = "gnu")]
+    {
+        extern "C" {
+            static mut _nl_msg_cat_cntr: std::os::raw::c_int;
+        }
+        // SAFETY: a plain increment of a glibc-owned counter on the main thread.
+        unsafe {
+            _nl_msg_cat_cntr += 1;
+        }
+    }
 }
 
 /// Determine the directory with the `.mo` catalogs:

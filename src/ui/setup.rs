@@ -19,7 +19,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::i18n::{gettext, system_language_code, LANGUAGES};
+use crate::i18n::{gettext, switch_language, system_language_code, LANGUAGES};
 use crate::ui::app::SECTIONS;
 
 /// Number of wizard steps (0..STEPS-1).
@@ -68,6 +68,8 @@ pub(crate) enum SetupInput {
     ToggleSection(&'static str, bool),
     Next,
     Back,
+    /// "Cancel" on the first step → abort first-run setup and quit.
+    Cancel,
     /// Final "Continue" → emit the result and close.
     Finish,
 }
@@ -138,7 +140,17 @@ impl Component for SetupPage {
                 self.window = Some(window);
                 self.ensure_dialog(&sender);
             }
-            SetupInput::SelectLanguage(code) => self.lang_code = code,
+            SetupInput::SelectLanguage(code) => {
+                if code != self.lang_code {
+                    self.lang_code = code.clone();
+                    // Load the chosen language right away so the rest of the
+                    // wizard — and this very page — appears in it, rather than
+                    // only after the final restart. gettext can't retranslate
+                    // the existing widgets, so rebuild the dialog from scratch.
+                    switch_language(&code);
+                    self.rebuild_dialog(&sender);
+                }
+            }
             SetupInput::SetHasCollection(has) => {
                 self.has_collection = has;
                 self.apply_folder_text();
@@ -170,7 +182,25 @@ impl Component for SetupPage {
                 if self.step > 0 {
                     self.step -= 1;
                     self.apply_step();
+                } else {
+                    // On the first step the button reads "Cancel" (there is
+                    // nothing to go back to), so route it to the abort path.
+                    sender.input(SetupInput::Cancel);
                 }
+            }
+            SetupInput::Cancel => {
+                // Abort first-run setup: nothing is persisted (so the wizard
+                // reappears on the next launch) and no library exists yet, so
+                // just quit. Mirror the main window's hard exit — `app.quit()`
+                // alone leaves the MPRIS/zbus task keeping the process alive.
+                if let Some(d) = self.dialog.take() {
+                    d.set_can_close(true);
+                    d.close();
+                }
+                if let Some(app) = self.window.as_ref().and_then(|w| w.application()) {
+                    app.quit();
+                }
+                std::process::exit(0);
             }
             SetupInput::Finish => {
                 let enabled_sections = self
@@ -252,8 +282,8 @@ impl SetupPage {
         self.view_stack
             .add_named(&self.build_features_page(sender), Some("s3"));
 
-        // --- Bottom navigation (Back / Next-or-Continue) ---
-        self.back_btn.set_label(&gettext("Back"));
+        // --- Bottom navigation (Cancel/Back / Next-or-Continue) ---
+        // The label is set per-step in `apply_step` ("Cancel" on step 0).
         self.back_btn.add_css_class("flat");
         {
             let sender = sender.clone();
@@ -303,6 +333,29 @@ impl SetupPage {
 
         self.apply_step();
         dialog.present(Some(&window));
+    }
+
+    /// Tears down and rebuilds the dialog in the currently active language,
+    /// keeping the wizard's state (current step and chosen values). Used when
+    /// the language changes mid-setup: gettext only affects newly built widgets,
+    /// so the visible dialog has to be recreated.
+    fn rebuild_dialog(&mut self, sender: &ComponentSender<Self>) {
+        // Drop the old dialog (it was built with `can_close = false`).
+        if let Some(d) = self.dialog.take() {
+            d.set_can_close(true);
+            d.close();
+        }
+        // Reset the widgets `ensure_dialog` appends to or rebuilds, so the fresh
+        // build starts clean; `self.step` and the chosen values are preserved.
+        self.view_stack = adw::ViewStack::new();
+        self.step_circles.clear();
+        self.back_btn = gtk::Button::new();
+        self.next_btn = gtk::Button::new();
+        self.folder_title = gtk::Label::new(None);
+        self.folder_subtitle = gtk::Label::new(None);
+        self.folder_row = adw::ActionRow::new();
+        // With `self.dialog` now `None`, this rebuilds and re-presents.
+        self.ensure_dialog(sender);
     }
 
     /// Wraps a step's inner box in a Clamp + scroller for narrow/short screens.
@@ -586,7 +639,12 @@ impl SetupPage {
                 circle.remove_css_class("emilia-step-active");
             }
         }
-        self.back_btn.set_sensitive(self.step > 0);
+        // Step 0 has nothing to go back to, so the button cancels setup instead.
+        self.back_btn.set_label(&if self.step == 0 {
+            gettext("Cancel")
+        } else {
+            gettext("Back")
+        });
         let last = self.step + 1 == STEPS;
         self.next_btn.set_label(&if last {
             gettext("Continue")
