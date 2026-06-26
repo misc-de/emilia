@@ -76,6 +76,40 @@ fn action_row(title: &str, icon: &str) -> adw::ActionRow {
     row
 }
 
+/// A non-selectable results-list row with a spinner and the "Searching …"
+/// label, shown as the list's only row while a search is in flight. Building
+/// the spinner and appending the row into the already-visible list keeps it
+/// mapped, so the animation actually runs — unlike a separate box that starts
+/// hidden and is only toggled visible later (where the spinner never spins up).
+fn search_spinner_row() -> gtk::ListBoxRow {
+    let inner = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .margin_top(24)
+        .margin_bottom(24)
+        .build();
+    let spinner = gtk::Spinner::builder()
+        .width_request(36)
+        .height_request(36)
+        .build();
+    spinner.set_spinning(true);
+    inner.append(&spinner);
+    inner.append(
+        &gtk::Label::builder()
+            .label(gettext("Searching …"))
+            .css_classes(["dim-label"])
+            .build(),
+    );
+    let row = gtk::ListBoxRow::builder()
+        .selectable(false)
+        .activatable(false)
+        .build();
+    row.set_child(Some(&inner));
+    row
+}
+
 /// Converts a search/listing hit into a storable video row.
 fn to_model_video(r: YtResult) -> crate::model::YtVideo {
     crate::model::YtVideo {
@@ -242,7 +276,7 @@ pub(crate) struct YtPage {
     /// from a previous search (e.g. after switching Songs→Playlists→Channels)
     /// can no longer clear the spinner early or flash stale results.
     search_seq: u64,
-    search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox, gtk::Box)>>>,
+    search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     video_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
     ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
     ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
@@ -785,6 +819,7 @@ impl Component for YtPage {
                 if !term.is_empty() {
                     self.search_seq = self.search_seq.wrapping_add(1);
                     let seq = self.search_seq;
+                    self.show_youtube_search_spinner();
                     sender.spawn_command(move |out| {
                         let results = match youtube::search(&term, kind, 25) {
                             Ok(r) => r,
@@ -1588,34 +1623,11 @@ impl YtPage {
         results.add_css_class("boxed-list");
         results.set_visible(false);
 
-        let spinner_box = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(12)
-            .halign(gtk::Align::Center)
-            .valign(gtk::Align::Center)
-            .margin_top(24)
-            .margin_bottom(24)
-            .visible(false)
-            .build();
-        let spinner = gtk::Spinner::builder().build();
-        spinner.set_size_request(36, 36);
-        spinner.set_spinning(true);
-        spinner_box.append(&spinner);
-        spinner_box.append(
-            &gtk::Label::builder()
-                .label(gettext("Searching …"))
-                .css_classes(["dim-label"])
-                .build(),
-        );
-
         let trigger = {
             let (sender, entry, kind) = (sender.clone(), search_entry.clone(), kind.clone());
-            let (results, spinner_box) = (results.clone(), spinner_box.clone());
             move || {
                 let term = entry.text().to_string();
                 if !term.trim().is_empty() {
-                    results.set_visible(false);
-                    spinner_box.set_visible(true);
                     sender.input(YtInput::Search(term, kind.get()));
                 }
             }
@@ -1627,9 +1639,8 @@ impl YtPage {
         search_btn.connect_clicked(move |_| trigger());
 
         content.append(&results);
-        content.append(&spinner_box);
 
-        *self.search.borrow_mut() = Some((dialog.clone(), results.clone(), spinner_box.clone()));
+        *self.search.borrow_mut() = Some((dialog.clone(), results.clone()));
         {
             let slot = self.search.clone();
             dialog.connect_closed(move |_| {
@@ -1639,13 +1650,28 @@ impl YtPage {
         present_detail(&dialog, &content, &root);
     }
 
+    /// Clears the open search dialog's results list and shows a single spinner
+    /// row while the current search runs. Replaced by the real hits (or the
+    /// "Nothing found" / error row) once the worker reports back.
+    fn show_youtube_search_spinner(&self) {
+        let guard = self.search.borrow();
+        let Some((dialog, list)) = guard.as_ref() else {
+            return;
+        };
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
+        list.set_visible(true);
+        list.append(&search_spinner_row());
+        dialog.set_content_height(320);
+    }
+
     /// Redraws the results list in the open search dialog.
     fn rebuild_youtube_search_results(&self, sender: &ComponentSender<Self>) {
         let guard = self.search.borrow();
-        let Some((dialog, list, spinner_box)) = guard.as_ref() else {
+        let Some((dialog, list)) = guard.as_ref() else {
             return;
         };
-        spinner_box.set_visible(false);
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
