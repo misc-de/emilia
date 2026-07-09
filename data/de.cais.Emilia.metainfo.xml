@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.2" date="2026-07-09">
+      <description>
+        <p>Podcasts get their own equalizer: set it per episode or for a whole subscription right from the detail dialogs, inherited episode → podcast → global. Episode playback now applies the equalizer correctly. Tapping the title in the player bar opens the matching detail view for podcast episodes, radio stations and cloud tracks too, and the German translation of the equalizer dialogs was repaired.</p>
+        <p xml:lang="de">Podcasts bekommen ihren eigenen Equalizer: direkt in den Detailansichten pro Folge oder für ein ganzes Abo einstellbar, vererbt Folge → Podcast → Global. Die Episoden-Wiedergabe wendet den Equalizer jetzt korrekt an. Ein Tipp auf den Titel in der Player-Leiste öffnet die passende Detailansicht nun auch bei Podcast-Folgen, Radiosendern und Cloud-Titeln, und die deutsche Übersetzung der Equalizer-Dialoge wurde repariert.</p>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-06-26">
       <description>
         <p>Emilia now ships with a freshly tuned light and dark appearance as the default look. The first-run setup applies your chosen language right away. YouTube search shows a spinner while it works and marks songs you have already downloaded as part of your library, and connections to Nextcloud/WebDAV sources are more robust.</p>
