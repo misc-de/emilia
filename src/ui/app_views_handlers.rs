@@ -526,6 +526,40 @@ impl App {
                 self.nav.context_target = Some(CtxTarget::Fs(FsEntry::file(path)));
                 self.open_context_menu(root, sender);
             }
+        } else if let Some(url) = self.podcasts.playing_episode_url.clone() {
+            // An episode started from the Podcasts page plays queue-less; its
+            // detail is the episode dialog (resolved from the audio URL).
+            self.podcasts_page
+                .emit(crate::ui::podcasts_page::PodcastsInput::ShowEpisodeDetailByUrl { url });
+        } else if let Some(id) = self.streaming.playing_stream {
+            // Internet radio: the station's detail dialog.
+            self.stream_page
+                .emit(crate::ui::stream_page::StreamInput::OpenStream(id));
+        } else if self.files.playing_remote {
+            // A remote (Nextcloud/WebDAV) track also plays queue-less; rebuild
+            // its file entry from the remote row for the same detail dialog as
+            // a local track (a cached offline copy counts as downloaded).
+            if let Some(track) = self.files.remote_queue.get(self.files.remote_pos).cloned() {
+                let downloaded = self
+                    .remote_cache_path(&track.rel_path)
+                    .filter(|p| p.exists());
+                let name = track
+                    .rel_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(track.rel_path.as_str())
+                    .to_string();
+                let entry = FsEntry::remote_file(
+                    track.rel_path.clone(),
+                    name,
+                    downloaded,
+                    Some(track.title),
+                    None,
+                    None,
+                );
+                self.nav.context_target = Some(CtxTarget::Fs(entry));
+                self.open_context_menu(root, sender);
+            }
         }
     }
 
