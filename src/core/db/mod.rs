@@ -376,13 +376,15 @@ impl Library {
             );
 
             -- Equalizer settings per output and level (10 bands as JSON).
-            -- Inheritance track → album → artist → global; additionally a
+            -- Inheritance track → album → artist → global (and station /
+            -- episode → podcast as the queue-less cascades); additionally a
             -- device-specific output falls back to the default output ('').
             -- output: '' (all/default) | sink name.  key: '' (global) |
-            -- artist name | artist\1album | path.
+            -- artist name | artist\1album | path | station id | podcast id |
+            -- episode audio URL.
             CREATE TABLE IF NOT EXISTS eq_setting (
                 output TEXT NOT NULL DEFAULT '',
-                scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream')),
+                scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream','podcast','episode')),
                 key    TEXT NOT NULL,
                 bands  TEXT NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
@@ -715,10 +717,11 @@ impl Library {
             )?;
         }
 
-        // Migration: allow the 'stream' scope (per-station equalizer). The old
-        // CHECK constraint only listed global/artist/album/track; SQLite can't
-        // alter a CHECK in place, so rebuild the table when it's still the old
-        // shape (detected by the stored schema SQL). Atomic, like above.
+        // Migration: allow the 'stream' (per-station) and 'podcast'/'episode'
+        // equalizer scopes. Earlier CHECK constraints listed fewer scopes;
+        // SQLite can't alter a CHECK in place, so rebuild the table when it's
+        // still an old shape (detected by the stored schema SQL). Atomic, like
+        // above.
         let eq_schema: String = self
             .conn
             .query_row(
@@ -727,14 +730,14 @@ impl Library {
                 |r| r.get(0),
             )
             .unwrap_or_default();
-        if !eq_schema.contains("'stream'") {
+        if !eq_schema.contains("'episode'") {
             self.conn.execute_batch(
                 r#"
                 BEGIN;
                 ALTER TABLE eq_setting RENAME TO eq_setting_old;
                 CREATE TABLE eq_setting (
                     output TEXT NOT NULL DEFAULT '',
-                    scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream')),
+                    scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream','podcast','episode')),
                     key    TEXT NOT NULL,
                     bands  TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
@@ -2654,6 +2657,59 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         // No stream and no global anywhere → neutral (None).
         assert_eq!(lib.resolve_eq_stream("sink1", "42"), None);
+    }
+
+    #[test]
+    fn eq_scope_migration_keeps_old_settings() {
+        let lib = Library::open_in_memory().unwrap();
+        // Rebuild eq_setting in the pre-podcast shape (CHECK without
+        // 'podcast'/'episode') with an existing per-station setting …
+        lib.conn
+            .execute_batch(
+                r#"
+                DROP TABLE eq_setting;
+                CREATE TABLE eq_setting (
+                    output TEXT NOT NULL DEFAULT '',
+                    scope  TEXT NOT NULL CHECK(scope IN ('global','artist','album','track','stream')),
+                    key    TEXT NOT NULL,
+                    bands  TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (output, scope, key)
+                );
+                "#,
+            )
+            .unwrap();
+        lib.set_eq("", "stream", "42", &bands(5.0)).unwrap();
+        // … then re-run the migrations: the table is rebuilt with the new
+        // CHECK, the old setting survives, and the new scopes are accepted.
+        lib.migrate().unwrap();
+        assert_eq!(lib.resolve_eq_stream("", "42"), Some(bands(5.0)));
+        lib.set_eq("", "podcast", "7", &bands(3.0)).unwrap();
+        lib.set_eq("", "episode", "https://example.org/e.mp3", &bands(4.0))
+            .unwrap();
+    }
+
+    #[test]
+    fn eq_podcast_episode_over_podcast_over_global() {
+        let lib = Library::open_in_memory().unwrap();
+        let url = "https://example.org/ep1.mp3";
+        lib.set_eq("", "global", "", &bands(1.0)).unwrap();
+        lib.set_eq("", "podcast", "7", &bands(3.0)).unwrap();
+        // Podcast level beats global; an episode of another podcast inherits global.
+        assert_eq!(lib.resolve_eq_podcast("", Some("7"), url), Some(bands(3.0)));
+        assert_eq!(lib.resolve_eq_podcast("", Some("8"), url), Some(bands(1.0)));
+        // Episode level beats the podcast level.
+        lib.set_eq("", "episode", url, &bands(5.0)).unwrap();
+        assert_eq!(lib.resolve_eq_podcast("", Some("7"), url), Some(bands(5.0)));
+        // Concrete output is resolved fully first, then the default output.
+        lib.set_eq("sink1", "podcast", "7", &bands(7.0)).unwrap();
+        assert_eq!(
+            lib.resolve_eq_podcast("sink1", Some("7"), "https://example.org/ep2.mp3"),
+            Some(bands(7.0))
+        );
+        // Nothing set anywhere → neutral (None).
+        let empty = Library::open_in_memory().unwrap();
+        assert_eq!(empty.resolve_eq_podcast("", Some("7"), url), None);
     }
 
     #[test]

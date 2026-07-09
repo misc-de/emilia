@@ -1063,10 +1063,28 @@ impl App {
             self.player.set_eq_bands(&bands);
             return;
         }
+        // A podcast episode (also queue-less): resolve the per-episode EQ
+        // (episode → podcast → global) keyed by the episode's audio URL.
+        if let Some(url) = self.podcasts.playing_episode_url.clone() {
+            self.apply_episode_eq(&url);
+            return;
+        }
         let Some(path) = self.transport.queue.get(self.transport.queue_pos) else {
             return;
         };
         let path_str = path.to_string_lossy();
+        // An episode played from a playlist lands in the queue with its audio
+        // URL as the path; route it to the podcast cascade, not the track one.
+        if self
+            .library
+            .podcast_id_for_episode_url(&path_str)
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            self.apply_episode_eq(&path_str);
+            return;
+        }
         let track = self
             .library
             .track_by_path(&path_str)
@@ -1085,6 +1103,22 @@ impl App {
                 album.as_deref(),
                 &path_str,
             )
+            .unwrap_or([0.0; 10]);
+        self.player.set_eq_bands(&bands);
+    }
+
+    /// Resolves and applies the equalizer for a podcast episode (episode →
+    /// podcast → global, then default output) on the active output.
+    fn apply_episode_eq(&self, url: &str) {
+        let podcast_id = self
+            .library
+            .podcast_id_for_episode_url(url)
+            .ok()
+            .flatten()
+            .map(|id| id.to_string());
+        let bands = self
+            .library
+            .resolve_eq_podcast(&self.settings.active_output, podcast_id.as_deref(), url)
             .unwrap_or([0.0; 10]);
         self.player.set_eq_bands(&bands);
     }

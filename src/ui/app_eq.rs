@@ -266,6 +266,52 @@ impl App {
         );
     }
 
+    /// Per-podcast equalizer (from a subscription's detail dialog). Keyed by
+    /// the podcast id; episodes without their own setting inherit it, the rest
+    /// of the cascade is podcast → global during playback.
+    pub(crate) fn open_podcast_eq(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        id: i64,
+    ) {
+        let name = self
+            .library
+            .podcast_title(id)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        self.open_eq_editor(
+            root,
+            sender,
+            "the podcast",
+            &name,
+            Some("Also applies to this podcast's episodes."),
+            "podcast",
+            id.to_string(),
+        );
+    }
+
+    /// Per-episode equalizer (from an episode's detail dialog). Keyed by the
+    /// episode's audio URL; inherits podcast → global during playback.
+    pub(crate) fn open_episode_eq(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        url: String,
+        title: String,
+    ) {
+        self.open_eq_editor(
+            root,
+            sender,
+            "the episode",
+            &title,
+            Some("Applies while this episode plays."),
+            "episode",
+            url,
+        );
+    }
+
     /// Equalizer editor for exactly one level (scope/key) with output selection.
     /// Used by the detail EQ (artist/album/track) and by the global EQ.
     pub(crate) fn open_eq_editor(

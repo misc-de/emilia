@@ -118,6 +118,11 @@ impl App {
                 self.set_chapters(chapters);
                 // Show the current chapter (at the resume/start position) immediately.
                 self.update_current_chapter();
+                // Apply the per-episode equalizer (episode → podcast → global)
+                // on the current output, like a normal track start does.
+                self.settings.active_output =
+                    crate::core::output::default_output().unwrap_or_default();
+                self.apply_current_eq();
                 // Count the episode in the statistics: a session keyed by the
                 // audio URL (the tick accumulates listened time, finalize on
                 // end/switch writes the play_event). Duration backfills on tick.

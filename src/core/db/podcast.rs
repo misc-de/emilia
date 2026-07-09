@@ -66,6 +66,16 @@ impl Library {
             .optional()?)
     }
 
+    /// Title of a podcast (for dialog headers, e.g. the per-podcast EQ editor).
+    pub fn podcast_title(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT title FROM podcast WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
     /// Removes a podcast along with its episodes.
     pub fn delete_podcast(&self, id: i64) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;

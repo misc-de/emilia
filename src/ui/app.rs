@@ -1562,6 +1562,13 @@ pub enum Msg {
     OpenStreamReplay(i64),
     /// Open the equalizer editor for a station (per-station EQ).
     OpenStreamEq(i64),
+    /// Open the equalizer editor for a podcast subscription (per-podcast EQ).
+    OpenPodcastEq(i64),
+    /// Open the equalizer editor for a podcast episode (per-episode EQ).
+    OpenEpisodeEq {
+        url: String,
+        title: String,
+    },
     /// Preview a buffered song (absolute byte range).
     ReplayPlay {
         start: u64,
@@ -3260,6 +3267,8 @@ impl Component for App {
                 match out {
                     O::ToggleEpisode { url, title } => Msg::ToggleEpisode { url, title },
                     O::EpisodeSeekTo { url, title, ms } => Msg::EpisodeSeekTo { url, title, ms },
+                    O::OpenPodcastEqualizer(id) => Msg::OpenPodcastEq(id),
+                    O::OpenEpisodeEqualizer { url, title } => Msg::OpenEpisodeEq { url, title },
                     O::PushSubpage => Msg::PushPodcastSubpage,
                     O::Share(sel) => Msg::ShareItems(*sel),
                     O::Toast(s) => Msg::PodcastToast(s),
@@ -3827,6 +3836,8 @@ impl Component for App {
             }
             Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
             Msg::OpenStreamEq(id) => self.open_stream_eq(root, &sender, id),
+            Msg::OpenPodcastEq(id) => self.open_podcast_eq(root, &sender, id),
+            Msg::OpenEpisodeEq { url, title } => self.open_episode_eq(root, &sender, url, title),
             Msg::ReplayPlay { start, end } => self.replay_play(start, end),
             Msg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
             Msg::PlayRecording(path) => self.play_recording(path),

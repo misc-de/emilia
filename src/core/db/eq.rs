@@ -160,6 +160,39 @@ impl Library {
         None
     }
 
+    /// Effective equalizer for a podcast episode + output. Episodes carry no
+    /// track metadata, so the inheritance is episode → podcast → global, per
+    /// output: first the concrete output, then the default output ('') as the
+    /// basis. The episode is keyed by its audio URL, the podcast by its id.
+    /// `None` if nothing is set (→ neutral).
+    pub fn resolve_eq_podcast(
+        &self,
+        output: &str,
+        podcast_id: Option<&str>,
+        episode_url: &str,
+    ) -> Option<[f64; 10]> {
+        let mut outputs: Vec<&str> = Vec::new();
+        if !output.is_empty() {
+            outputs.push(output);
+        }
+        outputs.push("");
+
+        for out in outputs {
+            if let Some(b) = self.resolve_eq_setting(out, "episode", episode_url) {
+                return Some(b);
+            }
+            if let Some(id) = podcast_id {
+                if let Some(b) = self.resolve_eq_setting(out, "podcast", id) {
+                    return Some(b);
+                }
+            }
+            if let Some(b) = self.resolve_eq_setting(out, "global", "") {
+                return Some(b);
+            }
+        }
+        None
+    }
+
     fn resolve_eq_setting(&self, output: &str, scope: &str, key: &str) -> Option<[f64; 10]> {
         let bands = self.get_eq(output, scope, key).ok().flatten()?;
         if self.eq_enabled(output, scope, key).unwrap_or(true) {

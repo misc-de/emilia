@@ -212,6 +212,12 @@ pub(crate) enum PodcastsOutput {
     ToggleEpisode { url: String, title: String },
     /// Transport: jump to/start at a show-notes timestamp.
     EpisodeSeekTo { url: String, title: String, ms: i64 },
+    /// Open the equalizer editor (a parent dialog) for a subscription
+    /// (per-podcast EQ, inherited by its episodes).
+    OpenPodcastEqualizer(i64),
+    /// Open the equalizer editor (a parent dialog) for one episode
+    /// (per-episode EQ, keyed by its audio URL).
+    OpenEpisodeEqualizer { url: String, title: String },
     /// A built episode subpage is parked in `subpage_slot`; ask the parent to
     /// push it onto the shared NavigationView. Unit, so the parent's `Send` `Msg`
     /// stays valid (the `!Send` widget travels through the shared slot instead).
@@ -1282,6 +1288,26 @@ impl PodcastsPage {
         *self.ctx_episode_download.borrow_mut() = Some((dl_value, ep.audio_url.clone()));
         self.refresh_download_row();
 
+        // Per-episode equalizer (inherits podcast → global during playback).
+        let actions = adw::PreferencesGroup::new();
+        let eq = action_row(
+            &gettext("Equalizer settings"),
+            "multimedia-equalizer-symbolic",
+        );
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            let (url, title) = (ep.audio_url.clone(), ep.title.clone());
+            eq.connect_activated(move |_| {
+                let _ = sender.output(PodcastsOutput::OpenEpisodeEqualizer {
+                    url: url.clone(),
+                    title: title.clone(),
+                });
+                dialog.close();
+            });
+        }
+        actions.add(&eq);
+        content.append(&actions);
+
         // Shownotes (if present): timestamps become clickable jump markers.
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
             let notes_group = adw::PreferencesGroup::new();
@@ -1388,6 +1414,18 @@ impl PodcastsPage {
             });
         }
         actions.add(&refresh);
+        let eq = action_row(
+            &gettext("Equalizer settings"),
+            "multimedia-equalizer-symbolic",
+        );
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            eq.connect_activated(move |_| {
+                let _ = sender.output(PodcastsOutput::OpenPodcastEqualizer(id));
+                dialog.close();
+            });
+        }
+        actions.add(&eq);
         // Share the podcast (feed + episodes incl. show notes) over device sync.
         if let Some(feed) = self.library.podcast_feed_url(id).ok().flatten() {
             let share = action_row(&gettext("Share"), "emilia-share-symbolic");

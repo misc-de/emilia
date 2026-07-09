@@ -2867,6 +2867,51 @@ msgstr "Wähle die Version von „{title}“, die hinzugefügt werden soll"
 msgid "Already in your library"
 msgstr "Bereits in deiner Bibliothek"
 
+# Dynamisch zusammengesetzte Strings (EQ-Subjekt/-Hinweis, Jahresspanne),
+# die xtr nicht automatisch findet – hier von Hand gepflegt.
+# Nicht per msgmerge entfernen lassen!
+msgid "Years"
+msgstr "Jahre"
+
+msgid "the artist"
+msgstr "den Interpreten"
+
+msgid "the album"
+msgstr "das Album"
+
+msgid "the track"
+msgstr "den Titel"
+
+msgid "the global equalizer"
+msgstr "den globalen Equalizer"
+
+msgid "the station"
+msgstr "den Sender"
+
+msgid "the podcast"
+msgstr "den Podcast"
+
+msgid "the episode"
+msgstr "die Folge"
+
+msgid "Also applies to this artist's albums and tracks."
+msgstr "Gilt auch für die Alben und Lieder dieses Interpreten."
+
+msgid "Also applies to this album's tracks."
+msgstr "Gilt auch für die Lieder dieses Albums."
+
+msgid "Also applies to this podcast's episodes."
+msgstr "Gilt auch für die Folgen dieses Podcasts."
+
+msgid "Applies to everything without its own artist, album or track setting."
+msgstr "Gilt für alles ohne eigene Einstellung für Interpret, Album oder Titel."
+
+msgid "Applies while this station plays."
+msgstr "Gilt, während dieser Sender läuft."
+
+msgid "Applies while this episode plays."
+msgstr "Gilt, während diese Folge läuft."
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 
@@ -3255,35 +3300,6 @@ msgstr "Bereits in deiner Bibliothek"
 
 #~ msgid "Scan QR code – coming soon"
 #~ msgstr "QR-Code einlesen – kommt bald"
-
-# Dynamisch zusammengesetzte Strings (EQ-Subjekt/-Hinweis, Jahresspanne),
-# die xtr nicht automatisch findet – hier von Hand gepflegt.
-#
-#~ msgid "Years"
-#~ msgstr "Jahre"
-
-#~ msgid "the artist"
-#~ msgstr "den Interpreten"
-
-#~ msgid "the album"
-#~ msgstr "das Album"
-
-#~ msgid "the track"
-#~ msgstr "den Titel"
-
-#~ msgid "the global equalizer"
-#~ msgstr "den globalen Equalizer"
-
-#~ msgid "Also applies to this artist's albums and tracks."
-#~ msgstr "Gilt auch für die Alben und Lieder dieses Interpreten."
-
-#~ msgid "Also applies to this album's tracks."
-#~ msgstr "Gilt auch für die Lieder dieses Albums."
-
-#~ msgid ""
-#~ "Applies to everything without its own artist, album or track setting."
-#~ msgstr ""
-#~ "Gilt für alles ohne eigene Einstellung für Interpret, Album oder Titel."
 
 #~ msgid "Quick access to the tracks, albums and artists you starred."
 #~ msgstr ""
