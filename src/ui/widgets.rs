@@ -113,7 +113,12 @@ pub fn cover_frame(placeholder_icon: &str, size: i32) -> gtk::AspectFrame {
     let frame = gtk::AspectFrame::new(0.0, 0.5, 1.0, false);
     frame.set_size_request(size, size);
     frame.set_overflow(gtk::Overflow::Hidden);
-    frame.set_halign(gtk::Align::Start);
+    // Large covers are only ever used centred in detail dialogs/carousels, so
+    // centre by default. This keeps every detail view from having to override
+    // the alignment itself — a step that kept getting forgotten on new/async
+    // code paths and left the cover stuck to the left edge. (Small list/header
+    // thumbnails use `thumb_frame`, which stays `Start`.)
+    frame.set_halign(gtk::Align::Center);
     frame.set_valign(gtk::Align::Center);
     frame.set_hexpand(false);
     frame.set_vexpand(false);

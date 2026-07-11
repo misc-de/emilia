@@ -448,6 +448,14 @@ pub fn resolve_audio_url(video_id_or_url: &str) -> Result<String> {
 /// `<video_id>.<ext>` (yt-dlp picks the real extension) and returns the produced
 /// file path. **Network – worker threads only.**
 pub fn download_audio(video_id: &str) -> Result<PathBuf> {
+    download_audio_progress(video_id, |_| {})
+}
+
+/// Like [`download_audio`], but reports the live download percentage (0–100)
+/// via `on_pct`, called only when the rounded value changes. Streams yt-dlp's
+/// `--newline` progress lines through a marker template so the percent is
+/// unambiguous to parse. **Network – worker threads only.**
+pub fn download_audio_progress(video_id: &str, mut on_pct: impl FnMut(u8)) -> Result<PathBuf> {
     let dir = yt_download_dir();
     // Clear any stale fragment/previous copy for this id so the glob is unambiguous.
     if let Some(old) = find_download(video_id) {
@@ -459,6 +467,15 @@ pub fn download_audio(video_id: &str) -> Result<PathBuf> {
         "--ignore-config",
         "--no-warnings",
         "--no-playlist",
+        // Emit progress as discrete `\n`-terminated lines (not `\r`-refreshed)
+        // so a line reader sees each update; the `EMILIA_PCT ` marker lets us
+        // pick our percent out of yt-dlp's other stdout chatter, and `--color`
+        // off keeps ANSI codes out of the number.
+        "--newline",
+        "--color",
+        "no_color",
+        "--progress-template",
+        "download:EMILIA_PCT %(progress._percent_str)s",
         "--socket-timeout",
         SOCKET_TIMEOUT_SECS,
         "-f",
@@ -468,11 +485,28 @@ pub fn download_audio(video_id: &str) -> Result<PathBuf> {
     .arg(&template)
     .arg("--")
     .arg(watch_url(video_id));
-    let status = proc::status_timeout(&mut cmd, DOWNLOAD_TIMEOUT)?;
+    let mut last = 101u8; // impossible value → first real reading always fires
+    let status = proc::status_timeout_lines(&mut cmd, DOWNLOAD_TIMEOUT, |line| {
+        if let Some(pct) = parse_progress_pct(line) {
+            if pct != last {
+                last = pct;
+                on_pct(pct);
+            }
+        }
+    })?;
     if !status.success() {
         return Err(anyhow!("yt-dlp download failed"));
     }
     find_download(video_id).ok_or_else(|| anyhow!("download produced no file"))
+}
+
+/// Parses a percent (0–100) out of a yt-dlp `--progress-template` line of the
+/// form `EMILIA_PCT  42.3%`. Returns `None` for any other stdout line.
+fn parse_progress_pct(line: &str) -> Option<u8> {
+    let rest = line.trim().strip_prefix("EMILIA_PCT")?;
+    let num = rest.split('%').next()?.trim();
+    let val: f64 = num.parse().ok()?;
+    Some(val.round().clamp(0.0, 100.0) as u8)
 }
 
 /// Locates an already downloaded offline audio file for a video id (any
@@ -673,6 +707,25 @@ mod tests {
         assert_eq!(artist.as_deref(), Some("Pink Floyd"));
         assert_eq!(album.as_deref(), Some("The Wall"));
         assert_eq!(title, "Hey You");
+    }
+
+    #[test]
+    fn progress_pct_parses_real_ytdlp_lines() {
+        // Exact lines emitted by the `--progress-template` above (verified live).
+        assert_eq!(parse_progress_pct("EMILIA_PCT   0.4%"), Some(0));
+        assert_eq!(parse_progress_pct("EMILIA_PCT  12.6%"), Some(13));
+        assert_eq!(parse_progress_pct("EMILIA_PCT  51.6%"), Some(52));
+        assert_eq!(parse_progress_pct("EMILIA_PCT 100.0%"), Some(100));
+    }
+
+    #[test]
+    fn progress_pct_ignores_other_stdout() {
+        assert_eq!(
+            parse_progress_pct("[download] Destination: test.webm"),
+            None
+        );
+        assert_eq!(parse_progress_pct("[youtube] Extracting URL: …"), None);
+        assert_eq!(parse_progress_pct(""), None);
     }
 
     #[test]
@@ -1037,6 +1090,17 @@ pub enum AddOutcome {
     Exists(PathBuf),
 }
 
+/// Coarse phase of an [`add_to_library_progress`] run, for live UI feedback.
+#[derive(Clone, Copy, Debug)]
+pub enum AddProgress {
+    /// Resolving metadata / cover art before the download starts.
+    Preparing,
+    /// Downloading the audio; the payload is the percentage (0–100).
+    Downloading(u8),
+    /// Transcoding + tagging the downloaded file.
+    Processing,
+}
+
 /// Downloads a video (if no local copy yet), transcodes it into the on-disk
 /// music library under `<music>/YouTube/<Artist>/<Album>/<Title>.mp3`, tags it,
 /// gives it the enriched cover, indexes it, and removes the temporary download.
@@ -1048,6 +1112,22 @@ pub fn add_to_library(
     cover: Option<&str>,
     overwrite: bool,
 ) -> Result<AddOutcome, String> {
+    add_to_library_progress(video_id, title_hint, music_dir, cover, overwrite, |_| {})
+}
+
+/// Like [`add_to_library`], but reports coarse progress (prepare → download %
+/// → process) via `on`, so a caller can drive a live progress popup. The
+/// download percentage is the only fine-grained signal; metadata/cover fetch
+/// and transcoding are reported as single phase changes.
+pub fn add_to_library_progress(
+    video_id: &str,
+    title_hint: &str,
+    music_dir: &str,
+    cover: Option<&str>,
+    overwrite: bool,
+    mut on: impl FnMut(AddProgress),
+) -> Result<AddOutcome, String> {
+    on(AddProgress::Preparing);
     let meta = video_meta(video_id).ok();
     let artist = meta
         .as_ref()
@@ -1090,8 +1170,10 @@ pub fn add_to_library(
 
     let source = match find_download(video_id) {
         Some(p) => p,
-        None => download_audio(video_id).map_err(|e| e.to_string())?,
+        None => download_audio_progress(video_id, |pct| on(AddProgress::Downloading(pct)))
+            .map_err(|e| e.to_string())?,
     };
+    on(AddProgress::Processing);
     transcode_to_mp3(&source, &dest, &title, artist.as_deref(), album.as_deref())
         .map_err(|e| e.to_string())?;
     let dest_str = dest.to_string_lossy().into_owned();

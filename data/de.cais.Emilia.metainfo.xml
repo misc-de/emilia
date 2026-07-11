@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.3" date="2026-07-11">
+      <description>
+        <p>Downloading a track from YouTube now shows a live progress popup — a preparing phase, the actual download percentage, then a final processing step — instead of an opaque wait. Covers and photos in the detail views are reliably centred again, including the YouTube cover that previously jumped to the left edge once its thumbnail finished loading.</p>
+        <p xml:lang="de">Das Herunterladen eines Titels von YouTube zeigt jetzt ein Live-Fortschritts-Popup — eine Vorbereitungsphase, den tatsächlichen Download-Prozentwert und einen abschließenden Verarbeitungsschritt — statt einer undurchsichtigen Wartezeit. Cover und Bilder in den Detailansichten sind wieder zuverlässig zentriert, einschließlich des YouTube-Covers, das zuvor an den linken Rand sprang, sobald sein Vorschaubild fertig geladen war.</p>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-07-09">
       <description>
         <p>Podcasts get their own equalizer: set it per episode or for a whole subscription right from the detail dialogs, inherited episode → podcast → global. Episode playback now applies the equalizer correctly. Tapping the title in the player bar opens the matching detail view for podcast episodes, radio stations and cloud tracks too, and the German translation of the equalizer dialogs was repaired.</p>

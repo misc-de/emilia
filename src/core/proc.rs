@@ -62,6 +62,71 @@ pub fn status_timeout(cmd: &mut Command, timeout: Duration) -> Result<ExitStatus
     wait_or_kill(&mut child, timeout)
 }
 
+/// Like [`status_timeout`], but streams the child's **stdout** line by line to
+/// `on_line` while it runs (stderr is discarded). Used to surface live progress
+/// (yt-dlp's `--newline` output). A helper thread reads the pipe into an
+/// unbounded channel — so a fast producer can never fill the pipe buffer and
+/// deadlock — while this thread polls the child for exit/timeout exactly as
+/// [`status_timeout`] does; `on_line` runs on the calling thread. Same
+/// kill-on-timeout guarantee. Worker threads only.
+pub fn status_timeout_lines(
+    cmd: &mut Command,
+    timeout: Duration,
+    mut on_line: impl FnMut(&str),
+) -> Result<ExitStatus> {
+    use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
+
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn()?;
+    let stdout = child.stdout.take().expect("stdout was set to piped");
+    let (tx, rx) = mpsc::channel::<String>();
+    let reader = std::thread::spawn(move || {
+        let mut r = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match r.read_line(&mut line) {
+                Ok(0) => break, // EOF: child closed stdout
+                Ok(_) => {
+                    if tx.send(line.trim_end().to_string()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        while let Ok(line) = rx.try_recv() {
+            on_line(&line);
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait(); // reap; also closes stdout so the reader ends
+            let _ = reader.join();
+            while let Ok(line) = rx.try_recv() {
+                on_line(&line);
+            }
+            bail!("subprocess timed out after {timeout:?} and was killed");
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    };
+    // Child exited: the reader hits EOF and returns; drain whatever is left.
+    let _ = reader.join();
+    while let Ok(line) = rx.try_recv() {
+        on_line(&line);
+    }
+    Ok(status)
+}
+
 /// Polls `child` until it exits or `timeout` elapses; on expiry kills it and
 /// reaps it (so it never lingers as a zombie), then errors.
 fn wait_or_kill(child: &mut Child, timeout: Duration) -> Result<ExitStatus> {
@@ -109,5 +174,33 @@ mod tests {
         let mut cmd = Command::new("false");
         let out = output_timeout(&mut cmd, Duration::from_secs(10)).unwrap();
         assert!(!out.status.success());
+    }
+
+    #[test]
+    fn lines_are_streamed_in_order() {
+        let mut cmd = Command::new("printf");
+        cmd.arg("a\nb\nc\n");
+        let mut got = Vec::new();
+        let status = status_timeout_lines(&mut cmd, Duration::from_secs(10), |l| {
+            got.push(l.to_string())
+        })
+        .unwrap();
+        assert!(status.success());
+        assert_eq!(got, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn lines_timeout_kills_and_still_drains() {
+        // Emits one line, then hangs → the line must arrive before the kill.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "printf 'first\\n'; sleep 60"]);
+        let mut got = Vec::new();
+        let start = Instant::now();
+        let res = status_timeout_lines(&mut cmd, Duration::from_millis(300), |l| {
+            got.push(l.to_string())
+        });
+        assert!(res.is_err(), "expected a timeout error");
+        assert!(start.elapsed() < Duration::from_secs(5));
+        assert_eq!(got, vec!["first"]);
     }
 }

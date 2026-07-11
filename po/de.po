@@ -2912,6 +2912,12 @@ msgstr "Gilt, während dieser Sender läuft."
 msgid "Applies while this episode plays."
 msgstr "Gilt, während diese Folge läuft."
 
+msgid "Downloading … {pct}%"
+msgstr "Wird heruntergeladen … {pct} %"
+
+msgid "Converting …"
+msgstr "Wird konvertiert …"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

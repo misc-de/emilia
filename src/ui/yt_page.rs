@@ -286,6 +286,19 @@ pub(crate) struct YtPage {
     pl_cover_slots: Vec<(String, adw::Bin)>,
     /// Hand-off slot for built subpages (the `!Send` widget can't ride a message).
     subpage_slot: Rc<RefCell<Option<(String, gtk::Box)>>>,
+    /// Live "adding to library" progress popup (video detail → library add),
+    /// kept so async [`YtCmd::AddLibProgress`] commands can drive its bar/label.
+    progress_popup: Rc<RefCell<Option<ProgressPopup>>>,
+}
+
+/// Widgets of the non-blocking library-add progress popup ([`YtPage::show_progress_popup`]).
+struct ProgressPopup {
+    dialog: adw::Dialog,
+    bar: gtk::ProgressBar,
+    label: gtk::Label,
+    /// Which download this popup tracks, so stray progress/finish commands for a
+    /// different video don't retarget or close it.
+    video_id: String,
 }
 
 #[derive(Debug)]
@@ -444,6 +457,11 @@ pub(crate) enum YtCmd {
     LibraryProgress {
         done: usize,
         total: usize,
+    },
+    /// Live phase/percentage of a single-video library add, for the popup.
+    AddLibProgress {
+        video_id: String,
+        progress: youtube::AddProgress,
     },
     LibraryAdded {
         video_id: Option<String>,
@@ -705,6 +723,7 @@ impl Component for YtPage {
             playlist_songs_cache: HashMap::new(),
             pl_cover_slots: Vec::new(),
             subpage_slot,
+            progress_popup: Rc::new(RefCell::new(None)),
         };
         // Cache the channel thumbnails once in the background, then redraw.
         sender.spawn_oneshot_command(|| {
@@ -1009,7 +1028,11 @@ impl Component for YtPage {
                     &[("done", &done.to_string()), ("total", &total.to_string())],
                 )));
             }
+            YtCmd::AddLibProgress { video_id, progress } => {
+                self.update_progress_popup(&video_id, progress);
+            }
             YtCmd::LibraryAdded { video_id, result } => {
+                self.close_progress_popup(video_id.as_deref());
                 if let Some(vid) = &video_id {
                     self.downloading_videos.remove(vid);
                     self.refresh_yt_download_row();
@@ -1981,10 +2004,6 @@ impl YtPage {
             .and_then(|p| gtk::gdk::Texture::from_filename(p).ok());
         let cover =
             crate::ui::widgets::rounded_image(initial.as_ref(), "video-x-generic-symbolic", 200);
-        // `rounded_image` (via `cover_frame`) defaults to `halign: Start` for
-        // list/header use; in this centred detail dialog that left the cover
-        // stuck to the left edge with empty space on the right. Override it.
-        cover.set_halign(gtk::Align::Center);
         cover_box.append(&cover);
         content.append(&cover_box);
 
@@ -2051,12 +2070,19 @@ impl YtPage {
         let off_icon = gtk::Image::from_icon_name("list-add-symbolic");
         off.add_prefix(&off_icon);
         {
-            let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
+            let (sender, dialog, vid, t) = (
+                sender.clone(),
+                dialog.clone(),
+                video_id.to_string(),
+                title.to_string(),
+            );
             off.connect_activated(move |_| {
                 sender.input(YtInput::AddToLibrary {
                     video_id: vid.clone(),
                     title: t.clone(),
                 });
+                // Close the detail view; the progress popup takes over the feedback.
+                dialog.close();
             });
         }
         actions.add(&off);
@@ -2464,6 +2490,94 @@ impl YtPage {
         }
     }
 
+    /// Opens (replacing any earlier one) the non-blocking progress popup for a
+    /// library add and parks its widgets so [`Self::update_progress_popup`] can
+    /// drive them. The user may dismiss it; the download keeps running and the
+    /// finishing command still lands (and its success toast still shows).
+    fn show_progress_popup(&self, video_id: &str, title: &str) {
+        let Some(root) = self.window.clone() else {
+            return;
+        };
+        if let Some(prev) = self.progress_popup.borrow_mut().take() {
+            prev.dialog.close();
+        }
+        let dialog = adw::Dialog::builder().title(title).build();
+        self.adapt_detail_dialog(&dialog);
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(18)
+            .margin_top(24)
+            .margin_bottom(24)
+            .margin_start(24)
+            .margin_end(24)
+            .build();
+        let label = gtk::Label::builder()
+            .label(gettext("Preparing …"))
+            .wrap(true)
+            .xalign(0.0)
+            .build();
+        let bar = gtk::ProgressBar::builder().fraction(0.0).build();
+        content.append(&label);
+        content.append(&bar);
+        let toolbar = adw::ToolbarView::new();
+        toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.set_content(Some(&content));
+        dialog.set_child(Some(&toolbar));
+        dialog.set_content_width(360);
+        dialog.present(Some(&root));
+        *self.progress_popup.borrow_mut() = Some(ProgressPopup {
+            dialog,
+            bar,
+            label,
+            video_id: video_id.to_string(),
+        });
+    }
+
+    /// Reflects an async [`youtube::AddProgress`] in the open progress popup, if
+    /// it is still the one tracking `video_id`.
+    fn update_progress_popup(&self, video_id: &str, progress: youtube::AddProgress) {
+        let guard = self.progress_popup.borrow();
+        let Some(popup) = guard.as_ref() else {
+            return;
+        };
+        if popup.video_id != video_id {
+            return;
+        }
+        match progress {
+            youtube::AddProgress::Preparing => {
+                popup.label.set_label(&gettext("Preparing …"));
+                popup.bar.set_fraction(0.0);
+            }
+            youtube::AddProgress::Downloading(pct) => {
+                popup.label.set_label(&gettext_f(
+                    "Downloading … {pct}%",
+                    &[("pct", &pct.to_string())],
+                ));
+                popup.bar.set_fraction(pct as f64 / 100.0);
+            }
+            youtube::AddProgress::Processing => {
+                popup.label.set_label(&gettext("Converting …"));
+                popup.bar.set_fraction(1.0);
+            }
+        }
+    }
+
+    /// Closes the progress popup when it tracks `video_id` (or unconditionally
+    /// when `video_id` is `None`). A no-op if none is open.
+    fn close_progress_popup(&self, video_id: Option<&str>) {
+        let mut guard = self.progress_popup.borrow_mut();
+        let close = match (guard.as_ref(), video_id) {
+            (Some(_), None) => true,
+            (Some(popup), Some(v)) => popup.video_id == v,
+            (None, _) => false,
+        };
+        if close {
+            if let Some(popup) = guard.take() {
+                popup.dialog.close();
+            }
+        }
+    }
+
     /// Fills an open video detail dialog with metadata that arrived async.
     fn apply_video_meta(
         &self,
@@ -2538,29 +2652,40 @@ impl YtPage {
         };
         self.downloading_videos.insert(video_id.clone());
         self.refresh_yt_download_row();
-        let _ = sender.output(YtOutput::Progress(gettext_f(
-            "Adding “{title}” to library …",
-            &[("title", &title)],
-        )));
+        self.show_progress_popup(&video_id, &title);
         let cover = crate::core::online::youtube_cover_path(&video_id);
         let vid = video_id;
         sender.spawn_command(move |out| {
-            let cmd =
-                match youtube::add_to_library(&vid, &title, &music, cover.as_deref(), overwrite) {
-                    Ok(youtube::AddOutcome::Added) => YtCmd::LibraryAdded {
-                        video_id: Some(vid),
-                        result: Ok(1),
-                    },
-                    Ok(youtube::AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
-                        video_id: vid,
-                        title,
-                        dest: dest.to_string_lossy().into_owned(),
-                    },
-                    Err(e) => YtCmd::LibraryAdded {
-                        video_id: Some(vid),
-                        result: Err(e),
-                    },
-                };
+            let progress_out = out.clone();
+            let progress_vid = vid.clone();
+            let on_progress = move |progress| {
+                let _ = progress_out.send(YtCmd::AddLibProgress {
+                    video_id: progress_vid.clone(),
+                    progress,
+                });
+            };
+            let cmd = match youtube::add_to_library_progress(
+                &vid,
+                &title,
+                &music,
+                cover.as_deref(),
+                overwrite,
+                on_progress,
+            ) {
+                Ok(youtube::AddOutcome::Added) => YtCmd::LibraryAdded {
+                    video_id: Some(vid),
+                    result: Ok(1),
+                },
+                Ok(youtube::AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
+                    video_id: vid,
+                    title,
+                    dest: dest.to_string_lossy().into_owned(),
+                },
+                Err(e) => YtCmd::LibraryAdded {
+                    video_id: Some(vid),
+                    result: Err(e),
+                },
+            };
             let _ = out.send(cmd);
         });
     }
@@ -2688,6 +2813,7 @@ impl YtPage {
         title: String,
         dest: String,
     ) {
+        self.close_progress_popup(Some(&video_id));
         self.downloading_videos.remove(&video_id);
         self.refresh_yt_download_row();
         let _ = sender.output(YtOutput::ProgressDone(gettext("Song already exists")));

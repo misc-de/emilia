@@ -623,7 +623,6 @@ impl App {
         } else {
             let tex = covers.first().and_then(|p| decode(p));
             let cover = crate::ui::widgets::rounded_image(tex.as_ref(), "view-list-symbolic", 160);
-            cover.set_halign(gtk::Align::Center);
             content.append(&cover);
         }
 
