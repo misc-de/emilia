@@ -109,9 +109,16 @@ pub fn status_timeout_lines(
             break status;
         }
         if Instant::now() >= deadline {
+            // Timed out: kill and reap the child, then return promptly WITHOUT
+            // joining the reader. `child.kill()` only signals the direct child;
+            // a grandchild it spawned (e.g. yt-dlp's ffmpeg) can inherit the
+            // stdout pipe and hold it open, so joining the reader would block on
+            // `read_line` until *that* process exits — defeating this timeout.
+            // The detached reader ends on its own once the pipe finally closes
+            // (its next `tx.send` fails because `rx` is dropped, or it hits EOF).
             let _ = child.kill();
-            let _ = child.wait(); // reap; also closes stdout so the reader ends
-            let _ = reader.join();
+            let _ = child.wait();
+            // Drain whatever the reader already buffered, then error out.
             while let Ok(line) = rx.try_recv() {
                 on_line(&line);
             }
