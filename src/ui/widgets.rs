@@ -276,7 +276,7 @@ thread_local! {
 pub fn enqueue_thumb_decode(path: &str, bin: &adw::Bin) {
     COVER_DECODER.with(|cell| {
         let mut slot = cell.borrow_mut();
-        if slot.is_none() {
+        let dec = slot.get_or_insert_with(|| {
             let (tx, rx) = async_channel::unbounded::<String>();
             let (out_tx, out_rx) = async_channel::unbounded::<(String, gtk::gdk::Texture)>();
             // Worker thread: decode off the UI thread (path + texture are Send;
@@ -307,9 +307,8 @@ pub fn enqueue_thumb_decode(path: &str, bin: &adw::Bin) {
                     }
                 });
             }
-            *slot = Some(CoverDecoder { tx, pending });
-        }
-        let dec = slot.as_ref().unwrap();
+            CoverDecoder { tx, pending }
+        });
         let is_new = {
             let mut pend = dec.pending.borrow_mut();
             let entry = pend.entry(path.to_string()).or_default();

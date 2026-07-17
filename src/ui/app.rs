@@ -107,24 +107,38 @@ pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
         .map(|(_, label, icon)| (*label, *icon))
 }
 
-/// One- to two-sentence description of a menu section (English `msgid`; translate
-/// at the display site with `gettext()`). Shown as the secondary text of each row
-/// in the setup assistant and the Settings → Menu list.
-pub(crate) fn section_description(name: &str) -> &'static str {
+/// One- to two-sentence description of a menu section, already translated.
+/// Shown as the secondary text of each row in the setup assistant and the
+/// Settings → Menu list. Unknown sections yield an empty string — never pass
+/// the fallback through `gettext()`, `gettext("")` returns the catalog header.
+/// Each arm calls `gettext()` on its literal so `xtr` extracts the strings.
+pub(crate) fn section_description(name: &str) -> String {
     match name {
-        "favorites" => "Quick access to the tracks, albums and artists you starred.",
-        "files" => "Browse your music folder — and any extra sources — as a file tree.",
-        "artists" => "Every artist in your library, each opening to their albums and tracks.",
-        "albums" => "Every album in your library, sortable and grouped by initial or year.",
-        "concerts" => "Live and concert recordings you marked, kept apart from your albums.",
-        "podcasts" => "Subscribe to podcast feeds and play or download their episodes.",
-        "streaming" => "Internet radio stations, with an optional buffer to record what just played.",
-        "youtube" => "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.",
-        "audiobooks" => "Albums, folders or tracks you marked as audiobooks, resuming where you left off.",
-        "playlists" => "Your own playlists, arranged in any order you like.",
-        "memo" => "Quick voice notes recorded with the microphone.",
-        "stats" => "Listening statistics and your most-played artists and tracks.",
-        _ => "",
+        "favorites" => gettext("Quick access to the tracks, albums and artists you starred."),
+        "files" => gettext("Browse your music folder — and any extra sources — as a file tree."),
+        "artists" => gettext("Every artist in your library, each opening to their albums and tracks."),
+        "singles" => {
+            gettext("Releases by a single artist with just a few tracks, kept apart from full albums.")
+        }
+        "albums" => gettext("Every album in your library, sortable and grouped by initial or year."),
+        "compilations" => {
+            gettext("Albums with tracks by several artists, such as samplers and soundtracks.")
+        }
+        "concerts" => gettext("Live and concert recordings you marked, kept apart from your albums."),
+        "podcasts" => gettext("Subscribe to podcast feeds and play or download their episodes."),
+        "streaming" => {
+            gettext("Internet radio stations, with an optional buffer to record what just played.")
+        }
+        "youtube" => {
+            gettext("Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.")
+        }
+        "audiobooks" => {
+            gettext("Albums, folders or tracks you marked as audiobooks, resuming where you left off.")
+        }
+        "playlists" => gettext("Your own playlists, arranged in any order you like."),
+        "memo" => gettext("Quick voice notes recorded with the microphone."),
+        "stats" => gettext("Listening statistics and your most-played artists and tracks."),
+        _ => String::new(),
     }
 }
 
@@ -607,12 +621,10 @@ pub(crate) struct TransportState {
     pub(crate) shuffle_idx: usize,
     /// Repeat: at the end of the queue / single track, start over.
     pub(crate) repeat: bool,
-    /// Recently played tracks (for "previous song" via double-click on back).
+    /// Recently played tracks (for stepping back across playback contexts).
     pub(crate) play_history: Vec<PathBuf>,
     /// When jumping back out of history, do not write to the history again.
     pub(crate) skip_history_push: bool,
-    /// Time of the last back click (double-click detection, < 1 s).
-    pub(crate) last_prev: Option<std::time::Instant>,
     /// Queue paused while a single song is played in between (list + position).
     pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
     /// Back stack of displaced playback contexts (queue + position).
@@ -3469,7 +3481,6 @@ impl Component for App {
                 repeat: repeat_on,
                 play_history: Vec::new(),
                 skip_history_push: false,
-                last_prev: None,
                 interrupted_queue: None,
                 nav_stack: Vec::new(),
                 prev_ctx: None,

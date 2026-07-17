@@ -428,58 +428,47 @@ impl App {
         }
     }
 
-    /// Back button: pressing once restarts the running track from the beginning,
-    /// a second press **within one second** jumps to the previously
-    /// played track (history).
+    /// Back button. Behaves like a list: it steps to the **previous track** of
+    /// the running queue. Only at the very start of the queue (or a lone
+    /// single-song context) does it fall back to restoring a context that a
+    /// single-song tap displaced, then the most recently played track, and
+    /// finally – with nothing before it – a restart of the current track.
     pub(crate) fn play_prev(&mut self) {
-        let now = std::time::Instant::now();
-        let double = self
-            .transport
-            .last_prev
-            .is_some_and(|t| now.duration_since(t) <= std::time::Duration::from_secs(1));
-        self.transport.last_prev = Some(now);
-
-        if double {
-            if let Some(prev) = self.transport.play_history.pop() {
-                // Previous song: preferably play it at its queue position,
-                // otherwise the path directly (without another history entry).
-                self.transport.skip_history_push = true;
-                if let Some(pos) = self.transport.queue.iter().position(|p| *p == prev) {
-                    self.transport.queue_pos = pos;
-                    self.play_current();
-                } else {
-                    self.transport.queue = vec![prev];
-                    self.transport.queue_pos = 0;
-                    self.play_current();
-                }
-                return;
-            }
-            // No history → sequentially one song back.
-            if !self.transport.queue.is_empty() && self.transport.queue_pos > 0 {
-                self.transport.skip_history_push = true;
-                self.transport.queue_pos -= 1;
-                self.play_current();
-            }
+        // One track back within the running queue (the common "list" case).
+        if self.transport.queue_pos > 0 && self.transport.queue.len() > 1 {
+            self.transport.skip_history_push = true;
+            self.transport.queue_pos -= 1;
+            self.play_current();
             return;
         }
 
-        // First press: if a new context was just started (track
-        // has been running for < 5 s) and a displaced context lies on the stack,
-        // restore it **including its playlist** and keep listening to the song
-        // (resume from the DB). "Back" right after an accidentally
-        // started song thus returns to the previous one.
-        if !self.transport.nav_stack.is_empty() && self.player.position_ms().unwrap_or(0) < 5000 {
-            if let Some((q, pos)) = self.transport.nav_stack.pop() {
-                self.transport.skip_history_push = true;
-                self.transport.queue = q;
-                self.transport.queue_pos = pos.min(self.transport.queue.len().saturating_sub(1));
-                self.play_current();
-                self.refresh_queue_icons();
-                return;
-            }
+        // At the start of a single-song context: restore a list that a quick
+        // single-song tap displaced, keeping the previously playing song **and**
+        // its playlist (resume from the DB).
+        if let Some((q, pos)) = self.transport.nav_stack.pop() {
+            self.transport.skip_history_push = true;
+            self.transport.queue = q;
+            self.transport.queue_pos = pos.min(self.transport.queue.len().saturating_sub(1));
+            self.play_current();
+            self.refresh_queue_icons();
+            return;
         }
 
-        // Otherwise: running track from the beginning.
+        // Else jump to the most recently played track (crosses contexts):
+        // preferably at its queue position, otherwise by path directly.
+        if let Some(prev) = self.transport.play_history.pop() {
+            self.transport.skip_history_push = true;
+            if let Some(pos) = self.transport.queue.iter().position(|p| *p == prev) {
+                self.transport.queue_pos = pos;
+            } else {
+                self.transport.queue = vec![prev];
+                self.transport.queue_pos = 0;
+            }
+            self.play_current();
+            return;
+        }
+
+        // Nothing before this: restart the current track from the beginning.
         if self.transport.playing_path.is_some() {
             self.transport.skip_history_push = true;
             self.play_current();

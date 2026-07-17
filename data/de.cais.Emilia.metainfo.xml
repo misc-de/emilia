@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.4" date="2026-07-17">
+      <description>
+        <p>The back button now behaves like a list: it steps to the previous track in the queue instead of only restarting the current one, so you can move freely back and forth through an artist or album. The Singles and Compilations entries in Settings → Menu finally show a plain-language description of what they are, instead of stray technical text.</p>
+        <p xml:lang="de">Die Zurück-Taste verhält sich jetzt wie eine Liste: Sie springt zum vorherigen Titel der Warteschlange, statt nur den aktuellen neu zu starten – so lässt sich frei durch einen Interpreten oder ein Album vor- und zurückblättern. Die Einträge Einzellieder und Kompilationen unter Einstellungen → Menü zeigen endlich eine verständliche Beschreibung, statt versehentlich technischen Text.</p>
+      </description>
+    </release>
     <release version="0.8.3" date="2026-07-11">
       <description>
         <p>Downloading a track from YouTube now shows a live progress popup — a preparing phase, the actual download percentage, then a final processing step — instead of an opaque wait. Covers and photos in the detail views are reliably centred again, including the YouTube cover that previously jumped to the left edge once its thumbnail finished loading.</p>

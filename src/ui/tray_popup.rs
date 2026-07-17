@@ -148,10 +148,10 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        if self.media_popup.is_none() {
-            self.media_popup = Some(MediaPopup::build(root, sender));
-        }
-        let window = self.media_popup.as_ref().unwrap().window.clone();
+        let popup = self
+            .media_popup
+            .get_or_insert_with(|| MediaPopup::build(root, sender));
+        let window = popup.window.clone();
         if window.is_visible() {
             window.set_visible(false);
             return;

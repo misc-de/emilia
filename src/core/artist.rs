@@ -150,10 +150,11 @@ fn replace_ci_ascii(haystack: &str, needle: &str, repl: &str) -> String {
         if i + nb.len() <= hb.len() && hb[i..i + nb.len()].eq_ignore_ascii_case(nb) {
             out.push_str(repl);
             i += nb.len();
-        } else {
-            let ch = haystack[i..].chars().next().unwrap();
+        } else if let Some(ch) = haystack[i..].chars().next() {
             out.push(ch);
             i += ch.len_utf8();
+        } else {
+            break;
         }
     }
     out

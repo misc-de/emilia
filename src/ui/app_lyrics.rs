@@ -393,20 +393,13 @@ impl App {
         if !self.lyrics.current.as_ref().is_some_and(|l| l.has_synced()) {
             return;
         }
-        if self.lyrics.view.is_none() {
+        let Some(on) = self.lyrics.view.as_ref().map(|v| !v.karaoke) else {
             return;
-        }
-        let on = !self
-            .lyrics
-            .view
-            .as_ref()
-            .map(|v| v.karaoke)
-            .unwrap_or(false);
+        };
         self.library.set_lyrics_karaoke_off(&path, !on);
         if on {
             let input = self.input.clone();
-            {
-                let view = self.lyrics.view.as_mut().unwrap();
+            if let Some(view) = self.lyrics.view.as_mut() {
                 view.karaoke = true;
                 view.active = None;
                 for l in &view.lines {
@@ -424,8 +417,7 @@ impl App {
                 }
             }
             self.update_lyrics_highlight();
-        } else {
-            let view = self.lyrics.view.as_mut().unwrap();
+        } else if let Some(view) = self.lyrics.view.as_mut() {
             view.karaoke = false;
             if let Some(id) = view.timer.take() {
                 id.remove();

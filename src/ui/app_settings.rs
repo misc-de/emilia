@@ -1314,7 +1314,7 @@ fn rebuild_section_rows(
         };
         let row = adw::ActionRow::builder()
             .title(gettext(label))
-            .subtitle(gettext(crate::ui::app::section_description(name)))
+            .subtitle(crate::ui::app::section_description(name))
             .build();
         row.set_subtitle_lines(2);
 
