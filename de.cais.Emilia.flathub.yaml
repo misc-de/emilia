@@ -158,14 +158,14 @@ modules:
         /app/share/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
     sources:
       # App-Quelle aus dem getaggten Git-Stand (Flathub baut nur hieraus).
-      # Release 0.8.4 == MetaInfo-Top-Release; der Tag zeigt auf den Release-
+      # Release 0.8.5 == MetaInfo-Top-Release; der Tag zeigt auf den Release-
       # Commit. Bei einem neuen Release NICHT von Hand pflegen, sondern
       # `scripts/sync-flathub.sh` laufen lassen (zieht tag + commit aus dem
       # MetaInfo-Top-Release + Git-Tag). Der pre-commit-Hook warnt bei Drift.
       - type: git
         url: https://github.com/misc-de/emilia.git
-        tag: v0.8.4
-        commit: d42185a29c7aa7d37f2fd4ef5ba6e96d1dd76b42
+        tag: v0.8.5
+        commit: 0d45810f6aeef4643a6afd362ca0ecee89f5e740
       # Gevendorte Cargo-Abhängigkeiten (offline-Build). Liegt im selben Ordner
       # wie dieses Manifest (im flathub-Repo neben de.cais.Emilia.yaml).
       - generated-sources.json
