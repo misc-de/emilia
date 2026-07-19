@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.6" date="2026-07-19">
+      <description>
+        <p>Large covers in the detail dialogs are centred again on the phone. In a narrow window the picture used to sit against the left edge, with empty card background left over beside it.</p>
+        <p xml:lang="de">Große Cover in den Detailansichten sind auf dem Telefon wieder zentriert. In einem schmalen Fenster stand das Bild bisher am linken Rand, mit leerer Kartenfläche daneben.</p>
+      </description>
+    </release>
     <release version="0.8.5" date="2026-07-19">
       <description>
         <p>Podcast episodes in Newest now show how far you have already listened, just like the Recently list does. The current section is named in the title bar on the phone as well, and the sharing dialogs finally take the height their content needs — the review of an incoming transfer is no longer squeezed into a couple of lines.</p>
