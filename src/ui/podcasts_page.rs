@@ -13,7 +13,7 @@
 //! shared chrome, so they too go through `Output`.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -944,6 +944,14 @@ impl PodcastsPage {
         });
         eps.truncate(150);
         self.newest_items = eps;
+        // Resume positions of *all* episodes in one query — a per-row lookup
+        // would mean 150 statements for a list this long.
+        let progress: HashMap<String, i64> = self
+            .library
+            .all_episode_progress()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         while let Some(child) = self.newest_list.first_child() {
             self.newest_list.remove(&child);
         }
@@ -998,6 +1006,30 @@ impl PodcastsPage {
                 .as_deref()
                 .and_then(crate::core::online::podcast_image_path);
             row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
+            // Listening progress, like in the "Recently" list: a bar for every
+            // episode with a stored position, as long as the feed tells us the
+            // total length (without it there is no fraction to show).
+            let position_ms = progress.get(&ep.audio_url).copied().unwrap_or(0);
+            let total_secs = ep
+                .duration
+                .as_deref()
+                .and_then(crate::core::podcast::duration_secs)
+                .filter(|s| *s > 0);
+            if let (true, Some(secs)) = (position_ms > 0, total_secs) {
+                let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
+                let bar = gtk::ProgressBar::builder()
+                    .fraction(frac)
+                    .valign(gtk::Align::Center)
+                    .width_request(64)
+                    .tooltip_text(format!(
+                        "{} / {}",
+                        crate::ui::app_helpers::fmt_duration(position_ms),
+                        crate::ui::app_helpers::fmt_duration(secs * 1000)
+                    ))
+                    .build();
+                bar.add_css_class("emilia-hourbar");
+                row.add_suffix(&bar);
+            }
             // Episode length as a subtle label, left of the play button.
             if let Some(d) = ep
                 .duration

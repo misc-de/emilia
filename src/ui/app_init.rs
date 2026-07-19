@@ -612,6 +612,8 @@ impl App {
         // name — discreetly via the dimmed subtitle slot. On a pushed subpage the
         // desktop shows the page's own title; mobile stays blank (its back arrow
         // gives the context).
+        // Narrow mode keeps the same section label: the top icon nav shows it
+        // only as an icon, so the label is the one place that spells it out.
         let refresh_title: std::rc::Rc<dyn Fn()> = {
             let win_title = widgets.win_title.clone();
             let nav_view = widgets.nav_view.clone();
@@ -624,21 +626,15 @@ impl App {
                     .is_some_and(|t| t == "main");
                 if on_main {
                     // The title bar shows just the section (category) name, dimmed
-                    // + centred (the empty title hides the bold primary label). In
-                    // narrow/mobile mode the top icon nav already conveys the
-                    // category, so the title bar stays empty — no redundant label.
+                    // + centred (the empty title hides the bold primary label).
                     win_title.set_title("");
-                    if narrow.get() {
-                        win_title.set_subtitle("");
-                    } else {
-                        let cur = stack.visible_child_name();
-                        let cur = cur.as_deref().unwrap_or("files");
-                        win_title.set_subtitle(
-                            &section_meta(cur)
-                                .map(|(l, _)| gettext(l))
-                                .unwrap_or_default(),
-                        );
-                    }
+                    let cur = stack.visible_child_name();
+                    let cur = cur.as_deref().unwrap_or("files");
+                    win_title.set_subtitle(
+                        &section_meta(cur)
+                            .map(|(l, _)| gettext(l))
+                            .unwrap_or_default(),
+                    );
                 } else if narrow.get() {
                     // Mobile subpage: keep it quiet (the back arrow gives context).
                     win_title.set_title("");

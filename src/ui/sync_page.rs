@@ -311,11 +311,15 @@ impl SyncPage {
     fn set_sub_content(&self, content: &impl gtk::prelude::IsA<gtk::Widget>) {
         // Reset to the compact default size; phases that need more room (the
         // camera scan view) enlarge the window themselves afterwards.
+        // `-1` = follow the content's natural height, so every phase gets exactly
+        // the room it needs. The floor keeps the short phases (progress, mode
+        // select) from rendering as a thin strip under the header bar.
         if let Some(d) = &self.sub {
             d.set_content_width(440);
             d.set_content_height(-1);
         }
         if let Some(tb) = &self.sub_toolbar {
+            content.as_ref().set_size_request(-1, 240);
             tb.set_content(Some(content));
         }
     }

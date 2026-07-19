@@ -29,7 +29,7 @@ pub(crate) fn build_confirm(
     manifest: &ShareManifest,
     sender: &ComponentSender<SyncPage>,
 ) -> gtk::Widget {
-    let page = adw::PreferencesPage::new();
+    let page = page_box();
     let g = adw::PreferencesGroup::builder()
         .title(gettext("Transfer summary"))
         .description(gettext(
@@ -142,7 +142,7 @@ pub(crate) fn build_confirm(
                 .build(),
         );
     }
-    page.add(&g);
+    page.append(&g);
 
     let buttons = adw::PreferencesGroup::new();
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -165,7 +165,7 @@ pub(crate) fn build_confirm(
     row.append(&cancel);
     row.append(&send);
     buttons.add(&row);
-    page.add(&buttons);
+    page.append(&buttons);
 
     scrolled(&page)
 }
@@ -229,7 +229,7 @@ pub(crate) fn build_review(
     sender: &ComponentSender<SyncPage>,
 ) -> (gtk::Widget, ReviewHandles) {
     let mut h = ReviewHandles::default();
-    let page = adw::PreferencesPage::new();
+    let page = page_box();
 
     let (new_n, have_n, coll_n) = reviews
         .iter()
@@ -254,7 +254,7 @@ pub(crate) fn build_review(
             ],
         ))
         .build();
-    page.add(&head);
+    page.append(&head);
 
     if !reviews.is_empty() {
         let files = adw::PreferencesGroup::builder()
@@ -278,7 +278,7 @@ pub(crate) fn build_review(
                 }
             }
         }
-        page.add(&files);
+        page.append(&files);
     }
 
     if yt_enabled && !manifest.yt.is_empty() {
@@ -291,7 +291,7 @@ pub(crate) fn build_review(
             yt.add(&row);
             h.yt.push((check, item.id.clone()));
         }
-        page.add(&yt);
+        page.append(&yt);
     }
 
     // Library-data switches, only for facets actually present in the offer.
@@ -317,7 +317,7 @@ pub(crate) fn build_review(
         h.podcasts = add(lb.podcasts.is_some(), gettext("Podcasts"));
         h.eq = add(lb.eq.is_some(), gettext("Equalizer"));
         h.categories = add(lb.categories.is_some(), gettext("Categories"));
-        page.add(&g);
+        page.append(&g);
     }
 
     // Actions: reject / accept.
@@ -344,7 +344,7 @@ pub(crate) fn build_review(
     row.append(&reject);
     row.append(&accept);
     buttons.add(&row);
-    page.add(&buttons);
+    page.append(&buttons);
 
     (scrolled(&page), h)
 }
@@ -494,18 +494,41 @@ fn album_expander(
     (exp, handles)
 }
 
-/// Wraps a preferences page in a vertically-scrolling container.
+/// The vertical container the share pages fill with their groups.
+///
+/// Deliberately a plain box rather than an [`adw::PreferencesPage`]: that widget
+/// carries its own internal scroller, whose natural height is a tiny minimum —
+/// wrapping it in [`scrolled`] therefore propagated *that* minimum upwards and
+/// collapsed the natural-sized dialog to a few lines. A box reports the real
+/// height of its children, which is what the dialog has to follow.
+fn page_box() -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Vertical, 18);
+    b.set_margin_top(18);
+    b.set_margin_bottom(18);
+    b.set_margin_start(12);
+    b.set_margin_end(12);
+    b
+}
+
+/// Wraps a [`page_box`] in a vertically-scrolling, clamped container.
 ///
 /// `propagate_natural_height` is essential: without it the scroller reports its
 /// own tiny minimum and the natural-sized dialog collapses to a single line. With
-/// it the dialog grows to the content's natural height and only scrolls once that
-/// exceeds the parent window.
-fn scrolled(page: &adw::PreferencesPage) -> gtk::Widget {
+/// it the dialog grows to the content's natural height, and `max_content_height`
+/// caps how far a long file list may push it before scrolling takes over.
+fn scrolled(content: &gtk::Box) -> gtk::Widget {
+    // Same clamp width AdwPreferencesPage would have applied.
+    let clamp = adw::Clamp::builder()
+        .maximum_size(600)
+        .tightening_threshold(400)
+        .child(content)
+        .build();
     let sw = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .propagate_natural_height(true)
+        .max_content_height(620)
         .vexpand(true)
-        .child(page)
+        .child(&clamp)
         .build();
     sw.upcast()
 }
