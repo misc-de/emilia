@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.5" date="2026-07-19">
+      <description>
+        <p>Podcast episodes in Newest now show how far you have already listened, just like the Recently list does. The current section is named in the title bar on the phone as well, and the sharing dialogs finally take the height their content needs — the review of an incoming transfer is no longer squeezed into a couple of lines.</p>
+        <p xml:lang="de">Podcast-Folgen unter Neuste zeigen jetzt an, wie weit Sie bereits gehört haben – genau wie in der Liste Zuletzt. Der aktuelle Bereich steht auch auf dem Telefon in der Titelleiste, und die Teilen-Dialoge nehmen sich endlich die Höhe, die ihr Inhalt braucht: Die Prüfung einer eingehenden Übertragung wird nicht länger auf wenige Zeilen gequetscht.</p>
+      </description>
+    </release>
     <release version="0.8.4" date="2026-07-17">
       <description>
         <p>The back button now behaves like a list: it steps to the previous track in the queue instead of only restarting the current one, so you can move freely back and forth through an artist or album. The Singles and Compilations entries in Settings → Menu finally show a plain-language description of what they are, instead of stray technical text.</p>
