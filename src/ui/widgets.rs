@@ -110,7 +110,10 @@ pub fn decode_thumb(path: &str) -> Option<gtk::gdk::Texture> {
 pub fn cover_frame(placeholder_icon: &str, size: i32) -> gtk::AspectFrame {
     // Large detail cover: AspectFrame crops the image to fill a square.
     // (For small list thumbnails see `thumb_frame`.)
-    let frame = gtk::AspectFrame::new(0.0, 0.5, 1.0, false);
+    // `xalign = 0.5`: when the frame is allocated wider than its 1:1 ratio
+    // allows for the given height (narrow phone dialogs), the image would
+    // otherwise sit at the left edge with bare card background to its right.
+    let frame = gtk::AspectFrame::new(0.5, 0.5, 1.0, false);
     frame.set_size_request(size, size);
     frame.set_overflow(gtk::Overflow::Hidden);
     // Large covers are only ever used centred in detail dialogs/carousels, so

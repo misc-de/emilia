@@ -4597,3 +4597,29 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{section_description, SECTIONS};
+
+    /// Every menu section needs a subtitle for the setup assistant and
+    /// Settings → Menu. A missing arm used to fall through to the empty
+    /// string, which — passed through `gettext()` — rendered the whole
+    /// catalog header as the row's subtitle.
+    #[test]
+    fn every_section_has_a_description() {
+        for (name, _, _) in SECTIONS {
+            assert!(
+                !section_description(name).is_empty(),
+                "section {name:?} has no description"
+            );
+        }
+    }
+
+    /// The empty fallback must stay untranslated — `gettext("")` returns the
+    /// catalog header, not an empty string.
+    #[test]
+    fn unknown_section_yields_empty_description() {
+        assert_eq!(section_description("does-not-exist"), "");
+    }
+}
