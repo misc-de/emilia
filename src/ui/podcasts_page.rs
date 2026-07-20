@@ -1004,15 +1004,22 @@ impl PodcastsPage {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&crate::core::podcast::pubdate_short(p));
             }
-            // Listening progress as text under the title — like in "Recently",
-            // and unlike the bar it also works without a known total length.
+            // Listening progress on its own third line, below podcast and date.
+            // As text rather than a bar it also works for feeds that state no
+            // length — then only the elapsed time shows.
             if position_ms > 0 {
-                subtitle.push_str(" · ");
-                subtitle.push_str(&crate::ui::app_helpers::fmt_duration(position_ms));
-                if let Some(secs) = total_secs {
-                    subtitle.push_str(" / ");
-                    subtitle.push_str(&crate::ui::app_helpers::fmt_duration(secs * 1000));
-                }
+                let elapsed = crate::ui::app_helpers::fmt_duration(position_ms);
+                subtitle.push('\n');
+                subtitle.push_str(&match total_secs {
+                    Some(secs) => gettext_f(
+                        "{position} of {total} listened",
+                        &[
+                            ("position", &elapsed),
+                            ("total", &crate::ui::app_helpers::fmt_duration(secs * 1000)),
+                        ],
+                    ),
+                    None => gettext_f("{position} listened", &[("position", &elapsed)]),
+                });
             }
             // Not activatable: like a library track, the episode plays via its
             // play button; long press / right click opens the detail view.
@@ -1020,30 +1027,15 @@ impl PodcastsPage {
                 .title(gtk::glib::markup_escape_text(&ep.title))
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .build();
+            if position_ms > 0 {
+                row.set_subtitle_lines(2);
+            }
             row.add_css_class("emilia-flush");
             let cover = ep
                 .podcast_image
                 .as_deref()
                 .and_then(crate::core::online::podcast_image_path);
             row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
-            // Listening progress, like in the "Recently" list: a bar for every
-            // episode with a stored position, as long as the feed tells us the
-            // total length (without it there is no fraction to show).
-            if let (true, Some(secs)) = (position_ms > 0, total_secs) {
-                let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
-                let bar = gtk::ProgressBar::builder()
-                    .fraction(frac)
-                    .valign(gtk::Align::Center)
-                    .width_request(64)
-                    .tooltip_text(format!(
-                        "{} / {}",
-                        crate::ui::app_helpers::fmt_duration(position_ms),
-                        crate::ui::app_helpers::fmt_duration(secs * 1000)
-                    ))
-                    .build();
-                bar.add_css_class("emilia-hourbar");
-                row.add_suffix(&bar);
-            }
             // Episode length as a subtle label, left of the play button.
             if let Some(d) = ep
                 .duration

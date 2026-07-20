@@ -2991,6 +2991,12 @@ msgstr "Keine Kompilationen"
 msgid "Compilations are albums with tracks by several artists"
 msgstr "Kompilationen sind Alben mit Titeln verschiedener Interpreten"
 
+msgid "{position} of {total} listened"
+msgstr "{position} von {total} gehört"
+
+msgid "{position} listened"
+msgstr "{position} gehört"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 
