@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.8" date="2026-07-20">
+      <description>
+        <p>Under Newest, how far you have listened to an episode now has a line of its own beneath the podcast and the date, instead of a narrow bar at the right edge. Episodes from feeds that state no length are covered as well — they show the time listened so far, which the bar could not display at all.</p>
+        <p xml:lang="de">Unter Neuste steht der Hörfortschritt einer Folge jetzt in einer eigenen Zeile unter Podcast und Datum, statt als schmaler Balken am rechten Rand. Auch Folgen aus Feeds ohne Längenangabe sind dabei: Sie zeigen die bereits gehörte Zeit, die der Balken gar nicht darstellen konnte.</p>
+      </description>
+    </release>
     <release version="0.8.7" date="2026-07-20">
       <description>
         <p>The listening progress under Newest is now actually visible. It was only drawn when the podcast list was rebuilt from scratch, so an episode you had just started still looked untouched; the list now refreshes when you switch to the tab. The progress also stands next to the episode date as plain text, which works even for feeds that do not state a length.</p>
