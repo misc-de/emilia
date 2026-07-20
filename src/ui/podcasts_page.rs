@@ -529,10 +529,13 @@ impl Component for PodcastsPage {
             PodcastsInput::SetWindow(w) => self.window = Some(w),
             PodcastsInput::SetView(view) => {
                 self.podcast_view = view;
-                // Refresh the progress when entering "Recently" (it changes as
-                // episodes are listened to).
-                if view == PodcastView::Recent {
-                    self.reload_recent(&sender);
+                // Refresh the progress when entering "Recently" or "Newest"
+                // (it changes as episodes are listened to; without this the
+                // lists keep the state of the last full reload).
+                match view {
+                    PodcastView::Recent => self.reload_recent(&sender),
+                    PodcastView::Newest => self.reload_newest(&sender),
+                    _ => {}
                 }
                 // The sort button only shows on the subscription overview.
                 self.rebuild_sort(&sender);
@@ -989,10 +992,27 @@ impl PodcastsPage {
                 group = Some(g);
             }
 
+            let position_ms = progress.get(&ep.audio_url).copied().unwrap_or(0);
+            let total_secs = ep
+                .duration
+                .as_deref()
+                .and_then(crate::core::podcast::duration_secs)
+                .filter(|s| *s > 0);
+
             let mut subtitle = ep.podcast_title.clone();
             if let Some(p) = ep.published.as_deref().filter(|p| !p.trim().is_empty()) {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&crate::core::podcast::pubdate_short(p));
+            }
+            // Listening progress as text under the title — like in "Recently",
+            // and unlike the bar it also works without a known total length.
+            if position_ms > 0 {
+                subtitle.push_str(" · ");
+                subtitle.push_str(&crate::ui::app_helpers::fmt_duration(position_ms));
+                if let Some(secs) = total_secs {
+                    subtitle.push_str(" / ");
+                    subtitle.push_str(&crate::ui::app_helpers::fmt_duration(secs * 1000));
+                }
             }
             // Not activatable: like a library track, the episode plays via its
             // play button; long press / right click opens the detail view.
@@ -1009,12 +1029,6 @@ impl PodcastsPage {
             // Listening progress, like in the "Recently" list: a bar for every
             // episode with a stored position, as long as the feed tells us the
             // total length (without it there is no fraction to show).
-            let position_ms = progress.get(&ep.audio_url).copied().unwrap_or(0);
-            let total_secs = ep
-                .duration
-                .as_deref()
-                .and_then(crate::core::podcast::duration_secs)
-                .filter(|s| *s > 0);
             if let (true, Some(secs)) = (position_ms > 0, total_secs) {
                 let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
                 let bar = gtk::ProgressBar::builder()
