@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.7" date="2026-07-20">
+      <description>
+        <p>The listening progress under Newest is now actually visible. It was only drawn when the podcast list was rebuilt from scratch, so an episode you had just started still looked untouched; the list now refreshes when you switch to the tab. The progress also stands next to the episode date as plain text, which works even for feeds that do not state a length.</p>
+        <p xml:lang="de">Der Hörfortschritt unter Neuste ist jetzt tatsächlich sichtbar. Er wurde nur gezeichnet, wenn die Podcast-Liste komplett neu aufgebaut wurde – eine gerade begonnene Folge sah deshalb weiterhin unangetastet aus; die Liste frischt sich nun beim Wechsel auf den Reiter auf. Der Fortschritt steht außerdem als Text neben dem Folgendatum, was auch bei Feeds ohne Längenangabe funktioniert.</p>
+      </description>
+    </release>
     <release version="0.8.6" date="2026-07-19">
       <description>
         <p>Large covers in the detail dialogs are centred again on the phone. In a narrow window the picture used to sit against the left edge, with empty card background left over beside it.</p>
