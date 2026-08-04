@@ -1057,28 +1057,11 @@ impl PodcastsPage {
                 .build();
             subtitle_lbl.add_css_class("dim-label");
             text.append(&subtitle_lbl);
-            // Progress bar as its own line inside the text column (only with a
-            // known length and > 10 s listened), the elapsed time before it.
+            // Listening progress like "Recently": once less than 30 s remain the
+            // episode counts as listened (a check), otherwise the elapsed time
+            // before a bar. Only with a known length and > 10 s listened.
             if let (true, Some(secs)) = (heard, total_secs) {
-                let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
-                let prow = gtk::Box::builder()
-                    .orientation(gtk::Orientation::Horizontal)
-                    .spacing(8)
-                    .margin_top(2)
-                    .build();
-                let elapsed =
-                    gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(position_ms)));
-                elapsed.set_valign(gtk::Align::Center);
-                elapsed.set_css_classes(&["dim-label", "numeric"]);
-                prow.append(&elapsed);
-                let bar = gtk::ProgressBar::builder()
-                    .fraction(frac)
-                    .hexpand(true)
-                    .valign(gtk::Align::Center)
-                    .build();
-                bar.add_css_class("emilia-hourbar");
-                prow.append(&bar);
-                text.append(&prow);
+                text.append(&Self::episode_progress_row(position_ms, secs));
             }
             top.append(&text);
             // Episode length as a subtle label, left of the play button.
@@ -1107,6 +1090,41 @@ impl PodcastsPage {
             }
         }
         self.refresh_episode_icons();
+    }
+
+    /// The progress line for a podcast episode. Once less than 30 s remain the
+    /// episode counts as finished and shows a check with "Listened"; otherwise
+    /// the elapsed time sits before a progress bar.
+    fn episode_progress_row(position_ms: i64, total_secs: i64) -> gtk::Box {
+        let prow = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(8)
+            .margin_top(2)
+            .build();
+        let total_ms = total_secs * 1000;
+        if total_ms - position_ms < 30_000 {
+            let check = gtk::Image::from_icon_name("object-select-symbolic");
+            check.set_valign(gtk::Align::Center);
+            prow.append(&check);
+            let lbl = gtk::Label::new(Some(&gettext("Listened")));
+            lbl.set_valign(gtk::Align::Center);
+            lbl.add_css_class("dim-label");
+            prow.append(&lbl);
+        } else {
+            let elapsed = gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(position_ms)));
+            elapsed.set_valign(gtk::Align::Center);
+            elapsed.set_css_classes(&["dim-label", "numeric"]);
+            prow.append(&elapsed);
+            let frac = (position_ms as f64 / total_ms as f64).clamp(0.0, 1.0);
+            let bar = gtk::ProgressBar::builder()
+                .fraction(frac)
+                .hexpand(true)
+                .valign(gtk::Align::Center)
+                .build();
+            bar.add_css_class("emilia-hourbar");
+            prow.append(&bar);
+        }
+        prow
     }
 
     /// Builds the "Recently" list: episodes you have started (those with a
@@ -1178,29 +1196,11 @@ impl PodcastsPage {
             subtitle.add_css_class("dim-label");
             text.append(&subtitle);
 
-            // Progress bar as its own line *inside the text column*, so it spans
-            // only the text width — not under the cover or the play button. The
-            // already-listened time sits directly before the bar.
+            // Progress line inside the text column, so it spans only the text
+            // width — not under the cover or the play button. Once less than
+            // 30 s remain the episode counts as listened (a check).
             if let Some(secs) = total_secs {
-                let frac = (ep.position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
-                let prow = gtk::Box::builder()
-                    .orientation(gtk::Orientation::Horizontal)
-                    .spacing(8)
-                    .margin_top(2)
-                    .build();
-                let elapsed =
-                    gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(ep.position_ms)));
-                elapsed.set_valign(gtk::Align::Center);
-                elapsed.set_css_classes(&["dim-label", "numeric"]);
-                prow.append(&elapsed);
-                let bar = gtk::ProgressBar::builder()
-                    .fraction(frac)
-                    .hexpand(true)
-                    .valign(gtk::Align::Center)
-                    .build();
-                bar.add_css_class("emilia-hourbar");
-                prow.append(&bar);
-                text.append(&prow);
+                text.append(&Self::episode_progress_row(ep.position_ms, secs));
             }
             top.append(&text);
 
