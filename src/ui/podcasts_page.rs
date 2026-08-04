@@ -1004,38 +1004,83 @@ impl PodcastsPage {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&crate::core::podcast::pubdate_short(p));
             }
-            // Listening progress on its own third line, below podcast and date.
-            // As text rather than a bar it also works for feeds that state no
-            // length — then only the elapsed time shows.
-            if position_ms > 0 {
-                let elapsed = crate::ui::app_helpers::fmt_duration(position_ms);
-                subtitle.push('\n');
-                subtitle.push_str(&match total_secs {
-                    Some(secs) => gettext_f(
-                        "{position} of {total} listened",
-                        &[
-                            ("position", &elapsed),
-                            ("total", &crate::ui::app_helpers::fmt_duration(secs * 1000)),
-                        ],
-                    ),
-                    None => gettext_f("{position} listened", &[("position", &elapsed)]),
-                });
+            // Listening progress like "Recently": the elapsed time before a bar,
+            // but only once more than 10 s have actually been listened to. When
+            // the feed states no length there is no bar, so the elapsed time is
+            // appended to the subtitle instead.
+            let heard = position_ms > 10_000;
+            if heard && total_secs.is_none() {
+                subtitle.push_str(" · ");
+                subtitle.push_str(&gettext_f(
+                    "{position} listened",
+                    &[(
+                        "position",
+                        &crate::ui::app_helpers::fmt_duration(position_ms),
+                    )],
+                ));
             }
+
             // Not activatable: like a library track, the episode plays via its
             // play button; long press / right click opens the detail view.
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&ep.title))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .build();
-            if position_ms > 0 {
-                row.set_subtitle_lines(2);
-            }
-            row.add_css_class("emilia-flush");
             let cover = ep
                 .podcast_image
                 .as_deref()
                 .and_then(crate::core::online::podcast_image_path);
-            row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
+            let card = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .build();
+            let top = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(12)
+                .margin_top(8)
+                .margin_bottom(8)
+                .margin_start(12)
+                .margin_end(12)
+                .build();
+            top.append(&cover_widget(cover.as_deref(), "microphone-symbolic"));
+            let text = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .hexpand(true)
+                .valign(gtk::Align::Center)
+                .build();
+            let title = gtk::Label::builder()
+                .label(&ep.title)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            title.add_css_class("heading");
+            text.append(&title);
+            let subtitle_lbl = gtk::Label::builder()
+                .label(&subtitle)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            subtitle_lbl.add_css_class("dim-label");
+            text.append(&subtitle_lbl);
+            // Progress bar as its own line inside the text column (only with a
+            // known length and > 10 s listened), the elapsed time before it.
+            if let (true, Some(secs)) = (heard, total_secs) {
+                let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
+                let prow = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Horizontal)
+                    .spacing(8)
+                    .margin_top(2)
+                    .build();
+                let elapsed =
+                    gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(position_ms)));
+                elapsed.set_valign(gtk::Align::Center);
+                elapsed.set_css_classes(&["dim-label", "numeric"]);
+                prow.append(&elapsed);
+                let bar = gtk::ProgressBar::builder()
+                    .fraction(frac)
+                    .hexpand(true)
+                    .valign(gtk::Align::Center)
+                    .build();
+                bar.add_css_class("emilia-hourbar");
+                prow.append(&bar);
+                text.append(&prow);
+            }
+            top.append(&text);
             // Episode length as a subtle label, left of the play button.
             if let Some(d) = ep
                 .duration
@@ -1045,19 +1090,20 @@ impl PodcastsPage {
                 let lbl = gtk::Label::new(Some(&d));
                 lbl.set_valign(gtk::Align::Center);
                 lbl.set_css_classes(&["dim-label", "numeric"]);
-                row.add_suffix(&lbl);
+                top.append(&lbl);
             }
-            row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
-            on_secondary_click(&row, {
+            top.append(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
+            card.append(&top);
+            on_secondary_click(&card, {
                 let sender = sender.clone();
                 move || sender.input(PodcastsInput::ShowEpisodeDetail(i))
             });
-            on_long_press(&row, {
+            on_long_press(&card, {
                 let sender = sender.clone();
                 move || sender.input(PodcastsInput::ShowEpisodeDetail(i))
             });
             if let Some(g) = &group {
-                g.add(&row);
+                g.add(&card);
             }
         }
         self.refresh_episode_icons();
