@@ -1110,25 +1110,19 @@ impl PodcastsPage {
                 .build();
             title.add_css_class("heading");
             text.append(&title);
-            // Subtitle: "podcast · total" — the elapsed time sits before the bar
-            // below. Without a known length there is no bar, so the elapsed time
-            // is shown here instead.
+            // Subtitle: just the podcast name — the total length sits next to
+            // the play button (like "Newest"). Without a known length there is
+            // no bar, so the elapsed time is shown here instead.
             let mut sub = ep.podcast_title.clone();
-            match total_secs {
-                Some(secs) => {
-                    sub.push_str(" · ");
-                    sub.push_str(&crate::ui::app_helpers::fmt_duration(secs * 1000));
-                }
-                None => {
-                    sub.push_str(" · ");
-                    sub.push_str(&gettext_f(
-                        "{position} listened",
-                        &[(
-                            "position",
-                            &crate::ui::app_helpers::fmt_duration(ep.position_ms),
-                        )],
-                    ));
-                }
+            if total_secs.is_none() {
+                sub.push_str(" · ");
+                sub.push_str(&gettext_f(
+                    "{position} listened",
+                    &[(
+                        "position",
+                        &crate::ui::app_helpers::fmt_duration(ep.position_ms),
+                    )],
+                ));
             }
             let subtitle = gtk::Label::builder()
                 .label(&sub)
@@ -1164,6 +1158,18 @@ impl PodcastsPage {
             }
             top.append(&text);
 
+            // Episode length as a subtle label, left of the play button — the
+            // same placement as in "Newest".
+            if let Some(d) = ep
+                .duration
+                .as_deref()
+                .and_then(crate::core::podcast::format_duration)
+            {
+                let lbl = gtk::Label::new(Some(&d));
+                lbl.set_valign(gtk::Align::Center);
+                lbl.set_css_classes(&["dim-label", "numeric"]);
+                top.append(&lbl);
+            }
             top.append(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
             card.append(&top);
 
