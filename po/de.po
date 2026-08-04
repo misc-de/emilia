@@ -2997,6 +2997,36 @@ msgstr "{position} von {total} gehört"
 msgid "{position} listened"
 msgstr "{position} gehört"
 
+msgid "Listened"
+msgstr "Gehört"
+
+msgid "Individual songs"
+msgstr "Einzelne Titel"
+
+msgid "{n} more artists"
+msgstr "{n} weitere Interpreten"
+
+msgid "{n} already here"
+msgstr "{n} bereits vorhanden"
+
+msgid "{n} would overwrite"
+msgstr "{n} würden überschreiben"
+
+msgid "+{n} more"
+msgstr "+{n} weitere"
+
+msgid "{n} covers/photos"
+msgstr "{n} Cover/Fotos"
+
+msgid "Received {list}."
+msgstr "{list} empfangen."
+
+msgid "{n} new"
+msgstr "{n} neu"
+
+msgid "{n} files · {size}"
+msgstr "{n} Dateien · {size}"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

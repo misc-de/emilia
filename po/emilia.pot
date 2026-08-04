@@ -2629,3 +2629,43 @@ msgstr ""
 #: src/ui/podcasts_page.rs
 msgid "{position} listened"
 msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "Listened"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "Individual songs"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "{n} more artists"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "{n} already here"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "{n} would overwrite"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "+{n} more"
+msgstr ""
+
+#: src/ui/sync_page.rs
+msgid "{n} covers/photos"
+msgstr ""
+
+#: src/ui/sync_page.rs
+msgid "Received {list}."
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "{n} new"
+msgstr ""
+
+#: src/ui/sync_share_ui.rs
+msgid "{n} files · {size}"
+msgstr ""

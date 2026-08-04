@@ -539,6 +539,95 @@ fn yt_song_rec(lib: &Library, video_id: &str) -> YtVideoRec {
 }
 
 // ---------------------------------------------------------------------------
+// Summarisation: artist → album → track
+// ---------------------------------------------------------------------------
+
+/// One album of an [`ArtistGroup`]; `idxs` are positions in the file list the
+/// grouping was built from.
+#[derive(Debug, Clone)]
+pub struct AlbumGroup {
+    pub album: String,
+    pub idxs: Vec<usize>,
+    pub size: u64,
+}
+
+/// All files of one artist, split into albums plus the album-less leftovers.
+#[derive(Debug, Clone)]
+pub struct ArtistGroup {
+    /// `None` for files without an artist tag (voice memos, loose files, …).
+    pub artist: Option<String>,
+    pub albums: Vec<AlbumGroup>,
+    /// Indices of this artist's files that carry no album tag.
+    pub loose: Vec<usize>,
+    pub tracks: usize,
+    pub size: u64,
+}
+
+impl ArtistGroup {
+    /// Every file index of this group — albums first (in album order), then the
+    /// album-less ones.
+    pub fn idxs(&self) -> Vec<usize> {
+        let mut out = Vec::with_capacity(self.tracks);
+        for a in &self.albums {
+            out.extend_from_slice(&a.idxs);
+        }
+        out.extend_from_slice(&self.loose);
+        out
+    }
+}
+
+/// Trimmed tag value, treating empty/whitespace as absent.
+fn tag(v: &Option<String>) -> Option<&str> {
+    v.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Groups files into artist → album → track, preserving first-seen order on
+/// every level.
+///
+/// Both ends of a share render the offer from this: sender and receiver then
+/// describe the same transfer the same way — as the albums and artists it was
+/// started from, instead of a flat list of hundreds of file names.
+pub fn group_files<'a>(files: impl IntoIterator<Item = &'a ManifestFile>) -> Vec<ArtistGroup> {
+    let mut groups: Vec<ArtistGroup> = Vec::new();
+    // Key → position, so grouping stays linear even for a whole-library offer.
+    let mut by_artist: HashMap<Option<String>, usize> = HashMap::new();
+    let mut by_album: HashMap<(usize, String), usize> = HashMap::new();
+
+    for (i, f) in files.into_iter().enumerate() {
+        let artist = tag(&f.artist).map(str::to_string);
+        let ai = *by_artist.entry(artist.clone()).or_insert_with(|| {
+            groups.push(ArtistGroup {
+                artist,
+                albums: Vec::new(),
+                loose: Vec::new(),
+                tracks: 0,
+                size: 0,
+            });
+            groups.len() - 1
+        });
+        groups[ai].tracks += 1;
+        groups[ai].size += f.size;
+
+        match tag(&f.album) {
+            Some(album) => {
+                let bi = *by_album.entry((ai, album.to_string())).or_insert_with(|| {
+                    groups[ai].albums.push(AlbumGroup {
+                        album: album.to_string(),
+                        idxs: Vec::new(),
+                        size: 0,
+                    });
+                    groups[ai].albums.len() - 1
+                });
+                groups[ai].albums[bi].idxs.push(i);
+                groups[ai].albums[bi].size += f.size;
+            }
+            None => groups[ai].loose.push(i),
+        }
+    }
+    groups
+}
+
+// ---------------------------------------------------------------------------
 // Receiver: classification (dedup / collision)
 // ---------------------------------------------------------------------------
 
@@ -750,6 +839,61 @@ mod tests {
             std::fs::File::create(&p).unwrap().write_all(bytes).unwrap();
         }
         dir
+    }
+
+    fn mf(rel: &str, artist: Option<&str>, album: Option<&str>, size: u64) -> ManifestFile {
+        ManifestFile {
+            rel_path: rel.into(),
+            size,
+            quick_hash: String::new(),
+            title: rel.into(),
+            artist: artist.map(str::to_string),
+            album: album.map(str::to_string),
+            duration_ms: None,
+        }
+    }
+
+    #[test]
+    fn group_files_builds_artist_album_tree_in_first_seen_order() {
+        let files = vec![
+            mf("h/rek/01.mp3", Some("Helden"), Some("Reklamation"), 10),
+            mf("hosen/kuss/01.mp3", Some("Hosen"), Some("Kuss"), 20),
+            mf("h/rek/02.mp3", Some("Helden"), Some("Reklamation"), 30),
+            mf("hosen/opium/01.mp3", Some("Hosen"), Some("Opium"), 40),
+            mf("hosen/single.mp3", Some("Hosen"), None, 50),
+            mf("memo.ogg", None, None, 60),
+        ];
+        let g = group_files(&files);
+
+        assert_eq!(g.len(), 3);
+        assert_eq!(g[0].artist.as_deref(), Some("Helden"));
+        assert_eq!(g[0].tracks, 2);
+        assert_eq!(g[0].size, 40);
+        assert_eq!(g[0].albums.len(), 1);
+        assert_eq!(g[0].albums[0].idxs, vec![0, 2]);
+
+        // Second artist keeps album order, and the album-less track stays loose.
+        assert_eq!(g[1].artist.as_deref(), Some("Hosen"));
+        assert_eq!(g[1].tracks, 3);
+        let albums: Vec<&str> = g[1].albums.iter().map(|a| a.album.as_str()).collect();
+        assert_eq!(albums, vec!["Kuss", "Opium"]);
+        assert_eq!(g[1].loose, vec![4]);
+        assert_eq!(g[1].idxs(), vec![1, 3, 4]);
+
+        // Untagged files land in their own trailing group.
+        assert_eq!(g[2].artist, None);
+        assert_eq!(g[2].loose, vec![5]);
+        assert_eq!(g[2].size, 60);
+    }
+
+    #[test]
+    fn group_files_treats_blank_tags_as_missing() {
+        let files = vec![mf("x.mp3", Some("  "), Some(""), 7)];
+        let g = group_files(&files);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].artist, None);
+        assert!(g[0].albums.is_empty());
+        assert_eq!(g[0].loose, vec![0]);
     }
 
     #[test]

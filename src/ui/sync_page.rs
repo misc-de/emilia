@@ -127,7 +127,10 @@ pub(crate) enum SyncInput {
     RejectOffer,
     /// Transfer-success "Done" → back to the connected panel (stay paired).
     BackToConnected,
-    /// User tapped "Disconnect" → end the live pairing.
+    /// End the live pairing. The connected/after-transfer panels no longer show
+    /// a "Disconnect" button (closing the window keeps the pairing alive in the
+    /// background), so nothing sends this yet — kept for a future trigger.
+    #[allow(dead_code)]
     Disconnect,
     /// The flow window was closed. Keeps the connection alive if still paired;
     /// otherwise (e.g. closed mid-pairing) stops the server/scanner.
@@ -285,9 +288,14 @@ impl SyncPage {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         // No fixed content_height: the dialog follows its content's natural
         // height (mode select is short, QR/camera/review grow as needed).
+        // Bottom sheet everywhere (not just on the phone): the share flow is a
+        // multi-step task with long lists, and a floating box in the middle of a
+        // wide window reads as a cramped popup. Sliding in from the bottom over
+        // the full window width matches the detail views.
         let dialog = adw::Dialog::builder()
             .title(gettext("Connect to share"))
-            .content_width(440)
+            .presentation_mode(adw::DialogPresentationMode::BottomSheet)
+            .content_width(560)
             .build();
         dialog.set_child(Some(&toolbar));
         {
@@ -314,9 +322,22 @@ impl SyncPage {
         // `-1` = follow the content's natural height, so every phase gets exactly
         // the room it needs. The floor keeps the short phases (progress, mode
         // select) from rendering as a thin strip under the header bar.
+        self.set_sub_content_h(content, -1);
+    }
+
+    /// Like [`set_sub_content`], but takes the full available height instead of
+    /// the natural one — for the list phases (confirm/review), where a small
+    /// dialog would force scrolling even when there is plenty of room. The list
+    /// scroller fills the height and only scrolls once the content truly exceeds
+    /// the window.
+    fn set_sub_content_tall(&self, content: &impl gtk::prelude::IsA<gtk::Widget>) {
+        self.set_sub_content_h(content, 10_000);
+    }
+
+    fn set_sub_content_h(&self, content: &impl gtk::prelude::IsA<gtk::Widget>, height: i32) {
         if let Some(d) = &self.sub {
-            d.set_content_width(440);
-            d.set_content_height(-1);
+            d.set_content_width(560);
+            d.set_content_height(height);
         }
         if let Some(tb) = &self.sub_toolbar {
             content.as_ref().set_size_request(-1, 240);
@@ -389,12 +410,12 @@ impl SyncPage {
     /// on pairing and whenever the header sync icon is tapped while a pairing is
     /// live. Sharing is **not** offered here; it is started per item from a detail
     /// view.
-    fn show_connected_panel(&mut self, sender: &ComponentSender<Self>) {
+    fn show_connected_panel(&mut self, _sender: &ComponentSender<Self>) {
         self.set_title(&gettext("Connect to share"));
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
 
-        let icon = gtk::Image::from_icon_name("emblem-ok-symbolic");
+        let icon = gtk::Image::from_icon_name("object-select-symbolic");
         icon.set_pixel_size(64);
         icon.add_css_class("success");
         let title = gtk::Label::builder()
@@ -415,22 +436,12 @@ impl SyncPage {
             .justify(gtk::Justification::Center)
             .build();
 
-        // Closing the window (its header close button) hides it but keeps the
-        // pairing alive in the background; "Disconnect" actively ends it.
-        let disconnect_btn = gtk::Button::builder()
-            .label(gettext("Disconnect"))
-            .css_classes(["destructive-action", "pill"])
-            .halign(gtk::Align::Center)
-            .build();
-        {
-            let sender = sender.clone();
-            disconnect_btn.connect_clicked(move |_| sender.input(SyncInput::Disconnect));
-        }
-
+        // No "Disconnect" button here: closing the window (its header close
+        // button) hides it and keeps the pairing alive in the background, which
+        // is all the connected/after-transfer screens should offer.
         content.append(&icon);
         content.append(&title);
         content.append(&hint);
-        content.append(&disconnect_btn);
         // No live status widgets on this panel; a transfer rebuilds the progress
         // panel with its own status/progress labels.
         self.status = None;
@@ -630,7 +641,7 @@ impl SyncPage {
         // large instead of a thumbnail (reset to compact by `set_sub_content`
         // for the other phases).
         if let Some(d) = &self.sub {
-            d.set_content_width(560);
+            d.set_content_width(640);
             d.set_content_height(640);
         }
 
@@ -742,16 +753,44 @@ impl SyncPage {
                 // on TransferDone (server side is told via /share/complete), so
                 // here we only record the summary + reload the imported views.
                 self.synced_ok = true;
-                self.sync_summary = gettext_f(
-                    "Received {fav} favorites, {pl} playlists, {pod} podcasts, {st} stations, {meta} covers/photos.",
-                    &[
-                        ("fav", &stats.favorites.to_string()),
-                        ("pl", &stats.playlists.to_string()),
-                        ("pod", &stats.podcasts.to_string()),
-                        ("st", &stats.stations.to_string()),
-                        ("meta", &stats.meta.to_string()),
-                    ],
-                );
+                // Only name the types that actually carried something — a list of
+                // zeroes ("0 favorites, 0 playlists, …") is just noise.
+                let mut parts: Vec<String> = Vec::new();
+                if stats.favorites > 0 {
+                    parts.push(gettext_f(
+                        "{n} favorites",
+                        &[("n", &stats.favorites.to_string())],
+                    ));
+                }
+                if stats.playlists > 0 {
+                    parts.push(gettext_f(
+                        "{n} playlists",
+                        &[("n", &stats.playlists.to_string())],
+                    ));
+                }
+                if stats.podcasts > 0 {
+                    parts.push(gettext_f(
+                        "{n} podcasts",
+                        &[("n", &stats.podcasts.to_string())],
+                    ));
+                }
+                if stats.stations > 0 {
+                    parts.push(gettext_f(
+                        "{n} radio stations",
+                        &[("n", &stats.stations.to_string())],
+                    ));
+                }
+                if stats.meta > 0 {
+                    parts.push(gettext_f(
+                        "{n} covers/photos",
+                        &[("n", &stats.meta.to_string())],
+                    ));
+                }
+                self.sync_summary = if parts.is_empty() {
+                    String::new()
+                } else {
+                    gettext_f("Received {list}.", &[("list", &parts.join(", "))])
+                };
                 if let Some(st) = &self.status {
                     st.set_text(&self.sync_summary);
                 }
@@ -838,7 +877,7 @@ impl SyncPage {
         let content = padded_vbox();
         content.set_valign(gtk::Align::Center);
 
-        let icon = gtk::Image::from_icon_name("emblem-ok-symbolic");
+        let icon = gtk::Image::from_icon_name("object-select-symbolic");
         icon.set_pixel_size(64);
         icon.add_css_class("success");
         let title = gtk::Label::builder()
@@ -948,7 +987,7 @@ impl SyncPage {
     fn on_manifest_ready(&mut self, manifest: ShareManifest, sender: &ComponentSender<Self>) {
         let page = build_confirm(&manifest, sender);
         self.prepared_manifest = Some(manifest);
-        self.set_sub_content(&page);
+        self.set_sub_content_tall(&page);
     }
 
     /// Confirmation "Send" → park (server) or send (client) the prepared offer.
@@ -988,7 +1027,7 @@ impl SyncPage {
         let (page, handles) = build_review(&manifest, &reviews, yt, sender);
         self.review = Some(handles);
         self.incoming_manifest = Some(manifest);
-        self.set_sub_content(&page);
+        self.set_sub_content_tall(&page);
     }
 
     /// Review "Accept" → apply the (selectively) accepted offer.
