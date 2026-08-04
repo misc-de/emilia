@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.9" date="2026-08-04">
+      <description>
+        <p>The listening progress across the podcast lists is clearer and more consistent. Newest and Recently now share the same bar with the time listened so far in front of it — shown once you have listened for more than ten seconds — and the total length sits next to the play button. A podcast's own episode list now marks how far you have listened as well.</p>
+        <p xml:lang="de">Der Hörfortschritt in den Podcast-Listen ist klarer und einheitlicher. Neuste und Zuletzt zeigen jetzt denselben Balken mit der bereits gehörten Zeit davor – sobald Sie länger als zehn Sekunden gehört haben –, und die Gesamtlänge steht neben der Wiedergabetaste. Auch die Episodenliste eines Podcasts markiert nun, wie weit Sie schon gehört haben.</p>
+      </description>
+    </release>
     <release version="0.8.8" date="2026-07-20">
       <description>
         <p>Under Newest, how far you have listened to an episode now has a line of its own beneath the podcast and the date, instead of a narrow bar at the right edge. Episodes from feeds that state no length are covered as well — they show the time listened so far, which the bar could not display at all.</p>
