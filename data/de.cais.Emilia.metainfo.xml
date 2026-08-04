@@ -137,6 +137,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.10" date="2026-08-04">
+      <description>
+        <p>Podcast episodes you have all but finished — less than 30 seconds left — are now marked as listened instead of showing a nearly-full bar.</p>
+        <p>The device-sharing dialogs were reworked: the action buttons stay pinned at the bottom instead of scrolling out of reach, the dialog uses the full height so you scroll less, the transfer summary lists only what was actually sent, the success screen shows its check mark again, and shared files are grouped by artist and album.</p>
+        <p xml:lang="de">Podcast-Folgen, die fast zu Ende gehört sind — weniger als 30 Sekunden Rest — werden jetzt als gehört markiert, statt einen fast vollen Balken zu zeigen.</p>
+        <p xml:lang="de">Die Teilen-Dialoge wurden überarbeitet: Die Schaltflächen bleiben unten sichtbar, statt aus dem Bild zu scrollen, der Dialog nutzt die volle Höhe (weniger Scrollen), die Übertragungs-Übersicht zeigt nur noch, was wirklich gesendet wurde, der Erfolgsbildschirm zeigt wieder sein Häkchen, und geteilte Dateien werden nach Interpret und Album gruppiert.</p>
+      </description>
+    </release>
     <release version="0.8.9" date="2026-08-04">
       <description>
         <p>The listening progress across the podcast lists is clearer and more consistent. Newest and Recently now share the same bar with the time listened so far in front of it — shown once you have listened for more than ten seconds — and the total length sits next to the play button. A podcast's own episode list now marks how far you have listened as well.</p>
