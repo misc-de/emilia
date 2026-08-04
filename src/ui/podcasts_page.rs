@@ -1110,13 +1110,25 @@ impl PodcastsPage {
                 .build();
             title.add_css_class("heading");
             text.append(&title);
-            // Subtitle: "podcast · elapsed [/ total]".
+            // Subtitle: "podcast · total" — the elapsed time sits before the bar
+            // below. Without a known length there is no bar, so the elapsed time
+            // is shown here instead.
             let mut sub = ep.podcast_title.clone();
-            sub.push_str(" · ");
-            sub.push_str(&crate::ui::app_helpers::fmt_duration(ep.position_ms));
-            if let Some(secs) = total_secs {
-                sub.push_str(" / ");
-                sub.push_str(&crate::ui::app_helpers::fmt_duration(secs * 1000));
+            match total_secs {
+                Some(secs) => {
+                    sub.push_str(" · ");
+                    sub.push_str(&crate::ui::app_helpers::fmt_duration(secs * 1000));
+                }
+                None => {
+                    sub.push_str(" · ");
+                    sub.push_str(&gettext_f(
+                        "{position} listened",
+                        &[(
+                            "position",
+                            &crate::ui::app_helpers::fmt_duration(ep.position_ms),
+                        )],
+                    ));
+                }
             }
             let subtitle = gtk::Label::builder()
                 .label(&sub)
@@ -1125,24 +1137,35 @@ impl PodcastsPage {
                 .build();
             subtitle.add_css_class("dim-label");
             text.append(&subtitle);
+
+            // Progress bar as its own line *inside the text column*, so it spans
+            // only the text width — not under the cover or the play button. The
+            // already-listened time sits directly before the bar.
+            if let Some(secs) = total_secs {
+                let frac = (ep.position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
+                let prow = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Horizontal)
+                    .spacing(8)
+                    .margin_top(2)
+                    .build();
+                let elapsed =
+                    gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(ep.position_ms)));
+                elapsed.set_valign(gtk::Align::Center);
+                elapsed.set_css_classes(&["dim-label", "numeric"]);
+                prow.append(&elapsed);
+                let bar = gtk::ProgressBar::builder()
+                    .fraction(frac)
+                    .hexpand(true)
+                    .valign(gtk::Align::Center)
+                    .build();
+                bar.add_css_class("emilia-hourbar");
+                prow.append(&bar);
+                text.append(&prow);
+            }
             top.append(&text);
 
             top.append(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
             card.append(&top);
-
-            // Progress bar — only when the total length is known (otherwise we
-            // cannot compute a fraction; the elapsed time still shows above).
-            if let Some(secs) = total_secs {
-                let frac = (ep.position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
-                let bar = gtk::ProgressBar::builder()
-                    .fraction(frac)
-                    .margin_start(10)
-                    .margin_end(10)
-                    .margin_bottom(8)
-                    .build();
-                bar.add_css_class("emilia-hourbar");
-                card.append(&bar);
-            }
 
             let url = ep.audio_url.clone();
             on_secondary_click(&card, {
