@@ -1497,6 +1497,14 @@ impl PodcastsPage {
     /// detail view).
     fn open_podcast(&self, sender: &ComponentSender<Self>, id: i64, title: &str) {
         let episodes = self.library.episodes(id).unwrap_or_default();
+        // Resume positions of *all* episodes in one query (like "Newest"),
+        // to mark on each row how far it has already been listened to.
+        let progress: HashMap<String, i64> = self
+            .library
+            .all_episode_progress()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         let cover = self
             .podcast_items
             .iter()
@@ -1541,6 +1549,31 @@ impl PodcastsPage {
                 }
                 subtitle.push_str(d.trim());
             }
+            // Listening progress on its own line below published/duration, the
+            // same wording as "Newest". Only for episodes with a stored
+            // position; without a known length only the elapsed time shows.
+            let position_ms = progress.get(&ep.audio_url).copied().unwrap_or(0);
+            if position_ms > 0 {
+                let elapsed = crate::ui::app_helpers::fmt_duration(position_ms);
+                let total_secs = ep
+                    .duration
+                    .as_deref()
+                    .and_then(crate::core::podcast::duration_secs)
+                    .filter(|s| *s > 0);
+                if !subtitle.is_empty() {
+                    subtitle.push('\n');
+                }
+                subtitle.push_str(&match total_secs {
+                    Some(secs) => gettext_f(
+                        "{position} of {total} listened",
+                        &[
+                            ("position", &elapsed),
+                            ("total", &crate::ui::app_helpers::fmt_duration(secs * 1000)),
+                        ],
+                    ),
+                    None => gettext_f("{position} listened", &[("position", &elapsed)]),
+                });
+            }
             // Not activatable: like a library track, the episode plays via its
             // play button; long press / right click opens the detail view.
             let row = adw::ActionRow::builder()
@@ -1548,6 +1581,9 @@ impl PodcastsPage {
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .build();
             row.add_css_class("emilia-flush");
+            if position_ms > 0 {
+                row.set_subtitle_lines(2);
+            }
             row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
             row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
             on_secondary_click(&row, {
