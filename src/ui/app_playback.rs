@@ -1354,6 +1354,11 @@ impl App {
             // behind it): finalize its statistics session as "fully
             // listened", then reset the playback state and marking.
             self.finalize_play_session(true);
+            // Mark it heard so it stays in Recently/Newest as "Listened" even
+            // though the resume position is cleared at the very end.
+            if let Some(url) = &self.podcasts.playing_episode_url {
+                let _ = self.library.mark_episode_finished(url);
+            }
             self.mini.playing = false;
             self.podcasts.playing_episode_url = None;
             self.mpris.set_playing(false);

@@ -202,8 +202,10 @@ pub struct RecentEpisode {
     pub audio_url: String,
     /// Total length text from the feed (for the progress fraction + label).
     pub duration: Option<String>,
-    /// Stored playback position in milliseconds (> 0).
+    /// Stored playback position in milliseconds (0 when only `finished` is set).
     pub position_ms: i64,
+    /// Listened to the end — shown as "Listened" instead of a progress bar.
+    pub finished: bool,
 }
 
 /// A video together with its channel – for the cross-channel "Newest videos"

@@ -134,6 +134,10 @@ pub struct EpisodeRec {
     /// during sync if present.
     #[serde(default)]
     pub position_ms: i64,
+    /// Listened to the end. Kept distinct from `position_ms = 0` so a finished
+    /// episode syncs as heard. Older peers omit it (defaults to false).
+    #[serde(default)]
+    pub finished: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

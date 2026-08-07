@@ -92,10 +92,11 @@ pub(crate) fn export_playlists_user(lib: &Library, base: &str) -> Result<Vec<Pla
 }
 
 pub(crate) fn export_podcasts(lib: &Library) -> Result<Vec<PodcastRec>> {
-    let progress: std::collections::HashMap<String, i64> = lib
+    let progress: std::collections::HashMap<String, (i64, bool)> = lib
         .all_episode_progress()
         .unwrap_or_default()
         .into_iter()
+        .map(|(url, pos, fin)| (url, (pos, fin)))
         .collect();
     let mut podcasts = Vec::new();
     for (id, title, image_url, _count) in lib.podcasts()? {
@@ -104,14 +105,19 @@ pub(crate) fn export_podcasts(lib: &Library) -> Result<Vec<PodcastRec>> {
                 .episodes(id)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|e| EpisodeRec {
-                    position_ms: progress.get(&e.audio_url).copied().unwrap_or(0),
-                    guid: e.guid,
-                    title: e.title,
-                    audio_url: e.audio_url,
-                    published: e.published,
-                    duration: e.duration,
-                    description: e.description,
+                .map(|e| {
+                    let (position_ms, finished) =
+                        progress.get(&e.audio_url).copied().unwrap_or((0, false));
+                    EpisodeRec {
+                        position_ms,
+                        finished,
+                        guid: e.guid,
+                        title: e.title,
+                        audio_url: e.audio_url,
+                        published: e.published,
+                        duration: e.duration,
+                        description: e.description,
+                    }
                 })
                 .collect();
             podcasts.push(PodcastRec {
@@ -255,9 +261,12 @@ pub(crate) fn import_podcasts(lib: &Library, pcs: &[PodcastRec]) -> usize {
                     .collect();
                 let _ = lib.set_episodes(id, &eps);
             }
-            // Merge episode positions: the furthest position wins.
+            // Merge episode progress: a finished mark wins outright; otherwise
+            // the furthest position wins.
             for ep in &pc.episodes {
-                if ep.position_ms > 0
+                if ep.finished {
+                    let _ = lib.mark_episode_finished(&ep.audio_url);
+                } else if ep.position_ms > 0
                     && ep.position_ms > lib.episode_progress(&ep.audio_url).unwrap_or(0)
                 {
                     let _ = lib.set_episode_progress(&ep.audio_url, ep.position_ms);

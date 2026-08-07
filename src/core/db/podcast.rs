@@ -114,20 +114,39 @@ impl Library {
         Ok(())
     }
 
-    /// Stores/updates the resume position of an episode (by URL).
-    /// `position_ms <= 0` deletes the entry (counts as "from the start / finished").
+    /// Stores/updates the resume position of an episode (by URL). A stored
+    /// position means "in progress", so this also clears any `finished` mark.
+    /// `position_ms <= 0` drops the resume point — but keeps a `finished` row, so
+    /// a fully-heard episode stays marked as heard.
     pub fn set_episode_progress(&self, url: &str, position_ms: i64) -> Result<()> {
         if position_ms <= 0 {
-            self.conn
-                .execute("DELETE FROM episode_progress WHERE url = ?1", [url])?;
+            self.conn.execute(
+                "DELETE FROM episode_progress WHERE url = ?1 AND finished = 0",
+                [url],
+            )?;
             return Ok(());
         }
         self.conn.execute(
-            "INSERT INTO episode_progress (url, position_ms, updated_at)
-             VALUES (?1, ?2, strftime('%s','now'))
+            "INSERT INTO episode_progress (url, position_ms, updated_at, finished)
+             VALUES (?1, ?2, strftime('%s','now'), 0)
              ON CONFLICT(url) DO UPDATE SET
-                position_ms = excluded.position_ms, updated_at = excluded.updated_at",
+                position_ms = excluded.position_ms, updated_at = excluded.updated_at,
+                finished = 0",
             rusqlite::params![url, position_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Marks an episode as listened to the end: clears the resume position but
+    /// keeps a row (with `finished = 1`), so it still counts as heard in the
+    /// "Recently"/"Newest" lists.
+    pub fn mark_episode_finished(&self, url: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO episode_progress (url, position_ms, updated_at, finished)
+             VALUES (?1, 0, strftime('%s','now'), 1)
+             ON CONFLICT(url) DO UPDATE SET
+                position_ms = 0, updated_at = strftime('%s','now'), finished = 1",
+            [url],
         )?;
         Ok(())
     }
@@ -145,27 +164,33 @@ impl Library {
             .unwrap_or(0))
     }
 
-    /// All remembered episode positions (for the device sync).
-    pub fn all_episode_progress(&self) -> Result<Vec<(String, i64)>> {
+    /// All remembered episode positions with their finished flag (for the device
+    /// sync and the "Newest" progress markers): `(url, position_ms, finished)`.
+    pub fn all_episode_progress(&self) -> Result<Vec<(String, i64, bool)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT url, position_ms FROM episode_progress")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            .prepare("SELECT url, position_ms, finished FROM episode_progress")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)? != 0,
+            ))
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Recently (partly) heard episodes for the podcast "Recently" list: those
-    /// with a stored playback position, newest first. Joined back to the
-    /// episode + podcast rows for display; a progress entry whose episode is no
-    /// longer present in any feed is dropped by the JOIN. A finished episode has
-    /// no row here at all (its progress is cleared on completion).
+    /// Recently heard episodes for the podcast "Recently" list: those with a
+    /// stored playback position **or** marked finished, newest first. Joined back
+    /// to the episode + podcast rows for display; a progress entry whose episode
+    /// is no longer present in any feed is dropped by the JOIN.
     pub fn recent_episodes(&self, limit: usize) -> Result<Vec<crate::model::RecentEpisode>> {
         let mut stmt = self.conn.prepare(
-            "SELECT p.title, p.image_url, e.title, e.audio_url, e.duration, pr.position_ms
+            "SELECT p.title, p.image_url, e.title, e.audio_url, e.duration, pr.position_ms, pr.finished
              FROM episode_progress pr
              JOIN episode e ON e.audio_url = pr.url
              JOIN podcast p ON p.id = e.podcast_id
-             WHERE pr.position_ms > 0
+             WHERE pr.position_ms > 0 OR pr.finished = 1
              ORDER BY pr.updated_at DESC, pr.rowid DESC
              LIMIT ?1",
         )?;
@@ -177,6 +202,7 @@ impl Library {
                 audio_url: r.get(3)?,
                 duration: r.get(4)?,
                 position_ms: r.get(5)?,
+                finished: r.get::<_, i64>(6)? != 0,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

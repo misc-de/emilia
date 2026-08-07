@@ -456,7 +456,11 @@ impl Library {
             CREATE TABLE IF NOT EXISTS episode_progress (
                 url         TEXT PRIMARY KEY,
                 position_ms INTEGER NOT NULL DEFAULT 0,
-                updated_at  INTEGER NOT NULL DEFAULT 0
+                updated_at  INTEGER NOT NULL DEFAULT 0,
+                -- 1 = listened to the end. Distinct from "no row" (never played),
+                -- so a finished episode still shows up as heard even though its
+                -- resume position is cleared.
+                finished    INTEGER NOT NULL DEFAULT 0
             );
 
             -- Downloaded episodes (offline playback), keyed by audio URL like
@@ -923,6 +927,22 @@ impl Library {
         if !has_descr {
             self.conn
                 .execute_batch("ALTER TABLE episode ADD COLUMN description TEXT;")?;
+        }
+
+        // Migration: mark episodes listened to the end (distinct from "no row").
+        let has_finished = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('episode_progress') WHERE name = 'finished'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_finished {
+            self.conn.execute_batch(
+                "ALTER TABLE episode_progress ADD COLUMN finished INTEGER NOT NULL DEFAULT 0;",
+            )?;
         }
 
         // Migration: playlists gained a chosen cover (derived from their songs;

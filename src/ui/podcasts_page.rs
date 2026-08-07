@@ -947,13 +947,14 @@ impl PodcastsPage {
         });
         eps.truncate(150);
         self.newest_items = eps;
-        // Resume positions of *all* episodes in one query — a per-row lookup
-        // would mean 150 statements for a list this long.
-        let progress: HashMap<String, i64> = self
+        // Resume positions + finished flags of *all* episodes in one query — a
+        // per-row lookup would mean 150 statements for a list this long.
+        let progress: HashMap<String, (i64, bool)> = self
             .library
             .all_episode_progress()
             .unwrap_or_default()
             .into_iter()
+            .map(|(url, pos, fin)| (url, (pos, fin)))
             .collect();
         while let Some(child) = self.newest_list.first_child() {
             self.newest_list.remove(&child);
@@ -992,7 +993,8 @@ impl PodcastsPage {
                 group = Some(g);
             }
 
-            let position_ms = progress.get(&ep.audio_url).copied().unwrap_or(0);
+            let (position_ms, finished) =
+                progress.get(&ep.audio_url).copied().unwrap_or((0, false));
             let total_secs = ep
                 .duration
                 .as_deref()
@@ -1005,11 +1007,11 @@ impl PodcastsPage {
                 subtitle.push_str(&crate::core::podcast::pubdate_short(p));
             }
             // Listening progress like "Recently": the elapsed time before a bar,
-            // but only once more than 10 s have actually been listened to. When
-            // the feed states no length there is no bar, so the elapsed time is
-            // appended to the subtitle instead.
+            // but only once more than 10 s have actually been listened to (or a
+            // check once finished). When the feed states no length there is no
+            // bar, so the elapsed time is appended to the subtitle instead.
             let heard = position_ms > 10_000;
-            if heard && total_secs.is_none() {
+            if heard && total_secs.is_none() && !finished {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&gettext_f(
                     "{position} listened",
@@ -1057,11 +1059,15 @@ impl PodcastsPage {
                 .build();
             subtitle_lbl.add_css_class("dim-label");
             text.append(&subtitle_lbl);
-            // Listening progress like "Recently": once less than 30 s remain the
-            // episode counts as listened (a check), otherwise the elapsed time
-            // before a bar. Only with a known length and > 10 s listened.
-            if let (true, Some(secs)) = (heard, total_secs) {
-                text.append(&Self::episode_progress_row(position_ms, secs));
+            // Listening progress like "Recently": finished shows a check;
+            // otherwise the elapsed time before a bar, once > 10 s were listened
+            // to and the feed states a length.
+            if finished || (heard && total_secs.is_some()) {
+                text.append(&Self::episode_progress_row(
+                    position_ms,
+                    total_secs,
+                    finished,
+                ));
             }
             top.append(&text);
             // Episode length as a subtle label, left of the play button.
@@ -1092,17 +1098,18 @@ impl PodcastsPage {
         self.refresh_episode_icons();
     }
 
-    /// The progress line for a podcast episode. Once less than 30 s remain the
-    /// episode counts as finished and shows a check with "Listened"; otherwise
-    /// the elapsed time sits before a progress bar.
-    fn episode_progress_row(position_ms: i64, total_secs: i64) -> gtk::Box {
+    /// The progress line for a podcast episode. Finished, or with less than 30 s
+    /// left, it shows a check with "Listened"; otherwise the elapsed time sits
+    /// before a progress bar. `total_secs` is `None` for feeds without a length —
+    /// then only the finished case draws anything (a bar needs the total).
+    fn episode_progress_row(position_ms: i64, total_secs: Option<i64>, finished: bool) -> gtk::Box {
         let prow = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(8)
             .margin_top(2)
             .build();
-        let total_ms = total_secs * 1000;
-        if total_ms - position_ms < 30_000 {
+        let near_end = total_secs.is_some_and(|s| s * 1000 - position_ms < 30_000);
+        if finished || near_end {
             let check = gtk::Image::from_icon_name("object-select-symbolic");
             check.set_valign(gtk::Align::Center);
             prow.append(&check);
@@ -1110,12 +1117,12 @@ impl PodcastsPage {
             lbl.set_valign(gtk::Align::Center);
             lbl.add_css_class("dim-label");
             prow.append(&lbl);
-        } else {
+        } else if let Some(secs) = total_secs {
             let elapsed = gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(position_ms)));
             elapsed.set_valign(gtk::Align::Center);
             elapsed.set_css_classes(&["dim-label", "numeric"]);
             prow.append(&elapsed);
-            let frac = (position_ms as f64 / total_ms as f64).clamp(0.0, 1.0);
+            let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
             let bar = gtk::ProgressBar::builder()
                 .fraction(frac)
                 .hexpand(true)
@@ -1176,9 +1183,10 @@ impl PodcastsPage {
             text.append(&title);
             // Subtitle: just the podcast name — the total length sits next to
             // the play button (like "Newest"). Without a known length there is
-            // no bar, so the elapsed time is shown here instead.
+            // no bar, so the elapsed time is shown here instead (unless finished,
+            // where the line below already says "Listened").
             let mut sub = ep.podcast_title.clone();
-            if total_secs.is_none() {
+            if total_secs.is_none() && !ep.finished {
                 sub.push_str(" · ");
                 sub.push_str(&gettext_f(
                     "{position} listened",
@@ -1197,10 +1205,14 @@ impl PodcastsPage {
             text.append(&subtitle);
 
             // Progress line inside the text column, so it spans only the text
-            // width — not under the cover or the play button. Once less than
-            // 30 s remain the episode counts as listened (a check).
-            if let Some(secs) = total_secs {
-                text.append(&Self::episode_progress_row(ep.position_ms, secs));
+            // width — not under the cover or the play button. Finished (or < 30 s
+            // left) shows a check; otherwise the elapsed time before a bar.
+            if ep.finished || total_secs.is_some() {
+                text.append(&Self::episode_progress_row(
+                    ep.position_ms,
+                    total_secs,
+                    ep.finished,
+                ));
             }
             top.append(&text);
 
@@ -1574,11 +1586,12 @@ impl PodcastsPage {
         let episodes = self.library.episodes(id).unwrap_or_default();
         // Resume positions of *all* episodes in one query (like "Newest"),
         // to mark on each row how far it has already been listened to.
-        let progress: HashMap<String, i64> = self
+        let progress: HashMap<String, (i64, bool)> = self
             .library
             .all_episode_progress()
             .unwrap_or_default()
             .into_iter()
+            .map(|(url, pos, fin)| (url, (pos, fin)))
             .collect();
         let cover = self
             .podcast_items
@@ -1625,10 +1638,16 @@ impl PodcastsPage {
                 subtitle.push_str(d.trim());
             }
             // Listening progress on its own line below published/duration, the
-            // same wording as "Newest". Only for episodes with a stored
-            // position; without a known length only the elapsed time shows.
-            let position_ms = progress.get(&ep.audio_url).copied().unwrap_or(0);
-            if position_ms > 0 {
+            // same wording as "Newest". Finished episodes read "Listened";
+            // in-progress ones show elapsed [/ total].
+            let (position_ms, finished) =
+                progress.get(&ep.audio_url).copied().unwrap_or((0, false));
+            if finished {
+                if !subtitle.is_empty() {
+                    subtitle.push('\n');
+                }
+                subtitle.push_str(&gettext("Listened"));
+            } else if position_ms > 0 {
                 let elapsed = crate::ui::app_helpers::fmt_duration(position_ms);
                 let total_secs = ep
                     .duration
@@ -1656,7 +1675,7 @@ impl PodcastsPage {
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .build();
             row.add_css_class("emilia-flush");
-            if position_ms > 0 {
+            if finished || position_ms > 0 {
                 row.set_subtitle_lines(2);
             }
             row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
