@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.11" date="2026-08-07">
+      <description>
+        <p>Podcast episodes you listened to all the way through now stay under Recently and are marked as listened, instead of quietly disappearing once you reached the end — and Newest shows them as listened too.</p>
+        <p xml:lang="de">Podcast-Folgen, die Sie komplett durchgehört haben, bleiben jetzt unter Zuletzt und werden als gehört markiert, statt am Ende stillschweigend zu verschwinden – auch unter Neuste erscheinen sie als gehört.</p>
+      </description>
+    </release>
     <release version="0.8.10" date="2026-08-04">
       <description>
         <p>Podcast episodes you have all but finished — less than 30 seconds left — are now marked as listened instead of showing a nearly-full bar.</p>
