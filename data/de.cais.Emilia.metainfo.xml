@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.12" date="2026-08-07">
+      <description>
+        <p>Podcast episodes you had already finished before this was tracked are now recognised as listened, reconstructed from your listening history.</p>
+        <p xml:lang="de">Podcast-Folgen, die Sie bereits komplett durchgehört hatten, bevor das erfasst wurde, werden jetzt als gehört erkannt – rekonstruiert aus Ihrem Wiedergabeverlauf.</p>
+      </description>
+    </release>
     <release version="0.8.11" date="2026-08-07">
       <description>
         <p>Podcast episodes you listened to all the way through now stay under Recently and are marked as listened, instead of quietly disappearing once you reached the end — and Newest shows them as listened too.</p>
