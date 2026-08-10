@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.13" date="2026-08-10">
+      <description>
+        <p>The podcast Recently list is sorted by when you actually last heard each episode again — the episodes reconstructed by the previous update no longer bunch together by podcast.</p>
+        <p xml:lang="de">Die Zuletzt-Liste der Podcasts ist wieder nach der tatsächlichen letzten Hörzeit sortiert – die vom letzten Update rekonstruierten Folgen sind nicht mehr nach Podcast gruppiert.</p>
+      </description>
+    </release>
     <release version="0.8.12" date="2026-08-07">
       <description>
         <p>Podcast episodes you had already finished before this was tracked are now recognised as listened, reconstructed from your listening history.</p>
