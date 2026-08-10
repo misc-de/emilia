@@ -962,9 +962,15 @@ impl Library {
             .optional()?
             .is_some();
         if !backfill_done {
+            // Stamp updated_at with the *actual* last listen time (from the
+            // stats), not "now" — otherwise the "Recently" list, which sorts by
+            // updated_at, would show every backfilled episode at the same time
+            // and fall back to insertion order (grouped by podcast).
             self.conn.execute_batch(
                 "INSERT OR IGNORE INTO episode_progress (url, position_ms, updated_at, finished)
-                 SELECT e.audio_url, 0, strftime('%s','now'), 1
+                 SELECT e.audio_url, 0,
+                        (SELECT MAX(pe.started_at) FROM play_event pe WHERE pe.path = e.audio_url),
+                        1
                  FROM episode e
                  WHERE EXISTS (
                      SELECT 1 FROM play_event pe
@@ -974,6 +980,35 @@ impl Library {
                  );
                  INSERT OR REPLACE INTO setting (key, value)
                  VALUES ('episode_finished_backfill', '1');",
+            )?;
+        }
+
+        // Repair: an earlier backfill (0.8.12) stamped every backfilled row with
+        // the same "now", so "Recently" couldn't order them by when they were
+        // actually heard. Reset those timestamps from the stats, once. Only rows
+        // that carry no resume position (finished-only) and have a play_event.
+        let backfill_ts_fixed = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM setting WHERE key = 'episode_finished_backfill_ts'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !backfill_ts_fixed {
+            self.conn.execute_batch(
+                "UPDATE episode_progress
+                 SET updated_at = (
+                     SELECT MAX(pe.started_at) FROM play_event pe
+                     WHERE pe.path = episode_progress.url
+                 )
+                 WHERE finished = 1 AND position_ms = 0
+                   AND EXISTS (
+                     SELECT 1 FROM play_event pe WHERE pe.path = episode_progress.url
+                   );
+                 INSERT OR REPLACE INTO setting (key, value)
+                 VALUES ('episode_finished_backfill_ts', '1');",
             )?;
         }
 
