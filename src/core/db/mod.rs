@@ -945,6 +945,38 @@ impl Library {
             )?;
         }
 
+        // One-time backfill: episodes already heard to the end before the
+        // `finished` flag existed left no progress row (the end guard cleared
+        // it), so they'd never show as heard. The listening stats still know
+        // them — a play_event whose path is an episode's audio URL that reached
+        // within 30 s of the end. Gated by its own setting flag (not by the
+        // column check above), so it still runs when the column was already
+        // added by an earlier build. INSERT OR IGNORE leaves in-progress rows be.
+        let backfill_done = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM setting WHERE key = 'episode_finished_backfill'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !backfill_done {
+            self.conn.execute_batch(
+                "INSERT OR IGNORE INTO episode_progress (url, position_ms, updated_at, finished)
+                 SELECT e.audio_url, 0, strftime('%s','now'), 1
+                 FROM episode e
+                 WHERE EXISTS (
+                     SELECT 1 FROM play_event pe
+                     WHERE pe.path = e.audio_url
+                       AND pe.duration_ms > 0
+                       AND pe.played_ms >= pe.duration_ms - 30000
+                 );
+                 INSERT OR REPLACE INTO setting (key, value)
+                 VALUES ('episode_finished_backfill', '1');",
+            )?;
+        }
+
         // Migration: playlists gained a chosen cover (derived from their songs;
         // the user can pick one in the detail view when several covers exist).
         let has_pl_cover = self
