@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.14" date="2026-08-12">
+      <description>
+        <p>YouTube subscriptions now show video titles in the app language where YouTube offers them, and a channel's video list shows each video's upload date. A missing browser identifier had made YouTube reject the app's feed requests, which silently dropped all those dates — now they come through reliably, and are kept even if a refresh temporarily fails.</p>
+        <p xml:lang="de">YouTube-Abos zeigen Video-Titel jetzt in der App-Sprache, wo YouTube sie anbietet, und die Videoliste eines Kanals zeigt das Upload-Datum jedes Videos. Eine fehlende Browser-Kennung hatte YouTube die Feed-Anfragen der App ablehnen lassen, wodurch all diese Daten verloren gingen – jetzt kommen sie zuverlässig durch und bleiben auch erhalten, wenn eine Aktualisierung vorübergehend fehlschlägt.</p>
+      </description>
+    </release>
     <release version="0.8.13" date="2026-08-10">
       <description>
         <p>The podcast Recently list is sorted by when you actually last heard each episode again — the episodes reconstructed by the previous update no longer bunch together by podcast.</p>
