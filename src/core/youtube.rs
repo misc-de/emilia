@@ -626,6 +626,8 @@ pub fn channel_rss_published(channel_id: &str) -> std::collections::HashMap<Stri
         .build();
     // Best effort: retry transient failures, but any final error (or a 404 →
     // Ok(None)) just yields an empty map — the caller treats it as "no dates".
+    // `get_with_retry` sends the app-wide browser UA (None); YouTube's feed
+    // returns 404 to the library's default UA, which used to drop all dates.
     let body = match net::get_with_retry(&agent, &url, None, "youtube channel feed") {
         Ok(Some(resp)) => {
             let mut s = String::new();
@@ -946,6 +948,11 @@ fn dump_entries(args: &[&str]) -> Result<Vec<RawEntry>> {
     if !available() {
         return Err(anyhow!("yt-dlp is not installed"));
     }
+    // Prefer translated metadata (titles etc.) in the UI language, so a German
+    // app doesn't show English titles when YouTube offers a localized one. Falls
+    // back to the original when no translation exists; unknown extractor args are
+    // ignored by yt-dlp.
+    let lang_arg = format!("youtube:lang={}", crate::i18n::startup_language_code());
     let mut cmd = ytdlp();
     cmd.args([
         "--ignore-config",
@@ -953,6 +960,8 @@ fn dump_entries(args: &[&str]) -> Result<Vec<RawEntry>> {
         "--ignore-errors",
         "--socket-timeout",
         SOCKET_TIMEOUT_SECS,
+        "--extractor-args",
+        &lang_arg,
         "--dump-json",
     ])
     .args(args);

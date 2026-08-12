@@ -189,9 +189,24 @@ pub(crate) fn fetch_and_store_channel(
 pub(crate) fn refresh_channel_videos(channel_db_id: i64, title: &str, url: &str) -> Option<String> {
     let lib = Library::open().ok()?;
     let cid = youtube::channel_id_from_url(url);
-    let videos = list_channel_videos(url, cid.as_deref());
+    let mut videos = list_channel_videos(url, cid.as_deref());
     if videos.is_empty() {
         return None;
+    }
+    // Preserve upload dates the feed didn't return this time (e.g. a transient
+    // feed failure): a refresh must not erase dates we already had.
+    let known: std::collections::HashMap<String, String> = lib
+        .channel_videos(channel_db_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| v.published.map(|p| (v.video_id, p)))
+        .collect();
+    if !known.is_empty() {
+        for v in videos.iter_mut() {
+            if v.published.is_none() {
+                v.published = known.get(&v.video_id).cloned();
+            }
+        }
     }
     lib.set_channel_videos(channel_db_id, &videos).ok()?;
     Some(title.to_string())
@@ -1836,7 +1851,17 @@ impl YtPage {
             );
         }
         for v in &videos {
-            let subtitle = v.duration.map(fmt_duration).unwrap_or_default();
+            // Subtitle: upload date · duration (either may be missing).
+            let mut subtitle = String::new();
+            if let Some(p) = v.published.as_deref().filter(|p| !p.trim().is_empty()) {
+                subtitle.push_str(&fmt_published(p));
+            }
+            if let Some(d) = v.duration.map(fmt_duration) {
+                if !subtitle.is_empty() {
+                    subtitle.push_str(" · ");
+                }
+                subtitle.push_str(&d);
+            }
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&v.title))
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))

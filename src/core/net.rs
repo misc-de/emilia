@@ -31,14 +31,22 @@ pub fn is_transient(err: &ureq::Error) -> bool {
     }
 }
 
+/// App-wide default `User-Agent`: a plain Chrome string. Several endpoints (e.g.
+/// YouTube's feed) reject the library's default UA with a `404`/`403`, so every
+/// request sends this unless a caller passes its own (e.g. MusicBrainz, which
+/// wants an app-identifying UA).
+pub const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
 /// Runs a `GET url` on `agent` with defensive retry + exponential backoff
 /// against **transient** failures: network/transport errors, server `5xx`, and
 /// rate limits (`429`/`503`, honouring `Retry-After`). A `404` maps to
 /// `Ok(None)` (no content). Non-transient errors, and a persistent failure after
-/// [`RETRY_MAX`] attempts, are returned. When `user_agent` is set it is sent on
-/// every attempt. `label` is for logging only — pass a value **without** a query
-/// string (it may carry API keys). Performs the request itself (rather than via
-/// a closure) so the large `ureq::Error` never crosses a closure boundary.
+/// [`RETRY_MAX`] attempts, are returned. `user_agent` is sent on every attempt;
+/// when `None`, the app-wide [`BROWSER_UA`] is sent instead of ureq's default.
+/// `label` is for logging only — pass a value **without** a query string (it may
+/// carry API keys). Performs the request itself (rather than via a closure) so
+/// the large `ureq::Error` never crosses a closure boundary.
 pub fn get_with_retry(
     agent: &ureq::Agent,
     url: &str,
@@ -48,10 +56,9 @@ pub fn get_with_retry(
     let mut backoff = RETRY_BASE_BACKOFF;
     let mut attempt = 0usize;
     loop {
-        let mut req = agent.get(url);
-        if let Some(ua) = user_agent {
-            req = req.set("User-Agent", ua);
-        }
+        let req = agent
+            .get(url)
+            .set("User-Agent", user_agent.unwrap_or(BROWSER_UA));
         match req.call() {
             Ok(resp) => return Ok(Some(resp)),
             // No content (404) – not an error, and not worth retrying.
