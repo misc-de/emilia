@@ -576,6 +576,19 @@ impl Library {
                 thumbnail  TEXT,
                 PRIMARY KEY (channel_id, position)
             );
+            -- Watch progress of **long-form** YouTube items (talks, streams,
+            -- podcasts — see `youtube::LONGFORM_SECS`), the mirror of
+            -- `episode_progress`. Songs deliberately get no row: resuming a
+            -- 3-minute track mid-way is not what anyone expects. Kept separate
+            -- from `episode_progress` so device sync (which ships podcast
+            -- progress) is unaffected.
+            CREATE TABLE IF NOT EXISTS yt_progress (
+                video_id    TEXT PRIMARY KEY,
+                position_ms INTEGER NOT NULL DEFAULT 0,
+                updated_at  INTEGER NOT NULL DEFAULT 0,
+                -- 1 = watched to the end (kept when the resume point is cleared).
+                finished    INTEGER NOT NULL DEFAULT 0
+            );
             -- Offline-downloaded YouTube audio, keyed by video id (mirror
             -- `episode_download`). Playback prefers `path` over re-resolving.
             CREATE TABLE IF NOT EXISTS yt_download (
@@ -835,6 +848,26 @@ impl Library {
         if !has_yt_total {
             self.conn
                 .execute_batch("ALTER TABLE yt_recent ADD COLUMN total_duration INTEGER;")?;
+        }
+
+        // Migration: `yt_progress` gained the `finished` flag (watched to the
+        // end, kept after the resume point is cleared). Databases that already
+        // carry a three-column `yt_progress` from an earlier build keep their
+        // stored positions — `CREATE TABLE IF NOT EXISTS` skips them, so without
+        // this the writes would fail on the missing column.
+        let has_yt_finished = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('yt_progress') WHERE name = 'finished'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_yt_finished {
+            self.conn.execute_batch(
+                "ALTER TABLE yt_progress ADD COLUMN finished INTEGER NOT NULL DEFAULT 0;",
+            )?;
         }
 
         // Migration: playlists gained an `origin` marker so a mirrored YouTube

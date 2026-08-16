@@ -49,10 +49,13 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Feed URLs of all subscribed podcasts (for refreshing every feed at once).
-    pub fn podcast_feed_urls(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT feed_url FROM podcast")?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    /// Title + feed URL of every subscribed podcast, alphabetically — the input
+    /// of a "refresh all" run, which names each feed while it fetches it.
+    pub fn podcast_feeds(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT title, feed_url FROM podcast ORDER BY title COLLATE NOCASE")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 

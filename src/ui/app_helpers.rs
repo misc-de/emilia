@@ -5,7 +5,7 @@ use relm4::gtk;
 
 use crate::core::db::Library;
 use crate::core::scanner;
-use crate::i18n::ngettext_n;
+use crate::i18n::{gettext, ngettext_n};
 use crate::model::Track;
 use crate::ui::fs_row::FsEntry;
 
@@ -342,6 +342,65 @@ pub(crate) fn duration_label(ms: i64) -> gtk::Label {
     gtk::Label::builder()
         .label(fmt_duration(ms))
         .css_classes(["dim-label", "numeric"])
+        .build()
+}
+
+/// (Re)fills the listening/watching progress line of a list row — shared by the
+/// podcast and YouTube lists so both read exactly the same. Finished, or with
+/// less than 30 s left, it shows a check with "Listened"; otherwise the elapsed
+/// time before a bar spanning the rest of the text column. With neither a length
+/// nor a position there is nothing to show, and the line hides itself so an
+/// untouched item keeps its compact row.
+///
+/// Called both when a row is built and on every transport tick for the running
+/// item, so the bar advances without rebuilding the list.
+pub(crate) fn fill_progress_row(
+    row: &gtk::Box,
+    position_ms: i64,
+    total_secs: Option<i64>,
+    finished: bool,
+) {
+    while let Some(child) = row.first_child() {
+        row.remove(&child);
+    }
+    let heard = position_ms > 10_000;
+    if !(finished || heard && total_secs.is_some()) {
+        row.set_visible(false);
+        return;
+    }
+    row.set_visible(true);
+    let near_end = total_secs.is_some_and(|s| s * 1000 - position_ms < 30_000);
+    if finished || near_end {
+        let check = gtk::Image::from_icon_name("object-select-symbolic");
+        check.set_valign(gtk::Align::Center);
+        row.append(&check);
+        let lbl = gtk::Label::new(Some(&gettext("Listened")));
+        lbl.set_valign(gtk::Align::Center);
+        lbl.add_css_class("dim-label");
+        row.append(&lbl);
+    } else if let Some(secs) = total_secs {
+        let elapsed = gtk::Label::new(Some(&fmt_duration(position_ms)));
+        elapsed.set_valign(gtk::Align::Center);
+        elapsed.set_css_classes(&["dim-label", "numeric"]);
+        row.append(&elapsed);
+        let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
+        let bar = gtk::ProgressBar::builder()
+            .fraction(frac)
+            .hexpand(true)
+            .valign(gtk::Align::Center)
+            .build();
+        bar.add_css_class("emilia-hourbar");
+        row.append(&bar);
+    }
+}
+
+/// An empty progress line with the spacing the lists use, ready for
+/// [`fill_progress_row`].
+pub(crate) fn progress_row_box() -> gtk::Box {
+    gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .margin_top(2)
         .build()
 }
 

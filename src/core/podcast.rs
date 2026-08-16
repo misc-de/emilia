@@ -3,7 +3,7 @@
 //! nothing is downloaded and no audio file is modified.
 
 use std::io::Read;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 
@@ -390,6 +390,31 @@ pub fn fetch_feed(url: &str) -> Result<PodcastFeed> {
 /// capped at [`crate::core::net::MAX_DOWNLOAD_BYTES`] so a hostile or broken
 /// feed cannot fill the disk. Returns the number of bytes written.
 pub fn download_episode(url: &str, dest: &std::path::Path) -> Result<u64> {
+    download_episode_progress(url, dest, |_| {})
+}
+
+/// How often a running download reports progress. Short enough to feel live,
+/// long enough that a fast transfer doesn't flood the UI thread with messages.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Progress of a running episode download: bytes written so far and the total
+/// size — `None` when the server advertises no (usable) `Content-Length`, in
+/// which case no percentage can be shown.
+#[derive(Debug, Clone, Copy)]
+pub struct DownloadProgress {
+    pub done: u64,
+    pub total: Option<u64>,
+}
+
+/// Like [`download_episode`], but reports progress while the transfer runs:
+/// once up front (`done = 0`, with the total size if the server states one),
+/// then at most every [`PROGRESS_INTERVAL`], and a final report with the
+/// complete size. The callback runs on the calling (worker) thread.
+pub fn download_episode_progress(
+    url: &str,
+    dest: &std::path::Path,
+    mut on_progress: impl FnMut(DownloadProgress),
+) -> Result<u64> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         // Generous *per-read* timeout: a large episode over a slow link may take
@@ -403,13 +428,32 @@ pub fn download_episode(url: &str, dest: &std::path::Path) -> Result<u64> {
         std::fs::create_dir_all(parent)?;
     }
     let resp = agent.get(url).call()?;
-    net::check_content_length(&resp, net::MAX_DOWNLOAD_BYTES)?;
+    let total = net::check_content_length(&resp, net::MAX_DOWNLOAD_BYTES)?.filter(|t| *t > 0);
+    // Report once before the first byte: the dialog can show 0 % and — with a
+    // known Content-Length — the size right away instead of an empty readout.
+    on_progress(DownloadProgress { done: 0, total });
     let tmp = dest.with_extension("part");
     let written = {
         let mut file = std::fs::File::create(&tmp)?;
-        match net::copy_capped(resp.into_reader(), &mut file, net::MAX_DOWNLOAD_BYTES) {
+        let mut last = Instant::now();
+        let copied = net::copy_capped_progress(
+            resp.into_reader(),
+            &mut file,
+            net::MAX_DOWNLOAD_BYTES,
+            |done| {
+                if last.elapsed() >= PROGRESS_INTERVAL {
+                    last = Instant::now();
+                    on_progress(DownloadProgress { done, total });
+                }
+            },
+        );
+        match copied {
             Ok(n) => {
                 file.sync_all()?;
+                on_progress(DownloadProgress {
+                    done: n,
+                    total: total.or(Some(n)),
+                });
                 n
             }
             // Over the size cap (or an I/O error): drop the partial file so it
@@ -797,5 +841,85 @@ mod tests {
             r[0].image_url.as_deref(),
             Some("https://example.com/100.jpg")
         );
+    }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::download_episode_progress;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// A one-shot HTTP server on localhost that answers any request with
+    /// `body` — with a `Content-Length` unless `advertise_length` is false
+    /// (then it closes the connection to signal the end, like a chunked/
+    /// unknown-length server). Returns its address.
+    fn serve_once(body: Vec<u8>, advertise_length: bool) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf); // request head – content is irrelevant
+            let head = if advertise_length {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+            } else {
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nConnection: close\r\n\r\n"
+                    .to_string()
+            };
+            let _ = sock.write_all(head.as_bytes());
+            let _ = sock.write_all(&body);
+            let _ = sock.flush();
+        });
+        format!("http://{addr}/episode.mp3")
+    }
+
+    #[test]
+    fn download_reports_progress_with_the_advertised_total() {
+        let body = vec![9u8; 300 * 1024]; // several 64 KiB chunks
+        let url = serve_once(body.clone(), true);
+        let dir = std::env::temp_dir().join(format!("emilia-dl-{}", std::process::id()));
+        let dest = dir.join("episode.mp3");
+        let mut reports = Vec::new();
+        let n = download_episode_progress(&url, &dest, |p| reports.push((p.done, p.total)))
+            .expect("download");
+
+        assert_eq!(n, body.len() as u64);
+        assert_eq!(
+            std::fs::read(&dest).expect("written file").len(),
+            body.len()
+        );
+        // First report before the first byte, last one complete – both with the
+        // total, so the UI can show a percentage from the start.
+        assert_eq!(reports.first().copied(), Some((0, Some(body.len() as u64))));
+        assert_eq!(
+            reports.last().copied(),
+            Some((body.len() as u64, Some(body.len() as u64)))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn download_without_content_length_reports_size_only() {
+        let body = vec![4u8; 128 * 1024];
+        let url = serve_once(body.clone(), false);
+        let dir = std::env::temp_dir().join(format!("emilia-dl-nolen-{}", std::process::id()));
+        let dest = dir.join("episode.mp3");
+        let mut reports = Vec::new();
+        let n = download_episode_progress(&url, &dest, |p| reports.push((p.done, p.total)))
+            .expect("download");
+
+        assert_eq!(n, body.len() as u64);
+        // No total up front (no percentage possible), but the final report
+        // states the size that was actually transferred.
+        assert_eq!(reports.first().copied(), Some((0, None)));
+        assert_eq!(
+            reports.last().copied(),
+            Some((body.len() as u64, Some(body.len() as u64)))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

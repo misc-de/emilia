@@ -138,14 +138,44 @@ pub fn json_capped<T: DeserializeOwned>(resp: ureq::Response, limit: u64) -> Res
 /// file a caller must clean up on error is bounded – it does not keep streaming
 /// an endless body to disk.
 pub fn copy_capped(reader: impl Read, writer: &mut impl Write, limit: u64) -> Result<u64> {
+    copy_capped_progress(reader, writer, limit, |_| {})
+}
+
+/// Chunk size of the streaming copy – also the granularity at which
+/// [`copy_capped_progress`] reports progress.
+const COPY_CHUNK: usize = 64 * 1024;
+
+/// Like [`copy_capped`], but calls `on_progress(bytes_written_so_far)` after
+/// every chunk, so a caller can drive a progress display. The callback runs on
+/// the copying (worker) thread and is invoked often – throttle inside it if the
+/// consumer is expensive (see `podcast::download_episode_progress`).
+pub fn copy_capped_progress(
+    reader: impl Read,
+    writer: &mut impl Write,
+    limit: u64,
+    mut on_progress: impl FnMut(u64),
+) -> Result<u64> {
     // `+ 1` so a body of exactly `limit` bytes still succeeds, while anything
     // larger is detected (we read one byte past the limit, then bail).
     let mut limited = reader.take(limit.saturating_add(1));
-    let n = std::io::copy(&mut limited, writer)?;
-    if n > limit {
-        bail!("download exceeds the {limit}-byte size limit");
+    let mut buf = vec![0u8; COPY_CHUNK];
+    let mut written: u64 = 0;
+    loop {
+        let n = match limited.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            // A signal interrupted the read – not an error, just retry.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e.into()),
+        };
+        writer.write_all(&buf[..n])?;
+        written += n as u64;
+        if written > limit {
+            bail!("download exceeds the {limit}-byte size limit");
+        }
+        on_progress(written);
     }
-    Ok(n)
+    Ok(written)
 }
 
 #[cfg(test)]
@@ -177,5 +207,22 @@ mod tests {
         assert!(copy_capped(&data[..], &mut out, 4096).is_err());
         // Never buffered more than limit + 1 bytes to the sink.
         assert!(out.len() <= 4097, "wrote {} bytes", out.len());
+    }
+
+    #[test]
+    fn progress_reports_monotonic_totals_ending_at_the_size() {
+        // Two full chunks plus a partial one, so more than one report lands.
+        let data = vec![3u8; COPY_CHUNK * 2 + 17];
+        let mut out = Vec::new();
+        let mut seen = Vec::new();
+        let n =
+            copy_capped_progress(&data[..], &mut out, u64::MAX, |done| seen.push(done)).unwrap();
+        assert_eq!(n, data.len() as u64);
+        assert!(seen.len() >= 3, "only {} reports", seen.len());
+        assert!(
+            seen.windows(2).all(|w| w[0] < w[1]),
+            "not monotonic: {seen:?}"
+        );
+        assert_eq!(seen.last().copied(), Some(data.len() as u64));
     }
 }

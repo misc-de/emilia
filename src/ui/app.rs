@@ -991,6 +991,14 @@ pub struct App {
     /// (rescan/cloud/podcasts/YouTube). While > 0 the loading overlay shows a
     /// spinner; each worker's completion decrements it back toward zero.
     pub(crate) refresh_pending: u32,
+    /// Progress of a running podcast/YouTube "refresh all": items done, items
+    /// total, and the feed/channel currently being fetched. Drives a progress
+    /// bar in the loading overlay, so a refresh is no longer a mute spinner.
+    pub(crate) refresh_progress: Option<(usize, usize, String)>,
+    /// Outcome of the last refresh ("3 channels updated · 2 new videos"), shown
+    /// in the overlay for a moment after the run and then cleared. Informational
+    /// toasts are disabled app-wide, so this is where a refresh reports back.
+    pub(crate) refresh_summary: Option<String>,
     /// A first/initial library scan is running (the music folder is being read
     /// for the very first time, so the views are still empty). Drives the
     /// loading overlay with an explanatory text so the app does not look frozen.
@@ -1471,6 +1479,16 @@ pub enum Msg {
     /// The page started/finished a "refresh all" worker → drive the spinner.
     PodcastRefreshStarted(bool),
     PodcastRefreshFinished,
+    /// A podcast/YouTube "refresh all" advanced by one item → overlay bar.
+    RefreshProgress {
+        done: usize,
+        total: usize,
+        label: String,
+    },
+    /// A refresh reported its outcome → show it in the overlay for a moment.
+    RefreshSummary(String),
+    /// The summary's display time elapsed → clear the overlay.
+    ClearRefreshSummary,
     // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
     // menu switch (see `Msg::SetSectionVisible`), not a dedicated settings toggle.
     /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
@@ -2569,6 +2587,10 @@ impl Component for App {
                             gtk::Spinner {
                                 set_spinning: true,
                                 set_size_request: (48, 48),
+                                // While the outcome of a finished refresh is on
+                                // screen there is nothing left to wait for.
+                                #[watch]
+                                set_visible: model.refresh_summary.is_none(),
                             },
                             gtk::Label {
                                 #[watch]
@@ -2580,6 +2602,51 @@ impl Component for App {
                                 set_wrap: true,
                                 set_justify: gtk::Justification::Center,
                                 set_max_width_chars: 28,
+                            },
+
+                            // Refresh progress (podcast feeds / YouTube channels):
+                            // a bar with "2 of 7" over the name currently being
+                            // fetched, so a long refresh isn't a mute spinner.
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_halign: gtk::Align::Center,
+                                set_spacing: 4,
+                                #[watch]
+                                set_visible: model.refresh_progress.is_some(),
+
+                                gtk::ProgressBar {
+                                    set_width_request: 260,
+                                    set_show_text: true,
+                                    #[watch]
+                                    set_fraction: match &model.refresh_progress {
+                                        Some((done, total, _)) if *total > 0 => {
+                                            *done as f64 / *total as f64
+                                        }
+                                        _ => 0.0,
+                                    },
+                                    #[watch]
+                                    set_text: model.refresh_progress.as_ref().map(|(done, total, _)| {
+                                        gettext_f(
+                                            "{done} of {total}",
+                                            &[
+                                                ("done", &done.to_string()),
+                                                ("total", &total.to_string()),
+                                            ],
+                                        )
+                                    }).as_deref(),
+                                },
+                                gtk::Label {
+                                    add_css_class: "caption",
+                                    add_css_class: "dim-label",
+                                    set_ellipsize: gtk::pango::EllipsizeMode::End,
+                                    set_max_width_chars: 28,
+                                    #[watch]
+                                    set_label: model
+                                        .refresh_progress
+                                        .as_ref()
+                                        .map(|(_, _, label)| label.as_str())
+                                        .unwrap_or_default(),
+                                },
                             },
 
                             // Import progress: a bar with "X of Y songs" and a
@@ -3287,6 +3354,10 @@ impl Component for App {
                     O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
                     O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
                     O::RefreshFinished => Msg::PodcastRefreshFinished,
+                    O::RefreshProgress { done, total, label } => {
+                        Msg::RefreshProgress { done, total, label }
+                    }
+                    O::RefreshSummary(s) => Msg::RefreshSummary(s),
                     O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::PodcastChanged),
                 }
             });
@@ -3326,6 +3397,10 @@ impl Component for App {
                     O::DeleteChannelUndo(id) => Msg::YtChannelUndo(id),
                     O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
                     O::RefreshFinished => Msg::YtRefreshFinished,
+                    O::RefreshProgress { done, total, label } => {
+                        Msg::RefreshProgress { done, total, label }
+                    }
+                    O::RefreshSummary(s) => Msg::RefreshSummary(s),
                     O::Share(sel) => Msg::ShareItems(sel),
                     O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::YtChanged),
                 }
@@ -3434,6 +3509,8 @@ impl Component for App {
                 missing_busy: None,
             },
             refresh_pending: 0,
+            refresh_progress: None,
+            refresh_summary: None,
             scanning: false,
             scan_done: 0,
             scan_total: 0,
@@ -3959,6 +4036,24 @@ impl Component for App {
                 }
             }
             Msg::PodcastRefreshFinished => self.refresh_done(),
+            Msg::RefreshProgress { done, total, label } => {
+                self.refresh_summary = None;
+                self.refresh_progress = Some((done, total, label));
+            }
+            Msg::RefreshSummary(text) => {
+                self.refresh_progress = None;
+                self.refresh_summary = Some(text);
+                // Hold the outcome in the overlay just long enough to read it,
+                // then let the view go back to the content.
+                let input = sender.input_sender().clone();
+                gtk::glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(2600),
+                    move || {
+                        let _ = input.send(Msg::ClearRefreshSummary);
+                    },
+                );
+            }
+            Msg::ClearRefreshSummary => self.refresh_summary = None,
             // --- YouTube ---
             Msg::FetchYtDlp => {
                 let update = self.youtube.ytdlp_version.is_some();
@@ -4500,19 +4595,27 @@ impl App {
     /// When it hits zero the loading overlay hides itself again (see the view).
     pub(crate) fn refresh_done(&mut self) {
         self.refresh_pending = self.refresh_pending.saturating_sub(1);
+        if self.refresh_pending == 0 {
+            self.refresh_progress = None;
+        }
     }
 
     /// Whether the loading overlay should be shown: either a folder/list load is
     /// in progress or a manual refresh still has background workers running.
     pub(crate) fn overlay_visible(&self) -> bool {
-        self.libview.loading || self.refresh_pending > 0 || self.scanning
+        self.libview.loading
+            || self.refresh_pending > 0
+            || self.scanning
+            || self.refresh_summary.is_some()
     }
 
     /// Text beneath the overlay spinner. A specific load label (e.g. a YouTube
     /// playlist) wins; otherwise a manual refresh shows "Updating …", and
     /// finally the default "reading data" of a plain folder/list load.
     pub(crate) fn overlay_text(&self) -> String {
-        if let Some(label) = &self.libview.loading_label {
+        if let Some(summary) = &self.refresh_summary {
+            summary.clone()
+        } else if let Some(label) = &self.libview.loading_label {
             label.clone()
         } else if self.scanning {
             gettext("Reading in your music collection — this may take a moment the first time")

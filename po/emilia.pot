@@ -2669,3 +2669,71 @@ msgstr ""
 #: src/ui/sync_share_ui.rs
 msgid "{n} files · {size}"
 msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "{pct} % · {time} left"
+msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "{pct} % downloaded"
+msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "Downloading … {size}"
+msgstr ""
+
+#: src/ui/app.rs
+msgid "{done} of {total}"
+msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "No internet connection"
+msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "No podcasts subscribed"
+msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "Nothing new"
+msgstr ""
+
+#: src/ui/yt_page.rs
+msgid "yt-dlp is missing — install or update it in the settings"
+msgstr ""
+
+#: src/ui/podcasts_page.rs
+msgid "{n} podcast updated"
+msgid_plural "{n} podcasts updated"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/podcasts_page.rs
+msgid "{n} new episode"
+msgid_plural "{n} new episodes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/podcasts_page.rs
+msgid "{n} feed failed"
+msgid_plural "{n} feeds failed"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/yt_page.rs
+msgid "{n} channel updated"
+msgid_plural "{n} channels updated"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/yt_page.rs
+msgid "{n} new video"
+msgid_plural "{n} new videos"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/yt_page.rs
+msgid "{n} channel failed"
+msgid_plural "{n} channels failed"
+msgstr[0] ""
+msgstr[1] ""

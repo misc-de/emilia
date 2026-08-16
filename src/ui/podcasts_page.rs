@@ -13,7 +13,7 @@
 //! shared chrome, so they too go through `Output`.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -24,24 +24,83 @@ use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
 use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
+use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
 
 /// Fetches a feed and stores podcast + episodes (runs in the worker thread,
-/// its own DB connection). Returns the podcast title on success.
-pub(crate) fn fetch_and_store_podcast(feed_url: &str) -> Option<String> {
+/// its own DB connection). Returns the podcast title on success, plus how many
+/// of the fetched episodes were **new** — so a refresh can report what it
+/// actually brought in instead of leaving the user guessing.
+pub(crate) fn fetch_and_store_podcast(feed_url: &str) -> Option<(String, usize)> {
     let feed = crate::core::podcast::fetch_feed(feed_url).ok()?;
     let lib = Library::open().ok()?;
     let id = lib
         .subscribe_podcast(&feed.title, feed_url, feed.image_url.as_deref())
         .ok()?;
+    // Episodes stored so far, to count the new arrivals (`set_episodes`
+    // replaces the whole list, so this has to happen before the write).
+    let known: std::collections::HashSet<String> = lib
+        .episodes(id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.audio_url)
+        .collect();
+    let fresh = feed
+        .episodes
+        .iter()
+        .filter(|e| !known.contains(&e.audio_url))
+        .count();
     let _ = lib.set_episodes(id, &feed.episodes);
     // Load the feed image into the cache (worker thread, no UI block).
     if let Some(img) = feed.image_url.as_deref() {
         crate::core::online::cache_podcast_image(img);
     }
-    Some(feed.title)
+    // A first subscription reports no "new" episodes — everything is new then,
+    // and the count is meant for refreshes.
+    Some((feed.title, if known.is_empty() { 0 } else { fresh }))
+}
+
+/// A listening-progress line of a list row, kept so the transport tick can
+/// refresh it in place instead of rebuilding the whole list.
+struct EpisodeRow {
+    /// Audio URL of the episode the line belongs to.
+    url: String,
+    /// The line itself (emptied and refilled on every update).
+    row: gtk::Box,
+    /// Episode length from the feed, if it states one.
+    total_secs: Option<i64>,
+}
+
+/// One-line outcome of a "refresh all", shown briefly in the loading overlay:
+/// how many feeds were updated, what came in, and what failed.
+fn refresh_summary_text(updated: usize, failed: usize, new_episodes: usize) -> String {
+    let mut parts = Vec::new();
+    if updated > 0 {
+        parts.push(ngettext_n(
+            "{n} podcast updated",
+            "{n} podcasts updated",
+            updated as u32,
+        ));
+    }
+    if new_episodes > 0 {
+        parts.push(ngettext_n(
+            "{n} new episode",
+            "{n} new episodes",
+            new_episodes as u32,
+        ));
+    }
+    if failed > 0 {
+        parts.push(ngettext_n(
+            "{n} feed failed",
+            "{n} feeds failed",
+            failed as u32,
+        ));
+    }
+    if parts.is_empty() {
+        return gettext("Nothing new");
+    }
+    parts.join(" · ")
 }
 
 /// Content box for the detail dialogs (uniform margins).
@@ -83,6 +142,79 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     dialog.set_content_width(600);
     crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
+}
+
+/// Live state of one running episode download. `started`/`done` give the
+/// average transfer rate, from which the remaining time is estimated — the
+/// average (instead of the momentary rate) keeps the readout from jittering.
+#[derive(Debug)]
+struct EpisodeDownload {
+    started: std::time::Instant,
+    /// Bytes written so far (last report from the worker).
+    done: u64,
+    /// Total size, if the server advertised a `Content-Length`.
+    total: Option<u64>,
+}
+
+impl EpisodeDownload {
+    fn new() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            done: 0,
+            total: None,
+        }
+    }
+
+    /// Completed share of the transfer (`None` while the total size is unknown).
+    fn fraction(&self) -> Option<f64> {
+        let total = self.total.filter(|t| *t > 0)?;
+        Some((self.done as f64 / total as f64).clamp(0.0, 1.0))
+    }
+
+    /// Estimated remaining time in milliseconds, from the average rate since the
+    /// start. `None` until enough has been transferred for the estimate to mean
+    /// anything (unknown total, or barely started).
+    fn remaining_ms(&self) -> Option<i64> {
+        let total = self.total.filter(|t| *t > self.done)?;
+        let elapsed = self.started.elapsed().as_secs_f64();
+        if self.done < 64 * 1024 || elapsed < 1.0 {
+            return None;
+        }
+        let rate = self.done as f64 / elapsed; // bytes per second
+        if rate <= 0.0 {
+            return None;
+        }
+        // At least a second: "0:00 left" would read like it is already done.
+        Some(((((total - self.done) as f64 / rate) * 1000.0) as i64).max(1000))
+    }
+
+    /// The one-line readout under the "Download" heading while the transfer runs:
+    /// "45 % · 1:20 left", falling back to just the percentage (or the downloaded
+    /// size when the server states no total).
+    fn status_text(&self) -> String {
+        let Some(frac) = self.fraction() else {
+            // Nothing transferred yet (connecting, or the server states no
+            // length): a plain "Downloading …" until there is a real number.
+            if self.done == 0 {
+                return gettext("Downloading …");
+            }
+            return gettext_f(
+                "Downloading … {size}",
+                &[("size", &crate::core::sync::share::human_size(self.done))],
+            );
+        };
+        let pct = (frac * 100.0).round() as u32;
+        match self.remaining_ms() {
+            Some(ms) => gettext_f(
+                "{pct} % · {time} left",
+                &[
+                    ("pct", &pct.to_string()),
+                    ("time", &crate::ui::app_helpers::fmt_duration(ms)),
+                ],
+            ),
+            None => gettext_f("{pct} % downloaded", &[("pct", &pct.to_string())]),
+        }
+    }
 }
 
 /// The podcasts page component.
@@ -140,12 +272,18 @@ pub(crate) struct PodcastsPage {
     podcast_search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// Play/pause buttons of the visible episode rows (audio URL → button).
     episode_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
+    /// Listening-progress lines of the visible rows, so the per-second transport
+    /// tick can update the running episode's bar in place (rebuilding the list
+    /// on every tick would be far too expensive — and made the progress look
+    /// frozen until the user switched tabs).
+    episode_progress_rows: Rc<RefCell<Vec<EpisodeRow>>>,
     /// "Play" row of an open episode detail dialog (row, audio URL).
     ctx_episode_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
-    /// "Download" column of an open episode detail dialog (value label, audio URL).
-    ctx_episode_download: Rc<RefCell<Option<(gtk::Label, String)>>>,
-    /// Audio URLs of episodes whose download is currently running.
-    downloading_episodes: HashSet<String>,
+    /// "Download" column of an open episode detail dialog (value label, progress
+    /// bar, audio URL).
+    ctx_episode_download: Rc<RefCell<Option<(gtk::Label, gtk::ProgressBar, String)>>>,
+    /// Episodes whose download is currently running (audio URL → live progress).
+    downloading_episodes: HashMap<String, EpisodeDownload>,
     /// Hand-off slot for a built episode subpage. The parent owns the shared
     /// NavigationView; since its `Msg` must be `Send` it cannot carry the
     /// (`!Send`) `gtk::Box` through a message, so we park the built page here and
@@ -164,6 +302,23 @@ pub(crate) enum PodcastsInput {
     PlaybackStateChanged {
         playing_url: Option<String>,
         playing: bool,
+    },
+    /// Per-second position of the running episode (from the transport): update
+    /// the progress line of every visible row of that episode in place.
+    EpisodeProgressTick {
+        url: String,
+        position_ms: i64,
+        duration_ms: i64,
+    },
+    /// The episode's resume point was written to the DB (5 s timer) — used to
+    /// pull a freshly started episode into the "Recently" list, which only
+    /// lists episodes that already have a stored position.
+    EpisodeProgressPersisted {
+        url: String,
+    },
+    /// The episode played to its end → show it as "Listened" right away.
+    EpisodeFinished {
+        url: String,
     },
     SetGalleryView(bool),
     SetGalleryColumns(u32),
@@ -234,6 +389,16 @@ pub(crate) enum PodcastsOutput {
     RefreshStarted(bool),
     /// The "refresh all" worker finished → the parent clears one spinner count.
     RefreshFinished,
+    /// Live progress of the running "refresh all" (feed `done` of `total`, name
+    /// of the feed being fetched) for the loading overlay's progress bar.
+    RefreshProgress {
+        done: usize,
+        total: usize,
+        label: String,
+    },
+    /// Outcome of a refresh, shown briefly in the overlay — the only feedback
+    /// channel left, since informational toasts are disabled app-wide.
+    RefreshSummary(String),
     /// The sort slot was rebuilt → the parent refreshes the shared title-bar
     /// sort button (if the Podcasts section is showing).
     SortChanged,
@@ -248,14 +413,31 @@ pub(crate) enum PodcastsCmd {
         url: String,
         result: Result<String, String>,
     },
+    /// Progress of a running episode download (throttled by the worker), so the
+    /// detail dialog can show percent and the remaining time.
+    DownloadProgress {
+        url: String,
+        done: u64,
+        total: Option<u64>,
+    },
     /// Search hits (still without covers).
     SearchResults(Vec<crate::core::podcast::PodcastSearchResult>),
     /// Search failed (service unreachable).
     SearchFailed,
     /// Search-hit covers cached → redraw the hit list.
     SearchCoversReady,
-    /// All feeds (refresh-all) re-fetched.
-    Refreshed,
+    /// One feed of a "refresh all" is about to be fetched.
+    RefreshProgress {
+        done: usize,
+        total: usize,
+        title: String,
+    },
+    /// All feeds (refresh-all) re-fetched, with what it brought in.
+    Refreshed {
+        updated: usize,
+        failed: usize,
+        new_episodes: usize,
+    },
     /// Startup feed-image cache finished → redraw the overview.
     CoversCached,
 }
@@ -467,9 +649,10 @@ impl Component for PodcastsPage {
             podcast_search_failed: false,
             podcast_search: Rc::new(RefCell::new(None)),
             episode_play_buttons: Rc::new(RefCell::new(Vec::new())),
+            episode_progress_rows: Rc::new(RefCell::new(Vec::new())),
             ctx_episode_play: Rc::new(RefCell::new(None)),
             ctx_episode_download: Rc::new(RefCell::new(None)),
-            downloading_episodes: HashSet::new(),
+            downloading_episodes: HashMap::new(),
             subpage_slot,
         };
         // Cache the podcast feed images once in the background, then rebuild the
@@ -493,27 +676,37 @@ impl Component for PodcastsPage {
     fn update(&mut self, msg: PodcastsInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             PodcastsInput::Reload => self.reload_podcasts(&sender),
-            PodcastsInput::RefreshAll => {
-                if self.podcast_items.is_empty() {
-                    return;
-                }
-                sender.spawn_oneshot_command(|| {
-                    if let Ok(lib) = Library::open() {
-                        for url in lib.podcast_feed_urls().unwrap_or_default() {
-                            let _ = fetch_and_store_podcast(&url);
-                        }
-                    }
-                    PodcastsCmd::Refreshed
-                });
-                let _ = sender.output(PodcastsOutput::RefreshStarted(true));
-            }
+            PodcastsInput::RefreshAll => self.refresh_all_feeds(&sender),
             PodcastsInput::PlaybackStateChanged {
                 playing_url,
                 playing,
             } => {
+                // A different episode than before means the previous one now has
+                // a stored position: "Recently" has to be rebuilt for it to show
+                // up (and in the right order).
+                let switched = playing_url.is_some() && playing_url != self.playing_url;
                 self.playing_url = playing_url;
                 self.playing = playing;
                 self.refresh_episode_icons();
+                if switched {
+                    self.reload_recent(&sender);
+                }
+            }
+            PodcastsInput::EpisodeProgressTick {
+                url,
+                position_ms,
+                duration_ms,
+            } => self.apply_episode_progress(&url, position_ms, duration_ms, false),
+            PodcastsInput::EpisodeProgressPersisted { url } => {
+                // Only worth a rebuild while the episode is still missing from
+                // "Recently" — afterwards the tick keeps its row current.
+                if !self.recent_items.iter().any(|e| e.audio_url == url) {
+                    self.reload_recent(&sender);
+                }
+            }
+            PodcastsInput::EpisodeFinished { url } => {
+                self.apply_episode_progress(&url, 0, 0, true);
+                self.reload_recent(&sender);
             }
             PodcastsInput::SetGalleryView(on) => {
                 self.gallery_view = on;
@@ -598,7 +791,8 @@ impl Component for PodcastsPage {
                 if !url.is_empty() {
                     let _ = sender.output(PodcastsOutput::Toast(gettext("Loading feed …")));
                     sender.spawn_command(move |out| {
-                        let _ = out.send(PodcastsCmd::Fetched(fetch_and_store_podcast(&url)));
+                        let fetched = fetch_and_store_podcast(&url).map(|(title, _)| title);
+                        let _ = out.send(PodcastsCmd::Fetched(fetched));
                     });
                 }
             }
@@ -606,7 +800,8 @@ impl Component for PodcastsPage {
                 if let Ok(Some(url)) = self.library.podcast_feed_url(id) {
                     let _ = sender.output(PodcastsOutput::Toast(gettext("Updating feed …")));
                     sender.spawn_command(move |out| {
-                        let _ = out.send(PodcastsCmd::Fetched(fetch_and_store_podcast(&url)));
+                        let fetched = fetch_and_store_podcast(&url).map(|(title, _)| title);
+                        let _ = out.send(PodcastsCmd::Fetched(fetched));
                     });
                 }
             }
@@ -666,6 +861,13 @@ impl Component for PodcastsPage {
                     }
                 }
             }
+            PodcastsCmd::DownloadProgress { url, done, total } => {
+                if let Some(dl) = self.downloading_episodes.get_mut(&url) {
+                    dl.done = done;
+                    dl.total = total;
+                    self.refresh_download_row();
+                }
+            }
             PodcastsCmd::Downloaded { url, result } => {
                 self.downloading_episodes.remove(&url);
                 self.refresh_download_row();
@@ -690,8 +892,24 @@ impl Component for PodcastsPage {
                 self.rebuild_podcast_search_results(&sender);
             }
             PodcastsCmd::SearchCoversReady => self.rebuild_podcast_search_results(&sender),
-            PodcastsCmd::Refreshed => {
+            PodcastsCmd::RefreshProgress { done, total, title } => {
+                let _ = sender.output(PodcastsOutput::RefreshProgress {
+                    done,
+                    total,
+                    label: title,
+                });
+            }
+            PodcastsCmd::Refreshed {
+                updated,
+                failed,
+                new_episodes,
+            } => {
                 let _ = sender.output(PodcastsOutput::RefreshFinished);
+                let _ = sender.output(PodcastsOutput::RefreshSummary(refresh_summary_text(
+                    updated,
+                    failed,
+                    new_episodes,
+                )));
                 self.reload_podcasts(&sender);
             }
             PodcastsCmd::CoversCached => self.reload_podcasts(&sender),
@@ -700,6 +918,59 @@ impl Component for PodcastsPage {
 }
 
 impl PodcastsPage {
+    /// "Refresh all" from the header button: re-fetch every subscribed feed,
+    /// one after another. Each step reports back so the loading overlay can show
+    /// a progress bar with the feed being fetched — a bare spinner left the user
+    /// unable to tell whether anything was happening at all. The cases that used
+    /// to end in silence (no subscriptions, no network) now say so.
+    fn refresh_all_feeds(&mut self, sender: &ComponentSender<Self>) {
+        let feeds = self.library.podcast_feeds().unwrap_or_default();
+        if feeds.is_empty() {
+            let _ = sender.output(PodcastsOutput::RefreshSummary(gettext(
+                "No podcasts subscribed",
+            )));
+            return;
+        }
+        if !crate::ui::app_helpers::online_available() {
+            let _ = sender.output(PodcastsOutput::RefreshSummary(gettext(
+                "No internet connection",
+            )));
+            return;
+        }
+        let total = feeds.len();
+        let _ = sender.output(PodcastsOutput::RefreshStarted(true));
+        let _ = sender.output(PodcastsOutput::RefreshProgress {
+            done: 0,
+            total,
+            label: feeds[0].0.clone(),
+        });
+        sender.spawn_command(move |out| {
+            let (mut updated, mut failed, mut new_episodes) = (0usize, 0usize, 0usize);
+            for (i, (title, url)) in feeds.iter().enumerate() {
+                let _ = out.send(PodcastsCmd::RefreshProgress {
+                    done: i,
+                    total,
+                    title: title.clone(),
+                });
+                match fetch_and_store_podcast(url) {
+                    Some((_, fresh)) => {
+                        updated += 1;
+                        new_episodes += fresh;
+                    }
+                    None => {
+                        tracing::warn!("Podcast refresh failed for {url}");
+                        failed += 1;
+                    }
+                }
+            }
+            let _ = out.send(PodcastsCmd::Refreshed {
+                updated,
+                failed,
+                new_episodes,
+            });
+        });
+    }
+
     /// Show detail dialogs on the phone over the **full width** (bottom sheet);
     /// on the desktop floating as before (auto).
     fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
@@ -1061,14 +1332,14 @@ impl PodcastsPage {
             text.append(&subtitle_lbl);
             // Listening progress like "Recently": finished shows a check;
             // otherwise the elapsed time before a bar, once > 10 s were listened
-            // to and the feed states a length.
-            if finished || (heard && total_secs.is_some()) {
-                text.append(&Self::episode_progress_row(
-                    position_ms,
-                    total_secs,
-                    finished,
-                ));
-            }
+            // to and the feed states a length. Always built (hidden while there
+            // is nothing to show) so the tick can fill it in as it plays.
+            text.append(&self.episode_progress_row(
+                &ep.audio_url,
+                position_ms,
+                total_secs,
+                finished,
+            ));
             top.append(&text);
             // Episode length as a subtle label, left of the play button.
             if let Some(d) = ep
@@ -1098,39 +1369,24 @@ impl PodcastsPage {
         self.refresh_episode_icons();
     }
 
-    /// The progress line for a podcast episode. Finished, or with less than 30 s
-    /// left, it shows a check with "Listened"; otherwise the elapsed time sits
-    /// before a progress bar. `total_secs` is `None` for feeds without a length —
-    /// then only the finished case draws anything (a bar needs the total).
-    fn episode_progress_row(position_ms: i64, total_secs: Option<i64>, finished: bool) -> gtk::Box {
-        let prow = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(8)
-            .margin_top(2)
-            .build();
-        let near_end = total_secs.is_some_and(|s| s * 1000 - position_ms < 30_000);
-        if finished || near_end {
-            let check = gtk::Image::from_icon_name("object-select-symbolic");
-            check.set_valign(gtk::Align::Center);
-            prow.append(&check);
-            let lbl = gtk::Label::new(Some(&gettext("Listened")));
-            lbl.set_valign(gtk::Align::Center);
-            lbl.add_css_class("dim-label");
-            prow.append(&lbl);
-        } else if let Some(secs) = total_secs {
-            let elapsed = gtk::Label::new(Some(&crate::ui::app_helpers::fmt_duration(position_ms)));
-            elapsed.set_valign(gtk::Align::Center);
-            elapsed.set_css_classes(&["dim-label", "numeric"]);
-            prow.append(&elapsed);
-            let frac = (position_ms as f64 / (secs as f64 * 1000.0)).clamp(0.0, 1.0);
-            let bar = gtk::ProgressBar::builder()
-                .fraction(frac)
-                .hexpand(true)
-                .valign(gtk::Align::Center)
-                .build();
-            bar.add_css_class("emilia-hourbar");
-            prow.append(&bar);
-        }
+    /// The progress line for a podcast episode, registered under `url` so the
+    /// per-second transport tick can keep it live while the episode plays (see
+    /// [`Self::apply_episode_progress`]). Always built — an episode that has not
+    /// been started yet gets an empty, hidden row that fills in as it plays.
+    fn episode_progress_row(
+        &self,
+        url: &str,
+        position_ms: i64,
+        total_secs: Option<i64>,
+        finished: bool,
+    ) -> gtk::Box {
+        let prow = crate::ui::app_helpers::progress_row_box();
+        fill_progress_row(&prow, position_ms, total_secs, finished);
+        self.episode_progress_rows.borrow_mut().push(EpisodeRow {
+            url: url.to_string(),
+            row: prow.clone(),
+            total_secs,
+        });
         prow
     }
 
@@ -1207,13 +1463,12 @@ impl PodcastsPage {
             // Progress line inside the text column, so it spans only the text
             // width — not under the cover or the play button. Finished (or < 30 s
             // left) shows a check; otherwise the elapsed time before a bar.
-            if ep.finished || total_secs.is_some() {
-                text.append(&Self::episode_progress_row(
-                    ep.position_ms,
-                    total_secs,
-                    ep.finished,
-                ));
-            }
+            text.append(&self.episode_progress_row(
+                &ep.audio_url,
+                ep.position_ms,
+                total_secs,
+                ep.finished,
+            ));
             top.append(&text);
 
             // Episode length as a subtle label, left of the play button — the
@@ -1393,6 +1648,15 @@ impl PodcastsPage {
             .css_classes(["accent"])
             .build();
         dl_cell.append(&dl_value);
+        // Only shown while a download runs (and only with a known total size).
+        let dl_bar = gtk::ProgressBar::builder()
+            .fraction(0.0)
+            .valign(gtk::Align::Center)
+            .margin_top(4)
+            .visible(false)
+            .build();
+        dl_bar.add_css_class("emilia-hourbar");
+        dl_cell.append(&dl_bar);
         dl_cell.set_cursor_from_name(Some("pointer"));
         {
             let (sender, url, title) = (sender.clone(), ep.audio_url.clone(), ep.title.clone());
@@ -1410,7 +1674,7 @@ impl PodcastsPage {
         info.add(&meta);
         content.append(&info);
 
-        *self.ctx_episode_download.borrow_mut() = Some((dl_value, ep.audio_url.clone()));
+        *self.ctx_episode_download.borrow_mut() = Some((dl_value, dl_bar, ep.audio_url.clone()));
         self.refresh_download_row();
 
         // Per-episode equalizer (inherits podcast → global during playback).
@@ -1474,14 +1738,43 @@ impl PodcastsPage {
                 .margin_start(14)
                 .margin_end(14)
                 .build();
-            let heading = gtk::Label::builder()
-                .label(gettext("Shownotes"))
-                .xalign(0.0)
-                .css_classes(["heading"])
-                .build();
-            wrap.append(&heading);
             wrap.append(&label);
-            notes_group.add(&wrap);
+            // Collapsed by default: long shownotes would otherwise push the
+            // dialog's actions out of view — one tap on the row unfolds them.
+            let expander = adw::ExpanderRow::builder()
+                .title(gettext("Shownotes"))
+                .expanded(false)
+                .build();
+            expander.add_row(&wrap);
+            // Unfolding makes the row tall, and GTK scrolls the focused row
+            // fully into view — which lands at the *end* of the notes, with the
+            // row (and its fold-away arrow) off screen. Scroll back to the row
+            // once the unfold animation has settled.
+            expander.connect_expanded_notify(|row| {
+                if !row.is_expanded() {
+                    return;
+                }
+                let row = row.clone();
+                gtk::glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(300),
+                    move || {
+                        let Some(scroller) = row
+                            .ancestor(gtk::ScrolledWindow::static_type())
+                            .and_then(|w| w.downcast::<gtk::ScrolledWindow>().ok())
+                        else {
+                            return;
+                        };
+                        let Some(point) =
+                            row.compute_point(&scroller, &gtk::graphene::Point::new(0.0, 0.0))
+                        else {
+                            return;
+                        };
+                        let adj = scroller.vadjustment();
+                        adj.set_value((adj.value() + point.y() as f64 - 8.0).max(0.0));
+                    },
+                );
+            });
+            notes_group.add(&expander);
             content.append(&notes_group);
         }
 
@@ -1889,6 +2182,29 @@ impl PodcastsPage {
         btn
     }
 
+    /// Refreshes the progress line of every visible row of `url` — driven by the
+    /// transport's per-second tick, so the bar in "Newest"/"Recently"/a podcast's
+    /// episode list moves along with playback instead of only after a rebuild.
+    /// Rows whose widget left the tree are dropped along the way.
+    fn apply_episode_progress(
+        &self,
+        url: &str,
+        position_ms: i64,
+        duration_ms: i64,
+        finished: bool,
+    ) {
+        let mut rows = self.episode_progress_rows.borrow_mut();
+        rows.retain(|r| r.row.root().is_some());
+        for entry in rows.iter().filter(|r| r.url == url) {
+            // The feed's length wins (it is what the row shows elsewhere); the
+            // player's duration fills in for feeds that state none.
+            let total = entry
+                .total_secs
+                .or_else(|| (duration_ms > 0).then_some(duration_ms / 1000));
+            fill_progress_row(&entry.row, position_ms, total, finished);
+        }
+    }
+
     /// Updates the Play/Pause icons of all visible entry rows and the "Play" row
     /// of an open detail dialog. Detached rows are discarded in the process.
     fn refresh_episode_icons(&self) {
@@ -1912,21 +2228,37 @@ impl PodcastsPage {
     }
 
     /// Updates the download row of an open episode detail dialog to reflect the
-    /// offline state of its episode.
+    /// offline state of its episode: while a download runs it shows the live
+    /// percentage plus the estimated remaining time over a progress bar.
     fn refresh_download_row(&self) {
         let guard = self.ctx_episode_download.borrow();
-        let Some((label, url)) = guard.as_ref() else {
+        let Some((label, bar, url)) = guard.as_ref() else {
             return;
         };
-        let downloading = self.downloading_episodes.contains(url);
+        let running = self.downloading_episodes.get(url);
         let downloaded =
-            !downloading && self.library.episode_download(url).ok().flatten().is_some();
-        if downloading {
-            label.set_label(&gettext("Downloading …"));
-        } else if downloaded {
-            label.set_label(&gettext("Remove download"));
-        } else {
-            label.set_label(&gettext("For offline listening"));
+            running.is_none() && self.library.episode_download(url).ok().flatten().is_some();
+        match running {
+            Some(dl) => {
+                label.set_label(&dl.status_text());
+                // Without a Content-Length there is nothing to fill the bar
+                // with — the label then reports the downloaded size instead.
+                match dl.fraction() {
+                    Some(frac) => {
+                        bar.set_fraction(frac);
+                        bar.set_visible(true);
+                    }
+                    None => bar.set_visible(false),
+                }
+            }
+            None => {
+                bar.set_visible(false);
+                label.set_label(&if downloaded {
+                    gettext("Remove download")
+                } else {
+                    gettext("For offline listening")
+                });
+            }
         }
     }
 
@@ -1937,7 +2269,7 @@ impl PodcastsPage {
         url: String,
         title: String,
     ) {
-        if self.downloading_episodes.contains(&url) {
+        if self.downloading_episodes.contains_key(&url) {
             return;
         }
         if let Some(path) = self.library.delete_episode_download(&url).unwrap_or(None) {
@@ -1946,7 +2278,8 @@ impl PodcastsPage {
             let _ = sender.output(PodcastsOutput::Toast(gettext("Download removed")));
             return;
         }
-        self.downloading_episodes.insert(url.clone());
+        self.downloading_episodes
+            .insert(url.clone(), EpisodeDownload::new());
         self.refresh_download_row();
         let _ = sender.output(PodcastsOutput::Toast(gettext_f(
             "Downloading “{title}” …",
@@ -1955,20 +2288,126 @@ impl PodcastsPage {
         let dl_url = url.clone();
         sender.spawn_command(move |out| {
             let dest = crate::core::online::episode_download_dest(&dl_url);
-            let result = match crate::core::podcast::download_episode(&dl_url, &dest) {
-                Ok(_) => {
-                    let path = dest.to_string_lossy().into_owned();
-                    if let Ok(lib) = Library::open() {
-                        let _ = lib.set_episode_download(&dl_url, &path);
-                    }
-                    Ok(path)
+            // Progress reports (throttled in `download_episode_progress`) drive
+            // the percentage/remaining-time readout in the detail dialog.
+            let progress = {
+                let (out, url) = (out.clone(), dl_url.clone());
+                move |p: crate::core::podcast::DownloadProgress| {
+                    let _ = out.send(PodcastsCmd::DownloadProgress {
+                        url: url.clone(),
+                        done: p.done,
+                        total: p.total,
+                    });
                 }
-                Err(e) => Err(e.to_string()),
             };
+            let result =
+                match crate::core::podcast::download_episode_progress(&dl_url, &dest, progress) {
+                    Ok(_) => {
+                        let path = dest.to_string_lossy().into_owned();
+                        if let Ok(lib) = Library::open() {
+                            let _ = lib.set_episode_download(&dl_url, &path);
+                        }
+                        Ok(path)
+                    }
+                    Err(e) => Err(e.to_string()),
+                };
             let _ = out.send(PodcastsCmd::Downloaded {
                 url: dl_url.clone(),
                 result,
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EpisodeDownload;
+    use std::time::{Duration, Instant};
+
+    /// Download state as if it had been running for `secs` with `done` of
+    /// `total` bytes transferred.
+    fn running(done: u64, total: Option<u64>, secs: u64) -> EpisodeDownload {
+        EpisodeDownload {
+            started: Instant::now() - Duration::from_secs(secs),
+            done,
+            total,
+        }
+    }
+
+    #[test]
+    fn fraction_needs_a_total_and_is_clamped() {
+        assert_eq!(running(1_000, None, 5).fraction(), None);
+        assert_eq!(running(0, Some(0), 5).fraction(), None);
+        assert_eq!(running(500, Some(2_000), 5).fraction(), Some(0.25));
+        // A server that under-reports its length must not push the bar past 1.
+        assert_eq!(running(3_000, Some(2_000), 5).fraction(), Some(1.0));
+    }
+
+    #[test]
+    fn remaining_time_estimates_from_the_average_rate() {
+        // 1 MB in 10 s → 100 KB/s; 3 MB left → ~30 s.
+        let ms = running(1024 * 1024, Some(4 * 1024 * 1024), 10)
+            .remaining_ms()
+            .expect("estimate");
+        assert!((29_000..=31_000).contains(&ms), "estimated {ms} ms");
+    }
+
+    #[test]
+    fn remaining_time_is_withheld_until_the_estimate_is_meaningful() {
+        // Barely started: too little data for a rate.
+        assert_eq!(
+            running(1_024, Some(4 * 1024 * 1024), 5).remaining_ms(),
+            None
+        );
+        // Just begun: elapsed time too short.
+        assert_eq!(
+            running(4 * 1024 * 1024, Some(80 * 1024 * 1024), 0).remaining_ms(),
+            None
+        );
+        // Complete: nothing left to wait for.
+        assert_eq!(
+            running(4 * 1024 * 1024, Some(4 * 1024 * 1024), 10).remaining_ms(),
+            None
+        );
+        // No total: no estimate possible.
+        assert_eq!(running(4 * 1024 * 1024, None, 10).remaining_ms(), None);
+    }
+
+    #[test]
+    fn status_text_falls_back_from_eta_to_percent_to_size() {
+        // Untranslated in the test binary, so the msgids come back verbatim.
+        assert_eq!(
+            running(1024 * 1024, Some(4 * 1024 * 1024), 10).status_text(),
+            "25 % · 0:30 left"
+        );
+        assert_eq!(
+            running(1024 * 1024, Some(4 * 1024 * 1024), 0).status_text(),
+            "25 % downloaded"
+        );
+        assert_eq!(
+            running(5 * 1024 * 1024, None, 10).status_text(),
+            "Downloading … 5.0 MB"
+        );
+        // Still connecting: no size worth showing yet.
+        assert_eq!(running(0, None, 1).status_text(), "Downloading …");
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    use super::refresh_summary_text;
+
+    #[test]
+    fn summary_lists_only_the_parts_that_happened() {
+        assert_eq!(refresh_summary_text(1, 0, 0), "1 podcast updated");
+        assert_eq!(
+            refresh_summary_text(2, 0, 4),
+            "2 podcasts updated · 4 new episodes"
+        );
+        assert_eq!(
+            refresh_summary_text(1, 2, 0),
+            "1 podcast updated · 2 feeds failed"
+        );
+        assert_eq!(refresh_summary_text(0, 0, 0), "Nothing new");
     }
 }

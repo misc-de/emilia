@@ -453,4 +453,70 @@ impl Library {
         tx.commit()?;
         Ok(id)
     }
+
+    // ---- watch progress (long-form videos) --------------------------------
+
+    /// Stores/updates the resume position of a long-form YouTube item. A stored
+    /// position means "in progress", so it also clears any `finished` mark;
+    /// `position_ms <= 0` drops the resume point but keeps a finished row.
+    /// Mirrors [`Library::set_episode_progress`] for podcasts.
+    pub fn set_yt_progress(&self, video_id: &str, position_ms: i64) -> Result<()> {
+        if position_ms <= 0 {
+            self.conn.execute(
+                "DELETE FROM yt_progress WHERE video_id = ?1 AND finished = 0",
+                [video_id],
+            )?;
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO yt_progress (video_id, position_ms, updated_at, finished)
+             VALUES (?1, ?2, strftime('%s','now'), 0)
+             ON CONFLICT(video_id) DO UPDATE SET
+                position_ms = excluded.position_ms, updated_at = excluded.updated_at,
+                finished = 0",
+            rusqlite::params![video_id, position_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Marks a video as watched to the end: clears the resume position but keeps
+    /// the row, so the lists can still show it as watched.
+    pub fn mark_yt_finished(&self, video_id: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_progress (video_id, position_ms, updated_at, finished)
+             VALUES (?1, 0, strftime('%s','now'), 1)
+             ON CONFLICT(video_id) DO UPDATE SET
+                position_ms = 0, updated_at = strftime('%s','now'), finished = 1",
+            [video_id],
+        )?;
+        Ok(())
+    }
+
+    /// Remembered resume position of a video in ms (0 = none/from the start).
+    pub fn yt_progress(&self, video_id: &str) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT position_ms FROM yt_progress WHERE video_id = ?1",
+                [video_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+
+    /// All remembered watch positions: `video_id -> (position_ms, finished)`,
+    /// read once per list rebuild instead of querying per row.
+    pub fn all_yt_progress(&self) -> Result<std::collections::HashMap<String, (i64, bool)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT video_id, position_ms, finished FROM yt_progress")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, i64>(1)?, r.get::<_, i64>(2)? != 0),
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?)
+    }
 }

@@ -3027,6 +3027,62 @@ msgstr "{n} neu"
 msgid "{n} files · {size}"
 msgstr "{n} Dateien · {size}"
 
+# --- Podcast-Download-Fortschritt (de) ---
+msgid "{pct} % · {time} left"
+msgstr "{pct} % · noch {time}"
+
+msgid "{pct} % downloaded"
+msgstr "{pct} % geladen"
+
+msgid "Downloading … {size}"
+msgstr "Wird heruntergeladen … {size}"
+
+# --- Aktualisieren: Fortschritt + Ergebnis (Podcasts/YouTube) (de) ---
+msgid "{done} of {total}"
+msgstr "{done} von {total}"
+
+msgid "No internet connection"
+msgstr "Keine Internetverbindung"
+
+msgid "No podcasts subscribed"
+msgstr "Keine Podcasts abonniert"
+
+msgid "Nothing new"
+msgstr "Nichts Neues"
+
+msgid "yt-dlp is missing — install or update it in the settings"
+msgstr "yt-dlp fehlt – in den Einstellungen installieren oder aktualisieren"
+
+msgid "{n} podcast updated"
+msgid_plural "{n} podcasts updated"
+msgstr[0] "{n} Podcast aktualisiert"
+msgstr[1] "{n} Podcasts aktualisiert"
+
+msgid "{n} new episode"
+msgid_plural "{n} new episodes"
+msgstr[0] "{n} neue Folge"
+msgstr[1] "{n} neue Folgen"
+
+msgid "{n} feed failed"
+msgid_plural "{n} feeds failed"
+msgstr[0] "{n} Feed fehlgeschlagen"
+msgstr[1] "{n} Feeds fehlgeschlagen"
+
+msgid "{n} channel updated"
+msgid_plural "{n} channels updated"
+msgstr[0] "{n} Kanal aktualisiert"
+msgstr[1] "{n} Kanäle aktualisiert"
+
+msgid "{n} new video"
+msgid_plural "{n} new videos"
+msgstr[0] "{n} neues Video"
+msgstr[1] "{n} neue Videos"
+
+msgid "{n} channel failed"
+msgid_plural "{n} channels failed"
+msgstr[0] "{n} Kanal fehlgeschlagen"
+msgstr[1] "{n} Kanäle fehlgeschlagen"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

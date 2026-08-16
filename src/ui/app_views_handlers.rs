@@ -369,19 +369,19 @@ impl App {
         // other section refreshes just its own content, so e.g. a podcast refresh
         // no longer re-indexes the whole music library.
         match self.current_section().as_deref() {
-            // Podcasts: pull new episodes for every subscribed feed. Reports its
-            // worker start/finish via `PodcastRefreshStarted/Finished`, which
-            // drive `refresh_pending` (the spinner) on their own.
+            // Podcasts: pull new episodes for every subscribed feed. The page
+            // reports worker start/finish via `PodcastRefreshStarted/Finished`
+            // (driving `refresh_pending`, the spinner) plus per-feed progress —
+            // and it also owns the "nothing to do" cases (no subscriptions, no
+            // network), which it states in the overlay instead of failing mute.
             Some("podcasts") => {
-                if online_available() {
-                    self.podcasts_page
-                        .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
-                }
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::RefreshAll);
             }
-            // YouTube: refresh the subscribed channels (start/finish via
-            // `YtRefreshStarted/Finished`).
+            // YouTube: refresh the subscribed channels (same contract as above;
+            // the page additionally reports a missing yt-dlp).
             Some("youtube") => {
-                if online_available() && self.youtube.enabled {
+                if self.youtube.enabled {
                     self.yt_page.emit(crate::ui::yt_page::YtInput::RefreshAll);
                 }
             }

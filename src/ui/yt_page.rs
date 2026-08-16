@@ -25,7 +25,7 @@ use crate::core::youtube::{self, YtKind, YtResult};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{SortCrit, YtView};
 use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
+use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover};
 use crate::ui::app_views::natural_key;
 
@@ -186,18 +186,25 @@ pub(crate) fn fetch_and_store_channel(
 }
 
 /// Refreshes a subscribed channel's newest videos (worker thread, own DB).
-pub(crate) fn refresh_channel_videos(channel_db_id: i64, title: &str, url: &str) -> Option<String> {
+/// Returns the channel title plus how many of the listed videos were **new**,
+/// so a refresh can report what it actually brought in.
+pub(crate) fn refresh_channel_videos(
+    channel_db_id: i64,
+    title: &str,
+    url: &str,
+) -> Option<(String, usize)> {
     let lib = Library::open().ok()?;
     let cid = youtube::channel_id_from_url(url);
     let mut videos = list_channel_videos(url, cid.as_deref());
     if videos.is_empty() {
         return None;
     }
+    let stored = lib.channel_videos(channel_db_id).unwrap_or_default();
+    let seen: std::collections::HashSet<String> =
+        stored.iter().map(|v| v.video_id.clone()).collect();
     // Preserve upload dates the feed didn't return this time (e.g. a transient
     // feed failure): a refresh must not erase dates we already had.
-    let known: std::collections::HashMap<String, String> = lib
-        .channel_videos(channel_db_id)
-        .unwrap_or_default()
+    let known: std::collections::HashMap<String, String> = stored
         .into_iter()
         .filter_map(|v| v.published.map(|p| (v.video_id, p)))
         .collect();
@@ -208,8 +215,56 @@ pub(crate) fn refresh_channel_videos(channel_db_id: i64, title: &str, url: &str)
             }
         }
     }
+    let fresh = videos
+        .iter()
+        .filter(|v| !seen.contains(&v.video_id))
+        .count();
     lib.set_channel_videos(channel_db_id, &videos).ok()?;
-    Some(title.to_string())
+    // A channel cached for the first time reports no "new" videos — the count
+    // is meant for refreshes of an already-known channel.
+    Some((title.to_string(), if seen.is_empty() { 0 } else { fresh }))
+}
+
+/// A watch-progress widget of a list row, kept so the transport tick can update
+/// it in place while the video plays.
+struct WatchRow {
+    /// Video the widget belongs to.
+    video_id: String,
+    /// The widget itself (emptied and refilled on every update).
+    row: gtk::Box,
+    /// Runtime in seconds, as the list knows it.
+    total_secs: Option<i64>,
+}
+
+/// One-line outcome of a "refresh all", shown briefly in the loading overlay:
+/// how many channels were refreshed, what came in, and what failed.
+fn refresh_summary_text(updated: usize, failed: usize, new_videos: usize) -> String {
+    let mut parts = Vec::new();
+    if updated > 0 {
+        parts.push(ngettext_n(
+            "{n} channel updated",
+            "{n} channels updated",
+            updated as u32,
+        ));
+    }
+    if new_videos > 0 {
+        parts.push(ngettext_n(
+            "{n} new video",
+            "{n} new videos",
+            new_videos as u32,
+        ));
+    }
+    if failed > 0 {
+        parts.push(ngettext_n(
+            "{n} channel failed",
+            "{n} channels failed",
+            failed as u32,
+        ));
+    }
+    if parts.is_empty() {
+        return gettext("Nothing new");
+    }
+    parts.join(" · ")
 }
 
 /// Lists a channel's newest videos via yt-dlp and merges in publication dates.
@@ -293,6 +348,9 @@ pub(crate) struct YtPage {
     search_seq: u64,
     search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     video_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
+    /// Watch-progress widgets of the visible rows (long-form items only), so the
+    /// per-second transport tick can advance them without rebuilding the list.
+    watch_progress_rows: Rc<RefCell<Vec<WatchRow>>>,
     ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
     ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, gtk::Image, String)>>>,
     ctx_video_meta: Rc<RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>>,
@@ -325,6 +383,17 @@ pub(crate) enum YtInput {
     PlaybackStateChanged {
         playing_video_id: Option<String>,
         playing: bool,
+    },
+    /// Per-second position of the running long-form video (from the transport):
+    /// update its rows' progress widgets in place.
+    VideoProgressTick {
+        video_id: String,
+        position_ms: i64,
+        duration_ms: i64,
+    },
+    /// The video played to its end → show its rows as "Listened" right away.
+    VideoFinished {
+        video_id: String,
     },
     RefreshBroken,
     SetView(YtView),
@@ -449,6 +518,16 @@ pub(crate) enum YtOutput {
     /// A "refresh all" worker was started / finished → drive the spinner.
     RefreshStarted(bool),
     RefreshFinished,
+    /// Live progress of the running "refresh all" (channel `done` of `total`,
+    /// name of the channel being fetched) for the overlay's progress bar.
+    RefreshProgress {
+        done: usize,
+        total: usize,
+        label: String,
+    },
+    /// Outcome of a refresh, shown briefly in the overlay — informational toasts
+    /// are disabled app-wide, so this is the only feedback channel left.
+    RefreshSummary(String),
     /// Share a selection (a YouTube channel or video) over device sync.
     Share(crate::core::sync::share::Selection),
     /// The sort slot was rebuilt → the parent refreshes the shared title-bar
@@ -462,7 +541,20 @@ pub(crate) enum YtCmd {
     SearchFailed(u64),
     SearchThumbsReady(u64),
     ChannelFetched(Option<String>),
-    ChannelsRefreshed,
+    /// One channel of a "refresh all" is about to be fetched.
+    RefreshProgress {
+        done: usize,
+        total: usize,
+        title: String,
+    },
+    /// All channels re-fetched, with what the run brought in.
+    ChannelsRefreshed {
+        updated: usize,
+        failed: usize,
+        new_videos: usize,
+    },
+    /// The refresh worker found no usable yt-dlp — nothing was fetched.
+    RefreshUnavailable,
     VideoMeta {
         video_id: String,
         uploader: Option<String>,
@@ -731,6 +823,7 @@ impl Component for YtPage {
             search_seq: 0,
             search: Rc::new(RefCell::new(None)),
             video_play_buttons: Rc::new(RefCell::new(Vec::new())),
+            watch_progress_rows: Rc::new(RefCell::new(Vec::new())),
             ctx_video_play: Rc::new(RefCell::new(None)),
             ctx_video_download: Rc::new(RefCell::new(None)),
             ctx_video_meta: Rc::new(RefCell::new(None)),
@@ -760,33 +853,32 @@ impl Component for YtPage {
     fn update(&mut self, msg: YtInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             YtInput::Reload => self.reload_channels(&sender),
-            YtInput::RefreshAll => {
-                if self.channel_items.is_empty() {
-                    return;
-                }
-                sender.spawn_oneshot_command(|| {
-                    if let Ok(lib) = Library::open() {
-                        if youtube::available() {
-                            for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
-                                if let Some(t) = thumb.as_deref() {
-                                    crate::core::online::cache_youtube_thumb(t);
-                                }
-                                let _ = refresh_channel_videos(id, &title, &url);
-                            }
-                        }
-                    }
-                    YtCmd::ChannelsRefreshed
-                });
-                let _ = sender.output(YtOutput::RefreshStarted(true));
-            }
+            YtInput::RefreshAll => self.refresh_all_channels(&sender),
             YtInput::ReloadRecent => self.reload_yt_recent(&sender),
             YtInput::PlaybackStateChanged {
                 playing_video_id,
                 playing,
             } => {
+                // Switching videos means the previous one now has a stored
+                // position — "Recent" has to be rebuilt to show it (and in the
+                // right order).
+                let switched =
+                    playing_video_id.is_some() && playing_video_id != self.playing_video_id;
                 self.playing_video_id = playing_video_id;
                 self.playing = playing;
                 self.refresh_yt_icons();
+                if switched {
+                    self.reload_yt_recent(&sender);
+                }
+            }
+            YtInput::VideoProgressTick {
+                video_id,
+                position_ms,
+                duration_ms,
+            } => self.apply_watch_progress(&video_id, position_ms, duration_ms, false),
+            YtInput::VideoFinished { video_id } => {
+                self.apply_watch_progress(&video_id, 0, 0, true);
+                self.reload_yt_recent(&sender);
             }
             YtInput::RefreshBroken => self.ytdlp_broken = youtube::extraction_broken(),
             YtInput::SetView(v) => {
@@ -924,9 +1016,9 @@ impl Component for YtPage {
                 {
                     let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
                     sender.spawn_command(move |out| {
-                        let _ = out.send(YtCmd::ChannelFetched(refresh_channel_videos(
-                            id, &title, &url,
-                        )));
+                        let fetched =
+                            refresh_channel_videos(id, &title, &url).map(|(title, _)| title);
+                        let _ = out.send(YtCmd::ChannelFetched(fetched));
                     });
                 }
             }
@@ -1027,9 +1119,30 @@ impl Component for YtPage {
                     }
                 }
             }
-            YtCmd::ChannelsRefreshed => {
+            YtCmd::RefreshProgress { done, total, title } => {
+                let _ = sender.output(YtOutput::RefreshProgress {
+                    done,
+                    total,
+                    label: title,
+                });
+            }
+            YtCmd::ChannelsRefreshed {
+                updated,
+                failed,
+                new_videos,
+            } => {
                 let _ = sender.output(YtOutput::RefreshFinished);
+                let _ = sender.output(YtOutput::RefreshSummary(refresh_summary_text(
+                    updated, failed, new_videos,
+                )));
+                self.ytdlp_broken = youtube::extraction_broken();
                 self.reload_channels(&sender);
+            }
+            YtCmd::RefreshUnavailable => {
+                let _ = sender.output(YtOutput::RefreshFinished);
+                let _ = sender.output(YtOutput::RefreshSummary(gettext(
+                    "yt-dlp is missing — install or update it in the settings",
+                )));
             }
             YtCmd::VideoMeta {
                 video_id,
@@ -1394,6 +1507,8 @@ impl YtPage {
             3 => gettext("This month"),
             _ => gettext("Older"),
         };
+        // Stored watch positions in one query, instead of one per row.
+        let watched = self.library.all_yt_progress().unwrap_or_default();
         let mut cur_bucket: Option<usize> = None;
         let mut group: Option<adw::PreferencesGroup> = None;
         for (i, v) in self.newest_items.iter().enumerate() {
@@ -1411,12 +1526,6 @@ impl YtPage {
                 subtitle.push_str(" · ");
                 subtitle.push_str(&fmt_published(p));
             }
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&v.title))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
             let cover = crate::core::online::youtube_cover_path(&v.video_id)
                 .or_else(|| {
                     crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
@@ -1426,28 +1535,19 @@ impl YtPage {
                         .as_deref()
                         .and_then(crate::core::online::youtube_thumb_path)
                 });
-            row.add_prefix(&cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
-            if let Some(d) = v.duration.filter(|d| *d > 0) {
-                row.add_suffix(&duration_chip(d));
-            }
-            row.add_suffix(&self.video_play_button(sender, &v.video_id, &v.title));
-            {
-                let (sender, vid, title) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                row.connect_activated(move |_| {
-                    let _ = sender.output(YtOutput::PlayVideo {
-                        video_id: vid.clone(),
-                        title: title.clone(),
-                    });
-                });
-            }
-            on_secondary_click(&row, {
-                let sender = sender.clone();
-                move || sender.input(YtInput::ShowNewestDetail(i))
-            });
-            on_long_press(&row, {
-                let sender = sender.clone();
-                move || sender.input(YtInput::ShowNewestDetail(i))
-            });
+            let row = self.video_card(
+                sender,
+                &v.video_id,
+                &v.title,
+                &subtitle,
+                cover.as_deref(),
+                v.duration,
+                watched.get(&v.video_id),
+                {
+                    let sender = sender.clone();
+                    move || sender.input(YtInput::ShowNewestDetail(i))
+                },
+            );
             if let Some(g) = &group {
                 g.add(&row);
             }
@@ -1468,6 +1568,7 @@ impl YtPage {
         if self.recent_items.is_empty() {
             return;
         }
+        let watched = self.library.all_yt_progress().unwrap_or_default();
         let group = adw::PreferencesGroup::new();
         for r in &self.recent_items {
             let row = adw::ActionRow::builder()
@@ -1539,45 +1640,28 @@ impl YtPage {
                 group.add(&row);
                 continue;
             }
-            if let Some(a) = r.artist.as_deref().filter(|s| !s.trim().is_empty()) {
-                row.set_subtitle(&gtk::glib::markup_escape_text(a));
-            }
             let cover = crate::core::online::youtube_cover_path(&r.video_id).or_else(|| {
                 crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&r.video_id))
             });
-            row.add_prefix(&cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
-            if let Some(d) = r.duration.filter(|d| *d > 0) {
-                row.add_suffix(&duration_chip(d));
-            }
-            row.add_suffix(&self.video_play_button(sender, &r.video_id, &r.title));
-            {
-                let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                row.connect_activated(move |_| {
-                    let _ = sender.output(YtOutput::PlayVideo {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    });
-                });
-            }
-            on_secondary_click(&row, {
-                let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                move || {
-                    sender.input(YtInput::ShowVideoDetail {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    });
-                }
-            });
-            on_long_press(&row, {
-                let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                move || {
-                    sender.input(YtInput::ShowVideoDetail {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    })
-                }
-            });
-            group.add(&row);
+            let card = self.video_card(
+                sender,
+                &r.video_id,
+                &r.title,
+                r.artist.as_deref().unwrap_or_default(),
+                cover.as_deref(),
+                r.duration,
+                watched.get(&r.video_id),
+                {
+                    let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
+                    move || {
+                        sender.input(YtInput::ShowVideoDetail {
+                            video_id: vid.clone(),
+                            title: t.clone(),
+                        });
+                    }
+                },
+            );
+            group.add(&card);
         }
         self.recent_list.append(&group);
         self.refresh_yt_icons();
@@ -1850,59 +1934,40 @@ impl YtPage {
                     .build(),
             );
         }
+        let watched = self.library.all_yt_progress().unwrap_or_default();
         for v in &videos {
-            // Subtitle: upload date · duration (either may be missing).
-            let mut subtitle = String::new();
-            if let Some(p) = v.published.as_deref().filter(|p| !p.trim().is_empty()) {
-                subtitle.push_str(&fmt_published(p));
-            }
-            if let Some(d) = v.duration.map(fmt_duration) {
-                if !subtitle.is_empty() {
-                    subtitle.push_str(" · ");
-                }
-                subtitle.push_str(&d);
-            }
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&v.title))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
+            // Subtitle: upload date (the runtime sits on the right, like the
+            // podcast lists; repeating it here would be noise).
+            let subtitle = v
+                .published
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .map(fmt_published)
+                .unwrap_or_default();
             let cover = crate::core::online::youtube_cover_path(&v.video_id)
                 .or_else(|| {
                     crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
                 })
                 .or_else(|| channel_thumb.clone());
-            row.add_prefix(&cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
-            row.add_suffix(&self.video_play_button(sender, &v.video_id, &v.title));
-            {
-                let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                row.connect_activated(move |_| {
-                    let _ = sender.output(YtOutput::PlayVideo {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    });
-                });
-            }
-            on_secondary_click(&row, {
-                let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                move || {
-                    sender.input(YtInput::ShowVideoDetail {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    });
-                }
-            });
-            on_long_press(&row, {
-                let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                move || {
-                    sender.input(YtInput::ShowVideoDetail {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    })
-                }
-            });
-            group.add(&row);
+            let card = self.video_card(
+                sender,
+                &v.video_id,
+                &v.title,
+                &subtitle,
+                cover.as_deref(),
+                v.duration,
+                watched.get(&v.video_id),
+                {
+                    let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
+                    move || {
+                        sender.input(YtInput::ShowVideoDetail {
+                            video_id: vid.clone(),
+                            title: t.clone(),
+                        });
+                    }
+                },
+            );
+            group.add(&card);
         }
         content.append(&group);
         self.push_subpage(
@@ -2463,6 +2528,129 @@ impl YtPage {
         btn
     }
 
+    /// A video row built like the podcast lists: cover, title and subtitle in a
+    /// text column with the progress line underneath (long-form items only),
+    /// then the runtime and the play button. A `AdwActionRow` has no room under
+    /// its subtitle, so the row is a plain box — the progress line then reads
+    /// exactly like the one in "Newest"/"Recently" for podcasts.
+    #[allow(clippy::too_many_arguments)]
+    fn video_card(
+        &self,
+        sender: &ComponentSender<Self>,
+        video_id: &str,
+        title: &str,
+        subtitle: &str,
+        cover: Option<&str>,
+        duration: Option<i64>,
+        watched: Option<&(i64, bool)>,
+        on_detail: impl Fn() + Clone + 'static,
+    ) -> gtk::Box {
+        let card = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        let top = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(12)
+            .margin_top(8)
+            .margin_bottom(8)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        top.append(&cover_widget(cover, "video-x-generic-symbolic"));
+        let text = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .hexpand(true)
+            .valign(gtk::Align::Center)
+            .build();
+        let title_lbl = gtk::Label::builder()
+            .label(title)
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        title_lbl.add_css_class("heading");
+        text.append(&title_lbl);
+        if !subtitle.trim().is_empty() {
+            let sub = gtk::Label::builder()
+                .label(subtitle)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            sub.add_css_class("dim-label");
+            text.append(&sub);
+        }
+        if let Some(prow) = self.watch_progress_widget(video_id, duration, watched) {
+            text.append(&prow);
+        }
+        top.append(&text);
+        if let Some(d) = duration.filter(|d| *d > 0) {
+            top.append(&duration_chip(d));
+        }
+        top.append(&self.video_play_button(sender, video_id, title));
+        card.append(&top);
+        // Tapping the row plays, like the action rows it replaces (the play
+        // button handles its own clicks, so this never double-fires).
+        {
+            let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
+            let click = gtk::GestureClick::new();
+            click.connect_released(move |g, _, _, _| {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                let _ = sender.output(YtOutput::PlayVideo {
+                    video_id: vid.clone(),
+                    title: t.clone(),
+                });
+            });
+            card.add_controller(click);
+        }
+        on_secondary_click(&card, on_detail.clone());
+        on_long_press(&card, on_detail);
+        card
+    }
+
+    /// Watch-progress suffix for a row, for **long-form** items only (talks,
+    /// streams, podcasts — a song keeps its plain row). Returns `None` for
+    /// anything shorter than [`youtube::LONGFORM_SECS`]; otherwise a widget that
+    /// is registered for the live tick and starts out hidden until there is
+    /// something to show.
+    fn watch_progress_widget(
+        &self,
+        video_id: &str,
+        total_secs: Option<i64>,
+        progress: Option<&(i64, bool)>,
+    ) -> Option<gtk::Box> {
+        if !youtube::is_longform(total_secs) {
+            return None;
+        }
+        let row = crate::ui::app_helpers::progress_row_box();
+        let (position_ms, finished) = progress.copied().unwrap_or((0, false));
+        fill_progress_row(&row, position_ms, total_secs, finished);
+        self.watch_progress_rows.borrow_mut().push(WatchRow {
+            video_id: video_id.to_string(),
+            row: row.clone(),
+            total_secs,
+        });
+        Some(row)
+    }
+
+    /// Refreshes the watch-progress widgets of every visible row of `video_id`
+    /// (driven by the transport tick). Rows that left the widget tree are
+    /// dropped along the way.
+    fn apply_watch_progress(
+        &self,
+        video_id: &str,
+        position_ms: i64,
+        duration_ms: i64,
+        finished: bool,
+    ) {
+        let mut rows = self.watch_progress_rows.borrow_mut();
+        rows.retain(|r| r.row.root().is_some());
+        for entry in rows.iter().filter(|r| r.video_id == video_id) {
+            let total = entry
+                .total_secs
+                .or_else(|| (duration_ms > 0).then_some(duration_ms / 1000));
+            fill_progress_row(&entry.row, position_ms, total, finished);
+        }
+    }
+
     /// Updates the Play/Pause icons of visible video rows and the detail "Play"
     /// row from the mirrored playback state.
     fn refresh_yt_icons(&self) {
@@ -2513,6 +2701,63 @@ impl YtPage {
             icon.set_icon_name(Some("list-add-symbolic"));
             row.set_sensitive(true);
         }
+    }
+
+    /// "Refresh all" from the header button: re-fetch the newest videos of every
+    /// subscribed channel, one after another, reporting progress so the loading
+    /// overlay shows a bar with the channel being fetched. The channel list comes
+    /// from the DB rather than the (possibly not-yet-built) view state, and the
+    /// cases that used to end in silence — no subscriptions, no network, no
+    /// yt-dlp — now say what happened.
+    fn refresh_all_channels(&mut self, sender: &ComponentSender<Self>) {
+        let channels = self.library.channels().unwrap_or_default();
+        if channels.is_empty() {
+            let _ = sender.output(YtOutput::RefreshSummary(gettext("No subscriptions")));
+            return;
+        }
+        if !crate::ui::app_helpers::online_available() {
+            let _ = sender.output(YtOutput::RefreshSummary(gettext("No internet connection")));
+            return;
+        }
+        let total = channels.len();
+        let _ = sender.output(YtOutput::RefreshStarted(true));
+        let _ = sender.output(YtOutput::RefreshProgress {
+            done: 0,
+            total,
+            label: channels[0].1.clone(),
+        });
+        sender.spawn_command(move |out| {
+            if !youtube::available() {
+                let _ = out.send(YtCmd::RefreshUnavailable);
+                return;
+            }
+            let (mut updated, mut failed, mut new_videos) = (0usize, 0usize, 0usize);
+            for (i, (id, title, url, thumb, _)) in channels.iter().enumerate() {
+                let _ = out.send(YtCmd::RefreshProgress {
+                    done: i,
+                    total,
+                    title: title.clone(),
+                });
+                if let Some(t) = thumb.as_deref() {
+                    crate::core::online::cache_youtube_thumb(t);
+                }
+                match refresh_channel_videos(*id, title, url) {
+                    Some((_, fresh)) => {
+                        updated += 1;
+                        new_videos += fresh;
+                    }
+                    None => {
+                        tracing::warn!("YouTube refresh returned no videos for {url}");
+                        failed += 1;
+                    }
+                }
+            }
+            let _ = out.send(YtCmd::ChannelsRefreshed {
+                updated,
+                failed,
+                new_videos,
+            });
+        });
     }
 
     /// Opens (replacing any earlier one) the non-blocking progress popup for a
@@ -2929,5 +3174,26 @@ impl YtPage {
                 None => true,
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refresh_summary_text;
+
+    #[test]
+    fn summary_lists_only_the_parts_that_happened() {
+        // Untranslated in the test binary, so the msgids come back verbatim.
+        assert_eq!(refresh_summary_text(1, 0, 0), "1 channel updated");
+        assert_eq!(
+            refresh_summary_text(3, 0, 5),
+            "3 channels updated · 5 new videos"
+        );
+        assert_eq!(
+            refresh_summary_text(2, 1, 0),
+            "2 channels updated · 1 channel failed"
+        );
+        // Nothing reached at all: still say something rather than show a blank.
+        assert_eq!(refresh_summary_text(0, 0, 0), "Nothing new");
     }
 }

@@ -689,6 +689,27 @@ impl App {
             .set_episode_progress(&url, guarded_resume(pos, dur));
     }
 
+    /// Saves the watch position of the running YouTube item — but only for
+    /// long-form ones (talks/streams/podcasts, see
+    /// [`crate::core::youtube::LONGFORM_SECS`]); songs are meant to start from
+    /// the beginning next time. No-op when no video is playing.
+    pub(crate) fn save_yt_progress(&self) {
+        let Some(vid) = self.youtube.playing_video_id.clone() else {
+            return;
+        };
+        let Some(pos) = self.player.position_ms() else {
+            return;
+        };
+        let dur = self
+            .player
+            .duration_ms()
+            .unwrap_or(self.mini.track_duration_ms);
+        if !crate::core::youtube::is_longform((dur > 0).then_some(dur / 1000)) {
+            return;
+        }
+        let _ = self.library.set_yt_progress(&vid, guarded_resume(pos, dur));
+    }
+
     /// Finalizes the running listening session and writes it as one
     /// `play_event` into the statistics. `completed` = listened to the end (EOS).
     /// Without a session nothing happens (idempotent).
@@ -813,8 +834,9 @@ impl App {
                 .map(|p| std::path::Path::new(&p).exists())
                 .unwrap_or(false);
             if !has_local {
-                // A freshly selected video always starts from the beginning.
-                let resume = 0;
+                // Long-form items (talks/streams/podcasts) continue where they
+                // were left off; songs have no stored position and start at 0.
+                let resume = self.library.yt_progress(video_id).unwrap_or(0).max(0);
                 // Optimistic now-playing state; the worker resolves the stream.
                 self.transport.skip_count = 0;
                 self.transport.playing_path = Some(path.clone());
@@ -859,8 +881,11 @@ impl App {
         let track = self.library.track_by_path(&path_str).ok().flatten();
         let resume_ms = match self.transport.forced_start_ms.take() {
             Some(ms) => ms.max(0),
-            None => match &track {
-                Some(t) if self.should_resume(t) => t.resume_ms,
+            // An offline copy of a long-form YouTube item has no library row —
+            // its resume point lives in `yt_progress`, like the streamed case.
+            None => match (&track, &yt_video) {
+                (_, Some(vid)) => self.library.yt_progress(vid).unwrap_or(0).max(0),
+                (Some(t), None) if self.should_resume(t) => t.resume_ms,
                 _ => 0,
             },
         };
@@ -1356,8 +1381,12 @@ impl App {
             self.finalize_play_session(true);
             // Mark it heard so it stays in Recently/Newest as "Listened" even
             // though the resume position is cleared at the very end.
-            if let Some(url) = &self.podcasts.playing_episode_url {
-                let _ = self.library.mark_episode_finished(url);
+            if let Some(url) = self.podcasts.playing_episode_url.clone() {
+                let _ = self.library.mark_episode_finished(&url);
+                // Flip its rows to "Listened" now, instead of only after the
+                // next rebuild (which used to need a tab switch).
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::EpisodeFinished { url });
             }
             self.mini.playing = false;
             self.podcasts.playing_episode_url = None;
@@ -1372,6 +1401,17 @@ impl App {
             // as a resume point.
             if let Some(path) = self.transport.playing_path.take() {
                 let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
+            }
+            // A long-form YouTube item that ran out counts as watched: keep the
+            // mark (instead of a resume point) and show it in its rows at once.
+            if let Some(vid) = self.youtube.playing_video_id.clone() {
+                if crate::core::youtube::is_longform(
+                    (self.mini.track_duration_ms > 0).then_some(self.mini.track_duration_ms / 1000),
+                ) {
+                    let _ = self.library.mark_yt_finished(&vid);
+                    self.yt_page
+                        .emit(crate::ui::yt_page::YtInput::VideoFinished { video_id: vid });
+                }
             }
             *self.transport.close_resume.borrow_mut() = None;
             // If a single song was slipped in between, now resume the interrupted
@@ -1391,6 +1431,34 @@ impl App {
         }
     }
 
+    /// Pushes the running item's position to the list pages, so their progress
+    /// lines advance live (podcast episodes always; YouTube only for long-form
+    /// items, see [`Self::push_yt_listen_progress`]).
+    fn push_listen_progress(&self) {
+        let pos = self.mini.position_ms;
+        let dur = self.mini.track_duration_ms;
+        if let Some(url) = self.podcasts.playing_episode_url.clone() {
+            self.podcasts_page.emit(
+                crate::ui::podcasts_page::PodcastsInput::EpisodeProgressTick {
+                    url,
+                    position_ms: pos,
+                    duration_ms: dur,
+                },
+            );
+        }
+        // YouTube only for long-form items — a song's row stays plain.
+        if let Some(video_id) = self.youtube.playing_video_id.clone() {
+            if crate::core::youtube::is_longform((dur > 0).then_some(dur / 1000)) {
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::VideoProgressTick {
+                        video_id,
+                        position_ms: pos,
+                        duration_ms: dur,
+                    });
+            }
+        }
+    }
+
     /// 5 s timer: persist the resume point of the running track/episode.
     pub(crate) fn on_persist_resume(&mut self) {
         if self.mini.playing {
@@ -1398,9 +1466,15 @@ impl App {
             // a hard crash loses at most ~5 s of position, while normal
             // pause/seek/track-switch/close still save immediately.
             self.save_resume();
-            if self.podcasts.playing_episode_url.is_some() {
+            if let Some(url) = self.podcasts.playing_episode_url.clone() {
                 self.save_episode_progress();
+                // Now that a position exists, a freshly started episode belongs
+                // in "Recently" — the page pulls it in if it is missing.
+                self.podcasts_page.emit(
+                    crate::ui::podcasts_page::PodcastsInput::EpisodeProgressPersisted { url },
+                );
             }
+            self.save_yt_progress();
             if let Some(pos) = self.player.position_ms() {
                 self.mpris.set_position(pos);
             }
@@ -1434,6 +1508,9 @@ impl App {
             }
             // (Episode resume is persisted on the 5 s PersistResume timer,
             // not here — no per-second DB write on the UI thread.)
+            // The list rows do follow every second though: the pages update the
+            // running item's progress line in place (no DB, no rebuild).
+            self.push_listen_progress();
             // Track the current chapter below the title (except while hovering).
             self.update_current_chapter();
             // Keep counting the listened time of the statistics session (wall clock, only

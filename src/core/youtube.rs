@@ -45,6 +45,17 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(1800);
 /// seconds instead of waiting out the wall-clock backstop.
 const SOCKET_TIMEOUT_SECS: &str = "30";
 
+/// From this runtime on, a video is treated as **long-form** — a talk, stream,
+/// mix or podcast rather than a song. Only those remember a watch position and
+/// show a progress line in the lists; resuming a 3-minute track mid-way is not
+/// what anyone expects.
+pub const LONGFORM_SECS: i64 = 600;
+
+/// Whether a runtime (in seconds, `None` = unknown) counts as long-form.
+pub fn is_longform(duration_secs: Option<i64>) -> bool {
+    duration_secs.is_some_and(|d| d > LONGFORM_SECS)
+}
+
 /// `$XDG_DATA_HOME/emilia/bin` – where the managed `yt-dlp` zipapp lives.
 pub fn ytdlp_dir() -> PathBuf {
     let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -693,6 +704,18 @@ fn parse_atom_published(body: &str) -> std::collections::HashMap<String, String>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn longform_starts_above_ten_minutes() {
+        // Songs: no watch position, no progress line.
+        assert!(!is_longform(None));
+        assert!(!is_longform(Some(0)));
+        assert!(!is_longform(Some(210)));
+        assert!(!is_longform(Some(LONGFORM_SECS)));
+        // Talks, streams, video podcasts.
+        assert!(is_longform(Some(LONGFORM_SECS + 1)));
+        assert!(is_longform(Some(4656)));
+    }
+
     use super::*;
 
     #[test]
