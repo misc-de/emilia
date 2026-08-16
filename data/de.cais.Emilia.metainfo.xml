@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.15" date="2026-08-16">
+      <description>
+        <p>Downloading a podcast episode now shows how far it has come and how long it will take. Updating podcasts or YouTube subscriptions shows which feed is being fetched and what the run brought in, and says so when there is nothing to update, no connection, or no yt-dlp. Listening progress in the lists keeps up with playback instead of only after switching tabs, and a finished episode is marked as listened right away. Long YouTube items — talks, streams and podcasts over ten minutes — now remember where you stopped, continue there next time and show the same progress line as podcasts.</p>
+        <p xml:lang="de">Beim Herunterladen einer Podcast-Folge sehen Sie jetzt, wie weit sie ist und wie lange es noch dauert. Beim Aktualisieren von Podcasts oder YouTube-Abos zeigt die App, welcher Feed gerade geholt wird und was dabei herauskam – und sagt Bescheid, wenn es nichts zu aktualisieren gibt, die Verbindung fehlt oder yt-dlp nicht da ist. Der Hörfortschritt in den Listen läuft jetzt live mit, statt erst nach einem Tab-Wechsel, und eine fertig gehörte Folge wird sofort als gehört markiert. Lange YouTube-Beiträge – Talks, Streams und Podcasts über zehn Minuten – merken sich jetzt die Stelle, machen dort weiter und zeigen dieselbe Fortschrittsanzeige wie Podcasts.</p>
+      </description>
+    </release>
     <release version="0.8.14" date="2026-08-12">
       <description>
         <p>YouTube subscriptions now show video titles in the app language where YouTube offers them, and a channel's video list shows each video's upload date. A missing browser identifier had made YouTube reject the app's feed requests, which silently dropped all those dates — now they come through reliably, and are kept even if a refresh temporarily fails.</p>
