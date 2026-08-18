@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.16" date="2026-08-18">
+      <description>
+        <p>YouTube downloads work again. YouTube had started rejecting them while playback still worked, and updating yt-dlp could not help because no fixed release existed yet. Emilia now picks the newer development build of yt-dlp automatically whenever the stable one has become too old to be trusted.</p>
+        <p xml:lang="de">YouTube-Downloads funktionieren wieder. YouTube hatte sie abgewiesen, während das Abspielen weiterlief, und ein yt-dlp-Update konnte nicht helfen, weil es noch keine korrigierte Version gab. Emilia nimmt jetzt automatisch die neuere Entwicklungsversion von yt-dlp, sobald die stabile zu alt ist, um ihr noch zu trauen.</p>
+      </description>
+    </release>
     <release version="0.8.15" date="2026-08-16">
       <description>
         <p>Downloading a podcast episode now shows how far it has come and how long it will take. Updating podcasts or YouTube subscriptions shows which feed is being fetched and what the run brought in, and says so when there is nothing to update, no connection, or no yt-dlp. Listening progress in the lists keeps up with playback instead of only after switching tabs, and a finished episode is marked as listened right away. Long YouTube items — talks, streams and podcasts over ten minutes — now remember where you stopped, continue there next time and show the same progress line as podcasts.</p>
