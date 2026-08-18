@@ -4,7 +4,8 @@
 //! the manifest), so the feature works out of the box once the user enables
 //! YouTube — no unverified runtime download. Because YouTube frequently breaks
 //! older `yt-dlp` versions, a newer copy can be fetched on demand into the app
-//! data dir ([`download_ytdlp`]); that copy then **takes precedence** over the
+//! data dir ([`download_ytdlp`], stable release or nightly depending on how old
+//! stable is); that copy then **takes precedence** over the
 //! bundled baseline. Outside the Flatpak a `yt-dlp` on `PATH` is used (or the
 //! on-demand download). The managed zipapp is run via `python3` (provided by the
 //! GNOME runtime); a `PATH` binary runs via its own shebang.
@@ -19,7 +20,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
@@ -30,6 +31,16 @@ use crate::core::proc;
 /// Official "latest" zipapp asset (a self-contained Python program; needs the
 /// runtime's `python3`, which the GNOME Platform provides).
 const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+/// Same zipapp built from master. Used when the stable release has gone stale –
+/// see [`download_ytdlp`].
+const YTDLP_NIGHTLY_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp";
+/// How old the stable release may be before the nightly is preferred. YouTube
+/// breaks extractors far more often than yt-dlp cuts stable releases: in August
+/// 2026 the six-week-old stable still *resolved* formats but every download died
+/// with `HTTP 403`, and no newer stable existed — so an update could not fix the
+/// very breakage it was invoked for. A stale stable is treated as suspect.
+const STABLE_MAX_AGE_DAYS: i64 = 14;
 
 /// `yt-dlp --version` (a `python3` cold start, no network) — generous probe.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(20);
@@ -115,32 +126,38 @@ pub fn version() -> Option<String> {
     (!v.is_empty()).then_some(v)
 }
 
-/// Downloads (or replaces) the latest `yt-dlp` zipapp. Writes to a temporary
-/// `*.part` file, makes it executable and renames on success, then verifies it
-/// runs. Returns the installed version. **Network – worker threads only.**
+/// Installs the newest usable `yt-dlp` zipapp: the stable release when it is
+/// fresh, otherwise the nightly. Falling back matters because a stale stable is
+/// exactly the case where "update yt-dlp" would otherwise be a no-op against a
+/// broken extractor (see [`STABLE_MAX_AGE_DAYS`]). Returns the installed
+/// version. **Network – worker threads only.**
 pub fn download_ytdlp() -> Result<String> {
+    let stable = fetch_ytdlp(YTDLP_URL);
+    if let Ok(v) = &stable {
+        // An unparseable version is not evidence of staleness – keep stable.
+        if release_age_days(v).is_none_or(|age| age <= STABLE_MAX_AGE_DAYS) {
+            return stable;
+        }
+    }
+    // Stable is unusable or stale; the nightly tracks extractor fixes. If even
+    // that fails, report the stable outcome – it is what is on disk.
+    fetch_ytdlp(YTDLP_NIGHTLY_URL).or(stable)
+}
+
+/// Fetches the `yt-dlp` zipapp from `url` into the managed path: writes a
+/// temporary `*.part` file, makes it executable and renames on success, then
+/// verifies it runs. Returns the installed version.
+fn fetch_ytdlp(url: &str) -> Result<String> {
     let dir = ytdlp_dir();
     std::fs::create_dir_all(&dir)?;
     let dest = ytdlp_path();
     let tmp = dest.with_extension("part");
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(15))
-        .build();
-    let written = {
-        let mut reader = agent
-            .get(YTDLP_URL)
-            .call()?
-            .into_reader()
-            .take(64 * 1024 * 1024); // generous cap; the zipapp is only a few MB
-        let mut file = std::fs::File::create(&tmp)?;
-        let n = std::io::copy(&mut reader, &mut file)?;
-        file.sync_all()?;
-        n
-    };
-    if written == 0 {
+    // Never leave a half-written zipapp behind: `dest` keeps whatever copy
+    // already worked, and the next attempt (or channel) starts clean.
+    if let Err(e) = download_to(url, &tmp) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(anyhow!("downloaded yt-dlp is empty"));
+        return Err(e);
     }
     std::fs::rename(&tmp, &dest)?;
     set_executable(&dest)?;
@@ -148,9 +165,49 @@ pub fn download_ytdlp() -> Result<String> {
     version().ok_or_else(|| anyhow!("yt-dlp was downloaded but does not run"))
 }
 
-/// Re-downloads the latest `yt-dlp` (YouTube changes frequently break older
-/// versions). Identical to [`download_ytdlp`]; kept separate for a clear call
-/// site / intent at the UI layer.
+/// Streams `url` into `tmp`, treating an empty response as a failure.
+fn download_to(url: &str, tmp: &Path) -> Result<()> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .build();
+    let mut reader = agent.get(url).call()?.into_reader().take(64 * 1024 * 1024); // generous cap; the zipapp is only a few MB
+    let mut file = std::fs::File::create(tmp)?;
+    let written = std::io::copy(&mut reader, &mut file)?;
+    file.sync_all()?;
+    if written == 0 {
+        return Err(anyhow!("downloaded yt-dlp is empty"));
+    }
+    Ok(())
+}
+
+/// Age in days of a `yt-dlp` release, read from its date-based version string
+/// (`YYYY.MM.DD`; nightlies append a `.HHMMSS` build stamp). `None` when the
+/// string is not such a date – callers must then not infer staleness.
+fn release_age_days(version: &str) -> Option<i64> {
+    let mut parts = version.trim().split('.');
+    let y: i64 = parts.next()?.parse().ok()?;
+    let m: i64 = parts.next()?.parse().ok()?;
+    let d: i64 = parts.next()?.parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let now_days = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as i64 / 86_400;
+    Some(now_days - days_from_civil(y, m, d))
+}
+
+/// Days since the Unix epoch for a civil date (algorithm after Howard Hinnant).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
+/// Re-downloads `yt-dlp` (YouTube changes frequently break older versions).
+/// Identical to [`download_ytdlp`]; kept separate for a clear call site /
+/// intent at the UI layer.
 pub fn update_ytdlp() -> Result<String> {
     download_ytdlp()
 }
@@ -717,6 +774,53 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn civil_dates_map_to_epoch_days() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(1970, 1, 2), 1);
+        assert_eq!(days_from_civil(1969, 12, 31), -1);
+        // Leap day and the day after, to catch an off-by-one in the March-based
+        // year shift.
+        assert_eq!(days_from_civil(2024, 2, 29), 19_782);
+        assert_eq!(days_from_civil(2024, 3, 1), 19_783);
+        assert_eq!(days_from_civil(2026, 8, 18), 20_683);
+    }
+
+    #[test]
+    fn release_age_reads_the_version_date() {
+        let today = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            / 86_400;
+        // Inverse of `days_from_civil`, so the test builds version strings from
+        // day offsets instead of hard-coding dates it would age out of.
+        let ymd = |days: i64| {
+            let z = days + 719_468;
+            let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+            let doe = z - era * 146_097;
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let y = yoe + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            format!("{}.{m:02}.{d:02}", if m <= 2 { y + 1 } else { y })
+        };
+        assert_eq!(release_age_days(&ymd(today)), Some(0));
+        assert_eq!(release_age_days(&ymd(today - 30)), Some(30));
+        // Nightlies carry a build stamp after the date – still a valid date.
+        assert_eq!(
+            release_age_days(&format!("{}.073947", ymd(today - 3))),
+            Some(3)
+        );
+        // Anything that is not a date must stay unknown, never "stale".
+        assert_eq!(release_age_days("unknown"), None);
+        assert_eq!(release_age_days("2026.13.01"), None);
+        assert_eq!(release_age_days("2026.07"), None);
+        assert_eq!(release_age_days(""), None);
+    }
 
     #[test]
     fn split_title_artist_and_title() {
