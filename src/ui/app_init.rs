@@ -437,8 +437,14 @@ impl App {
                 let cur = env!("CARGO_PKG_VERSION");
                 if online && crate::core::youtube::available() && prev.as_deref() != Some(cur) {
                     let _ = crate::core::youtube::update_ytdlp();
+                    // Mark the version as refreshed only once the refresh could
+                    // actually run. Marking it unconditionally burnt the single
+                    // per-version attempt on an offline first start, and with no
+                    // managed copy on disk the weekly auto-update never takes
+                    // over — leaving the install stuck on the bundled baseline
+                    // until the next app version.
+                    let _ = lib.set_setting("yt_dlp_app_version", cur);
                 }
-                let _ = lib.set_setting("yt_dlp_app_version", cur);
                 if online && crate::core::youtube::available() {
                     for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
                         if let Some(t) = thumb.as_deref() {
