@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.17" date="2026-08-18">
+      <description>
+        <p>YouTube downloads work again. YouTube had started rejecting them while playback still worked, and updating yt-dlp could not help because no fixed release existed yet. Emilia now picks the newer development build of yt-dlp automatically whenever the stable one has become too old to be trusted, and it no longer skips that refresh when the first start after an update happens without a connection.</p>
+        <p xml:lang="de">YouTube-Downloads funktionieren wieder. YouTube hatte sie abgewiesen, während das Abspielen weiterlief, und ein yt-dlp-Update konnte nicht helfen, weil es noch keine korrigierte Version gab. Emilia nimmt jetzt automatisch die neuere Entwicklungsversion von yt-dlp, sobald die stabile zu alt ist, um ihr noch zu trauen – und lässt diese Auffrischung nicht mehr aus, wenn der erste Start nach einem Update ohne Verbindung stattfindet.</p>
+      </description>
+    </release>
     <release version="0.8.16" date="2026-08-18">
       <description>
         <p>YouTube downloads work again. YouTube had started rejecting them while playback still worked, and updating yt-dlp could not help because no fixed release existed yet. Emilia now picks the newer development build of yt-dlp automatically whenever the stable one has become too old to be trusted.</p>
