@@ -1244,20 +1244,31 @@ pub enum AddProgress {
 pub fn add_to_library(
     video_id: &str,
     title_hint: &str,
+    artist_hint: Option<&str>,
     music_dir: &str,
     cover: Option<&str>,
     overwrite: bool,
 ) -> Result<AddOutcome, String> {
-    add_to_library_progress(video_id, title_hint, music_dir, cover, overwrite, |_| {})
+    add_to_library_progress(
+        video_id,
+        title_hint,
+        artist_hint,
+        music_dir,
+        cover,
+        overwrite,
+        |_| {},
+    )
 }
 
 /// Like [`add_to_library`], but reports coarse progress (prepare → download %
 /// → process) via `on`, so a caller can drive a live progress popup. The
 /// download percentage is the only fine-grained signal; metadata/cover fetch
 /// and transcoding are reported as single phase changes.
+#[allow(clippy::too_many_arguments)]
 pub fn add_to_library_progress(
     video_id: &str,
     title_hint: &str,
+    artist_hint: Option<&str>,
     music_dir: &str,
     cover: Option<&str>,
     overwrite: bool,
@@ -1265,24 +1276,38 @@ pub fn add_to_library_progress(
 ) -> Result<AddOutcome, String> {
     on(AddProgress::Preparing);
     let meta = video_meta(video_id).ok();
-    let artist = meta
-        .as_ref()
-        .and_then(|m| m.uploader.clone())
-        .map(|c| clean_channel_name(&c))
-        .filter(|s| !s.trim().is_empty());
-    let title = meta
+    let raw_title = meta
         .as_ref()
         .map(|m| m.title.clone())
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| title_hint.to_string());
 
-    let (album, dz_cover) = match artist.as_deref() {
-        Some(a) => match crate::core::online::track_cover(a, &title) {
-            Some((bytes, alb)) => (alb.filter(|s| !s.trim().is_empty()), Some(bytes)),
-            None => (None, None),
-        },
-        None => (None, None),
+    // What YouTube offers is a channel name and a title like
+    // "Artist - Song (Official Video)". Split that into artist/title first …
+    let (split_artist, _, split_title) = split_title(
+        &raw_title,
+        meta.as_ref().and_then(|m| m.uploader.as_deref()),
+    );
+    // … but a caller that passes an `artist_hint` took *both* hints from a
+    // better source than YouTube (a station's song recognition), so its pair
+    // wins over anything derived from the video.
+    let (hint_artist, lookup_title) = match artist_hint.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(a) => (
+            Some(a.to_string()),
+            match title_hint.trim() {
+                "" => split_title,
+                t => t.to_string(),
+            },
+        ),
+        None => (split_artist, split_title),
     };
+    // Finally let a music database have the say on the actual tags.
+    let (artist, title, album, dz_cover) =
+        match crate::core::online::track_tags(hint_artist.as_deref(), &lookup_title) {
+            Some(t) => (t.artist.or(hint_artist), t.title, t.album, t.cover),
+            // Nothing found online — the cleaned-up hints still beat the raw title.
+            None => (hint_artist, lookup_title, None, None),
+        };
 
     let mut dest = PathBuf::from(music_dir);
     dest.push("YouTube");
@@ -1328,9 +1353,12 @@ pub fn add_to_library_progress(
             genre: None,
             track_no: None,
             disc_no: None,
-            duration_ms: meta
-                .and_then(|m| m.duration)
-                .map(|s| s.saturating_mul(1000)),
+            // The transcoded file is the truth (yt-dlp reports the *video*
+            // length, which the mp3 need not match); its metadata is the fallback.
+            duration_ms: crate::core::scanner::read_meta(&dest).2.or_else(|| {
+                meta.and_then(|m| m.duration)
+                    .map(|s| s.saturating_mul(1000))
+            }),
             resume_ms: 0,
             year: None,
         };
@@ -1395,7 +1423,9 @@ pub fn add_video_to_album(
             genre: None,
             track_no: Some(track_no),
             disc_no: disc,
-            duration_ms: None,
+            // Read back from the transcoded file — there is no yt-dlp metadata
+            // here, and without it the album list shows no runtime for the row.
+            duration_ms: crate::core::scanner::read_meta(&dest).2,
             resume_ms: 0,
             year,
         };

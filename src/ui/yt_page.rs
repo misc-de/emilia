@@ -450,10 +450,14 @@ pub(crate) enum YtInput {
     AddToLibrary {
         video_id: String,
         title: String,
+        /// Artist from a better source than YouTube (e.g. a radio stream's song
+        /// recognition), used as the hint for the online metadata lookup.
+        artist: Option<String>,
     },
     AddToLibraryConfirmed {
         video_id: String,
         title: String,
+        artist: Option<String>,
     },
     PlaylistToLibrary {
         url: String,
@@ -578,6 +582,9 @@ pub(crate) enum YtCmd {
     LibraryExists {
         video_id: String,
         title: String,
+        /// Carried through so "Overwrite" reruns the import with the same
+        /// artist hint the first attempt had.
+        artist: Option<String>,
         dest: String,
     },
     PlaylistSongs {
@@ -1070,12 +1077,16 @@ impl Component for YtPage {
                     });
                 }
             }
-            YtInput::AddToLibrary { video_id, title } => {
-                self.yt_add_video_to_library(&sender, video_id, title, false)
-            }
-            YtInput::AddToLibraryConfirmed { video_id, title } => {
-                self.yt_add_video_to_library(&sender, video_id, title, true)
-            }
+            YtInput::AddToLibrary {
+                video_id,
+                title,
+                artist,
+            } => self.yt_add_video_to_library(&sender, video_id, title, artist, false),
+            YtInput::AddToLibraryConfirmed {
+                video_id,
+                title,
+                artist,
+            } => self.yt_add_video_to_library(&sender, video_id, title, artist, true),
             YtInput::PlaylistToLibrary { url, title } => {
                 self.yt_playlist_to_library(&sender, url, title)
             }
@@ -1184,8 +1195,9 @@ impl Component for YtPage {
             YtCmd::LibraryExists {
                 video_id,
                 title,
+                artist,
                 dest,
-            } => self.on_cmd_yt_library_exists(&sender, video_id, title, dest),
+            } => self.on_cmd_yt_library_exists(&sender, video_id, title, artist, dest),
             YtCmd::PlaylistSongs { url, title, result } => {
                 self.on_cmd_yt_playlist_songs(&sender, url, title, result)
             }
@@ -2171,6 +2183,7 @@ impl YtPage {
                 sender.input(YtInput::AddToLibrary {
                     video_id: vid.clone(),
                     title: t.clone(),
+                    artist: None,
                 });
                 // Close the detail view; the progress popup takes over the feedback.
                 dialog.close();
@@ -2910,6 +2923,7 @@ impl YtPage {
         sender: &ComponentSender<Self>,
         video_id: String,
         title: String,
+        artist: Option<String>,
         overwrite: bool,
     ) {
         if self.downloading_videos.contains(&video_id) {
@@ -2938,6 +2952,7 @@ impl YtPage {
             let cmd = match youtube::add_to_library_progress(
                 &vid,
                 &title,
+                artist.as_deref(),
                 &music,
                 cover.as_deref(),
                 overwrite,
@@ -2950,6 +2965,7 @@ impl YtPage {
                 Ok(youtube::AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
                     video_id: vid,
                     title,
+                    artist,
                     dest: dest.to_string_lossy().into_owned(),
                 },
                 Err(e) => YtCmd::LibraryAdded {
@@ -2982,9 +2998,14 @@ impl YtPage {
                 let _ = out.send(YtCmd::LibraryProgress { done: 0, total });
                 for (i, v) in videos.into_iter().enumerate() {
                     let cover = crate::core::online::youtube_cover_path(&v.id);
-                    if let Ok(youtube::AddOutcome::Added) =
-                        youtube::add_to_library(&v.id, &v.title, &music, cover.as_deref(), false)
-                    {
+                    if let Ok(youtube::AddOutcome::Added) = youtube::add_to_library(
+                        &v.id,
+                        &v.title,
+                        None,
+                        &music,
+                        cover.as_deref(),
+                        false,
+                    ) {
                         n += 1;
                     }
                     let _ = out.send(YtCmd::LibraryProgress { done: i + 1, total });
@@ -3082,6 +3103,7 @@ impl YtPage {
         sender: &ComponentSender<Self>,
         video_id: String,
         title: String,
+        artist: Option<String>,
         dest: String,
     ) {
         self.close_progress_popup(Some(&video_id));
@@ -3110,6 +3132,7 @@ impl YtPage {
                     sender.input(YtInput::AddToLibraryConfirmed {
                         video_id: video_id.clone(),
                         title: title.clone(),
+                        artist: artist.clone(),
                     });
                 }
             });

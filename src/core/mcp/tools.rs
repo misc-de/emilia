@@ -873,12 +873,14 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let vid = video_id.clone();
             std::thread::spawn(move || {
                 let res =
-                    youtube::add_to_library(&vid, &vid, &music, None, false).map(|o| match o {
-                        youtube::AddOutcome::Added => "added to library".to_string(),
-                        youtube::AddOutcome::Exists(p) => {
-                            format!("already present: {}", p.display())
-                        }
-                    });
+                    youtube::add_to_library(&vid, &vid, None, &music, None, false).map(
+                        |o| match o {
+                            youtube::AddOutcome::Added => "added to library".to_string(),
+                            youtube::AddOutcome::Exists(p) => {
+                                format!("already present: {}", p.display())
+                            }
+                        },
+                    );
                 jobs.finish(job_id, res);
             });
             Ok(json!({ "ok": true, "job_id": job_id, "video_id": video_id }))

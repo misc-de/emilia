@@ -1737,6 +1737,9 @@ pub enum Cmd {
     HeardResolved {
         video_id: Option<String>,
         title: String,
+        /// Artist as the song recognition reported it — a better metadata hint
+        /// for the import than anything YouTube says.
+        artist: Option<String>,
         download: bool,
     },
     /// The canonical (MusicBrainz) tracklist of an album finished fetching and
@@ -4540,8 +4543,9 @@ impl Component for App {
             Cmd::HeardResolved {
                 video_id,
                 title,
+                artist,
                 download,
-            } => self.on_heard_resolved(video_id, title, download),
+            } => self.on_heard_resolved(video_id, title, artist, download),
             Cmd::AlbumTracklistFetched { artist, album } => {
                 self.refill_album_page(&sender, &artist, &album);
             }

@@ -812,6 +812,7 @@ impl App {
             let _ = out.send(crate::ui::app::Cmd::HeardResolved {
                 video_id,
                 title,
+                artist,
                 download,
             });
         });
@@ -823,6 +824,7 @@ impl App {
         &mut self,
         video_id: Option<String>,
         title: String,
+        artist: Option<String>,
         download: bool,
     ) {
         // The online lookup returned → take down the spinner.
@@ -832,8 +834,14 @@ impl App {
             return;
         };
         if download {
+            // The recognized artist/title come from the station, not from a
+            // YouTube channel name — pass them on as the metadata hint.
             self.yt_page
-                .emit(crate::ui::yt_page::YtInput::AddToLibrary { video_id, title });
+                .emit(crate::ui::yt_page::YtInput::AddToLibrary {
+                    video_id,
+                    title,
+                    artist,
+                });
         } else {
             self.yt_play_video(video_id, title);
         }

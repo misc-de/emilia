@@ -111,6 +111,25 @@ pub struct CanonicalTrack {
     pub length_ms: Option<i64>,
 }
 
+/// Canonical tags of a single track, as a music database (Deezer) knows them.
+/// Used to tag a download from its *real* metadata instead of a YouTube channel
+/// name and video title.
+pub struct TrackTags {
+    /// The database's artist — not the uploader/channel.
+    pub artist: Option<String>,
+    pub title: String,
+    pub album: Option<String>,
+    /// Front cover of the single/album, if one could be fetched.
+    pub cover: Option<Vec<u8>>,
+}
+
+impl TrackTags {
+    /// Reduces the hit to what the cover-only callers want.
+    fn into_cover(self) -> Option<(Vec<u8>, Option<String>)> {
+        self.cover.map(|c| (c, self.album))
+    }
+}
+
 /// HTTP client with a shared connection pool and timeouts.
 /// Cloneable (the `ureq::Agent` shares the pool/configuration) – so it can be
 /// passed to multiple fetch threads.
@@ -376,20 +395,24 @@ impl OnlineClient {
         // dump into the artist tag and that make the search miss.
         let cleaned = artist.split(['(', '[']).next().unwrap_or(artist).trim();
         if !cleaned.is_empty() && cleaned != artist.trim() {
-            if let Some(hit) = self.search_track_cover(artist, title)? {
+            if let Some(hit) = self
+                .search_track_tags(artist, title)?
+                .and_then(TrackTags::into_cover)
+            {
                 return Ok(Some(hit));
             }
-            return self.search_track_cover(cleaned, title);
+            return Ok(self
+                .search_track_tags(cleaned, title)?
+                .and_then(TrackTags::into_cover));
         }
-        self.search_track_cover(artist, title)
+        Ok(self
+            .search_track_tags(artist, title)?
+            .and_then(TrackTags::into_cover))
     }
 
-    /// One Deezer track search for (artist, title) → (cover bytes, album name).
-    fn search_track_cover(
-        &self,
-        artist: &str,
-        title: &str,
-    ) -> Result<Option<(Vec<u8>, Option<String>)>> {
+    /// One Deezer track search for (artist, title) → the database's own artist,
+    /// title, album and cover. An empty `artist` searches by title alone.
+    fn search_track_tags(&self, artist: &str, title: &str) -> Result<Option<TrackTags>> {
         let q = if artist.trim().is_empty() {
             format!("track:\"{}\"", title.replace('"', " "))
         } else {
@@ -407,17 +430,35 @@ impl OnlineClient {
             Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
-        let Some(album) = search.data.into_iter().next().and_then(|t| t.album) else {
+        let Some(hit) = search.data.into_iter().next() else {
             return Ok(None);
         };
-        let cover = [album.cover_big, album.cover_medium, album.cover]
-            .into_iter()
-            .flatten()
-            .find(|u| !u.is_empty());
-        let Some(cover_url) = cover else {
-            return Ok(None);
+        let non_empty = |s: String| Some(s).filter(|s| !s.trim().is_empty());
+        let album = hit.album;
+        let cover_url = album
+            .as_ref()
+            .and_then(|a| {
+                [&a.cover_big, &a.cover_medium, &a.cover]
+                    .into_iter()
+                    .flatten()
+                    .find(|u| !u.is_empty())
+            })
+            .cloned();
+        // The cover is a second request and may well fail — the tags are still
+        // worth returning without it.
+        let cover = match cover_url {
+            Some(u) => self.get_image(&u)?,
+            None => None,
         };
-        Ok(self.get_image(&cover_url)?.map(|b| (b, album.title)))
+        Ok(Some(TrackTags {
+            artist: hit.artist.and_then(|a| a.name).and_then(non_empty),
+            title: hit
+                .title
+                .and_then(non_empty)
+                .unwrap_or_else(|| title.to_string()),
+            album: album.and_then(|a| a.title).and_then(non_empty),
+            cover,
+        }))
     }
 
     /// Loads several images of an album from the Cover Art Archive (front, back,
@@ -770,6 +811,57 @@ pub fn track_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>
         .flatten()
 }
 
+/// Looks up the canonical tags of a track in a music database (Deezer), so a
+/// download can be tagged from real metadata instead of a YouTube channel name
+/// and video title. `artist` is only a *hint*: it narrows the search, but the
+/// returned artist is the database's. Tried hint-first, then title-only — a
+/// channel like "NoCopyrightSounds" would otherwise sink every search.
+///
+/// `None` when nothing plausible was found; the caller then keeps what it had.
+pub fn track_tags(artist: Option<&str>, title: &str) -> Option<TrackTags> {
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let client = shared_client();
+    let hint = artist.map(str::trim).filter(|s| !s.is_empty());
+    for query_artist in hint.into_iter().chain(std::iter::once("")) {
+        // Deezer answers *something* for almost any fuzzy query, so only trust a
+        // hit whose title really is the one we asked for.
+        match client.search_track_tags(query_artist, title) {
+            Ok(Some(tags)) if loose_match(&tags.title, title) => return Some(tags),
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Track lookup failed ({title}): {e}");
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// Compares two track/artist names loosely: case- and punctuation-insensitive,
+/// and tolerant of one carrying a suffix the other lacks ("Song" vs
+/// "Song (Radio Edit)").
+fn loose_match(a: &str, b: &str) -> bool {
+    let (a, b) = (normalize_name(a), normalize_name(b));
+    !a.is_empty() && !b.is_empty() && (a.starts_with(&b) || b.starts_with(&a))
+}
+
+/// Lowercases, drops everything but letters/digits and collapses whitespace.
+/// Apostrophes vanish without leaving a gap, so "Ain't" and "Aint" normalize
+/// to the same string.
+fn normalize_name(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter(|c| !"'\u{2019}\u{02BC}`\u{00B4}".contains(*c))
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn recording_cover(
     raw_title: &str,
     station: Option<&str>,
@@ -780,7 +872,10 @@ pub fn recording_cover(
     // is cached under it so the recordings list finds it ([`recording_cover_path`]).
     let key = candidates.first().cloned();
     for (artist, title) in &candidates {
-        if let Ok(Some(hit)) = client.search_track_cover(artist.as_deref().unwrap_or(""), title) {
+        if let Ok(Some(hit)) = client
+            .search_track_tags(artist.as_deref().unwrap_or(""), title)
+            .map(|t| t.and_then(TrackTags::into_cover))
+        {
             if let Some((ka, kt)) = &key {
                 let _ = std::fs::write(
                     recording_cover_file(ka.as_deref().unwrap_or(""), kt),
@@ -1365,7 +1460,17 @@ struct DzTrackSearch {
 #[derive(Deserialize)]
 struct DzTrack {
     #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    artist: Option<DzTrackArtist>,
+    #[serde(default)]
     album: Option<DzAlbum>,
+}
+
+#[derive(Deserialize)]
+struct DzTrackArtist {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1449,4 +1554,30 @@ pub(crate) fn percent_encode(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loose_match_ignores_case_and_punctuation() {
+        assert!(loose_match(
+            "Never Gonna Give You Up",
+            "never gonna give you up"
+        ));
+        assert!(loose_match("Ain't No Sunshine", "Aint No Sunshine"));
+        // One side carrying a version suffix must still match.
+        assert!(loose_match("Take On Me (Radio Edit)", "Take On Me"));
+        assert!(loose_match("Sky High", "Sky High - Remastered 2011"));
+    }
+
+    #[test]
+    fn loose_match_rejects_a_different_song() {
+        assert!(!loose_match("Take On Me", "Take My Breath Away"));
+        assert!(!loose_match("Yesterday", "Help"));
+        // Empty never matches — an empty query must not accept any hit.
+        assert!(!loose_match("", "Yesterday"));
+        assert!(!loose_match("Yesterday", "   "));
+    }
 }
