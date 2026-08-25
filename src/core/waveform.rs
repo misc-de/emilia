@@ -235,8 +235,8 @@ fn decode_pcm(path: &Path, mono: bool) -> Result<(Vec<i16>, u32, u32)> {
             if let Ok(map) = buf.map_readable() {
                 let data = map.as_slice();
                 samples.reserve(data.len() / 2);
-                for c in data.chunks_exact(2) {
-                    samples.push(i16::from_le_bytes([c[0], c[1]]));
+                for c in data.as_chunks::<2>().0 {
+                    samples.push(i16::from_le_bytes(*c));
                 }
             }
         }
