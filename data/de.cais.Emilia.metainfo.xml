@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.18" date="2026-08-25">
+      <description>
+        <p>Songs downloaded from YouTube now carry proper tags: artist, title, album and cover come from a music database instead of the channel name and the raw video title, and a song recognised on a radio stream keeps the artist it was recognised as. Detail dialogs no longer stay small when you unfold shownotes, lyrics or the info block — they grow to the height the text needs, as far as the window allows.</p>
+        <p xml:lang="de">Von YouTube heruntergeladene Titel haben jetzt richtige Tags: Interpret, Titel, Album und Cover kommen aus einer Musikdatenbank statt aus Kanalname und rohem Videotitel, und ein im Radiostream erkannter Song behält den erkannten Interpreten. Detail-Dialoge bleiben nicht mehr klein, wenn man Shownotes, Songtexte oder den Info-Block aufklappt – sie wachsen auf die Höhe, die der Text braucht, so weit das Fenster es zulässt.</p>
+      </description>
+    </release>
     <release version="0.8.17" date="2026-08-18">
       <description>
         <p>YouTube downloads work again. YouTube had started rejecting them while playback still worked, and updating yt-dlp could not help because no fixed release existed yet. Emilia now picks the newer development build of yt-dlp automatically whenever the stable one has become too old to be trusted, and it no longer skips that refresh when the first start after an update happens without a connection.</p>
