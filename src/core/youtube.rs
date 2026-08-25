@@ -27,6 +27,7 @@ use serde::Deserialize;
 
 use crate::core::net;
 use crate::core::proc;
+use crate::core::xml;
 
 /// Official "latest" zipapp asset (a self-contained Python program; needs the
 /// runtime's `python3`, which the GNOME Platform provides).
@@ -721,37 +722,47 @@ fn parse_atom_published(body: &str) -> std::collections::HashMap<String, String>
     let mut reader = quick_xml::Reader::from_str(body);
     let mut in_entry = false;
     let mut field: Option<&'static str> = None;
+    // A value arrives in pieces (`a &amp; b` is three events), so collect it
+    // until the element closes. See `core::xml::push_text`.
+    let mut text = String::new();
     let (mut cur_id, mut cur_pub): (Option<String>, Option<String>) = (None, None);
     loop {
         match reader.read_event() {
-            Ok(Event::Start(e)) => match local_atom_name(e.name().as_ref()).as_str() {
-                "entry" => {
-                    in_entry = true;
-                    cur_id = None;
-                    cur_pub = None;
-                }
-                "videoId" if in_entry => field = Some("id"),
-                "published" if in_entry => field = Some("published"),
-                _ => {}
-            },
-            Ok(Event::Text(t)) if field.is_some() => {
-                let val = t.unescape().unwrap_or_default().trim().to_string();
-                match field {
-                    Some("id") => cur_id = Some(val),
-                    Some("published") => cur_pub = Some(val),
+            Ok(Event::Start(e)) => {
+                match local_atom_name(e.name().as_ref()).as_str() {
+                    "entry" => {
+                        in_entry = true;
+                        cur_id = None;
+                        cur_pub = None;
+                    }
+                    "videoId" if in_entry => field = Some("id"),
+                    "published" if in_entry => field = Some("published"),
                     _ => {}
                 }
+                text.clear();
             }
-            Ok(Event::End(e)) => match local_atom_name(e.name().as_ref()).as_str() {
-                "entry" => {
-                    if let (Some(id), Some(p)) = (cur_id.take(), cur_pub.take()) {
-                        map.insert(id, p);
-                    }
-                    in_entry = false;
+            Ok(ev @ (Event::Text(_) | Event::GeneralRef(_))) => {
+                if field.is_some() {
+                    xml::push_text(&mut text, &ev);
                 }
-                "videoId" | "published" => field = None,
-                _ => {}
-            },
+            }
+            Ok(Event::End(e)) => {
+                let name = local_atom_name(e.name().as_ref());
+                let val = text.trim().to_string();
+                match (name.as_str(), field) {
+                    ("videoId", Some("id")) => cur_id = Some(val),
+                    ("published", Some("published")) => cur_pub = Some(val),
+                    ("entry", _) => {
+                        if let (Some(id), Some(p)) = (cur_id.take(), cur_pub.take()) {
+                            map.insert(id, p);
+                        }
+                        in_entry = false;
+                    }
+                    _ => {}
+                }
+                field = None;
+                text.clear();
+            }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }

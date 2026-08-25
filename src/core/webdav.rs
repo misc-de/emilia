@@ -18,6 +18,7 @@ use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTRO
 
 use crate::core::net;
 use crate::core::scanner;
+use crate::core::xml;
 use crate::model::Source;
 
 /// Characters to encode in a single path segment (excluding the `/` separator).
@@ -327,6 +328,9 @@ fn parse_propfind(xml: &str) -> Vec<RawEntry> {
     let mut out = Vec::new();
     let mut cur: Option<RawEntry> = None;
     let mut field: Option<Field> = None;
+    // A value arrives in pieces (`a &amp; b` is three events), so collect it
+    // until the element closes. See `core::xml::push_text`.
+    let mut text = String::new();
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
@@ -342,10 +346,17 @@ fn parse_propfind(xml: &str) -> Vec<RawEntry> {
                     }
                     _ => {}
                 }
+                text.clear();
             }
-            Ok(Event::Text(t)) => {
+            Ok(ev @ (Event::Text(_) | Event::GeneralRef(_))) => {
+                if field.is_some() {
+                    xml::push_text(&mut text, &ev);
+                }
+            }
+            Ok(Event::End(e)) => {
+                let name = local_name(e.name().as_ref());
                 if let (Some(c), Some(f)) = (cur.as_mut(), field) {
-                    let val = t.unescape().unwrap_or_default().trim().to_string();
+                    let val = text.trim().to_string();
                     if !val.is_empty() {
                         match f {
                             Field::Href => c.href = val,
@@ -353,15 +364,13 @@ fn parse_propfind(xml: &str) -> Vec<RawEntry> {
                         }
                     }
                 }
-            }
-            Ok(Event::End(e)) => {
-                let name = local_name(e.name().as_ref());
                 if name == "response" {
                     if let Some(c) = cur.take() {
                         out.push(c);
                     }
                 }
                 field = None;
+                text.clear();
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -769,6 +778,28 @@ mod tests {
             names,
             vec![("Alben".to_string(), true), ("song.mp3".to_string(), false)]
         );
+    }
+
+    #[test]
+    fn entities_survive_in_hrefs_and_display_names() {
+        // A name containing "&" reaches us as `&amp;`, which quick-xml reports
+        // as its own event between two text events – the value must not be cut
+        // off at the entity.
+        let xml = r#"<?xml version="1.0"?>
+        <d:multistatus xmlns:d="DAV:">
+          <d:response><d:href>/dav/Rock%20&amp;%20Roll/Best%20of%20A%20&amp;%20B.mp3</d:href>
+            <d:propstat><d:prop><d:displayname>Best of A &amp; B.mp3</d:displayname>
+            <d:resourcetype/></d:prop></d:propstat>
+          </d:response>
+        </d:multistatus>"#;
+        let raw = parse_propfind(xml);
+        assert_eq!(raw.len(), 1);
+        assert_eq!(
+            raw[0].href,
+            "/dav/Rock%20&%20Roll/Best%20of%20A%20&%20B.mp3"
+        );
+        assert_eq!(raw[0].display_name.as_deref(), Some("Best of A & B.mp3"));
+        assert!(!raw[0].is_dir);
     }
 
     #[test]

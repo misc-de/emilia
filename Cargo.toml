@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.18"
+version = "0.8.19"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -25,8 +25,8 @@ mpris-server = "0.10.0"
 # XDG camera portal (blocking API) in the QR scanner, so the desktop Flatpak
 # needs no `--device=all`. See src/core/sync/scanner.rs.
 zbus = "5"
-rss = { version = "2.0.13", default-features = false }
-gettext-rs = { version = "0.7", features = ["gettext-system"] }
+rss = { version = "2.1.0", default-features = false }
+gettext-rs = { version = "0.8", features = ["gettext-system"] }
 httparse = "1"
 socket2 = "0.6"
 rcgen = { version = "0.14.8", default-features = false, features = ["ring", "pem"] }
@@ -37,7 +37,7 @@ base64 = "0.22"
 getrandom = "0.2"
 qrcode = { version = "0.14.1", default-features = false }
 async-channel = "2.5"
-quick-xml = "0.36"
+quick-xml = "0.41"
 percent-encoding = "2"
 gstreamer-app = "0.23"
 # QR *decoding* (camera scanner). default-features off → drop the heavy `image`

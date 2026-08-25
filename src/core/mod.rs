@@ -23,4 +23,5 @@ pub mod sync;
 pub mod tray;
 pub mod waveform;
 pub mod webdav;
+pub mod xml;
 pub mod youtube;

@@ -103,11 +103,16 @@ pub fn init(lang: Option<&str>) {
     // of which glibc locales are installed (the whole point of shipping our own
     // catalogs). The fallback only triggers when the env locale is unavailable,
     // so a working `de_DE`/etc. system locale is never clobbered.
-    if setlocale(LocaleCategory::LcAll, "").is_none() {
-        for fallback in ["en_US.UTF-8", "C.UTF-8"] {
-            std::env::set_var("LC_ALL", fallback);
-            if setlocale(LocaleCategory::LcAll, "").is_some() {
-                break;
+    // SAFETY: `setlocale` is not thread-safe (RUSTSEC-2026-0244) – just like
+    // the `set_var` calls around it. `init` runs exactly once, from `main` on
+    // the main thread, before any UI or worker thread exists.
+    unsafe {
+        if setlocale(LocaleCategory::LcAll, "").is_none() {
+            for fallback in ["en_US.UTF-8", "C.UTF-8"] {
+                std::env::set_var("LC_ALL", fallback);
+                if setlocale(LocaleCategory::LcAll, "").is_some() {
+                    break;
+                }
             }
         }
     }
