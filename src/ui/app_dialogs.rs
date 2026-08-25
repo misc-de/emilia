@@ -362,6 +362,7 @@ impl App {
                 }
             });
         }
+        crate::ui::app_helpers::fit_dialog_on_expand(&dialog);
         crate::ui::app_helpers::close_on_click_outside(&dialog);
         dialog.present(Some(root));
     }

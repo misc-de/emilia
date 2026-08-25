@@ -62,6 +62,7 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
     dialog.set_content_width(600);
+    crate::ui::app_helpers::fit_dialog_on_expand(dialog);
     crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
 }

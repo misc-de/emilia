@@ -140,6 +140,7 @@ fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Applicat
     // Use full width, but never wider than 600 px (on narrow windows the
     // dialog automatically shrinks to the window width).
     dialog.set_content_width(600);
+    crate::ui::app_helpers::fit_dialog_on_expand(dialog);
     crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
 }

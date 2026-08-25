@@ -57,6 +57,105 @@ pub(crate) fn close_on_click_outside(dialog: &adw::Dialog) {
     dialog.add_controller(click);
 }
 
+/// Height the dialog's content currently needs, in `content-height` units (i.e.
+/// including the header bar).
+///
+/// The detail dialogs put their content into a `GtkScrolledWindow`, and that
+/// reports a natural height measured for the child's *natural* width — for a
+/// wrapping label (shownotes, lyrics) that is the whole text on one endless
+/// line, i.e. roughly one line tall. So the dialog keeps hugging the height it
+/// had when it opened and everything a click reveals has to be scrolled inside
+/// a tiny sheet. Measuring the scroller's child for the width it actually has
+/// gives the true height; the difference to the scroller's current height is
+/// what the dialog is missing (or has too much of, after folding back in).
+fn needed_dialog_height(dialog: &adw::Dialog) -> Option<i32> {
+    let child = dialog.child()?;
+    let outer = child.height();
+    if outer <= 0 {
+        return None; // not laid out yet – nothing to correct
+    }
+    let scroller = find_scroller(&child)?;
+    let inner = scroller.child()?;
+    let width = if inner.width() > 0 {
+        inner.width()
+    } else {
+        scroller.width()
+    };
+    if width <= 0 {
+        return None;
+    }
+    let natural = inner.measure(gtk::Orientation::Vertical, width).1;
+    Some(outer + natural - scroller.height())
+}
+
+/// Grows (or shrinks) a dialog to the height its content needs after a click
+/// revealed more of it — an unfolded expander, a group that just became
+/// visible. libadwaita clamps an oversized `content-height` to the window, so
+/// the result is "as tall as needed, at most as tall as there is room for"
+/// instead of scrolling a long text inside a mini dialog.
+///
+/// The revealing is animated, so a single measurement right after the click
+/// would only catch a fraction of the final height: re-fit until the height
+/// settles (or the dialog is gone).
+pub(crate) fn fit_dialog_height(dialog: &adw::Dialog) {
+    let weak = dialog.downgrade();
+    let mut last = -1;
+    let mut settled = 0u8;
+    let mut ticks = 0u8;
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        use gtk::glib::ControlFlow;
+        let Some(dialog) = weak.upgrade() else {
+            return ControlFlow::Break;
+        };
+        ticks += 1;
+        // Hard stop, so content that never settles can't keep the timer alive.
+        if ticks > 24 || !dialog.is_visible() {
+            return ControlFlow::Break;
+        }
+        let Some(height) = needed_dialog_height(&dialog) else {
+            return ControlFlow::Continue;
+        };
+        if height == last {
+            settled += 1;
+        } else {
+            settled = 0;
+            last = height;
+            dialog.set_content_height(height);
+        }
+        if settled >= 3 {
+            ControlFlow::Break
+        } else {
+            ControlFlow::Continue
+        }
+    });
+}
+
+/// Hooks every expander of an assembled dialog up to [`fit_dialog_height`], so
+/// unfolding shownotes, lyrics or an info block grows the dialog itself instead
+/// of turning it into a scroll box. Call after `set_child`, before presenting.
+pub(crate) fn fit_dialog_on_expand(dialog: &adw::Dialog) {
+    fn hook(widget: &gtk::Widget) {
+        if let Some(row) = widget.downcast_ref::<adw::ExpanderRow>() {
+            row.connect_expanded_notify(|row| {
+                if let Some(dialog) = row
+                    .ancestor(adw::Dialog::static_type())
+                    .and_then(|w| w.downcast::<adw::Dialog>().ok())
+                {
+                    fit_dialog_height(&dialog);
+                }
+            });
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            hook(&c);
+            child = c.next_sibling();
+        }
+    }
+    if let Some(child) = dialog.child() {
+        hook(&child);
+    }
+}
+
 /// Applies the color scheme ("system"/"dark"/"light") via the global
 /// libadwaita StyleManager. "system" follows the desktop setting.
 pub(crate) fn apply_color_scheme(code: &str) {
