@@ -13,12 +13,18 @@ unberührt und läuft weiter über `make flatpak-build` mit `de.cais.Emilia.yaml
 
 Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
 
+> Die beiden laufen bewusst auf **verschiedenen Runtimes**: Flathub baut gegen
+> `org.gnome.Platform//50` (der Flathub-Linter warnt bei älteren), der eigene
+> Repo-Release bleibt vorerst auf `//49`, solange der ARM64-Build-Host noch
+> darauf steht. Beim Anheben von `//49` im lokalen Manifest muss dort erst
+> `org.gnome.Platform//50` + `Sdk//50` installiert werden.
+
 ## Status der Flathub-Voraussetzungen
 
 - [x] Reverse-DNS-App-ID, MetaInfo/Desktop/Icon valide, OARS, GPL-3.0-or-later
 - [x] Screenshots im `<screenshots>`-Block (`data/screenshots/`, Raw-URLs auf `main`)
 - [x] Offline-Build via `generated-sources.json` (verifiziert: baut ohne Netz)
-- [x] **App-Quelle auf `type: git` + Tag** → `de.cais.Emilia.flathub.yaml` (`tag: v0.6.1` + `commit:` gesetzt; Tag gepusht). Nicht von Hand pflegen: `scripts/sync-flathub.sh` zieht `tag`/`commit` aus dem MetaInfo-Top-Release + Git-Tag, der pre-commit-Hook warnt bei Drift.
+- [x] **App-Quelle auf `type: git` + Tag** → `de.cais.Emilia.flathub.yaml` (aktuell `tag: v0.8.17` + `commit:` gesetzt; Tag gepusht). Nicht von Hand pflegen: `scripts/sync-flathub.sh` zieht `tag`/`commit` aus dem MetaInfo-Top-Release + Git-Tag, der pre-commit-Hook warnt bei Drift.
 
 ## Schritte für die Einreichung
 
@@ -86,7 +92,7 @@ Beide nutzen dasselbe `generated-sources.json` (Offline-Vendoring der Crates).
 Legende: ✅ begründet/unkritisch · ⚠️ Reviewer hakt nach, Antwort steht ·
 ❌ echter Handlungsbedarf vor Einreichung (siehe letzter Abschnitt).
 
-### Laufzeit-Tools in `org.gnome.Platform//49` (gegen das installierte Runtime verifiziert)
+### Laufzeit-Tools in `org.gnome.Platform//50` (gegen das installierte Runtime verifiziert)
 
 Die App ruft mehrere externe Programme/GStreamer-Plugins auf. Was vorhanden ist
 und was nicht:
