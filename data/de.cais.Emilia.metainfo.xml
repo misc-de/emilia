@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.19" date="2026-08-25">
+      <description>
+        <p>Security fixes. Three flaws in libraries Emilia uses to read data from outside — podcast feeds, WebDAV responses and the device sync connection — could be abused to hang the app or exhaust its memory. All of them are closed; there is nothing to do beyond updating.</p>
+        <p xml:lang="de">Sicherheitskorrekturen. Drei Schwachstellen in Bibliotheken, mit denen Emilia Daten von außen liest – Podcast-Feeds, WebDAV-Antworten und die Geräte-Synchronisierung –, ließen sich missbrauchen, um die App hängen zu lassen oder ihren Speicher zu erschöpfen. Alle sind geschlossen; außer dem Update ist nichts zu tun.</p>
+      </description>
+    </release>
     <release version="0.8.18" date="2026-08-25">
       <description>
         <p>Songs downloaded from YouTube now carry proper tags: artist, title, album and cover come from a music database instead of the channel name and the raw video title, and a song recognised on a radio stream keeps the artist it was recognised as. Detail dialogs no longer stay small when you unfold shownotes, lyrics or the info block — they grow to the height the text needs, as far as the window allows.</p>
