@@ -2737,3 +2737,35 @@ msgid "{n} channel failed"
 msgid_plural "{n} channels failed"
 msgstr[0] ""
 msgstr[1] ""
+
+#: src/ui/setup.rs
+msgid "Tips"
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "Every entry has a menu"
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "Tracks, albums, artists and files hold more than the list shows: cover art and info, lyrics, favorites, the queue, playlists and sharing."
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "Right-click"
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "With a mouse: click an entry with the right mouse button."
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "Press and hold"
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "On a touchscreen: touch an entry and keep your finger down for a moment."
+msgstr ""
+
+#: src/ui/setup.rs
+msgid "Get started"
+msgstr ""

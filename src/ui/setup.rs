@@ -1,10 +1,11 @@
 //! First-run setup assistant, a standalone relm4 component.
 //!
 //! Shown once on the very first launch (no `setup_complete` flag and no music
-//! folder yet). It walks the user through four steps — language, "do you
-//! already have a collection?", the music folder, and which menu items to use —
-//! and reports the result to [`crate::ui::app::App`] via [`SetupOutput`], which
-//! persists it and kicks off the initial scan.
+//! folder yet). It walks the user through five steps — language, "do you
+//! already have a collection?", the music folder, which menu items to use, and
+//! a closing tip on how to open an entry's context menu — and reports the
+//! result to [`crate::ui::app::App`] via [`SetupOutput`], which persists it and
+//! kicks off the initial scan.
 //!
 //! Like [`crate::ui::sync_page::SyncPage`] the component owns no visible root;
 //! it builds and presents a single modal [`adw::Dialog`] on demand and swaps an
@@ -23,7 +24,7 @@ use crate::i18n::{gettext, switch_language, system_language_code, LANGUAGES};
 use crate::ui::app::SECTIONS;
 
 /// Number of wizard steps (0..STEPS-1).
-const STEPS: usize = 4;
+const STEPS: usize = 5;
 
 /// The setup-wizard component. Holds the chosen values plus the few widgets
 /// that have to be updated as the user moves between steps.
@@ -242,12 +243,13 @@ impl SetupPage {
             gettext("Collection"),
             gettext("Folder"),
             gettext("Features"),
+            gettext("Tips"),
         ];
         for (i, caption) in captions.iter().enumerate() {
             if i > 0 {
                 let line = gtk::Separator::new(gtk::Orientation::Horizontal);
                 line.set_valign(gtk::Align::Center);
-                line.set_width_request(28);
+                line.set_width_request(20);
                 line.set_margin_bottom(18);
                 stepper.append(&line);
             }
@@ -265,6 +267,9 @@ impl SetupPage {
             let cap = gtk::Label::new(Some(caption));
             cap.add_css_class("caption");
             cap.add_css_class("dim-label");
+            // Five captions plus their connectors would overflow a narrow phone;
+            // ellipsizing lets the row shrink instead of pushing the dialog wide.
+            cap.set_ellipsize(gtk::pango::EllipsizeMode::End);
             item.append(&circle);
             item.append(&cap);
             stepper.append(&item);
@@ -281,6 +286,8 @@ impl SetupPage {
             .add_named(&self.build_folder_page(sender), Some("s2"));
         self.view_stack
             .add_named(&self.build_features_page(sender), Some("s3"));
+        self.view_stack
+            .add_named(&self.build_tips_page(), Some("s4"));
 
         // --- Bottom navigation (Cancel/Back / Next-or-Continue) ---
         // The label is set per-step in `apply_step` ("Cancel" on step 0).
@@ -589,6 +596,54 @@ impl SetupPage {
         Self::page_scroller(&page)
     }
 
+    /// Closing step: how to reach an entry's context menu. Both input styles
+    /// are always shown — the wizard has no idea whether the user is on a
+    /// phone, on a desktop, or on a convertible that is both.
+    fn build_tips_page(&self) -> gtk::ScrolledWindow {
+        let page = Self::page_box();
+        page.append(&Self::step_header(
+            "xsi-view-more-symbolic",
+            &gettext("Every entry has a menu"),
+        ));
+        let hint = gtk::Label::new(Some(&gettext(
+            "Tracks, albums, artists and files hold more than the list shows: cover art and info, lyrics, favorites, the queue, playlists and sharing.",
+        )));
+        hint.add_css_class("dim-label");
+        hint.set_wrap(true);
+        hint.set_justify(gtk::Justification::Center);
+        page.append(&hint);
+
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
+            .build();
+        for (icon, title, subtitle) in [
+            (
+                "input-mouse-symbolic",
+                gettext("Right-click"),
+                gettext("With a mouse: click an entry with the right mouse button."),
+            ),
+            (
+                "emilia-longpress-symbolic",
+                gettext("Press and hold"),
+                gettext("On a touchscreen: touch an entry and keep your finger down for a moment."),
+            ),
+        ] {
+            let row = adw::ActionRow::builder()
+                .title(title)
+                .subtitle(subtitle)
+                .build();
+            row.set_subtitle_lines(3);
+            let img = gtk::Image::from_icon_name(icon);
+            img.set_pixel_size(24);
+            img.add_css_class("accent");
+            row.add_prefix(&img);
+            list.append(&row);
+        }
+        page.append(&list);
+        Self::page_scroller(&page)
+    }
+
     /// Sets the folder step's heading/subtitle from the collection choice.
     fn apply_folder_text(&self) {
         if self.has_collection {
@@ -647,7 +702,7 @@ impl SetupPage {
         });
         let last = self.step + 1 == STEPS;
         self.next_btn.set_label(&if last {
-            gettext("Continue")
+            gettext("Get started")
         } else {
             gettext("Next")
         });

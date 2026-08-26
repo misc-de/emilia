@@ -3083,6 +3083,29 @@ msgid_plural "{n} channels failed"
 msgstr[0] "{n} Kanal fehlgeschlagen"
 msgstr[1] "{n} Kanäle fehlgeschlagen"
 
+msgid "Tips"
+msgstr "Tipps"
+
+msgid "Every entry has a menu"
+msgstr "Jeder Eintrag hat ein Menü"
+
+msgid "Tracks, albums, artists and files hold more than the list shows: cover art and info, lyrics, favorites, the queue, playlists and sharing."
+msgstr "Titel, Alben, Künstler und Dateien bieten mehr, als die Liste zeigt: Cover und Infos, Liedtext, Favoriten, Queue, Playlists und Teilen."
+
+msgid "Right-click"
+msgstr "Rechtsklick"
+
+msgid "With a mouse: click an entry with the right mouse button."
+msgstr "Mit der Maus: einen Eintrag mit der rechten Maustaste anklicken."
+
+msgid "Press and hold"
+msgstr "Gedrückt halten"
+
+msgid "On a touchscreen: touch an entry and keep your finger down for a moment."
+msgstr "Auf dem Touchscreen: einen Eintrag antippen und den Finger kurz liegen lassen."
+
+msgid "Get started"
+msgstr "Los geht’s"
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 
