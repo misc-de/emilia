@@ -152,7 +152,7 @@ fn fetch_ytdlp(url: &str) -> Result<String> {
     let dir = ytdlp_dir();
     std::fs::create_dir_all(&dir)?;
     let dest = ytdlp_path();
-    let tmp = dest.with_extension("part");
+    let tmp = crate::core::net::part_path(&dest);
 
     // Never leave a half-written zipapp behind: `dest` keeps whatever copy
     // already worked, and the next attempt (or channel) starts clean.
@@ -171,13 +171,20 @@ fn download_to(url: &str, tmp: &Path) -> Result<()> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
         .build();
-    let mut reader = agent.get(url).call()?.into_reader().take(64 * 1024 * 1024); // generous cap; the zipapp is only a few MB
+    let resp = agent.get(url).call()?;
+    // generous cap; the zipapp is only a few MB
+    const CAP: u64 = 64 * 1024 * 1024;
+    let expected = crate::core::net::check_content_length(&resp, CAP)?;
+    let mut reader = resp.into_reader().take(CAP);
     let mut file = std::fs::File::create(tmp)?;
     let written = std::io::copy(&mut reader, &mut file)?;
     file.sync_all()?;
     if written == 0 {
         return Err(anyhow!("downloaded yt-dlp is empty"));
     }
+    // A half-transferred zipapp would fail the `version()` probe later anyway;
+    // catching it here reports the real cause instead of "does not run".
+    crate::core::net::check_complete(written, expected)?;
     Ok(())
 }
 

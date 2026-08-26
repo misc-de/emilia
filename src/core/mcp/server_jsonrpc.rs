@@ -8,11 +8,13 @@
 //!
 //! Binds to `127.0.0.1` by default (local hosts only); "public" mode binds to
 //! `0.0.0.0` and wraps every connection in rustls TLS (the same maintained 0.23
-//! stack as sync). A bearer token is always required.
+//! stack as sync). A bearer token is always required, and no more than
+//! [`MAX_CONNECTIONS`] are served at once so an unauthenticated peer cannot
+//! spend the app's memory on thread stacks.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,6 +33,15 @@ const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY: usize = 8 * 1024 * 1024;
 /// Port fallbacks if the preferred one is taken.
 const PORT_ATTEMPTS: u16 = 10;
+/// Maximum connections served at once.
+///
+/// Each connection gets its own thread, and the bearer check runs *inside* it —
+/// so without a bound, an unauthenticated peer could open connections faster
+/// than the [`IO_TIMEOUT`] retires them and exhaust memory with thread stacks
+/// (on the phone hardware this targets, well before that on the desktop).
+/// Generous for the intended use — one assistant talking to the app — and tight
+/// enough that the accept loop stays the only unbounded resource.
+const MAX_CONNECTIONS: usize = 16;
 
 /// A running JSON-RPC server bound to a port, optionally TLS-wrapped.
 pub struct JsonRpcServer {
@@ -40,6 +51,34 @@ pub struct JsonRpcServer {
     handler: Arc<ConnHandler>,
     stop: Arc<AtomicBool>,
     port: u16,
+    /// Connections currently in flight, bounded by [`MAX_CONNECTIONS`].
+    live: Arc<AtomicUsize>,
+}
+
+/// One slot in the connection budget, released on drop — including when the
+/// connection thread panics, so a slot can never leak.
+struct ConnPermit(Arc<AtomicUsize>);
+
+impl ConnPermit {
+    /// Claims a slot, or `None` when [`MAX_CONNECTIONS`] are already in flight.
+    fn acquire(live: &Arc<AtomicUsize>) -> Option<Self> {
+        let mut cur = live.load(Ordering::Relaxed);
+        loop {
+            if cur >= MAX_CONNECTIONS {
+                return None;
+            }
+            match live.compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Relaxed) {
+                Ok(_) => return Some(Self(Arc::clone(live))),
+                Err(actual) => cur = actual,
+            }
+        }
+    }
+}
+
+impl Drop for ConnPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// Everything needed to serve one connection, independent of the accept loop.
@@ -88,6 +127,7 @@ impl JsonRpcServer {
             handler: Arc::new(ConnHandler { tls, token, ctx }),
             stop,
             port,
+            live: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -107,6 +147,7 @@ impl JsonRpcServer {
             }),
             stop,
             port,
+            live: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -117,7 +158,9 @@ impl JsonRpcServer {
     /// Blocking accept loop. Returns when the stop flag is set or the listener
     /// errors. Each connection is served on its own short-lived thread so a slow
     /// request (e.g. a `yt-dlp` network search that takes seconds) never stalls
-    /// the accept loop or blocks other in-flight requests behind it.
+    /// the accept loop or blocks other in-flight requests behind it — up to
+    /// [`MAX_CONNECTIONS`] at a time; beyond that new connections are refused
+    /// rather than queued, so the thread count stays bounded.
     pub fn run(self) {
         loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -125,8 +168,20 @@ impl JsonRpcServer {
             }
             match self.listener.accept() {
                 Ok((sock, _addr)) => {
+                    // Claim the slot *before* spawning: authentication happens
+                    // inside the connection, so the budget has to be enforced
+                    // while the peer is still unauthenticated.
+                    let Some(permit) = ConnPermit::acquire(&self.live) else {
+                        Self::refuse(sock, self.handler.tls.is_some());
+                        continue;
+                    };
                     let handler = Arc::clone(&self.handler);
-                    std::thread::spawn(move || handler.serve_connection(sock));
+                    std::thread::spawn(move || {
+                        // Held for the connection's lifetime; frees the slot on
+                        // return *and* on panic.
+                        let _permit = permit;
+                        handler.serve_connection(sock);
+                    });
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(ACCEPT_POLL);
@@ -134,6 +189,21 @@ impl JsonRpcServer {
                 Err(_) => break,
             }
         }
+    }
+
+    /// Turns away a connection over the budget, cheaply and without a thread.
+    /// In plain mode a `503` tells a legitimate client to retry; under TLS that
+    /// would need a full handshake, which is exactly the work being shed — there
+    /// the socket is simply closed.
+    fn refuse(mut sock: TcpStream, tls: bool) {
+        tracing::debug!("MCP connection refused: {MAX_CONNECTIONS} already in flight");
+        if !tls {
+            let _ = sock.set_write_timeout(Some(Duration::from_secs(1)));
+            let _ = sock.write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+        // Dropping `sock` closes it.
     }
 }
 
@@ -168,12 +238,11 @@ impl ConnHandler {
             return;
         }
 
-        // CORS preflight and an unauthenticated health probe are handled before
-        // the bearer check; everything else requires the token.
-        if req.method == "OPTIONS" {
-            http::write_status(stream, 204);
-            return;
-        }
+        // An unauthenticated health probe is handled before the bearer check;
+        // everything else requires the token — including `OPTIONS`. No
+        // `Access-Control-*` headers are sent, so browsers cannot read cross-origin
+        // responses from this server; answering preflights would only advertise a
+        // CORS story that does not exist.
         if req.method == "GET" && req.path == "/health" {
             http::write_json(stream, 200, &serde_json::json!({ "ok": true }));
             return;

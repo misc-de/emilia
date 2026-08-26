@@ -532,8 +532,14 @@ impl SyncServer {
             write_status(stream, 403);
             return Action::Continue;
         };
-        let limit = req.content_length.min(MAX_PUT);
-        match stream_to_file(stream, &req.body, limit, &dest) {
+        // Over the cap the body cannot be drained, so the stream would stay
+        // desynchronised for the next request on this connection: reject and
+        // close instead of half-reading it.
+        if req.content_length > MAX_PUT {
+            write_status(stream, 413);
+            return Action::Stop;
+        }
+        match stream_to_file(stream, &req.body, req.content_length, &dest) {
             Ok(n) => {
                 // Read in and sort the freshly received file into the library from
                 // its own tags (same as the client-as-receiver path), so it is
@@ -556,40 +562,69 @@ impl SyncServer {
     }
 }
 
-/// Streams up to `limit` bytes (the already-buffered `leftover` first, then more
-/// from `reader`) into `dest`, atomically via a `.part` file.
+/// Streams exactly `expect` bytes (the already-buffered `leftover` first, then
+/// more from `reader`) into `dest`, atomically via a `.part` file.
+///
+/// A peer that disconnects mid-upload ends the read loop with fewer bytes than
+/// announced. That is a **failed** transfer, not a short one: the partial file is
+/// discarded rather than renamed, so a dropped Wi-Fi connection can never leave a
+/// truncated track behind for the library to index.
 fn stream_to_file(
     reader: &mut impl Read,
     leftover: &[u8],
-    limit: usize,
+    expect: usize,
     dest: &Path,
 ) -> Result<u64> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = dest.with_extension("part");
-    let mut file = std::fs::File::create(&tmp)?;
+    let tmp = crate::core::net::part_path(dest);
+    let written = stream_body(reader, leftover, expect, &tmp);
+    match written {
+        Ok(n) if n == expect && n > 0 => {
+            std::fs::rename(&tmp, dest)?;
+            Ok(n as u64)
+        }
+        Ok(n) => {
+            let _ = std::fs::remove_file(&tmp);
+            if n == 0 {
+                Err(anyhow!("empty upload"))
+            } else {
+                Err(anyhow!("incomplete upload: got {n} of {expect} bytes"))
+            }
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+/// Writes the upload body to `tmp`, returning how many bytes actually arrived.
+/// Split out so [`stream_to_file`] can clean up on every failure path.
+fn stream_body(
+    reader: &mut impl Read,
+    leftover: &[u8],
+    expect: usize,
+    tmp: &Path,
+) -> Result<usize> {
+    let mut file = std::fs::File::create(tmp)?;
     let mut written = 0usize;
-    let take = leftover.len().min(limit);
+    let take = leftover.len().min(expect);
     file.write_all(&leftover[..take])?;
     written += take;
     let mut buf = [0u8; 64 * 1024];
-    while written < limit {
-        let want = (limit - written).min(buf.len());
+    while written < expect {
+        let want = (expect - written).min(buf.len());
         let n = reader.read(&mut buf[..want])?;
         if n == 0 {
-            break;
+            break; // peer went away early – caller treats this as a failure
         }
         file.write_all(&buf[..n])?;
         written += n;
     }
     file.sync_all().ok();
-    if written == 0 {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(anyhow!("empty upload"));
-    }
-    std::fs::rename(&tmp, dest)?;
-    Ok(written as u64)
+    Ok(written)
 }
 
 /// Reads the request **head** (request line + headers) from `stream` (drives the

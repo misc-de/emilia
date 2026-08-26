@@ -155,3 +155,197 @@ fn reason_phrase(status: u16) -> &'static str {
         _ => "OK",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A reader that hands out the payload in fixed-size slices, so the parser is
+    /// exercised across read boundaries the way a real socket delivers data
+    /// (a header block split mid-token is the classic parser bug).
+    struct Chunked {
+        data: Vec<u8>,
+        pos: usize,
+        chunk: usize,
+    }
+
+    impl Chunked {
+        fn new(data: impl Into<Vec<u8>>, chunk: usize) -> Self {
+            Self {
+                data: data.into(),
+                pos: 0,
+                chunk,
+            }
+        }
+    }
+
+    impl Read for Chunked {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let n = self
+                .chunk
+                .min(out.len())
+                .min(self.data.len().saturating_sub(self.pos));
+            out[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    fn post(body: &str) -> String {
+        format!(
+            "POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[test]
+    fn parses_a_normal_request() {
+        let raw = post(r#"{"jsonrpc":"2.0"}"#);
+        let mut s = Chunked::new(raw.clone(), 4096);
+        let mut req = read_head(&mut s).expect("head");
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.path, "/mcp");
+        assert_eq!(req.content_length, 17);
+        assert_eq!(req.header("host"), Some("x"), "lookup is case-insensitive");
+        read_body_fully(&mut s, &mut req, 8192).unwrap();
+        assert_eq!(req.body, br#"{"jsonrpc":"2.0"}"#);
+    }
+
+    /// One byte at a time: the head must still parse identically.
+    #[test]
+    fn head_split_across_reads_still_parses() {
+        let raw = post("hello");
+        for chunk in [1, 2, 3, 7, 64] {
+            let mut s = Chunked::new(raw.clone(), chunk);
+            let mut req = read_head(&mut s).unwrap_or_else(|e| panic!("chunk {chunk}: {e}"));
+            read_body_fully(&mut s, &mut req, 8192).unwrap();
+            assert_eq!(req.method, "POST", "chunk {chunk}");
+            assert_eq!(req.body, b"hello", "chunk {chunk}");
+        }
+    }
+
+    #[test]
+    fn query_string_is_stripped_from_the_path() {
+        let raw = "GET /health?verbose=1&x=2 HTTP/1.1\r\nHost: x\r\n\r\n";
+        let mut s = Chunked::new(raw, 4096);
+        let req = read_head(&mut s).unwrap();
+        assert_eq!(req.path, "/health");
+    }
+
+    /// An endless header block must be refused by the cap, not buffered forever.
+    #[test]
+    fn oversized_header_is_refused_and_bounded() {
+        // Never sends the terminating blank line.
+        let flood = format!(
+            "GET / HTTP/1.1\r\n{}",
+            "X-Pad: aaaaaaaaaaaaaaaa\r\n".repeat(8000)
+        );
+        assert!(flood.len() > MAX_HEADER);
+        let mut s = Chunked::new(flood, 4096);
+        assert!(
+            read_head(&mut s).is_err(),
+            "must not accept an unterminated head"
+        );
+    }
+
+    #[test]
+    fn truncated_and_empty_inputs_error_instead_of_hanging() {
+        // Closed before any header arrived.
+        assert!(read_head(&mut Chunked::new("", 16)).is_err());
+        // Head begun but never terminated, then EOF.
+        assert!(read_head(&mut Chunked::new("POST /mcp HTTP/1.1\r\nHost: x", 16)).is_err());
+        // Garbage that is not HTTP at all.
+        assert!(read_head(&mut Chunked::new("\x16\x03\x01\x02\x00\r\n\r\n", 16)).is_err());
+    }
+
+    /// More headers than the fixed parse buffer holds: an error, never a panic.
+    #[test]
+    fn too_many_headers_is_an_error_not_a_panic() {
+        let many = format!(
+            "GET / HTTP/1.1\r\n{}\r\n",
+            (0..64).map(|i| format!("X-{i}: v\r\n")).collect::<String>()
+        );
+        assert!(read_head(&mut Chunked::new(many, 4096)).is_err());
+    }
+
+    /// Header values are not required to be UTF-8; they must not panic the parser.
+    #[test]
+    fn non_utf8_header_value_is_lossy_not_fatal() {
+        let mut raw = b"GET / HTTP/1.1\r\nX-Bin: ".to_vec();
+        raw.extend_from_slice(&[0xff, 0xfe, 0x80]);
+        raw.extend_from_slice(b"\r\n\r\n");
+        let req = read_head(&mut Chunked::new(raw, 4096)).expect("head");
+        assert!(req.header("x-bin").is_some());
+    }
+
+    /// A body shorter than announced ends the read at EOF instead of blocking.
+    #[test]
+    fn short_body_does_not_hang() {
+        let raw = "POST /mcp HTTP/1.1\r\nContent-Length: 1000\r\n\r\nonly-this";
+        let mut s = Chunked::new(raw, 4096);
+        let mut req = read_head(&mut s).unwrap();
+        assert_eq!(req.content_length, 1000);
+        read_body_fully(&mut s, &mut req, 8192).unwrap();
+        assert_eq!(req.body, b"only-this", "stops at EOF, does not spin");
+    }
+
+    /// `max_body` wins over a larger advertised `Content-Length`.
+    #[test]
+    fn body_is_clamped_to_max_body() {
+        let raw = post(&"a".repeat(500));
+        let mut s = Chunked::new(raw, 4096);
+        let mut req = read_head(&mut s).unwrap();
+        read_body_fully(&mut s, &mut req, 100).unwrap();
+        assert_eq!(req.body.len(), 100);
+    }
+
+    /// A missing or unparsable Content-Length reads no body at all.
+    #[test]
+    fn absent_or_bogus_content_length_reads_nothing() {
+        for head in [
+            "POST /mcp HTTP/1.1\r\nHost: x\r\n\r\nignored",
+            "POST /mcp HTTP/1.1\r\nContent-Length: banana\r\n\r\nignored",
+            "POST /mcp HTTP/1.1\r\nContent-Length: -5\r\n\r\nignored",
+        ] {
+            let mut s = Chunked::new(head, 4096);
+            let mut req = read_head(&mut s).unwrap();
+            assert_eq!(req.content_length, 0, "{head:?}");
+            read_body_fully(&mut s, &mut req, 8192).unwrap();
+            assert!(req.body.is_empty(), "{head:?}");
+        }
+    }
+
+    #[test]
+    fn responses_are_well_formed() {
+        let mut out = Vec::new();
+        write_json(&mut out, 200, &serde_json::json!({ "ok": true }));
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(s.contains("Content-Type: application/json\r\n"));
+        assert!(s.contains("Content-Length: 11\r\n"));
+        assert!(s.contains("Connection: close\r\n"));
+        assert!(s.ends_with("\r\n\r\n{\"ok\":true}"));
+
+        let mut out = Vec::new();
+        write_status(&mut out, 401);
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(s.contains("Content-Length: 0\r\n"));
+    }
+
+    /// Writing to a sink that fails must not panic — a peer can vanish mid-write.
+    #[test]
+    fn write_to_a_broken_sink_is_survivable() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "gone"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        write_status(&mut Broken, 200);
+        write_json(&mut Broken, 200, &serde_json::json!({ "a": 1 }));
+    }
+}

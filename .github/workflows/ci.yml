@@ -5,6 +5,10 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  # Advisories are published against dependencies that have not changed, so the
+  # audit below has to run on a clock, not only when something is pushed.
+  schedule:
+    - cron: '0 6 * * 1'
 
 env:
   CARGO_TERM_COLOR: always
@@ -43,6 +47,26 @@ jobs:
 
       - name: Tests
         run: cargo test --locked
+
+  # Fails on a reported *vulnerability* in the dependency tree. Advisories that
+  # only warn (unmaintained / unsound / yanked crates, all of them transitive
+  # here) exit 0 and are left visible in the log rather than blocking the build —
+  # they are not fixable from this side of the tree.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit (RustSec advisory database)
+        run: cargo audit
 
   metadata:
     name: AppStream, desktop & translations

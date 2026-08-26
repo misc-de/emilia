@@ -657,18 +657,23 @@ pub fn download(c: &Creds, rel: &str, dest: &Path) -> Result<()> {
         .set("Authorization", &auth_header(c))
         .call()
         .map_err(|e| anyhow!("Download failed: {e}"))?;
-    net::check_content_length(&resp, net::MAX_DOWNLOAD_BYTES)?;
+    let expected = net::check_content_length(&resp, net::MAX_DOWNLOAD_BYTES)?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = dest.with_extension("part");
+    let tmp = net::part_path(dest);
     let mut file = std::fs::File::create(&tmp)?;
-    if let Err(e) = net::copy_capped(resp.into_reader(), &mut file, net::MAX_DOWNLOAD_BYTES) {
-        drop(file);
+    let copied = net::copy_capped(resp.into_reader(), &mut file, net::MAX_DOWNLOAD_BYTES);
+    file.sync_all().ok();
+    drop(file);
+    // A dropped connection ends the copy without an error, so verify the size
+    // before committing: a truncated file must not land in the cache, where it
+    // would be served as the real thing until the cache is cleared.
+    let complete = copied.and_then(|n| net::check_complete(n, expected));
+    if let Err(e) = complete {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    file.sync_all().ok();
     std::fs::rename(&tmp, dest)?;
     Ok(())
 }

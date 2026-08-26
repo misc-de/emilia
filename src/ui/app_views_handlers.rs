@@ -127,13 +127,7 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let meta = self
-            .libview
-            .artists
-            .guard()
-            .get(index)
-            .map(|c| c.meta.clone())
-            .or_else(|| self.libview.artists_overview.get(index).cloned());
+        let meta = self.libview.artists_overview.get(index).cloned();
         if let Some(meta) = meta {
             // Fetch the photo of the opened artist with priority.
             self.fetch_focus_artist(sender, &meta.name);
@@ -149,13 +143,7 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let meta = self
-            .libview
-            .albums
-            .guard()
-            .get(index)
-            .map(|c| c.meta.clone())
-            .or_else(|| self.libview.albums_overview.get(index).cloned());
+        let meta = self.libview.albums_overview.get(index).cloned();
         if let Some(meta) = meta {
             // Fetch the cover of the opened album with priority.
             self.fetch_focus_album(sender, &meta.artist, &meta.album);
@@ -197,16 +185,9 @@ impl App {
         // Album overview: open by album name (artist irrelevant).
         let album = self
             .libview
-            .albums
-            .guard()
+            .albums_overview
             .get(index)
-            .map(|c| c.meta.album.clone())
-            .or_else(|| {
-                self.libview
-                    .albums_overview
-                    .get(index)
-                    .map(|m| m.album.clone())
-            });
+            .map(|m| m.album.clone());
         if let Some(album) = album {
             self.open_album_by_name(sender, &album);
         }
@@ -215,16 +196,9 @@ impl App {
     pub(crate) fn on_show_single_tracks(&mut self, index: usize, sender: &ComponentSender<Self>) {
         let album = self
             .libview
-            .singles
-            .guard()
+            .singles_overview
             .get(index)
-            .map(|c| c.meta.album.clone())
-            .or_else(|| {
-                self.libview
-                    .singles_overview
-                    .get(index)
-                    .map(|m| m.album.clone())
-            });
+            .map(|m| m.album.clone());
         if let Some(album) = album {
             self.open_album_by_name(sender, &album);
         }
@@ -237,16 +211,9 @@ impl App {
     ) {
         let album = self
             .libview
-            .compilations
-            .guard()
+            .compilations_overview
             .get(index)
-            .map(|c| c.meta.album.clone())
-            .or_else(|| {
-                self.libview
-                    .compilations_overview
-                    .get(index)
-                    .map(|m| m.album.clone())
-            });
+            .map(|m| m.album.clone());
         if let Some(album) = album {
             self.open_album_by_name(sender, &album);
         }
@@ -258,13 +225,7 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let meta = self
-            .libview
-            .singles
-            .guard()
-            .get(index)
-            .map(|c| c.meta.clone())
-            .or_else(|| self.libview.singles_overview.get(index).cloned());
+        let meta = self.libview.singles_overview.get(index).cloned();
         if let Some(meta) = meta {
             self.fetch_focus_album(sender, &meta.artist, &meta.album);
             self.nav.context_target = Some(CtxTarget::Album(meta));
@@ -278,13 +239,7 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let meta = self
-            .libview
-            .compilations
-            .guard()
-            .get(index)
-            .map(|c| c.meta.clone())
-            .or_else(|| self.libview.compilations_overview.get(index).cloned());
+        let meta = self.libview.compilations_overview.get(index).cloned();
         if let Some(meta) = meta {
             self.fetch_focus_album(sender, &meta.artist, &meta.album);
             self.nav.context_target = Some(CtxTarget::Album(meta));
@@ -307,13 +262,7 @@ impl App {
 
     /// Short tap on an artist: open its albums & songs subpage.
     pub(crate) fn on_open_artist_tracks(&mut self, index: usize, sender: &ComponentSender<Self>) {
-        let meta = self
-            .libview
-            .artists
-            .guard()
-            .get(index)
-            .map(|c| c.meta.clone())
-            .or_else(|| self.libview.artists_overview.get(index).cloned());
+        let meta = self.libview.artists_overview.get(index).cloned();
         if let Some(meta) = meta {
             // Fetch the photo of the opened artist with priority.
             self.fetch_focus_artist(sender, &meta.name);

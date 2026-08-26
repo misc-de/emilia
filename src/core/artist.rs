@@ -67,6 +67,78 @@ pub fn norm_key(name: &str) -> String {
         .to_lowercase()
 }
 
+/// [`WORD_SEPARATORS`] with their padding stripped. A padded separator can only
+/// occur in a credit that also contains its core, so scanning for these rules
+/// out the whole set in one cheap pass. Deliberately over-eager: "Kraftwerk"
+/// contains "ft" and "Smith" contains "mit", which only costs those credits the
+/// fast path below — never correctness.
+const SEPARATOR_CORES: &[&str] = &["feat", "ft", "with", "mit"];
+
+/// ASCII-case-insensitive substring test that allocates nothing.
+fn contains_ci_ascii(haystack: &str, needle: &str) -> bool {
+    let (hb, nb) = (haystack.as_bytes(), needle.as_bytes());
+    nb.len() <= hb.len() && hb.windows(nb.len()).any(|w| w.eq_ignore_ascii_case(nb))
+}
+
+/// Whether `raw` is a plain single-artist credit: no separator, no bracketed or
+/// dashed qualifier, nothing for [`split_artists`] to do.
+///
+/// For such a credit `split_artists(raw)` provably returns exactly
+/// `[raw.trim()]` — every stage of it is a no-op — so [`credit_matches`] can
+/// compare directly instead of running the allocation-heavy split. The test is
+/// deliberately stricter than the split's actual triggers (any bracket or dash
+/// disqualifies, not just a qualifying one): being wrong in this direction only
+/// forgoes the shortcut.
+pub fn is_plain_credit(raw: &str) -> bool {
+    let t = raw.trim();
+    // An empty credit yields *no* names at all, which is not the same as one
+    // empty name — leave that to `split_artists`.
+    if t.is_empty() {
+        return false;
+    }
+    // `strip_qualifiers` collapses runs of whitespace, so a credit carrying any
+    // would not come back unchanged.
+    if t.contains("  ") || t.chars().any(|c| c.is_whitespace() && c != ' ') {
+        return false;
+    }
+    if t.chars().any(|c| {
+        CHAR_SEPARATORS.contains(&c) || matches!(c, '(' | ')' | '[' | ']' | '-' | '–' | '—')
+    }) {
+        return false;
+    }
+    !SEPARATOR_CORES
+        .iter()
+        .any(|core| contains_ci_ascii(t, core))
+}
+
+/// Whether `credit` (a raw `track.artist` value) names the artist whose
+/// [`norm_key`] is `target_key`, counting split "feat." credits.
+///
+/// This is the hot predicate of the artist view: it runs once per track in the
+/// library on every artist opened, so the common case — a plain credit — takes
+/// the allocation-free path through [`is_plain_credit`] and only genuinely
+/// compound credits pay for [`split_artists`].
+pub fn credit_matches(credit: &str, target_key: &str) -> bool {
+    if is_plain_credit(credit) {
+        return norm_key(credit) == target_key;
+    }
+    split_artists(credit)
+        .iter()
+        .any(|s| norm_key(s) == target_key)
+}
+
+/// Like [`credit_matches`], but only the **first** (main) artist of the credit
+/// counts: "A feat. B" belongs to A's album, not B's. Same shortcut — a plain
+/// credit is its own primary artist.
+pub fn primary_credit_matches(credit: &str, target_key: &str) -> bool {
+    if is_plain_credit(credit) {
+        return norm_key(credit) == target_key;
+    }
+    split_artists(credit)
+        .first()
+        .is_some_and(|p| norm_key(p) == target_key)
+}
+
 /// Primary artist of an entry (the first named, before "feat."). Used for
 /// album grouping: "Beginner feat. X" belongs to the album by "Beginner".
 pub fn primary_artist(raw: &str) -> String {
@@ -233,5 +305,80 @@ mod tests {
         assert_eq!(primary_artist("Beginner feat. Megaloh"), "Beginner");
         assert_eq!(primary_artist("Sido feat. Genetikk & Marsimoto"), "Sido");
         assert_eq!(primary_artist("Adele"), "Adele");
+    }
+
+    /// Credits the fast path may take, and credits it must not.
+    #[test]
+    fn plain_credit_recognises_what_the_split_leaves_alone() {
+        use super::is_plain_credit;
+        for plain in ["Adele", "Sigur Rós", "Die Ärzte", "björk", "  Prince  "] {
+            assert!(is_plain_credit(plain), "{plain:?} should be plain");
+        }
+        for compound in [
+            "Drake feat. Rihanna",
+            "A & B",
+            "Earth, Wind & Fire",
+            "Sting with Shaggy",
+            "Rammstein mit Till",
+            "Metallica (Live)",
+            "Eagles - Live",
+            "Sigur Rós (Band)",
+            "AC/DC",
+            "Kraftwerk", // over-eager: contains "ft" — allowed, just not fast
+        ] {
+            assert!(!is_plain_credit(compound), "{compound:?} must not be plain");
+        }
+    }
+
+    /// The fast path must be a pure optimisation: for every credit, matching
+    /// through `credit_matches` has to agree with the original split-and-compare
+    /// it replaces. This is the property that keeps a track from silently
+    /// dropping out of an artist's view.
+    #[test]
+    fn credit_matches_agrees_with_the_split_it_shortcuts() {
+        use super::{credit_matches, norm_key, split_artists};
+
+        let credits = [
+            "Adele",
+            "Prince ",
+            "RZA.",
+            "Björk",
+            "BJÖRK",
+            "Kraftwerk",
+            "Smith",
+            "Drake feat. Rihanna & Future",
+            "A FT. B",
+            "Sting with Shaggy",
+            "Rammstein mit Till",
+            "Earth, Wind & Fire",
+            "Metallica (Live)",
+            "Queen [Live in Concert]",
+            "Eagles - Live",
+            "Sigur Rós (Band)",
+            "ACDC (Live) feat. Bon Scott",
+            "AC/DC",
+            "A & a",
+            "  A ,  , B /",
+            "",
+            "   ",
+        ];
+        // Every name the corpus can produce, plus a few that must never match.
+        let mut targets: Vec<String> = credits
+            .iter()
+            .flat_map(|c| split_artists(c))
+            .map(|s| norm_key(&s))
+            .collect();
+        targets.extend(["nobody".into(), "".into(), "a".into(), "björk".into()]);
+
+        for credit in credits {
+            for target in &targets {
+                let expected = split_artists(credit).iter().any(|s| norm_key(s) == *target);
+                assert_eq!(
+                    credit_matches(credit, target),
+                    expected,
+                    "credit {credit:?} vs target {target:?}"
+                );
+            }
+        }
     }
 }

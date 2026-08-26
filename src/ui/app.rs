@@ -11,7 +11,6 @@ use crate::core::db::Library;
 use crate::core::player::Player;
 use crate::i18n::{gettext, gettext_f};
 use crate::model::{AlbumMeta, ArtistMeta, Source};
-use crate::ui::album_row::{AlbumCard, AlbumOutput};
 pub(crate) use crate::ui::app_helpers::{
     album_subtitle, apply_color_scheme, artist_count_subtitle, attach_hscroll_swipe,
     attach_swipe_back, cover_widget, duration_label, find_scroller, fmt_duration, fmt_rate,
@@ -19,7 +18,7 @@ pub(crate) use crate::ui::app_helpers::{
     online_available, read_entries, save_window_state, unix_now,
 };
 use crate::ui::app_init::InitState;
-use crate::ui::artist_row::{ArtistCard, ArtistOutput};
+use crate::ui::card_list::CardList;
 use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow};
 
 /// Target of the detail view (long press): a file/folder in the
@@ -481,7 +480,7 @@ pub(crate) struct PlaySession {
 /// Album/artist overviews + file-list factory + gallery rendering state.
 pub(crate) struct LibView {
     pub(crate) entries: FactoryVecDeque<FsRow>,
-    pub(crate) albums: FactoryVecDeque<AlbumCard>,
+    pub(crate) albums: CardList,
     /// Gallery variant of the albums (cover grid), parallel to the list factory.
     pub(crate) albums_gallery: gtk::FlowBox,
     /// Scrolled child of the album gallery. Normally holds [`Self::albums_gallery`]
@@ -499,19 +498,19 @@ pub(crate) struct LibView {
     // Singles / Compilations: extra album views filtered by the matching area
     // (`albums_overview_in_area`), whose kind-aware default reflects the
     // classification. Same machinery as the album overview above.
-    pub(crate) singles: FactoryVecDeque<AlbumCard>,
+    pub(crate) singles: CardList,
     pub(crate) singles_gallery: gtk::FlowBox,
     pub(crate) singles_gallery_box: gtk::Box,
     pub(crate) single_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     pub(crate) singles_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) single_count: usize,
-    pub(crate) compilations: FactoryVecDeque<AlbumCard>,
+    pub(crate) compilations: CardList,
     pub(crate) compilations_gallery: gtk::FlowBox,
     pub(crate) compilations_gallery_box: gtk::Box,
     pub(crate) compilation_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     pub(crate) compilations_overview: Vec<crate::model::AlbumMeta>,
     pub(crate) compilation_count: usize,
-    pub(crate) artists: FactoryVecDeque<ArtistCard>,
+    pub(crate) artists: CardList,
     /// Gallery variant of the artists (photo grid).
     pub(crate) artists_gallery: gtk::FlowBox,
     /// Scrolled child of the artist gallery. Normally holds [`Self::artists_gallery`]
@@ -2096,13 +2095,16 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.libview.artist_count > 0 && !model.libview.gallery_on("artists"),
                                         #[local_ref]
-                                        artists_box -> gtk::ListBox {
+                                        artists_box -> gtk::ListView {
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
+                                            // `boxed-list` is a GtkListBox style;
+                                            // the equivalent for the virtualised
+                                            // list lives in `emilia-card-list`.
+                                            set_css_classes: &["emilia-card-list"],
                                         },
                                     },
                                     // Gallery variant (photo grid). The box holds either
@@ -2144,13 +2146,16 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.libview.album_count > 0 && !model.libview.gallery_on("albums"),
                                         #[local_ref]
-                                        albums_box -> gtk::ListBox {
+                                        albums_box -> gtk::ListView {
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
+                                            // `boxed-list` is a GtkListBox style;
+                                            // the equivalent for the virtualised
+                                            // list lives in `emilia-card-list`.
+                                            set_css_classes: &["emilia-card-list"],
                                         },
                                     },
                                     // Gallery variant (cover grid). The box holds either
@@ -2191,13 +2196,16 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.libview.single_count > 0 && !model.libview.gallery_on("singles"),
                                         #[local_ref]
-                                        singles_box -> gtk::ListBox {
+                                        singles_box -> gtk::ListView {
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
+                                            // `boxed-list` is a GtkListBox style;
+                                            // the equivalent for the virtualised
+                                            // list lives in `emilia-card-list`.
+                                            set_css_classes: &["emilia-card-list"],
                                         },
                                     },
                                     gtk::ScrolledWindow {
@@ -2236,13 +2244,16 @@ impl Component for App {
                                         #[watch]
                                         set_visible: model.libview.compilation_count > 0 && !model.libview.gallery_on("compilations"),
                                         #[local_ref]
-                                        compilations_box -> gtk::ListBox {
+                                        compilations_box -> gtk::ListView {
                                             set_valign: gtk::Align::Start,
                                             set_margin_top: 0,
                                             set_margin_bottom: 12,
                                             set_margin_start: 12,
                                             set_margin_end: 12,
-                                            set_css_classes: &["boxed-list"],
+                                            // `boxed-list` is a GtkListBox style;
+                                            // the equivalent for the virtualised
+                                            // list lives in `emilia-card-list`.
+                                            set_css_classes: &["emilia-card-list"],
                                         },
                                     },
                                     gtk::ScrolledWindow {
@@ -3172,33 +3183,39 @@ impl Component for App {
                 FsOutput::PlayDir(index) => Msg::PlayFsAlbum(index.current_index()),
             });
 
-        let albums = FactoryVecDeque::builder()
-            .launch(gtk::ListBox::default())
-            .forward(sender.input_sender(), |out| match out {
-                AlbumOutput::Activated(index) => Msg::ShowAlbumTracks(index.current_index()),
-                AlbumOutput::LongPress(index) => Msg::ShowAlbumDetail(index.current_index()),
-            });
+        // The library overviews are virtualised (see `card_list`): they grow with
+        // the whole library, so a widget per entry would cost seconds on the
+        // phone. Their rows report a *position* rather than a factory index.
+        let card_list =
+            |icon: &str, activate: fn(usize) -> Msg, context: fn(usize) -> Msg| -> CardList {
+                let (a, c) = (sender.input_sender().clone(), sender.input_sender().clone());
+                CardList::new(
+                    icon,
+                    move |i| a.emit(activate(i)),
+                    move |i| c.emit(context(i)),
+                )
+            };
 
-        let singles = FactoryVecDeque::builder()
-            .launch(gtk::ListBox::default())
-            .forward(sender.input_sender(), |out| match out {
-                AlbumOutput::Activated(index) => Msg::ShowSingleTracks(index.current_index()),
-                AlbumOutput::LongPress(index) => Msg::ShowSingleDetail(index.current_index()),
-            });
-
-        let compilations = FactoryVecDeque::builder()
-            .launch(gtk::ListBox::default())
-            .forward(sender.input_sender(), |out| match out {
-                AlbumOutput::Activated(index) => Msg::ShowCompilationTracks(index.current_index()),
-                AlbumOutput::LongPress(index) => Msg::ShowCompilationDetail(index.current_index()),
-            });
-
-        let artists = FactoryVecDeque::builder()
-            .launch(gtk::ListBox::default())
-            .forward(sender.input_sender(), |out| match out {
-                ArtistOutput::Activated(index) => Msg::OpenArtistTracks(index.current_index()),
-                ArtistOutput::LongPress(index) => Msg::ShowArtistDetail(index.current_index()),
-            });
+        let albums = card_list(
+            "media-optical-symbolic",
+            Msg::ShowAlbumTracks,
+            Msg::ShowAlbumDetail,
+        );
+        let singles = card_list(
+            "media-optical-symbolic",
+            Msg::ShowSingleTracks,
+            Msg::ShowSingleDetail,
+        );
+        let compilations = card_list(
+            "media-optical-symbolic",
+            Msg::ShowCompilationTracks,
+            Msg::ShowCompilationDetail,
+        );
+        let artists = card_list(
+            "avatar-default-symbolic",
+            Msg::OpenArtistTracks,
+            Msg::ShowArtistDetail,
+        );
 
         let acoustid_key = library.get_secret_setting("acoustid_key").ok().flatten();
         let fanart_key = library.get_secret_setting("fanart_key").ok().flatten();

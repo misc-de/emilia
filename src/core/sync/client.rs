@@ -157,25 +157,43 @@ impl SyncClient {
             .call()
             .map_err(|e| anyhow!("download failed: {e}"))?;
 
+        // Reject an oversized body before writing a byte, and keep the announced
+        // length to verify the finished transfer against.
+        let expected =
+            crate::core::net::check_content_length(&resp, crate::core::net::MAX_DOWNLOAD_BYTES)?;
+
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let tmp = dest.with_extension("part");
-        let mut file = std::fs::File::create(&tmp)?;
-        // Cap the transfer: a pinned peer is still untrusted enough that a buggy
-        // or compromised one must not be able to fill the disk.
-        let n = crate::core::net::copy_capped(
-            resp.into_reader(),
-            &mut file,
-            crate::core::net::MAX_DOWNLOAD_BYTES,
-        )?;
-        file.sync_all().ok();
-        if n == 0 {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(anyhow!("downloaded file is empty"));
+        let tmp = crate::core::net::part_path(dest);
+        let outcome = (|| -> Result<u64> {
+            let mut file = std::fs::File::create(&tmp)?;
+            // Cap the transfer: a pinned peer is still untrusted enough that a buggy
+            // or compromised one must not be able to fill the disk.
+            let n = crate::core::net::copy_capped(
+                resp.into_reader(),
+                &mut file,
+                crate::core::net::MAX_DOWNLOAD_BYTES,
+            )?;
+            file.sync_all().ok();
+            if n == 0 {
+                return Err(anyhow!("downloaded file is empty"));
+            }
+            // A connection dropped mid-body ends the copy without an error, so
+            // the size is what tells a complete file from a truncated one.
+            crate::core::net::check_complete(n, expected)?;
+            Ok(n)
+        })();
+        match outcome {
+            Ok(n) => {
+                std::fs::rename(&tmp, dest)?;
+                Ok(n)
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                Err(e)
+            }
         }
-        std::fs::rename(&tmp, dest)?;
-        Ok(n)
     }
 
     /// Keep-alive ping (extends the server session while the user reviews).

@@ -161,30 +161,43 @@ impl Library {
     /// case-insensitively via [`crate::core::artist::norm_key`]. Returns zeros
     /// for an unknown artist.
     pub fn artist_summary(&self, name: &str) -> Result<(u32, u32, i64)> {
-        use crate::core::artist::{norm_key, split_artists};
+        use crate::core::artist::norm_key;
         let key = norm_key(name);
-        // Prefilter the scan to tracks whose raw `artist` string contains the
-        // name (SQLite LIKE is ASCII case-insensitive). This is a *superset*: a
-        // track that splits/normalizes to `key` necessarily contains the trimmed
-        // name as a substring, so the exact feat.-aware check below still decides
-        // membership — the LIKE only spares us scanning the whole track table.
-        let like = format!("%{}%", name.trim());
-        let mut stmt = self.conn.prepare(
+        let trimmed = name.trim();
+        // Prefilter the scan to tracks whose raw `artist` contains the name, so
+        // the exact feat.-aware check below runs over a fraction of the table.
+        //
+        // Only valid for a pure-ASCII name: SQLite's LIKE folds case for ASCII
+        // *only*, while `norm_key` lowercases with full Unicode rules. For a name
+        // like "Björk" that makes LIKE narrower than the real predicate —
+        // `'BJÖRK' LIKE '%Björk%'` is false — so the prefilter would drop tracks
+        // that genuinely belong to the artist and undercount them. With a
+        // non-ASCII name we scan the table and let `credit_matches` decide.
+        let like = trimmed.is_ascii().then(|| format!("%{trimmed}%"));
+        let sql = if like.is_some() {
             "SELECT artist, album, duration_ms FROM track
-             WHERE artist IS NOT NULL AND artist <> '' AND artist LIKE ?1",
-        )?;
-        let rows = stmt.query_map([&like], |r| {
+             WHERE artist IS NOT NULL AND artist <> '' AND artist LIKE ?1"
+        } else {
+            "SELECT artist, album, duration_ms FROM track
+             WHERE artist IS NOT NULL AND artist <> ''"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let map_row = |r: &rusqlite::Row<'_>| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, Option<String>>(1)?,
                 r.get::<_, Option<i64>>(2)?,
             ))
-        })?;
+        };
+        let rows = match &like {
+            Some(pat) => stmt.query_map([pat], map_row)?,
+            None => stmt.query_map([], map_row)?,
+        };
         let mut albums = std::collections::HashSet::new();
         let mut songs = 0u32;
         let mut duration_ms = 0i64;
         for (artist, album, dur) in rows.flatten() {
-            if split_artists(&artist).iter().any(|n| norm_key(n) == key) {
+            if crate::core::artist::credit_matches(&artist, &key) {
                 songs += 1;
                 duration_ms += dur.unwrap_or(0);
                 if let Some(al) = album.as_deref().map(str::trim).filter(|s| !s.is_empty()) {

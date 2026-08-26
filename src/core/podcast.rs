@@ -432,7 +432,7 @@ pub fn download_episode_progress(
     // Report once before the first byte: the dialog can show 0 % and — with a
     // known Content-Length — the size right away instead of an empty readout.
     on_progress(DownloadProgress { done: 0, total });
-    let tmp = dest.with_extension("part");
+    let tmp = net::part_path(dest);
     let written = {
         let mut file = std::fs::File::create(&tmp)?;
         let mut last = Instant::now();
@@ -468,6 +468,13 @@ pub fn download_episode_progress(
     if written == 0 {
         let _ = std::fs::remove_file(&tmp);
         return Err(anyhow!("Downloaded episode is empty"));
+    }
+    // The copy above ends cleanly on a dropped connection too, so compare what
+    // arrived against what the server announced: a truncated episode must not be
+    // renamed into place and offered as a complete offline copy.
+    if let Err(e) = net::check_complete(written, total) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     std::fs::rename(&tmp, dest)?;
     Ok(written)

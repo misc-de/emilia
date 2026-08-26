@@ -598,10 +598,24 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
             .and_then(|l| l.all_tracks().ok())
             .unwrap_or_default()
     };
-    let under: Vec<&Track> = all_tracks
-        .iter()
-        .filter(|t| std::path::Path::new(&t.path).starts_with(&dir))
-        .collect();
+    // Bucket the tracks below `dir` by the subfolder they sit in, in one pass.
+    // Re-filtering the whole list once per folder made this O(folders × library)
+    // — on a large library that is millions of path comparisons for a single
+    // folder change.
+    let mut by_subdir: std::collections::HashMap<PathBuf, Vec<&Track>> =
+        std::collections::HashMap::new();
+    for t in &all_tracks {
+        let Ok(rest) = std::path::Path::new(&t.path).strip_prefix(&dir) else {
+            continue;
+        };
+        // Two components or more means "inside a subfolder of `dir`"; a track
+        // sitting directly in `dir` belongs to no subfolder.
+        let mut comps = rest.components();
+        let (Some(first), Some(_)) = (comps.next(), comps.next()) else {
+            continue;
+        };
+        by_subdir.entry(dir.join(first)).or_default().push(t);
+    }
     let mut out = Vec::with_capacity(dirs.len() + files.len());
     for d in dirs {
         let visible = match &lib {
@@ -613,13 +627,9 @@ pub(crate) fn read_entries(dir: PathBuf) -> Vec<FsEntry> {
         if visible {
             // Tracks under this subfolder → its summed runtime (shown for every
             // folder with songs) and single-album detection (for the play button).
-            let in_dir: Vec<&Track> = under
-                .iter()
-                .copied()
-                .filter(|t| std::path::Path::new(&t.path).starts_with(&d))
-                .collect();
+            let in_dir: &[&Track] = by_subdir.get(&d).map_or(&[], Vec::as_slice);
             let total_ms = in_dir.iter().filter_map(|t| t.duration_ms).sum();
-            let album = lib.as_ref().and_then(|l| dir_album_info(l, &d, &in_dir));
+            let album = lib.as_ref().and_then(|l| dir_album_info(l, &d, in_dir));
             out.push(FsEntry::dir_album(d, album, total_ms));
         }
     }

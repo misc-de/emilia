@@ -149,25 +149,6 @@ pub fn thumb_frame(placeholder_icon: &str, size: i32) -> adw::Bin {
     bin
 }
 
-/// Wraps a cover/photo in an overlay with a red "Disconnected" badge when the
-/// associated source (Nextcloud) is currently offline. Otherwise the widget is
-/// returned unchanged.
-pub fn offline_overlay(child: &impl IsA<gtk::Widget>, offline: bool) -> gtk::Widget {
-    let child = child.clone().upcast::<gtk::Widget>();
-    if !offline {
-        return child;
-    }
-    let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&child));
-    let badge = gtk::Image::from_icon_name("network-offline-symbolic");
-    badge.add_css_class("emilia-offline");
-    badge.set_halign(gtk::Align::End);
-    badge.set_valign(gtk::Align::Start);
-    badge.set_pixel_size(14);
-    overlay.add_overlay(&badge);
-    overlay.upcast()
-}
-
 /// Stops a text field from being **auto-focused** when its dialog/page is shown
 /// or switched to. On mobile an auto-focused entry immediately pops the
 /// on-screen keyboard, which is disruptive when merely scrolling through the

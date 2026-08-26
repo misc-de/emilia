@@ -19,6 +19,7 @@ use crate::ui::app::{
     album_subtitle, artist_count_subtitle, cover_widget, duration_label, find_scroller,
     fmt_duration, most_common_artist, read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
 };
+use crate::ui::card_list::CardItem;
 use crate::ui::enrich::enrich_worker;
 use crate::ui::fs_row::FsEntry;
 
@@ -239,6 +240,45 @@ pub(crate) fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
     counts.into_iter().max_by_key(|(_, c)| *c).map(|(b, _)| b)
 }
 
+/// Maps an album overview to the rows of a virtualised [`CardList`]: the same
+/// title/subtitle/cover the old `AlbumCard` factory rendered, plus the offline
+/// badge for albums whose source is currently unreachable.
+fn album_cards(
+    albums: &[crate::model::AlbumMeta],
+    offline_keys: &std::collections::HashSet<(String, String)>,
+) -> Vec<CardItem> {
+    albums
+        .iter()
+        .map(|a| CardItem {
+            title: a.album.clone(),
+            subtitle: album_card_subtitle(a),
+            image: a.cover_path.clone(),
+            offline: offline_keys.contains(&(a.artist.clone(), a.album.clone())),
+        })
+        .collect()
+}
+
+/// Album subtitle: "Artist · Year · N songs" (whichever parts are known).
+/// Kept byte-for-byte as the old `album_row` factory rendered it, so the
+/// virtualised list reads exactly like the one it replaced.
+fn album_card_subtitle(m: &crate::model::AlbumMeta) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !m.artist.is_empty() {
+        parts.push(m.artist.clone());
+    }
+    if let Some(year) = m.year {
+        parts.push(year.to_string());
+    }
+    if m.track_count > 0 {
+        parts.push(crate::i18n::ngettext_n(
+            "{n} song",
+            "{n} songs",
+            m.track_count as u32,
+        ));
+    }
+    parts.join(" · ")
+}
+
 impl App {
     /// Scroller of the file list (ancestor of the entries `ListBox`).
     pub(crate) fn fs_scroller(&self) -> Option<gtk::ScrolledWindow> {
@@ -424,22 +464,13 @@ impl App {
             );
         } else {
             let offline_keys = self.offline_album_keys();
-            let mut guard = if singles {
-                self.libview.singles.guard()
+            let items = album_cards(&albums, &offline_keys);
+            let list = if singles {
+                &self.libview.singles
             } else {
-                self.libview.compilations.guard()
+                &self.libview.compilations
             };
-            guard.clear();
-            for a in albums {
-                let offline = offline_keys.contains(&(a.artist.clone(), a.album.clone()));
-                guard.push_back((a, offline));
-            }
-            drop(guard);
-            if singles {
-                self.libview.singles.widget().invalidate_headers();
-            } else {
-                self.libview.compilations.widget().invalidate_headers();
-            }
+            list.set_items(items, headers);
         }
     }
 
@@ -520,15 +551,9 @@ impl App {
                 Msg::ShowAlbumDetail,
             );
         } else {
-            let mut guard = self.libview.albums.guard();
-            guard.clear();
-            for a in albums {
-                let offline = offline_keys.contains(&(a.artist.clone(), a.album.clone()));
-                guard.push_back((a, offline));
-            }
-            drop(guard);
-            // Refresh the section headings for the rebuilt rows (or clear them).
-            self.libview.albums.widget().invalidate_headers();
+            self.libview
+                .albums
+                .set_items(album_cards(&albums, &offline_keys), headers);
         }
     }
 
@@ -735,21 +760,23 @@ impl App {
             let offline_names = self.offline_artist_names_lc();
             // Album/song counts for the secondary line, fetched in one pass.
             let counts = self.library.artist_counts().unwrap_or_default();
-            let mut guard = self.libview.artists.guard();
-            guard.clear();
-            for a in artists {
-                let name_lc = a.name.to_lowercase();
-                let offline = offline_names.iter().any(|n| n.contains(&name_lc));
-                let (albums, songs) = counts
-                    .get(&crate::core::artist::norm_key(&a.name))
-                    .copied()
-                    .unwrap_or((0, 0));
-                let subtitle = artist_count_subtitle(albums, songs);
-                guard.push_back((a, offline, subtitle));
-            }
-            drop(guard);
-            // Refresh the alphabetical headings for the rebuilt rows (or clear).
-            self.libview.artists.widget().invalidate_headers();
+            let items: Vec<CardItem> = artists
+                .iter()
+                .map(|a| {
+                    let name_lc = a.name.to_lowercase();
+                    let (albums, songs) = counts
+                        .get(&crate::core::artist::norm_key(&a.name))
+                        .copied()
+                        .unwrap_or((0, 0));
+                    CardItem {
+                        title: a.name.clone(),
+                        subtitle: artist_count_subtitle(albums, songs),
+                        image: a.image_path.clone(),
+                        offline: offline_names.iter().any(|n| n.contains(&name_lc)),
+                    }
+                })
+                .collect();
+            self.libview.artists.set_items(items, headers);
         }
     }
 
@@ -803,11 +830,9 @@ impl App {
             .unwrap_or_default()
             .into_iter()
             .filter(|t| {
-                t.artist.as_deref().is_some_and(|a| {
-                    crate::core::artist::split_artists(a)
-                        .iter()
-                        .any(|s| crate::core::artist::norm_key(s) == target)
-                })
+                t.artist
+                    .as_deref()
+                    .is_some_and(|a| crate::core::artist::credit_matches(a, &target))
             })
             .map(|t| PathBuf::from(t.path))
             .collect()
@@ -825,11 +850,9 @@ impl App {
             .unwrap_or_default()
             .into_iter()
             .filter(|t| {
-                t.artist.as_deref().is_some_and(|a| {
-                    crate::core::artist::split_artists(a)
-                        .first()
-                        .is_some_and(|p| crate::core::artist::norm_key(p) == target)
-                })
+                t.artist
+                    .as_deref()
+                    .is_some_and(|a| crate::core::artist::primary_credit_matches(a, &target))
             })
             .map(|t| PathBuf::from(t.path))
             .collect()
@@ -847,11 +870,10 @@ impl App {
         let mut groups: std::collections::HashMap<String, Vec<Track>> =
             std::collections::HashMap::new();
         for t in self.library.all_tracks().unwrap_or_default() {
-            let belongs = t.artist.as_deref().is_some_and(|a| {
-                crate::core::artist::split_artists(a)
-                    .iter()
-                    .any(|s| crate::core::artist::norm_key(s) == target)
-            });
+            let belongs = t
+                .artist
+                .as_deref()
+                .is_some_and(|a| crate::core::artist::credit_matches(a, &target));
             if !belongs {
                 continue;
             }
@@ -891,11 +913,10 @@ impl App {
         let mut groups: std::collections::HashMap<String, Vec<Track>> =
             std::collections::HashMap::new();
         for t in all {
-            let belongs = t.artist.as_deref().is_some_and(|a| {
-                crate::core::artist::split_artists(a)
-                    .iter()
-                    .any(|s| crate::core::artist::norm_key(s) == target)
-            });
+            let belongs = t
+                .artist
+                .as_deref()
+                .is_some_and(|a| crate::core::artist::credit_matches(a, &target));
             if !belongs {
                 continue;
             }
@@ -919,11 +940,9 @@ impl App {
             // NOT feed into the album construction – they count as singles.
             let (own_tracks, guest_tracks): (Vec<Track>, Vec<Track>) =
                 mine.into_iter().partition(|t| {
-                    t.artist.as_deref().is_some_and(|a| {
-                        crate::core::artist::split_artists(a)
-                            .first()
-                            .is_some_and(|p| crate::core::artist::norm_key(p) == target)
-                    })
+                    t.artist
+                        .as_deref()
+                        .is_some_and(|a| crate::core::artist::primary_credit_matches(a, &target))
                 });
             // Album only from two own tracks up; otherwise they count as singles.
             if own_tracks.len() >= 2 {
@@ -1005,11 +1024,9 @@ impl App {
             .filter(|t| {
                 // Album membership via the main artist (like the
                 // albums overview): "A feat. B" belongs to "A"'s album.
-                t.artist.as_deref().is_some_and(|a| {
-                    crate::core::artist::split_artists(a)
-                        .first()
-                        .is_some_and(|p| crate::core::artist::norm_key(p) == target)
-                })
+                t.artist
+                    .as_deref()
+                    .is_some_and(|a| crate::core::artist::primary_credit_matches(a, &target))
             })
             .collect();
         sort_by_structure(&mut tracks);

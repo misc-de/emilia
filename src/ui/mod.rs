@@ -1,4 +1,3 @@
-pub mod album_row;
 pub mod app;
 pub mod app_concert;
 pub mod app_covers;
@@ -31,7 +30,7 @@ pub mod app_views_cover;
 pub mod app_views_handlers;
 pub mod app_views_sources;
 pub mod app_yt_glue;
-pub mod artist_row;
+pub mod card_list;
 pub mod cloud_page;
 pub mod enrich;
 pub mod fs_row;

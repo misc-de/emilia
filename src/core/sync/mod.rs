@@ -201,3 +201,160 @@ pub fn default_device_name() -> String {
         .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "Emilia".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unique scratch directory for one test, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "emilia-sync-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("scratch dir");
+            Self(dir)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+        fn str(&self) -> String {
+            self.0.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn safe_rel_accepts_plain_segments_only() {
+        assert!(is_safe_rel("track.mp3"));
+        assert!(is_safe_rel("Album/track.mp3"));
+        // A name that merely *contains* dots is not a traversal.
+        assert!(is_safe_rel("The B..sides/a..b.mp3"));
+
+        assert!(!is_safe_rel(""));
+        assert!(!is_safe_rel(".."));
+        assert!(!is_safe_rel("../x.mp3"));
+        assert!(!is_safe_rel("Album/../../x.mp3"));
+        assert!(!is_safe_rel("/absolute.mp3"));
+        assert!(!is_safe_rel("./x.mp3"));
+
+        // `Path::components()` drops an interior `.`, so this normalises to
+        // "Album/x.mp3" — the same file inside the base, hence still safe.
+        assert!(is_safe_rel("Album/./x.mp3"));
+        assert_eq!(
+            Path::new("Album/./x.mp3").components().count(),
+            Path::new("Album/x.mp3").components().count()
+        );
+    }
+
+    /// The doc on [`resolve_existing`]/[`resolve_new`] promises that a symlink
+    /// *inside* the music folder cannot be used to escape it. Component checks
+    /// alone would not catch this — only canonicalising both ends does — so the
+    /// guarantee is pinned down here.
+    #[test]
+    #[cfg(unix)]
+    fn symlinked_subdirectory_cannot_redirect_out_of_the_base() {
+        let base = Scratch::new("symlink-base");
+        let outside = Scratch::new("symlink-outside");
+        std::fs::write(outside.path().join("secret.mp3"), b"x").unwrap();
+
+        // A symlink inside the music folder pointing at an unrelated directory.
+        std::os::unix::fs::symlink(outside.path(), base.path().join("escape")).unwrap();
+
+        // Reading through it must fail even though the file really exists.
+        assert!(
+            resolve_existing(&base.str(), "escape/secret.mp3").is_none(),
+            "a symlinked subdirectory must not expose files outside the base"
+        );
+        // Writing through it must fail before anything is created.
+        assert!(
+            resolve_new(&base.str(), "escape/planted.mp3").is_none(),
+            "a symlinked subdirectory must not accept writes outside the base"
+        );
+        assert!(
+            !outside.path().join("planted.mp3").exists(),
+            "nothing may be written outside the base"
+        );
+    }
+
+    /// A symlinked *file* inside the base pointing outside is likewise refused:
+    /// `resolve_existing` canonicalises the file itself, not just its parent.
+    #[test]
+    #[cfg(unix)]
+    fn symlinked_file_pointing_outside_is_refused() {
+        let base = Scratch::new("symlink-file-base");
+        let outside = Scratch::new("symlink-file-outside");
+        let secret = outside.path().join("secret.mp3");
+        std::fs::write(&secret, b"x").unwrap();
+        std::os::unix::fs::symlink(&secret, base.path().join("innocent.mp3")).unwrap();
+
+        assert!(resolve_existing(&base.str(), "innocent.mp3").is_none());
+    }
+
+    /// Ordinary files inside the base still resolve — the guards above must not
+    /// have made the happy path unreachable.
+    #[test]
+    fn plain_files_inside_the_base_still_resolve() {
+        let base = Scratch::new("happy");
+        std::fs::create_dir_all(base.path().join("Album")).unwrap();
+        std::fs::write(base.path().join("Album/track.mp3"), b"x").unwrap();
+
+        let found = resolve_existing(&base.str(), "Album/track.mp3").expect("existing file");
+        assert!(found.starts_with(base.path().canonicalize().unwrap()));
+
+        let fresh = resolve_new(&base.str(), "Album/new.mp3").expect("new file");
+        assert!(fresh.starts_with(base.path().canonicalize().unwrap()));
+        assert!(fresh.parent().unwrap().is_dir(), "parent is created");
+    }
+
+    /// The memo prefix deliberately redirects writes *out* of the music folder,
+    /// so it is the one place where a caller-supplied path changes its base. The
+    /// remainder after the prefix must still be a plain relative name.
+    #[test]
+    fn memo_prefix_redirects_but_still_rejects_traversal() {
+        let base = Scratch::new("memo");
+
+        // Traversal smuggled in behind the prefix is rejected, not redirected.
+        for rel in [
+            &format!("{MEMO_PREFIX}../escape.ogg"),
+            &format!("{MEMO_PREFIX}../../etc/passwd"),
+            &format!("{MEMO_PREFIX}/absolute.ogg"),
+            MEMO_PREFIX, // nothing after the prefix
+        ] {
+            assert!(
+                resolve_new(&base.str(), rel).is_none(),
+                "{rel:?} must not resolve"
+            );
+        }
+
+        // A plain memo name resolves into the memo store, never into the music
+        // folder the caller passed.
+        let memo = resolve_new(&base.str(), &format!("{MEMO_PREFIX}note.ogg"));
+        if let Some(p) = memo {
+            assert!(
+                !p.starts_with(base.path()),
+                "a memo must not land in the music folder"
+            );
+            assert!(p.ends_with("note.ogg"));
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+
+    /// An empty base is refused outright — otherwise a relative join would
+    /// resolve against the process working directory.
+    #[test]
+    fn empty_base_resolves_nothing() {
+        assert!(resolve_existing("", "track.mp3").is_none());
+        assert!(resolve_new("", "track.mp3").is_none());
+    }
+}

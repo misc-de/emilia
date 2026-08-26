@@ -1,12 +1,19 @@
 //! Shared download helpers: streaming a remote response to disk with a **hard
 //! size cap**, so a hostile or broken server can never fill the user's disk.
 //!
-//! Two layers of protection, used together at each download site:
+//! Three layers of protection, used together at each download site:
 //! 1. [`check_content_length`] rejects up front when the server *advertises* a
 //!    body beyond the limit – cheap, avoids even starting the transfer.
 //! 2. [`copy_capped`] streams with a running cap that aborts the moment the
 //!    source exceeds the limit – this is what defends against a server that
 //!    omits or *lies about* `Content-Length` (e.g. chunked transfer).
+//! 3. [`check_complete`] verifies afterwards that as many bytes arrived as were
+//!    advertised – the caps above bound how *much* may arrive, only this catches
+//!    a transfer that ended **early** (dropped connection), which would
+//!    otherwise be committed as a complete but truncated file.
+//!
+//! Downloads stream into a [`part_path`] temp file and are renamed into place
+//! only once all three checks pass, so the destination is never a partial file.
 
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -108,6 +115,38 @@ pub fn check_content_length(resp: &ureq::Response, limit: u64) -> Result<Option<
         Some(len) => Ok(Some(len)),
         None => Ok(None),
     }
+}
+
+/// Verifies a *finished* transfer against the length the peer advertised.
+///
+/// [`copy_capped`] (like `io::copy`) treats a premature EOF as a regular end of
+/// stream: a connection dropped mid-body returns `Ok(short_len)`, not an error.
+/// Without this check a truncated file looks exactly like a complete one and
+/// gets committed over the real destination. Every download site that knows the
+/// expected size therefore calls this **before** renaming its `.part` file into
+/// place. `expected == None` (no/unparsable `Content-Length`, chunked transfer)
+/// cannot be verified this way and passes — [`copy_capped`]'s cap stays the only
+/// bound there.
+pub fn check_complete(written: u64, expected: Option<u64>) -> Result<()> {
+    match expected {
+        Some(want) if written != want => {
+            bail!("incomplete transfer: got {written} of {want} bytes")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Temp path for an in-progress transfer: `.part` **appended** to the full file
+/// name, not substituted for its extension.
+///
+/// `Path::with_extension("part")` *replaces* the extension, so `song.mp3` and
+/// `song.flac` both collapse onto `song.part` — and a real file named
+/// `song.part` in the target folder would be clobbered. Appending keeps the temp
+/// name unique per destination.
+pub fn part_path(dest: &std::path::Path) -> std::path::PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    dest.with_file_name(name)
 }
 
 /// Ceiling for a JSON API response body (16 MiB). Metadata bodies (MusicBrainz,
@@ -224,5 +263,35 @@ mod tests {
             "not monotonic: {seen:?}"
         );
         assert_eq!(seen.last().copied(), Some(data.len() as u64));
+    }
+
+    #[test]
+    fn complete_transfer_passes_short_one_fails() {
+        assert!(check_complete(1000, Some(1000)).is_ok());
+        // The case that used to slip through: a dropped connection mid-body.
+        assert!(check_complete(999, Some(1000)).is_err());
+        // More than advertised is just as wrong as less.
+        assert!(check_complete(1001, Some(1000)).is_err());
+    }
+
+    #[test]
+    fn unknown_length_cannot_be_verified_and_passes() {
+        assert!(check_complete(0, None).is_ok());
+        assert!(check_complete(12345, None).is_ok());
+    }
+
+    #[test]
+    fn part_path_appends_and_keeps_distinct_extensions_apart() {
+        use std::path::Path;
+        let mp3 = part_path(Path::new("/m/Album/song.mp3"));
+        let flac = part_path(Path::new("/m/Album/song.flac"));
+        assert_eq!(mp3, Path::new("/m/Album/song.mp3.part"));
+        assert_eq!(flac, Path::new("/m/Album/song.flac.part"));
+        // The whole point: `with_extension` would have collapsed these onto one name.
+        assert_ne!(mp3, flac);
+        // Same folder as the destination, so the rename stays on one filesystem.
+        assert_eq!(mp3.parent(), Path::new("/m/Album/song.mp3").parent());
+        // A name without an extension still gets a distinct temp name.
+        assert_eq!(part_path(Path::new("/m/noext")), Path::new("/m/noext.part"));
     }
 }

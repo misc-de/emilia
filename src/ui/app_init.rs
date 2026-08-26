@@ -838,19 +838,10 @@ impl App {
         // The title-bar sort button; its popover is (re)built per section.
         self.nav.sort_btn = widgets.sort_btn.clone();
 
-        // Album & artist lists: section headings driven by the per-row labels
-        // filled in `reload_albums_with`/`reload_artists_with` (alphabetical when
-        // sorting by name, year strings by date). `None` means no grouping. The
-        // heading is painted on the window background (see `list_section_header_func`).
+        // The album & artist overviews are virtualised `CardList`s: they draw
+        // their own section headings per row (see `crate::ui::card_list`), so
+        // they need no `set_header_func` here.
         let header_func = crate::ui::app_gallery::list_section_header_func;
-        self.libview
-            .albums
-            .widget()
-            .set_header_func(header_func(self.libview.album_headers.clone()));
-        self.libview
-            .artists
-            .widget()
-            .set_header_func(header_func(self.libview.artist_headers.clone()));
         // Concert & audiobook entry lists: same alphabetical headings (by name)
         // as the albums; the labels are filled in `load_concerts`/`load_audiobooks`.
         self.concerts
@@ -1306,7 +1297,19 @@ impl App {
                  list.emilia-sectioned, list.emilia-sectioned.boxed-list { background: none; border: none; box-shadow: none; }\
                  list.emilia-sectioned > row { background-color: @card_bg_color; border-left: 1px solid @card_shade_color; border-right: 1px solid @card_shade_color; border-bottom: 1px solid @card_shade_color; }\
                  list.emilia-sectioned > row.emilia-sec-top { border-top: 1px solid @card_shade_color; border-top-left-radius: 12px; border-top-right-radius: 12px; }\
-                 list.emilia-sectioned > row.emilia-sec-bottom { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; margin-bottom: 6px; }",
+                 list.emilia-sectioned > row.emilia-sec-bottom { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; margin-bottom: 6px; }\
+                 /* Virtualised library overviews (see `crate::ui::card_list`). \
+                    `boxed-list` styles a GtkListBox, so the card look is rebuilt \
+                    here for GtkListView: the view and its item widgets stay \
+                    transparent, and the ActionRow inside each item carries the \
+                    background, borders and the per-section rounding. */\
+                 listview.emilia-card-list { background: none; }\
+                 listview.emilia-card-list > row { background: none; padding: 0; border: none; box-shadow: none; }\
+                 listview.emilia-card-list > row:hover, listview.emilia-card-list > row:selected { background: none; }\
+                 listview.emilia-card-list row.emilia-card { background-color: @card_bg_color; border-left: 1px solid @card_shade_color; border-right: 1px solid @card_shade_color; border-bottom: 1px solid @card_shade_color; }\
+                 listview.emilia-card-list row.emilia-card.emilia-sec-top { border-top: 1px solid @card_shade_color; border-top-left-radius: 12px; border-top-right-radius: 12px; }\
+                 listview.emilia-card-list row.emilia-card.emilia-sec-bottom { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }\
+                 listview.emilia-card-list.emilia-sectioned row.emilia-card.emilia-sec-bottom { margin-bottom: 6px; }",
             );
             gtk::style_context_add_provider_for_display(
                 &display,
