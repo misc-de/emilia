@@ -223,6 +223,31 @@ pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSet
     // touch more see-through. Both use a barely-there blur on the built-in
     // concert background.
     let dark = adw::StyleManager::default().is_dark();
+    // No explicit filter set: default to a gentle Soft blur on the built-in
+    // concert background.
+    let bg_filter = match get_design(lib, "design_bg_filter").filter(|s| !s.is_empty()) {
+        Some(k) => crate::ui::theme::BgFilter::from_key(&k),
+        None => crate::ui::theme::BgFilter::Soft,
+    };
+    // Soft moved from a coarse 0..10 strength scale to a fine 0..30 one. A value
+    // stored under the old scale is converted once — flagged per theme, since
+    // every design setting is per theme — so an existing setup keeps its blur.
+    let saved_strength =
+        get_design(lib, "design_bg_filter_strength").and_then(|s| s.parse::<u32>().ok());
+    let legacy_soft = bg_filter == crate::ui::theme::BgFilter::Soft
+        && get_design(lib, "design_bg_soft_scale").is_none();
+    let bg_filter_strength = match saved_strength {
+        Some(v) if legacy_soft => {
+            let v = crate::ui::theme::soft_strength_from_legacy(v.min(100));
+            set_design(lib, "design_bg_filter_strength", &v.to_string());
+            v
+        }
+        Some(v) => v.min(100),
+        None => crate::ui::theme::SOFT_STRENGTH_DEFAULT,
+    };
+    if legacy_soft {
+        set_design(lib, "design_bg_soft_scale", "1");
+    }
     crate::ui::theme::DesignSettings {
         background_on: get_design(lib, "design_background_on")
             .map(|s| s != "0")
@@ -231,16 +256,8 @@ pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSet
             .filter(|s| !s.is_empty())
             .map(PathBuf::from),
         use_cover_bg: matches!(get_design(lib, "design_use_cover_bg").as_deref(), Some("1")),
-        // No explicit filter set: default to a gentle Soft blur on the built-in
-        // concert background.
-        bg_filter: match get_design(lib, "design_bg_filter").filter(|s| !s.is_empty()) {
-            Some(k) => crate::ui::theme::BgFilter::from_key(&k),
-            None => crate::ui::theme::BgFilter::Soft,
-        },
-        bg_filter_strength: get_design(lib, "design_bg_filter_strength")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(1)
-            .min(100),
+        bg_filter,
+        bg_filter_strength,
         bg_nav: get_design(lib, "design_bg_nav")
             .map(|s| s != "0")
             .unwrap_or(true),

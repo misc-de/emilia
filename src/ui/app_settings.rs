@@ -6,7 +6,7 @@ use crate::ui::app::{cover_widget, App, Msg};
 use crate::ui::app_mcp::McpSettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::app_tray::TrayMsg;
-use crate::ui::theme::DesignMsg;
+use crate::ui::theme::{DesignMsg, SOFT_STRENGTH_MAX};
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
@@ -794,11 +794,12 @@ impl App {
             .sensitive(self.theme.design.bg_filter.index() != 0)
             .build();
         let strength_scale = mk_scale(self.theme.design.bg_filter_strength);
-        // Soft saturates after a small radius, so it uses a finer 0..10 scale
-        // (step 1) for fine control; the other filters keep 0..100 (step 5).
-        // The filter dropdown retunes this on change (see below).
+        // Soft saturates after a small radius, so it uses a finer 0..30 scale
+        // (step 1) that spreads just that gentle range over the whole slider;
+        // the other filters keep 0..100 (step 5). The filter dropdown retunes
+        // this on change (see below).
         if self.theme.design.bg_filter.index() == 1 {
-            strength_scale.set_range(0.0, 10.0);
+            strength_scale.set_range(0.0, f64::from(SOFT_STRENGTH_MAX));
             strength_scale.set_increments(1.0, 1.0);
         }
         strength_scale.set_value(f64::from(self.theme.design.bg_filter_strength));
@@ -848,7 +849,7 @@ impl App {
         }
 
         // Filter change: a strength only applies to an active filter. Soft uses
-        // a finer 0..10 scale, the others 0..100 — retune the slider on change
+        // a finer 0..30 scale, the others 0..100 — retune the slider on change
         // (a clamp of the old value re-emits via the handler above).
         {
             let sender = sender.clone();
@@ -856,7 +857,7 @@ impl App {
             let strength_scale = strength_scale.clone();
             filter_row.connect_selected_notify(move |r| {
                 if r.selected() == 1 {
-                    strength_scale.set_range(0.0, 10.0);
+                    strength_scale.set_range(0.0, f64::from(SOFT_STRENGTH_MAX));
                     strength_scale.set_increments(1.0, 1.0);
                 } else {
                     strength_scale.set_range(0.0, 100.0);

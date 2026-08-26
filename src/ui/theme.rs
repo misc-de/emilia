@@ -62,6 +62,41 @@ const SHARP_BG_PX: i32 = 2560;
 /// Decode size for the CPU/Gaussian filter modes: large enough that the
 /// directional/radial/ripple structure survives, still cheap to process.
 const FILTER_BASE_PX: i32 = 200;
+/// Decode size for the "Soft" blur. Higher than the CPU-effect base so the fine
+/// strength steps stay visible: at 200 px the upscale to the window already
+/// blurs the image more than a low Soft setting does, which is why the bottom
+/// of the old scale looked the same all the way up. Kept at 512 rather than
+/// higher because the blur cost grows with the area (~20 ms here) and it runs
+/// on the UI thread while the slider moves.
+const SOFT_BASE_PX: i32 = 512;
+/// Top of the "Soft" strength scale. Soft covers only the gentle range — its
+/// blur saturates within a few pixels of radius, so those pixels get 30 steps
+/// instead of 10; the heavy end is what the `Gaussian` filter is for.
+pub(crate) const SOFT_STRENGTH_MAX: u32 = 30;
+/// Fresh-install Soft strength (the same radius the old scale's step 1 gave).
+pub(crate) const SOFT_STRENGTH_DEFAULT: u32 = 17;
+/// Blur radius of the strongest Soft step, as a fraction of the decode width.
+const SOFT_TOP_RADIUS: f64 = 0.0235;
+
+/// Blur radius (in `SOFT_BASE_PX` pixels) for a Soft strength step. Linear, so
+/// the 30 steps divide the gentle range evenly — most of them land below one
+/// pixel of radius, which the fractional box blur still resolves.
+fn soft_radius(strength: u32) -> f64 {
+    let s = f64::from(strength.min(SOFT_STRENGTH_MAX)) / f64::from(SOFT_STRENGTH_MAX);
+    s * f64::from(SOFT_BASE_PX) * SOFT_TOP_RADIUS
+}
+
+/// Convert a Soft strength saved under the old coarse 0..10 scale to the fine
+/// 0..[`SOFT_STRENGTH_MAX`] one at the same blur radius. The old steps 4..10 all
+/// blurred past what the new top step reaches, so they clamp to it.
+pub(crate) fn soft_strength_from_legacy(v: u32) -> u32 {
+    if v == 0 {
+        return 0;
+    }
+    let old_radius = (0.10 + f64::from(v.min(10)) / 10.0 * 0.45) * 0.09;
+    let steps = old_radius / SOFT_TOP_RADIUS * f64::from(SOFT_STRENGTH_MAX);
+    (steps.round() as u32).min(SOFT_STRENGTH_MAX)
+}
 
 /// Blur/effect style applied to the background image. The dropdown order is the
 /// enum order (see [`BgFilter::from_index`]). `Off` keeps the cover background
@@ -660,16 +695,19 @@ fn render_filtered(path: &str, filter: BgFilter, strength: u32) -> Option<gtk::g
     }
     match filter {
         BgFilter::Off => decode_scaled(path, SHARP_BG_PX),
-        // Soft = a gentle *real* blur (a light Gaussian on the moderate-res
-        // decode), not the old tiny-decode upscale that looked blocky. It uses a
-        // finer 0..10 strength scale (see `app_settings`): the visible effect
-        // saturates after a small radius, so the upper 11..100 range was wasted —
-        // 0..10 gives fine control across the whole slider.
+        // Soft = a gentle *real* blur (a light Gaussian on a higher-res decode),
+        // not the old tiny-decode upscale that looked blocky. It runs on its own
+        // fine 0..30 strength scale (see `app_settings`): the visible effect
+        // saturates within a few pixels of radius, so the slider spreads exactly
+        // those over its whole travel — sub-pixel radii included, which the
+        // fractional box blur below resolves.
         BgFilter::Soft => {
-            let s = f64::from(strength.min(10)) / 10.0;
-            cpu_filter(path, |pb| gaussian_blur(pb, (0.10 + s * 0.45).min(1.0)))
+            let r = soft_radius(strength);
+            cpu_filter_at(path, SOFT_BASE_PX, |pb| gaussian_blur(pb, r))
         }
-        BgFilter::Gaussian => cpu_filter(path, |pb| gaussian_blur(pb, s)),
+        BgFilter::Gaussian => cpu_filter(path, |pb| {
+            gaussian_blur(pb, s * f64::from(FILTER_BASE_PX) * 0.09)
+        }),
         BgFilter::Motion => cpu_filter(path, |pb| motion_blur(pb, s)),
         BgFilter::Radial => cpu_filter(path, |pb| radial_blur(pb, s)),
         BgFilter::Water => cpu_filter(path, |pb| water_ripple(pb, s)),
@@ -678,7 +716,16 @@ fn render_filtered(path: &str, filter: BgFilter, strength: u32) -> Option<gtk::g
 
 /// Decode a moderate-resolution pixbuf, run a per-pixel effect, return a texture.
 fn cpu_filter(path: &str, f: impl FnOnce(&Pixbuf) -> Option<Pixbuf>) -> Option<gtk::gdk::Texture> {
-    let src = Pixbuf::from_file_at_scale(path, FILTER_BASE_PX, FILTER_BASE_PX, true).ok()?;
+    cpu_filter_at(path, FILTER_BASE_PX, f)
+}
+
+/// Same, at an explicit decode size (Soft needs more pixels to stay gradual).
+fn cpu_filter_at(
+    path: &str,
+    base_px: i32,
+    f: impl FnOnce(&Pixbuf) -> Option<Pixbuf>,
+) -> Option<gtk::gdk::Texture> {
+    let src = Pixbuf::from_file_at_scale(path, base_px, base_px, true).ok()?;
     f(&src).map(|pb| gtk::gdk::Texture::for_pixbuf(&pb))
 }
 
@@ -697,59 +744,80 @@ fn finish(out: Vec<u8>, src: &Pixbuf) -> Option<Pixbuf> {
 }
 
 /// Gaussian blur, approximated by three separable box-blur passes (the classic
-/// box≈Gaussian trick). Radius scales with strength.
-fn gaussian_blur(src: &Pixbuf, s: f64) -> Option<Pixbuf> {
+/// box≈Gaussian trick). `radius` is in source pixels and may be fractional.
+fn gaussian_blur(src: &Pixbuf, radius: f64) -> Option<Pixbuf> {
     let (w, h, nch, stride) = (src.width(), src.height(), src.n_channels(), src.rowstride());
-    let r = (s * (FILTER_BASE_PX as f64 * 0.09)).round() as i32;
-    if r < 1 {
+    if radius < 0.02 {
         return Some(src.clone());
     }
     let bytes = src.read_pixel_bytes();
     let mut buf = bytes.as_ref().to_vec();
     for _ in 0..3 {
-        buf = box_blur(&buf, w, h, nch, stride, r);
+        buf = box_blur(&buf, w, h, nch, stride, radius);
     }
     finish(buf, src)
 }
 
 /// One separable box blur (horizontal then vertical) of radius `r`.
-fn box_blur(data: &[u8], w: i32, h: i32, nch: i32, stride: i32, r: i32) -> Vec<u8> {
-    let at = |x: i32, y: i32| -> usize { (y * stride + x * nch) as usize };
-    // Horizontal pass.
-    let mut tmp = vec![0u8; (stride * h) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let mut acc = [0u32; 4];
-            let mut n = 0u32;
-            for sx in (x - r).max(0)..=(x + r).min(w - 1) {
-                let i = at(sx, y);
-                for c in 0..nch as usize {
-                    acc[c] += u32::from(data[i + c]);
-                }
-                n += 1;
-            }
-            let o = at(x, y);
-            for c in 0..nch as usize {
-                tmp[o + c] = (acc[c] / n) as u8;
+fn box_blur(data: &[u8], w: i32, h: i32, nch: i32, stride: i32, r: f64) -> Vec<u8> {
+    let horizontal = blur_axis(data, w, h, nch, stride, r, false);
+    blur_axis(&horizontal, w, h, nch, stride, r, true)
+}
+
+/// One 1-D pass of the box blur, along x (`vertical` false) or y.
+///
+/// `r` may be fractional: the two pixels just outside the whole-pixel window are
+/// mixed in with the leftover weight, so radii less than a pixel apart still
+/// give different images — that is what lets the Soft slider resolve 30 steps
+/// inside a range of a few pixels. Edges clamp to the border pixel, and the
+/// window sum slides, so the cost does not grow with the radius.
+fn blur_axis(
+    data: &[u8],
+    w: i32,
+    h: i32,
+    nch: i32,
+    stride: i32,
+    r: f64,
+    vertical: bool,
+) -> Vec<u8> {
+    // `u` runs along the blurred axis, `v` across it.
+    let at = |u: i32, v: i32| -> usize {
+        if vertical {
+            (u * stride + v * nch) as usize
+        } else {
+            (v * stride + u * nch) as usize
+        }
+    };
+    let (len, lines) = if vertical { (h, w) } else { (w, h) };
+    let ri = (r.floor() as i32).min(len - 1);
+    let frac = r - r.floor();
+    let norm = f64::from(2 * ri + 1) + 2.0 * frac;
+    let nc = nch as usize;
+
+    let mut out = vec![0u8; (stride * h) as usize];
+    for v in 0..lines {
+        // Window sum for u = 0, with both ends clamped to the border pixel.
+        let mut acc = [0u32; 4];
+        for u in -ri..=ri {
+            let i = at(u.clamp(0, len - 1), v);
+            for c in 0..nc {
+                acc[c] += u32::from(data[i + c]);
             }
         }
-    }
-    // Vertical pass.
-    let mut out = vec![0u8; (stride * h) as usize];
-    for x in 0..w {
-        for y in 0..h {
-            let mut acc = [0u32; 4];
-            let mut n = 0u32;
-            for sy in (y - r).max(0)..=(y + r).min(h - 1) {
-                let i = at(x, sy);
-                for c in 0..nch as usize {
-                    acc[c] += u32::from(tmp[i + c]);
-                }
-                n += 1;
+        for u in 0..len {
+            let lo = at((u - ri - 1).clamp(0, len - 1), v);
+            let hi = at((u + ri + 1).clamp(0, len - 1), v);
+            let o = at(u, v);
+            for c in 0..nc {
+                let edges = f64::from(u32::from(data[lo + c]) + u32::from(data[hi + c]));
+                out[o + c] = ((f64::from(acc[c]) + frac * edges) / norm).round() as u8;
             }
-            let o = at(x, y);
-            for c in 0..nch as usize {
-                out[o + c] = (acc[c] / n) as u8;
+            // Slide the window one step: add the entering pixel, drop the leaving
+            // one (in that order, so the running sum never goes negative).
+            let enter = at((u + 1 + ri).clamp(0, len - 1), v);
+            let leave = at((u - ri).clamp(0, len - 1), v);
+            for c in 0..nc {
+                acc[c] = acc[c] + u32::from(data[enter + c]) - u32::from(data[leave + c]);
             }
         }
     }
@@ -840,4 +908,61 @@ fn water_ripple(src: &Pixbuf, s: f64) -> Option<Pixbuf> {
         }
     }
     finish(out, src)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk::gdk_pixbuf::Colorspace;
+
+    /// A hard black/white edge: blurring widens it, so the profile flattens.
+    fn edge(w: i32) -> Pixbuf {
+        let pb = Pixbuf::new(Colorspace::Rgb, false, 8, w, 8).unwrap();
+        pb.fill(0x0000_00ff);
+        let (stride, nch) = (pb.rowstride(), pb.n_channels());
+        // SAFETY: no other reference to the pixel data exists here.
+        let px = unsafe { pb.pixels() };
+        for y in 0..8 {
+            for x in w / 2..w {
+                let i = (y * stride + x * nch) as usize;
+                px[i..i + nch as usize].fill(255);
+            }
+        }
+        pb
+    }
+
+    /// How much contrast is left: flat (fully blurred) profiles score lower.
+    fn contrast(pb: &Pixbuf) -> u64 {
+        let (w, nch) = (pb.width(), pb.n_channels());
+        let bytes = pb.read_pixel_bytes();
+        (0..w)
+            .map(|x| {
+                let v = i64::from(bytes[(x * nch) as usize]);
+                (v - 128).unsigned_abs()
+            })
+            .sum()
+    }
+
+    /// Every step of the fine Soft scale must actually change the image — that
+    /// is the point of the fractional radius (most steps are sub-pixel).
+    #[test]
+    fn soft_steps_all_differ() {
+        let src = edge(SOFT_BASE_PX);
+        let mut prev = contrast(&src);
+        for v in 1..=SOFT_STRENGTH_MAX {
+            let out = gaussian_blur(&src, soft_radius(v)).unwrap();
+            let c = contrast(&out);
+            assert!(c < prev, "step {v} did not soften the edge ({c} vs {prev})");
+            prev = c;
+        }
+    }
+
+    /// Old 0..10 values keep their radius; anything past the new top clamps.
+    #[test]
+    fn legacy_soft_strengths_convert() {
+        assert_eq!(soft_strength_from_legacy(0), 0);
+        assert_eq!(soft_strength_from_legacy(1), SOFT_STRENGTH_DEFAULT);
+        assert_eq!(soft_strength_from_legacy(10), SOFT_STRENGTH_MAX);
+        assert!(soft_strength_from_legacy(3) < SOFT_STRENGTH_MAX);
+    }
 }
