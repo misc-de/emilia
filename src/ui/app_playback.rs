@@ -121,13 +121,8 @@ impl App {
         if is_active {
             if self.mini.playing {
                 self.save_resume();
-                self.player.pause();
-            } else {
-                self.player.resume();
             }
-            self.mini.playing = !self.mini.playing;
-            self.mpris.set_playing(self.mini.playing);
-            self.refresh_queue_icons();
+            self.flip_playing();
             return;
         }
         // Build the remote row from the visible file rows (folder sequence).
@@ -753,6 +748,23 @@ impl App {
         *self.transport.close_session.borrow_mut() = Some((path_str, now, 0, duration_ms));
     }
 
+    /// Flips play/pause on whatever is running and syncs everything that hangs
+    /// off that state: the flag the UI watches, the MPRIS status and the queue
+    /// icons. Saving the playback position is deliberately *not* part of it —
+    /// local tracks, podcast episodes and YouTube items each have their own
+    /// store ([`Self::save_resume`], [`Self::save_episode_progress`],
+    /// [`Self::save_yt_progress`]), so the caller saves before calling.
+    pub(crate) fn flip_playing(&mut self) {
+        if self.mini.playing {
+            self.player.pause();
+        } else {
+            self.player.resume();
+        }
+        self.mini.playing = !self.mini.playing;
+        self.mpris.set_playing(self.mini.playing);
+        self.refresh_queue_icons();
+    }
+
     /// Tapping the entry of the file that is *already loaded* must not restart
     /// it. If `path` is the currently playing/paused file, this toggles
     /// pause/resume (like the mini player) and returns `true` so the caller
@@ -764,13 +776,8 @@ impl App {
         }
         if self.mini.playing {
             self.save_resume();
-            self.player.pause();
-        } else {
-            self.player.resume();
         }
-        self.mini.playing = !self.mini.playing;
-        self.mpris.set_playing(self.mini.playing);
-        self.refresh_queue_icons();
+        self.flip_playing();
         true
     }
 
@@ -1192,13 +1199,8 @@ impl App {
                 if self.mini.now_playing.is_some() {
                     if self.mini.playing {
                         self.save_resume();
-                        self.player.pause();
-                    } else {
-                        self.player.resume();
                     }
-                    self.mini.playing = !self.mini.playing;
-                    self.mpris.set_playing(self.mini.playing);
-                    self.refresh_queue_icons();
+                    self.flip_playing();
                 }
             }
             M::Play => {

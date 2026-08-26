@@ -938,29 +938,7 @@ impl App {
         if let Some((d, _)) = self.libview.missing_busy.take() {
             d.close();
         }
-        let dialog = adw::Dialog::builder().content_width(300).build();
-        let vb = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(16)
-            .margin_top(28)
-            .margin_bottom(28)
-            .margin_start(28)
-            .margin_end(28)
-            .halign(gtk::Align::Center)
-            .build();
-        let spinner = gtk::Spinner::builder()
-            .width_request(32)
-            .height_request(32)
-            .build();
-        spinner.set_spinning(true);
-        let label = gtk::Label::builder()
-            .label(text)
-            .wrap(true)
-            .justify(gtk::Justification::Center)
-            .build();
-        vb.append(&spinner);
-        vb.append(&label);
-        dialog.set_child(Some(&vb));
+        let (dialog, label) = crate::ui::widgets::busy_dialog(text, 300);
         dialog.present(Some(root));
         self.libview.missing_busy = Some((dialog, label));
     }

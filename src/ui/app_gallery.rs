@@ -192,13 +192,7 @@ pub(crate) fn section_header_label(text: &str) -> gtk::Label {
 pub(crate) fn list_section_header_func(
     labels: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
 ) -> impl Fn(&gtk::ListBoxRow, Option<&gtk::ListBoxRow>) {
-    fn set_class(w: &gtk::ListBoxRow, class: &str, on: bool) {
-        if on {
-            w.add_css_class(class);
-        } else {
-            w.remove_css_class(class);
-        }
-    }
+    use crate::ui::widgets::set_class;
     move |row: &gtk::ListBoxRow, _before: Option<&gtk::ListBoxRow>| {
         let list = row.parent().and_downcast::<gtk::ListBox>();
         let guard = labels.borrow();
@@ -313,22 +307,7 @@ impl App {
         detail: fn(usize) -> Msg,
         hook: bool,
     ) {
-        while let Some(c) = fb.first_child() {
-            fb.remove(&c);
-        }
-        // Fixed grid: exactly the configured number of columns per row, every
-        // tile the same width. No reflow to fewer columns — the user picks the
-        // grid, and each tile is kept square by `SquareBin`.
-        fb.set_min_children_per_line(self.libview.gallery_columns);
-        fb.set_max_children_per_line(self.libview.gallery_columns);
-        fb.set_homogeneous(true);
-        fb.set_row_spacing(8);
-        fb.set_column_spacing(8);
-        fb.set_selection_mode(gtk::SelectionMode::None);
-        fb.set_activate_on_single_click(false);
-        if !fb.has_css_class("emilia-gallery") {
-            fb.add_css_class("emilia-gallery");
-        }
+        crate::ui::widgets::reset_gallery_grid(fb, self.libview.gallery_columns);
 
         let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (cover, icon, title)) in items.iter().enumerate() {

@@ -70,6 +70,30 @@ macro_rules! track_upsert_params {
     };
 }
 
+/// Column list of every `SELECT` that feeds [`row_to_track`]. The two belong
+/// together: the mapping addresses its columns by index, so this order is what
+/// makes those indices correct.
+const TRACK_COLS: &str =
+    "id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year";
+
+/// Maps a row selected with [`TRACK_COLS`] to a [`Track`]. `genre` is not part
+/// of that list, so it stays `None` here.
+fn row_to_track(r: &rusqlite::Row) -> rusqlite::Result<Track> {
+    Ok(Track {
+        id: r.get(0)?,
+        path: r.get(1)?,
+        title: r.get(2)?,
+        artist: r.get(3)?,
+        album: r.get(4)?,
+        genre: None,
+        track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
+        duration_ms: r.get(6)?,
+        resume_ms: r.get(7)?,
+        disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
+        year: r.get(9)?,
+    })
+}
+
 /// Escapes the LIKE metacharacters `\ % _` so an arbitrary (user-chosen) path
 /// can be used as a literal prefix in a `LIKE … ESCAPE '\'` pattern.
 fn like_escape(s: &str) -> String {
@@ -1788,24 +1812,9 @@ impl Library {
         let track = self
             .conn
             .query_row(
-                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
-                 FROM track WHERE path = ?1",
+                &format!("SELECT {TRACK_COLS} FROM track WHERE path = ?1"),
                 [path],
-                |r| {
-                    Ok(Track {
-                        id: r.get(0)?,
-                        path: r.get(1)?,
-                        title: r.get(2)?,
-                        artist: r.get(3)?,
-                        album: r.get(4)?,
-                        genre: None,
-                        track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
-                        duration_ms: r.get(6)?,
-                        resume_ms: r.get(7)?,
-                        disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
-                        year: r.get(9)?,
-                    })
-                },
+                row_to_track,
             )
             .optional()?;
         Ok(track)
@@ -1822,26 +1831,9 @@ impl Library {
         // SQLite caps the number of bound parameters; chunk well under the limit.
         for chunk in paths.chunks(900) {
             let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!(
-                "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
-                 FROM track WHERE path IN ({placeholders})"
-            );
+            let sql = format!("SELECT {TRACK_COLS} FROM track WHERE path IN ({placeholders})");
             let mut stmt = self.conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
-                Ok(Track {
-                    id: r.get(0)?,
-                    path: r.get(1)?,
-                    title: r.get(2)?,
-                    artist: r.get(3)?,
-                    album: r.get(4)?,
-                    genre: None,
-                    track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
-                    duration_ms: r.get(6)?,
-                    resume_ms: r.get(7)?,
-                    disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
-                    year: r.get(9)?,
-                })
-            })?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), row_to_track)?;
             for t in rows {
                 let t = t?;
                 map.insert(t.path.clone(), t);
@@ -1852,53 +1844,23 @@ impl Library {
 
     /// All tracks, sorted by album and track number.
     pub fn all_tracks(&self) -> Result<Vec<Track>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
-             FROM track
-             ORDER BY album, COALESCE(disc_no, 1), track_no, title",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(Track {
-                id: r.get(0)?,
-                path: r.get(1)?,
-                title: r.get(2)?,
-                artist: r.get(3)?,
-                album: r.get(4)?,
-                genre: None,
-                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
-                duration_ms: r.get(6)?,
-                resume_ms: r.get(7)?,
-                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
-                year: r.get(9)?,
-            })
-        })?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TRACK_COLS} FROM track
+             ORDER BY album, COALESCE(disc_no, 1), track_no, title"
+        ))?;
+        let rows = stmt.query_map([], row_to_track)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Tracks of one album name only, sorted for album playback/subpages. This
     /// avoids loading the whole library when opening a single album.
     pub fn tracks_by_album_name(&self, album: &str) -> Result<Vec<Track>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
-             FROM track
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TRACK_COLS} FROM track
              WHERE album = ?1 COLLATE NOCASE
-             ORDER BY COALESCE(disc_no, 1), track_no, path",
-        )?;
-        let rows = stmt.query_map([album], |r| {
-            Ok(Track {
-                id: r.get(0)?,
-                path: r.get(1)?,
-                title: r.get(2)?,
-                artist: r.get(3)?,
-                album: r.get(4)?,
-                genre: None,
-                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
-                duration_ms: r.get(6)?,
-                resume_ms: r.get(7)?,
-                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
-                year: r.get(9)?,
-            })
-        })?;
+             ORDER BY COALESCE(disc_no, 1), track_no, path"
+        ))?;
+        let rows = stmt.query_map([album], row_to_track)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -1908,26 +1870,11 @@ impl Library {
     pub fn tracks_under_path(&self, dir: &str) -> Result<Vec<Track>> {
         let prefix = format!("{}/", dir.trim_end_matches('/'));
         let upper = format!("{prefix}\u{10FFFF}");
-        let mut stmt = self.conn.prepare(
-            "SELECT id, path, title, artist, album, track_no, duration_ms, resume_ms, disc_no, year
-             FROM track
-             WHERE path >= ?1 AND path < ?2",
-        )?;
-        let rows = stmt.query_map([&prefix, &upper], |r| {
-            Ok(Track {
-                id: r.get(0)?,
-                path: r.get(1)?,
-                title: r.get(2)?,
-                artist: r.get(3)?,
-                album: r.get(4)?,
-                genre: None,
-                track_no: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
-                duration_ms: r.get(6)?,
-                resume_ms: r.get(7)?,
-                disc_no: r.get::<_, Option<i64>>(8)?.map(|n| n as u32),
-                year: r.get(9)?,
-            })
-        })?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TRACK_COLS} FROM track
+             WHERE path >= ?1 AND path < ?2"
+        ))?;
+        let rows = stmt.query_map([&prefix, &upper], row_to_track)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 

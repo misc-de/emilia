@@ -28,6 +28,7 @@ use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover};
 use crate::ui::app_views::natural_key;
+use crate::ui::widgets::{action_row, detail_box, present_detail};
 
 /// How many newest videos to cache per channel on subscribe/refresh.
 pub(crate) const CHANNEL_VIDEO_LIMIT: usize = 30;
@@ -36,46 +37,6 @@ const PLAYLIST_INDEX_LIMIT: usize = 200;
 /// How long a cached browsed-playlist song list is served as-is before a
 /// background refresh is kicked off on the next open (6 hours).
 const PLAYLIST_CACHE_TTL_SECS: i64 = 6 * 60 * 60;
-
-/// Content box for the detail dialogs (uniform margins).
-fn detail_box() -> gtk::Box {
-    gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(12)
-        .margin_top(6)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build()
-}
-
-/// Embeds the content scrollably in a dialog with a header bar and shows it.
-fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
-        .vexpand(true)
-        .child(content)
-        .build();
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&scroller));
-    dialog.set_child(Some(&toolbar));
-    dialog.set_content_width(600);
-    crate::ui::app_helpers::fit_dialog_on_expand(dialog);
-    crate::ui::app_helpers::close_on_click_outside(dialog);
-    dialog.present(Some(root));
-}
-
-/// Activatable action row with an icon prefix (for the detail dialogs).
-fn action_row(title: &str, icon: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(title)
-        .activatable(true)
-        .build();
-    row.add_prefix(&gtk::Image::from_icon_name(icon));
-    row
-}
 
 /// A non-selectable results-list row with a spinner and the "Searching …"
 /// label, shown as the list's only row while a search is in flight. Building
@@ -156,15 +117,10 @@ fn duration_chip(secs: i64) -> gtk::Label {
     lbl
 }
 
-/// Formats a duration in seconds as `M:SS` or `H:MM:SS` (display only).
+/// Formats a duration in **seconds** as `M:SS` or `H:MM:SS` (display only) —
+/// YouTube reports lengths in seconds, the rest of the app in milliseconds.
 pub(crate) fn fmt_duration(secs: i64) -> String {
-    let s = secs.max(0);
-    let (h, m, sec) = (s / 3600, (s % 3600) / 60, s % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{sec:02}")
-    } else {
-        format!("{m}:{sec:02}")
-    }
+    crate::ui::app_helpers::fmt_duration(secs.saturating_mul(1000))
 }
 
 /// Subscribes to a channel and caches its newest videos (worker thread, own DB).
@@ -1237,9 +1193,7 @@ impl Component for YtPage {
 impl YtPage {
     /// Show detail dialogs as bottom sheets on the phone.
     fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
-        if self.mobile {
-            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
-        }
+        crate::ui::widgets::adapt_dialog(dialog, self.mobile);
     }
 
     /// Park a built subpage in the shared slot and ask the parent to push it.
@@ -1431,19 +1385,7 @@ impl YtPage {
     /// Gallery variant of the channel overview (thumbnail grid).
     fn fill_yt_gallery(&self, sender: &ComponentSender<Self>) {
         let fb = &self.channels_gallery;
-        while let Some(c) = fb.first_child() {
-            fb.remove(&c);
-        }
-        fb.set_min_children_per_line(self.gallery_columns);
-        fb.set_max_children_per_line(self.gallery_columns);
-        fb.set_homogeneous(true);
-        fb.set_row_spacing(8);
-        fb.set_column_spacing(8);
-        fb.set_selection_mode(gtk::SelectionMode::None);
-        fb.set_activate_on_single_click(false);
-        if !fb.has_css_class("emilia-gallery") {
-            fb.add_css_class("emilia-gallery");
-        }
+        crate::ui::widgets::reset_gallery_grid(fb, self.gallery_columns);
         let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (_, title, _, thumb, _)) in self.channel_items.iter().enumerate() {
             let cover = thumb

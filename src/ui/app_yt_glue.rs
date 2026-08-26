@@ -115,14 +115,7 @@ impl App {
     /// Play a single video (toggles if it is already the running one).
     pub(crate) fn yt_play_video(&mut self, video_id: String, title: String) {
         if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
-            if self.mini.playing {
-                self.player.pause();
-            } else {
-                self.player.resume();
-            }
-            self.mini.playing = !self.mini.playing;
-            self.mpris.set_playing(self.mini.playing);
-            self.refresh_queue_icons();
+            self.flip_playing();
         } else {
             self.youtube.playing_playlist = false;
             self.youtube.video_titles.clear();

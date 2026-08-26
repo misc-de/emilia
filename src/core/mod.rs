@@ -4,6 +4,7 @@ pub mod concert;
 pub mod cover;
 pub mod db;
 pub mod fingerprint;
+pub mod http;
 pub mod lyrics;
 pub mod mcp;
 pub mod mic;

@@ -6,11 +6,13 @@
 //! flag as well as the pairing/session timeouts. Every authenticated request
 //! extends the session (no separate ping needed).
 //!
-//! HTTP/1.1 is parsed with `httparse` (request line + headers); bodies are read
-//! by `Content-Length` and hard-capped. One request is served per connection
-//! (`Connection: close`) — the client (`ureq`) re-dials for the next request,
-//! which keeps the server free of keep-alive/pipelining edge cases. The set of
-//! requests is fixed and tiny (see [`crate::core::sync::client`]).
+//! HTTP/1.1 parsing and response writing come from [`crate::core::http`],
+//! shared with the MCP JSON-RPC server: request line + headers via `httparse`,
+//! bodies read by `Content-Length` and hard-capped ([`MAX_BODY`]). One request
+//! is served per connection (`Connection: close`) — the client (`ureq`) re-dials
+//! for the next request, which keeps the server free of keep-alive/pipelining
+//! edge cases. The set of requests is fixed and tiny (see
+//! [`crate::core::sync::client`]).
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -20,9 +22,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use serde::Serialize;
 
 use crate::core::db::Library;
+use crate::core::http::{read_head, write_json, write_status, HttpReq};
 use crate::core::sync::protocol::{self, Capabilities, PairRequest, PairResponse};
 use crate::core::sync::share::{ShareDecision, ShareManifest};
 use crate::core::sync::{crypto, data, SyncEvent};
@@ -59,8 +61,6 @@ pub(crate) fn local_caps() -> Capabilities {
 /// exhausting memory. The body is bounded here, *before* the bearer check on
 /// `/pair`, so the cap holds pre-auth.
 const MAX_BODY: usize = 64 * 1024 * 1024;
-/// Cap for the request head (request line + headers).
-const MAX_HEADER: usize = 64 * 1024;
 /// Per-connection read/write timeout, so a slow/stuck peer cannot pin a worker.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// Upper bound for a single streamed `/files/put` upload (sanity cap, not memory:
@@ -88,30 +88,6 @@ pub struct SyncServer {
 enum Action {
     Continue,
     Stop,
-}
-
-/// A parsed HTTP/1.1 request: just what the dispatch needs.
-struct HttpReq {
-    method: String,
-    /// Request target without the query string.
-    path: String,
-    /// Raw query string (after `?`), empty if none.
-    query: String,
-    headers: Vec<(String, String)>,
-    /// Body bytes read so far (for non-streamed endpoints: the full body).
-    body: Vec<u8>,
-    /// `Content-Length` as advertised (not yet clamped). For the streamed
-    /// `/files/put` path the body is read directly off the stream up to this.
-    content_length: usize,
-}
-
-impl HttpReq {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
-    }
 }
 
 impl SyncServer {
@@ -299,7 +275,7 @@ impl SyncServer {
         let action = if req.method == "POST" && req.path == "/files/put" {
             self.handle_put(&req, &mut tls)
         } else {
-            if read_body_fully(&mut tls, &mut req).is_err() {
+            if crate::core::http::read_body_fully(&mut tls, &mut req, MAX_BODY).is_err() {
                 return Action::Continue;
             }
             self.dispatch(&req, &mut tls, paired, failed, peer_name, peer_caps, emit)
@@ -627,134 +603,6 @@ fn stream_body(
     Ok(written)
 }
 
-/// Reads the request **head** (request line + headers) from `stream` (drives the
-/// TLS handshake on first read). `body` holds only the bytes already buffered
-/// past the header block; `content_length` is the advertised length (unclamped).
-/// The caller fills the body ([`read_body_fully`]) or streams it (`/files/put`).
-fn read_head(stream: &mut impl Read) -> Result<HttpReq> {
-    let mut buf: Vec<u8> = Vec::with_capacity(2048);
-    let mut tmp = [0u8; 4096];
-    let head_end = loop {
-        if let Some(pos) = find_subsequence(&buf, b"\r\n\r\n") {
-            break pos + 4;
-        }
-        if buf.len() > MAX_HEADER {
-            return Err(anyhow!("request header too large"));
-        }
-        let n = stream.read(&mut tmp)?;
-        if n == 0 {
-            return Err(anyhow!("connection closed before headers"));
-        }
-        buf.extend_from_slice(&tmp[..n]);
-    };
-
-    let mut headers = [httparse::EMPTY_HEADER; 32];
-    let mut parsed = httparse::Request::new(&mut headers);
-    if parsed.parse(&buf[..head_end])?.is_partial() {
-        return Err(anyhow!("incomplete request head"));
-    }
-    let method = parsed.method.unwrap_or("").to_string();
-    let target = parsed.path.unwrap_or("");
-    let (path, query) = match target.split_once('?') {
-        Some((p, q)) => (p.to_string(), q.to_string()),
-        None => (target.to_string(), String::new()),
-    };
-    let headers: Vec<(String, String)> = parsed
-        .headers
-        .iter()
-        .map(|h| {
-            (
-                h.name.to_string(),
-                String::from_utf8_lossy(h.value).into_owned(),
-            )
-        })
-        .collect();
-
-    let content_length = headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("Content-Length"))
-        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-
-    Ok(HttpReq {
-        method,
-        path,
-        query,
-        headers,
-        body: buf[head_end..].to_vec(),
-        content_length,
-    })
-}
-
-/// Fills `req.body` up to `Content-Length`, clamped to `MAX_BODY` (small JSON
-/// bodies). For the streamed `/files/put` path this is **not** called.
-fn read_body_fully(stream: &mut impl Read, req: &mut HttpReq) -> Result<()> {
-    let target = req.content_length.min(MAX_BODY);
-    if req.body.len() > target {
-        req.body.truncate(target);
-    }
-    let mut tmp = [0u8; 4096];
-    while req.body.len() < target {
-        let n = stream.read(&mut tmp)?;
-        if n == 0 {
-            break;
-        }
-        let take = (target - req.body.len()).min(n);
-        req.body.extend_from_slice(&tmp[..take]);
-    }
-    Ok(())
-}
-
-/// Full read of a request (head + body) — used by the tests and any caller that
-/// wants the whole body in memory.
-#[cfg(test)]
-fn read_request(stream: &mut impl Read) -> Result<HttpReq> {
-    let mut req = read_head(stream)?;
-    read_body_fully(stream, &mut req)?;
-    Ok(req)
-}
-
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
-}
-
-fn reason_phrase(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        500 => "Internal Server Error",
-        _ => "OK",
-    }
-}
-
-/// Writes a complete `Connection: close` response with a body.
-fn write_response(out: &mut impl Write, status: u16, content_type: &str, body: &[u8]) {
-    let head = format!(
-        "HTTP/1.1 {status} {reason}\r\n\
-         Content-Type: {content_type}\r\n\
-         Content-Length: {len}\r\n\
-         Connection: close\r\n\r\n",
-        reason = reason_phrase(status),
-        len = body.len(),
-    );
-    if out.write_all(head.as_bytes()).is_ok() {
-        let _ = out.write_all(body);
-        let _ = out.flush();
-    }
-}
-
-fn write_json<S: Serialize>(out: &mut impl Write, status: u16, body: &S) {
-    let json = serde_json::to_vec(body).unwrap_or_else(|_| b"{}".to_vec());
-    write_response(out, status, "application/json", &json);
-}
-
-fn write_status(out: &mut impl Write, status: u16) {
-    write_response(out, status, "text/plain", b"");
-}
-
 /// Streams a file as the response body (Content-Length = file size).
 fn write_file(out: &mut impl Write, path: &Path) {
     let mut file = match std::fs::File::open(path) {
@@ -871,7 +719,7 @@ mod tests {
                     Authorization: Bearer abc\r\n\
                     Content-Length: 5\r\n\r\nhello";
         let mut cursor = std::io::Cursor::new(raw.to_vec());
-        let req = read_request(&mut cursor).expect("parses");
+        let req = crate::core::http::read_request(&mut cursor, MAX_BODY).expect("parses");
         assert_eq!(req.method, "POST");
         assert_eq!(req.path, "/sync/import");
         assert_eq!(req.query, "x=1");
@@ -884,7 +732,7 @@ mod tests {
         // Extra bytes beyond Content-Length must not be read into the body.
         let raw = b"GET /ping HTTP/1.1\r\nContent-Length: 3\r\n\r\nABCDEFG";
         let mut cursor = std::io::Cursor::new(raw.to_vec());
-        let req = read_request(&mut cursor).expect("parses");
+        let req = crate::core::http::read_request(&mut cursor, MAX_BODY).expect("parses");
         assert_eq!(req.body, b"ABC");
     }
 }

@@ -5,10 +5,7 @@ use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
 use relm4::{adw, gtk};
 use std::path::{Path, PathBuf};
 
-/// Escapes special characters (`&`, `<`, …) for display in Pango markup.
-fn esc(s: &str) -> String {
-    gtk::glib::markup_escape_text(s).to_string()
-}
+use crate::ui::widgets::esc;
 
 /// Splits a file name (without extension) at the last "-": before it the artist,
 /// after it the track name. Without a "-" there is no artist and the whole

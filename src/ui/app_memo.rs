@@ -21,6 +21,7 @@ use crate::core::mic::MicRecorder;
 use crate::i18n::{gettext, ngettext_n};
 use crate::model::{MemoCategory, MemoItem};
 use crate::ui::app::{fmt_duration, App, MemoView, Msg};
+use crate::ui::widgets::{action_row, detail_box, present_detail};
 
 /// Stand-in category id for the "General" (unassigned) node in
 /// [`MemoState::expanded_cats`]; real category ids are positive DB keys.
@@ -128,46 +129,6 @@ fn fmt_datetime(secs: i64) -> String {
         .and_then(|d| d.format("%d.%m.%Y %H:%M"))
         .map(|s| s.to_string())
         .unwrap_or_else(|_| secs.to_string())
-}
-
-/// Content box for the detail dialogs (uniform margins).
-fn detail_box() -> gtk::Box {
-    gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(12)
-        .margin_top(6)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build()
-}
-
-/// Activatable action row with an icon prefix (for the detail dialog).
-fn action_row(title: &str, icon: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(title)
-        .activatable(true)
-        .build();
-    row.add_prefix(&gtk::Image::from_icon_name(icon));
-    row
-}
-
-/// Embeds the content scrollably in a dialog with a header bar and shows it.
-fn present_dialog(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
-        .vexpand(true)
-        .child(content)
-        .build();
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&scroller));
-    dialog.set_child(Some(&toolbar));
-    dialog.set_content_width(600);
-    crate::ui::app_helpers::fit_dialog_on_expand(dialog);
-    crate::ui::app_helpers::close_on_click_outside(dialog);
-    dialog.present(Some(root));
 }
 
 /// Small text-entry prompt (rename / new category). Calls `on_ok` with the
@@ -761,7 +722,7 @@ impl App {
         actions.add(&remove);
         content.append(&actions);
 
-        present_dialog(&dialog, &content, root);
+        present_detail(&dialog, &content, root);
     }
 
     /// Detail dialog of a memo category: metadata (creation date, memo count),
@@ -839,7 +800,7 @@ impl App {
         actions.add(&remove);
         content.append(&actions);
 
-        present_dialog(&dialog, &content, root);
+        present_detail(&dialog, &content, root);
     }
 }
 

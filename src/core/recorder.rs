@@ -718,8 +718,9 @@ fn sanitize_filename(artist: Option<&str>, title: &str) -> String {
     }
 }
 
-/// Finds a free file path (appends " (2)" etc. if needed).
-fn unique_path(dir: &Path, base: &str, ext: &str) -> PathBuf {
+/// Finds a free file path (appends " (2)" etc. if needed). Shared with the
+/// voice-memo recorder ([`crate::core::mic`]).
+pub(crate) fn unique_path(dir: &Path, base: &str, ext: &str) -> PathBuf {
     let mut p = dir.join(format!("{base}.{ext}"));
     let mut i = 2;
     while p.exists() {

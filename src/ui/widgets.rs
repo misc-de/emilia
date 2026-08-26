@@ -380,3 +380,127 @@ pub(crate) fn carousel_with_arrows(carousel: &adw::Carousel) -> gtk::Box {
     row.append(&next);
     row
 }
+
+// ---------------------------------------------------------------------------
+// Detail dialogs
+//
+// The building blocks every "tap an item, get a sheet of actions" dialog shares
+// (Files/Memos, Podcasts, Streaming, YouTube). They used to live once per page
+// as byte-identical private copies.
+// ---------------------------------------------------------------------------
+
+/// Content box for the detail dialogs (uniform margins).
+pub fn detail_box() -> gtk::Box {
+    gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(6)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build()
+}
+
+/// Activatable action row with an icon prefix (for the detail dialogs).
+pub fn action_row(title: &str, icon: &str) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .activatable(true)
+        .build();
+    row.add_prefix(&gtk::Image::from_icon_name(icon));
+    row
+}
+
+/// Embeds the content scrollably in a dialog with a header bar and shows it.
+/// Uses the full width, but never more than 600 px (on narrow windows the
+/// dialog shrinks to the window width by itself).
+pub fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .vexpand(true)
+        .child(content)
+        .build();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&scroller));
+    dialog.set_child(Some(&toolbar));
+    dialog.set_content_width(600);
+    crate::ui::app_helpers::fit_dialog_on_expand(dialog);
+    crate::ui::app_helpers::close_on_click_outside(dialog);
+    dialog.present(Some(root));
+}
+
+/// On a phone a detail dialog is shown as a bottom sheet instead of a floating
+/// window. Call before presenting.
+pub fn adapt_dialog(dialog: &adw::Dialog, mobile: bool) {
+    if mobile {
+        dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
+    }
+}
+
+/// Empties a gallery flow box and (re-)applies its fixed grid: exactly
+/// `columns` equally wide tiles per row. No reflow to fewer columns — the user
+/// picks the grid, and each tile is kept square by its `SquareBin`.
+pub fn reset_gallery_grid(fb: &gtk::FlowBox, columns: u32) {
+    while let Some(c) = fb.first_child() {
+        fb.remove(&c);
+    }
+    fb.set_min_children_per_line(columns);
+    fb.set_max_children_per_line(columns);
+    fb.set_homogeneous(true);
+    fb.set_row_spacing(8);
+    fb.set_column_spacing(8);
+    fb.set_selection_mode(gtk::SelectionMode::None);
+    fb.set_activate_on_single_click(false);
+    if !fb.has_css_class("emilia-gallery") {
+        fb.add_css_class("emilia-gallery");
+    }
+}
+
+/// Escapes the Pango markup metacharacters (`&`, `<`, …) so a title/name is
+/// displayed literally in a markup label.
+pub fn esc(s: &str) -> String {
+    gtk::glib::markup_escape_text(s).to_string()
+}
+
+/// Adds or removes a CSS class by a boolean, so callers can just state the
+/// wanted end state instead of branching.
+pub fn set_class(w: &impl IsA<gtk::Widget>, class: &str, on: bool) {
+    if on {
+        w.add_css_class(class);
+    } else {
+        w.remove_css_class(class);
+    }
+}
+
+/// A small modal spinner dialog with a caption, for the short blocking waits
+/// (resolving a song online, downloading a missing track). Returns the dialog
+/// and its label, so the caller can present it, update the phase text and close
+/// it when the work returns.
+pub fn busy_dialog(text: &str, width: i32) -> (adw::Dialog, gtk::Label) {
+    let dialog = adw::Dialog::builder().content_width(width).build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .margin_top(28)
+        .margin_bottom(28)
+        .margin_start(28)
+        .margin_end(28)
+        .halign(gtk::Align::Center)
+        .build();
+    let spinner = gtk::Spinner::builder()
+        .width_request(32)
+        .height_request(32)
+        .build();
+    spinner.set_spinning(true);
+    let label = gtk::Label::builder()
+        .label(text)
+        .wrap(true)
+        .justify(gtk::Justification::Center)
+        .build();
+    content.append(&spinner);
+    content.append(&label);
+    dialog.set_child(Some(&content));
+    (dialog, label)
+}

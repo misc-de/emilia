@@ -103,7 +103,7 @@ impl MicRecorder {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let path = unique_path(dest_dir, &format!("memo-{stamp}-{n}"), EXT);
+        let path = crate::core::recorder::unique_path(dest_dir, &format!("memo-{stamp}-{n}"), EXT);
 
         // `name=micsrc` so `stop` can send EOS straight to the source (most
         // reliable way to finalize a live capture). The `level` element posts
@@ -255,16 +255,4 @@ fn norm_db(v: &gst::glib::Value) -> f32 {
         _ => return 0.0,
     };
     (((db - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)) as f32
-}
-
-/// Finds a free `<dir>/<base>.<ext>` (appends ` (2)`, … if needed), mirroring the
-/// radio recorder's helper of the same purpose.
-fn unique_path(dir: &Path, base: &str, ext: &str) -> PathBuf {
-    let mut p = dir.join(format!("{base}.{ext}"));
-    let mut i = 2;
-    while p.exists() {
-        p = dir.join(format!("{base} ({i}).{ext}"));
-        i += 1;
-    }
-    p
 }

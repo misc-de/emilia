@@ -854,29 +854,7 @@ impl App {
         if let Some(d) = self.streaming.resolve_busy.take() {
             d.close();
         }
-        let dialog = adw::Dialog::builder().content_width(280).build();
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(16)
-            .margin_top(28)
-            .margin_bottom(28)
-            .margin_start(28)
-            .margin_end(28)
-            .halign(gtk::Align::Center)
-            .build();
-        let spinner = gtk::Spinner::builder()
-            .width_request(32)
-            .height_request(32)
-            .build();
-        spinner.set_spinning(true);
-        let label = gtk::Label::builder()
-            .label(text)
-            .wrap(true)
-            .justify(gtk::Justification::Center)
-            .build();
-        content.append(&spinner);
-        content.append(&label);
-        dialog.set_child(Some(&content));
+        let (dialog, _label) = crate::ui::widgets::busy_dialog(text, 280);
         dialog.present(Some(root));
         self.streaming.resolve_busy = Some(dialog);
     }

@@ -439,40 +439,16 @@ pub fn test_connection(c: &Creds) -> Result<()> {
 // Tags & download
 // ---------------------------------------------------------------------------
 
-/// Reads title/artist/duration from the first ~512 KB of a file (range GET)
-/// into an in-memory buffer and runs `lofty` over it. Best effort: for
-/// formats with metadata at the end of the file (e.g. unoptimized MP4) this
-/// fails and returns `None` – the callers then fall back to the file name.
+/// Reads title/artist/duration of a remote track — the subset of [`read_meta`]
+/// the file list needs, off the same single range GET. Best effort: an
+/// unreachable file, or one whose metadata sits at the end (e.g. unoptimized
+/// MP4) and is thus outside the fetched prefix, yields `None`s – the callers
+/// then fall back to the file name.
 pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Option<i64>) {
-    let buf = match fetch_prefix(c, rel, "bytes=0-524287", 600_000) {
-        Ok(b) => b,
-        Err(_) => return (None, None, None),
-    };
-    // `lofty::read_from` expects a `File`; with an in-memory buffer it works
-    // via `Probe` (Read + Seek on the `Cursor`, purely local – no HTTP seek).
-    let tagged = match lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type() {
-        Ok(p) => match p.read() {
-            Ok(t) => t,
-            Err(_) => return (None, None, None),
-        },
-        Err(_) => return (None, None, None),
-    };
-    let duration_ms = match tagged.properties().duration().as_millis() {
-        0 => None,
-        ms => Some(ms as i64),
-    };
-    let (title, artist) = match tagged.primary_tag().or_else(|| tagged.first_tag()) {
-        Some(tag) => (
-            tag.title()
-                .map(|c| c.trim().to_string())
-                .filter(|s| !s.is_empty()),
-            tag.artist()
-                .map(|c| c.trim().to_string())
-                .filter(|s| !s.is_empty()),
-        ),
-        None => (None, None),
-    };
-    (title, artist, duration_ms)
+    match read_meta(c, rel) {
+        Ok(m) => (m.title, m.artist, m.duration_ms),
+        Err(_) => (None, None, None),
+    }
 }
 
 /// Complete metadata of a remote track (for indexing into the
@@ -502,6 +478,8 @@ pub fn read_meta(c: &Creds, rel: &str) -> Result<RemoteMeta> {
 /// Runs `lofty` over an in-memory file prefix and pulls the library fields out.
 /// Unreadable/absent tags are not an error here — they just leave fields empty.
 fn parse_remote_meta(buf: Vec<u8>) -> RemoteMeta {
+    // `lofty::read_from` expects a `File`; with an in-memory buffer it works
+    // via `Probe` (Read + Seek on the `Cursor`, purely local – no HTTP seek).
     let tagged = match lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type() {
         Ok(p) => match p.read() {
             Ok(t) => t,

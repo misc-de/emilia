@@ -5,9 +5,9 @@
 //! interchangeable transport backends call the **same** tool layer
 //! ([`tools::dispatch`]):
 //!
-//! * [`server_jsonrpc`] — a lean, tokio-free JSON-RPC 2.0 server, a near-copy of
-//!   the device-sync HTTP server ([`crate::core::sync::server`]). Default on
-//!   aarch64 (phones).
+//! * [`server_jsonrpc`] — a lean, tokio-free JSON-RPC 2.0 server on the same
+//!   blocking HTTP helpers as the device-sync server ([`crate::core::http`]).
+//!   Default on aarch64 (phones).
 //! * `server_sdk` (rmcp/tokio) — the official SDK on its own runtime thread.
 //!   Default on desktop architectures. *(Added in a later step.)*
 //!
@@ -17,7 +17,6 @@
 //! startup, keeping this module free of any GTK/relm4 dependency.
 
 pub mod command;
-pub mod http;
 pub mod jobs;
 pub mod protocol;
 pub mod server_jsonrpc;

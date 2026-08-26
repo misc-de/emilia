@@ -349,6 +349,14 @@ impl App {
             .set_setting(&format!("sort_{key}_desc"), if desc { "1" } else { "0" });
         // Keep the title-bar icon in step with the chosen direction.
         self.nav.sort_btn.set_icon_name(sort_dir_icon(desc));
+        self.reload_section(key, sender);
+    }
+
+    /// Rebuilds the overview of one [`SORTABLE_SECTIONS`] entry — what every
+    /// sort/grouping/gallery change ends with. (`files` and `memo` never reach
+    /// it from the gallery toggle: [`section_has_gallery`] offers no such
+    /// toggle for them.)
+    fn reload_section(&mut self, key: &str, sender: &ComponentSender<Self>) {
         match key {
             "files" => self.resort_entries(),
             "albums" => self.reload_albums(),
@@ -380,19 +388,7 @@ impl App {
         let _ = self
             .library
             .set_setting(&format!("nogroup_{key}"), if off { "1" } else { "0" });
-        match key {
-            "files" => self.resort_entries(),
-            "albums" => self.reload_albums(),
-            "singles" => self.reload_singles(),
-            "compilations" => self.reload_compilations(),
-            "artists" => self.reload_artists(),
-            "concerts" => self.load_concerts(sender),
-            "audiobooks" => self.load_audiobooks(sender),
-            "favorites" => self.load_favorites(sender),
-            "playlists" => self.reload_playlists(sender),
-            "memo" => self.reload_memos(sender),
-            _ => {}
-        }
+        self.reload_section(key, sender);
     }
 
     /// Stores a section's per-view "gallery" choice (overriding the global
@@ -412,17 +408,7 @@ impl App {
         let _ = self
             .library
             .set_setting(&format!("gallery_{key}"), if on { "1" } else { "0" });
-        match key {
-            "albums" => self.reload_albums(),
-            "singles" => self.reload_singles(),
-            "compilations" => self.reload_compilations(),
-            "artists" => self.reload_artists(),
-            "concerts" => self.load_concerts(sender),
-            "audiobooks" => self.load_audiobooks(sender),
-            "favorites" => self.load_favorites(sender),
-            "playlists" => self.reload_playlists(sender),
-            _ => {}
-        }
+        self.reload_section(key, sender);
     }
 
     /// Drives the shared title-bar sort button from a component page's

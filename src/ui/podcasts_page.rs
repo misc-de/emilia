@@ -27,6 +27,7 @@ use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
+use crate::ui::widgets::{action_row, detail_box, present_detail};
 
 /// Fetches a feed and stores podcast + episodes (runs in the worker thread,
 /// its own DB connection). Returns the podcast title on success, plus how many
@@ -101,48 +102,6 @@ fn refresh_summary_text(updated: usize, failed: usize, new_episodes: usize) -> S
         return gettext("Nothing new");
     }
     parts.join(" · ")
-}
-
-/// Content box for the detail dialogs (uniform margins).
-fn detail_box() -> gtk::Box {
-    gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(12)
-        .margin_top(6)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build()
-}
-
-/// Activatable action row with an icon prefix (for the detail dialogs).
-fn action_row(title: &str, icon: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(title)
-        .activatable(true)
-        .build();
-    row.add_prefix(&gtk::Image::from_icon_name(icon));
-    row
-}
-
-/// Embeds the content scrollably in a dialog with a header bar and shows it.
-fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
-        .vexpand(true)
-        .child(content)
-        .build();
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&scroller));
-    dialog.set_child(Some(&toolbar));
-    // Use full width, but never wider than 600 px (on narrow windows the
-    // dialog automatically shrinks to the window width).
-    dialog.set_content_width(600);
-    crate::ui::app_helpers::fit_dialog_on_expand(dialog);
-    crate::ui::app_helpers::close_on_click_outside(dialog);
-    dialog.present(Some(root));
 }
 
 /// Live state of one running episode download. `started`/`done` give the
@@ -975,9 +934,7 @@ impl PodcastsPage {
     /// Show detail dialogs on the phone over the **full width** (bottom sheet);
     /// on the desktop floating as before (auto).
     fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
-        if self.mobile {
-            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
-        }
+        crate::ui::widgets::adapt_dialog(dialog, self.mobile);
     }
 
     /// Confirmation alert before removing a subscription. On confirm it asks the
@@ -1145,19 +1102,7 @@ impl PodcastsPage {
     /// episodes, long-press the subscription detail view.
     fn fill_podcast_gallery(&self, sender: &ComponentSender<Self>) {
         let fb = &self.podcasts_gallery;
-        while let Some(c) = fb.first_child() {
-            fb.remove(&c);
-        }
-        fb.set_min_children_per_line(self.gallery_columns);
-        fb.set_max_children_per_line(self.gallery_columns);
-        fb.set_homogeneous(true);
-        fb.set_row_spacing(8);
-        fb.set_column_spacing(8);
-        fb.set_selection_mode(gtk::SelectionMode::None);
-        fb.set_activate_on_single_click(false);
-        if !fb.has_css_class("emilia-gallery") {
-            fb.add_css_class("emilia-gallery");
-        }
+        crate::ui::widgets::reset_gallery_grid(fb, self.gallery_columns);
 
         let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (_, title, image, _)) in self.podcast_items.iter().enumerate() {

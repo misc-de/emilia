@@ -1,11 +1,13 @@
-//! Minimal blocking HTTP/1.1 read/write helpers for the JSON-RPC backend.
+//! Minimal blocking HTTP/1.1 read/write helpers.
 //!
-//! A trimmed copy of the device-sync server's request handling
-//! ([`crate::core::sync::server`]): read the request head with `httparse`, read a
-//! length-bounded body, write a `Connection: close` response. One request per
-//! connection — no keep-alive, which keeps the server free of pipelining edge
-//! cases. Kept separate so the MCP server does not depend on the sync module's
-//! private internals.
+//! Shared by the two blocking servers Emilia embeds — device sync
+//! ([`crate::core::sync::server`]) and the lean MCP JSON-RPC backend
+//! ([`crate::core::mcp::server_jsonrpc`]): read the request head with
+//! `httparse`, read a length-bounded body, write a `Connection: close`
+//! response. One request per connection — no keep-alive, which keeps both
+//! servers free of pipelining edge cases. Body caps stay with the callers
+//! (`max_body`), since a sync file upload and a JSON-RPC call want very
+//! different limits.
 
 use std::io::{Read, Write};
 
@@ -18,8 +20,11 @@ const MAX_HEADER: usize = 64 * 1024;
 /// A parsed HTTP/1.1 request: just what the dispatch needs.
 pub struct HttpReq {
     pub method: String,
-    /// Request target without the query string (the MCP endpoint takes none).
+    /// Request target without the query string.
     pub path: String,
+    /// Raw query string (after `?`), empty if none. Unused by the MCP endpoint,
+    /// which takes no query parameters.
+    pub query: String,
     pub headers: Vec<(String, String)>,
     /// Body bytes (filled by [`read_body_fully`]).
     pub body: Vec<u8>,
@@ -63,11 +68,10 @@ pub fn read_head(stream: &mut impl Read) -> Result<HttpReq> {
     }
     let method = parsed.method.unwrap_or("").to_string();
     let target = parsed.path.unwrap_or("");
-    // Strip any query string — the single MCP endpoint takes no query params.
-    let path = target
-        .split_once('?')
-        .map_or(target, |(p, _)| p)
-        .to_string();
+    let (path, query) = match target.split_once('?') {
+        Some((p, q)) => (p.to_string(), q.to_string()),
+        None => (target.to_string(), String::new()),
+    };
     let headers: Vec<(String, String)> = parsed
         .headers
         .iter()
@@ -88,6 +92,7 @@ pub fn read_head(stream: &mut impl Read) -> Result<HttpReq> {
     Ok(HttpReq {
         method,
         path,
+        query,
         headers,
         body: buf[head_end..].to_vec(),
         content_length,
@@ -139,6 +144,15 @@ pub fn write_status(out: &mut impl Write, status: u16) {
     write_response(out, status, "text/plain", b"");
 }
 
+/// Full read of a request (head + body) — for tests and any caller that wants
+/// the whole body in memory in one call.
+#[cfg(test)]
+pub fn read_request(stream: &mut impl Read, max_body: usize) -> Result<HttpReq> {
+    let mut req = read_head(stream)?;
+    read_body_fully(stream, &mut req, max_body)?;
+    Ok(req)
+}
+
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
@@ -150,7 +164,9 @@ fn reason_phrase(status: u16) -> &'static str {
         204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
+        413 => "Payload Too Large",
         500 => "Internal Server Error",
         _ => "OK",
     }
@@ -224,12 +240,21 @@ mod tests {
         }
     }
 
+    /// The path must never carry the query string (the dispatches match on it
+    /// exactly); the query itself is kept for the callers that read parameters.
     #[test]
-    fn query_string_is_stripped_from_the_path() {
+    fn query_string_is_split_off_the_path() {
         let raw = "GET /health?verbose=1&x=2 HTTP/1.1\r\nHost: x\r\n\r\n";
         let mut s = Chunked::new(raw, 4096);
         let req = read_head(&mut s).unwrap();
         assert_eq!(req.path, "/health");
+        assert_eq!(req.query, "verbose=1&x=2");
+
+        // No "?" at all → empty query, path untouched.
+        let mut s = Chunked::new("GET /health HTTP/1.1\r\nHost: x\r\n\r\n", 4096);
+        let req = read_head(&mut s).unwrap();
+        assert_eq!(req.path, "/health");
+        assert_eq!(req.query, "");
     }
 
     /// An endless header block must be refused by the cap, not buffered forever.

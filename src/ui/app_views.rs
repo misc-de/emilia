@@ -362,26 +362,15 @@ impl App {
         );
     }
 
-    /// Shared reload for the Singles / Compilations pages — mirrors
-    /// [`Self::reload_albums_with`] but pulls the albums filed in the section's
-    /// own [`Area`] (kind-aware default + any "Available in" override) and writes
-    /// to the section's own factory/overview/headers (chosen by `section`).
-    fn reload_kind_with(
-        &mut self,
-        area: crate::core::category::Area,
-        section: &'static str,
-        snap: Option<&crate::core::db::CategorySnapshot>,
-    ) {
-        let singles = section == "singles";
-        let mut albums = self
-            .library
-            .albums_overview_in_area(area, snap)
-            .unwrap_or_default();
+    /// Fills in the album covers the overview query left empty. Pulls every
+    /// stored `album_meta` cover in one query (instead of an `album_cover`
+    /// lookup per album), and only for the albums still without one falls back
+    /// to the local per-track cover — those track paths come from a single
+    /// batched query too, instead of an `album_track_paths` query per album.
+    /// (The covers themselves are still read per album — that's file I/O on the
+    /// first track with embedded/folder art.)
+    fn resolve_album_covers(&self, albums: &mut [crate::model::AlbumMeta]) {
         let meta_covers = self.library.album_meta_covers().unwrap_or_default();
-        // Batch the local-cover fallback too: one query for the track paths of
-        // every still-coverless album, instead of a `album_track_paths` query per
-        // album. (The covers themselves are still read per album — that's file
-        // I/O on the first track with embedded/folder art.)
         let coverless: Vec<String> = albums
             .iter()
             .filter(|a| {
@@ -397,7 +386,7 @@ impl App {
                 .album_track_paths_by_names(&coverless)
                 .unwrap_or_default()
         };
-        for album in &mut albums {
+        for album in albums.iter_mut() {
             if album
                 .cover_path
                 .as_deref()
@@ -417,6 +406,24 @@ impl App {
                     });
             }
         }
+    }
+
+    /// Shared reload for the Singles / Compilations pages — mirrors
+    /// [`Self::reload_albums_with`] but pulls the albums filed in the section's
+    /// own [`Area`] (kind-aware default + any "Available in" override) and writes
+    /// to the section's own factory/overview/headers (chosen by `section`).
+    fn reload_kind_with(
+        &mut self,
+        area: crate::core::category::Area,
+        section: &'static str,
+        snap: Option<&crate::core::db::CategorySnapshot>,
+    ) {
+        let singles = section == "singles";
+        let mut albums = self
+            .library
+            .albums_overview_in_area(area, snap)
+            .unwrap_or_default();
+        self.resolve_album_covers(&mut albums);
         self.sort_album_metas(section, &mut albums);
         let headers = self.album_meta_headers(section, &albums);
         let icon = if singles {
@@ -476,49 +483,7 @@ impl App {
 
     pub(crate) fn reload_albums_with(&mut self, snap: Option<&crate::core::db::CategorySnapshot>) {
         let mut albums = self.library.albums_overview_with(snap).unwrap_or_default();
-        // Resolve missing covers: pull every stored album_meta cover in one
-        // query (instead of an `album_cover` lookup per album), and only fall
-        // back to the per-track local-cover scan for albums still without one.
-        let meta_covers = self.library.album_meta_covers().unwrap_or_default();
-        // Batch the local-cover fallback too: one query for the track paths of
-        // every still-coverless album, instead of a `album_track_paths` query per
-        // album. (The covers themselves are still read per album — that's file
-        // I/O on the first track with embedded/folder art.)
-        let coverless: Vec<String> = albums
-            .iter()
-            .filter(|a| {
-                a.cover_path.as_deref().is_none_or(|p| p.trim().is_empty())
-                    && !meta_covers.contains_key(&a.album.to_lowercase())
-            })
-            .map(|a| a.album.clone())
-            .collect();
-        let local_paths = if coverless.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            self.library
-                .album_track_paths_by_names(&coverless)
-                .unwrap_or_default()
-        };
-        for album in &mut albums {
-            if album
-                .cover_path
-                .as_deref()
-                .is_none_or(|p| p.trim().is_empty())
-            {
-                album.cover_path = meta_covers
-                    .get(&album.album.to_lowercase())
-                    .cloned()
-                    .or_else(|| {
-                        local_paths
-                            .get(&album.album.to_lowercase())
-                            .and_then(|paths| {
-                                paths
-                                    .iter()
-                                    .find_map(|p| crate::core::online::local_track_cover(p))
-                            })
-                    });
-            }
-        }
+        self.resolve_album_covers(&mut albums);
         // Apply the chosen sort order (criterion + direction). The DB already
         // returns the albums by name; here we re-order to match the user's pick.
         self.sort_albums(&mut albums);

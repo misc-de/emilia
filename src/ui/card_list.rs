@@ -36,6 +36,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::ui::widgets;
+use crate::ui::widgets::{esc, set_class};
 
 /// One row's content, independent of whether it came from an album or an artist.
 #[derive(Clone, Debug, Default)]
@@ -389,18 +390,6 @@ fn section_edges(position: usize, total: usize, headers: Option<&[String]>) -> (
         }
         None => (position == 0, position + 1 >= total),
     }
-}
-
-fn set_class(w: &impl IsA<gtk::Widget>, class: &str, on: bool) {
-    if on {
-        w.add_css_class(class);
-    } else {
-        w.remove_css_class(class);
-    }
-}
-
-fn esc(s: &str) -> String {
-    glib::markup_escape_text(s).to_string()
 }
 
 #[cfg(test)]

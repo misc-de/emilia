@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use super::http::{self, HttpReq};
 use super::protocol::{RpcResponse, PARSE_ERROR};
 use super::{tools, McpContext, PORT};
+use crate::core::http::{self, HttpReq};
 use crate::core::sync::crypto;
 
 /// Accept loop: maximum blocking time, after which the stop flag is re-checked.

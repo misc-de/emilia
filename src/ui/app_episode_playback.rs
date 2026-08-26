@@ -136,14 +136,7 @@ impl App {
     pub(crate) fn toggle_episode(&mut self, url: String, title: String) {
         if self.podcasts.playing_episode_url.as_deref() == Some(url.as_str()) {
             // Already loaded episode → toggle pause/resume.
-            if self.mini.playing {
-                self.player.pause();
-            } else {
-                self.player.resume();
-            }
-            self.mini.playing = !self.mini.playing;
-            self.mpris.set_playing(self.mini.playing);
-            self.refresh_queue_icons();
+            self.flip_playing();
         } else {
             // Other/no episode → start this one.
             self.play_episode(&url, &title);

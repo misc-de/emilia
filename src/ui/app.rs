@@ -4671,9 +4671,7 @@ impl App {
     /// Show detail dialogs on the phone over the **full width**
     /// (bottom sheet); on the desktop floating as before (auto).
     pub(crate) fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
-        if self.is_mobile() {
-            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
-        }
+        crate::ui::widgets::adapt_dialog(dialog, self.is_mobile());
     }
 
     /// Only upwards, as long as we stay within the start folder.

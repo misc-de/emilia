@@ -5,6 +5,7 @@ use relm4::factory::{DynamicIndex, FactoryComponent, FactorySender};
 use relm4::{adw, gtk};
 
 use crate::model::Track;
+use crate::ui::widgets::esc;
 
 pub struct TrackItem {
     pub track: Track,
@@ -15,17 +16,12 @@ pub enum TrackOutput {
     Play(DynamicIndex),
 }
 
-/// Escapes special characters (`&`, `<`, …) so that Pango markup displays them literally.
-fn esc(s: &str) -> String {
-    gtk::glib::markup_escape_text(s).to_string()
-}
-
+/// Track length for the row, empty when unknown. The formatting itself is the
+/// app-wide [`crate::ui::app_helpers::fmt_duration`], so a track past the hour
+/// reads `1:05:30` here too instead of `65:30`.
 fn fmt_duration(ms: Option<i64>) -> String {
     match ms {
-        Some(ms) if ms > 0 => {
-            let secs = ms / 1000;
-            format!("{}:{:02}", secs / 60, secs % 60)
-        }
+        Some(ms) if ms > 0 => crate::ui::app_helpers::fmt_duration(ms),
         _ => String::new(),
     }
 }
