@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.20" date="2026-08-26">
+      <description>
+        <p>Interrupted downloads are no longer kept as if they were complete. When the connection dropped mid-transfer, a partial song or podcast episode could end up in the library looking perfectly fine — now the transfer is checked against its announced size and discarded if it fell short. Large libraries also open far quicker: the album and artist lists no longer build every entry up front, so they appear at once no matter how much music you have, and the listening statistics no longer slow down with the number of podcast episodes. Singles and compilations finally show the same alphabetical headings as the other lists, and artists whose names carry accents or umlauts are counted correctly again.</p>
+        <p xml:lang="de">Abgebrochene Downloads werden nicht mehr behandelt, als wären sie vollständig. Riss die Verbindung mitten in der Übertragung, konnte ein halber Titel oder eine halbe Podcast-Folge in der Bibliothek landen und dabei völlig in Ordnung aussehen – jetzt wird die Übertragung gegen die angekündigte Größe geprüft und verworfen, wenn sie zu kurz geriet. Große Bibliotheken öffnen außerdem deutlich schneller: Alben- und Künstlerlisten bauen nicht mehr jeden Eintrag im Voraus auf, erscheinen also sofort, gleich wie viel Musik vorhanden ist, und die Hörstatistik wird nicht mehr langsamer, je mehr Podcast-Folgen es gibt. Singles und Kompilationen zeigen endlich dieselben alphabetischen Überschriften wie die übrigen Listen, und Künstler mit Akzenten oder Umlauten im Namen werden wieder richtig gezählt.</p>
+      </description>
+    </release>
     <release version="0.8.19" date="2026-08-25">
       <description>
         <p>Security fixes. Three flaws in libraries Emilia uses to read data from outside — podcast feeds, WebDAV responses and the device sync connection — could be abused to hang the app or exhaust its memory. All of them are closed; there is nothing to do beyond updating.</p>
