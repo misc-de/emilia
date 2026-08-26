@@ -283,31 +283,75 @@ where
 }
 
 /// Makes a horizontal `ScrolledWindow` (the mobile top-navigation strip) scroll
-/// reliably on a sideways swipe **even when the swipe starts directly on one of
-/// the icon buttons**. Without this the buttons swallow the touch and the strip
-/// feels stuck. A drag in the **capture** phase claims the sequence as soon as
-/// the finger moves clearly sideways and then scrolls the strip 1:1 with the
-/// finger; claiming also cancels the button's tap. A plain tap (no real
-/// movement) never claims, so it still falls through to the button and
-/// activates the section underneath. `enabled` gates the gesture off when the
-/// strip should not scroll — the top strip uses its swipe-back gesture instead
-/// while a subpage is open, so the two never fight over the same drag.
+/// reliably on a sideways swipe — **no matter where in the strip the finger
+/// lands**: on an icon, in the gap between two icons, or in the padding above
+/// and below them.
+///
+/// Two different things used to eat that swipe:
+///
+/// * On an icon the button swallows the touch. Hence the drag below runs in the
+///   **capture** phase and claims the sequence as soon as the finger moves
+///   clearly sideways; claiming scrolls the strip and cancels the button's tap,
+///   while a plain tap (no real movement) never claims and still activates the
+///   section underneath.
+/// * Anywhere else the press was left unclaimed and bubbled up into the
+///   `GtkWindowHandle` that `AdwToolbarView` wraps its top bars in
+///   (`scrolledwindow < box < windowhandle < revealer < toolbarview`). Its
+///   bubble-phase drag gesture turns such a press into a window move once it
+///   passes the drag threshold, and the compositor then owns the whole touch
+///   sequence — which is why the strip felt dead in exactly those spots where no
+///   button had claimed the press. The legacy controller below swallows presses
+///   on the strip before they bubble that far, so the touch stays here. The
+///   strip is mobile-only chrome, so giving up "drag the window by it" costs
+///   nothing.
+///
+/// A press that does not sit on an icon has no tap to protect, so it is claimed
+/// right away and the strip follows the finger from the very first pixel.
+/// `enabled` gates that off when the strip should not scroll — the top strip
+/// uses its swipe-back gesture instead while a subpage is open, so the two never
+/// fight over the same drag.
 pub(crate) fn attach_hscroll_swipe<E>(scroller: &gtk::ScrolledWindow, enabled: E)
 where
     E: Fn() -> bool + 'static,
 {
+    // Keep presses out of the toolbar's window handle (see above). Bubble phase:
+    // everything inside the strip — the icon buttons and the gestures below —
+    // has already seen the event by the time it reaches this controller.
+    let block_window_drag = gtk::EventControllerLegacy::new();
+    block_window_drag.set_propagation_phase(gtk::PropagationPhase::Bubble);
+    block_window_drag.connect_event(|_, event| {
+        if matches!(
+            event.event_type(),
+            gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin
+        ) {
+            gtk::glib::Propagation::Stop
+        } else {
+            gtk::glib::Propagation::Proceed
+        }
+    });
+    scroller.add_controller(block_window_drag);
+
     let drag = gtk::GestureDrag::new();
     drag.set_touch_only(false);
     drag.set_propagation_phase(gtk::PropagationPhase::Capture);
     let start = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
     let scrolling = std::rc::Rc::new(std::cell::Cell::new(false));
+    let enabled = std::rc::Rc::new(enabled);
     {
         let scroller = scroller.clone();
         let start = start.clone();
         let scrolling = scrolling.clone();
-        drag.connect_drag_begin(move |_, _, _| {
-            scrolling.set(false);
+        let enabled = enabled.clone();
+        drag.connect_drag_begin(move |g, x, y| {
             start.set(scroller.hadjustment().value());
+            // Off an icon there is no tap that could still be meant, so take the
+            // sequence at once: the strip then tracks the finger 1:1 from the
+            // first pixel and no other gesture can take it away mid-swipe.
+            let off_icon = !press_on_button(scroller.upcast_ref(), x, y);
+            scrolling.set(off_icon && enabled());
+            if scrolling.get() {
+                g.set_state(gtk::EventSequenceState::Claimed);
+            }
         });
     }
     {
@@ -316,9 +360,10 @@ where
         let scrolling = scrolling.clone();
         drag.connect_drag_update(move |g, dx, dy| {
             if !scrolling.get() {
-                // Stay out of the way until the drag is clearly a sideways swipe:
-                // a small wobble during a tap keeps falling through to the button,
-                // a real horizontal swipe claims the sequence and starts scrolling.
+                // Started on an icon: stay out of the way until the drag is
+                // clearly a sideways swipe — a small wobble during a tap keeps
+                // falling through to the button, a real horizontal swipe claims
+                // the sequence and starts scrolling.
                 if !enabled() || dx.abs() <= 8.0 || dx.abs() <= dy.abs() {
                     return;
                 }
