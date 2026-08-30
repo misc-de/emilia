@@ -164,7 +164,8 @@ embedded in the `.flatpakrepo` file – nothing needs to be imported separately.
 
 ## Getting started
 
-1. Start Emilia and open **Settings** (the gear) at the top.
+1. Start Emilia and open **Settings** (the **⋮** button) – at the bottom of the
+   sidebar on the desktop, in the title bar on mobile.
 2. Pick the **music folder** – Emilia scans the library in the background.
 3. Browse and play via **Artists** / **Albums** / **File system**.
 4. Optional: under **Search**, enable "Fetch automatically" to fill in covers,
