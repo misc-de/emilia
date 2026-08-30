@@ -1291,6 +1291,10 @@ impl App {
                  box.emilia-step-active label { color: @accent_fg_color; }\
                  scrolledwindow.emilia-nav-scroller scrollbar { opacity: 0; min-width: 0px; min-height: 0px; }\
                  scrolledwindow.emilia-nav-scroller button.emilia-nav-btn { padding-left: 6px; padding-right: 6px; min-width: 0px; }\
+                 /* The settings tab bar carries six categories — more than any \
+                    other tab bar — so trim the button padding, or every name \
+                    ends up an ellipsis. */\
+                 box.emilia-settings-tabs button { padding-left: 6px; padding-right: 6px; min-width: 0px; }\
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.97); border-radius: 18px; padding: 22px 30px; }\
                  label.emilia-list-section { background-color: @window_bg_color; padding: 10px 13px 4px 13px; }\

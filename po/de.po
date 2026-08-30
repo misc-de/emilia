@@ -1206,12 +1206,11 @@ msgstr "Skaliert die gesamte Oberfläche (Prozent)"
 
 #: src/ui/app_settings.rs:340
 msgid "Menu icon size"
-msgstr ""
+msgstr "Menü-Symbolgröße"
 
 #: src/ui/app_settings.rs:341
-#, fuzzy
 msgid "Scales the menu icons (mobile, percent)"
-msgstr "Skaliert die gesamte Oberfläche (Prozent)"
+msgstr "Skaliert die Menü-Symbole (mobil, Prozent)"
 
 #: src/ui/app_settings.rs:371
 msgid "System tray"
@@ -1256,13 +1255,15 @@ msgstr "Das Tray-Icon entsättigt anzeigen"
 
 #: src/ui/app_settings.rs:457
 msgid "MCP server"
-msgstr ""
+msgstr "MCP-Server"
 
 #: src/ui/app_settings.rs:459
 msgid ""
 "Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST "
 "http://127.0.0.1:8770/mcp with the bearer token below."
 msgstr ""
+"Stellt Bibliothek und Wiedergabe einem MCP-Host (z. B. Claude) bereit. "
+"Endpunkt: POST http://127.0.0.1:8770/mcp mit dem Bearer-Token unten."
 
 #: src/ui/app_settings.rs:470 src/ui/app_settings.rs:767 src/ui/app_sleep.rs:73
 #: src/ui/app_sleep.rs:133
@@ -1271,56 +1272,57 @@ msgstr "Aus"
 
 #: src/ui/app_settings.rs:471
 msgid "JSON-RPC 2.0 (lean)"
-msgstr ""
+msgstr "JSON-RPC 2.0 (schlank)"
 
 #: src/ui/app_settings.rs:472
 msgid "Tokio SDK"
-msgstr ""
+msgstr "Tokio-SDK"
 
 #: src/ui/app_settings.rs:476
-#, fuzzy
 msgid "Backend"
-msgstr "Zurück"
+msgstr "Backend"
 
 #: src/ui/app_settings.rs:491
 msgid "Public (reachable on the LAN)"
-msgstr ""
+msgstr "Öffentlich (im LAN erreichbar)"
 
 #: src/ui/app_settings.rs:493
 msgid "Off: only this device (127.0.0.1). On: the whole network, over TLS."
 msgstr ""
+"Aus: nur dieses Gerät (127.0.0.1). Ein: das ganze Netzwerk, über TLS."
 
 #: src/ui/app_settings.rs:520
 msgid "Generated when the server is first enabled"
-msgstr ""
+msgstr "Wird beim ersten Einschalten des Servers erzeugt"
 
 #: src/ui/app_settings.rs:525
 msgid "Bearer token"
-msgstr ""
+msgstr "Bearer-Token"
 
 # --- Token (cut&paste) pairing ---
 #: src/ui/app_settings.rs:537
-#, fuzzy
 msgid "Copy token"
-msgstr "Code kopieren"
+msgstr "Token kopieren"
 
 #: src/ui/app_settings.rs:552
 msgid "Generate a new token"
-msgstr ""
+msgstr "Einen neuen Token erzeugen"
 
 #: src/ui/app_settings.rs:562
 msgid "Generate a new token?"
-msgstr ""
+msgstr "Neuen Token erzeugen?"
 
 #: src/ui/app_settings.rs:564
 msgid ""
 "A new bearer token is created immediately. Existing connections stop "
 "working, and every MCP host must be updated with the new token."
 msgstr ""
+"Es wird sofort ein neuer Bearer-Token erzeugt. Bestehende Verbindungen "
+"funktionieren nicht mehr, und jeder MCP-Host muss den neuen Token bekommen."
 
 #: src/ui/app_settings.rs:570
 msgid "Generate new token"
-msgstr ""
+msgstr "Neuen Token erzeugen"
 
 #: src/ui/app_settings.rs:672
 msgid "Design"
@@ -1331,13 +1333,12 @@ msgid "Background"
 msgstr "Hintergrund"
 
 #: src/ui/app_settings.rs:718
-#, fuzzy
 msgid "Show a background"
-msgstr "Eigener Hintergrund"
+msgstr "Hintergrund anzeigen"
 
 #: src/ui/app_settings.rs:720
 msgid "On without a chosen image uses the built-in default"
-msgstr ""
+msgstr "Ein ohne gewähltes Bild nutzt die eingebaute Vorgabe"
 
 #: src/ui/app_settings.rs:727 src/ui/app_settings.rs:896
 msgid "Image selected"
@@ -1345,7 +1346,7 @@ msgstr "Bild ausgewählt"
 
 #: src/ui/app_settings.rs:729 src/ui/app_settings.rs:915
 msgid "None (built-in default)"
-msgstr ""
+msgstr "Keins (eingebaute Vorgabe)"
 
 #: src/ui/app_settings.rs:732
 msgid "Custom background"
@@ -1356,13 +1357,12 @@ msgid "Choose image"
 msgstr "Bild auswählen"
 
 #: src/ui/app_settings.rs:752
-#, fuzzy
 msgid "Cover as background"
-msgstr "Eigener Hintergrund"
+msgstr "Cover als Hintergrund"
 
 #: src/ui/app_settings.rs:753
 msgid "Use the current track's cover as the background"
-msgstr ""
+msgstr "Das Cover des laufenden Titels als Hintergrund verwenden"
 
 # --- Design page round 3: background filters + split text/fields colors ---
 #: src/ui/app_settings.rs:768
@@ -1418,8 +1418,8 @@ msgid "Choose background image"
 msgstr "Hintergrundbild auswählen"
 
 #: src/ui/app_settings.rs:955
-msgid "Colors"
-msgstr "Farben"
+msgid "Entries"
+msgstr "Einträge"
 
 #: src/ui/app_settings.rs:1013
 msgid "Choose color"
@@ -1430,16 +1430,16 @@ msgid "Text color"
 msgstr "Textfarbe"
 
 #: src/ui/app_settings.rs:1079
-msgid "Fields color"
-msgstr "Felder-Farbe"
+msgid "Color"
+msgstr "Farbe"
 
 #: src/ui/app_settings.rs:1080
 msgid "Background of tabs, navigation and list headings"
 msgstr "Hintergrund von Tabs, Navigation und Listen-Überschriften"
 
 #: src/ui/app_settings.rs:1086
-msgid "Fields transparency"
-msgstr "Felder-Transparenz"
+msgid "Transparency"
+msgstr "Transparenz"
 
 # --- Transparency slider description ---
 #: src/ui/app_settings.rs:1087
@@ -3119,6 +3119,22 @@ msgid "{n} chapter"
 msgid_plural "{n} chapters"
 msgstr[0] "{n} Kapitel"
 msgstr[1] "{n} Kapitel"
+
+#: src/ui/app_views.rs
+msgid "Type"
+msgstr "Typ"
+
+#: src/ui/app_views.rs
+msgid "Where this album is filed (Singles / Compilations)"
+msgstr "Wo dieses Album einsortiert ist (Singles / Kompilationen)"
+
+#: src/ui/app_views.rs
+msgid "Single"
+msgstr "Single"
+
+#: src/ui/app_views.rs
+msgid "Compilation"
+msgstr "Kompilation"
 
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"

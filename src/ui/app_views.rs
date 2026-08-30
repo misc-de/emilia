@@ -1019,9 +1019,31 @@ impl App {
         self.push_subpage_inner(title, content, false);
     }
 
-    fn push_subpage_inner(&self, title: &str, content: &gtk::Box, swipe_back: bool) {
-        // If we are leaving the root overview, remember the current scroll position
-        // of the visible section (restored when returning).
+    /// Wraps content that brings its own scrolling (e.g. a stack of
+    /// `AdwPreferencesPage`s) into a subpage: no outer scroller — a second one
+    /// would let the inner page grow without bound — and no swipe-back, since
+    /// such pages carry horizontal drags of their own (the settings sliders).
+    /// `tag` marks the page so it can be recognised later; the pushed page is
+    /// returned so the caller can hook into it.
+    pub(crate) fn push_subpage_self_scrolling(
+        &self,
+        title: &str,
+        tag: &str,
+        content: &gtk::Box,
+    ) -> adw::NavigationPage {
+        self.remember_overview_scroll();
+        let page = adw::NavigationPage::builder()
+            .title(title)
+            .tag(tag)
+            .child(content)
+            .build();
+        self.nav.nav_view.push(&page);
+        page
+    }
+
+    /// When leaving the root overview, remembers the current scroll position of
+    /// the visible section (restored when returning).
+    fn remember_overview_scroll(&self) {
         let leaving_root = self
             .nav
             .nav_view
@@ -1039,6 +1061,10 @@ impl App {
                 *self.nav.overview_scroll.borrow_mut() = Some((sc, value));
             }
         }
+    }
+
+    fn push_subpage_inner(&self, title: &str, content: &gtk::Box, swipe_back: bool) {
+        self.remember_overview_scroll();
 
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)

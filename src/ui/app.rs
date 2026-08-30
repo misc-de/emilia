@@ -803,9 +803,6 @@ pub(crate) struct NavState {
     /// The open context/detail dialog, so a cover/photo change can rebuild it in
     /// place (close + re-open) and the new image shows immediately.
     pub(crate) ctx_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
-    /// The open settings dialog, so a light/dark theme switch can rebuild it —
-    /// its appearance controls show per-theme values. `None` when closed.
-    pub(crate) settings_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
     /// Remembered scroll position of the most recently left overview page.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// Narrow/mobile layout active (driven by the width breakpoint). The source
@@ -3718,7 +3715,6 @@ impl Component for App {
                 context_target: None,
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ctx_dialog: std::rc::Rc::new(std::cell::RefCell::new(None)),
-                settings_dialog: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 narrow: std::rc::Rc::new(std::cell::Cell::new(false)),
                 nav_hidden: std::rc::Rc::new(std::cell::Cell::new(false)),

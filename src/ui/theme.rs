@@ -516,12 +516,17 @@ impl App {
                 self.theme.design = read_design_settings(&self.library);
                 self.refresh_background();
                 self.reapply_runtime_style();
-                // If the settings dialog is open, rebuild it so its appearance
-                // controls show the new theme's values (it reopens on the same
-                // page via `settings_last_page`).
-                let reopen = self.nav.settings_dialog.borrow_mut().take();
-                if let Some(dialog) = reopen {
-                    dialog.close();
+                // If the settings subpage is on screen, rebuild it so its
+                // appearance controls show the new theme's values (it reopens on
+                // the same category via `settings_last_page`).
+                let on_settings = self
+                    .nav
+                    .nav_view
+                    .visible_page()
+                    .and_then(|p| p.tag())
+                    .is_some_and(|t| t == crate::ui::app_settings::SETTINGS_TAG);
+                if on_settings {
+                    self.nav.nav_view.pop();
                     self.open_settings(root, sender);
                 }
             }

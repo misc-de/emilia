@@ -1,4 +1,4 @@
-//! Settings dialog: preferences, extra sources, section order & hidden items.
+//! Settings subpage: preferences, extra sources, section order & hidden items.
 //! Split out of app_dialogs.rs – pure reordering, no functional change.
 
 use crate::i18n::{gettext, gettext_f};
@@ -10,6 +10,10 @@ use crate::ui::theme::{DesignMsg, SOFT_STRENGTH_MAX};
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
+
+/// Navigation tag of the settings subpage — used to recognise it again (a
+/// second tap on the settings button, a theme flip that rebuilds it).
+pub(crate) const SETTINGS_TAG: &str = "settings";
 
 /// Keep an `adw::SpinRow`'s value field as narrow as its digits instead of
 /// letting it stretch across the whole row. By default the inner `gtk::Text`
@@ -47,7 +51,17 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let dialog = adw::PreferencesDialog::new();
+        // Already open? A second tap on the settings button must not stack a
+        // second copy of the page onto the navigation.
+        if self
+            .nav
+            .nav_view
+            .visible_page()
+            .and_then(|p| p.tag())
+            .is_some_and(|t| t == SETTINGS_TAG)
+        {
+            return;
+        }
 
         // The former "Library" page (music folder, extra sources, Nextcloud
         // connect) was removed: all of that is now managed directly on the Files
@@ -819,13 +833,18 @@ impl App {
         strength_row.add_suffix(&strength_scale);
 
         // 4) Make the navigation transparent so the background shows through.
+        // Both transparency switches only reach desktop chrome (the sidebar
+        // pane, the wide title bar); in the narrow layout there is no sidebar
+        // and the header is already see-through, so they change nothing there
+        // — hide them on a phone rather than offer dead switches.
+        let chrome_rows = !self.nav.narrow.get();
         let bg_nav_row = adw::SwitchRow::builder()
             .title(gettext("Transparency - Navigation"))
             .subtitle(gettext(
                 "Also show the blurred background behind the sidebar",
             ))
             .active(self.theme.design.bg_nav)
-            .visible(bg_on)
+            .visible(bg_on && chrome_rows)
             .build();
         {
             let sender = sender.clone();
@@ -841,7 +860,7 @@ impl App {
                 "Also show the blurred background behind the title bar",
             ))
             .active(self.theme.design.bg_titlebar)
-            .visible(bg_on)
+            .visible(bg_on && chrome_rows)
             .build();
         {
             let sender = sender.clone();
@@ -905,8 +924,8 @@ impl App {
                             filter_row.set_visible(true);
                             strength_row.set_visible(true);
                             strength_row.set_sensitive(filter_row.selected() != 0);
-                            nav_row.set_visible(true);
-                            titlebar_row.set_visible(true);
+                            nav_row.set_visible(chrome_rows);
+                            titlebar_row.set_visible(chrome_rows);
                             sender.input(Msg::Design(DesignMsg::CustomBg(Some(path))));
                         }
                     }
@@ -940,8 +959,8 @@ impl App {
                 cover_row.set_visible(on);
                 filter_row.set_visible(on);
                 strength_row.set_visible(on);
-                nav_row.set_visible(on);
-                titlebar_row.set_visible(on);
+                nav_row.set_visible(on && chrome_rows);
+                titlebar_row.set_visible(on && chrome_rows);
                 sender.input(Msg::Design(DesignMsg::BackgroundOn(on)));
             });
         }
@@ -956,10 +975,10 @@ impl App {
         bg_group.add(&bg_titlebar_row);
         page.add(&bg_group);
 
-        // Colors: text and fields, each with its own color (with reset) and a
-        // transparency over the background.
+        // Entries: text and entry rows, each with its own color (with reset)
+        // and a transparency over the background.
         let colors_group = adw::PreferencesGroup::builder()
-            .title(gettext("Colors"))
+            .title(gettext("Entries"))
             .build();
         // Build a color row (color button + reset). `set` is the tuple-variant
         // constructor that persists the picked/cleared color.
@@ -1081,16 +1100,16 @@ impl App {
         );
         colors_group.add(&text_color_row);
 
-        // Fields color + its transparency (tabs, navigation, list headings …).
+        // Entry color + its transparency (tabs, navigation, list headings …).
         let field_color_row = mk_color_row(
-            gettext("Fields color"),
+            gettext("Color"),
             Some(gettext("Background of tabs, navigation and list headings")),
             &self.theme.design.field_color,
             |c| Msg::Design(DesignMsg::FieldColor(c)),
         );
         colors_group.add(&field_color_row);
         let field_trans_row = adw::ActionRow::builder()
-            .title(gettext("Fields transparency"))
+            .title(gettext("Transparency"))
             .subtitle(gettext("0 % opaque, 100 % fully transparent"))
             .build();
         let field_trans_scale = mk_scale(self.theme.design.field_transparency);
@@ -1240,14 +1259,6 @@ impl App {
         // refreshes them (see `refresh_ytdlp_status_label`).
         *self.youtube.settings_status.borrow_mut() = Some(ytdlp_row.clone());
         *self.youtube.settings_dl_btn.borrow_mut() = Some(dl_btn);
-        {
-            let status_slot = self.youtube.settings_status.clone();
-            let btn_slot = self.youtube.settings_dl_btn.clone();
-            dialog.connect_closed(move |_| {
-                *status_slot.borrow_mut() = None;
-                *btn_slot.borrow_mut() = None;
-            });
-        }
         // Resolve the real version in the background unless it is already cached.
         if cached.is_none() {
             sender.spawn_command(|out| {
@@ -1257,43 +1268,120 @@ impl App {
             });
         }
 
-        // Order of the settings pages: "View" first.
-        dialog.add(&view_page);
-        dialog.add(&design_page);
-        dialog.add(&sound_page);
-        dialog.add(&search_page);
-        dialog.add(&menu_page);
-        dialog.add(&hidden_page);
+        // The categories are no longer the sidebar of a modal: they sit in a
+        // linked tab bar over a stack, the same tab menu the other sections use
+        // (Podcasts, Streaming, Files …), and the whole thing is pushed as an
+        // ordinary subpage. Order: "View" first.
+        let pages: [(&adw::PreferencesPage, &str, String, &str); 6] = [
+            (&view_page, "view", gettext("View"), "view-list-symbolic"),
+            (
+                &design_page,
+                "design",
+                gettext("Design"),
+                "applications-graphics-symbolic",
+            ),
+            (
+                &sound_page,
+                "sound",
+                gettext("Sound"),
+                "audio-speakers-symbolic",
+            ),
+            (
+                &search_page,
+                "meta",
+                gettext("Meta/Lib"),
+                "system-search-symbolic",
+            ),
+            (&menu_page, "menu", gettext("Menu"), "open-menu-symbolic"),
+            (
+                &hidden_page,
+                "hidden",
+                gettext("Hidden"),
+                "view-conceal-symbolic",
+            ),
+        ];
 
-        // Reopen on the category last viewed, and remember it on every switch.
-        if let Some(name) = self
+        // Reopen on the category last viewed (an unknown/absent name falls back
+        // to the first tab), and remember it on every switch.
+        let last = self
             .library
             .get_setting("settings_last_page")
             .ok()
             .flatten()
-            .filter(|s| !s.is_empty())
-        {
-            dialog.set_visible_page_name(&name);
-        }
-        {
-            let sender = sender.clone();
-            dialog.connect_visible_page_name_notify(move |d| {
-                if let Some(name) = d.visible_page_name() {
-                    sender.input(Msg::SetLastSettingsPage(name.to_string()));
-                }
-            });
-        }
+            .filter(|n| pages.iter().any(|(_, name, _, _)| name == n))
+            .unwrap_or_else(|| "view".to_string());
 
-        // Track the open dialog so a light/dark theme switch can rebuild it —
-        // otherwise its appearance controls keep showing the old theme's values.
-        *self.nav.settings_dialog.borrow_mut() = Some(dialog.clone().upcast());
+        let stack = gtk::Stack::builder().vexpand(true).build();
+        let tab_bar = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .margin_top(2)
+            .margin_bottom(4)
+            .margin_start(12)
+            .margin_end(12)
+            .css_classes(["linked", "emilia-tabbar", "emilia-settings-tabs"])
+            .build();
+        // Six categories never fit as labels on a phone, so the narrow layout
+        // shows the icons alone — the tooltip still spells the category out.
+        let icons_only = self.nav.narrow.get();
+        let mut leader: Option<gtk::ToggleButton> = None;
+        for (page, name, title, icon) in pages {
+            stack.add_named(page, Some(name));
+            let btn = gtk::ToggleButton::builder()
+                .hexpand(true)
+                .tooltip_text(&title)
+                .build();
+            if icons_only {
+                btn.set_icon_name(icon);
+            } else {
+                // Labels only, like the other tab bars (Podcasts, Streaming …):
+                // six categories plus their icons leave so little room per tab
+                // that every name ends up an ellipsis. Ellipsizing anyway, so a
+                // long name can't push the bar (and with it the window) wider
+                // than the screen.
+                let label = gtk::Label::new(Some(&title));
+                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                btn.set_child(Some(&label));
+            }
+            match &leader {
+                Some(l) => btn.set_group(Some(l)),
+                None => leader = Some(btn.clone()),
+            }
+            // Preselect BEFORE connecting, so restoring the last category does
+            // not already count as a switch.
+            btn.set_active(name == last);
+            {
+                let sender = sender.clone();
+                let stack = stack.clone();
+                let name = name.to_string();
+                btn.connect_toggled(move |b| {
+                    if b.is_active() {
+                        stack.set_visible_child_name(&name);
+                        sender.input(Msg::SetLastSettingsPage(name.clone()));
+                    }
+                });
+            }
+            tab_bar.append(&btn);
+        }
+        stack.set_visible_child_name(&last);
+
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build();
+        content.append(&tab_bar);
+        content.append(&stack);
+        let page = self.push_subpage_self_scrolling(&gettext("Settings"), SETTINGS_TAG, &content);
+
+        // Leaving the page drops the yt-dlp status widgets a running probe or
+        // download would otherwise keep updating.
         {
-            let slot = self.nav.settings_dialog.clone();
-            dialog.connect_closed(move |_| {
-                *slot.borrow_mut() = None;
+            let status_slot = self.youtube.settings_status.clone();
+            let btn_slot = self.youtube.settings_dl_btn.clone();
+            page.connect_hidden(move |_| {
+                *status_slot.borrow_mut() = None;
+                *btn_slot.borrow_mut() = None;
             });
         }
-        dialog.present(Some(root));
     }
 }
 
