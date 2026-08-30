@@ -6,7 +6,7 @@
 #   flatpak-builder --user --install --force-clean build-dir de.cais.Emilia.yaml
 #   flatpak run de.cais.Emilia
 #
-# Der Build läuft offline (Flathub-Anforderung): Die Cargo-Abhängigkeiten sind in
+# Der Build läuft offline: Die Cargo-Abhängigkeiten sind in
 # generated-sources.json gevendort (erzeugt mit flatpak-cargo-generator aus
 # Cargo.lock) und werden mit `cargo build --offline` verwendet. Nach Änderungen an
 # den Abhängigkeiten (Cargo.lock) muss generated-sources.json neu erzeugt werden:
@@ -50,8 +50,7 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   # Kamera-Quelle für den QR-Scan: direkter V4L2-Pfad (dieser Build hat
   # --device=all). Umgeht das Kamera-Portal, das auf Halium die V4L2-Loopbacks
-  # nicht zuverlässig exponiert. Auf dem Flathub-Build ist das NICHT gesetzt, dort
-  # läuft die Kamera über das Portal (kein --device=all).
+  # nicht zuverlässig exponiert.
   - --env=EMILIA_CAMERA_SRC=autovideosrc
   # Übersetzungskataloge liegen privat unter /app (nicht in der Locale-Extension,
   # die nur die Gerätesprachen installiert), damit der eingebaute Sprachwähler
@@ -86,8 +85,7 @@ modules:
         url: https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-1.6.0.tar.gz
         sha256: 9d33482e56a1389a37a0d6742c376139fa43e3b8a63d29003222b93db2cb40da
   # yt-dlp als gepinnte, sha256-verifizierte Binary mitliefern (statt sie zur
-  # Laufzeit ungeprüft von GitHub zu laden). Identisch zum Flathub-Manifest, damit
-  # beide Flatpak-Builds dieselbe Baseline haben. flatpak-builder lädt diese
+  # Laufzeit ungeprüft von GitHub zu laden). flatpak-builder lädt diese
   # Source in der Download-Phase (nicht im Offline-Build-Schritt). `x-checker-data`
   # erlaubt automatisches Bumpen via flatpak-external-data-checker. Die App
   # aktualisiert bei Bedarf eine neuere Version in den Datenordner (Vorrang vor

@@ -9,8 +9,9 @@
 /repo-*
 /*.flatpak
 
-# Flathub-Hilfswerkzeuge (Generator-Skript + venv); generated-sources.json wird
-# bewusst eingecheckt (Offline-Build), .flathub-tools nicht.
+# Hilfswerkzeuge (Cargo-Vendor-Generator, Übersetzungsskripte + venv);
+# generated-sources.json wird bewusst eingecheckt (Offline-Build), die
+# Werkzeuge selbst nicht.
 /.flathub-tools
 
 # Kompilierte Übersetzungskataloge (werden aus po/<lang>.po via msgfmt gebaut)

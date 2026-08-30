@@ -125,4 +125,4 @@ CREATE TABLE eq_binding (
 
 - App-ID / Namespace (z. B. `de.cais.Emilia`)?
 - Streaming-Backend in Phase 4: Subsonic/Navidrome **oder** Jellyfin zuerst?
-- Packaging-Weg final: Flatpak (Flathub) vs. Distro-Pakete (Mobian/postmarketOS)?
+- Packaging-Weg final: Flatpak (eigenes OSTree-Repo) vs. Distro-Pakete (Mobian/postmarketOS)?

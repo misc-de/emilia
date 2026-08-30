@@ -103,10 +103,9 @@ check:
 #
 # Setzt VERSION konsistent in Cargo.toml + Cargo.lock, verlangt einen passenden
 # <release>-Eintrag in der Metainfo (die Notizen schreibst du vorher von Hand und
-# committest sie), pinnt den Tag im Flathub-Manifest und taggt den Stand. Der
-# Commit läuft mit --no-verify, damit der version-bump-Hook die gesetzte Version
-# NICHT wieder hochzählt (sonst driftet Cargo.toml weg). Danach wird der Tag-SHA
-# ins `commit:`-Feld des Flathub-Manifests gepinnt (von Flathub empfohlen).
+# committest sie) und taggt den Stand. Der Commit läuft mit --no-verify, damit
+# der version-bump-Hook die gesetzte Version NICHT wieder hochzählt (sonst
+# driftet Cargo.toml weg).
 # Hinweis: VERSION wird wörtlich übernommen – die Patch-Stelle ist ansonsten nur
 # der Auto-Build-Zähler des Hooks, hier gibst du die echte Release-Version an.
 # ---------------------------------------------------------------------------
@@ -117,13 +116,9 @@ release:
 	@grep -q 'release version="$(VERSION)"' data/$(APPID).metainfo.xml || { echo "Kein <release version=\"$(VERSION)\"> in data/$(APPID).metainfo.xml – bitte zuerst die Release-Notiz ergänzen und committen."; exit 1; }
 	sed -i -E 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"/version = "$(VERSION)"/' Cargo.toml
 	sed -i -E '/^name = "emilia"$$/{n;s/^version = "[0-9]+\.[0-9]+\.[0-9]+"/version = "$(VERSION)"/;}' Cargo.lock
-	sed -i -E 's|^( *tag: )v[0-9]+\.[0-9]+\.[0-9]+|\1v$(VERSION)|' $(APPID).flathub.yaml
-	git add Cargo.toml Cargo.lock $(APPID).flathub.yaml
+	git add Cargo.toml Cargo.lock
 	git commit --no-verify -m "Release: $(VERSION)"
 	git tag "v$(VERSION)"
-	sed -i -E 's|^( *)#? *commit:.*|\1commit: '"$$(git rev-parse v$(VERSION))"'|' $(APPID).flathub.yaml
-	git add $(APPID).flathub.yaml
-	git commit --no-verify -m "Release: Flathub-commit für v$(VERSION) pinnen"
 	@echo "✓ v$(VERSION) getaggt. Pushen:  git push && git push origin v$(VERSION)"
 
 # ---------------------------------------------------------------------------
