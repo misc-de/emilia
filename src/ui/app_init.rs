@@ -1258,6 +1258,12 @@ impl App {
             css.load_from_string(
                 "row.emilia-flush > box.header { padding-left: 0px; margin-left: 0px; }\
                  row.emilia-flush > box.header > box.prefixes { margin-left: 0px; margin-right: 8px; }\
+                 /* The gap left of the cover is the row's own padding (12 px in \
+                    Adwaita), not the header's — so flushing the header alone left \
+                    the thumbnail four times further from the left edge than from \
+                    the top and bottom. Pin all three to the same value so the \
+                    cover sits equally deep on every side. */\
+                 row.emilia-flush { padding-top: 3px; padding-bottom: 3px; padding-left: 3px; }\
                  button.sync-connected { color: @success_color; }\
                  button.sleep-armed { color: @accent_color; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\

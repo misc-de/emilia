@@ -2488,7 +2488,10 @@ impl YtPage {
     /// text column with the progress line underneath (long-form items only),
     /// then the runtime and the play button. A `AdwActionRow` has no room under
     /// its subtitle, so the row is a plain box — the progress line then reads
-    /// exactly like the one in "Newest"/"Recently" for podcasts.
+    /// exactly like the one in "Newest"/"Recently" for podcasts. The box is
+    /// wrapped in a list-box row and laid out like an `emilia-flush`
+    /// `AdwActionRow` (cover flush left, 8 px to the text, plain title weight),
+    /// so it looks the same as the streaming/album rows next to it.
     #[allow(clippy::too_many_arguments)]
     fn video_card(
         &self,
@@ -2500,16 +2503,16 @@ impl YtPage {
         duration: Option<i64>,
         watched: Option<&(i64, bool)>,
         on_detail: impl Fn() + Clone + 'static,
-    ) -> gtk::Box {
+    ) -> gtk::ListBoxRow {
         let card = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .build();
         let top = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
-            .margin_top(8)
-            .margin_bottom(8)
-            .margin_start(12)
+            .spacing(8)
+            .margin_top(3)
+            .margin_bottom(3)
+            .margin_start(3)
             .margin_end(12)
             .build();
         top.append(&cover_widget(cover, "video-x-generic-symbolic"));
@@ -2523,7 +2526,6 @@ impl YtPage {
             .xalign(0.0)
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .build();
-        title_lbl.add_css_class("heading");
         text.append(&title_lbl);
         if !subtitle.trim().is_empty() {
             let sub = gtk::Label::builder()
@@ -2559,7 +2561,7 @@ impl YtPage {
         }
         on_secondary_click(&card, on_detail.clone());
         on_long_press(&card, on_detail);
-        card
+        crate::ui::app_helpers::card_row(&card)
     }
 
     /// Watch-progress suffix for a row, for **long-form** items only (talks,

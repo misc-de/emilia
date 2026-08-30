@@ -348,6 +348,10 @@ impl FactoryComponent for FsRow {
 
     view! {
         adw::ActionRow {
+            // Same row look as the streaming/album lists: the icon sits in a
+            // 48 px thumbnail frame flush against the left edge instead of being
+            // a small inline image (`emilia-flush` drops the header padding).
+            add_css_class: "emilia-flush",
             // #[watch], so that tags read later (remote files) update the
             // display.
             #[watch]
@@ -358,7 +362,7 @@ impl FactoryComponent for FsRow {
             // their play button; a tap on the row does nothing, and the detail
             // view opens on long press / right click.
             set_activatable: self.entry.is_dir(),
-            add_prefix = &gtk::Image::from_icon_name(self.entry.prefix_icon()),
+            add_prefix: &crate::ui::widgets::thumb_frame(self.entry.prefix_icon(), 48),
 
             // Play button for an album folder (plays the whole album; the row
             // itself still opens the folder). Plain folders have none. Placed

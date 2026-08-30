@@ -1248,12 +1248,14 @@ impl PodcastsPage {
             let card = gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
                 .build();
+            // Laid out like an `emilia-flush` `AdwActionRow` (cover flush left,
+            // 8 px to the text) so the row matches the streaming/album lists.
             let top = gtk::Box::builder()
                 .orientation(gtk::Orientation::Horizontal)
-                .spacing(12)
-                .margin_top(8)
-                .margin_bottom(8)
-                .margin_start(12)
+                .spacing(8)
+                .margin_top(3)
+                .margin_bottom(3)
+                .margin_start(3)
                 .margin_end(12)
                 .build();
             top.append(&cover_widget(cover.as_deref(), "microphone-symbolic"));
@@ -1267,7 +1269,6 @@ impl PodcastsPage {
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .build();
-            title.add_css_class("heading");
             text.append(&title);
             let subtitle_lbl = gtk::Label::builder()
                 .label(&subtitle)
@@ -1309,7 +1310,7 @@ impl PodcastsPage {
                 move || sender.input(PodcastsInput::ShowEpisodeDetail(i))
             });
             if let Some(g) = &group {
-                g.add(&card);
+                g.add(&crate::ui::app_helpers::card_row(&card));
             }
         }
         self.refresh_episode_icons();
@@ -1345,6 +1346,14 @@ impl PodcastsPage {
         while let Some(child) = self.recent_list.first_child() {
             self.recent_list.remove(&child);
         }
+        // One group for the whole list, so the rows share a single card with
+        // separators — the same look the streaming/album lists have. Only
+        // attached when there is something to show, so an empty list stays empty
+        // (the icon refresh below still has to run either way).
+        let group = adw::PreferencesGroup::new();
+        if !self.recent_items.is_empty() {
+            self.recent_list.append(&group);
+        }
         for ep in self.recent_items.clone() {
             let total_secs = ep
                 .duration
@@ -1355,15 +1364,14 @@ impl PodcastsPage {
             let card = gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
                 .spacing(6)
-                .css_classes(["card"])
                 .build();
             let top = gtk::Box::builder()
                 .orientation(gtk::Orientation::Horizontal)
-                .spacing(12)
-                .margin_top(8)
-                .margin_bottom(8)
-                .margin_start(10)
-                .margin_end(10)
+                .spacing(8)
+                .margin_top(3)
+                .margin_bottom(3)
+                .margin_start(3)
+                .margin_end(12)
                 .build();
             let cover = ep
                 .podcast_image
@@ -1381,7 +1389,6 @@ impl PodcastsPage {
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .build();
-            title.add_css_class("heading");
             text.append(&title);
             // Subtitle: just the podcast name — the total length sits next to
             // the play button (like "Newest"). Without a known length there is
@@ -1442,7 +1449,7 @@ impl PodcastsPage {
                 let sender = sender.clone();
                 move || sender.input(PodcastsInput::ShowEpisodeDetailByUrl { url: url.clone() })
             });
-            self.recent_list.append(&card);
+            group.add(&crate::ui::app_helpers::card_row(&card));
         }
         self.refresh_episode_icons();
     }

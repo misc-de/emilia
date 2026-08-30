@@ -582,6 +582,21 @@ pub(crate) fn cover_widget(path: Option<&str>, placeholder: &str) -> gtk::Widget
     bin.upcast()
 }
 
+/// Wraps a hand-built row body in a `GtkListBoxRow` so it picks up the same
+/// `boxed-list` card styling — background, separators, rounded ends — that the
+/// `AdwActionRow` lists (streaming, albums, playlists …) get for free. The
+/// podcast/YouTube rows need a progress line *under* the subtitle, which an
+/// `AdwActionRow` has no room for, so they are plain boxes; without this wrapper
+/// `AdwPreferencesGroup` parks them outside its list box and they end up with no
+/// card at all.
+pub(crate) fn card_row(child: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
+    row.set_selectable(false);
+    row.set_child(Some(child));
+    row
+}
+
 /// If `sub` is a single-album folder (and not a known artist folder), returns
 /// its album info (artist, album) so the row can offer a "play album" button.
 /// `in_dir` are the library tracks already scoped to `sub`.
