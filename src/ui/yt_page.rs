@@ -123,40 +123,174 @@ pub(crate) fn fmt_duration(secs: i64) -> String {
     crate::ui::app_helpers::fmt_duration(secs.saturating_mul(1000))
 }
 
-/// Subscribes to a channel and caches its newest videos (worker thread, own DB).
-pub(crate) fn fetch_and_store_channel(
+/// Stores the subscription itself and returns its DB id (worker thread, own DB).
+/// Deliberately separate from [`fill_channel_videos`]: writing the row takes
+/// milliseconds, while filling its video cache is a yt-dlp run plus a listing's
+/// worth of thumbnails — the user should see the channel appear immediately
+/// rather than watch a spinner until all of that is done.
+pub(crate) fn store_channel(
     channel_id: &str,
     title: &str,
     url: &str,
     thumbnail: Option<&str>,
-) -> Option<String> {
-    let lib = Library::open().ok()?;
-    let cid = lib
+) -> Option<i64> {
+    Library::open()
+        .ok()?
         .subscribe_channel(channel_id, title, url, thumbnail)
-        .ok()?;
-    let videos = list_channel_videos(url, Some(channel_id));
-    let _ = lib.set_channel_videos(cid, &videos);
-    if let Some(t) = thumbnail {
+        .ok()
+}
+
+/// Makes sure a subscribed channel has a picture to show: caches its YouTube
+/// avatar, or — when the listing carried none — looks one up in a music DB by
+/// channel name and stores that URL on the channel row. Without this a channel
+/// without an avatar keeps a bare placeholder in the subscriptions list.
+/// **Network – worker threads only.**
+pub(crate) fn ensure_channel_image(
+    lib: &Library,
+    db_id: i64,
+    title: &str,
+    thumbnail: Option<&str>,
+) {
+    if let Some(t) = thumbnail.map(str::trim).filter(|t| !t.is_empty()) {
         crate::core::online::cache_youtube_thumb(t);
+        return;
     }
-    Some(title.to_string())
+    let name = youtube::clean_channel_name(title);
+    if let Some(url) = crate::core::online::channel_image_url(None, &name) {
+        crate::core::online::cache_youtube_thumb(&url);
+        let _ = lib.set_channel_thumbnail(db_id, &url);
+    }
+}
+
+/// Fills a freshly subscribed channel's video cache and thumbnails (worker
+/// thread, own DB). Runs after [`store_channel`] has already made the channel
+/// visible. **Network.**
+pub(crate) fn fill_channel_videos(
+    db_id: i64,
+    channel_id: &str,
+    title: &str,
+    url: &str,
+    thumbnail: Option<&str>,
+) {
+    let Ok(lib) = Library::open() else {
+        return;
+    };
+    ensure_channel_image(&lib, db_id, title, thumbnail);
+    let videos = list_channel_videos(url, Some(channel_id), None);
+    let _ = lib.set_channel_videos(db_id, &videos);
+}
+
+/// Whether the channel feed lists a video the cache doesn't know yet — the
+/// question a "check for new videos" actually asks. `dates` is a feed map
+/// (`video_id → published`).
+fn feed_has_unknown(
+    dates: &std::collections::HashMap<String, String>,
+    stored: &[crate::model::YtVideo],
+) -> bool {
+    let known: std::collections::HashSet<&str> =
+        stored.iter().map(|v| v.video_id.as_str()).collect();
+    dates.keys().any(|id| !known.contains(id.as_str()))
+}
+
+/// Fingerprint of a channel feed's current contents. Stored after a listing so
+/// the next check can tell "the feed has not moved at all" from "there is
+/// something new", **including entries the `/videos` listing never returns** —
+/// a channel's Shorts and streams show up in the feed but not in that tab, so
+/// comparing feed ids against the video cache alone would report new videos
+/// forever and defeat the whole point of asking the feed first.
+fn feed_signature(dates: &std::collections::HashMap<String, String>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut entries: Vec<(&str, &str)> = dates
+        .iter()
+        .map(|(id, p)| (id.as_str(), p.as_str()))
+        .collect();
+    entries.sort_unstable();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    entries.hash(&mut h);
+    format!("{:x}", h.finish())
+}
+
+/// Setting key the feed fingerprint of a channel is stored under.
+fn feed_sig_key(channel_db_id: i64) -> String {
+    format!("yt_feed_sig_{channel_db_id}")
+}
+
+/// Fills in publication dates the cache is missing from a feed map, leaving
+/// dates it already has untouched. Returns whether anything changed (so an
+/// unchanged cache needn't be written back).
+fn backfill_published(
+    videos: &mut [crate::model::YtVideo],
+    dates: &std::collections::HashMap<String, String>,
+) -> bool {
+    let mut changed = false;
+    for v in videos.iter_mut() {
+        if v.published.is_none() {
+            if let Some(p) = dates.get(&v.video_id) {
+                v.published = Some(p.clone());
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 /// Refreshes a subscribed channel's newest videos (worker thread, own DB).
 /// Returns the channel title plus how many of the listed videos were **new**,
 /// so a refresh can report what it actually brought in.
+///
+/// The channel's Atom feed answers "is there anything new?" in ~80 ms, while the
+/// yt-dlp listing it would take otherwise costs well over a second (a `python3`
+/// cold start plus several requests to YouTube). So the feed is asked first and
+/// yt-dlp only runs when it actually reports a video we don't have — which for a
+/// routine "check for new videos" is almost never.
 pub(crate) fn refresh_channel_videos(
     channel_db_id: i64,
     title: &str,
     url: &str,
 ) -> Option<(String, usize)> {
     let lib = Library::open().ok()?;
-    let cid = youtube::channel_id_from_url(url);
-    let mut videos = list_channel_videos(url, cid.as_deref());
+    // The feed needs a real `UC…` id: the stored subscription key has it even
+    // when the channel was added by its `/@handle` URL.
+    let cid = youtube::channel_id_from_url(url).or_else(|| {
+        lib.channel_yt_id(channel_db_id)
+            .ok()
+            .flatten()
+            .filter(|c| c.starts_with("UC"))
+    });
+    let stored = lib.channel_videos(channel_db_id).unwrap_or_default();
+    let sig_key = feed_sig_key(channel_db_id);
+    let (mut feed_dates, mut feed_sig) = (None, None);
+    if !stored.is_empty() {
+        if let Some(cid) = cid.as_deref() {
+            let dates = youtube::channel_rss_published(cid);
+            if !dates.is_empty() {
+                let sig = feed_signature(&dates);
+                let seen_sig = lib.get_setting(&sig_key).ok().flatten();
+                // Nothing new — either the feed has not moved since the last
+                // listing, or everything it carries is already cached.
+                if seen_sig.as_deref() == Some(sig.as_str()) || !feed_has_unknown(&dates, &stored) {
+                    // Skip yt-dlp entirely; only backfill dates we are missing.
+                    let mut videos = stored;
+                    if backfill_published(&mut videos, &dates) {
+                        let _ = lib.set_channel_videos(channel_db_id, &videos);
+                    }
+                    if seen_sig.as_deref() != Some(sig.as_str()) {
+                        let _ = lib.set_setting(&sig_key, &sig);
+                    }
+                    return Some((title.to_string(), 0));
+                }
+                // There *is* something new: hand the dates to the listing so it
+                // needn't fetch the same feed again, and remember the
+                // fingerprint once that listing has actually run.
+                feed_sig = Some(sig);
+                feed_dates = Some(dates);
+            }
+        }
+    }
+    let mut videos = list_channel_videos(url, cid.as_deref(), feed_dates);
     if videos.is_empty() {
         return None;
     }
-    let stored = lib.channel_videos(channel_db_id).unwrap_or_default();
     let seen: std::collections::HashSet<String> =
         stored.iter().map(|v| v.video_id.clone()).collect();
     // Preserve upload dates the feed didn't return this time (e.g. a transient
@@ -177,6 +311,10 @@ pub(crate) fn refresh_channel_videos(
         .filter(|v| !seen.contains(&v.video_id))
         .count();
     lib.set_channel_videos(channel_db_id, &videos).ok()?;
+    // Only now: a feed whose listing failed must not be recorded as "handled".
+    if let Some(sig) = feed_sig {
+        let _ = lib.set_setting(&sig_key, &sig);
+    }
     // A channel cached for the first time reports no "new" videos — the count
     // is meant for refreshes of an already-known channel.
     Some((title.to_string(), if seen.is_empty() { 0 } else { fresh }))
@@ -225,25 +363,31 @@ fn refresh_summary_text(updated: usize, failed: usize, new_videos: usize) -> Str
 }
 
 /// Lists a channel's newest videos via yt-dlp and merges in publication dates.
-fn list_channel_videos(url: &str, channel_id: Option<&str>) -> Vec<crate::model::YtVideo> {
+/// `dates` is the channel's already-fetched Atom feed (`video_id → published`);
+/// when `None` the feed is fetched here.
+fn list_channel_videos(
+    url: &str,
+    channel_id: Option<&str>,
+    dates: Option<std::collections::HashMap<String, String>>,
+) -> Vec<crate::model::YtVideo> {
     let mut videos: Vec<crate::model::YtVideo> = youtube::list_entries(url, CHANNEL_VIDEO_LIMIT)
         .unwrap_or_default()
         .into_iter()
         .map(to_model_video)
         .collect();
-    if let Some(cid) = channel_id {
-        let dates = youtube::channel_rss_published(cid);
-        if !dates.is_empty() {
-            for v in videos.iter_mut() {
-                if let Some(p) = dates.get(&v.video_id) {
-                    v.published = Some(p.clone());
-                }
+    let dates = dates.or_else(|| channel_id.map(youtube::channel_rss_published));
+    if let Some(dates) = dates.filter(|d| !d.is_empty()) {
+        for v in videos.iter_mut() {
+            if let Some(p) = dates.get(&v.video_id) {
+                v.published = Some(p.clone());
             }
         }
     }
-    for v in &videos {
-        crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&v.video_id));
-    }
+    let thumbs: Vec<String> = videos
+        .iter()
+        .map(|v| youtube::thumbnail_url(&v.video_id))
+        .collect();
+    crate::core::online::cache_youtube_thumbs(&thumbs);
     videos
 }
 
@@ -311,6 +455,9 @@ pub(crate) struct YtPage {
     ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
     ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, gtk::Image, String)>>>,
     ctx_video_meta: Rc<RefCell<Option<(String, gtk::Box, adw::ActionRow, adw::ActionRow, bool)>>>,
+    /// While a video detail dialog is open: (video id, title, the box its
+    /// chapters/description are filled into once they are known).
+    ctx_video_desc: Rc<RefCell<Option<(String, String, gtk::Box)>>>,
     downloading_videos: HashSet<String>,
     playlist_songs_cache: HashMap<String, Vec<YtResult>>,
     pl_cover_slots: Vec<(String, adw::Bin)>,
@@ -432,6 +579,13 @@ pub(crate) enum YtOutput {
         video_id: String,
         title: String,
     },
+    /// Play a video from one of its jump marks (chapter list / a timestamp in
+    /// the description), like tapping a timestamp in podcast shownotes.
+    PlayVideoAt {
+        video_id: String,
+        title: String,
+        ms: i64,
+    },
     /// Transport: play a subscribed channel's videos as the queue.
     PlayChannel(i64),
     /// Transport: resolve a playlist URL and start playing it.
@@ -502,6 +656,9 @@ pub(crate) enum YtCmd {
     SearchFailed(u64),
     SearchThumbsReady(u64),
     ChannelFetched(Option<String>),
+    /// A newly subscribed channel's video cache finished filling in the
+    /// background — the lists can show its videos now.
+    ChannelVideosReady,
     /// One channel of a "refresh all" is about to be fetched.
     RefreshProgress {
         done: usize,
@@ -521,6 +678,9 @@ pub(crate) enum YtCmd {
         uploader: Option<String>,
         duration: Option<i64>,
         cover: Option<String>,
+        /// Description text and its jump marks (empty when the video has none).
+        description: Option<String>,
+        chapters: Vec<(i64, String)>,
     },
     LibraryProgress {
         done: usize,
@@ -649,7 +809,7 @@ impl Component for YtPage {
                 },
             },
             adw::StatusPage {
-                set_icon_name: Some("video-x-generic-symbolic"),
+                set_icon_name: Some("audio-x-generic-symbolic"),
                 set_title: &gettext("No videos yet"),
                 set_description: Some(&gettext("Subscribe to a channel to follow its newest videos.")),
                 set_vexpand: true,
@@ -712,7 +872,7 @@ impl Component for YtPage {
                 },
             },
             adw::StatusPage {
-                set_icon_name: Some("video-x-generic-symbolic"),
+                set_icon_name: Some("audio-x-generic-symbolic"),
                 set_title: &gettext("No subscriptions"),
                 set_description: Some(&gettext("Search YouTube and subscribe to a channel.")),
                 set_vexpand: true,
@@ -791,6 +951,7 @@ impl Component for YtPage {
             ctx_video_play: Rc::new(RefCell::new(None)),
             ctx_video_download: Rc::new(RefCell::new(None)),
             ctx_video_meta: Rc::new(RefCell::new(None)),
+            ctx_video_desc: Rc::new(RefCell::new(None)),
             downloading_videos: HashSet::new(),
             playlist_songs_cache: HashMap::new(),
             pl_cover_slots: Vec::new(),
@@ -940,13 +1101,17 @@ impl Component for YtPage {
                         &[("t", &r.title)],
                     ))));
                     sender.spawn_command(move |out| {
-                        let t = fetch_and_store_channel(
-                            &r.id,
-                            &r.title,
-                            &r.url,
-                            r.thumbnail.as_deref(),
-                        );
-                        let _ = out.send(YtCmd::ChannelFetched(t));
+                        let Some(db_id) =
+                            store_channel(&r.id, &r.title, &r.url, r.thumbnail.as_deref())
+                        else {
+                            let _ = out.send(YtCmd::ChannelFetched(None));
+                            return;
+                        };
+                        // The subscription exists — show it now; its videos and
+                        // thumbnails keep loading in this worker.
+                        let _ = out.send(YtCmd::ChannelFetched(Some(r.title.clone())));
+                        fill_channel_videos(db_id, &r.id, &r.title, &r.url, r.thumbnail.as_deref());
+                        let _ = out.send(YtCmd::ChannelVideosReady);
                     });
                 }
             }
@@ -1087,6 +1252,7 @@ impl Component for YtPage {
                     }
                 }
             }
+            YtCmd::ChannelVideosReady => self.reload_channels(&sender),
             YtCmd::RefreshProgress { done, total, title } => {
                 let _ = sender.output(YtOutput::RefreshProgress {
                     done,
@@ -1117,7 +1283,12 @@ impl Component for YtPage {
                 uploader,
                 duration,
                 cover,
-            } => self.apply_video_meta(&video_id, uploader, duration, cover),
+                description,
+                chapters,
+            } => {
+                self.apply_video_meta(&video_id, uploader, duration, cover);
+                self.fill_video_description(&sender, &video_id, description.as_deref(), &chapters);
+            }
             YtCmd::LibraryProgress { done, total } => {
                 let _ = sender.output(YtOutput::Progress(gettext_f(
                     "Adding to library … ({done}/{total})",
@@ -1356,7 +1527,7 @@ impl YtPage {
                 let cover = thumb
                     .as_deref()
                     .and_then(crate::core::online::youtube_thumb_path);
-                row.add_prefix(&cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+                row.add_prefix(&cover_widget(cover.as_deref(), "avatar-default-symbolic"));
                 {
                     let sender = sender.clone();
                     row.connect_activated(move |_| sender.input(YtInput::OpenChannel(id)));
@@ -1391,7 +1562,7 @@ impl YtPage {
             let cover = thumb
                 .as_deref()
                 .and_then(crate::core::online::youtube_thumb_path);
-            let (cell, pic) = gallery_cell(cover.as_deref(), "video-x-generic-symbolic", title);
+            let (cell, pic) = gallery_cell(cover.as_deref(), "avatar-default-symbolic", title);
             if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
                 if crate::ui::widgets::cached_thumb(path).is_none() {
                     to_decode.push((path.to_string(), pic));
@@ -1802,7 +1973,7 @@ impl YtPage {
                 .and_then(crate::core::online::youtube_thumb_path);
             let icon = match r.kind {
                 YtKind::Channel => "avatar-default-symbolic",
-                _ => "video-x-generic-symbolic",
+                _ => "audio-x-generic-symbolic",
             };
             row.add_prefix(&cover_widget(cover.as_deref(), icon));
             match r.kind {
@@ -1957,7 +2128,7 @@ impl YtPage {
         let cover = thumb
             .as_deref()
             .and_then(crate::core::online::youtube_thumb_path);
-        head.add_prefix(&cover_widget(cover.as_deref(), "video-x-generic-symbolic"));
+        head.add_prefix(&cover_widget(cover.as_deref(), "avatar-default-symbolic"));
         info.add(&head);
         content.append(&info);
 
@@ -2048,7 +2219,7 @@ impl YtPage {
             .as_deref()
             .and_then(|p| gtk::gdk::Texture::from_filename(p).ok());
         let cover =
-            crate::ui::widgets::rounded_image(initial.as_ref(), "video-x-generic-symbolic", 200);
+            crate::ui::widgets::rounded_image(initial.as_ref(), "audio-x-generic-symbolic", 200);
         cover_box.append(&cover);
         content.append(&cover_box);
 
@@ -2176,6 +2347,21 @@ impl YtPage {
         }
         content.append(&actions);
 
+        // Chapters + description (the YouTube counterpart of podcast shownotes)
+        // are filled in below — right away when they are cached, otherwise when
+        // the worker's `VideoMeta` arrives.
+        let desc_box = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .build();
+        content.append(&desc_box);
+        self.ctx_video_desc
+            .replace(Some((video_id.to_string(), title.to_string(), desc_box)));
+        let cached_detail = self.library.yt_detail(video_id).ok().flatten();
+        if let Some((description, chapters)) = cached_detail.as_ref() {
+            self.fill_video_description(sender, video_id, description.as_deref(), chapters);
+        }
+
         self.ctx_video_download.replace(Some((
             off.clone(),
             off_icon.clone(),
@@ -2191,20 +2377,35 @@ impl YtPage {
         self.refresh_yt_download_row();
         self.refresh_yt_icons();
 
-        if stored_channel.is_none() || stored_duration.is_none() || initial.is_none() {
+        if stored_channel.is_none()
+            || stored_duration.is_none()
+            || initial.is_none()
+            || cached_detail.is_none()
+        {
             let (sender, vid) = (sender.clone(), video_id.to_string());
             sender.spawn_command(move |out| {
-                let meta = youtube::video_meta(&vid).ok();
-                let uploader = meta.as_ref().and_then(|m| m.uploader.clone());
-                let duration = meta.as_ref().and_then(|m| m.duration);
+                // One dump carries metadata, description and chapters; the
+                // result is cached so opening the dialog again is instant.
+                let details = youtube::video_details(&vid).ok();
+                if let (Ok(lib), Some(d)) = (Library::open(), details.as_ref()) {
+                    let _ = lib.set_yt_detail(&vid, d.description.as_deref(), &d.chapters);
+                }
+                let meta = details.as_ref().map(|d| &d.meta);
+                let uploader = meta.and_then(|m| m.uploader.clone());
+                let duration = meta.and_then(|m| m.duration);
                 let cover = crate::core::online::youtube_cover_path(&vid).or_else(|| {
                     crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid))
                 });
+                let (description, chapters) = details
+                    .map(|d| (d.description, d.chapters))
+                    .unwrap_or_default();
                 let _ = out.send(YtCmd::VideoMeta {
                     video_id: vid,
                     uploader,
                     duration,
                     cover,
+                    description,
+                    chapters,
                 });
             });
         }
@@ -2213,10 +2414,12 @@ impl YtPage {
             let play_slot = self.ctx_video_play.clone();
             let dl_slot = self.ctx_video_download.clone();
             let meta_slot = self.ctx_video_meta.clone();
+            let desc_slot = self.ctx_video_desc.clone();
             dialog.connect_closed(move |_| {
                 *play_slot.borrow_mut() = None;
                 *dl_slot.borrow_mut() = None;
                 *meta_slot.borrow_mut() = None;
+                *desc_slot.borrow_mut() = None;
             });
         }
         present_detail(&dialog, &content, &root);
@@ -2368,7 +2571,7 @@ impl YtPage {
             let thumb_url = youtube::thumbnail_url(&v.id);
             let cover = crate::core::online::youtube_cover_path(&v.id)
                 .or_else(|| crate::core::online::youtube_thumb_path(&thumb_url));
-            let frame = crate::ui::widgets::thumb_frame("video-x-generic-symbolic", 48);
+            let frame = crate::ui::widgets::thumb_frame("audio-x-generic-symbolic", 48);
             match cover.as_deref().and_then(crate::ui::widgets::thumb_cached) {
                 Some(tex) => crate::ui::widgets::set_cover_thumb(&frame, &tex),
                 None => pending.push((thumb_url, frame.clone())),
@@ -2515,7 +2718,7 @@ impl YtPage {
             .margin_start(3)
             .margin_end(12)
             .build();
-        top.append(&cover_widget(cover, "video-x-generic-symbolic"));
+        top.append(&cover_widget(cover, "audio-x-generic-symbolic"));
         let text = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .hexpand(true)
@@ -2696,8 +2899,8 @@ impl YtPage {
                     total,
                     title: title.clone(),
                 });
-                if let Some(t) = thumb.as_deref() {
-                    crate::core::online::cache_youtube_thumb(t);
+                if let Ok(lib) = Library::open() {
+                    ensure_channel_image(&lib, *id, title, thumb.as_deref());
                 }
                 match refresh_channel_videos(*id, title, url) {
                     Some((_, fresh)) => {
@@ -2807,6 +3010,116 @@ impl YtPage {
     }
 
     /// Fills an open video detail dialog with metadata that arrived async.
+    /// Fills the open video dialog's chapters + description. Chapters become
+    /// tappable rows (they start playback at that mark), and the description is
+    /// shown with its timestamps linkified — the same treatment podcast
+    /// shownotes get, so both media behave alike. A no-op when the dialog was
+    /// closed meanwhile or shows a different video.
+    fn fill_video_description(
+        &self,
+        sender: &ComponentSender<Self>,
+        video_id: &str,
+        description: Option<&str>,
+        chapters: &[(i64, String)],
+    ) {
+        let guard = self.ctx_video_desc.borrow();
+        let Some((vid, title, container)) = guard.as_ref() else {
+            return;
+        };
+        if vid != video_id {
+            return;
+        }
+        while let Some(child) = container.first_child() {
+            container.remove(&child);
+        }
+        let description = description.map(str::trim).filter(|d| !d.is_empty());
+        if chapters.is_empty() && description.is_none() {
+            return;
+        }
+
+        // Chapters: one row per mark, tapping it plays from there.
+        if !chapters.is_empty() {
+            let group = adw::PreferencesGroup::new();
+            let expander = adw::ExpanderRow::builder()
+                .title(gettext("Chapters"))
+                .subtitle(ngettext_n(
+                    "{n} chapter",
+                    "{n} chapters",
+                    chapters.len() as u32,
+                ))
+                .expanded(false)
+                .build();
+            for (ms, label) in chapters {
+                let row = adw::ActionRow::builder()
+                    .title(gtk::glib::markup_escape_text(label))
+                    .subtitle(crate::ui::app_helpers::fmt_duration(*ms))
+                    .activatable(true)
+                    .build();
+                let (sender, vid, t, ms) =
+                    (sender.clone(), video_id.to_string(), title.clone(), *ms);
+                row.connect_activated(move |_| {
+                    let _ = sender.output(YtOutput::PlayVideoAt {
+                        video_id: vid.clone(),
+                        title: t.clone(),
+                        ms,
+                    });
+                });
+                expander.add_row(&row);
+            }
+            group.add(&expander);
+            container.append(&group);
+        }
+
+        // Description: timestamps in the text stay tappable as well.
+        if let Some(text) = description {
+            let group = adw::PreferencesGroup::new();
+            let label = gtk::Label::builder()
+                .label(crate::core::podcast::linkify_timestamps(text))
+                .use_markup(true)
+                .wrap(true)
+                // Wrap inside long unbreakable tokens (URLs) too, so a
+                // description can never force the dialog wider than the screen.
+                .wrap_mode(gtk::pango::WrapMode::WordChar)
+                .xalign(0.0)
+                .selectable(true)
+                .build();
+            label.add_css_class("body");
+            {
+                let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.clone());
+                label.connect_activate_link(move |_, uri| {
+                    if let Some(ms) = uri
+                        .strip_prefix("emilia-seek:")
+                        .and_then(|s| s.parse::<i64>().ok())
+                    {
+                        let _ = sender.output(YtOutput::PlayVideoAt {
+                            video_id: vid.clone(),
+                            title: t.clone(),
+                            ms,
+                        });
+                        return gtk::glib::Propagation::Stop;
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
+            }
+            let wrap = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(6)
+                .margin_top(10)
+                .margin_bottom(10)
+                .margin_start(14)
+                .margin_end(14)
+                .build();
+            wrap.append(&label);
+            let expander = adw::ExpanderRow::builder()
+                .title(gettext("Description"))
+                .expanded(false)
+                .build();
+            expander.add_row(&wrap);
+            group.add(&expander);
+            container.append(&group);
+        }
+    }
+
     fn apply_video_meta(
         &self,
         video_id: &str,
@@ -2839,7 +3152,7 @@ impl YtPage {
             }
             cover_box.append(&crate::ui::widgets::rounded_image(
                 Some(&tex),
-                "video-x-generic-symbolic",
+                "audio-x-generic-symbolic",
                 200,
             ));
         }
@@ -3147,7 +3460,102 @@ impl YtPage {
 
 #[cfg(test)]
 mod tests {
-    use super::refresh_summary_text;
+    use super::{backfill_published, feed_has_unknown, feed_signature, refresh_summary_text};
+    use crate::model::YtVideo;
+    use std::collections::HashMap;
+
+    fn video(id: &str, published: Option<&str>) -> YtVideo {
+        YtVideo {
+            video_id: id.to_string(),
+            title: format!("Video {id}"),
+            url: format!("https://www.youtube.com/watch?v={id}"),
+            duration: Some(210),
+            published: published.map(str::to_string),
+            thumbnail: None,
+        }
+    }
+
+    fn feed(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries
+            .iter()
+            .map(|(id, p)| (id.to_string(), p.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn a_feed_of_known_videos_means_nothing_to_fetch() {
+        let stored = vec![video("a", None), video("b", None)];
+        // The feed covers fewer videos than the cache – still nothing new.
+        assert!(!feed_has_unknown(
+            &feed(&[("a", "2026-08-01T10:00:00+00:00")]),
+            &stored
+        ));
+        assert!(!feed_has_unknown(
+            &feed(&[
+                ("a", "2026-08-01T10:00:00+00:00"),
+                ("b", "2026-07-01T10:00:00+00:00")
+            ]),
+            &stored
+        ));
+        // One unknown id is enough to warrant the expensive listing.
+        assert!(feed_has_unknown(
+            &feed(&[("c", "2026-08-30T10:00:00+00:00")]),
+            &stored
+        ));
+    }
+
+    #[test]
+    fn empty_cache_always_counts_as_having_new_videos() {
+        assert!(feed_has_unknown(
+            &feed(&[("a", "2026-08-01T10:00:00+00:00")]),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn feed_signature_ignores_order_but_tracks_content() {
+        let a = feed(&[
+            ("a", "2026-08-01T10:00:00+00:00"),
+            ("b", "2026-07-01T10:00:00+00:00"),
+        ]);
+        let b = feed(&[
+            ("b", "2026-07-01T10:00:00+00:00"),
+            ("a", "2026-08-01T10:00:00+00:00"),
+        ]);
+        assert_eq!(feed_signature(&a), feed_signature(&b));
+        // A Short appearing in the feed changes it, even though the `/videos`
+        // listing will never return that id.
+        let c = feed(&[
+            ("a", "2026-08-01T10:00:00+00:00"),
+            ("b", "2026-07-01T10:00:00+00:00"),
+            ("short", "2026-08-30T10:00:00+00:00"),
+        ]);
+        assert_ne!(feed_signature(&a), feed_signature(&c));
+    }
+
+    #[test]
+    fn backfill_only_fills_missing_dates() {
+        let mut videos = vec![
+            video("a", None),
+            video("b", Some("2026-01-01T00:00:00+00:00")),
+        ];
+        let dates = feed(&[
+            ("a", "2026-08-01T10:00:00+00:00"),
+            ("b", "2026-08-02T10:00:00+00:00"),
+        ]);
+        assert!(backfill_published(&mut videos, &dates));
+        assert_eq!(
+            videos[0].published.as_deref(),
+            Some("2026-08-01T10:00:00+00:00")
+        );
+        // A date we already had is never overwritten by the feed.
+        assert_eq!(
+            videos[1].published.as_deref(),
+            Some("2026-01-01T00:00:00+00:00")
+        );
+        // Nothing left to fill → no pointless DB write.
+        assert!(!backfill_published(&mut videos, &dates));
+    }
 
     #[test]
     fn summary_lists_only_the_parts_that_happened() {

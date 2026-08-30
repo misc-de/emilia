@@ -1852,3 +1852,21 @@ msgstr "إحصاءات الاستماع وأكثر الفنانين والمقا
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "الاشتراكات"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "فصول"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "الوصف"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} فصل"
+msgstr[1] "{n} فصل"
+msgstr[2] "{n} فصل"
+msgstr[3] "{n} فصول"
+msgstr[4] "{n} فصلاً"
+msgstr[5] "{n} فصل"

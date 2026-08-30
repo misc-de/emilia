@@ -41,11 +41,30 @@ impl App {
             let stored = lib
                 .as_ref()
                 .and_then(|l| l.yt_video_info(&vid).ok().flatten());
-            let meta = if stored.is_none() {
-                youtube::video_meta(&vid).ok()
-            } else {
-                None
+            // Description + jump marks: served from the DB when we fetched them
+            // once, so a replay costs no yt-dlp run at all.
+            let cached = lib.as_ref().and_then(|l| l.yt_detail(&vid).ok().flatten());
+            let details = match stored.is_none() || cached.is_none() {
+                true => youtube::video_details(&vid).ok(),
+                false => None,
             };
+            if let (Some(l), Some(d)) = (lib.as_ref(), details.as_ref()) {
+                let _ = l.set_yt_detail(&vid, d.description.as_deref(), &d.chapters);
+            }
+            // Straight to the transport: the seekbar markers should appear as
+            // soon as they are known, not after the cover lookup below.
+            let chapters = details
+                .as_ref()
+                .map(|d| d.chapters.clone())
+                .or_else(|| cached.map(|(_, c)| c))
+                .unwrap_or_default();
+            if !chapters.is_empty() {
+                let _ = input.send(Msg::YtChapters {
+                    video_id: vid.clone(),
+                    chapters,
+                });
+            }
+            let meta = details.map(|d| d.meta);
             if let (Some(l), Some(d)) = (lib.as_ref(), meta.as_ref().and_then(|m| m.duration)) {
                 let _ = l.set_yt_meta(&vid, &t, Some(d));
             }
@@ -67,6 +86,21 @@ impl App {
                 cover,
             });
         });
+    }
+
+    /// Jump marks of a local file that is a downloaded YouTube video (stored
+    /// with the video, see `Library::set_yt_detail`). Empty for every other
+    /// track — a plain audio file has no chapters. DB only, no network.
+    pub(crate) fn local_yt_chapters(&self, path: &str) -> Vec<(i64, String)> {
+        let Some(video_id) = self.library.yt_download_video_id(path).ok().flatten() else {
+            return Vec::new();
+        };
+        self.library
+            .yt_detail(&video_id)
+            .ok()
+            .flatten()
+            .map(|(_, chapters)| chapters)
+            .unwrap_or_default()
     }
 
     /// Online enrichment (artist + cover) for a played video finished.
@@ -127,6 +161,24 @@ impl App {
             self.transport.queue_pos = 0;
             self.play_current();
         }
+    }
+
+    /// Plays a video from a jump mark in its description. A video that is
+    /// already playing simply seeks — re-resolving its stream would cost
+    /// seconds for a jump within the same video.
+    pub(crate) fn yt_play_video_at(&mut self, video_id: String, title: String, ms: i64) {
+        let ms = ms.max(0);
+        if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
+            let _ = self.player.seek_ms(ms);
+            self.mini.position_ms = ms;
+            self.mpris.set_position(ms);
+            self.mpris.seeked(ms);
+            self.update_current_chapter();
+            return;
+        }
+        // Consumed by the start below instead of the stored resume position.
+        self.youtube.pending_seek = Some((video_id.clone(), ms));
+        self.yt_play_video(video_id, title);
     }
 
     /// Resolve a playlist URL to its videos (yt-dlp) and start playing it.

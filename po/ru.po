@@ -1836,3 +1836,18 @@ msgstr "Статистика прослушивания и ваши самые �
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "Подписки"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "Главы"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "Описание"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} глава"
+msgstr[1] "{n} главы"
+msgstr[2] "{n} глав"

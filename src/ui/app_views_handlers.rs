@@ -860,7 +860,7 @@ impl App {
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
                 .activatable(true)
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("video-x-generic-symbolic"));
+            row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
             {
                 let (sender, dialog, video_id) = (sender.clone(), dialog.clone(), r.id.clone());
                 let (artist, album, title) = (artist.clone(), album.clone(), title.clone());

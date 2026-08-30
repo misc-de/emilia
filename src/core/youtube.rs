@@ -108,10 +108,38 @@ fn ytdlp() -> Command {
     }
 }
 
+/// Cached answer of [`available`] plus when it was probed. Probing spawns
+/// `yt-dlp --version` — a full `python3` cold start (~0.6 s) — which is far too
+/// expensive for a question asked on every listing, every page open and every
+/// MCP call.
+static AVAILABLE: std::sync::Mutex<Option<(bool, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+
+/// How long a *negative* probe is trusted. A "yes" cannot become a "no" while we
+/// run, but a yt-dlp installed from the outside should be picked up without an
+/// app restart — so a "no" is re-probed after a while.
+const AVAILABLE_MISS_TTL: Duration = Duration::from_secs(60);
+
 /// Whether a usable `yt-dlp` is present — the user-updated copy, or one on
-/// `PATH` (e.g. the bundled `/app/bin/yt-dlp` in the Flatpak).
+/// `PATH` (e.g. the bundled `/app/bin/yt-dlp` in the Flatpak). The answer is
+/// cached (see [`AVAILABLE`]); [`fetch_ytdlp`] drops the cache after installing.
 pub fn available() -> bool {
-    version().is_some()
+    let mut slot = AVAILABLE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((yes, probed_at)) = *slot {
+        if yes || probed_at.elapsed() < AVAILABLE_MISS_TTL {
+            return yes;
+        }
+    }
+    // Held across the probe on purpose: concurrent callers wait for this answer
+    // instead of each spawning their own `--version` process.
+    let yes = version().is_some();
+    *slot = Some((yes, std::time::Instant::now()));
+    yes
+}
+
+/// Forgets the cached [`available`] answer (after installing/replacing yt-dlp).
+fn reset_available_cache() {
+    *AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// The installed `yt-dlp` version string (e.g. `2026.03.17`), or `None` if it is
@@ -162,6 +190,9 @@ fn fetch_ytdlp(url: &str) -> Result<String> {
     }
     std::fs::rename(&tmp, &dest)?;
     set_executable(&dest)?;
+    // A copy just appeared (or replaced an unusable one) — a cached "not
+    // installed" from before must not stick around.
+    reset_available_cache();
 
     version().ok_or_else(|| anyhow!("yt-dlp was downloaded but does not run"))
 }
@@ -248,6 +279,16 @@ pub enum YtKind {
     Video,
     Playlist,
     Channel,
+}
+
+/// A single video with everything a full dump gives: [`YtResult`] plus its
+/// description and jump marks (`ms` → label), the YouTube counterpart of a
+/// podcast episode's shownotes and chapters.
+#[derive(Debug, Clone)]
+pub struct YtDetails {
+    pub meta: YtResult,
+    pub description: Option<String>,
+    pub chapters: Vec<(i64, String)>,
 }
 
 /// A single search or listing result: enough to display it and act on it
@@ -794,6 +835,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn youtube_chapters_win_over_the_description() {
+        let own = vec![
+            RawChapter {
+                start_time: Some(0.0),
+                title: Some("Intro".into()),
+            },
+            RawChapter {
+                start_time: Some(319.0),
+                title: Some("Interview".into()),
+            },
+        ];
+        let desc = "00:00 Something else\n05:19 And more";
+        let got = chapters_from(Some(&own), Some(desc));
+        assert_eq!(
+            got,
+            vec![(0, "Intro".to_string()), (319_000, "Interview".to_string())]
+        );
+    }
+
+    #[test]
+    fn without_own_chapters_the_description_timestamps_are_used() {
+        let desc =
+            "Kanal abonnieren: http://example.com\n\n00:00:00 - Anfang\n00:05:19 - Interview";
+        let got = chapters_from(None, Some(desc));
+        assert_eq!(
+            got,
+            vec![
+                (0, "Anfang".to_string()),
+                (319_000, "Interview".to_string())
+            ]
+        );
+        // Nothing anywhere → no marks (and no panic on a missing description).
+        assert!(chapters_from(None, None).is_empty());
+        assert!(chapters_from(Some(&[]), Some("no timestamps here")).is_empty());
+    }
+
+    #[test]
     fn civil_dates_map_to_epoch_days() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
         assert_eq!(days_from_civil(1970, 1, 2), 1);
@@ -983,14 +1061,53 @@ fn local_atom_name(qname: &[u8]) -> String {
 /// Full metadata of a single video (title, uploader, duration, thumbnail) for
 /// indexing it into the library with proper artist/title. **Network.**
 pub fn video_meta(video_id_or_url: &str) -> Result<YtResult> {
+    video_details(video_id_or_url).map(|d| d.meta)
+}
+
+/// Everything a single-video dump carries: the listing metadata plus the
+/// description and its jump marks. One yt-dlp run — the caller that wants both
+/// (playback, the detail dialog) must not pay for two. **Network.**
+pub fn video_details(video_id_or_url: &str) -> Result<YtDetails> {
     let url = to_url(video_id_or_url);
-    // No `--flat-playlist`: a full single-video dump carries uploader/duration.
+    // No `--flat-playlist`: a full single-video dump carries uploader/duration,
+    // the description and YouTube's chapter marks.
     let entries = dump_entries(&["--no-playlist", "--", &url])?;
-    entries
+    let entry = entries
         .into_iter()
         .next()
-        .and_then(|e| e.into_result())
-        .ok_or_else(|| anyhow!("no metadata for {url}"))
+        .ok_or_else(|| anyhow!("no metadata for {url}"))?;
+    let description = entry.description.clone().filter(|d| !d.trim().is_empty());
+    let chapters = chapters_from(entry.chapters.as_deref(), description.as_deref());
+    let meta = entry
+        .into_result()
+        .ok_or_else(|| anyhow!("no metadata for {url}"))?;
+    Ok(YtDetails {
+        meta,
+        description,
+        chapters,
+    })
+}
+
+/// Jump marks for a video: YouTube's own chapter list when it has one,
+/// otherwise the timestamps in the description — the same "00:00 Intro" lines
+/// podcast shownotes use, so both go through
+/// [`crate::core::podcast::parse_chapters`].
+fn chapters_from(chapters: Option<&[RawChapter]>, description: Option<&str>) -> Vec<(i64, String)> {
+    let own: Vec<(i64, String)> = chapters
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| {
+            let ms = (c.start_time? * 1000.0).round() as i64;
+            let title = c.title.clone()?;
+            (!title.trim().is_empty()).then(|| (ms.max(0), title))
+        })
+        .collect();
+    if !own.is_empty() {
+        return own;
+    }
+    description
+        .map(crate::core::podcast::parse_chapters)
+        .unwrap_or_default()
 }
 
 /// Lists a playlist's videos in playlist order (used by "add playlist to
@@ -1153,6 +1270,22 @@ struct RawEntry {
     thumbnail: Option<String>,
     #[serde(default)]
     thumbnails: Vec<RawThumb>,
+    /// Full video description (single-video dumps only — a `--flat-playlist`
+    /// entry has none).
+    #[serde(default)]
+    description: Option<String>,
+    /// YouTube's own chapter marks, when the video has them.
+    #[serde(default)]
+    chapters: Option<Vec<RawChapter>>,
+}
+
+/// One chapter of yt-dlp's `chapters` array.
+#[derive(Deserialize)]
+struct RawChapter {
+    #[serde(default)]
+    start_time: Option<f64>,
+    #[serde(default)]
+    title: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -2769,3 +2769,17 @@ msgstr ""
 #: src/ui/setup.rs
 msgid "Get started"
 msgstr ""
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr ""
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr ""
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] ""
+msgstr[1] ""

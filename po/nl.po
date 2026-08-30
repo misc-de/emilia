@@ -1829,3 +1829,17 @@ msgstr "Luisterstatistieken en je meest afgespeelde artiesten en nummers."
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "Abonnementen"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "Hoofdstukken"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "Beschrijving"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} hoofdstuk"
+msgstr[1] "{n} hoofdstukken"

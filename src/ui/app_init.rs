@@ -447,9 +447,12 @@ impl App {
                 }
                 if online && crate::core::youtube::available() {
                     for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
-                        if let Some(t) = thumb.as_deref() {
-                            crate::core::online::cache_youtube_thumb(t);
-                        }
+                        crate::ui::yt_page::ensure_channel_image(
+                            &lib,
+                            id,
+                            &title,
+                            thumb.as_deref(),
+                        );
                         let _ = crate::ui::yt_page::refresh_channel_videos(id, &title, &url);
                     }
                 }

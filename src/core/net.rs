@@ -60,6 +60,21 @@ pub fn get_with_retry(
     user_agent: Option<&str>,
     label: &str,
 ) -> Result<Option<ureq::Response>> {
+    get_with_retry_max(agent, url, user_agent, label, RETRY_MAX)
+}
+
+/// [`get_with_retry`] with an explicit attempt budget. Bulk fetches of optional
+/// artwork pass a small one: the default budget spends up to 1.5+3+6+12 s on a
+/// *single* image, which — multiplied by a listing's worth of thumbnails — turns
+/// a throttling image host into a minutes-long stall for something the UI can
+/// happily show a placeholder for.
+pub fn get_with_retry_max(
+    agent: &ureq::Agent,
+    url: &str,
+    user_agent: Option<&str>,
+    label: &str,
+    retry_max: usize,
+) -> Result<Option<ureq::Response>> {
     let mut backoff = RETRY_BASE_BACKOFF;
     let mut attempt = 0usize;
     loop {
@@ -72,7 +87,7 @@ pub fn get_with_retry(
             Err(ureq::Error::Status(404, _)) => return Ok(None),
             Err(e) => {
                 attempt += 1;
-                if !is_transient(&e) || attempt > RETRY_MAX {
+                if !is_transient(&e) || attempt > retry_max {
                     return Err(e.into());
                 }
                 // Honour Retry-After on rate limits; otherwise exponential backoff.
@@ -86,7 +101,7 @@ pub fn get_with_retry(
                 }
                 .min(RETRY_MAX_BACKOFF);
                 tracing::debug!(
-                    "transient error on {label} (attempt {attempt}/{RETRY_MAX}); \
+                    "transient error on {label} (attempt {attempt}/{retry_max}); \
                      retrying in {wait:?}: {e}"
                 );
                 std::thread::sleep(wait);

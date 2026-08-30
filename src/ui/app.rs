@@ -910,6 +910,10 @@ pub(crate) struct YoutubeState {
     /// Whether the current play context is a YouTube playlist – then individual
     /// videos are not logged to "Recent" (the playlist is logged as one entry).
     pub(crate) playing_playlist: bool,
+    /// Position the next start of this video should begin at (video id, ms) —
+    /// set when a jump mark in the description was tapped, and preferred over
+    /// the stored resume position for that one start.
+    pub(crate) pending_seek: Option<(String, i64)>,
     /// Live progress toast shown while adding video(s) to the on-disk library
     /// (the page requests it via `YtOutput::Progress`; the toast lives on the
     /// parent overlay).
@@ -1546,6 +1550,18 @@ pub enum Msg {
         result: Result<String, String>,
     },
     /// Internal: online enrichment (artist + cover) for a played video finished.
+    /// Play a video starting at a jump mark from its description.
+    YtPlayVideoAt {
+        video_id: String,
+        title: String,
+        ms: i64,
+    },
+    /// Jump marks of the running YouTube video arrived (from its chapters or
+    /// its description) — set the seekbar markers, as for a podcast episode.
+    YtChapters {
+        video_id: String,
+        chapters: Vec<(i64, String)>,
+    },
     YtEnriched {
         video_id: String,
         artist: Option<String>,
@@ -3406,6 +3422,15 @@ impl Component for App {
                 use crate::ui::yt_page::YtOutput as O;
                 match out {
                     O::PlayVideo { video_id, title } => Msg::YtPlayVideo { video_id, title },
+                    O::PlayVideoAt {
+                        video_id,
+                        title,
+                        ms,
+                    } => Msg::YtPlayVideoAt {
+                        video_id,
+                        title,
+                        ms,
+                    },
                     O::PlayChannel(id) => Msg::YtPlayChannel(id),
                     O::StartPlaylist { url, title } => Msg::YtStartPlaylist { url, title },
                     O::StartPlaylistAt {
@@ -3672,6 +3697,7 @@ impl Component for App {
                 playing_video_id: None,
                 video_titles: std::collections::HashMap::new(),
                 playing_playlist: false,
+                pending_seek: None,
                 progress_toast: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
             offline_sources: std::collections::HashSet::new(),
@@ -4108,11 +4134,24 @@ impl Component for App {
                 videos,
             } => self.yt_start_playlist_at(url, title, index, close, videos),
             Msg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
+            Msg::YtPlayVideoAt {
+                video_id,
+                title,
+                ms,
+            } => self.yt_play_video_at(video_id, title, ms),
             Msg::YtStreamResolved {
                 video_id,
                 resume,
                 result,
             } => self.yt_stream_resolved(&sender, video_id, resume, result),
+            Msg::YtChapters { video_id, chapters } => {
+                // Only if that video is still the one playing — the marks arrive
+                // from a worker and the user may have skipped on meanwhile.
+                if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
+                    self.set_chapters(chapters);
+                    self.update_current_chapter();
+                }
+            }
             Msg::YtEnriched {
                 video_id,
                 artist,

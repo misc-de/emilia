@@ -3106,6 +3106,20 @@ msgstr "Auf dem Touchscreen: einen Eintrag antippen und den Finger kurz liegen l
 
 msgid "Get started"
 msgstr "Los geht’s"
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "Kapitel"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "Beschreibung"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} Kapitel"
+msgstr[1] "{n} Kapitel"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

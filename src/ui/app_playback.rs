@@ -843,7 +843,14 @@ impl App {
             if !has_local {
                 // Long-form items (talks/streams/podcasts) continue where they
                 // were left off; songs have no stored position and start at 0.
-                let resume = self.library.yt_progress(video_id).unwrap_or(0).max(0);
+                // A tapped jump mark wins over both for this one start.
+                let resume = self
+                    .youtube
+                    .pending_seek
+                    .take()
+                    .filter(|(v, _)| v == video_id)
+                    .map(|(_, ms)| ms)
+                    .unwrap_or_else(|| self.library.yt_progress(video_id).unwrap_or(0).max(0));
                 // Optimistic now-playing state; the worker resolves the stream.
                 self.transport.skip_count = 0;
                 self.transport.playing_path = Some(path.clone());
@@ -967,8 +974,11 @@ impl App {
                 // Remember the current context (detection of future queue switches).
                 self.transport.prev_ctx =
                     Some((self.transport.queue.clone(), self.transport.queue_pos));
-                // Tracks have no chapters → clear markers/hover list.
-                self.set_chapters(Vec::new());
+                // Tracks have no chapters — except a downloaded YouTube video,
+                // whose description carries the same jump marks the streamed
+                // version shows.
+                self.set_chapters(self.local_yt_chapters(&path_str));
+                self.update_current_chapter();
                 // Load lyrics for the new track (embedded/cache instantly, then
                 // LRCLIB in the background) – shows the karaoke button when synced
                 // lyrics exist.

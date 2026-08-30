@@ -655,6 +655,13 @@ impl Library {
             -- `songs` is the JSON-serialized result list; `fetched_at` (Unix
             -- seconds) drives a staleness-gated background refresh. Saved
             -- playlists use the `playlist` mirror instead (origin = url).
+            CREATE TABLE IF NOT EXISTS yt_detail (
+                video_id    TEXT PRIMARY KEY,
+                description TEXT,
+                -- jump marks as JSON [[ms, "label"], …]
+                chapters    TEXT,
+                fetched_at  INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS yt_playlist_cache (
                 url        TEXT PRIMARY KEY,
                 title      TEXT NOT NULL,

@@ -1806,3 +1806,16 @@ msgstr "收听统计以及你最常播放的艺术家和曲目。"
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "订阅"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "章节"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "描述"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} 章节"

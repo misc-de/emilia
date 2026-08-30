@@ -1833,3 +1833,18 @@ msgstr "Statystyki słuchania oraz najczęściej odtwarzani wykonawcy i utwory."
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "Subskrypcje"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "Rozdziały"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "Opis"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} rozdział"
+msgstr[1] "{n} rozdziały"
+msgstr[2] "{n} rozdziałów"

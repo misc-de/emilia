@@ -32,6 +32,89 @@ impl Library {
         )?)
     }
 
+    /// The YouTube channel id (or handle) a subscription was stored under —
+    /// needed for the Atom feed, which only works with a real `UC…` id and
+    /// cannot be derived from a `/@handle` URL.
+    pub fn channel_yt_id(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT channel_id FROM yt_channel WHERE id = ?1",
+                [id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Stores a video's description and jump marks (see
+    /// [`crate::core::youtube::YtDetails`]) so the next play or detail view
+    /// needs no yt-dlp run. `chapters` is kept as JSON `[[ms, "label"], …]`.
+    pub fn set_yt_detail(
+        &self,
+        video_id: &str,
+        description: Option<&str>,
+        chapters: &[(i64, String)],
+    ) -> Result<()> {
+        let json = serde_json::to_string(chapters)?;
+        self.conn.execute(
+            "INSERT INTO yt_detail (video_id, description, chapters, fetched_at)
+             VALUES (?1, ?2, ?3, strftime('%s','now'))
+             ON CONFLICT(video_id) DO UPDATE SET
+                description = excluded.description,
+                chapters = excluded.chapters,
+                fetched_at = excluded.fetched_at",
+            rusqlite::params![video_id, description, json],
+        )?;
+        Ok(())
+    }
+
+    /// Stored description + jump marks of a video, `None` when it was never
+    /// fetched. A video that genuinely has neither is stored as empty, so a
+    /// cached "nothing there" is not re-fetched on every play.
+    pub fn yt_detail(
+        &self,
+        video_id: &str,
+    ) -> Result<Option<(Option<String>, Vec<(i64, String)>)>> {
+        let row: Option<(Option<String>, Option<String>)> = self
+            .conn
+            .query_row(
+                "SELECT description, chapters FROM yt_detail WHERE video_id = ?1",
+                [video_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.map(|(desc, json)| {
+            let chapters = json
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<Vec<(i64, String)>>(j).ok())
+                .unwrap_or_default();
+            (desc, chapters)
+        }))
+    }
+
+    /// The video a downloaded file belongs to (reverse of [`Self::yt_download`]),
+    /// so a locally played copy can still show its jump marks.
+    pub fn yt_download_video_id(&self, path: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT video_id FROM yt_download WHERE path = ?1 LIMIT 1",
+                [path],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Replaces a channel's picture URL (e.g. after looking one up for a
+    /// channel whose listing carried no avatar).
+    pub fn set_channel_thumbnail(&self, id: i64, url: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE yt_channel SET thumbnail = ?2 WHERE id = ?1",
+            rusqlite::params![id, url],
+        )?;
+        Ok(())
+    }
+
     /// All subscribed channels as (id, title, url, thumbnail, video count),
     /// newest first.
     pub fn channels(&self) -> Result<Vec<(i64, String, String, Option<String>, i64)>> {
@@ -52,11 +135,13 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Removes a channel subscription along with its cached videos.
+    /// Removes a channel subscription along with its cached videos (and the
+    /// feed fingerprint the refresh keeps for it).
     pub fn delete_channel(&self, id: i64) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM yt_video WHERE channel_id = ?1", [id])?;
         tx.execute("DELETE FROM yt_channel WHERE id = ?1", [id])?;
+        tx.execute("DELETE FROM setting WHERE key = 'yt_feed_sig_' || ?1", [id])?;
         tx.commit()?;
         Ok(())
     }

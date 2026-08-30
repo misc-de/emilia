@@ -1830,3 +1830,17 @@ msgstr "Takwimu za kusikiliza na wasanii na nyimbo unazocheza zaidi."
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "Usajili"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "Sura"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "Maelezo"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "sura {n}"
+msgstr[1] "sura {n}"

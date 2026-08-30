@@ -32,6 +32,13 @@ const USER_AGENT: &str = concat!("Emilia/", env!("CARGO_PKG_VERSION"), " ( https
 pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
 /// Number of parallel fetches for artist photos (Deezer handles this well).
 pub const ARTIST_FETCH_THREADS: usize = 8;
+/// Number of parallel fetches when caching a batch of thumbnails.
+pub const THUMB_FETCH_THREADS: usize = 6;
+/// Attempt budget for a single image download. Artwork is optional — the UI
+/// falls back to a placeholder — so a slow or throttling host is dropped after
+/// one retry instead of holding up a whole listing (see
+/// [`crate::core::net::get_with_retry_max`]).
+const IMAGE_RETRY_MAX: usize = 1;
 
 /// Directory for cached covers: `$XDG_CACHE_HOME/emilia/covers`.
 pub fn cover_cache_dir() -> PathBuf {
@@ -166,6 +173,18 @@ impl OnlineClient {
         crate::core::net::get_with_retry(&self.agent, url, Some(USER_AGENT), safe_url)
     }
 
+    /// [`Self::call_get`] with the short image budget ([`IMAGE_RETRY_MAX`]).
+    fn call_get_image(&self, url: &str) -> Result<Option<ureq::Response>> {
+        let safe_url = url.split('?').next().unwrap_or(url);
+        crate::core::net::get_with_retry_max(
+            &self.agent,
+            url,
+            Some(USER_AGENT),
+            safe_url,
+            IMAGE_RETRY_MAX,
+        )
+    }
+
     /// Finds the best-matching MusicBrainz release for (artist, album).
     /// Returns `Ok(None)` if nothing sufficiently matching was found.
     pub fn match_release(&self, artist: &str, album: &str) -> Result<Option<ReleaseMatch>> {
@@ -259,7 +278,7 @@ impl OnlineClient {
     }
 
     pub(crate) fn get_image(&self, url: &str) -> Result<Option<Vec<u8>>> {
-        match self.call_get(url)? {
+        match self.call_get_image(url)? {
             Some(resp) => {
                 let mut buf = Vec::new();
                 // Cap against accidentally huge responses (10 MB).
@@ -302,6 +321,33 @@ impl OnlineClient {
             Some(u) => self.get_image(&u),
             None => Ok(None),
         }
+    }
+
+    /// URL of the artist photo a music DB (Deezer) has for `name`, without
+    /// downloading it. Used where the URL itself is stored (a channel row's
+    /// thumbnail), so the usual thumbnail cache handles the rest.
+    pub fn artist_image_url(&self, name: &str) -> Result<Option<String>> {
+        let url = format!(
+            "https://api.deezer.com/search/artist?q={}&limit=1",
+            percent_encode(name)
+        );
+        let search: DzSearch = match self.call_get(&url)? {
+            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
+            None => return Ok(None),
+        };
+        let Some(artist) = search.data.into_iter().next() else {
+            return Ok(None);
+        };
+        // Big enough for a channel avatar in a list or the gallery.
+        Ok([
+            artist.picture_big,
+            artist.picture_xl,
+            artist.picture_medium,
+            artist.picture,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|u| !u.is_empty()))
     }
 
     /// Looks up lyrics for a track on [LRCLIB](https://lrclib.net) – a free,
@@ -771,12 +817,25 @@ pub fn store_youtube_cover(video_id: &str, bytes: &[u8]) -> Option<String> {
 /// Local cache path of a YouTube thumbnail (key = image URL), **only if the
 /// file is already present** – without network access (UI-thread safe).
 pub fn youtube_thumb_path(url: &str) -> Option<String> {
+    let url = normalize_image_url(url);
     if url.trim().is_empty() {
         return None;
     }
     let mut p = cover_cache_dir();
-    p.push(format!("yt_{}.img", name_hash(url)));
+    p.push(format!("yt_{}.img", name_hash(&url)));
     p.exists().then(|| p.to_string_lossy().into_owned())
+}
+
+/// Gives a protocol-relative image URL (`//yt3.googleusercontent.com/…`, what
+/// YouTube listings return for channel avatars) the scheme it is missing —
+/// without one the request fails outright and the entry keeps a placeholder.
+/// Applied on both the cache lookup and the fetch, so the two agree on the key.
+fn normalize_image_url(url: &str) -> String {
+    let u = url.trim();
+    match u.starts_with("//") {
+        true => format!("https:{u}"),
+        false => u.to_string(),
+    }
 }
 
 /// Loads a YouTube thumbnail into the cache on demand and returns the local
@@ -786,14 +845,59 @@ pub fn cache_youtube_thumb(url: &str) -> Option<String> {
     if let Some(p) = youtube_thumb_path(url) {
         return Some(p);
     }
-    if url.trim().is_empty() {
+    let url = normalize_image_url(url);
+    if url.is_empty() {
         return None;
     }
-    let bytes = shared_client().get_image(url).ok().flatten()?;
+    let bytes = shared_client().get_image(&url).ok().flatten()?;
     let mut p = cover_cache_dir();
-    p.push(format!("yt_{}.img", name_hash(url)));
+    p.push(format!("yt_{}.img", name_hash(&url)));
     std::fs::write(&p, &bytes).ok()?;
     Some(p.to_string_lossy().into_owned())
+}
+
+/// Picture for a subscribed channel: its own avatar when the listing gave one,
+/// otherwise the artist photo a music DB has for the channel name — a channel
+/// without an avatar would show a bare placeholder in the subscriptions list.
+/// Returns the URL to store on the channel row (`None` if nothing was found).
+pub fn channel_image_url(avatar: Option<&str>, channel_name: &str) -> Option<String> {
+    if let Some(u) = avatar.map(normalize_image_url).filter(|u| !u.is_empty()) {
+        return Some(u);
+    }
+    let name = channel_name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    shared_client().artist_image_url(name).ok().flatten()
+}
+
+/// Caches a batch of YouTube thumbnails **in parallel** ([`THUMB_FETCH_THREADS`]
+/// network threads). Already cached URLs cost nothing, so a refresh that brought
+/// in two new videos only fetches those two. **Network – worker threads only.**
+pub fn cache_youtube_thumbs(urls: &[String]) {
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    let missing: VecDeque<String> = urls
+        .iter()
+        .filter(|u| !u.trim().is_empty() && youtube_thumb_path(u).is_none())
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+    let n_threads = missing.len().min(THUMB_FETCH_THREADS);
+    let jobs = Mutex::new(missing);
+    std::thread::scope(|s| {
+        for _ in 0..n_threads {
+            s.spawn(|| loop {
+                let Some(url) = jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
+                    break;
+                };
+                cache_youtube_thumb(&url);
+            });
+        }
+    });
 }
 
 /// Fetches the cover (and album name) for (artist, title) – **network access**,

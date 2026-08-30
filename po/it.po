@@ -1829,3 +1829,17 @@ msgstr "Statistiche di ascolto e i tuoi artisti e brani più riprodotti."
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
 msgid "Subscribed"
 msgstr "Iscrizioni"
+
+#: src/ui/yt_page.rs
+msgid "Chapters"
+msgstr "Capitoli"
+
+#: src/ui/yt_page.rs
+msgid "Description"
+msgstr "Descrizione"
+
+#: src/ui/yt_page.rs
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} capitolo"
+msgstr[1] "{n} capitoli"
