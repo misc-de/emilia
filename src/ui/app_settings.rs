@@ -370,9 +370,11 @@ impl App {
         // "List display" sits right after "Scaling" on the View page.
         page.add(&gallery_group);
 
-        // System: optional desktop tray icon + window behavior.
+        // System: optional desktop tray icon + window behavior. There is no tray
+        // on a phone, so the whole group stays hidden in the narrow layout.
         let tray_group = adw::PreferencesGroup::builder()
             .title(gettext("System tray"))
+            .visible(!self.nav.narrow.get())
             .build();
         let tray_enabled_row = adw::SwitchRow::builder()
             .title(gettext("Show tray icon"))
