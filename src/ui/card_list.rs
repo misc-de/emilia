@@ -238,35 +238,29 @@ impl CardRow {
                 Some(texture) => widgets::set_cover_thumb(&imp.thumb, &texture),
                 None => {
                     self.reset_thumb();
-                    self.spawn_thumb_decode(path.to_string());
+                    self.request_thumb_decode(path);
                 }
             },
             None => self.reset_thumb(),
         }
     }
 
-    /// Decodes one cover off the UI thread and applies it **only** if the row
-    /// still wants that path — a row rebound meanwhile must keep its new image.
-    fn spawn_thumb_decode(&self, path: String) {
-        let (tx, rx) = async_channel::bounded(1);
-        let decode_path = path.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send_blocking(widgets::decode_thumb(&decode_path));
+    /// Queues one cover on the shared background decoder; the guard applies it
+    /// **only** if the row still wants that path — a row rebound meanwhile must
+    /// keep its new image.
+    ///
+    /// The decoder is process-wide and single-threaded on purpose. `bind` runs
+    /// for every row scrolling into view, so decoding in a thread *per row* put
+    /// hundreds of them in flight while flicking through a large library — each
+    /// holding a decoded pixbuf, and with no cap and no dedup between rows
+    /// wanting the same cover. That is enough to exhaust memory on the phone
+    /// this app targets; the shared queue has both.
+    fn request_thumb_decode(&self, path: &str) {
+        let row = self.downgrade();
+        widgets::enqueue_thumb_decode_guarded(path, &self.imp().thumb, move |path| {
+            row.upgrade()
+                .is_some_and(|row| row.imp().wants.borrow().as_deref() == Some(path))
         });
-        glib::spawn_future_local(glib::clone!(
-            #[weak(rename_to = this)]
-            self,
-            async move {
-                let Ok(Some(texture)) = rx.recv().await else {
-                    return;
-                };
-                widgets::store_thumb(path.clone(), texture.clone());
-                let imp = this.imp();
-                if imp.wants.borrow().as_deref() == Some(path.as_str()) {
-                    widgets::set_cover_thumb(&imp.thumb, &texture);
-                }
-            }
-        ));
     }
 }
 

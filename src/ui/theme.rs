@@ -209,6 +209,9 @@ pub(crate) struct ThemeState {
     scrim: Option<gtk::Box>,
     /// Whether a background image is currently shown (drives the transparency CSS).
     bg_active: bool,
+    /// What the currently shown background was rendered from (source path,
+    /// filter, strength), so an unchanged background is not decoded again.
+    bg_key: Option<(String, BgFilter, u32)>,
 }
 
 impl ThemeState {
@@ -234,6 +237,7 @@ impl ThemeState {
             bg_picture: None,
             scrim: None,
             bg_active: false,
+            bg_key: None,
         }
     }
 
@@ -630,17 +634,32 @@ impl App {
     /// now-playing cover, then reapply the stylesheet (transparency depends on
     /// whether a background is shown).
     pub(crate) fn refresh_background(&mut self) {
-        let tex = self.resolve_bg_texture();
-        self.theme.set_background_texture(tex.as_ref());
+        // Rendering means decoding *and* filtering an image on the UI thread,
+        // and `refresh_cover_background` lands here on every single track
+        // change — where the source has usually not moved at all (the next
+        // track of the same album carries the same cover, and with the cover
+        // background off the base image never changes). So re-render only when
+        // something the render actually depends on differs. The stylesheet is
+        // reapplied either way: callers also use this to pick up design changes
+        // that never reach the texture (`bg_nav`, `bg_titlebar`, colors).
+        let key = self.bg_render_key();
+        if self.theme.bg_key != key {
+            let tex = key
+                .as_ref()
+                .and_then(|(src, filter, strength)| render_filtered(src, *filter, *strength));
+            self.theme.set_background_texture(tex.as_ref());
+            self.theme.bg_key = key;
+        }
         self.reapply_runtime_style();
     }
 
-    /// The texture to show as the blurred background (already filtered), or
-    /// `None` for the neutral look. The master switch turns the whole feature
-    /// off; otherwise the base image is the user's `custom_bg` or, when none is
-    /// set, the built-in light/dark default. With "cover as background" on, the
-    /// now-playing cover takes priority as the source and the base is the fallback.
-    fn resolve_bg_texture(&self) -> Option<gtk::gdk::Texture> {
+    /// Everything the background render depends on: the source image path plus
+    /// the filter and its strength — or `None` for the neutral look. The master
+    /// switch turns the whole feature off; otherwise the base image is the
+    /// user's `custom_bg` or, when none is set, the built-in light/dark default.
+    /// With "cover as background" on, the now-playing cover takes priority as
+    /// the source and the base is the fallback.
+    fn bg_render_key(&self) -> Option<(String, BgFilter, u32)> {
         let d = &self.theme.design;
         if !d.background_on {
             return None;
@@ -657,7 +676,7 @@ impl App {
         } else {
             base
         };
-        render_filtered(&src, d.bg_filter, d.bg_filter_strength)
+        Some((src, d.bg_filter, d.bg_filter_strength))
     }
 
     /// Cover file of the currently playing local track (via its album), if any.

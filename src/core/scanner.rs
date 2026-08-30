@@ -3,6 +3,7 @@
 use anyhow::Result;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -125,10 +126,20 @@ pub fn is_audio(path: &Path) -> bool {
 }
 
 /// Recursively collects all audio files below `root`.
+///
+/// A symlinked directory is followed, but only entered once: `is_dir()` resolves
+/// links, so a link pointing at itself or an ancestor (`music/all -> music`)
+/// would otherwise send the walk in circles, growing the result until memory
+/// runs out. Identity is the canonical path, so the same directory reached by
+/// two routes counts as one.
 pub fn collect_audio_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
+    let mut seen: HashSet<PathBuf> = HashSet::new();
     while let Some(dir) = stack.pop() {
+        if !seen.insert(dir.canonicalize().unwrap_or_else(|_| dir.clone())) {
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };

@@ -88,6 +88,15 @@ pub fn store_thumb(path: String, texture: gtk::gdk::Texture) {
 /// resolution when only a small widget shows the image. `None` on a
 /// missing/faulty file.
 pub fn decode_scaled(path: &str, px: i32) -> Option<gtk::gdk::Texture> {
+    // Never scale *up*. `from_file_at_scale` happily blows a 600 px cover up to
+    // `px`, which costs (px/600)² the memory for no added detail — at the 2560 px
+    // background size that is ~26 MB per decode, on the UI thread, for every
+    // track change. `file_info` reads only the header, so capping the target at
+    // the image's own longer edge is essentially free.
+    let px = match gtk::gdk_pixbuf::Pixbuf::file_info(path) {
+        Some((_, w, h)) if w > 0 && h > 0 => px.min(w.max(h)),
+        _ => px,
+    };
     let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, px, px, true).ok()?;
     Some(gtk::gdk::Texture::for_pixbuf(&pixbuf))
 }
@@ -246,9 +255,19 @@ pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
 /// decodes sequentially off the UI thread, and the texture is cached + applied
 /// to every bin still waiting for that path. This keeps building long lists from
 /// blocking on image decoding, without spawning a thread per cover.
+/// One frame waiting for a decoded cover, plus an optional veto: a **recycled**
+/// list row may have been rebound to a different entry while its cover was in
+/// the queue, and must then keep the new entry's image. The guard runs on the UI
+/// thread right before the texture is applied and answers "does this widget
+/// still want `path`?".
+struct PendingTarget {
+    bin: gtk::glib::WeakRef<adw::Bin>,
+    still_wanted: Option<Box<dyn Fn(&str) -> bool>>,
+}
+
 struct CoverDecoder {
     tx: async_channel::Sender<String>,
-    pending: std::rc::Rc<RefCell<HashMap<String, Vec<gtk::glib::WeakRef<adw::Bin>>>>>,
+    pending: std::rc::Rc<RefCell<HashMap<String, Vec<PendingTarget>>>>,
 }
 
 thread_local! {
@@ -258,32 +277,59 @@ thread_local! {
 /// Schedules `path` to be decoded in the background and set into `bin` once ready
 /// (used by the list cover widgets on a cache miss).
 pub fn enqueue_thumb_decode(path: &str, bin: &adw::Bin) {
+    enqueue_decode(path, bin, None);
+}
+
+/// Like [`enqueue_thumb_decode`], but the texture is applied only while
+/// `still_wanted(path)` holds. For the recycled rows of [`crate::ui::card_list`],
+/// whose frame may belong to a different entry by the time the decode lands.
+pub fn enqueue_thumb_decode_guarded(
+    path: &str,
+    bin: &adw::Bin,
+    still_wanted: impl Fn(&str) -> bool + 'static,
+) {
+    enqueue_decode(path, bin, Some(Box::new(still_wanted)));
+}
+
+fn enqueue_decode(path: &str, bin: &adw::Bin, still_wanted: Option<Box<dyn Fn(&str) -> bool>>) {
     COVER_DECODER.with(|cell| {
         let mut slot = cell.borrow_mut();
         let dec = slot.get_or_insert_with(|| {
             let (tx, rx) = async_channel::unbounded::<String>();
-            let (out_tx, out_rx) = async_channel::unbounded::<(String, gtk::gdk::Texture)>();
+            let (out_tx, out_rx) =
+                async_channel::unbounded::<(String, Option<gtk::gdk::Texture>)>();
             // Worker thread: decode off the UI thread (path + texture are Send;
             // the Bin weak refs stay on the UI thread in `pending`).
             std::thread::spawn(move || {
                 while let Ok(path) = rx.recv_blocking() {
-                    if let Some(tex) = decode_thumb(&path) {
-                        if out_tx.send_blocking((path, tex)).is_err() {
-                            break;
-                        }
+                    // Report the failure too, instead of dropping it silently:
+                    // the UI side keys `pending` by path and only ever removes
+                    // an entry when a result arrives. Staying quiet on an
+                    // undecodable file would pin that entry (and its weak refs)
+                    // for the process lifetime *and* make the `is_new` dedup
+                    // below swallow every later request for the same path.
+                    let tex = decode_thumb(&path);
+                    if out_tx.send_blocking((path, tex)).is_err() {
+                        break;
                     }
                 }
             });
-            let pending: std::rc::Rc<RefCell<HashMap<String, Vec<gtk::glib::WeakRef<adw::Bin>>>>> =
+            let pending: std::rc::Rc<RefCell<HashMap<String, Vec<PendingTarget>>>> =
                 std::rc::Rc::new(RefCell::new(HashMap::new()));
             {
                 let pending = pending.clone();
                 gtk::glib::spawn_future_local(async move {
                     while let Ok((path, tex)) = out_rx.recv().await {
+                        let Some(targets) = pending.borrow_mut().remove(&path) else {
+                            continue;
+                        };
+                        let Some(tex) = tex else {
+                            continue; // Undecodable file: entry dropped, nothing to show.
+                        };
                         store_thumb(path.clone(), tex.clone());
-                        if let Some(bins) = pending.borrow_mut().remove(&path) {
-                            for weak in bins {
-                                if let Some(bin) = weak.upgrade() {
+                        for target in targets {
+                            if target.still_wanted.as_ref().is_none_or(|f| f(&path)) {
+                                if let Some(bin) = target.bin.upgrade() {
                                     set_cover_thumb(&bin, &tex);
                                 }
                             }
@@ -297,7 +343,10 @@ pub fn enqueue_thumb_decode(path: &str, bin: &adw::Bin) {
             let mut pend = dec.pending.borrow_mut();
             let entry = pend.entry(path.to_string()).or_default();
             let is_new = entry.is_empty();
-            entry.push(bin.downgrade());
+            entry.push(PendingTarget {
+                bin: bin.downgrade(),
+                still_wanted,
+            });
             is_new
         };
         // Enqueue the path only once even if several rows want the same cover.

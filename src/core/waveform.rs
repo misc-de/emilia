@@ -18,6 +18,15 @@ pub struct CutResult {
     pub duration_ms: i64,
 }
 
+/// Hard ceiling on the decoded PCM held in memory: 512 MB, i.e. ~100 minutes of
+/// 44.1 kHz mono (waveform) or ~50 minutes stereo (cut).
+///
+/// The module is written for short per-song captures, but nothing *enforced*
+/// that — pointing the editor at a long recording decoded until the allocator
+/// (or, on the phone, the OOM killer) gave up. Comfortably above any real
+/// recording, and a clean error instead of a dead process beyond it.
+const MAX_PCM_SAMPLES: usize = 256 * 1024 * 1024;
+
 /// Decodes `path` into `buckets` mono peak amplitudes (0.0–1.0) for the waveform
 /// display, plus the total duration in seconds. Synchronous — run off the UI thread.
 pub fn decode_peaks(path: &Path, buckets: usize) -> Result<(Vec<f32>, f64)> {
@@ -131,10 +140,15 @@ pub fn cut(
         .collect();
     cuts.sort_by_key(|r| r.0);
 
-    // Keep = complement of the merged cuts within [0, frames].
-    let mut kept: Vec<i16> = Vec::with_capacity(samples.len());
+    // Keep = complement of the merged cuts within [0, frames]. Size the buffer
+    // to what actually survives rather than to the full input: the merged ranges
+    // are disjoint and clamped to `frames`, so this is exact — and on a long
+    // recording it saves holding a second full-size copy of the audio.
+    let merged = merge_ranges(&cuts);
+    let cut_frames: usize = merged.iter().map(|&(a, b)| b.saturating_sub(a)).sum();
+    let mut kept: Vec<i16> = Vec::with_capacity(frames.saturating_sub(cut_frames) * ch);
     let mut cursor = 0usize;
-    for (a, b) in merge_ranges(&cuts) {
+    for (a, b) in merged {
         if a > cursor {
             kept.extend_from_slice(&samples[cursor * ch..a * ch]);
         }
@@ -143,6 +157,10 @@ pub fn cut(
     if cursor < frames {
         kept.extend_from_slice(&samples[cursor * ch..frames * ch]);
     }
+    // The source PCM is no longer needed, and `encode_pcm` below allocates
+    // another copy of `kept` as bytes — release it before that peak, not at the
+    // end of the function.
+    drop(samples);
     if kept.is_empty() {
         bail!("the cut would remove the whole recording");
     }
@@ -234,6 +252,10 @@ fn decode_pcm(path: &Path, mono: bool) -> Result<(Vec<i16>, u32, u32)> {
         if let Some(buf) = sample.buffer() {
             if let Ok(map) = buf.map_readable() {
                 let data = map.as_slice();
+                if samples.len() + data.len() / 2 > MAX_PCM_SAMPLES {
+                    let _ = pipeline.set_state(gst::State::Null);
+                    bail!("recording is too long to edit (over {MAX_PCM_SAMPLES} samples)");
+                }
                 samples.reserve(data.len() / 2);
                 for c in data.as_chunks::<2>().0 {
                     samples.push(i16::from_le_bytes(*c));

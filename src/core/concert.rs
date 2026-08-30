@@ -2,7 +2,7 @@
 //! concert, as well as individual long audio files (from 30 minutes).
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::core::scanner;
 
@@ -48,8 +48,15 @@ fn fmt_hms(secs: u64) -> String {
 pub fn scan_candidates(root: &Path, existing: &HashSet<String>) -> Vec<Candidate> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
+    // Enter each directory once, by canonical path: `is_dir()` follows symlinks,
+    // so a link back to an ancestor would loop forever (see
+    // [`scanner::collect_audio_files`]).
+    let mut seen: HashSet<PathBuf> = HashSet::new();
 
     while let Some(dir) = stack.pop() {
+        if !seen.insert(dir.canonicalize().unwrap_or_else(|_| dir.clone())) {
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
