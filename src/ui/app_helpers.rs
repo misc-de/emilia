@@ -377,6 +377,158 @@ where
     scroller.add_controller(drag);
 }
 
+/// How far below a page the tab-menu lookup descends. Every tab bar in the app
+/// sits within the first few levels of its page (the deepest is the statistics
+/// period selector at four), so this keeps the search cheap on pages that carry
+/// no tab menu at all instead of walking a whole list of thousands of rows.
+const TAB_BAR_MAX_DEPTH: u32 = 6;
+
+/// First descendant of `w` (including `w` itself) that is marked as a tab menu.
+/// `emilia-tabbar` is the class every tab bar here already wears for its
+/// styling, so it doubles as the marker for "this is the page's tab menu".
+fn tab_bar_of(w: &gtk::Widget, depth: u32) -> Option<gtk::Widget> {
+    if w.has_css_class("emilia-tabbar") {
+        return Some(w.clone());
+    }
+    if depth == 0 {
+        return None;
+    }
+    let mut child = w.first_child();
+    while let Some(c) = child {
+        if let Some(bar) = tab_bar_of(&c, depth - 1) {
+            return Some(bar);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+/// The tabs of a tab bar, in display order. A trailing "+" (add podcast, add
+/// station, add category …) is a plain `Button`, not a `ToggleButton`, so it
+/// never enters this list — which is precisely what keeps the carousel from
+/// stopping on it.
+fn tabs_of(bar: &gtk::Widget) -> Vec<gtk::ToggleButton> {
+    let mut tabs = Vec::new();
+    let mut child = bar.first_child();
+    while let Some(c) = child {
+        child = c.next_sibling();
+        if let Ok(t) = c.downcast::<gtk::ToggleButton>() {
+            tabs.push(t);
+        }
+    }
+    tabs
+}
+
+/// Selects the tab one step forward/backward, wrapping around at either end.
+fn step_tab(bar: &gtk::Widget, forward: bool) {
+    let tabs = tabs_of(bar);
+    if tabs.len() < 2 {
+        return;
+    }
+    let cur = tabs.iter().position(|b| b.is_active()).unwrap_or(0);
+    let next = if forward {
+        (cur + 1) % tabs.len()
+    } else {
+        (cur + tabs.len() - 1) % tabs.len()
+    };
+    if next != cur {
+        // `emit_clicked`, not `set_active`: most of these bars are ungrouped
+        // toggles whose handler hangs on `clicked` and whose active state is
+        // then driven from the model, so a bare `set_active` would move the
+        // toggle without ever switching the view.
+        tabs[next].emit_clicked();
+    }
+}
+
+/// True when the press at (`x`,`y`) landed on a widget that owns horizontal
+/// drags of its own — a slider, a switch or a text field. The settings page is
+/// built from those, and dragging a volume slider must not flip to the next
+/// category.
+fn press_on_hdrag_widget(widget: &gtk::Widget, x: f64, y: f64) -> bool {
+    let Some(target) = widget.pick(x, y, gtk::PickFlags::DEFAULT) else {
+        return false;
+    };
+    [
+        gtk::Range::static_type(),
+        gtk::Switch::static_type(),
+        gtk::Text::static_type(),
+    ]
+    .into_iter()
+    .any(|ty| target.type_().is_a(ty) || target.ancestor(ty).is_some())
+}
+
+/// Attaches the tab carousel to a category page: a leftward swipe moves to the
+/// next entry of the page's tab menu, a rightward one to the previous, and both
+/// wrap around at the ends. A trailing "+" is skipped — it is not a tab, and
+/// swiping onto it would open a dialog instead of showing a view.
+///
+/// The tab bar is looked up per swipe instead of captured once, so a bar that is
+/// rebuilt later (the statistics period selector is recreated on every render)
+/// keeps working. A page without a tab menu, or with only a single tab, simply
+/// never claims the drag and behaves exactly as before.
+///
+/// Like [`attach_swipe_back`] the drag runs in the **capture** phase so it also
+/// works when the swipe starts on a list row or a cover, and it only claims the
+/// sequence once the movement is clearly sideways — taps and vertical scrolling
+/// stay untouched.
+pub(crate) fn attach_tab_swipe(page: &impl IsA<gtk::Widget>) {
+    let drag = gtk::GestureDrag::new();
+    drag.set_touch_only(false);
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let armed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let claimed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let weak = page.clone().upcast::<gtk::Widget>().downgrade();
+    {
+        let armed = armed.clone();
+        let claimed = claimed.clone();
+        let weak = weak.clone();
+        drag.connect_drag_begin(move |_, x, y| {
+            claimed.set(false);
+            armed.set(
+                weak.upgrade()
+                    .is_some_and(|w| !press_on_hdrag_widget(&w, x, y)),
+            );
+        });
+    }
+    {
+        let armed = armed.clone();
+        let claimed = claimed.clone();
+        let weak = weak.clone();
+        drag.connect_drag_update(move |g, dx, dy| {
+            if claimed.get() || !armed.get() || dx.abs() <= 30.0 || dx.abs() <= dy.abs() * 1.2 {
+                return;
+            }
+            // Take the sequence only when there really is something to switch
+            // between, so pages without a tab menu keep every drag they had.
+            let switchable = weak
+                .upgrade()
+                .and_then(|w| tab_bar_of(&w, TAB_BAR_MAX_DEPTH))
+                .is_some_and(|bar| tabs_of(&bar).len() > 1);
+            if switchable {
+                claimed.set(true);
+                g.set_state(gtk::EventSequenceState::Claimed);
+            }
+        });
+    }
+    {
+        let claimed = claimed.clone();
+        drag.connect_drag_end(move |_, dx, dy| {
+            if !claimed.get() || dx.abs() <= 50.0 || dx.abs() <= dy.abs() * 1.2 {
+                return;
+            }
+            if let Some(bar) = weak
+                .upgrade()
+                .and_then(|w| tab_bar_of(&w, TAB_BAR_MAX_DEPTH))
+            {
+                // Swiping left drags the content leftwards, i.e. towards the
+                // next tab; swiping right goes back to the previous one.
+                step_tab(&bar, dx < 0.0);
+            }
+        });
+    }
+    page.add_controller(drag);
+}
+
 /// Default gallery tiles-per-row when the user has not chosen one yet: 3 on
 /// phone-sized screens, 4 on the desktop.
 pub(crate) fn initial_gallery_columns() -> u32 {

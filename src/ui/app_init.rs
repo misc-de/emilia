@@ -943,6 +943,29 @@ impl App {
             move || sender.input(Msg::NavUp)
         });
 
+        // Tab carousel: on a category whose page carries a tab menu, a sideways
+        // swipe steps through its tabs (Podcasts, Streaming, YouTube, Memo,
+        // Statistics …) and wraps around at the ends. Pages without a tab menu
+        // never claim the drag, so this is harmless on the plain library
+        // sections. "Files" is left out on purpose: there a rightward swipe
+        // already means "one folder up" (see above), and the two would fight
+        // over the same drag — its source tabs stay tap-only.
+        {
+            let pages = widgets.view_stack.pages();
+            for i in 0..pages.n_items() {
+                let Some(page) = pages
+                    .item(i)
+                    .and_then(|o| o.downcast::<adw::ViewStackPage>().ok())
+                else {
+                    continue;
+                };
+                if page.name().as_deref() == Some("files") {
+                    continue;
+                }
+                crate::ui::app::attach_tab_swipe(&page.child());
+            }
+        }
+
         // Same swipe-back on the top navigation strip, but only while a subpage
         // is open — on the root the strip keeps its sideways scroll (the gesture
         // does not claim there). Pops the pushed subpage.
@@ -1298,6 +1321,14 @@ impl App {
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.97); border-radius: 18px; padding: 22px 30px; }\
                  label.emilia-list-section { background-color: @window_bg_color; padding: 10px 13px 4px 13px; }\
+                 /* Runtimes and other figures (`numeric` + `dim-label` is this \
+                    app's spelling for a duration label) keep the plain \
+                    foreground colour instead of Adwaita's 55 % dimming: at that \
+                    opacity a track length reads as grey rather than as \
+                    information, and a custom text colour barely showed at all. \
+                    They stay set apart by being right-aligned and tabular, not \
+                    by being faint. */\
+                 label.numeric.dim-label { opacity: 1; }\
                  progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
                  label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
                  flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\

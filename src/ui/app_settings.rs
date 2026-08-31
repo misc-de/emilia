@@ -1370,6 +1370,10 @@ impl App {
             .build();
         content.append(&tab_bar);
         content.append(&stack);
+        // Same tab carousel as the other categories. The page is full of
+        // sliders and switches, but those keep their own horizontal drags —
+        // `attach_tab_swipe` ignores a press that starts on one.
+        crate::ui::app::attach_tab_swipe(&content);
         let page = self.push_subpage_self_scrolling(&gettext("Settings"), SETTINGS_TAG, &content);
 
         // Leaving the page drops the yt-dlp status widgets a running probe or
