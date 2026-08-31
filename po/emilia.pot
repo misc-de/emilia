@@ -2783,3 +2783,11 @@ msgid "{n} chapter"
 msgid_plural "{n} chapters"
 msgstr[0] ""
 msgstr[1] ""
+
+#: src/ui/app_settings.rs
+msgid "Show background"
+msgstr ""
+
+#: src/ui/app_settings.rs
+msgid "Entries sit on a background of their own"
+msgstr ""

@@ -3136,6 +3136,14 @@ msgstr "Single"
 msgid "Compilation"
 msgstr "Kompilation"
 
+#: src/ui/app_settings.rs
+msgid "Show background"
+msgstr "Hintergrund einblenden"
+
+#: src/ui/app_settings.rs
+msgid "Entries sit on a background of their own"
+msgstr "Einträge liegen auf einem eigenen Hintergrund"
+
 #~ msgid "Recent"
 #~ msgstr "Zuletzt"
 

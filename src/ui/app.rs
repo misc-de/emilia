@@ -265,6 +265,9 @@ pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSet
             .map(|s| s != "0")
             .unwrap_or(true),
         text_color: get_design(lib, "design_text_color").filter(|s| !s.is_empty()),
+        entry_bg_on: get_design(lib, "design_entry_bg")
+            .map(|s| s != "0")
+            .unwrap_or(true),
         // Default field tint for a fresh install. `None` = never set; `Some("")`
         // = explicitly cleared via the reset button, which must stay cleared.
         field_color: match get_design(lib, "design_field_color") {

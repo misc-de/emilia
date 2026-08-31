@@ -188,6 +188,11 @@ pub(crate) struct DesignSettings {
     pub(crate) bg_titlebar: bool,
     /// Text (foreground) color (hex `#rrggbb`).
     pub(crate) text_color: Option<String>,
+    /// Do the list entries sit on a background of their own (default on)? Off
+    /// makes the rows/cards see-through so the app background shows straight
+    /// through the lists; the chrome (tabs, navigation, headings) keeps its
+    /// tint, or the app would lose the surfaces you navigate by.
+    pub(crate) entry_bg_on: bool,
     /// Fields (chrome) color (hex `#rrggbb`); `None` = the theme's window bg.
     pub(crate) field_color: Option<String>,
     /// Transparency (0..=100 %) of entries, buttons, tabs & headings over the
@@ -409,6 +414,30 @@ impl ThemeState {
             }
         }
 
+        // ---- Entries without a background of their own ----
+        // Last, so it wins over both the card look from `install_styles` and the
+        // field tint the blur branch above gives the rows. The whole surface
+        // goes, not just its fill: an outline with a drop shadow around nothing
+        // is a card that lost its face, not a flat list. So this also clears the
+        // frame libadwaita draws on the *list* (`boxed-list`), the per-row
+        // borders our sectioned/card lists paint themselves, and the hairlines
+        // between rows — those are borders too.
+        //
+        // Only the entries are cleared: the chrome (tabs, navigation, list
+        // headings) keeps its tint, since those surfaces are what the lists are
+        // read against. Text fields (`entry`, `spinbutton`) keep theirs too — a
+        // see-through input box reads as decoration, not as somewhere to type.
+        if !self.design.entry_bg_on {
+            css.push_str(
+                "list > row, .boxed-list > row, list.emilia-sectioned > row, \
+                 listview.emilia-card-list row.emilia-card, \
+                 list.boxed-list, .boxed-list, list.emilia-sectioned, \
+                 listview.emilia-card-list \
+                 { background-color: transparent; background-image: none; \
+                   border: none; box-shadow: none; }",
+            );
+        }
+
         css
     }
 }
@@ -471,6 +500,8 @@ pub(crate) enum DesignMsg {
     TextColor(Option<String>),
     /// Set/clear the fields (chrome) color (hex).
     FieldColor(Option<String>),
+    /// Toggle whether the list entries carry a background of their own.
+    EntryBackground(bool),
     /// Toggle whether the background shows behind the sidebar/navigation.
     BgNav(bool),
     /// Toggle whether the background shows behind the title bar (headerbar).
@@ -590,6 +621,11 @@ impl App {
                     "design_field_color",
                     color.as_deref().unwrap_or(""),
                 );
+                self.reapply_runtime_style();
+            }
+            DesignMsg::EntryBackground(on) => {
+                self.theme.design.entry_bg_on = on;
+                set_design(&self.library, "design_entry_bg", if on { "1" } else { "0" });
                 self.reapply_runtime_style();
             }
             DesignMsg::BgNav(on) => {

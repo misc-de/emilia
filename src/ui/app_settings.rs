@@ -980,6 +980,16 @@ impl App {
         let colors_group = adw::PreferencesGroup::builder()
             .title(gettext("Entries"))
             .build();
+        // First in the group: do the entries get a background at all? Off makes
+        // the rows see-through and hides the two rows that shape that
+        // background — a colour and a transparency for something that is no
+        // longer drawn would be dead controls.
+        let entry_bg_row = adw::SwitchRow::builder()
+            .title(gettext("Show background"))
+            .subtitle(gettext("Entries sit on a background of their own"))
+            .active(self.theme.design.entry_bg_on)
+            .build();
+        colors_group.add(&entry_bg_row);
         // Build a color row (color button + reset). `set` is the tuple-variant
         // constructor that persists the picked/cleared color.
         let mk_color_row = |title: String,
@@ -1120,6 +1130,22 @@ impl App {
         );
         field_trans_row.add_suffix(&field_trans_scale);
         colors_group.add(&field_trans_row);
+        // The colour and transparency only shape the entry background, so they
+        // follow the switch above.
+        let bg_rows = [field_color_row.clone(), field_trans_row.clone()];
+        for row in &bg_rows {
+            row.set_visible(self.theme.design.entry_bg_on);
+        }
+        {
+            let sender = sender.clone();
+            entry_bg_row.connect_active_notify(move |r| {
+                let on = r.is_active();
+                for row in &bg_rows {
+                    row.set_visible(on);
+                }
+                sender.input(Msg::Design(DesignMsg::EntryBackground(on)));
+            });
+        }
         page.add(&colors_group);
 
         let design_page = page;
