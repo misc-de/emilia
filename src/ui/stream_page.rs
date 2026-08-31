@@ -28,6 +28,7 @@ use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover, SortToggle};
 use crate::ui::app_views::natural_key;
+use crate::ui::entry_row::EntryRow;
 use crate::ui::widgets::{action_row, detail_box, present_detail};
 
 /// Placeholder icon when a station has no logo.
@@ -93,8 +94,10 @@ pub(crate) struct StreamPage {
     /// streaming (no audio captured — pure history).
     heard_items: Vec<HeardItem>,
     heard_list: gtk::ListBox,
-    stream_play_buttons: Rc<RefCell<Vec<(i64, gtk::Button)>>>,
-    rec_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
+    /// Play/pause controls of the station rows, keyed by station id.
+    stream_marks: crate::ui::play_mark::Marks,
+    /// Play/pause controls of the recording rows, keyed by file path.
+    rec_marks: crate::ui::play_mark::Marks,
     /// Per-sub-view sort (criterion + descending): stations by name; recordings by
     /// name / recording date / length. Persisted as "sort_stations[_desc]" /
     /// "sort_recordings[_desc]".
@@ -448,8 +451,8 @@ impl Component for StreamPage {
             recordings_list: recordings_list.clone(),
             heard_items: Vec::new(),
             heard_list: heard_list.clone(),
-            stream_play_buttons: Rc::new(RefCell::new(Vec::new())),
-            rec_play_buttons: Rc::new(RefCell::new(Vec::new())),
+            stream_marks: Default::default(),
+            rec_marks: Default::default(),
             stations_sort,
             recordings_sort,
             heard_sort,
@@ -888,50 +891,38 @@ impl StreamPage {
             self.fill_streams_gallery(sender);
             return;
         }
-        self.stream_play_buttons.borrow_mut().clear();
+        self.stream_marks.clear();
         while let Some(child) = self.streams_list.first_child() {
             self.streams_list.remove(&child);
         }
         for st in self.stream_items.clone() {
             // Not activatable: like a library track, the station plays via its
             // play button; long press / right click opens the detail view.
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&st.name))
-                .build();
-            row.add_css_class("emilia-flush");
-            if let Some(sub) = stream_subtitle(&st) {
-                row.set_subtitle(&gtk::glib::markup_escape_text(&sub));
-            }
+            let id = st.id;
             let logo = st
                 .favicon
                 .as_deref()
                 .and_then(crate::core::online::station_image_path);
-            row.add_prefix(&cover_widget(logo.as_deref(), STREAM_ICON));
-            let id = st.id;
-
-            let pp = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .valign(gtk::Align::Center)
-                .tooltip_text(gettext("Play/Pause"))
+            let row = EntryRow::new(&st.name)
+                .subtitle(&stream_subtitle(&st).unwrap_or_default())
+                .cover(logo.as_deref(), STREAM_ICON)
+                .play_button(
+                    &gettext("Play/Pause"),
+                    self.playing_stream == Some(id),
+                    self.playing,
+                    {
+                        let sender = sender.clone();
+                        move || {
+                            let _ = sender.output(StreamOutput::ToggleStream(id));
+                        }
+                    },
+                )
+                .marked_in(&self.stream_marks, id.to_string())
+                .on_detail({
+                    let sender = sender.clone();
+                    move || sender.input(StreamInput::OpenStream(id))
+                })
                 .build();
-            pp.add_css_class("flat");
-            {
-                let sender = sender.clone();
-                pp.connect_clicked(move |_| {
-                    let _ = sender.output(StreamOutput::ToggleStream(id));
-                });
-            }
-            self.stream_play_buttons.borrow_mut().push((id, pp.clone()));
-            row.add_suffix(&pp);
-
-            on_secondary_click(&row, {
-                let sender = sender.clone();
-                move || sender.input(StreamInput::OpenStream(id))
-            });
-            on_long_press(&row, {
-                let sender = sender.clone();
-                move || sender.input(StreamInput::OpenStream(id))
-            });
             self.streams_list.append(&row);
         }
         self.streams_list.invalidate_headers();
@@ -940,34 +931,16 @@ impl StreamPage {
 
     /// Refreshes the Play/Pause icons of the station rows.
     fn refresh_stream_icons(&self) {
-        let playing = self.playing;
-        let cur = self.playing_stream;
-        let mut btns = self.stream_play_buttons.borrow_mut();
-        btns.retain(|(_, b)| b.root().is_some());
-        for (id, btn) in btns.iter() {
-            let active = cur == Some(*id) && playing;
-            btn.set_icon_name(if active {
-                "media-playback-pause-symbolic"
-            } else {
-                "media-playback-start-symbolic"
-            });
-        }
+        let cur = self.playing_stream.map(|id| id.to_string());
+        self.stream_marks
+            .apply_all(self.playing, |key| cur.as_deref() == Some(key));
     }
 
     /// Keeps the play/pause icon of each recording row in sync.
     fn refresh_recording_icons(&self) {
-        let playing = self.playing;
-        let cur = self.playing_path.as_deref();
-        let mut btns = self.rec_play_buttons.borrow_mut();
-        btns.retain(|(_, b)| b.root().is_some());
-        for (path, btn) in btns.iter() {
-            let active = cur == Some(path.as_str()) && playing;
-            btn.set_icon_name(if active {
-                "media-playback-pause-symbolic"
-            } else {
-                "media-playback-start-symbolic"
-            });
-        }
+        let cur = self.playing_path.clone();
+        self.rec_marks
+            .apply_all(self.playing, |key| cur.as_deref() == Some(key));
     }
 
     /// Station detail dialog: replay (buffer), rename, remove.
@@ -1336,7 +1309,7 @@ impl StreamPage {
         // Alphabetical headings (by name) for the saved rows; none while a live
         // entry is prepended (it would offset the labels) or for date/length sorts.
         *self.recording_headers.borrow_mut() = self.recording_section_headers();
-        self.rec_play_buttons.borrow_mut().clear();
+        self.rec_marks.clear();
         while let Some(child) = self.recordings_list.first_child() {
             self.recordings_list.remove(&child);
         }
@@ -1379,11 +1352,6 @@ impl StreamPage {
         }
 
         for rec in self.recording_items.clone() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&rec.title))
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
             let mut sub: Vec<String> = Vec::new();
             if let Some(a) = rec.artist.as_deref().filter(|s| !s.trim().is_empty()) {
                 sub.push(a.to_string());
@@ -1392,9 +1360,6 @@ impl StreamPage {
                 sub.push(s.to_string());
             }
             sub.push(format_datetime(rec.recorded_at));
-            if !sub.is_empty() {
-                row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
-            }
             let placeholder = if rec.incomplete {
                 "media-playlist-consecutive-symbolic"
             } else {
@@ -1404,53 +1369,34 @@ impl StreamPage {
                 rec.artist.as_deref().unwrap_or(""),
                 &rec.title,
             );
-            row.add_prefix(&cover_widget(cover.as_deref(), placeholder));
+            let play = {
+                let sender = sender.clone();
+                let path = rec.path.clone();
+                move || {
+                    let _ = sender.output(StreamOutput::PlayRecording(path.clone()));
+                }
+            };
+            let row = EntryRow::new(&rec.title)
+                .subtitle(&sub.join(" · "))
+                .cover(cover.as_deref(), placeholder)
+                .duration(rec.duration_ms)
+                .play_button(
+                    &gettext("Play"),
+                    self.playing_path.as_deref() == Some(rec.path.as_str()),
+                    self.playing,
+                    play.clone(),
+                )
+                .marked_in(&self.rec_marks, rec.path.clone())
+                .on_activate(play)
+                .on_detail({
+                    let sender = sender.clone();
+                    let id = rec.id;
+                    move || sender.input(StreamInput::OpenRecording(id))
+                })
+                .build();
             if rec.incomplete {
                 row.set_tooltip_text(Some(&gettext("Incomplete (beginning was missing)")));
             }
-            if rec.duration_ms > 0 {
-                let dur = gtk::Label::new(Some(&crate::ui::app::fmt_duration(rec.duration_ms)));
-                dur.set_valign(gtk::Align::Center);
-                dur.set_css_classes(&["dim-label", "numeric"]);
-                row.add_suffix(&dur);
-            }
-            let is_active = self.playing_path.as_deref() == Some(rec.path.as_str());
-            let play_btn = gtk::Button::from_icon_name(if is_active && self.playing {
-                "media-playback-pause-symbolic"
-            } else {
-                "media-playback-start-symbolic"
-            });
-            play_btn.set_valign(gtk::Align::Center);
-            play_btn.set_tooltip_text(Some(&gettext("Play")));
-            play_btn.add_css_class("flat");
-            {
-                let sender = sender.clone();
-                let path = rec.path.clone();
-                play_btn.connect_clicked(move |_| {
-                    let _ = sender.output(StreamOutput::PlayRecording(path.clone()));
-                });
-            }
-            row.add_suffix(&play_btn);
-            self.rec_play_buttons
-                .borrow_mut()
-                .push((rec.path.clone(), play_btn));
-            {
-                let sender = sender.clone();
-                let path = rec.path.clone();
-                row.connect_activated(move |_| {
-                    let _ = sender.output(StreamOutput::PlayRecording(path.clone()));
-                });
-            }
-            on_secondary_click(&row, {
-                let sender = sender.clone();
-                let id = rec.id;
-                move || sender.input(StreamInput::OpenRecording(id))
-            });
-            on_long_press(&row, {
-                let sender = sender.clone();
-                let id = rec.id;
-                move || sender.input(StreamInput::OpenRecording(id))
-            });
             self.recordings_list.append(&row);
         }
         self.recordings_list.invalidate_headers();

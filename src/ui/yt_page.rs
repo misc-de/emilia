@@ -448,7 +448,8 @@ pub(crate) struct YtPage {
     /// can no longer clear the spinner early or flash stale results.
     search_seq: u64,
     search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    video_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
+    /// Play/pause controls of the video rows, keyed by video id.
+    video_marks: crate::ui::play_mark::Marks,
     /// Watch-progress widgets of the visible rows (long-form items only), so the
     /// per-second transport tick can advance them without rebuilding the list.
     watch_progress_rows: Rc<RefCell<Vec<WatchRow>>>,
@@ -946,7 +947,7 @@ impl Component for YtPage {
             search_failed: false,
             search_seq: 0,
             search: Rc::new(RefCell::new(None)),
-            video_play_buttons: Rc::new(RefCell::new(Vec::new())),
+            video_marks: Default::default(),
             watch_progress_rows: Rc::new(RefCell::new(Vec::new())),
             ctx_video_play: Rc::new(RefCell::new(None)),
             ctx_video_download: Rc::new(RefCell::new(None)),
@@ -2666,12 +2667,8 @@ impl YtPage {
         video_id: &str,
         title: &str,
     ) -> gtk::Button {
-        let btn = gtk::Button::builder()
-            .icon_name("media-playback-start-symbolic")
-            .valign(gtk::Align::Center)
-            .tooltip_text(gettext("Play/Pause"))
-            .build();
-        btn.add_css_class("flat");
+        let active = self.playing_video_id.as_deref() == Some(video_id);
+        let btn = crate::ui::play_mark::button(&gettext("Play/Pause"), active, self.playing);
         {
             let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
             btn.connect_clicked(move |_| {
@@ -2681,9 +2678,7 @@ impl YtPage {
                 });
             });
         }
-        self.video_play_buttons
-            .borrow_mut()
-            .push((video_id.to_string(), btn.clone()));
+        self.video_marks.add(video_id.to_string(), &btn);
         btn
     }
 
@@ -2818,17 +2813,8 @@ impl YtPage {
         let active = self.playing_video_id.clone();
         let playing = self.playing;
         let is_active = |vid: &str| playing && active.as_deref() == Some(vid);
-        {
-            let mut buttons = self.video_play_buttons.borrow_mut();
-            buttons.retain(|(_, btn)| btn.root().is_some());
-            for (vid, btn) in buttons.iter() {
-                btn.set_icon_name(if is_active(vid) {
-                    "media-playback-pause-symbolic"
-                } else {
-                    "media-playback-start-symbolic"
-                });
-            }
-        }
+        self.video_marks
+            .apply_all(playing, |vid| active.as_deref() == Some(vid));
         if let Some((row, vid)) = self.ctx_video_play.borrow().as_ref() {
             row.set_visible(!is_active(vid));
         }
@@ -3454,6 +3440,18 @@ impl YtPage {
                 }
                 None => true,
             }
+        });
+    }
+}
+
+/// Same for the video rows: the component owns them, so the shared state is
+/// handed over as a message.
+impl crate::ui::play_mark::PlaybackSink for relm4::Controller<YtPage> {
+    fn apply_playback(&self, state: &crate::ui::play_mark::PlaybackState) {
+        use relm4::ComponentController;
+        self.emit(YtInput::PlaybackStateChanged {
+            playing_video_id: state.video_id.clone(),
+            playing: state.playing,
         });
     }
 }

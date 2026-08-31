@@ -231,7 +231,8 @@ pub(crate) struct PodcastsPage {
     /// While the subscribe search dialog is open: (dialog, hit list).
     podcast_search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// Play/pause buttons of the visible episode rows (audio URL → button).
-    episode_play_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
+    /// Play/pause controls of the episode rows, keyed by audio URL.
+    episode_marks: crate::ui::play_mark::Marks,
     /// Listening-progress lines of the visible rows, so the per-second transport
     /// tick can update the running episode's bar in place (rebuilding the list
     /// on every tick would be far too expensive — and made the progress look
@@ -608,7 +609,7 @@ impl Component for PodcastsPage {
             podcast_search_results: Vec::new(),
             podcast_search_failed: false,
             podcast_search: Rc::new(RefCell::new(None)),
-            episode_play_buttons: Rc::new(RefCell::new(Vec::new())),
+            episode_marks: Default::default(),
             episode_progress_rows: Rc::new(RefCell::new(Vec::new())),
             ctx_episode_play: Rc::new(RefCell::new(None)),
             ctx_episode_download: Rc::new(RefCell::new(None)),
@@ -2114,12 +2115,8 @@ impl PodcastsPage {
         url: &str,
         title: &str,
     ) -> gtk::Button {
-        let btn = gtk::Button::builder()
-            .icon_name("media-playback-start-symbolic")
-            .valign(gtk::Align::Center)
-            .tooltip_text(gettext("Play/Pause"))
-            .build();
-        btn.add_css_class("flat");
+        let active = self.playing_url.as_deref() == Some(url);
+        let btn = crate::ui::play_mark::button(&gettext("Play/Pause"), active, self.playing);
         {
             let (sender, url, title) = (sender.clone(), url.to_string(), title.to_string());
             btn.connect_clicked(move |_| {
@@ -2129,9 +2126,7 @@ impl PodcastsPage {
                 });
             });
         }
-        self.episode_play_buttons
-            .borrow_mut()
-            .push((url.to_string(), btn.clone()));
+        self.episode_marks.add(url.to_string(), &btn);
         btn
     }
 
@@ -2164,17 +2159,8 @@ impl PodcastsPage {
         let active = self.playing_url.clone();
         let playing = self.playing;
         let is_active = |url: &str| playing && active.as_deref() == Some(url);
-        {
-            let mut buttons = self.episode_play_buttons.borrow_mut();
-            buttons.retain(|(_, btn)| btn.root().is_some());
-            for (url, btn) in buttons.iter() {
-                btn.set_icon_name(if is_active(url) {
-                    "media-playback-pause-symbolic"
-                } else {
-                    "media-playback-start-symbolic"
-                });
-            }
-        }
+        self.episode_marks
+            .apply_all(playing, |url| active.as_deref() == Some(url));
         if let Some((row, url)) = self.ctx_episode_play.borrow().as_ref() {
             row.set_visible(!is_active(url));
         }
@@ -2362,5 +2348,17 @@ mod refresh_tests {
             "1 podcast updated · 2 feeds failed"
         );
         assert_eq!(refresh_summary_text(0, 0, 0), "Nothing new");
+    }
+}
+
+/// The episode rows live in this component, so the state reaches them through
+/// its message channel — the marking itself is the app-wide one.
+impl crate::ui::play_mark::PlaybackSink for relm4::Controller<PodcastsPage> {
+    fn apply_playback(&self, state: &crate::ui::play_mark::PlaybackState) {
+        use relm4::ComponentController;
+        self.emit(PodcastsInput::PlaybackStateChanged {
+            playing_url: state.episode_url.clone(),
+            playing: state.playing,
+        });
     }
 }

@@ -50,6 +50,7 @@ impl App {
                 false,
                 true,
                 false,
+                &self.concerts.concert_marks,
             );
             // Refresh the section headings for the rebuilt rows (or clear them).
             self.concerts.concerts_list.invalidate_headers();

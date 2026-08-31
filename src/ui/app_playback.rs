@@ -11,77 +11,74 @@ use crate::core::scanner;
 use crate::core::webdav::{self, Creds};
 use crate::model::Track;
 use crate::ui::app::{guarded_resume, ActiveSource, App, Msg, PlaySession, RemoteTrack};
-use crate::ui::fs_row::{FsEntry, FsInput};
+use crate::ui::app_favorites::EntryMarks;
+use crate::ui::fs_row::FsEntry;
+use crate::ui::play_mark::{PlaybackSink, PlaybackState};
 
 impl App {
-    /// Refreshes the queue marker of all visible file rows.
-    pub(crate) fn refresh_queue_icons(&mut self) {
-        // The "in queue" marker reflects the explicit user queue, not the active
-        // context (the album currently playing through).
-        let queued: std::collections::HashSet<PathBuf> =
-            self.transport.user_queue.iter().cloned().collect();
-        // Currently playing track (for the play marker).
-        let active_path = self.transport.queue.get(self.transport.queue_pos).cloned();
-        // Remote playback: the active entry is marked via the rel path.
-        let active_rel = if self.files.playing_remote {
-            self.files
-                .remote_queue
-                .get(self.files.remote_pos)
-                .map(|t| t.rel_path.clone())
-        } else {
-            None
-        };
-        let states: Vec<(usize, bool, bool)> = {
-            let guard = self.libview.entries.guard();
-            (0..guard.len())
-                .filter_map(|i| {
-                    guard.get(i).map(|r| {
-                        let is_file = !r.entry.is_dir();
-                        match r.entry.path() {
-                            Some(p) => {
-                                let q = is_file && queued.contains(p);
-                                let a = is_file && active_path.as_deref() == Some(p.as_path());
-                                (i, q, a)
-                            }
-                            None => {
-                                // Remote entry: active marker via rel_path.
-                                let a = is_file
-                                    && active_rel.is_some()
-                                    && r.entry.rel_path() == active_rel.as_deref();
-                                (i, false, a)
-                            }
-                        }
-                    })
+    /// Gathers what is playing right now, in the terms the lists ask in (see
+    /// [`PlaybackState`]). Built once per change so no list has to dig through
+    /// the transport itself — that digging is where the answers used to drift.
+    pub(crate) fn playback_state(&self) -> PlaybackState {
+        PlaybackState {
+            playing: self.mini.playing,
+            path: self.transport.queue.get(self.transport.queue_pos).cloned(),
+            album: self.playing_album(),
+            // Remote playback runs its own queue, separate from the local one.
+            rel_path: self
+                .files
+                .playing_remote
+                .then(|| {
+                    self.files
+                        .remote_queue
+                        .get(self.files.remote_pos)
+                        .map(|t| t.rel_path.clone())
                 })
-                .collect()
-        };
-        let playing = self.mini.playing;
-        for (i, q, a) in states {
-            self.libview.entries.send(i, FsInput::SetQueued(q));
-            self.libview
-                .entries
-                .send(i, FsInput::SetActive { active: a, playing });
+                .flatten(),
+            episode_url: self.podcasts.playing_episode_url.clone(),
+            video_id: self.youtube.playing_video_id.clone(),
+            // The "in queue" marker reflects the explicit user queue, not the
+            // active context (the album currently playing through).
+            queued: self.transport.user_queue.iter().cloned().collect(),
+        }
+    }
+
+    /// Pushes the current playback state to every list that marks a row.
+    ///
+    /// The mechanism differs per list — a factory message, recycled rows, a
+    /// control registry, a component's channel — but the state and the marker
+    /// policy are shared (see [`crate::ui::play_mark`]), so no list can drift
+    /// into answering "is this the one playing?" its own way again.
+    pub(crate) fn refresh_queue_icons(&mut self) {
+        let state = self.playback_state();
+        let sinks: [&dyn PlaybackSink; 6] = [
+            &self.libview.entries,
+            &self.libview.albums,
+            &self.libview.singles,
+            &self.libview.compilations,
+            &self.podcasts_page,
+            &self.yt_page,
+        ];
+        for sink in sinks {
+            sink.apply_playback(&state);
+        }
+        for marks in [
+            &self.favorites.favorite_marks,
+            &self.favorites.audiobook_marks,
+            &self.concerts.concert_marks,
+            &self.libview.page_marks,
+            &self.transport.queue_marks,
+            &self.memo.marks,
+        ] {
+            EntryMarks(marks).apply_playback(&state);
         }
         // Sync the play row of an open detail dialog with the playback state.
         self.refresh_ctx_play();
-        // Play/pause icons of the podcast episodes (and the detail "Play" row)
-        // live in the PodcastsPage component now → push it the current state.
-        self.podcasts_page.emit(
-            crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
-                playing_url: self.podcasts.playing_episode_url.clone(),
-                playing: self.mini.playing,
-            },
-        );
-        // …and of the YouTube video rows (now in the YtPage component). Also
-        // re-check the yt-dlp "broken" banner (a failed stream resolve flips it).
-        self.yt_page
-            .emit(crate::ui::yt_page::YtInput::PlaybackStateChanged {
-                playing_video_id: self.youtube.playing_video_id.clone(),
-                playing: self.mini.playing,
-            });
+        // Re-check the yt-dlp "broken" banner (a failed stream resolve flips it).
         self.yt_page
             .emit(crate::ui::yt_page::YtInput::RefreshBroken);
-        // …and of the saved-recording rows.
+        // The recording/station rows have their own change guard (they are also
+        // refreshed from the per-second tick), so they stay a separate push.
         self.sync_stream_page_icons();
         // The queue/next track may have changed (add/remove/reorder) → keep the
         // armed gapless follow in step with the new "next".
@@ -772,6 +769,38 @@ impl App {
     /// proceeds to start it normally.
     pub(crate) fn toggle_if_active_file(&mut self, path: &Path) -> bool {
         if self.transport.playing_path.as_deref() != Some(path) {
+            return false;
+        }
+        if self.mini.playing {
+            self.save_resume();
+        }
+        self.flip_playing();
+        true
+    }
+
+    /// Album of the track currently loaded into the player. Unlike
+    /// [`crate::ui::app::MiniState::current_album`] — which drives the player
+    /// bar's album shortcut and is therefore blank for single-track albums —
+    /// this is purely "which album is running", so the Singles rows can mark
+    /// themselves too.
+    pub(crate) fn playing_album(&self) -> Option<String> {
+        let path = self.transport.playing_path.as_ref()?;
+        self.library
+            .track_by_path(&path.to_string_lossy())
+            .ok()
+            .flatten()
+            .and_then(|t| t.album)
+            .filter(|a| !a.trim().is_empty())
+    }
+
+    /// Like [`Self::toggle_if_active_file`], but for a whole album: the play
+    /// button of an overview row shows a pause icon while that album runs, so
+    /// pressing it must toggle pause/resume instead of restarting from track 1.
+    pub(crate) fn toggle_if_active_album(&mut self, album: &str) -> bool {
+        if !self
+            .playing_album()
+            .is_some_and(|a| a.eq_ignore_ascii_case(album))
+        {
             return false;
         }
         if self.mini.playing {
@@ -1549,6 +1578,27 @@ impl App {
 
     /// Play a user-queue entry now: move its block to the front, then advance.
     pub(crate) fn on_play_queue_at(&mut self, start: usize, len: usize) {
+        // The row of the entry that is already running shows a pause icon (as
+        // that entry does in every other list), so pressing it has to toggle
+        // pause/resume rather than re-queue the block. An album row asks about
+        // the running album, a single row about the file — the same two
+        // questions its icon was drawn from.
+        if let Some(first) = self.transport.user_queue.get(start).cloned() {
+            let running = if len >= 2 {
+                self.library
+                    .track_by_path(&first.to_string_lossy())
+                    .ok()
+                    .flatten()
+                    .and_then(|t| t.album)
+                    .filter(|a| !a.trim().is_empty())
+                    .is_some_and(|album| self.toggle_if_active_album(&album))
+            } else {
+                self.toggle_if_active_file(&first)
+            };
+            if running {
+                return;
+            }
+        }
         // Play this queue entry now: move its block to the front of the
         // user queue, then advance – `play_next` splices the first track
         // into the context and the rest follow track by track. Entries

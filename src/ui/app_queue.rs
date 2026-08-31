@@ -13,6 +13,7 @@ use relm4::{adw, gtk};
 
 use crate::i18n::{gettext, ngettext_n};
 use crate::ui::app::{App, Msg};
+use crate::ui::app_favorites::{entry_is_active, mark_key};
 
 impl App {
     /// Opens the queue dialog.
@@ -103,6 +104,8 @@ impl App {
         while let Some(child) = self.transport.queue_list.first_child() {
             self.transport.queue_list.remove(&child);
         }
+        // The controls of the old rows are gone with them.
+        self.transport.queue_marks.clear();
         if self.transport.user_queue.is_empty() {
             self.transport.queue_list.append(
                 &adw::ActionRow::builder()
@@ -152,31 +155,43 @@ impl App {
 
         // Trailing widgets: runtime + "play from here" button. `start`/`len`
         // identify the queue entry (album rows span `len` tracks).
-        let add_tail = |row: &adw::ActionRow, start: usize, len: usize, total_ms: i64| {
-            let dur = if total_ms > 0 {
-                crate::ui::app::fmt_duration(total_ms)
-            } else {
-                Default::default()
+        // What is running right now, asked once for the whole rebuild: the rows
+        // mark it the same way every other list does (see
+        // [`crate::ui::app_favorites::entry_is_active`]).
+        let playing = self.mini.playing;
+        let cur_path = self.transport.playing_path.clone();
+        let cur_album = self.playing_album();
+        let add_tail =
+            |row: &adw::ActionRow, start: usize, len: usize, total_ms: i64, key: String| {
+                let dur = if total_ms > 0 {
+                    crate::ui::app::fmt_duration(total_ms)
+                } else {
+                    Default::default()
+                };
+                row.add_suffix(
+                    &gtk::Label::builder()
+                        .label(&dur)
+                        .valign(gtk::Align::Center)
+                        .css_classes(["dim-label", "numeric"])
+                        .build(),
+                );
+                // A queue entry that is the one playing shows a pause icon, like the
+                // same track does in every other list; pressing it then toggles
+                // pause/resume instead of re-queuing the block.
+                let active = match key.split_once('\u{1}') {
+                    Some((scope, k)) => {
+                        entry_is_active(cur_path.as_deref(), cur_album.as_deref(), scope, k)
+                    }
+                    None => false,
+                };
+                let play = crate::ui::play_mark::button(&gettext("Play"), active, playing);
+                let input = self.input.clone();
+                play.connect_clicked(move |_| {
+                    let _ = input.send(Msg::PlayQueueAt { start, len });
+                });
+                self.transport.queue_marks.add(key, &play);
+                row.add_suffix(&play);
             };
-            row.add_suffix(
-                &gtk::Label::builder()
-                    .label(&dur)
-                    .valign(gtk::Align::Center)
-                    .css_classes(["dim-label", "numeric"])
-                    .build(),
-            );
-            let play = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .tooltip_text(gettext("Play"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            let input = self.input.clone();
-            play.connect_clicked(move |_| {
-                let _ = input.send(Msg::PlayQueueAt { start, len });
-            });
-            row.add_suffix(&play);
-        };
 
         // Drag handle (left) + drag source/drop target for reordering. Album
         // rows carry the whole block (`len` tracks); single rows carry one entry.
@@ -242,8 +257,9 @@ impl App {
                     Some(a) => format!("{a} · {count}"),
                     None => count,
                 };
+                let album_name = album.unwrap_or_default();
                 let row = adw::ActionRow::builder()
-                    .title(gtk::glib::markup_escape_text(&album.unwrap_or_default()))
+                    .title(gtk::glib::markup_escape_text(&album_name))
                     .build();
                 row.set_subtitle(&gtk::glib::markup_escape_text(&subtitle));
                 let cover = self.entry_cover(
@@ -256,7 +272,7 @@ impl App {
                     "media-optical-symbolic",
                 ));
                 add_dnd(&row, start_idx, len);
-                add_tail(&row, start_idx, len, total);
+                add_tail(&row, start_idx, len, total, mark_key("album", &album_name));
                 self.transport.queue_list.append(&row);
             } else {
                 // --- Single track row. ---
@@ -270,7 +286,13 @@ impl App {
                     "audio-x-generic-symbolic",
                 ));
                 add_dnd(&row, start_idx, 1);
-                add_tail(&row, start_idx, 1, group[0].3);
+                add_tail(
+                    &row,
+                    start_idx,
+                    1,
+                    group[0].3,
+                    mark_key("track", &path.to_string_lossy()),
+                );
                 self.transport.queue_list.append(&row);
             }
             gi = end;

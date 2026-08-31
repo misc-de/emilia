@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
+use crate::ui::entry_row::EntryRow;
 
 /// Content fingerprint of a cover file (length + first 64 KB), to de-duplicate
 /// visually identical covers that live under different paths (e.g. per-track
@@ -47,7 +48,13 @@ pub(crate) enum PlaylistMsg {
     Play(i64),
     /// Play the whole playlist starting at the given track (so it continues
     /// through the rest of the list, incl. standalone songs after an album).
-    PlayFrom { id: i64, path: String },
+    /// `album` is set when the press came from an album block's control, whose
+    /// pause icon asks about the running *album*, not about `path` alone.
+    PlayFrom {
+        id: i64,
+        path: String,
+        album: Option<String>,
+    },
     /// Play the whole playlist shuffled (random order, random start).
     PlayShuffled(i64),
     /// Delete a playlist (shows an undo toast; the real delete is deferred to
@@ -127,7 +134,18 @@ impl App {
                     self.refresh_queue_icons();
                 }
             }
-            PlaylistMsg::PlayFrom { id, path } => {
+            PlaylistMsg::PlayFrom { id, path, album } => {
+                // The control of the entry that is already running shows a pause
+                // icon, so pressing it toggles pause/resume instead of restarting
+                // from the top — asking the same question the icon was drawn
+                // from (the album for an album block, the file for a track).
+                let running = match album.as_deref() {
+                    Some(album) => self.toggle_if_active_album(album),
+                    None => self.toggle_if_active_file(std::path::Path::new(&path)),
+                };
+                if running {
+                    return;
+                }
                 // Whole playlist as the queue, started at the tapped track — so it
                 // keeps playing through the rest of the list (e.g. the standalone
                 // songs after an album), not just that one entry.
@@ -219,54 +237,29 @@ impl App {
             self.playlists.playlists_list.remove(&child);
         }
         for (id, name, count) in self.playlists.playlist_items.clone() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&name))
-                .subtitle(ngettext_n("{n} track", "{n} tracks", count as u32))
-                .activatable(true)
-                .build();
-            // Cover flush to the far left.
-            row.add_css_class("emilia-flush");
-            // Cover derived from the songs (chosen or first available), else the
-            // generic playlist icon.
+            // Cover derived from the songs (chosen or first available), else
+            // the generic playlist icon; then the total runtime and a play
+            // button. A tap on the row opens the playlist, a long press its
+            // detail view.
             let paths = self.library.playlist_paths(id).unwrap_or_default();
             let cover = self.playlist_display_cover(id, &paths);
-            row.add_prefix(&crate::ui::app::cover_widget(
-                cover.as_deref(),
-                "view-list-symbolic",
-            ));
-            // Total runtime, then a play button on the far right (plays the whole
-            // playlist). A normal tap on the row still opens it; long press →
-            // detail view.
-            let total_ms = durations.get(&id).copied().unwrap_or(0);
-            if total_ms > 0 {
-                row.add_suffix(&crate::ui::app::duration_label(total_ms));
-            }
-            let play_btn = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .tooltip_text(gettext("Play playlist"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
+            let row = EntryRow::new(&name)
+                .subtitle(&ngettext_n("{n} track", "{n} tracks", count as u32))
+                .cover(cover.as_deref(), "view-list-symbolic")
+                .duration(durations.get(&id).copied().unwrap_or(0))
+                .play_button(&gettext("Play playlist"), false, self.mini.playing, {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::Playlist(PlaylistMsg::Play(id)))
+                })
+                .on_activate({
+                    let sender = sender.clone();
+                    move || sender.input(Msg::Playlist(PlaylistMsg::Open(id)))
+                })
+                .on_detail({
+                    let sender = sender.clone();
+                    move || sender.input(Msg::Playlist(PlaylistMsg::ShowDetail(id)))
+                })
                 .build();
-            {
-                let sender = sender.clone();
-                play_btn
-                    .connect_clicked(move |_| sender.input(Msg::Playlist(PlaylistMsg::Play(id))));
-            }
-            row.add_suffix(&play_btn);
-
-            {
-                let sender = sender.clone();
-                row.connect_activated(move |_| sender.input(Msg::Playlist(PlaylistMsg::Open(id))));
-            }
-            // Long press (touch) / right click (mouse): detail view (cover + actions).
-            crate::ui::app::on_secondary_click(&row, {
-                let sender = sender.clone();
-                move || sender.input(Msg::Playlist(PlaylistMsg::ShowDetail(id)))
-            });
-            crate::ui::app::on_long_press(&row, {
-                let sender = sender.clone();
-                move || sender.input(Msg::Playlist(PlaylistMsg::ShowDetail(id)))
-            });
             self.playlists.playlists_list.append(&row);
         }
         // Refresh the section headings for the rebuilt rows (or clear them).
@@ -283,6 +276,9 @@ impl App {
         let _ = self.library.relink_recordings_in_playlist(id);
         let paths = self.library.playlist_paths(id).unwrap_or_default();
         let (albums, singles) = self.playlist_sections(&paths);
+        // The running album, asked once for the whole page: the album blocks
+        // mark themselves with it (a track row only needs its own path).
+        let running_album = self.playing_album();
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -331,19 +327,25 @@ impl App {
                     "media-optical-symbolic",
                 ));
                 // Play button: start the playlist at this album's first track.
+                // While this album is the one running it shows a pause icon and
+                // pauses, the same as the album's row in the overviews.
                 if let Some(first) = tracks.first() {
-                    let play = gtk::Button::builder()
-                        .icon_name("media-playback-start-symbolic")
-                        .tooltip_text(gettext("Play"))
-                        .valign(gtk::Align::Center)
-                        .css_classes(["flat"])
-                        .build();
+                    let play = crate::ui::play_mark::button(
+                        &gettext("Play"),
+                        self.entry_is_active("album", album, running_album.as_deref()),
+                        self.mini.playing,
+                    );
+                    self.libview
+                        .page_marks
+                        .add(crate::ui::app_favorites::mark_key("album", album), &play);
                     let sender = sender.clone();
                     let path = first.path.clone();
+                    let album_name = album.to_string();
                     play.connect_clicked(move |_| {
                         sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
                             id,
                             path: path.clone(),
+                            album: Some(album_name.clone()),
                         }));
                     });
                     exp.add_suffix(&play);
@@ -479,62 +481,51 @@ impl App {
     ) -> adw::ActionRow {
         let display = self.display_name(std::path::Path::new(path));
         // Not activatable: the track plays via its play button; the detail view
-        // opens on long press / right click.
-        let row = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(&display))
-            .subtitle(self.playlist_source_label(path))
-            .build();
-        // Cover flush to the far left (like the album/artist track lists).
-        row.add_css_class("emilia-flush");
-        let cover = self.playlist_track_cover(path);
-        row.add_prefix(&crate::ui::app::cover_widget(cover.as_deref(), icon));
-
-        // Long press (touch) / right click (mouse): open the song's detail view
-        // (YouTube tracks get the YouTube video detail, everything else the file
-        // detail).
-        {
-            let open = {
-                let sender = sender.clone();
-                let path = path.to_string();
-                let title = display.clone();
-                move || {
-                    if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
-                        sender.input(Msg::YtShowVideoDetail {
-                            video_id,
-                            title: title.clone(),
-                        });
-                    } else {
-                        sender.input(Msg::ShowTrackDetail(path.clone()));
-                    }
-                }
-            };
-            crate::ui::app::on_long_press(&row, {
-                let open = open.clone();
-                move || open()
-            });
-            crate::ui::app::on_secondary_click(&row, open);
-        }
-        // Play button: starts the whole playlist at this track (so it keeps
-        // playing through the rest of the list), matching this view's "tapping a
-        // track plays the playlist from there".
-        let play_btn = gtk::Button::builder()
-            .icon_name("media-playback-start-symbolic")
-            .tooltip_text(gettext("Play"))
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        {
+        // opens on long press / right click (a YouTube track gets the YouTube
+        // video detail, everything else the file detail).
+        let open = {
             let sender = sender.clone();
-            let path = path.to_string();
-            play_btn.connect_clicked(move |_| {
-                sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
-                    id,
-                    path: path.clone(),
-                }));
-            });
-        }
-        row.add_suffix(&play_btn);
-        row
+            let (path, title) = (path.to_string(), display.clone());
+            move || {
+                if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
+                    sender.input(Msg::YtShowVideoDetail {
+                        video_id,
+                        title: title.clone(),
+                    });
+                } else {
+                    sender.input(Msg::ShowTrackDetail(path.clone()));
+                }
+            }
+        };
+        let cover = self.playlist_track_cover(path);
+        EntryRow::new(&display)
+            .subtitle(&self.playlist_source_label(path))
+            .cover(cover.as_deref(), icon)
+            // Play button: starts the whole playlist at this track (so it keeps
+            // playing through the rest of the list), matching this view's
+            // "tapping a track plays the playlist from there".
+            .play_button(
+                &gettext("Play"),
+                self.entry_is_active("track", path, None),
+                self.mini.playing,
+                {
+                    let sender = sender.clone();
+                    let path = path.to_string();
+                    move || {
+                        sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
+                            id,
+                            path: path.clone(),
+                            album: None,
+                        }))
+                    }
+                },
+            )
+            .marked_in(
+                &self.libview.page_marks,
+                crate::ui::app_favorites::mark_key("track", path),
+            )
+            .on_detail(open)
+            .build()
     }
 
     /// Long press on a playlist: a detail view (cover, name, totals and the

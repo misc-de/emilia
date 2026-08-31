@@ -158,6 +158,24 @@ pub fn thumb_frame(placeholder_icon: &str, size: i32) -> adw::Bin {
     bin
 }
 
+/// Like [`thumb_frame`], but for rows that only ever show a symbolic icon
+/// (file browser): no card background, and the icon is drawn 30 % smaller than
+/// the frame. The frame keeps its size so the rows stay aligned with the cover
+/// lists.
+pub fn icon_frame(icon: &str, size: i32) -> adw::Bin {
+    let bin = adw::Bin::new();
+    bin.set_size_request(size, size);
+    bin.set_halign(gtk::Align::Start);
+    bin.set_valign(gtk::Align::Center);
+    bin.set_hexpand(false);
+    bin.set_vexpand(false);
+    let img = gtk::Image::from_icon_name(icon);
+    img.set_pixel_size(size * 7 / 10);
+    img.add_css_class("dim-label");
+    bin.set_child(Some(&img));
+    bin
+}
+
 /// Stops a text field from being **auto-focused** when its dialog/page is shown
 /// or switched to. On mobile an auto-focused entry immediately pops the
 /// on-screen keyboard, which is disruptive when merely scrolling through the

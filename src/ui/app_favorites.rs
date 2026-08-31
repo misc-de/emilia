@@ -12,10 +12,60 @@ use relm4::{adw, gtk};
 use crate::core::category::album_key;
 use crate::i18n::gettext;
 use crate::model::Track;
-use crate::ui::app::{cover_widget, duration_label, App, CtxTarget, Msg};
+use crate::ui::app::{App, CtxTarget, Msg};
 use crate::ui::app_helpers::most_common_artist;
 use crate::ui::app_views::most_common_album_base;
+use crate::ui::entry_row::EntryRow;
 use crate::ui::fs_row::FsEntry;
+use crate::ui::play_mark::{Marks, PlaybackSink, PlaybackState};
+
+/// How an entry list keys its play/pause controls in the shared registry:
+/// scope and key, so the flip only needs the registry, not the row order.
+/// The subpages (artist, album, playlist) key their rows the same way, so their
+/// controls can ride along in [`crate::ui::app::LibViewState::page_marks`].
+pub(crate) fn mark_key(scope: &str, key: &str) -> String {
+    format!("{scope}\u{1}{key}")
+}
+
+/// Is this entry the one currently playing? A track by its path, a folder when
+/// the running track lies below it, an album by name. Free-standing because
+/// both the row building and the [`PlaybackSink`] below ask it — the latter
+/// from the shared state, without reaching into the app.
+pub(crate) fn entry_is_active(
+    path: Option<&Path>,
+    album: Option<&str>,
+    scope: &str,
+    key: &str,
+) -> bool {
+    let Some(path) = path else {
+        return false;
+    };
+    match scope {
+        "track" => path == Path::new(key),
+        "folder" => path.starts_with(key),
+        "album" => {
+            let name = key.split_once('\u{1}').map_or(key, |(_, album)| album);
+            album.is_some_and(|a| a.eq_ignore_ascii_case(name))
+        }
+        _ => false,
+    }
+}
+
+/// The play controls of one entry list (favorites, concerts, audiobooks), whose
+/// keys are `scope\u{1}key` — see [`mark_key`].
+pub(crate) struct EntryMarks<'a>(pub(crate) &'a Marks);
+
+impl PlaybackSink for EntryMarks<'_> {
+    fn apply_playback(&self, state: &PlaybackState) {
+        self.0
+            .apply_all(state.playing, |key| match key.split_once('\u{1}') {
+                Some((scope, key)) => {
+                    entry_is_active(state.path.as_deref(), state.album.as_deref(), scope, key)
+                }
+                None => false,
+            });
+    }
+}
 
 impl App {
     /// Identity (scope, key, display name, is_dir) of a detail target for the
@@ -114,6 +164,7 @@ impl App {
                 true,
                 false,
                 false,
+                &self.favorites.favorite_marks,
             );
             // Refresh the section headings for the rebuilt rows (or clear them).
             self.favorites.favorites_list.invalidate_headers();
@@ -158,6 +209,7 @@ impl App {
                 false,
                 true,
                 true,
+                &self.favorites.audiobook_marks,
             );
             // Refresh the section headings for the rebuilt rows (or clear them).
             self.favorites.audiobooks_list.invalidate_headers();
@@ -183,10 +235,16 @@ impl App {
         folder_as_album: bool,
         // Audiobook area: say "Audiobook" instead of "Album" for folder/album rows.
         audiobook: bool,
+        // Where this list keeps its play/pause controls (one registry per list).
+        marks: &Marks,
     ) {
         while let Some(child) = list.first_child() {
             list.remove(&child);
         }
+        marks.clear();
+        // Which album is running decides the play/pause icon of every row, so
+        // look it up once for the whole list instead of per row.
+        let playing_album = self.playing_album();
         for (i, (scope, key, title, is_dir)) in items.iter().enumerate() {
             let subtitle = if track_subtitle && scope == "track" {
                 self.track_meta_subtitle(key)
@@ -197,14 +255,6 @@ impl App {
             } else {
                 entry_kind(scope)
             };
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(title))
-                .subtitle(&subtitle)
-                .activatable(true)
-                .build();
-            // Cover/icon flush to the far left (no prefix inner spacing).
-            row.add_css_class("emilia-flush");
-
             // Cover (album/artist/track) or matching placeholder icon.
             let icon = if folder_as_album && scope == "folder" {
                 "media-optical-symbolic"
@@ -212,17 +262,82 @@ impl App {
                 entry_icon(scope)
             };
             let cover = self.entry_cover(scope, key, *is_dir);
-            row.add_prefix(&cover_widget(cover.as_deref(), icon));
+            let mut row = EntryRow::new(title)
+                .subtitle(&subtitle)
+                .cover(cover.as_deref(), icon)
+                // A single track shows its length, an album/concert/audiobook
+                // its total runtime.
+                .duration(self.entry_duration_ms(scope, key));
 
-            // Reorder handle on the far **left** (favorites only). `add_prefix`
-            // prepends, so adding it *after* the cover puts it leftmost. The
-            // DragSource sits on the whole row; the handle is the visible grip.
-            if let Some(move_msg) = move_msg {
+            // Reorder handle on the far **left** (favorites only): the prefixes
+            // keep their call order, so adding it after the cover would put it
+            // to the cover's right — hence the handle goes on first.
+            if move_msg.is_some() {
                 let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
                 handle.set_tooltip_text(Some(&gettext("Drag to reorder")));
                 handle.add_css_class("dim-label");
-                row.add_prefix(&handle);
+                row = row.prefix(&handle);
+            }
 
+            if let Some(remove) = remove {
+                let btn = gtk::Button::builder()
+                    .icon_name("user-trash-symbolic")
+                    .tooltip_text(gettext("Remove"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                let sender = sender.clone();
+                btn.connect_clicked(move |b| {
+                    crate::ui::app::confirm_destructive(
+                        b,
+                        &gettext("Remove this entry?"),
+                        &gettext("Remove"),
+                        sender.clone(),
+                        remove(i),
+                    );
+                });
+                row = row.suffix(&btn);
+            }
+
+            // In concerts/audiobooks an album/folder row *opens* its track list,
+            // so playing it needs a button of its own; a single track plays on a
+            // tap of the row, where the icon is only a marker.
+            let opens_list = folder_as_album && scope != "track";
+            let is_active = self.entry_is_active(scope, key, playing_album.as_deref());
+            row = if opens_list {
+                let sender = sender.clone();
+                row.play_button(&gettext("Play"), is_active, self.mini.playing, move || {
+                    sender.input(play(i))
+                })
+            } else {
+                row.play_marker(is_active, self.mini.playing)
+            };
+            row = row.marked_in(marks, mark_key(scope, key));
+
+            row = row.on_activate({
+                let sender = sender.clone();
+                let (scope, key) = (scope.clone(), key.clone());
+                move || {
+                    if opens_list {
+                        sender.input(Msg::OpenEntryTracks {
+                            scope: scope.clone(),
+                            key: key.clone(),
+                        });
+                    } else {
+                        sender.input(play(i));
+                    }
+                }
+            });
+            let row = row
+                .on_detail({
+                    let sender = sender.clone();
+                    move || sender.input(detail(i))
+                })
+                .build();
+
+            // Drag & drop reordering sits on the whole row, so it is wired once
+            // the row is assembled.
+            if let Some(move_msg) = move_msg {
                 let drag = gtk::DragSource::new();
                 drag.set_actions(gtk::gdk::DragAction::MOVE);
                 drag.connect_prepare(move |_, _, _| {
@@ -243,94 +358,6 @@ impl App {
                 }
                 row.add_controller(drop);
             }
-
-            if let Some(remove) = remove {
-                let btn = gtk::Button::builder()
-                    .icon_name("user-trash-symbolic")
-                    .tooltip_text(gettext("Remove"))
-                    .valign(gtk::Align::Center)
-                    .css_classes(["flat"])
-                    .build();
-                let sender = sender.clone();
-                btn.connect_clicked(move |b| {
-                    crate::ui::app::confirm_destructive(
-                        b,
-                        &gettext("Remove this entry?"),
-                        &gettext("Remove"),
-                        sender.clone(),
-                        remove(i),
-                    );
-                });
-                row.add_suffix(&btn);
-            }
-            // In concerts/audiobooks an album/folder opens its track list
-            // (no direct playback → no play icon, but a chevron instead);
-            // only single tracks are played directly and carry the play icon.
-            let opens_list = folder_as_album && scope != "track";
-            if opens_list {
-                // Far right: total duration + play button (plays the whole
-                // album/concert). A normal click still opens the list.
-                let total_ms = self.entry_total_ms(scope, key);
-                if total_ms > 0 {
-                    row.add_suffix(&duration_label(total_ms));
-                }
-                let play_btn = gtk::Button::builder()
-                    .icon_name("media-playback-start-symbolic")
-                    .tooltip_text(gettext("Play"))
-                    .valign(gtk::Align::Center)
-                    .css_classes(["flat"])
-                    .build();
-                {
-                    let sender = sender.clone();
-                    play_btn.connect_clicked(move |_| sender.input(play(i)));
-                }
-                row.add_suffix(&play_btn);
-            } else {
-                // Runtime to the left of the play/pause icon, as in the other
-                // track lists. A single track shows its length; a favorited
-                // album/folder shows its total runtime.
-                let total_ms = self.entry_duration_ms(scope, key);
-                if total_ms > 0 {
-                    row.add_suffix(&duration_label(total_ms));
-                }
-                // If exactly this track is currently playing, show a pause icon.
-                let is_active = scope == "track"
-                    && self
-                        .transport
-                        .playing_path
-                        .as_ref()
-                        .is_some_and(|p| p.to_string_lossy().as_ref() == key.as_str());
-                let play_icon = if is_active && self.mini.playing {
-                    "media-playback-pause-symbolic"
-                } else {
-                    "media-playback-start-symbolic"
-                };
-                row.add_suffix(&gtk::Image::from_icon_name(play_icon));
-            }
-
-            {
-                let sender = sender.clone();
-                if opens_list {
-                    let (scope, key) = (scope.clone(), key.clone());
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::OpenEntryTracks {
-                            scope: scope.clone(),
-                            key: key.clone(),
-                        });
-                    });
-                } else {
-                    row.connect_activated(move |_| sender.input(play(i)));
-                }
-            }
-            // Right click (classic mouse): same detail view as the long press.
-            crate::ui::app::on_secondary_click(&row, {
-                let sender = sender.clone();
-                move || sender.input(detail(i))
-            });
-            crate::ui::app::on_long_press(&row, {
-                let sender = sender.clone();
-                move || sender.input(detail(i))
-            });
 
             list.append(&row);
         }
@@ -387,6 +414,12 @@ impl App {
             "album" | "folder" => self.entry_total_ms(scope, key),
             _ => 0,
         }
+    }
+
+    /// Is this entry the one currently playing? `album` is the running track's
+    /// album, passed in so building a whole list costs one lookup.
+    pub(crate) fn entry_is_active(&self, scope: &str, key: &str, album: Option<&str>) -> bool {
+        entry_is_active(self.transport.playing_path.as_deref(), album, scope, key)
     }
 
     // ---- Resolution (cover / playback / detail) ----
@@ -495,6 +528,15 @@ impl App {
 
     /// Plays an entry (scope/key).
     pub(crate) fn play_entry(&mut self, scope: &str, key: &str, is_dir: bool) {
+        // The row shows a pause icon while its entry is the one running, so the
+        // press has to toggle pause/resume instead of restarting it.
+        if self.entry_is_active(scope, key, self.playing_album().as_deref()) {
+            if self.mini.playing {
+                self.save_resume();
+            }
+            self.flip_playing();
+            return;
+        }
         match scope {
             "track" => self.play_path(key, false),
             "folder" => self.play_path(key, is_dir),
@@ -564,7 +606,7 @@ impl App {
     }
 
     /// Queue = the given files starting at track 1, unless empty.
-    fn play_track_set(&mut self, files: Vec<PathBuf>) {
+    pub(crate) fn play_track_set(&mut self, files: Vec<PathBuf>) {
         if files.is_empty() {
             return;
         }

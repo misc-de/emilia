@@ -47,6 +47,12 @@ pub struct CardItem {
     pub image: Option<String>,
     /// Draw the red "source offline" badge over the image.
     pub offline: bool,
+    /// Summed runtime of the entry in milliseconds; `0` hides the label.
+    pub duration_ms: i64,
+    /// What identifies this entry while it plays (the album name), so the row
+    /// can show a pause icon while it is the one running. `None` for lists
+    /// without direct playback (artists) — those get no play button at all.
+    pub play_key: Option<String>,
 }
 
 /// Callback invoked with a row's current position.
@@ -61,6 +67,10 @@ mod imp {
         pub row: adw::ActionRow,
         /// Square image frame the cover is set into.
         pub thumb: adw::Bin,
+        /// Runtime of the entry, left of the play button (as in the file list).
+        pub duration: gtk::Label,
+        /// Play/pause button; hidden for rows without direct playback.
+        pub play: gtk::Button,
         /// Offline badge, toggled per item instead of rebuilt.
         pub badge: gtk::Image,
         /// Position this row currently displays — read by the gesture
@@ -73,6 +83,11 @@ mod imp {
         pub icon: RefCell<String>,
         /// Long press / right click handler, installed once by the factory.
         pub on_context: RefCell<Option<PosFn>>,
+        /// Play button handler, installed once by the factory.
+        pub on_play: RefCell<Option<PosFn>>,
+        /// `play_key` of the item currently bound, so the play/pause icon can be
+        /// re-derived without rebinding the row.
+        pub key: RefCell<Option<String>>,
     }
 
     impl Default for CardRow {
@@ -81,11 +96,15 @@ mod imp {
                 header: crate::ui::app_gallery::section_header_label(""),
                 row: adw::ActionRow::new(),
                 thumb: widgets::thumb_frame("media-optical-symbolic", 48),
+                duration: gtk::Label::new(None),
+                play: gtk::Button::new(),
                 badge: gtk::Image::from_icon_name("network-offline-symbolic"),
                 pos: Cell::new(0),
                 wants: RefCell::new(None),
                 icon: RefCell::new("media-optical-symbolic".to_string()),
                 on_context: RefCell::new(None),
+                on_play: RefCell::new(None),
+                key: RefCell::new(None),
             }
         }
     }
@@ -121,13 +140,34 @@ mod imp {
             self.row.add_prefix(&overlay);
             self.row.set_activatable(true);
 
+            // Right-hand side, in the order the file rows use it: the runtime
+            // first (so it sits left of the button), then the play/pause button
+            // that starts the entry — a tap on the row itself still opens it.
+            self.duration.set_css_classes(&["dim-label", "numeric"]);
+            self.row.add_suffix(&self.duration);
+            self.play.set_valign(gtk::Align::Center);
+            self.play.add_css_class("flat");
+            self.play
+                .set_tooltip_text(Some(&crate::i18n::gettext("Play")));
+            self.play.connect_clicked(glib::clone!(
+                #[weak(rename_to = this)]
+                obj,
+                move |_| this.fire_play()
+            ));
+            self.row.add_suffix(&self.play);
+
             // Long press and right click both open the detail view. Installed
             // once for the recycled row; they read the position out of `pos`.
             let lp = gtk::GestureLongPress::new();
             lp.connect_pressed(glib::clone!(
                 #[weak(rename_to = this)]
                 obj,
-                move |gesture, _, _| {
+                move |gesture, x, y| {
+                    // A press on the play button only plays — it must not also
+                    // open the detail view (as in the file list).
+                    if crate::ui::app_helpers::gesture_press_on_button(gesture, x, y) {
+                        return;
+                    }
                     gesture.set_state(gtk::EventSequenceState::Claimed);
                     this.fire_context();
                 }
@@ -139,7 +179,10 @@ mod imp {
             click.connect_pressed(glib::clone!(
                 #[weak(rename_to = this)]
                 obj,
-                move |gesture, _, _, _| {
+                move |gesture, _, x, y| {
+                    if crate::ui::app_helpers::gesture_press_on_button(gesture, x, y) {
+                        return;
+                    }
                     gesture.set_state(gtk::EventSequenceState::Claimed);
                     this.fire_context();
                 }
@@ -177,12 +220,13 @@ impl Default for CardRow {
 }
 
 impl CardRow {
-    /// Sets the placeholder icon and the context handler. Called once per
+    /// Sets the placeholder icon and the context/play handlers. Called once per
     /// recycled row, from the factory's `setup`.
-    fn configure(&self, icon: &str, on_context: PosFn) {
+    fn configure(&self, icon: &str, on_context: PosFn, on_play: PosFn) {
         let imp = self.imp();
         *imp.icon.borrow_mut() = icon.to_string();
         *imp.on_context.borrow_mut() = Some(on_context);
+        *imp.on_play.borrow_mut() = Some(on_play);
         self.reset_thumb();
     }
 
@@ -191,6 +235,26 @@ impl CardRow {
         if let Some(cb) = cb {
             cb(self.imp().pos.get() as usize);
         }
+    }
+
+    fn fire_play(&self) {
+        let cb = self.imp().on_play.borrow().clone();
+        if let Some(cb) = cb {
+            cb(self.imp().pos.get() as usize);
+        }
+    }
+
+    /// Draws the play button for the current playback state: a pause icon
+    /// (accented) while this row's entry is the one running, a play icon
+    /// otherwise. Kept separate from [`Self::bind`] so a play/pause elsewhere
+    /// only has to re-run this on the handful of realised rows.
+    fn apply_playback(&self, active: Option<&str>, playing: bool) {
+        let imp = self.imp();
+        let is_active = match (imp.key.borrow().as_deref(), active) {
+            (Some(key), Some(active)) => key.eq_ignore_ascii_case(active),
+            _ => false,
+        };
+        crate::ui::play_mark::apply(&imp.play, is_active, playing);
     }
 
     /// Puts the placeholder icon back into a frame that may still hold a cover.
@@ -204,13 +268,33 @@ impl CardRow {
     }
 
     /// Fills the row with `card` at `position`, applying `headers` (one heading
-    /// per row, same order) for the section markers.
-    fn bind(&self, position: u32, total: u32, card: &CardItem, headers: Option<&[String]>) {
+    /// per row, same order) for the section markers. `active`/`playing` are the
+    /// list's current playback state, for the row's play/pause icon.
+    fn bind(
+        &self,
+        position: u32,
+        total: u32,
+        card: &CardItem,
+        headers: Option<&[String]>,
+        active: Option<&str>,
+        playing: bool,
+    ) {
         let imp = self.imp();
         imp.pos.set(position);
         imp.row.set_title(&esc(&card.title));
         imp.row.set_subtitle(&esc(&card.subtitle));
         imp.badge.set_visible(card.offline);
+
+        // Runtime + play button: a recycled row must be reset here too, so an
+        // entry without a duration never inherits the previous one's.
+        imp.duration.set_visible(card.duration_ms > 0);
+        if card.duration_ms > 0 {
+            imp.duration
+                .set_label(&crate::ui::app::fmt_duration(card.duration_ms));
+        }
+        imp.play.set_visible(card.play_key.is_some());
+        *imp.key.borrow_mut() = card.play_key.clone();
+        self.apply_playback(active, playing);
 
         // A row starts a section when its heading differs from the previous
         // row's, and ends one when it differs from the next. At the list ends the
@@ -273,20 +357,26 @@ pub struct CardList {
     headers: Rc<RefCell<Option<Vec<String>>>>,
     /// Row count, so a bound row knows whether it is the last one.
     n_items: Rc<Cell<u32>>,
+    /// `play_key` of the entry currently playing (and whether playback runs), so
+    /// rows scrolling into view bind with the right play/pause icon.
+    active: Rc<RefCell<Option<String>>>,
+    playing: Rc<Cell<bool>>,
 }
 
 impl CardList {
     /// Builds the list. `on_activate` fires on a short tap (open the entry),
-    /// `on_context` on a long press or right click (detail view) — both with the
-    /// row's current position.
+    /// `on_context` on a long press or right click (detail view) and `on_play`
+    /// on the row's play button — each with the row's current position.
     pub fn new(
         placeholder_icon: &str,
         on_activate: impl Fn(usize) + 'static,
         on_context: impl Fn(usize) + 'static,
+        on_play: impl Fn(usize) + 'static,
     ) -> Self {
         let store = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
         let headers: Rc<RefCell<Option<Vec<String>>>> = Rc::new(RefCell::new(None));
         let on_context: PosFn = Rc::new(on_context);
+        let on_play: PosFn = Rc::new(on_play);
         let icon = placeholder_icon.to_string();
 
         let factory = gtk::SignalListItemFactory::new();
@@ -295,15 +385,18 @@ impl CardList {
                 return;
             };
             let row = CardRow::default();
-            row.configure(&icon, on_context.clone());
+            row.configure(&icon, on_context.clone(), on_play.clone());
             item.set_child(Some(&row));
         });
         // The row count decides where the ungrouped list rounds off; kept in a
         // cell the bind closure can read without borrowing the store.
         let n_items = Rc::new(Cell::new(0u32));
+        let active: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+        let playing = Rc::new(Cell::new(false));
         {
             let headers = headers.clone();
             let n_items = n_items.clone();
+            let (active, playing) = (active.clone(), playing.clone());
             factory.connect_bind(move |_, item| {
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                     return;
@@ -323,6 +416,8 @@ impl CardList {
                     n_items.get(),
                     &card,
                     headers.borrow().as_deref(),
+                    active.borrow().as_deref(),
+                    playing.get(),
                 );
             });
         }
@@ -341,6 +436,31 @@ impl CardList {
             store,
             headers,
             n_items,
+            active,
+            playing,
+        }
+    }
+
+    /// Reports which entry is playing (its `play_key`) and whether playback is
+    /// running. Only the realised rows are redrawn — every row scrolling in
+    /// later picks the state up in `bind`.
+    fn set_playback(&self, active: Option<String>, playing: bool) {
+        *self.active.borrow_mut() = active;
+        self.playing.set(playing);
+        let active = self.active.borrow();
+        let mut child = self.view.first_child();
+        while let Some(c) = child {
+            // A list item wraps the row widget; take either level, whichever is
+            // the CardRow.
+            if let Some(row) = c
+                .clone()
+                .downcast::<CardRow>()
+                .ok()
+                .or_else(|| c.first_child().and_downcast::<CardRow>())
+            {
+                row.apply_playback(active.as_deref(), playing);
+            }
+            child = c.next_sibling();
         }
     }
 
@@ -383,6 +503,14 @@ fn section_edges(position: usize, total: usize, headers: Option<&[String]>) -> (
             (top, bottom)
         }
         None => (position == 0, position + 1 >= total),
+    }
+}
+
+/// The overviews mark the album that is running; which artist it is filed under
+/// plays no role, exactly as when opening a row (they group by album name).
+impl crate::ui::play_mark::PlaybackSink for CardList {
+    fn apply_playback(&self, state: &crate::ui::play_mark::PlaybackState) {
+        self.set_playback(state.album.clone(), state.playing);
     }
 }
 

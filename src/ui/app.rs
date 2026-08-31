@@ -582,6 +582,12 @@ pub(crate) struct LibView {
     /// Modal phase-spinner shown while a missing track is searched/downloaded;
     /// the label is updated as the phase advances, and it is closed when done.
     pub(crate) missing_busy: Option<(adw::Dialog, gtk::Label)>,
+    /// Play/pause controls of the rows on the *subpages* (artist, album,
+    /// playlist). One shared registry: those pages come and go with the
+    /// navigation, and a control whose row was dropped with its page is
+    /// discarded on the next pass, so nothing has to clear this. Keyed like the
+    /// entry lists (see [`crate::ui::app_favorites::mark_key`]).
+    pub(crate) page_marks: crate::ui::play_mark::Marks,
 }
 
 impl LibView {
@@ -662,6 +668,9 @@ pub(crate) struct TransportState {
     pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
     /// List in the queue dialog (rebuilt on changes).
     pub(crate) queue_list: gtk::ListBox,
+    /// Play controls of the queue rows, so a play/pause elsewhere flips them
+    /// without the dialog being rebuilt (see [`crate::ui::play_mark::Marks`]).
+    pub(crate) queue_marks: crate::ui::play_mark::Marks,
     /// Consecutive unplayable tracks skipped since the last successful start.
     /// Bounds auto-skipping so an entirely unplayable queue stops instead of
     /// looping (see [`App::skip_current_track`]).
@@ -922,12 +931,16 @@ pub(crate) struct FavoritesState {
     /// Favorites: (scope, key, title, is_dir).
     pub(crate) favorite_items: Vec<(String, String, String, bool)>,
     pub(crate) favorites_list: gtk::ListBox,
+    /// Play/pause controls of the favorites rows (see [`crate::ui::play_mark`]).
+    pub(crate) favorite_marks: crate::ui::play_mark::Marks,
     /// Gallery variant of the favorites (cover grid), like the audiobooks.
     pub(crate) favorites_gallery: gtk::FlowBox,
     pub(crate) favorites_gallery_box: gtk::Box,
     /// Audiobooks: (scope, key, title, is_dir).
     pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
     pub(crate) audiobooks_list: gtk::ListBox,
+    /// Play/pause controls of the audiobook rows.
+    pub(crate) audiobook_marks: crate::ui::play_mark::Marks,
     /// Gallery variant of the audiobooks (cover grid). The box is the scrolled
     /// child and holds either the single grid or alphabetically grouped sections
     /// (see [`App::fill_sectioned_gallery`]); the flow box is the reusable grid.
@@ -950,6 +963,8 @@ pub(crate) struct ConcertsState {
     /// Concerts/audiobooks entries: (scope, key, title, is_dir) – like favorites.
     pub(crate) concert_items: Vec<(String, String, String, bool)>,
     pub(crate) concerts_list: gtk::ListBox,
+    /// Play/pause controls of the concert rows.
+    pub(crate) concert_marks: crate::ui::play_mark::Marks,
     /// Gallery variant of the concerts (cover grid). The box is the scrolled
     /// child and holds either the single grid or alphabetically grouped sections
     /// (see [`App::fill_sectioned_gallery`]); the flow box is the reusable grid.
@@ -1225,6 +1240,11 @@ pub enum Msg {
     },
     /// Play the album folder at this file-browser row index (its play button).
     PlayFsAlbum(usize),
+    /// Play button of an overview row (albums / singles / compilations): plays
+    /// that album, or toggles pause while it is the one already running.
+    PlayAlbumAt(usize),
+    PlaySingleAt(usize),
+    PlayCompilationAt(usize),
     CtxPlay,
     /// Play the album in track order (shuffle off, stop at the end).
     CtxPlayAlbum,
@@ -3216,35 +3236,53 @@ impl Component for App {
         // The library overviews are virtualised (see `card_list`): they grow with
         // the whole library, so a widget per entry would cost seconds on the
         // phone. Their rows report a *position* rather than a factory index.
-        let card_list =
-            |icon: &str, activate: fn(usize) -> Msg, context: fn(usize) -> Msg| -> CardList {
-                let (a, c) = (sender.input_sender().clone(), sender.input_sender().clone());
-                CardList::new(
-                    icon,
-                    move |i| a.emit(activate(i)),
-                    move |i| c.emit(context(i)),
-                )
-            };
+        // `play` is the row's play button; `None` for the lists whose rows are
+        // only opened (artists), whose rows then carry no play button at all.
+        let card_list = |icon: &str,
+                         activate: fn(usize) -> Msg,
+                         context: fn(usize) -> Msg,
+                         play: Option<fn(usize) -> Msg>|
+         -> CardList {
+            let (a, c, p) = (
+                sender.input_sender().clone(),
+                sender.input_sender().clone(),
+                sender.input_sender().clone(),
+            );
+            CardList::new(
+                icon,
+                move |i| a.emit(activate(i)),
+                move |i| c.emit(context(i)),
+                move |i| {
+                    if let Some(play) = play {
+                        p.emit(play(i));
+                    }
+                },
+            )
+        };
 
         let albums = card_list(
             "media-optical-symbolic",
             Msg::ShowAlbumTracks,
             Msg::ShowAlbumDetail,
+            Some(Msg::PlayAlbumAt),
         );
         let singles = card_list(
             "media-optical-symbolic",
             Msg::ShowSingleTracks,
             Msg::ShowSingleDetail,
+            Some(Msg::PlaySingleAt),
         );
         let compilations = card_list(
             "media-optical-symbolic",
             Msg::ShowCompilationTracks,
             Msg::ShowCompilationDetail,
+            Some(Msg::PlayCompilationAt),
         );
         let artists = card_list(
             "avatar-default-symbolic",
             Msg::OpenArtistTracks,
             Msg::ShowArtistDetail,
+            None,
         );
 
         let acoustid_key = library.get_secret_setting("acoustid_key").ok().flatten();
@@ -3566,6 +3604,7 @@ impl Component for App {
                 gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
                 album_page: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 missing_busy: None,
+                page_marks: Default::default(),
             },
             refresh_pending: 0,
             refresh_progress: None,
@@ -3626,6 +3665,7 @@ impl Component for App {
                 play_session: None,
                 close_session: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 queue_list: queue_list.clone(),
+                queue_marks: Default::default(),
                 skip_count: 0,
                 forced_start_ms: None,
             },
@@ -3652,6 +3692,7 @@ impl Component for App {
             toast_overlay: toast_overlay.clone(),
             concerts: ConcertsState {
                 concert_items: Vec::new(),
+                concert_marks: Default::default(),
                 concerts_list: concerts_list.clone(),
                 concerts_gallery: gtk::FlowBox::new(),
                 concerts_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
@@ -3659,10 +3700,12 @@ impl Component for App {
             },
             favorites: FavoritesState {
                 favorite_items: Vec::new(),
+                favorite_marks: Default::default(),
                 favorites_list: favorites_list.clone(),
                 favorites_gallery: gtk::FlowBox::new(),
                 favorites_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
                 audiobook_items: Vec::new(),
+                audiobook_marks: Default::default(),
                 audiobooks_list: audiobooks_list.clone(),
                 audiobooks_gallery: gtk::FlowBox::new(),
                 audiobooks_gallery_box: gtk::Box::new(gtk::Orientation::Vertical, 6),
@@ -3862,6 +3905,9 @@ impl Component for App {
                 self.open_context_menu(root, &sender);
             }
             Msg::ShowAlbumTracks(index) => self.on_show_album_tracks(index, &sender),
+            Msg::PlayAlbumAt(index) => self.on_play_album_at("albums", index),
+            Msg::PlaySingleAt(index) => self.on_play_album_at("singles", index),
+            Msg::PlayCompilationAt(index) => self.on_play_album_at("compilations", index),
             Msg::ShowSingleTracks(index) => self.on_show_single_tracks(index, &sender),
             Msg::ShowSingleDetail(index) => self.on_show_single_detail(index, root, &sender),
             Msg::ShowCompilationTracks(index) => self.on_show_compilation_tracks(index, &sender),

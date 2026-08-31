@@ -313,12 +313,13 @@ impl FsRow {
     }
 }
 
-#[derive(Debug)]
+// `Clone` so the playback state can be broadcast to every row at once.
+#[derive(Debug, Clone)]
 pub enum FsInput {
-    /// Update the queue marker.
-    SetQueued(bool),
-    /// Marker for "currently playing track" (+ whether playback is running).
-    SetActive { active: bool, playing: bool },
+    /// New playback state: each row decides for itself whether it is the entry
+    /// running or an enqueued one — it knows its entry, so the sender does not
+    /// have to read the rows back to work that out for them.
+    Playback(std::sync::Arc<crate::ui::play_mark::PlaybackState>),
     /// Apply tags that were read later for a remote file.
     SetTags {
         title: Option<String>,
@@ -348,9 +349,10 @@ impl FactoryComponent for FsRow {
 
     view! {
         adw::ActionRow {
-            // Same row look as the streaming/album lists: the icon sits in a
-            // 48 px thumbnail frame flush against the left edge instead of being
-            // a small inline image (`emilia-flush` drops the header padding).
+            // Same row layout as the streaming/album lists: the icon sits in a
+            // 48 px frame flush against the left edge instead of being a small
+            // inline image (`emilia-flush` drops the header padding). Unlike a
+            // cover it is drawn bare - no card background, icon 30 % smaller.
             add_css_class: "emilia-flush",
             // #[watch], so that tags read later (remote files) update the
             // display.
@@ -362,7 +364,7 @@ impl FactoryComponent for FsRow {
             // their play button; a tap on the row does nothing, and the detail
             // view opens on long press / right click.
             set_activatable: self.entry.is_dir(),
-            add_prefix: &crate::ui::widgets::thumb_frame(self.entry.prefix_icon(), 48),
+            add_prefix: &crate::ui::widgets::icon_frame(self.entry.prefix_icon(), 48),
 
             // Play button for an album folder (plays the whole album; the row
             // itself still opens the folder). Plain folders have none. Placed
@@ -404,19 +406,13 @@ impl FactoryComponent for FsRow {
                 set_valign: gtk::Align::Center,
                 set_tooltip_text: Some(&crate::i18n::gettext("Play")),
                 #[watch]
-                set_icon_name: if self.active {
-                    if self.playing {
-                        "media-playback-pause-symbolic"
-                    } else {
-                        "media-playback-start-symbolic"
-                    }
-                } else if self.queued {
+                set_icon_name: if !self.active && self.queued {
                     "media-playlist-consecutive-symbolic"
                 } else {
-                    "media-playback-start-symbolic"
+                    crate::ui::play_mark::icon_name(self.active, self.playing)
                 },
                 #[watch]
-                set_css_classes: if self.active { &["flat", "accent"] } else { &["flat", "dim-label"] },
+                set_css_classes: crate::ui::play_mark::classes(self.active),
                 connect_clicked[sender, index] => move |_| {
                     let _ = sender.output(FsOutput::Activated(index.clone()));
                 },
@@ -480,10 +476,23 @@ impl FactoryComponent for FsRow {
 
     fn update(&mut self, msg: Self::Input, _sender: FactorySender<Self>) {
         match msg {
-            FsInput::SetQueued(q) => self.queued = q,
-            FsInput::SetActive { active, playing } => {
-                self.active = active;
-                self.playing = playing;
+            FsInput::Playback(state) => {
+                let is_file = !self.entry.is_dir();
+                self.queued = is_file
+                    && self
+                        .entry
+                        .path()
+                        .is_some_and(|p| state.queued.contains(p.as_path()));
+                self.active = is_file
+                    && match self.entry.path() {
+                        Some(path) => state.path.as_deref() == Some(path.as_path()),
+                        // Remote entry: marked via its path inside the source.
+                        None => {
+                            state.rel_path.is_some()
+                                && self.entry.rel_path() == state.rel_path.as_deref()
+                        }
+                    };
+                self.playing = state.playing;
             }
             FsInput::SetTags {
                 title: t,
@@ -508,5 +517,15 @@ impl FactoryComponent for FsRow {
                 }
             }
         }
+    }
+}
+
+/// The file list marks the running track and the enqueued ones. Its rows are a
+/// relm4 factory, so the state travels as a message — one per row, which is why
+/// it is shared rather than cloned.
+impl crate::ui::play_mark::PlaybackSink for relm4::factory::FactoryVecDeque<FsRow> {
+    fn apply_playback(&self, state: &crate::ui::play_mark::PlaybackState) {
+        let state = std::sync::Arc::new(state.clone());
+        self.broadcast(FsInput::Playback(state));
     }
 }

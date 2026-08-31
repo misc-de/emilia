@@ -10,6 +10,7 @@ use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{online_available, ActiveSource, App, Cmd, CtxTarget, Msg};
 use crate::ui::app_views::natural_key;
 use crate::ui::fs_row::{FsEntry, FsInput, RowOpts};
+use crate::ui::play_mark::PlaybackSink;
 
 impl App {
     /// Activate a file-browser row: descend into a folder, follow a remote
@@ -217,6 +218,32 @@ impl App {
         if let Some(album) = album {
             self.open_album_by_name(sender, &album);
         }
+    }
+
+    /// Play button of an overview row (albums / singles / compilations): starts
+    /// that album from track 1, or — while it is the album already running —
+    /// toggles pause/resume, so the button matches the pause icon it shows.
+    pub(crate) fn on_play_album_at(&mut self, section: &str, index: usize) {
+        let overview = match section {
+            "singles" => &self.libview.singles_overview,
+            "compilations" => &self.libview.compilations_overview,
+            _ => &self.libview.albums_overview,
+        };
+        let Some(album) = overview.get(index).map(|m| m.album.clone()) else {
+            return;
+        };
+        if self.toggle_if_active_album(&album) {
+            return;
+        }
+        // The overview groups purely by album name, so play exactly the set of
+        // tracks the row stands for — across artists, like opening it does.
+        let files: Vec<std::path::PathBuf> = self
+            .album_tracks_by_name(&album)
+            .into_iter()
+            .map(|t| std::path::PathBuf::from(t.path))
+            .collect();
+        self.transport.shuffle = false;
+        self.play_track_set(files);
     }
 
     pub(crate) fn on_show_single_detail(
@@ -527,14 +554,19 @@ impl App {
         let opts = RowOpts {
             show_artist: distinct.len() > 1,
         };
-        let queue = self.transport.queue.clone();
         let mut guard = self.libview.entries.guard();
         guard.clear();
         for e in entries {
-            let queued = e.path().is_some_and(|ep| queue.iter().any(|p| p == ep));
-            guard.push_back((e, opts, queued));
+            guard.push_back((e, opts, false));
         }
         drop(guard);
+        // Hand the fresh rows the current playback state, so the running track
+        // is marked at once. They used to be built with a guess taken from the
+        // playing *context* — which marked every track of the running album as
+        // "in queue" and the running one not at all — and nothing corrected it
+        // until the next playback event.
+        let state = self.playback_state();
+        self.libview.entries.apply_playback(&state);
         self.libview.entries.widget().invalidate_headers();
         self.libview.loading = false;
 

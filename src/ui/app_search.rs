@@ -61,6 +61,17 @@ impl App {
         toolbar.set_content(Some(&outer));
         dialog.set_child(Some(&toolbar));
 
+        // What is running when the dialog opens, so a hit that is the current
+        // track shows a pause icon like it does in every other list. A snapshot
+        // is enough here: the dialog is short-lived, and pressing the row calls
+        // the same toggling playback path, so the icon never lies about what a
+        // press does.
+        let cur_path = self.transport.playing_path.clone();
+        let playing = self.mini.playing;
+        let is_running = move |path: &str| {
+            crate::ui::app_favorites::entry_is_active(cur_path.as_deref(), None, "track", path)
+        };
+
         // Live search: SQLite is local and the result count is capped, so we can
         // re-query on each (already debounced) change of the search entry.
         let sender = sender.clone();
@@ -176,7 +187,7 @@ impl App {
                         .activatable(true)
                         .build();
                     row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
-                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+                    row.add_suffix(&crate::ui::play_mark::marker(is_running(&s.path), playing));
                     let sender = sender.clone();
                     let dlg = dlg.clone();
                     let path = s.path.clone();
@@ -217,7 +228,7 @@ impl App {
                         .activatable(true)
                         .build();
                     row.add_prefix(&gtk::Image::from_icon_name("media-record-symbolic"));
-                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+                    row.add_suffix(&crate::ui::play_mark::marker(is_running(&r.path), playing));
                     let sender = sender.clone();
                     let dlg = dlg.clone();
                     let path = r.path.clone();
@@ -243,7 +254,7 @@ impl App {
                     row.add_prefix(&gtk::Image::from_icon_name(
                         "audio-input-microphone-symbolic",
                     ));
-                    row.add_suffix(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+                    row.add_suffix(&crate::ui::play_mark::marker(is_running(&m.path), playing));
                     let sender = sender.clone();
                     let dlg = dlg.clone();
                     let path = m.path.clone();

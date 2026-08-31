@@ -37,6 +37,9 @@ pub(crate) struct MemoState {
     /// Which tab is shown: Recent or Category.
     pub(crate) view: MemoView,
     pub(crate) memos_list: gtk::ListBox,
+    /// Play controls of the memo rows, so a play/pause elsewhere flips them
+    /// without the list being rebuilt (see [`crate::ui::play_mark::Marks`]).
+    pub(crate) marks: crate::ui::play_mark::Marks,
     /// Category ids the user has expanded in the Category tree (the "General"
     /// node uses [`GENERAL_CAT`]). The tree is torn down and rebuilt on every
     /// reload (e.g. after a sort change), so this remembers which expanders were
@@ -82,6 +85,7 @@ impl MemoState {
             categories: Vec::new(),
             view: MemoView::Recent,
             memos_list,
+            marks: Default::default(),
             expanded_cats: Rc::new(RefCell::new(HashSet::new())),
             recorder: None,
             recording: false,
@@ -398,6 +402,8 @@ impl App {
         while let Some(child) = self.memo.memos_list.first_child() {
             self.memo.memos_list.remove(&child);
         }
+        // The controls of the old rows are gone with them.
+        self.memo.marks.clear();
 
         match self.memo.view {
             MemoView::Recent => {
@@ -519,10 +525,18 @@ impl App {
             dur.set_css_classes(&["dim-label", "numeric"]);
             controls.append(&dur);
         }
-        let play_btn = gtk::Button::from_icon_name("media-playback-start-symbolic");
-        play_btn.set_valign(gtk::Align::Center);
-        play_btn.add_css_class("flat");
-        play_btn.set_tooltip_text(Some(&gettext("Play")));
+        // A memo that is the one playing shows a pause icon, like a track does
+        // in every other list; `play_recording` already toggles pause/resume for
+        // the file that is loaded, so the button matches what pressing it does.
+        let play_btn = crate::ui::play_mark::button(
+            &gettext("Play"),
+            self.entry_is_active("track", &m.path, None),
+            self.mini.playing,
+        );
+        self.memo.marks.add(
+            crate::ui::app_favorites::mark_key("track", &m.path),
+            &play_btn,
+        );
         {
             let sender = sender.clone();
             let path = m.path.clone();

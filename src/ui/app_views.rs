@@ -16,11 +16,12 @@ use crate::core::scanner;
 use crate::i18n::{gettext, ngettext_n, npgettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
-    album_subtitle, artist_count_subtitle, cover_widget, duration_label, find_scroller,
-    fmt_duration, most_common_artist, read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
+    album_subtitle, artist_count_subtitle, find_scroller, fmt_duration, most_common_artist,
+    read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
 };
 use crate::ui::card_list::CardItem;
 use crate::ui::enrich::enrich_worker;
+use crate::ui::entry_row::EntryRow;
 use crate::ui::fs_row::FsEntry;
 
 /// How a track tapped in an album track list is played back. Album contexts
@@ -254,6 +255,11 @@ fn album_cards(
             subtitle: album_card_subtitle(a),
             image: a.cover_path.clone(),
             offline: offline_keys.contains(&(a.artist.clone(), a.album.clone())),
+            // Runtime + play button on the right, as in the file list. The
+            // overview groups by album *name*, so that is also what marks the
+            // running album on its row.
+            duration_ms: a.total_duration_ms.unwrap_or(0),
+            play_key: Some(a.album.clone()),
         })
         .collect()
 }
@@ -738,6 +744,10 @@ impl App {
                         subtitle: artist_count_subtitle(albums, songs),
                         image: a.image_path.clone(),
                         offline: offline_names.iter().any(|n| n.contains(&name_lc)),
+                        // An artist is opened, not played from the overview →
+                        // neither a runtime nor a play button on the row.
+                        duration_ms: 0,
+                        play_key: None,
                     }
                 })
                 .collect();
@@ -1111,6 +1121,9 @@ impl App {
 
         // Separate own albums from the rest (guest tracks + tracks without album).
         let (album_groups, singles) = self.artist_sections(&meta.name);
+        // Which album/track is running decides every row's play icon — one
+        // lookup for the whole page instead of one per row.
+        let playing_album = self.playing_album();
 
         if album_groups.is_empty() && singles.is_empty() {
             content.append(
@@ -1144,76 +1157,58 @@ impl App {
                     .or_else(|| album_meta.as_ref().and_then(|m| m.year));
                 let cover_path = album_meta.as_ref().and_then(|m| m.cover_path.clone());
 
-                let row = adw::ActionRow::builder()
-                    .title(gtk::glib::markup_escape_text(album))
-                    .subtitle(album_subtitle(year, tracks.len()))
-                    .activatable(true)
-                    .build();
-                row.add_css_class("emilia-flush");
-                row.add_prefix(&cover_widget(
-                    cover_path.as_deref(),
-                    "media-optical-symbolic",
-                ));
-
-                // Total runtime of all album tracks + play button (layout as for
-                // the singles). The button plays the whole album; a
-                // tap on the row still opens the album subpage.
+                // Total runtime of all album tracks + play button (layout as
+                // for the singles). The button plays the whole album — or
+                // pauses it while it is the one running; a tap on the row still
+                // opens the album subpage.
                 let total_ms: i64 = tracks.iter().filter_map(|t| t.duration_ms).sum();
-                if total_ms > 0 {
-                    row.add_suffix(&duration_label(total_ms));
-                }
-                let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
-                play.add_css_class("flat");
-                play.set_valign(gtk::Align::Center);
-                play.set_tooltip_text(Some(&gettext("Play album")));
-                {
-                    let sender = sender.clone();
-                    let name = meta.name.clone();
-                    let album = album.clone();
-                    play.connect_clicked(move |_| {
-                        sender.input(Msg::PlayAlbum {
-                            artist: name.clone(),
-                            album: album.clone(),
-                        });
-                    });
-                }
-                row.add_suffix(&play);
-
-                let album = album.clone();
-                let display_artist = display_artist.clone();
-                // Short tap: album subpage (songs of the album).
-                {
-                    let sender = sender.clone();
-                    let name = meta.name.clone();
-                    let album = album.clone();
-                    row.connect_activated(move |_| {
-                        sender.input(Msg::OpenAlbumTracks {
-                            artist: name.clone(),
-                            album: album.clone(),
-                        });
-                    });
-                }
-                // Long press (touch) / right click (mouse): album detail view.
-                crate::ui::app::on_secondary_click(&row, {
-                    let sender = sender.clone();
-                    let display_artist = display_artist.clone();
-                    let album = album.clone();
-                    move || {
-                        sender.input(Msg::ShowAlbumDetailFor {
-                            artist: display_artist.clone(),
-                            album: album.clone(),
-                        });
-                    }
-                });
-                crate::ui::app::on_long_press(&row, {
-                    let sender = sender.clone();
-                    move || {
-                        sender.input(Msg::ShowAlbumDetailFor {
-                            artist: display_artist.clone(),
-                            album: album.clone(),
-                        })
-                    }
-                });
+                let key = crate::core::category::album_key(&meta.name, album);
+                let row = EntryRow::new(album)
+                    .subtitle(&album_subtitle(year, tracks.len()))
+                    .cover(cover_path.as_deref(), "media-optical-symbolic")
+                    .duration(total_ms)
+                    .play_button(
+                        &gettext("Play album"),
+                        self.entry_is_active("album", &key, playing_album.as_deref()),
+                        self.mini.playing,
+                        {
+                            let sender = sender.clone();
+                            let (name, album) = (meta.name.clone(), album.to_string());
+                            move || {
+                                sender.input(Msg::PlayAlbum {
+                                    artist: name.clone(),
+                                    album: album.clone(),
+                                })
+                            }
+                        },
+                    )
+                    .marked_in(
+                        &self.libview.page_marks,
+                        crate::ui::app_favorites::mark_key("album", &key),
+                    )
+                    // Short tap: album subpage (songs of the album).
+                    .on_activate({
+                        let sender = sender.clone();
+                        let (name, album) = (meta.name.clone(), album.to_string());
+                        move || {
+                            sender.input(Msg::OpenAlbumTracks {
+                                artist: name.clone(),
+                                album: album.clone(),
+                            })
+                        }
+                    })
+                    // Long press (touch) / right click (mouse): album detail view.
+                    .on_detail({
+                        let sender = sender.clone();
+                        let (display_artist, album) = (display_artist.clone(), album.to_string());
+                        move || {
+                            sender.input(Msg::ShowAlbumDetailFor {
+                                artist: display_artist.clone(),
+                                album: album.clone(),
+                            })
+                        }
+                    })
+                    .build();
                 group.add(&row);
             }
             content.append(&group);
@@ -1255,54 +1250,39 @@ impl App {
                     });
                 // Not activatable: the track plays via its play button; the
                 // detail view opens on long press / right click.
-                let row = adw::ActionRow::builder()
-                    .title(gtk::glib::markup_escape_text(&t.title))
-                    .build();
-                // Album as secondary info under the song name (if present).
-                if let Some(al) = t.album.as_deref().filter(|a| !a.trim().is_empty()) {
-                    row.set_subtitle(&gtk::glib::markup_escape_text(al));
-                }
-                row.add_css_class("emilia-flush");
-                row.add_prefix(&cover_widget(
-                    cover_path.as_deref(),
-                    "audio-x-generic-symbolic",
-                ));
-                if let Some(ms) = t.duration_ms {
-                    if ms > 0 {
-                        row.add_suffix(&duration_label(ms));
-                    }
-                }
                 let path = t.path.clone();
-                // Play button: plays this track but keeps the list open.
-                let play_btn = gtk::Button::builder()
-                    .icon_name("media-playback-start-symbolic")
-                    .tooltip_text(gettext("Play"))
-                    .valign(gtk::Align::Center)
-                    .css_classes(["flat"])
+                let row = EntryRow::new(&t.title)
+                    // Album as secondary info under the song name (if present).
+                    .subtitle(t.album.as_deref().unwrap_or_default())
+                    .cover(cover_path.as_deref(), "audio-x-generic-symbolic")
+                    .duration(t.duration_ms.unwrap_or(0))
+                    // Play button: plays this track but keeps the list open.
+                    .play_button(
+                        &gettext("Play"),
+                        self.entry_is_active("track", &path, None),
+                        self.mini.playing,
+                        {
+                            let sender = sender.clone();
+                            let (name, path) = (meta.name.clone(), path.clone());
+                            move || {
+                                sender.input(Msg::PlayArtistTrack {
+                                    name: name.clone(),
+                                    path: path.clone(),
+                                    close: false,
+                                })
+                            }
+                        },
+                    )
+                    .marked_in(
+                        &self.libview.page_marks,
+                        crate::ui::app_favorites::mark_key("track", &path),
+                    )
+                    // Long press (touch) / right click (mouse): song detail view.
+                    .on_detail({
+                        let sender = sender.clone();
+                        move || sender.input(Msg::ShowTrackDetail(path.clone()))
+                    })
                     .build();
-                {
-                    let sender = sender.clone();
-                    let name = meta.name.clone();
-                    let path = path.clone();
-                    play_btn.connect_clicked(move |_| {
-                        sender.input(Msg::PlayArtistTrack {
-                            name: name.clone(),
-                            path: path.clone(),
-                            close: false,
-                        });
-                    });
-                }
-                row.add_suffix(&play_btn);
-                // Long press (touch) / right click (mouse): song detail view.
-                crate::ui::app::on_secondary_click(&row, {
-                    let sender = sender.clone();
-                    let path = path.clone();
-                    move || sender.input(Msg::ShowTrackDetail(path.clone()))
-                });
-                crate::ui::app::on_long_press(&row, {
-                    let sender = sender.clone();
-                    move || sender.input(Msg::ShowTrackDetail(path.clone()))
-                });
                 group.add(&row);
             }
             content.append(&group);
@@ -1551,37 +1531,6 @@ impl App {
 
         // Builds a present-track row (cover, track number, duration, play).
         let make_row = |t: &Track| -> adw::ActionRow {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&t.title))
-                .build();
-            row.add_css_class("emilia-flush");
-            row.add_prefix(&crate::ui::widgets::rounded_image(
-                cover.as_ref(),
-                "media-optical-symbolic",
-                48,
-            ));
-            if let Some(no) = t.track_no {
-                row.add_prefix(
-                    &gtk::Label::builder()
-                        .label(no.to_string())
-                        .width_chars(2)
-                        .xalign(1.0)
-                        .css_classes(["dim-label", "numeric"])
-                        .build(),
-                );
-            }
-            if let Some(ms) = t.duration_ms {
-                if ms > 0 {
-                    row.add_suffix(&duration_label(ms));
-                }
-            }
-            if self.is_offline_path(&t.path) {
-                let badge = gtk::Image::from_icon_name("network-offline-symbolic");
-                badge.add_css_class("emilia-offline");
-                badge.set_pixel_size(14);
-                badge.set_valign(gtk::Align::Center);
-                row.add_suffix(&badge);
-            }
             let path = t.path.clone();
             let build_msg = {
                 let play = play.clone();
@@ -1594,29 +1543,38 @@ impl App {
                     },
                 }
             };
-            let play_btn = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .tooltip_text(gettext("Play"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            {
-                let sender = sender.clone();
-                let build_msg = build_msg.clone();
-                let path = path.clone();
-                play_btn.connect_clicked(move |_| sender.input(build_msg(path.clone(), false)));
+            let mut row = EntryRow::new(&t.title)
+                // The cover is already decoded for the whole page here, so the
+                // image goes in ready-made instead of by path.
+                .prefix(&crate::ui::widgets::rounded_image(
+                    cover.as_ref(),
+                    "media-optical-symbolic",
+                    48,
+                ))
+                .duration(t.duration_ms.unwrap_or(0))
+                .offline(self.is_offline_path(&t.path));
+            if let Some(no) = t.track_no {
+                row = row.number(no);
             }
-            row.add_suffix(&play_btn);
-            crate::ui::app::on_secondary_click(&row, {
+            row.play_button(
+                &gettext("Play"),
+                self.entry_is_active("track", &path, None),
+                self.mini.playing,
+                {
+                    let sender = sender.clone();
+                    let (build_msg, path) = (build_msg.clone(), path.clone());
+                    move || sender.input(build_msg(path.clone(), false))
+                },
+            )
+            .marked_in(
+                &self.libview.page_marks,
+                crate::ui::app_favorites::mark_key("track", &path),
+            )
+            .on_detail({
                 let sender = sender.clone();
-                let path = path.clone();
                 move || sender.input(Msg::ShowTrackDetail(path.clone()))
-            });
-            crate::ui::app::on_long_press(&row, {
-                let sender = sender.clone();
-                move || sender.input(Msg::ShowTrackDetail(path.clone()))
-            });
-            row
+            })
+            .build()
         };
 
         // Builds a greyed "missing" row: tapping it offers to fetch & add it.
