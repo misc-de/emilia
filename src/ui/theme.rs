@@ -353,7 +353,14 @@ impl ThemeState {
             );
             css.push_str(&format!(
                 "headerbar, .toolbar {{ background-color: transparent; background-image: none; }}\
-                 list > row, .boxed-list > row, entry, spinbutton \
+                 /* The virtualised library overviews (albums/singles/compilations/ \
+                    artists, see `crate::ui::card_list`) are a GtkListView, whose \
+                    rows the `list > row` selector does NOT reach — and their card \
+                    look is painted by our own `@card_bg_color` rule in \
+                    `install_styles`. Without the extra selector they stayed \
+                    opaque white while every other list turned translucent. */\
+                 list > row, .boxed-list > row, listview.emilia-card-list row.emilia-card, \
+                 entry, spinbutton \
                  {{ background-color: alpha({field}, {a}); }}\
                  .emilia-tabbar button {{ background-color: alpha({field}, {a_head}); }}\
                  .emilia-tabbar button:checked, button.emilia-nav-btn:checked {{ background-color: alpha({field}, {a_check}); }}\
