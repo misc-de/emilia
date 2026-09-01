@@ -2563,10 +2563,11 @@ impl YtPage {
         let mut pending: Vec<(String, adw::Bin)> = Vec::new();
         for (index, v) in videos.iter().enumerate() {
             let subtitle = v.duration.map(fmt_duration).unwrap_or_default();
+            // Not activatable: the video plays from its play button, the detail
+            // view opens on long press / right click.
             let row = adw::ActionRow::builder()
                 .title(gtk::glib::markup_escape_text(&v.title))
                 .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .activatable(true)
                 .build();
             row.add_css_class("emilia-flush");
             let thumb_url = youtube::thumbnail_url(&v.id);
@@ -2597,17 +2598,6 @@ impl YtPage {
                 });
             }
             row.add_suffix(&play);
-            {
-                let (sender, u, t) = (sender.clone(), url.to_string(), title.to_string());
-                row.connect_activated(move |_| {
-                    sender.input(YtInput::PlayPlaylistAt {
-                        url: u.clone(),
-                        title: t.clone(),
-                        index,
-                        close: true,
-                    });
-                });
-            }
             on_secondary_click(&row, {
                 let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
                 move || {
@@ -2743,20 +2733,10 @@ impl YtPage {
         }
         top.append(&self.video_play_button(sender, video_id, title));
         card.append(&top);
-        // Tapping the row plays, like the action rows it replaces (the play
-        // button handles its own clicks, so this never double-fires).
-        {
-            let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
-            let click = gtk::GestureClick::new();
-            click.connect_released(move |g, _, _, _| {
-                g.set_state(gtk::EventSequenceState::Claimed);
-                let _ = sender.output(YtOutput::PlayVideo {
-                    video_id: vid.clone(),
-                    title: t.clone(),
-                });
-            });
-            card.add_controller(click);
-        }
+        // A tap on the card deliberately does nothing: playback is the play
+        // button's job, so a stray tap while scrolling a feed cannot start a
+        // video. Same rule as the playlist track rows. The detail view is on
+        // long press / right click below.
         on_secondary_click(&card, on_detail.clone());
         on_long_press(&card, on_detail);
         crate::ui::app_helpers::card_row(&card)
