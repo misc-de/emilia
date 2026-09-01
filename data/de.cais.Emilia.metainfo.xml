@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.23" date="2026-08-31">
+      <description>
+        <p>A tap on a YouTube entry no longer starts the video. Playback is what the play button on the right is for, and the row itself stays quiet, so scrolling through a feed on a touchscreen can no longer set something playing by accident. The detail view is still a long press or a right click away. This covers the Recently and Newest lists, the videos of a channel, and the playlist dialog.</p>
+        <p xml:lang="de">Ein Tippen auf einen YouTube-Eintrag startet das Video nicht mehr. Dafür ist die Wiedergabe-Schaltfläche rechts da, und die Zeile selbst bleibt still, sodass das Blättern durch eine Liste auf dem Touchscreen nichts mehr versehentlich abspielt. Die Detailansicht öffnet weiterhin ein langer Druck oder ein Rechtsklick. Das gilt für die Listen Zuletzt und Neuste, die Videos eines Kanals und den Playlist-Dialog.</p>
+      </description>
+    </release>
     <release version="0.8.22" date="2026-08-31">
       <description>
         <p>Every category with a tab menu now turns with a sideways swipe: Podcasts, Streaming, YouTube, Memo, Statistics and the settings step through their tabs and wrap around at the ends, skipping the trailing plus button. The settings themselves have left their modal dialog and are an ordinary subpage now, carrying the same tab menu as the rest of the app instead of a second sidebar competing with the navigation. Album, single, compilation, concert and audiobook rows gained a runtime and a play button that starts the entry or pauses the one already running, and the track that is playing is marked the same way everywhere it appears, the queue, the memos and the search results included. Runtimes and play icons are no longer drawn faintly, so a track length reads as information rather than as decoration. A new switch under Design, Entries takes the background off the list entries entirely, frame and shadow with it, letting the wallpaper reach through the lists. YouTube subscribes and syncs noticeably quicker and shows channel art and chapter marks. And long memo lists, waveforms and library scans now work within a fixed memory budget instead of growing with the collection.</p>
