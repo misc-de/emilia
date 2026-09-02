@@ -367,6 +367,11 @@ impl ThemeState {
                  list > row, .boxed-list > row, listview.emilia-card-list row.emilia-card, \
                  entry, spinbutton \
                  {{ background-color: alpha({field}, {a}); }}\
+                 /* Not the −/+ fields of the settings' spin rows, though: their \
+                    value is a label next to two round buttons, not a box to type \
+                    into, and the tint drew a dark slab behind the trio (see \
+                    `app_settings::narrow_spin_value`). */ \
+                 row.spin spinbutton {{ background-color: transparent; }}\
                  .emilia-tabbar button {{ background-color: alpha({field}, {a_head}); }}\
                  .emilia-tabbar button:checked, button.emilia-nav-btn:checked {{ background-color: alpha({field}, {a_check}); }}\
                  label.emilia-list-section {{ background-color: transparent; }}\
@@ -425,8 +430,9 @@ impl ThemeState {
         //
         // Only the entries are cleared: the chrome (tabs, navigation, list
         // headings) keeps its tint, since those surfaces are what the lists are
-        // read against. Text fields (`entry`, `spinbutton`) keep theirs too — a
-        // see-through input box reads as decoration, not as somewhere to type.
+        // read against. Text fields (`entry`) keep theirs too — a see-through
+        // input box reads as decoration, not as somewhere to type. (The −/+
+        // spin rows are already flat, see the blur branch above.)
         if !self.design.entry_bg_on {
             css.push_str(
                 "list > row, .boxed-list > row, list.emilia-sectioned > row, \

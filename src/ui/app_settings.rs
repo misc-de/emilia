@@ -18,33 +18,45 @@ use relm4::{adw, gtk};
 /// second tap on the settings button, a theme flip that rebuilds it).
 pub(crate) const SETTINGS_TAG: &str = "settings";
 
-/// Keep an `adw::SpinRow`'s value field as narrow as its digits instead of
-/// letting it stretch across the whole row. By default the inner `gtk::Text`
-/// is `hexpand`, so a tiny integer like "5" or "100" still claims the full
-/// width; this walks to that `gtk::Text` and sizes it to its content.
+/// Pin an `adw::SpinRow`'s value + "−/+" buttons flush right, as narrow as the
+/// digits. libadwaita's row template gives its `GtkSpinButton` `hexpand`, so
+/// it takes the row's spare width: the whole right part became a (tinted, see
+/// `theme.rs`) slab, and once the inner `gtk::Text` (`hexpand` too) stopped
+/// stretching, the "−/+" ended wherever the title happened to leave them — at
+/// a different x in every row, never at the edge. Now the spin button is
+/// end-aligned inside that allocation, so the trio sits at the row's end in
+/// every row, with the text sized to a fixed few chars and the value
+/// right-aligned against the "−" button.
 fn narrow_spin_value(row: &adw::SpinRow) {
-    fn inner_text(w: &gtk::Widget) -> Option<gtk::Text> {
-        if let Ok(t) = w.clone().downcast::<gtk::Text>() {
+    fn find<T: IsA<gtk::Widget>>(w: &gtk::Widget) -> Option<T> {
+        if let Ok(t) = w.clone().downcast::<T>() {
             return Some(t);
         }
         let mut child = w.first_child();
         while let Some(c) = child {
-            if let Some(t) = inner_text(&c) {
+            if let Some(t) = find::<T>(&c) {
                 return Some(t);
             }
             child = c.next_sibling();
         }
         None
     }
-    let mut child = row.first_child();
-    while let Some(c) = child {
-        if let Some(text) = inner_text(&c) {
-            text.set_hexpand(false);
-            text.set_halign(gtk::Align::End);
-            text.set_max_width_chars(4);
-            break;
-        }
-        child = c.next_sibling();
+    let Some(spin) = find::<gtk::SpinButton>(row.upcast_ref()) else {
+        return;
+    };
+    // Keep the template's `hexpand` (the row's title box does not take the
+    // spare width on its own — with the spin button not expanding either, the
+    // trio just trailed the title with the slack to its right) and let
+    // `halign` place the natural-width trio at the far end of that allocation.
+    spin.set_halign(gtk::Align::End);
+    if let Some(text) = find::<gtk::Text>(spin.upcast_ref()) {
+        text.set_hexpand(false);
+        text.set_halign(gtk::Align::End);
+        // Wide enough for every range here ("-50", "150"); the same width in
+        // all rows keeps the digits' column steady.
+        text.set_width_chars(4);
+        text.set_max_width_chars(4);
+        text.set_alignment(1.0);
     }
 }
 
