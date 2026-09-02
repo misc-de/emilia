@@ -62,6 +62,22 @@ pub(crate) fn fetch_and_store_podcast(feed_url: &str) -> Option<(String, usize)>
     Some((feed.title, if known.is_empty() { 0 } else { fresh }))
 }
 
+/// Fetches the feed images not yet in the cache (worker thread — network).
+/// Returns whether any came in, i.e. whether a redraw would show something new.
+fn cache_missing_feed_images() -> bool {
+    let Ok(lib) = Library::open() else {
+        return false;
+    };
+    lib.podcasts()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(_, _, image, _)| image)
+        .filter(|url| crate::core::online::podcast_image_path(url).is_none())
+        .filter(|url| crate::core::online::cache_podcast_image(url).is_some())
+        .count()
+        > 0
+}
+
 /// A listening-progress line of a list row, kept so the transport tick can
 /// refresh it in place instead of rebuilding the whole list.
 struct EpisodeRow {
@@ -399,8 +415,9 @@ pub(crate) enum PodcastsCmd {
         failed: usize,
         new_episodes: usize,
     },
-    /// Startup feed-image cache finished → redraw the overview.
-    CoversCached,
+    /// Startup feed-image cache finished; `true` if it brought in an image
+    /// that was missing → redraw the overview (it was built from the cache).
+    CoversCached(bool),
 }
 
 #[relm4::component(pub(crate))]
@@ -585,7 +602,7 @@ impl Component for PodcastsPage {
         podcasts_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             overview_headers.clone(),
         ));
-        let model = PodcastsPage {
+        let mut model = PodcastsPage {
             library,
             window: None,
             playing_url: None,
@@ -616,21 +633,15 @@ impl Component for PodcastsPage {
             downloading_episodes: HashMap::new(),
             subpage_slot,
         };
-        // Cache the podcast feed images once in the background, then rebuild the
-        // overview so the covers appear (no UI block at startup).
-        sender.spawn_oneshot_command(|| {
-            if let Ok(lib) = Library::open() {
-                for (_, _, image, _) in lib.podcasts().unwrap_or_default() {
-                    if let Some(url) = image {
-                        crate::core::online::cache_podcast_image(&url);
-                    }
-                }
-            }
-            PodcastsCmd::CoversCached
-        });
+        // Fetch the feed images still missing from the cache in the background;
+        // the overview is rebuilt only if one came in (no UI block at startup).
+        sender.spawn_oneshot_command(|| PodcastsCmd::CoversCached(cache_missing_feed_images()));
         let widgets = view_output!();
-        // Build the header sort popover (icon + criteria) for the restored sort.
-        model.rebuild_sort(&sender);
+        // Show the overview right away from the disk-cached images (which also
+        // builds the header sort popover for the restored sort). Waiting for
+        // the fetch above instead left the page empty for as long as a dead
+        // image host took to time out.
+        model.reload_podcasts(&sender);
         ComponentParts { model, widgets }
     }
 
@@ -873,7 +884,11 @@ impl Component for PodcastsPage {
                 )));
                 self.reload_podcasts(&sender);
             }
-            PodcastsCmd::CoversCached => self.reload_podcasts(&sender),
+            PodcastsCmd::CoversCached(fetched) => {
+                if fetched {
+                    self.reload_podcasts(&sender);
+                }
+            }
         }
     }
 }

@@ -373,8 +373,26 @@ pub(crate) enum YtCmd {
         video_id: String,
         cover: Option<String>,
     },
-    /// Startup channel-thumbnail cache finished → redraw.
-    CoversCached,
+    /// Startup channel-thumbnail cache finished; `true` if it brought in a
+    /// thumbnail that was missing → redraw.
+    CoversCached(bool),
+}
+
+/// Fetches the channel thumbnails not yet in the cache (worker thread —
+/// network). Returns whether any came in, i.e. whether a redraw would show
+/// something new.
+fn cache_missing_channel_thumbs() -> bool {
+    let Ok(lib) = Library::open() else {
+        return false;
+    };
+    lib.channels()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(_, _, _, thumb, _)| thumb)
+        .filter(|url| crate::core::online::youtube_thumb_path(url).is_none())
+        .filter(|url| crate::core::online::cache_youtube_thumb(url).is_some())
+        .count()
+        > 0
 }
 
 #[relm4::component(pub(crate))]
@@ -609,17 +627,9 @@ impl Component for YtPage {
             subpage_slot,
             progress_popup: Rc::new(RefCell::new(None)),
         };
-        // Cache the channel thumbnails once in the background, then redraw.
-        sender.spawn_oneshot_command(|| {
-            if let Ok(lib) = Library::open() {
-                for (_, _, _, thumb, _) in lib.channels().unwrap_or_default() {
-                    if let Some(t) = thumb {
-                        crate::core::online::cache_youtube_thumb(&t);
-                    }
-                }
-            }
-            YtCmd::CoversCached
-        });
+        // Fetch the channel thumbnails still missing from the cache in the
+        // background; the page is rebuilt only if one came in.
+        sender.spawn_oneshot_command(|| YtCmd::CoversCached(cache_missing_channel_thumbs()));
         let widgets = view_output!();
         // Build the header sort popover for the restored subscriptions sort.
         model.rebuild_sort(&sender);
@@ -1005,7 +1015,11 @@ impl Component for YtPage {
                     .set_recent_meta(&video_id, None, cover.as_deref());
                 self.reload_yt_recent(&sender);
             }
-            YtCmd::CoversCached => self.reload_channels(&sender),
+            YtCmd::CoversCached(fetched) => {
+                if fetched {
+                    self.reload_channels(&sender);
+                }
+            }
         }
         // Keep the broken-banner in sync after any extraction-running command.
         self.ytdlp_broken = youtube::extraction_broken();

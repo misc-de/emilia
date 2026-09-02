@@ -34,6 +34,14 @@ pub const RATE_LIMIT: Duration = Duration::from_millis(1100);
 pub const ARTIST_FETCH_THREADS: usize = 8;
 /// Number of parallel fetches when caching a batch of thumbnails.
 pub const THUMB_FETCH_THREADS: usize = 6;
+/// Longest edge a downloaded image is stored at. Cover hosts hand out
+/// 3000 px originals (a podcast cover is 2 MB as a PNG); the app shows covers at
+/// 48 px in lists, ~360 px in detail views, and at most window-sized as the
+/// unfiltered background — 1600 px keeps that last one crisp on a desktop
+/// window and is native-or-better on any phone, at a fraction of the bytes on
+/// disk, the memory, and the decode time (which on the phone ran into seconds
+/// per cover) of the originals.
+pub const MAX_IMAGE_EDGE: i32 = 1600;
 /// Attempt budget for a single image download. Artwork is optional — the UI
 /// falls back to a placeholder — so a slow or throttling host is dropped after
 /// one retry instead of holding up a whole listing (see
@@ -48,6 +56,16 @@ pub fn cover_cache_dir() -> PathBuf {
 /// Directory for artist photos: `$XDG_CACHE_HOME/emilia/artists`.
 pub fn artist_cache_dir() -> PathBuf {
     cache_subdir("artists")
+}
+
+/// File the persistent **list thumbnail** of the image at `source` is kept in
+/// (`$XDG_CACHE_HOME/emilia/thumbs`, see [`crate::ui::widgets::decode_thumb`]).
+/// `stamp` identifies the source's current content (mtime + size), so a
+/// replaced image gets a fresh thumbnail instead of the stale one.
+pub fn thumb_cache_path(source: &str, stamp: &str) -> PathBuf {
+    let mut p = cache_subdir("thumbs");
+    p.push(format!("{}-{stamp}.img", name_hash(source)));
+    p
 }
 
 fn cache_subdir(name: &str) -> PathBuf {
@@ -315,7 +333,7 @@ impl OnlineClient {
                 resp.into_reader()
                     .take(10 * 1024 * 1024)
                     .read_to_end(&mut buf)?;
-                Ok(Some(buf))
+                Ok(Some(shrink_image(buf)))
             }
             // No cover stored (404) – not an error.
             None => Ok(None),
@@ -700,6 +718,49 @@ fn save_cover(mbid: &str, bytes: &[u8]) -> Result<PathBuf> {
     path.push(format!("{key}.img"));
     std::fs::write(&path, bytes)?;
     Ok(path)
+}
+
+/// Caps an encoded image at [`MAX_IMAGE_EDGE`] px on its longer edge (aspect
+/// kept): images within the cap come back untouched, larger ones re-encoded —
+/// JPEG for opaque images, PNG when there is transparency to keep (logos).
+/// Undecodable input is returned as is, so a broken download is stored and
+/// fails the same way it would have anyway. Decoding happens at the reduced
+/// size where the format allows (JPEG), so this is cheaper than a full decode.
+pub fn shrink_image(bytes: Vec<u8>) -> Vec<u8> {
+    use gtk::gdk_pixbuf::PixbufLoader;
+    use gtk::prelude::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let loader = PixbufLoader::new();
+    let shrunk = Rc::new(Cell::new(false));
+    {
+        let shrunk = shrunk.clone();
+        loader.connect_size_prepared(move |loader, w, h| {
+            let edge = w.max(h);
+            if edge > MAX_IMAGE_EDGE {
+                let scale = f64::from(MAX_IMAGE_EDGE) / f64::from(edge);
+                let dim = |v: i32| ((f64::from(v) * scale).round() as i32).max(1);
+                loader.set_size(dim(w), dim(h));
+                shrunk.set(true);
+            }
+        });
+    }
+    if loader.write(&bytes).is_err() || loader.close().is_err() {
+        return bytes;
+    }
+    if !shrunk.get() {
+        return bytes;
+    }
+    let Some(pixbuf) = loader.pixbuf() else {
+        return bytes;
+    };
+    let encoded = if pixbuf.has_alpha() {
+        pixbuf.save_to_bufferv("png", &[])
+    } else {
+        pixbuf.save_to_bufferv("jpeg", &[("quality", "90")])
+    };
+    encoded.unwrap_or(bytes)
 }
 
 /// Determines a **local** album cover entirely without the network: prefers the
@@ -1708,6 +1769,53 @@ pub(crate) fn percent_encode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
+
+    fn encoded(w: i32, h: i32, alpha: bool, format: &str) -> Vec<u8> {
+        let pb = Pixbuf::new(Colorspace::Rgb, alpha, 8, w, h).unwrap();
+        pb.fill(0x80c0ffff);
+        pb.save_to_bufferv(format, &[]).unwrap()
+    }
+
+    fn decoded(bytes: &[u8]) -> Pixbuf {
+        use gtk::prelude::*;
+        let loader = gtk::gdk_pixbuf::PixbufLoader::new();
+        loader.write(bytes).unwrap();
+        loader.close().unwrap();
+        loader.pixbuf().unwrap()
+    }
+
+    #[test]
+    fn shrink_image_caps_the_longer_edge_and_keeps_the_aspect() {
+        let big = encoded(2 * MAX_IMAGE_EDGE, MAX_IMAGE_EDGE, false, "png");
+        let out = shrink_image(big.clone());
+        let pb = decoded(&out);
+        assert_eq!(
+            (pb.width(), pb.height()),
+            (MAX_IMAGE_EDGE, MAX_IMAGE_EDGE / 2)
+        );
+        // Opaque → JPEG.
+        assert!(out.starts_with(&[0xFF, 0xD8]), "expected JPEG");
+    }
+
+    #[test]
+    fn shrink_image_keeps_transparency_as_png() {
+        let out = shrink_image(encoded(MAX_IMAGE_EDGE + 400, 300, true, "png"));
+        assert!(out.starts_with(b"\x89PNG"), "expected PNG");
+        let pb = decoded(&out);
+        assert!(pb.has_alpha());
+        assert_eq!(pb.width(), MAX_IMAGE_EDGE);
+    }
+
+    #[test]
+    fn shrink_image_leaves_small_and_undecodable_input_untouched() {
+        let small = encoded(800, 600, false, "jpeg");
+        assert_eq!(shrink_image(small.clone()), small);
+        let exact = encoded(MAX_IMAGE_EDGE, 200, false, "png");
+        assert_eq!(shrink_image(exact.clone()), exact);
+        let junk = b"not an image at all".to_vec();
+        assert_eq!(shrink_image(junk.clone()), junk);
+    }
 
     #[test]
     fn loose_match_ignores_case_and_punctuation() {

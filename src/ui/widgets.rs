@@ -88,25 +88,91 @@ pub fn store_thumb(path: String, texture: gtk::gdk::Texture) {
 /// resolution when only a small widget shows the image. `None` on a
 /// missing/faulty file.
 pub fn decode_scaled(path: &str, px: i32) -> Option<gtk::gdk::Texture> {
+    decode_scaled_pixbuf(path, px).map(|(pixbuf, _)| gtk::gdk::Texture::for_pixbuf(&pixbuf))
+}
+
+/// [`decode_scaled`] as a pixbuf, plus the source's longer edge in pixels (so
+/// a caller can tell whether anything was actually scaled down).
+fn decode_scaled_pixbuf(path: &str, px: i32) -> Option<(gtk::gdk_pixbuf::Pixbuf, i32)> {
     // Never scale *up*. `from_file_at_scale` happily blows a 600 px cover up to
     // `px`, which costs (px/600)² the memory for no added detail — at the 2560 px
     // background size that is ~26 MB per decode, on the UI thread, for every
     // track change. `file_info` reads only the header, so capping the target at
     // the image's own longer edge is essentially free.
-    let px = match gtk::gdk_pixbuf::Pixbuf::file_info(path) {
-        Some((_, w, h)) if w > 0 && h > 0 => px.min(w.max(h)),
+    let edge = match gtk::gdk_pixbuf::Pixbuf::file_info(path) {
+        Some((_, w, h)) if w > 0 && h > 0 => w.max(h),
         _ => px,
     };
+    let px = px.min(edge);
     let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, px, px, true).ok()?;
-    Some(gtk::gdk::Texture::for_pixbuf(&pixbuf))
+    Some((pixbuf, edge))
 }
 
 /// Decodes an image file **downscaled** to thumbnail size and creates a texture
 /// from it. Intended for the background thread (no widget/UI reference);
-/// returns `None` for a missing/faulty file. Scaled decoding is faster than the
-/// full size and keeps the cache memory-friendly.
+/// returns `None` for a missing/faulty file.
+///
+/// The scaled result is kept **on disk** (`thumb_cache_path`) and served from
+/// there on every later call — including the next app start, which the
+/// in-memory [`THUMB_CACHE`] does not survive. Shrinking a 3000 px podcast
+/// cover to 128 px costs ~¼ s on the desktop and seconds on the phone this app
+/// targets, at *every* start, for an image a list shows at 48 px; the stored
+/// thumbnail decodes in well under a millisecond. Sources no larger than the
+/// thumbnail are not duplicated. The file name carries the source's mtime and
+/// size, so a replaced image gets a fresh thumbnail.
 pub fn decode_thumb(path: &str) -> Option<gtk::gdk::Texture> {
-    decode_scaled(path, THUMB_PX)
+    let stamp = source_stamp(path)?;
+    let file = crate::core::online::thumb_cache_path(path, &stamp);
+    if file.exists() {
+        if let Ok(pixbuf) = gtk::gdk_pixbuf::Pixbuf::from_file(&file) {
+            return Some(gtk::gdk::Texture::for_pixbuf(&pixbuf));
+        }
+        // Unreadable thumbnail: fall through and rewrite it.
+    }
+    let (pixbuf, edge) = decode_scaled_pixbuf(path, THUMB_PX)?;
+    if edge > THUMB_PX {
+        write_thumb_file(&file, &pixbuf);
+    }
+    Some(gtk::gdk::Texture::for_pixbuf(&pixbuf))
+}
+
+/// Content stamp of an image file for its thumbnail's name: `<mtime>-<size>`.
+/// `None` when it is not a readable regular file.
+fn source_stamp(path: &str) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Some(format!("{mtime}-{}", meta.len()))
+}
+
+/// Writes a thumbnail file atomically (temp file + rename), so a concurrent
+/// reader — or a second decoder thread producing the same thumbnail — never
+/// sees a half-written image. Opaque images go out as JPEG (a few KB), images
+/// with transparency (station logos) as PNG so the alpha survives. Best effort:
+/// a failed write only means the next call decodes the source again.
+fn write_thumb_file(file: &std::path::Path, pixbuf: &gtk::gdk_pixbuf::Pixbuf) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let tmp = file.with_extension(format!(
+        "tmp{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let saved = if pixbuf.has_alpha() {
+        pixbuf.savev(&tmp, "png", &[])
+    } else {
+        pixbuf.savev(&tmp, "jpeg", &[("quality", "90")])
+    };
+    if saved.is_err() || std::fs::rename(&tmp, file).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
 }
 
 /// Empty, square and rounded image frame in card style with a placeholder icon.
@@ -269,10 +335,11 @@ pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
 }
 
 /// Process-wide background decoder for list thumbnails. [`crate::ui::app::cover_widget`]
-/// enqueues a `(path, target Bin)` on a cache miss; a single worker thread
-/// decodes sequentially off the UI thread, and the texture is cached + applied
-/// to every bin still waiting for that path. This keeps building long lists from
-/// blocking on image decoding, without spawning a thread per cover.
+/// enqueues a `(path, target Bin)` on a cache miss; a couple of worker threads
+/// decode off the UI thread, and the texture is cached + applied to every bin
+/// still waiting for that path. This keeps building long lists from blocking
+/// on image decoding, without spawning a thread per cover.
+///
 /// One frame waiting for a decoded cover, plus an optional veto: a **recycled**
 /// list row may have been rebound to a different entry while its cover was in
 /// the queue, and must then keep the new entry's image. The guard runs on the UI
@@ -283,13 +350,78 @@ struct PendingTarget {
     still_wanted: Option<Box<dyn Fn(&str) -> bool>>,
 }
 
+/// Paths waiting to be decoded, grouped into **bursts** and served **newest
+/// burst first**, in order inside a burst.
+///
+/// A burst is everything enqueued while the UI thread stayed busy — one list
+/// build, one scroll step. Plain FIFO order made a page opened right after
+/// startup wait behind everything the startup built: the YouTube "newest"
+/// list alone queues ~150 thumbnails, which on the phone this app targets is
+/// 10–15 s of decoding before the first station logo or podcast cover of the
+/// page actually on screen showed up. Serving the newest burst first means the
+/// page the user just opened (or the rows just scrolled into view) is always
+/// next, while keeping a list filling top-down inside the burst.
+struct DecodeQueue {
+    /// `(burst id, paths)`; the last entry is the newest burst.
+    bursts: Vec<(u64, std::collections::VecDeque<String>)>,
+}
+
+impl DecodeQueue {
+    /// Takes `path` out of whichever burst holds it; `true` if it was waiting.
+    fn remove(&mut self, path: &str) -> bool {
+        for (_, paths) in &mut self.bursts {
+            if let Some(i) = paths.iter().position(|p| p == path) {
+                paths.remove(i);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Appends `path` to burst `burst` (opening it if it is not the newest).
+    fn push(&mut self, burst: u64, path: String) {
+        if self.bursts.last().is_none_or(|(id, _)| *id != burst) {
+            self.bursts.push((burst, std::collections::VecDeque::new()));
+        }
+        if let Some((_, paths)) = self.bursts.last_mut() {
+            paths.push_back(path);
+        }
+    }
+
+    /// Next path to decode: the head of the newest non-empty burst.
+    fn pop(&mut self) -> Option<String> {
+        while let Some((_, paths)) = self.bursts.last_mut() {
+            if let Some(path) = paths.pop_front() {
+                return Some(path);
+            }
+            self.bursts.pop();
+        }
+        None
+    }
+}
+
 struct CoverDecoder {
-    tx: async_channel::Sender<String>,
+    queue: std::sync::Arc<(std::sync::Mutex<DecodeQueue>, std::sync::Condvar)>,
     pending: std::rc::Rc<RefCell<HashMap<String, Vec<PendingTarget>>>>,
+    /// Id of the burst currently open on the UI thread, if one is (closed by
+    /// an idle callback once the UI thread gets back to the main loop).
+    open_burst: std::rc::Rc<std::cell::Cell<Option<u64>>>,
+    next_burst: std::cell::Cell<u64>,
 }
 
 thread_local! {
     static COVER_DECODER: RefCell<Option<CoverDecoder>> = const { RefCell::new(None) };
+}
+
+/// Worker threads decoding list thumbnails. Two at most: each holds one
+/// full-size decode in flight (a 3000 px PNG is ~36 MB while it is being
+/// shrunk), which is what bounds memory on the phone; a thread per cover
+/// exhausted it (see [`crate::ui::card_list`]).
+fn decoder_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, 2)
 }
 
 /// Schedules `path` to be decoded in the background and set into `bin` once ready
@@ -312,51 +444,7 @@ pub fn enqueue_thumb_decode_guarded(
 fn enqueue_decode(path: &str, bin: &adw::Bin, still_wanted: Option<Box<dyn Fn(&str) -> bool>>) {
     COVER_DECODER.with(|cell| {
         let mut slot = cell.borrow_mut();
-        let dec = slot.get_or_insert_with(|| {
-            let (tx, rx) = async_channel::unbounded::<String>();
-            let (out_tx, out_rx) =
-                async_channel::unbounded::<(String, Option<gtk::gdk::Texture>)>();
-            // Worker thread: decode off the UI thread (path + texture are Send;
-            // the Bin weak refs stay on the UI thread in `pending`).
-            std::thread::spawn(move || {
-                while let Ok(path) = rx.recv_blocking() {
-                    // Report the failure too, instead of dropping it silently:
-                    // the UI side keys `pending` by path and only ever removes
-                    // an entry when a result arrives. Staying quiet on an
-                    // undecodable file would pin that entry (and its weak refs)
-                    // for the process lifetime *and* make the `is_new` dedup
-                    // below swallow every later request for the same path.
-                    let tex = decode_thumb(&path);
-                    if out_tx.send_blocking((path, tex)).is_err() {
-                        break;
-                    }
-                }
-            });
-            let pending: std::rc::Rc<RefCell<HashMap<String, Vec<PendingTarget>>>> =
-                std::rc::Rc::new(RefCell::new(HashMap::new()));
-            {
-                let pending = pending.clone();
-                gtk::glib::spawn_future_local(async move {
-                    while let Ok((path, tex)) = out_rx.recv().await {
-                        let Some(targets) = pending.borrow_mut().remove(&path) else {
-                            continue;
-                        };
-                        let Some(tex) = tex else {
-                            continue; // Undecodable file: entry dropped, nothing to show.
-                        };
-                        store_thumb(path.clone(), tex.clone());
-                        for target in targets {
-                            if target.still_wanted.as_ref().is_none_or(|f| f(&path)) {
-                                if let Some(bin) = target.bin.upgrade() {
-                                    set_cover_thumb(&bin, &tex);
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-            CoverDecoder { tx, pending }
-        });
+        let dec = slot.get_or_insert_with(start_decoder);
         let is_new = {
             let mut pend = dec.pending.borrow_mut();
             let entry = pend.entry(path.to_string()).or_default();
@@ -367,11 +455,100 @@ fn enqueue_decode(path: &str, bin: &adw::Bin, still_wanted: Option<Box<dyn Fn(&s
             });
             is_new
         };
-        // Enqueue the path only once even if several rows want the same cover.
-        if is_new {
-            let _ = dec.tx.send_blocking(path.to_string());
+        // Open a burst for this stretch of UI-thread work if none is open; the
+        // idle callback closes it once the main loop gets control back, so the
+        // next list build / scroll step forms a burst of its own.
+        let burst = match dec.open_burst.get() {
+            Some(id) => id,
+            None => {
+                let id = dec.next_burst.get();
+                dec.next_burst.set(id + 1);
+                dec.open_burst.set(Some(id));
+                let open_burst = dec.open_burst.clone();
+                gtk::glib::idle_add_local_once(move || open_burst.set(None));
+                id
+            }
+        };
+        let (queue, cvar) = &*dec.queue;
+        let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+        // A path already waiting in an older burst moves up into this one —
+        // the page asking now is the one on screen. A path that is not waiting
+        // is either new (queue it) or being decoded right now (nothing to do:
+        // its result reaches every target registered in `pending`).
+        if q.remove(path) || is_new {
+            q.push(burst, path.to_string());
+            drop(q);
+            cvar.notify_one();
         }
     });
+}
+
+/// Spins up the worker threads and the UI-side result loop (once per process).
+fn start_decoder() -> CoverDecoder {
+    let queue = std::sync::Arc::new((
+        std::sync::Mutex::new(DecodeQueue { bursts: Vec::new() }),
+        std::sync::Condvar::new(),
+    ));
+    let (out_tx, out_rx) = async_channel::unbounded::<(String, Option<gtk::gdk::Texture>)>();
+    for _ in 0..decoder_threads() {
+        let queue = queue.clone();
+        let out_tx = out_tx.clone();
+        // Worker thread: decode off the UI thread (path + texture are Send;
+        // the Bin weak refs stay on the UI thread in `pending`).
+        std::thread::spawn(move || loop {
+            let path = {
+                let (queue, cvar) = &*queue;
+                let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+                loop {
+                    if let Some(path) = q.pop() {
+                        break path;
+                    }
+                    q = cvar.wait(q).unwrap_or_else(|e| e.into_inner());
+                }
+            };
+            // Report the failure too, instead of dropping it silently: the UI
+            // side keys `pending` by path and only ever removes an entry when
+            // a result arrives. Staying quiet on an undecodable file would pin
+            // that entry (and its weak refs) for the process lifetime *and*
+            // make the `is_new` dedup swallow every later request for the
+            // same path.
+            let started = std::time::Instant::now();
+            let tex = decode_thumb(&path);
+            tracing::trace!("thumbnail decoded in {:?}: {path}", started.elapsed());
+            if out_tx.send_blocking((path, tex)).is_err() {
+                break;
+            }
+        });
+    }
+    let pending: std::rc::Rc<RefCell<HashMap<String, Vec<PendingTarget>>>> =
+        std::rc::Rc::new(RefCell::new(HashMap::new()));
+    {
+        let pending = pending.clone();
+        gtk::glib::spawn_future_local(async move {
+            while let Ok((path, tex)) = out_rx.recv().await {
+                let Some(targets) = pending.borrow_mut().remove(&path) else {
+                    continue;
+                };
+                let Some(tex) = tex else {
+                    continue; // Undecodable file: entry dropped, nothing to show.
+                };
+                store_thumb(path.clone(), tex.clone());
+                for target in targets {
+                    if target.still_wanted.as_ref().is_none_or(|f| f(&path)) {
+                        if let Some(bin) = target.bin.upgrade() {
+                            set_cover_thumb(&bin, &tex);
+                        }
+                    }
+                }
+            }
+        });
+    }
+    CoverDecoder {
+        queue,
+        pending,
+        open_burst: std::rc::Rc::new(std::cell::Cell::new(None)),
+        next_burst: std::cell::Cell::new(0),
+    }
 }
 
 /// Image or placeholder as a **square**, rounded image in card style –
@@ -574,7 +751,98 @@ pub fn busy_dialog(text: &str, width: i32) -> (adw::Dialog, gtk::Label) {
 
 #[cfg(test)]
 mod tests {
-    use super::esc;
+    use super::{esc, source_stamp, write_thumb_file, DecodeQueue};
+
+    fn queue_with(bursts: &[(u64, &[&str])]) -> DecodeQueue {
+        let mut q = DecodeQueue { bursts: Vec::new() };
+        for (id, paths) in bursts {
+            for p in *paths {
+                q.push(*id, p.to_string());
+            }
+        }
+        q
+    }
+
+    fn drain(q: &mut DecodeQueue) -> Vec<String> {
+        std::iter::from_fn(|| q.pop()).collect()
+    }
+
+    #[test]
+    fn decode_queue_serves_newest_burst_first_in_order() {
+        // Startup built a long list (burst 0); the user then opened a page
+        // (burst 1): the page's covers come first, each burst top-down.
+        let mut q = queue_with(&[(0, &["a1", "a2", "a3"]), (1, &["b1", "b2"])]);
+        assert_eq!(drain(&mut q), ["b1", "b2", "a1", "a2", "a3"]);
+        assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn decode_queue_moves_a_waiting_path_into_the_newest_burst() {
+        // "a2" was queued at startup and is requested again by the page now on
+        // screen: it moves up behind that page's earlier requests, once.
+        let mut q = queue_with(&[(0, &["a1", "a2", "a3"])]);
+        assert!(q.remove("a2"));
+        q.push(1, "a2".to_string());
+        q.push(1, "b1".to_string());
+        assert_eq!(drain(&mut q), ["a2", "b1", "a1", "a3"]);
+        // A path not waiting (new, or being decoded) is simply not found.
+        assert!(!q.remove("zzz"));
+    }
+
+    #[test]
+    fn decode_queue_reopens_a_burst_only_for_a_new_id() {
+        let mut q = queue_with(&[(0, &["a1"]), (0, &["a2"]), (1, &["b1"]), (0, &["a3"])]);
+        // Same id twice → same burst; a later push with an *older* id after a
+        // newer burst still opens a new (newest) burst — ids only mark
+        // boundaries, order is by recency of the push.
+        assert_eq!(drain(&mut q), ["a3", "b1", "a1", "a2"]);
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("emilia-thumb-test-{}-{name}", std::process::id()));
+        p
+    }
+
+    #[test]
+    fn source_stamp_is_mtime_and_size_of_a_regular_file() {
+        let file = temp_path("stamp.bin");
+        std::fs::write(&file, b"12345").unwrap();
+        let stamp = source_stamp(file.to_str().unwrap()).unwrap();
+        assert!(stamp.ends_with("-5"), "{stamp}");
+        assert!(stamp.split('-').next().unwrap().parse::<u64>().is_ok());
+        // Directories and missing files have no stamp (nothing to thumbnail).
+        assert_eq!(source_stamp(std::env::temp_dir().to_str().unwrap()), None);
+        assert_eq!(source_stamp(temp_path("missing").to_str().unwrap()), None);
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn write_thumb_file_stores_a_readable_image_keeping_alpha() {
+        use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
+        for (has_alpha, expected_alpha) in [(false, false), (true, true)] {
+            let pixbuf = Pixbuf::new(Colorspace::Rgb, has_alpha, 8, 128, 96).unwrap();
+            pixbuf.fill(0x3366ccff);
+            let file = temp_path(&format!("thumb-{has_alpha}.img"));
+            write_thumb_file(&file, &pixbuf);
+            let back = Pixbuf::from_file(&file).expect("thumbnail readable");
+            assert_eq!((back.width(), back.height()), (128, 96));
+            assert_eq!(back.has_alpha(), expected_alpha);
+            // No temp file left behind next to it.
+            let dir = file.parent().unwrap();
+            let stem = file.file_stem().unwrap().to_str().unwrap().to_string();
+            let leftovers = std::fs::read_dir(dir)
+                .unwrap()
+                .flatten()
+                .filter(|e| {
+                    let n = e.file_name().to_string_lossy().to_string();
+                    n.starts_with(&stem) && n.contains(".tmp")
+                })
+                .count();
+            assert_eq!(leftovers, 0);
+            let _ = std::fs::remove_file(&file);
+        }
+    }
 
     #[test]
     fn esc_escapes_markup_metacharacters() {

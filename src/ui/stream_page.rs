@@ -221,6 +221,25 @@ pub(crate) enum StreamCmd {
     SearchCoversReady,
     /// Station logos finished caching → redraw the station list.
     ReloadStreams,
+    /// Startup logo cache finished; `true` if it brought in a logo that was
+    /// missing → redraw the stations (they were built from the cache).
+    LogosCached(bool),
+}
+
+/// Fetches the station logos not yet in the cache (worker thread — network).
+/// Returns whether any came in, i.e. whether a redraw would show something new.
+fn cache_missing_station_logos() -> bool {
+    let Ok(lib) = Library::open() else {
+        return false;
+    };
+    lib.streams()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|st| st.favicon)
+        .filter(|url| crate::core::online::station_image_path(url).is_none())
+        .filter(|url| crate::core::online::cache_station_image(url).is_some())
+        .count()
+        > 0
 }
 
 #[relm4::component(pub(crate))]
@@ -432,7 +451,7 @@ impl Component for StreamPage {
         heard_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             heard_headers.clone(),
         ));
-        let model = StreamPage {
+        let mut model = StreamPage {
             library,
             window: None,
             mobile: false,
@@ -467,20 +486,15 @@ impl Component for StreamPage {
             streams_gallery: streams_gallery.clone(),
             sort_slot,
         };
-        // Cache the station logos once in the background, then redraw.
-        sender.spawn_oneshot_command(|| {
-            if let Ok(lib) = Library::open() {
-                for st in lib.streams().unwrap_or_default() {
-                    if let Some(url) = st.favicon {
-                        crate::core::online::cache_station_image(&url);
-                    }
-                }
-            }
-            StreamCmd::ReloadStreams
-        });
+        // Fetch the station logos still missing from the cache in the
+        // background; the stations are rebuilt only if one came in.
+        sender.spawn_oneshot_command(|| StreamCmd::LogosCached(cache_missing_station_logos()));
         let widgets = view_output!();
-        // Build the header sort popover for the restored sort + current sub-view.
-        model.rebuild_sort(&sender);
+        // Show the stations right away from the disk-cached logos (which also
+        // builds the header sort popover for the restored sort + sub-view).
+        // Waiting for the fetch above instead left the page empty for as long
+        // as a dead logo host took to time out.
+        model.reload_streams(&sender);
         ComponentParts { model, widgets }
     }
 
@@ -632,6 +646,11 @@ impl Component for StreamPage {
             }
             StreamCmd::SearchCoversReady => self.rebuild_stream_search_results(&sender),
             StreamCmd::ReloadStreams => self.reload_streams(&sender),
+            StreamCmd::LogosCached(fetched) => {
+                if fetched {
+                    self.reload_streams(&sender);
+                }
+            }
         }
     }
 }
