@@ -21,14 +21,23 @@ use crate::ui::app::Cmd;
 /// when playing – see [`crate::ui::app::App::fetch_focus_artist`],
 /// [`fetch_focus_album`](crate::ui::app::App::fetch_focus_album) and
 /// [`fetch_focus_track`](crate::ui::app::App::fetch_focus_track).
-/// Between network requests there is a pause (rate limit); a temporary server
-/// limit (HTTP 429/503) is caught in [`online`] (backoff + retry) and does **not**
-/// count as a failed attempt. A timeout / network error **does** count, though,
-/// so transient outages are retried a fair number of times before we give up.
-/// Only after this many *real* unsuccessful attempts is an entry no longer
-/// queried again – neither during the automatic sync nor on manual fetch –, so
-/// that persistently unsuccessful items are not retried endlessly.
-pub(crate) const MAX_ATTEMPTS: i64 = 20;
+/// Between network requests there is a pause (rate limit). Only a *fruitless*
+/// lookup counts here — the entry exists, the service simply has nothing on it,
+/// which is what happens with obscure albums, audiobooks or home recordings.
+/// Network and server errors do **not** count (see
+/// [`Library::upsert_album_meta`](crate::core::db::Library::upsert_album_meta)):
+/// they say nothing about the entry, and an outage would otherwise exhaust the
+/// budget of the whole library in one sweep — instead the sweep stops after
+/// [`MAX_CONSECUTIVE_ERRORS`]. After this many fruitless attempts an entry is no
+/// longer queried automatically; the refresh button in its detail view resets
+/// the counter and searches again.
+pub(crate) const MAX_ATTEMPTS: i64 = 3;
+
+/// After this many failed lookups in a row a sweep gives up for now: the service
+/// is unreachable or rate-limiting us, so continuing through the library would
+/// only produce more failures (and a log full of them). The next run resumes
+/// where this one stopped — nothing was counted against the entries.
+const MAX_CONSECUTIVE_ERRORS: usize = 3;
 
 /// Local album cover with a fallback **scan**: the `albums_missing_cover` sample
 /// is `MIN(path)`, which may have no embedded art even though another track of
@@ -124,6 +133,13 @@ pub(crate) fn enrich_worker(
     let mut any_change = false;
     let stopped = || cancel.load(Ordering::Relaxed);
 
+    // A cleared image cache leaves pointers to files that no longer exist behind.
+    // Drop those first, otherwise the phases below take the albums/artists in
+    // question for "already has an image" and never fill them in again.
+    if lib.prune_lost_images().unwrap_or(0) > 0 {
+        any_change = true;
+    }
+
     'work: {
         // Phase 1: artist photos (Deezer) – **highest priority** (preference:
         // artists first, then covers), in parallel, small images. Skip already
@@ -141,9 +157,14 @@ pub(crate) fn enrich_worker(
         if stopped() {
             break 'work;
         }
-        let new_artists = fetch_artists_parallel(&client, to_fetch, &cancel, &lib, out);
+        let (new_artists, artist_errors) =
+            fetch_artists_parallel(&client, to_fetch, &cancel, &lib, out);
         if new_artists > 0 {
             any_change = true;
+        }
+        if new_artists == 0 && artist_errors >= MAX_CONSECUTIVE_ERRORS {
+            tracing::warn!("Artist photo lookups keep failing – pausing the sweep");
+            break 'work;
         }
         // During the lightweight run only reload if new photos arrived (otherwise
         // a needless UI rebuild every minute).
@@ -241,20 +262,29 @@ pub(crate) fn enrich_worker(
         // Phase 3: online covers only for albums with no image at all (gap filler).
         let still_missing = lib.albums_missing_cover().unwrap_or_default();
         let mut new_covers = 0usize;
+        let mut errors = 0usize;
         for (artist, album, _) in still_missing.iter() {
             if stopped() {
                 break 'work;
             }
-            // Skip after too many unsuccessful attempts (also manually).
+            // Skip after too many fruitless attempts (also manually).
             let exhausted = lib.album_attempts(artist, album) >= MAX_ATTEMPTS;
-            if !exhausted {
-                if !artist.is_empty()
-                    && online::enrich_album(&client, &lib, artist, album)
-                        .cover_path
-                        .is_some()
-                {
+            if !exhausted && !artist.is_empty() {
+                let meta = online::enrich_album(&client, &lib, artist, album);
+                if meta.cover_path.is_some() {
                     new_covers += 1;
                     any_change = true;
+                }
+                errors = if meta.status == "error" {
+                    errors + 1
+                } else {
+                    0
+                };
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    tracing::warn!(
+                        "Album lookups keep failing ({errors} in a row) – pausing the sweep"
+                    );
+                    break 'work;
                 }
                 std::thread::sleep(online::RATE_LIMIT);
             }
@@ -269,6 +299,7 @@ pub(crate) fn enrich_worker(
         // unfindable year is not retried forever. Full sweeps only.
         if !light {
             let mut new_years = 0usize;
+            let mut errors = 0usize;
             for (artist, album) in lib.albums_missing_year().unwrap_or_default() {
                 if stopped() {
                     break 'work;
@@ -276,7 +307,12 @@ pub(crate) fn enrich_worker(
                 if artist.is_empty() {
                     continue;
                 }
-                online::enrich_album_year(&client, &lib, &artist, &album);
+                let errored = online::enrich_album_year(&client, &lib, &artist, &album);
+                errors = if errored { errors + 1 } else { 0 };
+                if errors >= MAX_CONSECUTIVE_ERRORS {
+                    tracing::warn!("Year lookups keep failing – pausing the sweep");
+                    break 'work;
+                }
                 new_years += 1;
                 std::thread::sleep(online::RATE_LIMIT);
             }
@@ -302,23 +338,28 @@ pub(crate) fn enrich_worker(
 
 /// Loads artist photos **in parallel** (multiple network threads), but writes the
 /// results serialized through the coordinator's single DB connection.
-/// Returns the number of newly matched artists.
+/// Returns `(newly matched, failed)`. Once nothing has succeeded but
+/// [`MAX_CONSECUTIVE_ERRORS`] lookups have failed, the remaining jobs are
+/// dropped: the service is unreachable, so the rest would fail too.
 fn fetch_artists_parallel(
     client: &online::OnlineClient,
     names: Vec<String>,
     cancel: &Arc<AtomicBool>,
     lib: &Library,
     out: &relm4::Sender<Cmd>,
-) -> usize {
+) -> (usize, usize) {
     use std::collections::VecDeque;
     use std::sync::mpsc;
     use std::sync::Mutex;
 
     let total = names.len();
     if total == 0 {
-        return 0;
+        return (0, 0);
     }
 
+    // Set by the coordinator when the service turns out to be unreachable; the
+    // workers then stop pulling jobs (`cancel` stays the user's own abort).
+    let give_up = Arc::new(AtomicBool::new(false));
     let jobs = Arc::new(Mutex::new(VecDeque::from(names)));
     let (tx, rx) = mpsc::channel::<(String, Option<Vec<u8>>, bool)>();
     let n_threads = total.min(online::ARTIST_FETCH_THREADS);
@@ -328,9 +369,10 @@ fn fetch_artists_parallel(
         let client = client.clone();
         let jobs = jobs.clone();
         let cancel = cancel.clone();
+        let give_up = give_up.clone();
         let tx = tx.clone();
         handles.push(std::thread::spawn(move || loop {
-            if cancel.load(Ordering::Relaxed) {
+            if cancel.load(Ordering::Relaxed) || give_up.load(Ordering::Relaxed) {
                 break;
             }
             let Some(name) = jobs.lock().unwrap().pop_front() else {
@@ -350,11 +392,20 @@ fn fetch_artists_parallel(
     // Coordinator: write results serialized into the DB. In between, refresh the
     // views so that new photos appear already during the run.
     let mut matched = 0usize;
+    let mut failed = 0usize;
     let mut done = 0usize;
     while let Ok((name, image, errored)) = rx.recv() {
         let meta = online::store_artist_image(&name, image, errored);
         if meta.status == "matched" {
             matched += 1;
+        }
+        if meta.status == "error" {
+            failed += 1;
+            // Nothing at all is coming through → the service is down, stop the
+            // remaining jobs instead of running the whole library into it.
+            if matched == 0 && failed >= MAX_CONSECUTIVE_ERRORS {
+                give_up.store(true, Ordering::Relaxed);
+            }
         }
         let _ = lib.upsert_artist_meta(&meta);
         done += 1;
@@ -366,5 +417,5 @@ fn fetch_artists_parallel(
     for h in handles {
         let _ = h.join();
     }
-    matched
+    (matched, failed)
 }

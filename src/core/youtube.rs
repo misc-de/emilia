@@ -1455,7 +1455,15 @@ pub fn add_to_library_progress(
     // Finally let a music database have the say on the actual tags.
     let (artist, title, album, dz_cover) =
         match crate::core::online::track_tags(hint_artist.as_deref(), &lookup_title) {
-            Some(t) => (t.artist.or(hint_artist), t.title, t.album, t.cover),
+            // Never file a download under the platform it came from: "YouTube"
+            // is not an album, neither as a tag nor as a folder.
+            Some(t) => (
+                t.artist.or(hint_artist),
+                t.title,
+                t.album
+                    .filter(|a| !crate::core::placeholder::is_platform_tag(a)),
+                t.cover,
+            ),
             // Nothing found online — the cleaned-up hints still beat the raw title.
             None => (hint_artist, lookup_title, None, None),
         };

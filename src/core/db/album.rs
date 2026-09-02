@@ -315,7 +315,8 @@ impl Library {
             r#"
             INSERT INTO album_meta (artist, album, mbid, cover_path, year, status, fetched_at, attempts)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'),
-                    CASE WHEN ?4 IS NOT NULL AND ?4 <> '' THEN 0 ELSE 1 END)
+                    CASE WHEN ?4 IS NOT NULL AND ?4 <> '' THEN 0
+                         WHEN ?6 = 'error' THEN 0 ELSE 1 END)
             ON CONFLICT(artist, album) DO UPDATE SET
                 mbid       = excluded.mbid,
                 cover_path = excluded.cover_path,
@@ -328,7 +329,13 @@ impl Library {
                 -- as an attempt -- otherwise the album stays in
                 -- `albums_missing_cover` and is re-queried every sweep forever,
                 -- never reaching MAX_ATTEMPTS.
+                -- A network/server error (MusicBrainz down or rate-limiting)
+                -- says nothing about this album, so it must not eat the budget:
+                -- an outage would otherwise exhaust every album in the library
+                -- and none would ever be looked up again. The sweep stops on
+                -- repeated errors instead (see `crate::ui::enrich`).
                 attempts   = CASE WHEN excluded.cover_path IS NOT NULL AND excluded.cover_path <> '' THEN 0
+                                  WHEN excluded.status = 'error' THEN album_meta.attempts
                                   ELSE album_meta.attempts + 1 END
             "#,
             rusqlite::params![m.artist, m.album, m.mbid, m.cover_path, m.year, m.status],

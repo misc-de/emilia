@@ -1713,6 +1713,106 @@ impl Library {
         Ok(removed)
     }
 
+    /// Drops image pointers whose file has vanished: album covers, artist photos
+    /// and the gallery entries of both. The image cache is disposable
+    /// (`~/.cache/emilia`, and a Flatpak install has its own separate one) and
+    /// may be cleared behind the app's back, while the rows pointing into it
+    /// survive in the database. Since [`Self::albums_missing_cover`] and the
+    /// artist phase of the enrichment only ask whether a pointer is *set*, those
+    /// albums/artists would count as done and stay blank forever. Clearing the
+    /// stale pointers puts them back in the queue: the next enrichment run
+    /// refills them from the tags or online, galleries are refetched when a
+    /// detail view opens. Returns the number of pointers dropped.
+    pub fn prune_lost_images(&self) -> Result<usize> {
+        let lost = |path: &str| crate::core::online::image_file_lost(path);
+        let tx = self.conn.unchecked_transaction()?;
+        let mut dropped = 0usize;
+
+        // Album covers.
+        let stale: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT artist, album, cover_path FROM album_meta
+                 WHERE cover_path IS NOT NULL AND cover_path <> ''",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .filter(|(_, _, path)| lost(path))
+                .map(|(artist, album, _)| (artist, album))
+                .collect()
+        };
+        {
+            let mut upd = tx.prepare(
+                "UPDATE album_meta SET cover_path = NULL WHERE artist = ?1 AND album = ?2",
+            )?;
+            for (artist, album) in &stale {
+                dropped += upd.execute(rusqlite::params![artist, album])?;
+            }
+        }
+
+        // Artist photos. Back to `pending` as well, because the enrichment skips
+        // artists that are already `matched` regardless of the path.
+        let stale: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT name, image_path FROM artist_meta
+                 WHERE image_path IS NOT NULL AND image_path <> ''",
+            )?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .filter(|(_, path)| lost(path))
+                .map(|(name, _)| name)
+                .collect()
+        };
+        {
+            let mut upd = tx.prepare(
+                "UPDATE artist_meta SET image_path = NULL, status = 'pending' WHERE name = ?1",
+            )?;
+            for name in &stale {
+                dropped += upd.execute([name])?;
+            }
+        }
+
+        // Galleries. Both tables are keyed differently but only ever hold cached
+        // files, so they are pruned by `rowid` (the table names are constants
+        // below, never user input).
+        {
+            let prune_gallery = |table: &str| -> Result<usize> {
+                let stale: Vec<i64> = {
+                    let mut stmt = tx.prepare(&format!("SELECT rowid, path FROM {table}"))?;
+                    let rows =
+                        stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+                    rows.collect::<rusqlite::Result<Vec<_>>>()?
+                        .into_iter()
+                        .filter(|(_, path)| lost(path))
+                        .map(|(id, _)| id)
+                        .collect()
+                };
+                let mut del = tx.prepare(&format!("DELETE FROM {table} WHERE rowid = ?1"))?;
+                let mut n = 0usize;
+                for id in &stale {
+                    n += del.execute([id])?;
+                }
+                Ok(n)
+            };
+            dropped += prune_gallery("album_image")?;
+            dropped += prune_gallery("artist_image")?;
+        }
+
+        tx.commit()?;
+        if dropped > 0 {
+            tracing::info!("Dropped {dropped} image pointer(s) whose file is gone");
+        }
+        Ok(dropped)
+    }
+
     /// Returns cached lyrics for a track path, or `None` when nothing positive
     /// is cached (a negative result is also reported as `None`).
     pub fn get_cached_lyrics(&self, path: &str) -> Option<crate::core::lyrics::Lyrics> {
@@ -1917,10 +2017,13 @@ impl Library {
         );
     }
 
-    /// Reset an album's online-fetch failure counter so a refresh retries it.
+    /// Reset an album's online-fetch failure counters so a refresh retries it —
+    /// the cover **and** the release year, since the manual refresh is the way
+    /// back for an album the automatic sweep has given up on.
     pub fn reset_album_attempts(&self, artist: &str, album: &str) {
         let _ = self.conn.execute(
-            "UPDATE album_meta SET attempts = 0 WHERE artist = ?1 AND album = ?2",
+            "UPDATE album_meta SET attempts = 0, year_attempts = 0
+             WHERE artist = ?1 AND album = ?2",
             rusqlite::params![artist, album],
         );
     }
@@ -1941,7 +2044,7 @@ impl Library {
 mod tests {
     use super::*;
     // Types used only by tests (their production callers moved to submodules).
-    use crate::model::{AlbumMeta, Episode};
+    use crate::model::{AlbumMeta, ArtistMeta, Episode};
 
     fn track(path: &str, artist: Option<&str>, album: Option<&str>) -> Track {
         Track {
@@ -2096,20 +2199,24 @@ mod tests {
         let lib = Library::open_in_memory().unwrap();
         let mut m = AlbumMeta::pending("A", "B");
 
-        // Every unsuccessful fetch counts up.
+        // A fruitless search counts up: this album is simply not in the database.
         m.status = "notfound".to_string();
         lib.upsert_album_meta(&m).unwrap();
         assert_eq!(lib.album_attempts("A", "B"), 1);
+
+        // An error does not: the service being down or rate-limiting says
+        // nothing about this album, and an outage would otherwise exhaust the
+        // budget of the whole library in a single sweep.
         m.status = "error".to_string();
         lib.upsert_album_meta(&m).unwrap();
-        assert_eq!(lib.album_attempts("A", "B"), 2);
+        assert_eq!(lib.album_attempts("A", "B"), 1);
 
         // A bare "matched" *without* a cover is still an unsuccessful cover
         // attempt – otherwise the cover-less album would be re-queried on every
         // sweep forever and never reach MAX_ATTEMPTS.
         m.status = "matched".to_string();
         lib.upsert_album_meta(&m).unwrap();
-        assert_eq!(lib.album_attempts("A", "B"), 3);
+        assert_eq!(lib.album_attempts("A", "B"), 2);
 
         // Only an actual cover (matched online or extracted locally) resets it.
         m.cover_path = Some("/cache/cover.img".to_string());
@@ -2875,6 +2982,78 @@ mod tests {
             .unwrap();
         assert_eq!(removed, 0);
         assert!(lib.track_by_path("/music/a.mp3").unwrap().is_some());
+    }
+
+    /// A cleared image cache must put the affected albums/artists back into the
+    /// enrichment queue — but a library that is merely unreachable must not lose
+    /// its pointers.
+    #[test]
+    fn prune_lost_images_drops_only_vanished_pointers() {
+        let dir = std::env::temp_dir().join(format!("emilia-prune-images-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let here = dir.join("cover.jpg");
+        std::fs::write(&here, b"jpeg").unwrap();
+        let here = here.to_string_lossy().to_string();
+        // Same folder, file deleted → the cache was cleared behind our back.
+        let gone = dir.join("gone.jpg").to_string_lossy().to_string();
+        // Whole folder away → an unmounted library, keeps its pointer.
+        let unmounted = "/emilia-not-mounted/cover.jpg".to_string();
+
+        let lib = Library::open_in_memory().unwrap();
+        for (album, cover) in [("Here", &here), ("Gone", &gone), ("Unmounted", &unmounted)] {
+            lib.upsert_track(&track(
+                &format!("/music/{album}.mp3"),
+                Some("A"),
+                Some(album),
+            ))
+            .unwrap();
+            let mut m = AlbumMeta::pending("A", album);
+            m.cover_path = Some(cover.clone());
+            m.status = "local".to_string();
+            lib.upsert_album_meta(&m).unwrap();
+        }
+        for (name, image) in [("Here", &here), ("Gone", &gone)] {
+            let mut m = ArtistMeta::pending(name);
+            m.image_path = Some(image.clone());
+            m.status = "matched".to_string();
+            lib.upsert_artist_meta(&m).unwrap();
+        }
+        lib.set_album_images(
+            "A",
+            "Here",
+            &[
+                (here.clone(), "cover".to_string(), "test".to_string()),
+                (gone.clone(), "cover".to_string(), "test".to_string()),
+            ],
+        )
+        .unwrap();
+
+        // One album cover, one artist photo, one gallery entry.
+        assert_eq!(lib.prune_lost_images().unwrap(), 3);
+
+        let cover_of = |album: &str| lib.get_album_meta("A", album).unwrap().unwrap().cover_path;
+        assert_eq!(cover_of("Here"), Some(here.clone()));
+        assert_eq!(cover_of("Gone"), None);
+        assert_eq!(cover_of("Unmounted"), Some(unmounted));
+        assert_eq!(lib.album_images("A", "Here").unwrap(), vec![here.clone()]);
+
+        let artist = |name: &str| lib.get_artist_meta(name).unwrap().unwrap();
+        assert_eq!(artist("Here").image_path, Some(here));
+        assert_eq!(artist("Here").status, "matched");
+        assert_eq!(artist("Gone").image_path, None);
+        // Back to `pending`: the enrichment skips artists that are `matched`.
+        assert_eq!(artist("Gone").status, "pending");
+
+        // Only the album whose file vanished is queued for a new cover.
+        let missing: Vec<String> = lib
+            .albums_missing_cover()
+            .unwrap()
+            .into_iter()
+            .map(|(_, album, _)| album)
+            .collect();
+        assert_eq!(missing, vec!["Gone".to_string()]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

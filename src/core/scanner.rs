@@ -51,7 +51,8 @@ pub fn read_album_year_genre(path: &Path) -> (Option<String>, Option<u32>, Optio
     let album = tag
         .album()
         .map(|c| c.trim().to_string())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .filter(|s| !crate::core::placeholder::is_platform_tag(s));
     let genre = tag
         .genre()
         .map(|c| c.trim().to_string())
@@ -179,7 +180,12 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
         Some(tag) => (
             tag.title().map(|c| c.to_string()).unwrap_or(file_stem),
             tag.artist().map(|c| c.to_string()),
-            tag.album().map(|c| c.to_string()),
+            // A downloader that had no album to write puts the platform in there
+            // ("YouTube"). That is not an album — it would show up as one in the
+            // library and be searched for online, so it is dropped on the way in.
+            tag.album()
+                .map(|c| c.to_string())
+                .filter(|s| !crate::core::placeholder::is_platform_tag(s)),
             tag.genre()
                 .map(|c| c.to_string())
                 .filter(|s| !s.trim().is_empty()),

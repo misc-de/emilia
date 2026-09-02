@@ -12,6 +12,7 @@ pub mod mpris;
 pub mod net;
 pub mod online;
 pub mod output;
+pub mod placeholder;
 pub mod player;
 pub mod podcast;
 pub mod proc;

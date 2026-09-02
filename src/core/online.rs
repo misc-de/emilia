@@ -58,6 +58,28 @@ fn cache_subdir(name: &str) -> PathBuf {
     dir
 }
 
+/// Whether `path` points at an image file that is gone for good, so the pointer
+/// stored for it in the database is stale and should be dropped (see
+/// [`Library::prune_lost_images`]) instead of being taken as "this album/artist
+/// already has an image".
+///
+/// Files inside the cache are disposable by definition — `~/.cache/emilia` may
+/// be cleared at any time, and a Flatpak install has its own separate cache — so
+/// a missing one always counts as lost. Outside the cache (e.g. a `folder.jpg`
+/// next to the music) the containing folder has to exist as well: an unmounted
+/// or briefly unreadable library must not get its cover pointers wiped, the same
+/// caution [`Library::prune_tracks_under`] takes with the tracks themselves.
+pub fn image_file_lost(path: &str) -> bool {
+    let p = Path::new(path);
+    if path.trim().is_empty() || p.exists() {
+        return false;
+    }
+    if p.starts_with(cover_cache_dir()) || p.starts_with(artist_cache_dir()) {
+        return true;
+    }
+    p.parent().is_some_and(|dir| dir.exists())
+}
+
 /// Directory for downloaded podcast episodes (offline playback):
 /// `$XDG_DATA_HOME/emilia/podcasts`. Unlike the cover cache this lives under the
 /// **data** dir (next to the library DB), so the OS won't purge offline
@@ -186,8 +208,16 @@ impl OnlineClient {
     }
 
     /// Finds the best-matching MusicBrainz release for (artist, album).
-    /// Returns `Ok(None)` if nothing sufficiently matching was found.
+    /// Returns `Ok(None)` if nothing sufficiently matching was found — including
+    /// right away, without a request, when either side is only a placeholder
+    /// (`release:"YouTube"`, `artist:"no artist"`): such a search cannot succeed,
+    /// so it is not worth a request against a rate-limited service.
     pub fn match_release(&self, artist: &str, album: &str) -> Result<Option<ReleaseMatch>> {
+        if crate::core::placeholder::is_placeholder(artist)
+            || crate::core::placeholder::is_placeholder(album)
+        {
+            return Ok(None);
+        }
         let query = format!(
             "artist:\"{}\" AND release:\"{}\"",
             escape_lucene(artist),
@@ -296,6 +326,9 @@ impl OnlineClient {
     /// raw image bytes – deliberately in a **small** resolution (for 48 px avatars
     /// `picture_medium` ~250 px is enough; saves a lot of bandwidth/time).
     pub fn fetch_artist_image(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        if crate::core::placeholder::is_placeholder(name) {
+            return Ok(None);
+        }
         let url = format!(
             "https://api.deezer.com/search/artist?q={}&limit=1",
             percent_encode(name)
@@ -1153,7 +1186,10 @@ pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &
         }
         Ok(None) => meta.status = "notfound".to_string(),
         Err(e) => {
-            tracing::warn!("MusicBrainz search failed ({artist} – {album}): {e}");
+            // Debug, not warn: during an outage this fires for every album of the
+            // sweep. The caller reports the outage once and stops (see
+            // `crate::ui::enrich`).
+            tracing::debug!("MusicBrainz search failed ({artist} – {album}): {e}");
             meta.status = "error".to_string();
         }
     }
@@ -1168,14 +1204,23 @@ pub fn enrich_album(client: &OnlineClient, lib: &Library, artist: &str, album: &
 /// release year (and mbid), then stores it via [`Library::set_album_year`],
 /// which preserves any existing cover/mbid and bounds the retries. One
 /// MusicBrainz request — the caller honours [`RATE_LIMIT`] between calls.
-pub fn enrich_album_year(client: &OnlineClient, lib: &Library, artist: &str, album: &str) {
-    let (year, mbid) = match client.match_release(artist, album) {
-        Ok(Some(rel)) => (rel.year, Some(rel.mbid)),
-        _ => (None, None),
+///
+/// Returns whether the lookup failed with a network/server error (as opposed to
+/// simply finding nothing), so a sweep can stop while the service is down
+/// instead of walking the whole library against it.
+pub fn enrich_album_year(client: &OnlineClient, lib: &Library, artist: &str, album: &str) -> bool {
+    let (year, mbid, errored) = match client.match_release(artist, album) {
+        Ok(Some(rel)) => (rel.year, Some(rel.mbid), false),
+        Ok(None) => (None, None, false),
+        Err(e) => {
+            tracing::debug!("MusicBrainz year lookup failed ({artist} – {album}): {e}");
+            (None, None, true)
+        }
     };
     if let Err(e) = lib.set_album_year(artist, album, year, mbid.as_deref()) {
         tracing::warn!("Failed to store album year ({artist} – {album}): {e}");
     }
+    errored
 }
 
 /// Fetches the MusicBrainz id (and year) for an album **without** touching an

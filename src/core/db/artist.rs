@@ -64,12 +64,15 @@ impl Library {
         self.conn.execute(
             "INSERT INTO artist_meta (name, image_path, status, fetched_at, attempts)
              VALUES (?1, ?2, ?3, strftime('%s','now'),
-                     CASE WHEN ?3 = 'matched' THEN 0 ELSE 1 END)
+                     CASE WHEN ?3 IN ('matched', 'error') THEN 0 ELSE 1 END)
              ON CONFLICT(name) DO UPDATE SET
                 image_path = excluded.image_path,
                 status     = excluded.status,
                 fetched_at = excluded.fetched_at,
+                -- An error is the service's problem, not the artist's — it
+                -- must not use up the budget (see `upsert_album_meta`).
                 attempts   = CASE WHEN excluded.status = 'matched' THEN 0
+                                  WHEN excluded.status = 'error' THEN artist_meta.attempts
                                   ELSE artist_meta.attempts + 1 END",
             rusqlite::params![m.name, m.image_path, m.status],
         )?;
@@ -236,7 +239,7 @@ impl Library {
             "INSERT INTO track_meta
                 (path, recording_mbid, title, artist, album, status, fetched_at, attempts)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now'),
-                     CASE WHEN ?6 = 'matched' THEN 0 ELSE 1 END)
+                     CASE WHEN ?6 IN ('matched', 'error') THEN 0 ELSE 1 END)
              ON CONFLICT(path) DO UPDATE SET
                 recording_mbid = excluded.recording_mbid,
                 title          = excluded.title,
@@ -245,6 +248,7 @@ impl Library {
                 status         = excluded.status,
                 fetched_at     = excluded.fetched_at,
                 attempts       = CASE WHEN excluded.status = 'matched' THEN 0
+                                      WHEN excluded.status = 'error' THEN track_meta.attempts
                                       ELSE track_meta.attempts + 1 END",
             rusqlite::params![
                 m.path,
