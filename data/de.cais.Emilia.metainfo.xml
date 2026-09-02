@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.27" date="2026-09-02">
+      <description>
+        <p>The stepper rows in the settings — app size, menu icon size, tiles per row and crossfade — sit right again. The value and its −/+ buttons now end flush with the right edge in every row, in line with the switches above and below, and the dark slab that the blurred-background look painted behind them is gone. The step field had been stretching across half the row, so its buttons landed wherever the title happened to end.</p>
+        <p xml:lang="de">Die Schrittzeilen in den Einstellungen – App-Größe, Menü-Symbolgröße, Kacheln pro Reihe und Überblendung – sitzen wieder richtig. Wert und −/+-Tasten schließen nun in jeder Zeile bündig mit dem rechten Rand ab, auf einer Linie mit den Schaltern darüber und darunter, und der dunkle Kasten, den die Ansicht mit unscharfem Hintergrund dahinter malte, ist weg. Das Schrittfeld hatte sich über die halbe Zeile gestreckt, sodass seine Tasten dort landeten, wo der Titel gerade endete.</p>
+      </description>
+    </release>
     <release version="0.8.26" date="2026-09-02">
       <description>
         <p>Pictures in the podcast, station and YouTube lists show up right away after a start, instead of trickling in over a quarter of a minute on the phone. Three things were behind the wait: every thumbnail was shrunk from the full-size original at each start — a podcast cover arrives as a 3000-pixel image and cost the phone a second or two apiece —, the thumbnails of a freshly opened page queued behind everything the start had already asked for, and the podcast and station pages held their lists back until a check of every picture on the web had finished. Shrunk thumbnails are now kept on disk and reused, the page on screen is served first, the lists appear at once from what is stored and only rebuild when a picture was actually missing, and newly downloaded artwork is stored at a sensible size rather than at the huge originals the cover hosts hand out.</p>
