@@ -10,7 +10,9 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::core::player::Player;
 use crate::i18n::{gettext, gettext_f};
-use crate::model::{AlbumMeta, ArtistMeta, Source};
+use crate::ui::app_concert::ConcertMsg;
+use crate::ui::app_dialogs::CtxMsg;
+use crate::ui::app_episode_playback::PodcastMsg;
 pub(crate) use crate::ui::app_helpers::{
     album_subtitle, apply_color_scheme, artist_count_subtitle, attach_hscroll_swipe,
     attach_swipe_back, attach_tab_swipe, cover_widget, duration_label, find_scroller, fmt_duration,
@@ -18,993 +20,19 @@ pub(crate) use crate::ui::app_helpers::{
     on_secondary_click, online_available, read_entries, save_window_state, unix_now,
 };
 use crate::ui::app_init::InitState;
+use crate::ui::app_lyrics::LyricsMsg;
+use crate::ui::app_playback::TransportMsg;
+use crate::ui::app_rec_edit::EditMsg;
+pub(crate) use crate::ui::app_sections::*;
+use crate::ui::app_settings::SettingMsg;
+pub(crate) use crate::ui::app_state::*;
+use crate::ui::app_streaming::StreamMsg;
+use crate::ui::app_yt_glue::YtMsg;
 use crate::ui::card_list::CardList;
-use crate::ui::fs_row::{FsEntry, FsInput, FsOutput, FsRow};
-
-/// Target of the detail view (long press): a file/folder in the
-/// file browser, an artist, an album or a concert (= path → `Fs`).
-#[derive(Clone)]
-pub(crate) enum CtxTarget {
-    Fs(FsEntry),
-    Artist(ArtistMeta),
-    Album(AlbumMeta),
-}
-
-impl CtxTarget {
-    /// Heading of the detail dialog.
-    pub(crate) fn heading(&self) -> String {
-        match self {
-            CtxTarget::Fs(e) => e.heading(),
-            CtxTarget::Artist(m) => m.name.clone(),
-            CtxTarget::Album(m) => {
-                if m.artist.is_empty() {
-                    m.album.clone()
-                } else {
-                    format!("{} - {}", m.artist, m.album)
-                }
-            }
-        }
-    }
-}
-
-/// Source currently selected in the file view: the primary `music_dir`
-/// (implicit first tab "Music") or an additional source by ID.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ActiveSource {
-    /// The primary music directory (`music_dir`).
-    Primary,
-    /// An additional source (local secondary folder or WebDAV) by `source.id`.
-    Source(i64),
-}
-
-/// A track of the remote (cloud) playback queue. Kept self-contained,
-/// separate from the local `PathBuf` queue.
-#[derive(Debug, Clone)]
-pub(crate) struct RemoteTrack {
-    /// Path relative to the source's music root (leading slash).
-    pub(crate) rel_path: String,
-    /// Display name (for "Now Playing").
-    pub(crate) title: String,
-}
-
-/// Musical meaning of a file system folder (for playback & EQ).
-pub(crate) enum FsKind {
-    /// Folder of an artist (name = known artist).
-    Artist(String),
-    /// Folder of exactly one album.
-    Album { artist: String, album: String },
-}
-
-/// Navigation sections: (stack name, tooltip, icon). The **default** order;
-/// the actual display/menu order is stored in `section_order`
-/// and can be reordered by the user.
-// The labels are English gettext `msgid`s; translate them at the display site
-// with `gettext()` (see usage in `build_nav` / `win_title`).
-pub(crate) const SECTIONS: [(&str, &str, &str); 14] = [
-    ("favorites", "Favorites", "emilia-favorite-symbolic"),
-    ("files", "Files", "folder-symbolic"),
-    ("artists", "Artists", "avatar-default-symbolic"),
-    ("singles", "Singles", "audio-x-generic-symbolic"),
-    ("albums", "Albums", "media-optical-symbolic"),
-    ("compilations", "Compilations", "view-grid-symbolic"),
-    ("concerts", "Concerts", "ticket-special-symbolic"),
-    ("podcasts", "Podcasts", "podcast-symbolic"),
-    ("streaming", "Streaming", "internet-radio-symbolic"),
-    ("youtube", "YouTube", "im-youtube-symbolic"),
-    ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
-    ("playlists", "Playlists", "view-list-symbolic"),
-    ("memo", "Memo", "audio-input-microphone-symbolic"),
-    ("stats", "Statistics", "emilia-stats-symbolic"),
-];
-
-/// Returns (tooltip/label as msgid, icon) of a section by its
-/// stack name. Translate the label at the display site with `gettext()`.
-pub(crate) fn section_meta(name: &str) -> Option<(&'static str, &'static str)> {
-    SECTIONS
-        .iter()
-        .find(|(n, _, _)| *n == name)
-        .map(|(_, label, icon)| (*label, *icon))
-}
-
-/// One- to two-sentence description of a menu section, already translated.
-/// Shown as the secondary text of each row in the setup assistant and the
-/// Settings → Menu list. Unknown sections yield an empty string — never pass
-/// the fallback through `gettext()`, `gettext("")` returns the catalog header.
-/// Each arm calls `gettext()` on its literal so `xtr` extracts the strings.
-pub(crate) fn section_description(name: &str) -> String {
-    match name {
-        "favorites" => gettext("Quick access to the tracks, albums and artists you starred."),
-        "files" => gettext("Browse your music folder — and any extra sources — as a file tree."),
-        "artists" => gettext("Every artist in your library, each opening to their albums and tracks."),
-        "singles" => {
-            gettext("Releases by a single artist with just a few tracks, kept apart from full albums.")
-        }
-        "albums" => gettext("Every album in your library, sortable and grouped by initial or year."),
-        "compilations" => {
-            gettext("Albums with tracks by several artists, such as samplers and soundtracks.")
-        }
-        "concerts" => gettext("Live and concert recordings you marked, kept apart from your albums."),
-        "podcasts" => gettext("Subscribe to podcast feeds and play or download their episodes."),
-        "streaming" => {
-            gettext("Internet radio stations, with an optional buffer to record what just played.")
-        }
-        "youtube" => {
-            gettext("Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.")
-        }
-        "audiobooks" => {
-            gettext("Albums, folders or tracks you marked as audiobooks, resuming where you left off.")
-        }
-        "playlists" => gettext("Your own playlists, arranged in any order you like."),
-        "memo" => gettext("Quick voice notes recorded with the microphone."),
-        "stats" => gettext("Listening statistics and your most-played artists and tracks."),
-        _ => String::new(),
-    }
-}
-
-/// Safety prompt before destructive actions (delete/remove). Shows a
-/// confirmation dialog relative to `parent` (any widget in the window) and
-/// sends `msg` only after confirmation. `confirm_label` labels the
-/// (destructive) confirm button, e.g. `gettext("Delete")` / `gettext("Remove")`.
-pub(crate) fn confirm_destructive(
-    parent: &impl IsA<gtk::Widget>,
-    heading: &str,
-    confirm_label: &str,
-    sender: ComponentSender<App>,
-    msg: Msg,
-) {
-    let confirm = adw::AlertDialog::new(Some(heading), None);
-    confirm.add_response("cancel", &gettext("Cancel"));
-    confirm.add_response("ok", confirm_label);
-    confirm.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
-    confirm.set_default_response(Some("cancel"));
-    confirm.set_close_response("cancel");
-    // `connect_response` is `Fn`; so take the message only once.
-    let msg = std::cell::RefCell::new(Some(msg));
-    confirm.connect_response(None, move |_, resp| {
-        if resp == "ok" {
-            if let Some(m) = msg.borrow_mut().take() {
-                sender.input(m);
-            }
-        }
-    });
-    confirm.present(Some(parent));
-}
-
-/// Re-exec the app in place (replace the process image) so gettext re-reads the
-/// chosen UI language at startup — the language can only be picked up on a fresh
-/// start. Uses `exec()` rather than spawn + exit because under Flatpak this
-/// process is PID 1 of the sandbox's PID namespace: exiting it makes the kernel
-/// kill every other process in the namespace, including a freshly spawned child,
-/// leaving the app simply gone. `exec()` keeps the same PID, so the sandbox
-/// stays alive and the new image starts. Only returns (via the spawn fallback)
-/// if `exec()` itself fails; otherwise it never returns.
-pub(crate) fn relaunch_for_language_change() -> ! {
-    if let Ok(exe) = std::env::current_exe() {
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&exe).exec();
-        // exec() only returns on failure; fall back to spawn.
-        tracing::error!("re-exec for language change failed: {err}");
-        let _ = std::process::Command::new(&exe).spawn();
-    }
-    std::process::exit(0);
-}
-
-/// Theme suffix for the per-theme design settings (the appearance — background +
-/// colours — is stored separately for light and dark).
-pub(crate) fn design_theme_suffix() -> &'static str {
-    if adw::StyleManager::default().is_dark() {
-        "dark"
-    } else {
-        "light"
-    }
-}
-
-/// Read a per-theme design setting (`<base>_light`/`<base>_dark`), falling back
-/// to the legacy global `<base>` key so values from before the split carry over
-/// into both themes until the user changes them.
-fn get_design(lib: &Library, base: &str) -> Option<String> {
-    lib.get_setting(&format!("{base}_{}", design_theme_suffix()))
-        .ok()
-        .flatten()
-        .or_else(|| lib.get_setting(base).ok().flatten())
-}
-
-/// Write a per-theme design setting under the current theme's key.
-pub(crate) fn set_design(lib: &Library, base: &str, value: &str) {
-    let _ = lib.set_setting(&format!("{base}_{}", design_theme_suffix()), value);
-}
-
-/// Build the [`DesignSettings`] for the *current* theme from the DB. Used at
-/// startup and again whenever the light/dark theme flips (see `reload_design`),
-/// so each theme keeps its own appearance.
-pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSettings {
-    // Fresh-install defaults differ per theme (the maintainer's shipped look):
-    // dark gets a deep indigo field tint; light a plain white one that is a
-    // touch more see-through. Both use a barely-there blur on the built-in
-    // concert background.
-    let dark = adw::StyleManager::default().is_dark();
-    // No explicit filter set: default to a gentle Soft blur on the built-in
-    // concert background.
-    let bg_filter = match get_design(lib, "design_bg_filter").filter(|s| !s.is_empty()) {
-        Some(k) => crate::ui::theme::BgFilter::from_key(&k),
-        None => crate::ui::theme::BgFilter::Soft,
-    };
-    // Soft moved from a coarse 0..10 strength scale to a fine 0..30 one. A value
-    // stored under the old scale is converted once — flagged per theme, since
-    // every design setting is per theme — so an existing setup keeps its blur.
-    let saved_strength =
-        get_design(lib, "design_bg_filter_strength").and_then(|s| s.parse::<u32>().ok());
-    let legacy_soft = bg_filter == crate::ui::theme::BgFilter::Soft
-        && get_design(lib, "design_bg_soft_scale").is_none();
-    let bg_filter_strength = match saved_strength {
-        Some(v) if legacy_soft => {
-            let v = crate::ui::theme::soft_strength_from_legacy(v.min(100));
-            set_design(lib, "design_bg_filter_strength", &v.to_string());
-            v
-        }
-        Some(v) => v.min(100),
-        None => crate::ui::theme::SOFT_STRENGTH_DEFAULT,
-    };
-    if legacy_soft {
-        set_design(lib, "design_bg_soft_scale", "1");
-    }
-    crate::ui::theme::DesignSettings {
-        background_on: get_design(lib, "design_background_on")
-            .map(|s| s != "0")
-            .unwrap_or(true),
-        custom_bg: get_design(lib, "design_bg_path")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from),
-        use_cover_bg: matches!(get_design(lib, "design_use_cover_bg").as_deref(), Some("1")),
-        bg_filter,
-        bg_filter_strength,
-        bg_nav: get_design(lib, "design_bg_nav")
-            .map(|s| s != "0")
-            .unwrap_or(true),
-        bg_titlebar: get_design(lib, "design_bg_titlebar")
-            .map(|s| s != "0")
-            .unwrap_or(true),
-        text_color: get_design(lib, "design_text_color").filter(|s| !s.is_empty()),
-        entry_bg_on: get_design(lib, "design_entry_bg")
-            .map(|s| s != "0")
-            .unwrap_or(true),
-        // Default field tint for a fresh install. `None` = never set; `Some("")`
-        // = explicitly cleared via the reset button, which must stay cleared.
-        field_color: match get_design(lib, "design_field_color") {
-            None => Some(if dark { "#241f31" } else { "#ffffff" }.to_string()),
-            Some(s) if s.is_empty() => None,
-            Some(s) => Some(s),
-        },
-        field_transparency: get_design(lib, "design_chrome_transparency")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(if dark { 60 } else { 90 })
-            .min(100),
-    }
-}
-
-/// Cadence of the quiet background backfill of missing artist photos & covers.
-/// Deliberately low (~1 min) so new users quickly get an enriched overview;
-/// the worker throttles the actual network requests itself.
-const AUTO_ENRICH_INTERVAL_SECS: u32 = 60;
-
-/// Which view the podcast page shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PodcastView {
-    /// Recently (partly) heard episodes — "continue listening", with progress.
-    Recent,
-    /// Newest episodes (entries) across all subscriptions.
-    Newest,
-    /// Overview of the subscribed podcasts.
-    Overview,
-}
-
-/// Which view the streaming page shows (tab switcher).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StreamView {
-    /// Saved stations/channels.
-    Channels,
-    /// Timeshift recordings.
-    Recordings,
-    /// Songs recognized while streaming ("Recently heard").
-    Heard,
-}
-
-/// What the (shared) waveform editor is currently editing. The editor body is
-/// generic over "an audio file with a path"; this only distinguishes where the
-/// item is looked up and where the cut result is written back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EditKind {
-    /// A radio timeshift recording (`recording` table).
-    Recording,
-    /// A voice memo (`memo` table).
-    Memo,
-}
-
-/// Which view the Memo page shows (tab switcher): a flat "Recent" list or a
-/// "Category" tree (categories alphanumeric, their memos nested underneath).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MemoView {
-    Recent,
-    Category,
-}
-
-/// Which view the YouTube page shows (tab switcher).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum YtView {
-    /// Newest videos across all subscribed channels.
-    Newest,
-    /// Recently played videos (history).
-    Recent,
-    /// Overview of the subscribed channels.
-    Channels,
-}
-
-/// Time period of the listening statistics. Deliberately sliding windows
-/// (instead of a calendar year) – calendar-free and without an extra date dependency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StatsPeriod {
-    /// Last 4 weeks.
-    Weeks4,
-    /// Last 12 months.
-    Year,
-    /// Since the beginning.
-    All,
-}
-
-/// A sort criterion of a library overview, chosen via the sort popover in the
-/// title bar. Not every category offers every criterion (see
-/// [`section_sort_criteria`]); the direction (asc/desc) is tracked per category
-/// in [`LibView::sort`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SortCrit {
-    /// By name/title (natural order).
-    Name,
-    /// By the summed playback length of all tracks.
-    Length,
-    /// By the release year.
-    Release,
-    /// By the number of songs.
-    Songs,
-    /// Keep the user's own drag order (favorites). No sort is applied; the
-    /// reorder handles stay active. Only offered where a manual order exists.
-    Manual,
-}
-
-impl SortCrit {
-    /// Stable token for persisting the choice in the settings DB.
-    pub(crate) fn as_key(self) -> &'static str {
-        match self {
-            SortCrit::Name => "name",
-            SortCrit::Length => "length",
-            SortCrit::Release => "release",
-            SortCrit::Songs => "songs",
-            SortCrit::Manual => "manual",
-        }
-    }
-
-    /// Parse the persisted token; falls back to [`SortCrit::Name`].
-    pub(crate) fn from_key(s: &str) -> Self {
-        match s {
-            "length" => SortCrit::Length,
-            "release" => SortCrit::Release,
-            "songs" => SortCrit::Songs,
-            "manual" => SortCrit::Manual,
-            _ => SortCrit::Name,
-        }
-    }
-
-    /// Localized label shown in the sort popover.
-    pub(crate) fn label(self) -> String {
-        match self {
-            SortCrit::Name => gettext("Name"),
-            SortCrit::Length => gettext("Length"),
-            // Release year; sorting by it groups the album list under year headings.
-            SortCrit::Release => gettext("Date"),
-            SortCrit::Songs => gettext("Number of songs"),
-            SortCrit::Manual => gettext("Custom order"),
-        }
-    }
-}
-
-/// The library sections that offer a sort control (with their own remembered
-/// criterion + direction). The cover/entry overviews additionally group + offer
-/// a gallery (see [`section_has_grouping`]/[`section_has_gallery`]); the flat
-/// lists (playlists, memos) only sort. Files/Podcasts/YouTube/Stats have none.
-pub(crate) const SORTABLE_SECTIONS: &[&str] = &[
-    "files",
-    "artists",
-    "albums",
-    "singles",
-    "compilations",
-    "concerts",
-    "audiobooks",
-    "favorites",
-    "playlists",
-    "memo",
-];
-
-/// The criteria a given section offers, in popover order. Category-appropriate:
-/// artists carry no single release year, so they omit [`SortCrit::Release`];
-/// albums/concerts/audiobooks derive a year from their tracks' tag metadata.
-/// Playlists sort by name/track-count/runtime; memos by name/recording-date/length.
-pub(crate) fn section_sort_criteria(section: &str) -> &'static [SortCrit] {
-    use SortCrit::*;
-    match section {
-        // File browser: by name or by runtime; folders stay above files either way.
-        "files" => &[Name, Length],
-        "albums" | "singles" | "compilations" | "concerts" | "audiobooks" => {
-            &[Name, Length, Release, Songs]
-        }
-        "artists" => &[Name, Songs, Length],
-        "playlists" => &[Name, Songs, Length],
-        // For memos `Release` is the recording date (label "Date"); no song count.
-        "memo" => &[Name, Release, Length],
-        // Favorites keep a manual drag order (the default); name is the alternative.
-        "favorites" => &[Manual, Name],
-        _ => &[],
-    }
-}
-
-/// Whether a section offers the alphabetical "without grouping" toggle (section
-/// headings) in its sort popover. Only the cover/entry overviews group; the flat
-/// lists (playlists, memos) sort without headings.
-pub(crate) fn section_has_grouping(section: &str) -> bool {
-    matches!(
-        section,
-        "artists"
-            | "albums"
-            | "singles"
-            | "compilations"
-            | "concerts"
-            | "audiobooks"
-            | "favorites"
-            | "playlists"
-            | "memo"
-            | "files"
-    )
-}
-
-/// Whether a section offers the per-view "gallery" toggle in its sort popover.
-/// Only the cover/photo overviews have a gallery variant (memos/files/recordings
-/// carry no covers, so they group but never offer a gallery).
-pub(crate) fn section_has_gallery(section: &str) -> bool {
-    matches!(
-        section,
-        "artists"
-            | "albums"
-            | "singles"
-            | "compilations"
-            | "concerts"
-            | "audiobooks"
-            | "favorites"
-            | "playlists"
-    )
-}
-
-/// Ongoing listening session of a track. On switch/end it is written as **one**
-/// `play_event` into the statistics (see `finalize_play_session`).
-/// Purely local – never leaves the device.
-pub(crate) struct PlaySession {
-    pub(crate) path: PathBuf,
-    /// Start time (Unix seconds).
-    pub(crate) started_at: i64,
-    /// Actually listened time (from the 1-s tick, counted only during "Playing").
-    pub(crate) played_ms: i64,
-    /// Snapshot of the track length (0 = still unknown → backfilled on tick).
-    pub(crate) duration_ms: i64,
-    /// How this play was started: `Some("single")` for a single tapped song
-    /// (excluded from the album stats), `None` for album/queue/history plays.
-    pub(crate) source: Option<&'static str>,
-}
-
-/// Album/artist overviews + file-list factory + gallery rendering state.
-pub(crate) struct LibView {
-    pub(crate) entries: FactoryVecDeque<FsRow>,
-    pub(crate) albums: CardList,
-    /// Gallery variant of the albums (cover grid), parallel to the list factory.
-    pub(crate) albums_gallery: gtk::FlowBox,
-    /// Scrolled child of the album gallery. Normally holds [`Self::albums_gallery`]
-    /// as a single grid; when grouping is active it holds sections (a heading +
-    /// a `FlowBox` per group): alphabetical initials by name, years by date. See
-    /// [`App::fill_sectioned_gallery`].
-    pub(crate) albums_gallery_box: gtk::Box,
-    /// Per-row section heading of the album **list** (sorted order): year strings
-    /// when sorting by date, the alphabetical initial (`0–9`, `A`, `B`, …) when
-    /// sorting by name. Drives the `set_header_func`; `None` = no grouping.
-    pub(crate) album_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    /// Album overview (same order as factory/gallery); index resolution for the gallery.
-    pub(crate) albums_overview: Vec<crate::model::AlbumMeta>,
-    pub(crate) album_count: usize,
-    // Singles / Compilations: extra album views filtered by the matching area
-    // (`albums_overview_in_area`), whose kind-aware default reflects the
-    // classification. Same machinery as the album overview above.
-    pub(crate) singles: CardList,
-    pub(crate) singles_gallery: gtk::FlowBox,
-    pub(crate) singles_gallery_box: gtk::Box,
-    pub(crate) single_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    pub(crate) singles_overview: Vec<crate::model::AlbumMeta>,
-    pub(crate) single_count: usize,
-    pub(crate) compilations: CardList,
-    pub(crate) compilations_gallery: gtk::FlowBox,
-    pub(crate) compilations_gallery_box: gtk::Box,
-    pub(crate) compilation_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    pub(crate) compilations_overview: Vec<crate::model::AlbumMeta>,
-    pub(crate) compilation_count: usize,
-    pub(crate) artists: CardList,
-    /// Gallery variant of the artists (photo grid).
-    pub(crate) artists_gallery: gtk::FlowBox,
-    /// Scrolled child of the artist gallery. Normally holds [`Self::artists_gallery`]
-    /// as a single grid; when sorting by name it holds alphabetically grouped
-    /// sections (a heading + a `FlowBox` per initial). Mirrors the album gallery.
-    pub(crate) artists_gallery_box: gtk::Box,
-    /// Per-row alphabetical section heading of the artist **list** (sorted order)
-    /// when sorting by name; drives the `set_header_func`. `None` = no grouping.
-    pub(crate) artist_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    /// Artist overview (same order); index resolution for the gallery.
-    pub(crate) artists_overview: Vec<crate::model::ArtistMeta>,
-    pub(crate) artist_count: usize,
-    /// Per-row alphabetical section headings of the concert/audiobook **lists**
-    /// (sorted order) when sorting by name; drive their `set_header_func`. `None`
-    /// = no grouping. Mirrors [`Self::album_headers`] for those entry lists.
-    pub(crate) concert_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    pub(crate) audiobook_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    /// Per-row alphabetical headings of the favorites/playlists/memo/files lists
-    /// (sorted order, name sort); drive their `set_header_func`. `None` = no grouping.
-    pub(crate) favorite_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    pub(crate) playlist_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    pub(crate) memo_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    pub(crate) files_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
-    /// Per-section sort state (criterion + `desc` direction), keyed by the
-    /// view-stack section name. Only the [`SORTABLE_SECTIONS`] have an entry;
-    /// a missing entry means the default (by name, ascending).
-    pub(crate) sort: std::collections::HashMap<&'static str, (SortCrit, bool)>,
-    /// Per-section "no grouping" flag: when set, the overview is sorted but not
-    /// split into section headings (the flat look from before grouping existed).
-    /// Keyed like [`Self::sort`]; a missing/`false` entry means grouped.
-    pub(crate) no_group: std::collections::HashMap<&'static str, bool>,
-    /// Show lists as a gallery (cover grid) instead of a list (global default).
-    pub(crate) gallery_view: bool,
-    /// Per-section gallery override (sort popover's "Gallery view" toggle): a
-    /// section with an entry uses it instead of the global [`Self::gallery_view`];
-    /// a missing entry follows the global flag. Keyed like [`Self::sort`].
-    pub(crate) section_gallery: std::collections::HashMap<&'static str, bool>,
-    /// Number of tiles per row in the gallery view (2–8).
-    pub(crate) gallery_columns: u32,
-    pub(crate) loading: bool,
-    /// Custom text for the loading overlay (e.g. while a YouTube playlist loads);
-    /// `None` falls back to the default "Reading music data".
-    pub(crate) loading_label: Option<String>,
-    /// Galleries (artist/album) for which an on-demand fetch already ran this session.
-    pub(crate) gallery_tried: std::cell::RefCell<std::collections::HashSet<String>>,
-    /// The album track-list subpage currently rendered. Kept so a late
-    /// MusicBrainz tracklist fetch — or a freshly downloaded missing track — can
-    /// refill the same content box in place (no navigation flicker). `RefCell`
-    /// because the renderer runs behind a `&self`.
-    pub(crate) album_page:
-        std::rc::Rc<std::cell::RefCell<Option<crate::ui::app_views::AlbumPageRef>>>,
-    /// Modal phase-spinner shown while a missing track is searched/downloaded;
-    /// the label is updated as the phase advances, and it is closed when done.
-    pub(crate) missing_busy: Option<(adw::Dialog, gtk::Label)>,
-    /// Play/pause controls of the rows on the *subpages* (artist, album,
-    /// playlist). One shared registry: those pages come and go with the
-    /// navigation, and a control whose row was dropped with its page is
-    /// discarded on the next pass, so nothing has to clear this. Keyed like the
-    /// entry lists (see [`crate::ui::app_favorites::mark_key`]).
-    pub(crate) page_marks: crate::ui::play_mark::Marks,
-}
-
-impl LibView {
-    /// Text shown beneath the loading spinner: the custom label if set, else the
-    /// default. Used by the overlay both for the local library and remote loads.
-    pub(crate) fn loading_text(&self) -> String {
-        self.loading_label
-            .clone()
-            .unwrap_or_else(|| gettext("Reading music data"))
-    }
-
-    /// The remembered sort of a section (criterion + `desc`), defaulting to
-    /// name-ascending when the section has no stored choice yet.
-    pub(crate) fn sort_for(&self, section: &str) -> (SortCrit, bool) {
-        self.sort
-            .get(section)
-            .copied()
-            .unwrap_or((SortCrit::Name, false))
-    }
-
-    /// Whether the user disabled section grouping for `section` (sort the rows
-    /// but don't split them under headings). Defaults to grouped.
-    pub(crate) fn grouping_off(&self, section: &str) -> bool {
-        self.no_group.get(section).copied().unwrap_or(false)
-    }
-
-    /// Whether `section` shows the gallery (cover grid). A per-section override
-    /// (set in the sort popover) wins; otherwise the global [`Self::gallery_view`]
-    /// applies. Used by the sortable sections' list/gallery visibility + reloads.
-    pub(crate) fn gallery_on(&self, section: &str) -> bool {
-        self.section_gallery
-            .get(section)
-            .copied()
-            .unwrap_or(self.gallery_view)
-    }
-}
-
-/// Playback transport: queue, shuffle order, history, resume/stats sessions.
-pub(crate) struct TransportState {
-    /// Active playback context: the album/artist/folder/track currently being
-    /// played through. Replaced freely whenever the user starts something new.
-    pub(crate) queue: Vec<PathBuf>,
-    pub(crate) queue_pos: usize,
-    /// Explicitly enqueued tracks ("Add to queue"). This is the user-curated
-    /// queue shown in the queue dialog – it is **never** overwritten by simply
-    /// playing an album/song. Its entries jump ahead of the rest of the context
-    /// (spliced in by `play_next`) and are consumed as they play.
-    pub(crate) user_queue: Vec<PathBuf>,
-    pub(crate) shuffle: bool,
-    /// Random order of the queue indices (Fisher-Yates) for shuffle.
-    pub(crate) shuffle_order: Vec<usize>,
-    /// Position within `shuffle_order`.
-    pub(crate) shuffle_idx: usize,
-    /// Repeat: at the end of the queue / single track, start over.
-    pub(crate) repeat: bool,
-    /// Recently played tracks (for stepping back across playback contexts).
-    pub(crate) play_history: Vec<PathBuf>,
-    /// When jumping back out of history, do not write to the history again.
-    pub(crate) skip_history_push: bool,
-    /// Queue paused while a single song is played in between (list + position).
-    pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
-    /// Back stack of displaced playback contexts (queue + position).
-    pub(crate) nav_stack: Vec<(Vec<PathBuf>, usize)>,
-    /// Context last played by `play_current` (to detect queue replacement).
-    pub(crate) prev_ctx: Option<(Vec<PathBuf>, usize)>,
-    /// Path of the track currently loaded into the player.
-    pub(crate) playing_path: Option<PathBuf>,
-    /// Snapshot (path, position, duration) of the running resume track.
-    pub(crate) close_resume: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64)>>>,
-    /// One-shot source tag for the **next** listening session (consumed by
-    /// `start_play_session`). Set right before a single-track start to mark it
-    /// `"single"`, so playing one song doesn't inflate its album in the stats;
-    /// `None` (whole albums, queues, history) counts towards the album normally.
-    pub(crate) next_source: Option<&'static str>,
-    /// Ongoing listening session for the statistics (see [`PlaySession`]).
-    pub(crate) play_session: Option<PlaySession>,
-    /// Snapshot of the session for close (path, start, listened, duration).
-    pub(crate) close_session: std::rc::Rc<std::cell::RefCell<Option<(String, i64, i64, i64)>>>,
-    /// List in the queue dialog (rebuilt on changes).
-    pub(crate) queue_list: gtk::ListBox,
-    /// Play controls of the queue rows, so a play/pause elsewhere flips them
-    /// without the dialog being rebuilt (see [`crate::ui::play_mark::Marks`]).
-    pub(crate) queue_marks: crate::ui::play_mark::Marks,
-    /// Consecutive unplayable tracks skipped since the last successful start.
-    /// Bounds auto-skipping so an entirely unplayable queue stops instead of
-    /// looping (see [`App::skip_current_track`]).
-    pub(crate) skip_count: u32,
-    /// One-shot start position (ms) for the next `play_current`, overriding the
-    /// saved resume position. Used by the recording editor's "play from the
-    /// playhead" preview. Consumed (reset to `None`) on use.
-    pub(crate) forced_start_ms: Option<i64>,
-}
-
-/// Mini-player / now-playing strip state, grouped off the `App` god-object.
-pub(crate) struct MiniState {
-    /// Title shown in the player bar; `None` when nothing is loaded.
-    pub(crate) now_playing: Option<String>,
-    /// Album of the running **local** track, if it has one — drives the album
-    /// shortcut in the player bar. `None` for streams/podcasts/YouTube/cloud.
-    pub(crate) current_album: Option<String>,
-    pub(crate) playing: bool,
-    /// A slow source (Nextcloud/YouTube) is resolving/buffering: show a spinner
-    /// in the play button until the pipeline is ready. Local files start fast
-    /// enough that a spinner would only flicker, so it stays off for them.
-    pub(crate) loading: bool,
-    /// Current position and total duration of the running track (ms).
-    pub(crate) position_ms: i64,
-    pub(crate) track_duration_ms: i64,
-    /// Playback speed (0.25–2.0, pitch-preserving). Not used for live streams.
-    pub(crate) playback_rate: f64,
-    /// Seek bar of the mini player (for chapter marks via `add_mark`).
-    pub(crate) seek_scale: gtk::Scale,
-    /// Label that, on hover over the seek bar, shows the chapter at the cursor.
-    pub(crate) chapter_label: gtk::Label,
-    /// Chapters (time + name) of the running episode.
-    pub(crate) chapters: std::rc::Rc<std::cell::RefCell<Vec<(i64, String)>>>,
-    /// Is the seek bar currently being hovered?
-    pub(crate) hovering_seek: std::rc::Rc<std::cell::Cell<bool>>,
-}
-
-/// Sleep-timer state. When `remaining_s` is set, playback pauses once it counts
-/// down to zero, fading out over the final [`crate::ui::app_sleep::SLEEP_FADE_S`]
-/// seconds. `until_track_end` instead stops after the current track (no fade).
-/// The countdown only advances while actually playing (see [`App::sleep_tick`]).
-#[derive(Default)]
-pub(crate) struct SleepState {
-    /// Seconds left until playback pauses; `None` = no timed sleep armed.
-    pub(crate) remaining_s: Option<i64>,
-    /// Stop at the end of the current track instead of after a fixed time.
-    pub(crate) until_track_end: bool,
-    /// Header menu button (gets the "sleep-armed" CSS class while a timer runs).
-    pub(crate) button: gtk::MenuButton,
-    /// Status label inside the popover ("Off" / "Pauses in 28:30").
-    pub(crate) status_label: gtk::Label,
-}
-
-/// A sleep-timer choice from the header popover.
-#[derive(Debug, Clone, Copy)]
-pub enum SleepChoice {
-    /// Cancel any running sleep timer.
-    Off,
-    /// Pause after this many minutes (with a fade-out over the final stretch).
-    Minutes(i64),
-    /// Stop once the current track finishes (no fade).
-    EndOfTrack,
-}
-
-/// Lyrics for the currently playing track + the open karaoke view, grouped off
-/// the `App` god-object. See [`crate::ui::app_lyrics`].
-pub(crate) struct LyricsState {
-    /// Parsed lyrics of the running track, once loaded (embedded/cache/online).
-    pub(crate) current: Option<crate::core::lyrics::Lyrics>,
-    /// Path the `current` lyrics belong to – guards against stale async results
-    /// arriving after the track has already changed.
-    pub(crate) for_path: Option<String>,
-    /// Live karaoke view while the lyrics dialog is open.
-    pub(crate) view: Option<LyricsView>,
-    /// Pending lyrics pulldown in an open file-info dialog, filled when an online
-    /// fetch for that file returns: the path it was opened for plus the (hidden)
-    /// label + group to reveal. `Rc<RefCell>` because the dialog is built from a
-    /// `&self` method.
-    pub(crate) file_pending:
-        std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Label, adw::PreferencesGroup)>>>,
-}
-
-/// Widgets of the open karaoke dialog, kept so each tick can move the highlight
-/// and auto-scroll without rebuilding anything.
-pub(crate) struct LyricsView {
-    /// One label per synced line (same order/length as `current.synced`).
-    pub(crate) lines: Vec<gtk::Label>,
-    /// Scroller around the lines (for auto-scrolling the active line into view).
-    pub(crate) scroller: gtk::ScrolledWindow,
-    /// Vertical box holding the line labels (parent for bounds computation).
-    pub(crate) container: gtk::Box,
-    /// Currently highlighted line index (skip redundant updates).
-    pub(crate) active: Option<usize>,
-    /// Fine-grained timer driving the highlight; removed when the dialog closes.
-    pub(crate) timer: Option<gtk::glib::SourceId>,
-    /// The dialog itself, so reopening can close a stale one.
-    pub(crate) dialog: adw::Dialog,
-    /// Whether timed karaoke highlighting is active (off → static lyrics, no
-    /// timer). Persisted per track in `lyrics_pref`.
-    pub(crate) karaoke: bool,
-    /// Manual karaoke timing offset in ms (+ = lyrics shown later). Persisted
-    /// per track.
-    pub(crate) delay_ms: i64,
-    /// Header label that shows the current delay (updated by the +/− buttons).
-    pub(crate) delay_label: gtk::Label,
-}
-
-/// Navigation + layout chrome, grouped off the `App` god-object.
-pub(crate) struct NavState {
-    /// Main split view – collapsed (`is_collapsed`) means narrow/mobile mode.
-    pub(crate) split: adw::OverlaySplitView,
-    pub(crate) view_stack: adw::ViewStack,
-    /// Title-bar sort button; its popover is (re)built per section in
-    /// [`App::rebuild_sort_menu`], and it's hidden on non-sortable sections.
-    pub(crate) sort_btn: gtk::MenuButton,
-    /// Sort popovers handed up from the component pages (Podcasts/Streaming/
-    /// YouTube), which keep their own sort state. The shared [`Self::sort_btn`]
-    /// adopts the matching one when its section is active (see
-    /// [`App::apply_component_sort`]).
-    pub(crate) podcast_sort: crate::ui::app_sort::SortSlot,
-    pub(crate) stream_sort: crate::ui::app_sort::SortSlot,
-    pub(crate) yt_sort: crate::ui::app_sort::SortSlot,
-    /// Navigation container for the subpages (artist → albums → album).
-    pub(crate) nav_view: adw::NavigationView,
-    /// Navigation containers (sidebar, top bar) for reordering.
-    pub(crate) sidebar_nav: gtk::Box,
-    pub(crate) top_nav: gtk::Box,
-    /// All navigation buttons per menu item with container marker
-    /// (`true` = sidebar, `false` = top bar), for showing/hiding and reordering.
-    pub(crate) nav_buttons: Vec<(&'static str, bool, gtk::ToggleButton)>,
-    /// Display order of the menu items (stack names). Reorderable by the user.
-    pub(crate) section_order: Vec<&'static str>,
-    /// Hidden navigation menu items (stack names).
-    pub(crate) hidden_sections: std::collections::HashSet<String>,
-    /// Target of the open context/detail dialog.
-    pub(crate) context_target: Option<CtxTarget>,
-    /// Play row of the open detail dialog + its track path (hidden while playing).
-    pub(crate) ctx_play: std::rc::Rc<std::cell::RefCell<Option<(adw::ActionRow, PathBuf)>>>,
-    /// The open context/detail dialog, so a cover/photo change can rebuild it in
-    /// place (close + re-open) and the new image shows immediately.
-    pub(crate) ctx_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
-    /// Remembered scroll position of the most recently left overview page.
-    pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
-    /// Narrow/mobile layout active (driven by the width breakpoint). The source
-    /// of truth for [`App::is_narrow`]; the split's `collapsed` is derived from
-    /// this **and** `nav_hidden`, so it can't be used to detect narrowness.
-    pub(crate) narrow: std::rc::Rc<std::cell::Cell<bool>>,
-    /// Only one menu item is visible → the whole navigation is suppressed
-    /// (sidebar collapsed, top bar hidden, Settings moved to the title bar).
-    pub(crate) nav_hidden: std::rc::Rc<std::cell::Cell<bool>>,
-    /// Reconciles the layout chrome (sidebar/top-nav/Settings visibility) with
-    /// the current `narrow` + `nav_hidden` state. Set up in `init`.
-    pub(crate) apply_chrome: std::rc::Rc<dyn Fn()>,
-}
-
-/// File browser + extra music sources (2nd local folder / Nextcloud) state.
-pub(crate) struct FilesState {
-    pub(crate) music_dir: Option<String>,
-    pub(crate) root_dir: Option<PathBuf>,
-    pub(crate) browse_dir: Option<PathBuf>,
-    /// Folder currently shown in the file browser (remembers scroll position).
-    pub(crate) shown_dir: Option<PathBuf>,
-    /// Remembered scroll positions per folder in the file browser.
-    pub(crate) fs_scroll: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<PathBuf, f64>>>,
-    /// Extra music sources (2nd local folder / Nextcloud), from the `source` table.
-    pub(crate) sources: Vec<Source>,
-    /// Source active in the file view (primary = `music_dir`).
-    pub(crate) active_source: ActiveSource,
-    /// Tab bar above the file list (linked ToggleButtons).
-    pub(crate) source_tabs: gtk::Box,
-    /// Tab buttons per source (incl. primary), for mirroring the active state.
-    pub(crate) source_tab_buttons: Vec<(ActiveSource, gtk::ToggleButton)>,
-    /// Current subpath in the remote source (leading slash; `""` = root).
-    pub(crate) remote_browse: Option<String>,
-    /// Last remote (WebDAV) listing error for the active source, shown as a
-    /// persistent status in the file view (so the user sees *why* it is empty,
-    /// not just a blank list). `None` while a remote load is fine or pending.
-    pub(crate) remote_error: Option<String>,
-    /// Remote (cloud) playback queue of the most recently opened folder.
-    pub(crate) remote_queue: Vec<RemoteTrack>,
-    pub(crate) remote_pos: usize,
-    /// Is a remote file currently playing (instead of local queue/episode/station)?
-    pub(crate) playing_remote: bool,
-}
-
-/// Streaming transport + timeshift-recording state owned by `App`. The
-/// internet-radio *page* (station list, dialogs, search, recordings list) lives
-/// in the [`crate::ui::stream_page`] component; what stays here is the running
-/// station + the background timeshift recorder, which the player bar, the 1-s
-/// tick and the replay subpage all reach.
-pub(crate) struct StreamingState {
-    /// ID of the currently running station; `None` when nothing/other is running.
-    pub(crate) playing_stream: Option<i64>,
-    /// Currently running track of the station (ICY metadata) for "Now Playing".
-    pub(crate) stream_title: Option<String>,
-    /// Timeshift recording of the running station (ring buffer); `None` if no
-    /// station is running or the buffer is set to 0 minutes.
-    pub(crate) recorder: Option<crate::core::recorder::Recorder>,
-    /// Active recording (state machine that saves at the song boundaries).
-    pub(crate) record_state: Option<crate::ui::app_streaming::RecordState>,
-    /// Size of the timeshift buffer in minutes (0 = off, max. 60).
-    pub(crate) recording_buffer_minutes: u32,
-    /// Modal spinner shown while a "Recently heard" song is being resolved
-    /// online (no local copy → YouTube lookup). Closed when the result arrives.
-    pub(crate) resolve_busy: Option<adw::Dialog>,
-}
-
-/// Podcast playback state owned by the transport. The podcast *page* (lists,
-/// dialogs, search, downloads) now lives in [`crate::ui::podcasts_page`]; the
-/// only thing the transport still owns is which episode is currently loaded.
-pub(crate) struct PodcastsState {
-    /// URL of the currently loaded podcast episode (the canonical "an episode is
-    /// playing" marker, read across the transport); `None` when music/another
-    /// source is playing or no episode is running. The page keeps a mirror of
-    /// this (pushed via `PodcastsInput::PlaybackStateChanged`) for its row icons.
-    pub(crate) playing_episode_url: Option<String>,
-}
-
-/// YouTube transport + yt-dlp/settings state owned by `App`. The YouTube *page*
-/// (lists, dialogs, search, downloads) lives in the [`crate::ui::yt_page`]
-/// component; what stays here is the transport's "now playing" markers and the
-/// yt-dlp installation/settings state (driven by the settings dialog). The whole
-/// section is gated behind the `youtube_enabled` setting.
-pub(crate) struct YoutubeState {
-    /// Whether the user enabled the YouTube feature (off by default).
-    pub(crate) enabled: bool,
-    /// Installed `yt-dlp` version (cached for the settings status; `None` if not
-    /// installed/runnable).
-    pub(crate) ytdlp_version: Option<String>,
-    /// The yt-dlp row in the open settings dialog (status subtitle).
-    pub(crate) settings_status: std::rc::Rc<std::cell::RefCell<Option<adw::ActionRow>>>,
-    /// Download/update button of the yt-dlp row in the open settings dialog.
-    pub(crate) settings_dl_btn: std::rc::Rc<std::cell::RefCell<Option<gtk::Button>>>,
-    /// Whether a yt-dlp download/update is currently running (ignore repeat taps).
-    pub(crate) ytdlp_busy: bool,
-    /// Video id currently loaded/playing (the canonical "a video is playing"
-    /// marker, read across the transport). The page keeps a mirror (pushed via
-    /// `YtInput::PlaybackStateChanged`) for its row icons.
-    pub(crate) playing_video_id: Option<String>,
-    /// Titles for the videos in the current play context (video id → title), so
-    /// `yt:` tracks not in the library show a name instead of their id.
-    pub(crate) video_titles: std::collections::HashMap<String, String>,
-    /// Whether the current play context is a YouTube playlist – then individual
-    /// videos are not logged to "Recent" (the playlist is logged as one entry).
-    pub(crate) playing_playlist: bool,
-    /// Position the next start of this video should begin at (video id, ms) —
-    /// set when a jump mark in the description was tapped, and preferred over
-    /// the stored resume position for that one start.
-    pub(crate) pending_seek: Option<(String, i64)>,
-    /// Live progress toast shown while adding video(s) to the on-disk library
-    /// (the page requests it via `YtOutput::Progress`; the toast lives on the
-    /// parent overlay).
-    pub(crate) progress_toast: std::rc::Rc<std::cell::RefCell<Option<adw::Toast>>>,
-}
-
-/// Favorites + audiobooks page state, grouped off the `App` god-object.
-pub(crate) struct FavoritesState {
-    /// Favorites: (scope, key, title, is_dir).
-    pub(crate) favorite_items: Vec<(String, String, String, bool)>,
-    pub(crate) favorites_list: gtk::ListBox,
-    /// Play/pause controls of the favorites rows (see [`crate::ui::play_mark`]).
-    pub(crate) favorite_marks: crate::ui::play_mark::Marks,
-    /// Gallery variant of the favorites (cover grid), like the audiobooks.
-    pub(crate) favorites_gallery: gtk::FlowBox,
-    pub(crate) favorites_gallery_box: gtk::Box,
-    /// Audiobooks: (scope, key, title, is_dir).
-    pub(crate) audiobook_items: Vec<(String, String, String, bool)>,
-    pub(crate) audiobooks_list: gtk::ListBox,
-    /// Play/pause controls of the audiobook rows.
-    pub(crate) audiobook_marks: crate::ui::play_mark::Marks,
-    /// Gallery variant of the audiobooks (cover grid). The box is the scrolled
-    /// child and holds either the single grid or alphabetically grouped sections
-    /// (see [`App::fill_sectioned_gallery`]); the flow box is the reusable grid.
-    pub(crate) audiobooks_gallery: gtk::FlowBox,
-    pub(crate) audiobooks_gallery_box: gtk::Box,
-}
-
-/// Playlists page state, grouped off the `App` god-object.
-pub(crate) struct PlaylistsState {
-    /// (id, name, track count) per playlist.
-    pub(crate) playlist_items: Vec<(i64, String, i64)>,
-    pub(crate) playlists_list: gtk::ListBox,
-    /// Gallery variant of the playlists (derived-cover grid), like the audiobooks.
-    pub(crate) playlists_gallery: gtk::FlowBox,
-    pub(crate) playlists_gallery_box: gtk::Box,
-}
-
-/// Concerts page state, grouped off the `App` god-object.
-pub(crate) struct ConcertsState {
-    /// Concerts/audiobooks entries: (scope, key, title, is_dir) – like favorites.
-    pub(crate) concert_items: Vec<(String, String, String, bool)>,
-    pub(crate) concerts_list: gtk::ListBox,
-    /// Play/pause controls of the concert rows.
-    pub(crate) concert_marks: crate::ui::play_mark::Marks,
-    /// Gallery variant of the concerts (cover grid). The box is the scrolled
-    /// child and holds either the single grid or alphabetically grouped sections
-    /// (see [`App::fill_sectioned_gallery`]); the flow box is the reusable grid.
-    pub(crate) concerts_gallery: gtk::FlowBox,
-    pub(crate) concerts_gallery_box: gtk::Box,
-    pub(crate) concert_hint_dismissed: bool,
-}
-
-/// Online-enrichment state, grouped off the `App` god-object.
-pub(crate) struct EnrichState {
-    /// Is an enrichment run currently in progress? (prevents parallel runs; without
-    /// a visible progress indicator – the fetch runs silently in the background).
-    pub(crate) enriching: bool,
-    /// Automatically fetch covers & metadata online at startup (only on a
-    /// non-metered connection; can be disabled in the settings).
-    pub(crate) auto_enrich: bool,
-    /// Cancel flag for the enrichment worker.
-    pub(crate) enrich_cancel: Arc<AtomicBool>,
-    pub(crate) acoustid_key: Option<String>,
-    pub(crate) fanart_key: Option<String>,
-}
-
-/// App-wide preferences, grouped off the `App` god-object.
-pub(crate) struct Settings {
-    /// Display language: "system" (system locale), "de" or "en". Can be
-    /// switched in the settings; takes effect after restarting the app.
-    pub(crate) ui_language: String,
-    /// Currently active audio output (PipeWire sink), for the EQ resolution.
-    pub(crate) active_output: String,
-    /// Gapless playback for sequential local queues (default on).
-    pub(crate) gapless: bool,
-    /// Crossfade window in seconds between tracks (0 = off, default off).
-    pub(crate) crossfade_secs: f64,
-}
+use crate::ui::fs_row::{FsEntry, FsInput, FsOutput};
 
 pub struct App {
-    /// Gates the per-second tick: the timer only delivers `Msg::Tick` while this
+    /// Gates the per-second tick: the timer only delivers `Msg::Transport(TransportMsg::Tick)` while this
     /// is set (playing or recording). When idle it stays unset, so the app does
     /// no per-second work — and triggers no full per-second view re-render.
     pub(crate) tick_active: std::rc::Rc<std::cell::Cell<bool>>,
@@ -1097,7 +125,7 @@ pub struct App {
     /// via `PodcastsOutput` and is told the state back via `PlaybackStateChanged`.
     pub(crate) podcasts_page: relm4::Controller<crate::ui::podcasts_page::PodcastsPage>,
     /// Hand-off slot for episode subpages built by the PodcastsPage component
-    /// (read in `Msg::PushPodcastSubpage`, then pushed onto the shared nav).
+    /// (read in `Msg::Podcast(PodcastMsg::PushPodcastSubpage)`, then pushed onto the shared nav).
     pub(crate) podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
     /// YouTube page, extracted into its own relm4 component. Transport + yt-dlp
     /// settings stay on `App` (see `app_yt_glue.rs`).
@@ -1117,35 +145,6 @@ pub struct App {
     pub(crate) media_popup: Option<crate::ui::tray_popup::MediaPopup>,
     /// Embedded MCP server state (now-playing snapshot + stop flag).
     pub(crate) mcp: McpState,
-}
-
-/// Desktop tray-icon options + the running service handle. The bool prefs are
-/// persisted; `handle`/`hold` are live runtime state (see `src/ui/app_tray.rs`).
-pub(crate) struct TrayState {
-    /// Show a StatusNotifierItem tray icon.
-    pub(crate) enabled: bool,
-    /// Closing the window hides it into the tray instead of quitting.
-    pub(crate) close_hides: bool,
-    /// Start with the window hidden (tray only).
-    pub(crate) start_hidden: bool,
-    /// Suppress the taskbar entry even while the window is visible (X11 only).
-    pub(crate) skip_taskbar: bool,
-    /// Show the tray icon desaturated (grayscale pixmap) instead of colored.
-    pub(crate) icon_gray: bool,
-    /// Running ksni service handle (for live menu updates); `None` when off.
-    pub(crate) handle: Option<ksni::Handle<crate::core::tray::EmiliaTray>>,
-    /// App-hold guard keeping the process alive while only the tray remains.
-    pub(crate) hold: Option<gtk::gio::ApplicationHoldGuard>,
-}
-
-/// Embedded MCP server runtime state. `now` is the snapshot the server thread
-/// reads (published from the UI thread); `stop` flags a running backend to shut
-/// down. See [`crate::ui::app_mcp`].
-pub(crate) struct McpState {
-    pub(crate) now: crate::core::mcp::NowPlayingHandle,
-    /// Background-job registry (downloads), kept across server restarts.
-    pub(crate) jobs: std::sync::Arc<crate::core::mcp::jobs::Jobs>,
-    pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[derive(Debug)]
@@ -1170,7 +169,6 @@ pub enum Msg {
     ShowSingleDetail(usize),
     ShowCompilationTracks(usize),
     ShowCompilationDetail(usize),
-    ShowConcertDetail(usize),
     /// Short tap on an artist: list its albums & songs.
     OpenArtistTracks(usize),
     /// Tap on an album in the artist subpage: list its tracks as
@@ -1248,25 +246,6 @@ pub enum Msg {
     PlayAlbumAt(usize),
     PlaySingleAt(usize),
     PlayCompilationAt(usize),
-    CtxPlay,
-    /// Play the album in track order (shuffle off, stop at the end).
-    CtxPlayAlbum,
-    /// Play all tracks of the artist: albums by year (newest or
-    /// oldest first), each album from track 1 top-down (shuffle off).
-    CtxPlayArtist {
-        newest_first: bool,
-    },
-    CtxAddQueue,
-    CtxAddPlaylist,
-    CtxEqualizer,
-    CtxShare,
-    /// Detail view's refresh button: re-fetch the cover/metadata of the open
-    /// target and rebuild the detail view.
-    CtxRefresh,
-    /// Share a ready-made selection over device sync (from the station / podcast
-    /// / playlist / YouTube detail views). Same path as the music "Share": size
-    /// confirmation when paired, otherwise open pairing.
-    ShareItems(crate::core::sync::share::Selection),
     /// Header sync icon → open the pairing / connection-status dialog (no item).
     OpenSync,
     // --- Device synchronization (handled by the SyncPage component) ---
@@ -1274,12 +253,6 @@ pub enum Msg {
     SyncConnected(bool),
     /// The sync component imported metadata → reload the affected views.
     SyncImported,
-    TrackFinished,
-    /// The active deck moved to the next queue track **gaplessly** (driven by
-    /// `playbin3`'s `about-to-finish`); advance the app's state to match.
-    GaplessAdvanced,
-    /// Periodic tick: save the resume position of the running track.
-    PersistResume,
     /// Command from the lock screen / from media keys (MPRIS).
     Mpris(crate::core::mpris::MprisCommand),
     /// Command from the embedded MCP server (see [`crate::ui::app_mcp`]).
@@ -1287,50 +260,17 @@ pub enum Msg {
     /// MCP-server settings (backend mode / LAN exposure / bearer token)
     /// (see [`crate::ui::app_mcp`]).
     McpSetting(crate::ui::app_mcp::McpSettingMsg),
-    /// 1-s tick: update position/duration of the seek bar.
-    Tick,
     /// Periodic, quiet background backfill: fetch missing artist photos (first)
     /// and online covers, without the user having to trigger it.
     AutoEnrichTick,
     /// On-demand fingerprint track recognition for the **just started**
     /// track without usable metadata (AcoustID), triggered on play.
     FingerprintCurrent(PathBuf),
-    /// Load lyrics for the just-started track: check embedded tags + the DB
-    /// cache, then fetch from LRCLIB in the background if needed.
-    LoadLyrics(PathBuf),
-    /// Open the karaoke dialog for the running track's synced lyrics.
-    ShowLyrics,
-    /// Fine-grained karaoke tick: refresh the highlighted line while the dialog
-    /// is open (no-op otherwise).
-    LyricsTick,
-    /// The karaoke dialog was closed: stop its timer and drop the view.
-    LyricsClosed,
-    /// Seek the song to a clicked karaoke line (its LRC timestamp in ms; the
-    /// current delay offset is applied by the handler).
-    LyricsSeek(i64),
-    /// Toggle timed karaoke highlighting for the running track (persisted).
-    LyricsToggleKaraoke,
-    /// Nudge the karaoke timing offset by the given ms (+ = later); persisted.
-    LyricsDelayAdjust(i64),
-    /// Online lyrics for an open file-info dialog returned (path + lyrics).
-    FileLyricsFetched {
-        path: String,
-        lyrics: Option<crate::core::lyrics::Lyrics>,
-    },
-    /// Jump to a position (ms) by dragging/clicking the seek bar.
-    Seek(i64),
-    Next,
-    Prev,
-    ToggleShuffle,
-    ToggleRepeat,
     NavUp,
     FilesGoStart,
     Refresh,
     /// Cancel the running library scan (the import progress "Cancel" button).
     ScanCancel,
-    TogglePlay,
-    /// Open the detail view of the currently running track (click on the bar).
-    OpenNowPlaying,
     OpenSettings,
     /// Set or clear the sleep timer (from the header zzz popover).
     SetSleepTimer(SleepChoice),
@@ -1351,174 +291,25 @@ pub enum Msg {
         path: String,
         title: String,
     },
-    /// Open the queue dialog.
-    ShowQueue,
-    /// Open the song page of the album currently playing (player-bar shortcut).
-    ShowCurrentAlbum,
     /// Back arrow in the shared header: pop the current subpage.
     NavBack,
-    /// Play a user-queue entry now (its index + length; album rows span `len`
-    /// tracks). The entry jumps ahead of the rest of the queue.
-    PlayQueueAt {
-        start: usize,
-        len: usize,
-    },
-    /// Set the playback speed (0.25–2.0, in 0.25 steps).
-    SetPlaybackRate(f64),
-    /// The current track failed to play (missing file/mount, unreachable
-    /// Nextcloud, …) → skip to the next entry.
-    PlaybackError,
-    /// The freshly loaded pipeline prerolled (buffered enough to play) → clear
-    /// the loading spinner of a slow source (Nextcloud/YouTube).
-    PlaybackReady,
-    /// Clear the user queue (after confirmation). Playback keeps running.
-    QueueClear,
-    /// Reorder the user queue: move the `len`-track block starting at `from` so
-    /// it lands at index `to` (album rows move as one block).
-    QueueMoveRange {
-        from: usize,
-        len: usize,
-        to: usize,
-    },
-    SetMusicDir(PathBuf),
-    /// The first-run setup assistant completed: persist the chosen language,
-    /// music folder and enabled menu items, then scan (or restart for a language
-    /// change).
-    SetupFinished {
-        lang_code: String,
-        music_dir: PathBuf,
-        enabled_sections: Vec<String>,
-    },
     /// Music sources (Files tab bar: extra local folders / Nextcloud)
     /// (see [`crate::ui::app_views_sources`]).
     Source(crate::ui::app_views_sources::SourceMsg),
-    SetAcoustidKey(String),
-    /// Set the primary cover of an album (last shown in the gallery carousel).
-    SetAlbumCover {
-        artist: String,
-        album: String,
-        path: String,
-    },
-    /// Set the primary photo of an artist (last shown in the gallery carousel).
-    SetArtistImage {
-        name: String,
-        path: String,
-    },
-    /// Image long-press/right-click: ask whether to upload, remove, or cancel.
-    CoverOptions,
-    /// Upload a custom cover/photo for the current detail target (file dialog).
-    UploadCover,
-    /// Remove the stored cover/photo of the current detail target.
-    RemoveCover,
-    SetFanartKey(String),
-    /// Turn the automatic online fetch on/off.
-    SetAutoEnrich(bool),
-    /// Change the display language ("system"/"de"/"en"); restarts the app.
-    SetLanguage(String),
-    /// Remember the last opened settings category (page name) so the settings
-    /// dialog reopens on it.
-    SetLastSettingsPage(String),
     /// Appearance / design: scaling, colours, background (see [`crate::ui::theme`]).
     Design(crate::ui::theme::DesignMsg),
     /// Desktop tray icon: settings + click actions (see [`crate::ui::app_tray`]).
     Tray(crate::ui::app_tray::TrayMsg),
-    /// Gapless playback on/off (settings); persisted + pushed to the player.
-    SetGapless(bool),
-    /// Crossfade window in seconds (settings); persisted + pushed to the player.
-    SetCrossfade(f64),
     /// Sort + gallery: the title-bar sort popover, the global gallery view, and
     /// the page `*Changed` mirrors (see [`crate::ui::app_sort`]).
     Sort(crate::ui::app_sort::SortMsg),
-    /// Set a property of a level (or with `None` reset to "inherit").
-    /// Set the areas (properties) of a level; empty value = hidden.
-    SetAreas {
-        scope: &'static str,
-        key: String,
-        value: String,
-    },
-    /// Override an album's classification (Singles/Compilations) from the album
-    /// context menu; `kind` = `None` reverts to the automatic heuristic.
-    SetAlbumKind {
-        album: String,
-        kind: Option<crate::model::AlbumKind>,
-    },
     /// Equalizer: set / enable / clear bands per output × level
     /// (see [`crate::ui::app_eq`]).
     Eq(crate::ui::app_eq::EqMsg),
-    // Concerts
-    ConcertImport,
-    ConcertDismissHint,
-    ConcertHideSection,
-    ConcertAdd(Vec<(String, String, bool)>),
-    PlayConcert(usize),
-    /// Open gallery concert (index): album/folder → track list, track → play.
-    OpenConcertEntry(usize),
-    /// Show/hide a navigation menu item (stack name).
-    SetSectionVisible {
-        section: &'static str,
-        visible: bool,
-    },
-    /// Move a menu item in the order (indices in `section_order`).
-    MoveSection {
-        from: usize,
-        to: usize,
-    },
-    /// Show a hidden content again (reset the override).
-    UnhideEntry {
-        scope: String,
-        key: String,
-    },
-    // Favorites
-    /// Set/remove the current detail target as a favorite.
-    ToggleFavorite,
-    /// Play a favorite (index in `favorite_items`).
-    PlayFavorite(usize),
-    /// Open the detail view of a favorite.
-    ShowFavoriteDetail(usize),
-    /// Reorder favorites (indices in `favorite_items`).
-    MoveFavorite {
-        from: usize,
-        to: usize,
-    },
-    // Audiobooks
-    /// Play an audiobook (index in `audiobook_items`).
-    PlayAudiobook(usize),
-    /// Open gallery audiobook (index): album/folder → track list, track → play.
-    OpenAudiobookEntry(usize),
-    /// Open the detail view of an audiobook.
-    ShowAudiobookDetail(usize),
     // Playlists
     /// Playlists section: create / open / play / rename / delete + cover
     /// (see [`crate::ui::app_playlist`]).
     Playlist(crate::ui::app_playlist::PlaylistMsg),
-    // Podcasts (episode playback only; the page lives in the PodcastsPage
-    // component — these two are mapped from its `Output`).
-    /// Toggle an episode: start or – if already the running one – pause/resume.
-    ToggleEpisode {
-        url: String,
-        title: String,
-    },
-    /// Click on a time-jump mark in the show notes: jump to the spot (start the
-    /// episode there if needed).
-    EpisodeSeekTo {
-        url: String,
-        title: String,
-        ms: i64,
-    },
-    // --- Bridge from the PodcastsPage component to the shared parent chrome ---
-    /// The page parked a built episode subpage in `podcast_subpage`; push it onto
-    /// the shared NavigationView. Unit so `Msg` stays `Send` (the `!Send` widget
-    /// travels through the shared slot, not the message).
-    PushPodcastSubpage,
-    /// Informational toast requested by the page.
-    PodcastToast(String),
-    /// The page confirmed a removal → show the "Podcast removed" undo toast.
-    PodcastUndoToast(i64),
-    /// Undo window elapsed → tell the page to actually delete the podcast.
-    PodcastReallyDelete(i64),
-    /// The page started/finished a "refresh all" worker → drive the spinner.
-    PodcastRefreshStarted(bool),
-    PodcastRefreshFinished,
     /// A podcast/YouTube "refresh all" advanced by one item → overlay bar.
     RefreshProgress {
         done: usize,
@@ -1529,195 +320,32 @@ pub enum Msg {
     RefreshSummary(String),
     /// The summary's display time elapsed → clear the overlay.
     ClearRefreshSummary,
-    // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
-    // menu switch (see `Msg::SetSectionVisible`), not a dedicated settings toggle.
-    /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
-    /// when one is already present. The download/update choice is decided from the
-    /// cached version at handling time, so the button works even before the
-    /// background version probe has resolved.
-    FetchYtDlp,
-    /// Background tick (startup + slow timer): silently re-download the managed
-    /// yt-dlp when it has gone stale, so YouTube keeps working hands-off.
-    YtDlpAutoUpdate,
-    // --- transport, requested by the YtPage component (or a worker result) ---
-    /// Play a subscribed channel's cached videos as the queue.
-    YtPlayChannel(i64),
-    /// Start playing a whole playlist (loads its videos as the queue).
-    YtStartPlaylist {
-        url: String,
-        title: String,
-    },
-    /// Play a cached playlist (videos handed in) starting at `index`; `close`
-    /// pops the song-list subpage afterwards.
-    YtStartPlaylistAt {
-        url: String,
-        title: String,
-        index: usize,
-        close: bool,
-        videos: Vec<(String, String, Option<i64>)>,
-    },
-    /// Play a video: resolves the stream URL asynchronously (or plays the
-    /// offline copy), then starts playback.
-    YtPlayVideo {
-        video_id: String,
-        title: String,
-    },
-    /// Internal: a video's stream URL was resolved (or failed) in a worker →
-    /// start streaming. Dispatched from `play_current` for `yt:` tracks.
-    YtStreamResolved {
-        video_id: String,
-        resume: i64,
-        result: Result<String, String>,
-    },
-    /// Internal: online enrichment (artist + cover) for a played video finished.
-    /// Play a video starting at a jump mark from its description.
-    YtPlayVideoAt {
-        video_id: String,
-        title: String,
-        ms: i64,
-    },
-    /// Jump marks of the running YouTube video arrived (from its chapters or
-    /// its description) — set the seekbar markers, as for a podcast episode.
-    YtChapters {
-        video_id: String,
-        chapters: Vec<(i64, String)>,
-    },
-    YtEnriched {
-        video_id: String,
-        artist: Option<String>,
-        cover: Option<String>,
-    },
-    // --- bridge from the YtPage component to the shared parent chrome ---
-    /// Open a mirrored playlist in the Playlists section.
-    YtOpenPlaylist {
-        id: i64,
-        name: String,
-    },
-    /// Open a video's detail dialog (from a playlist row or the now-playing bar,
-    /// which only have the parent's sender) → forwarded to the YtPage component.
-    YtShowVideoDetail {
-        video_id: String,
-        title: String,
-    },
-    /// Informational toast requested by the page.
-    YtToast(String),
-    /// Show/update the persistent add-to-library progress toast.
-    YtProgress(String),
-    /// Finish the progress toast with a short final message.
-    YtProgressDone(String),
-    /// Set/clear the central loading overlay.
-    YtSetLoading(Option<String>),
-    /// A track/playlist was added → reload artist/album overviews.
-    YtLibraryChanged,
-    /// A playlist was saved → reload the Playlists section.
-    YtPlaylistsChanged,
-    /// The page parked a built subpage in `yt_subpage`; push it onto the nav.
-    PushYtSubpage,
-    /// The page confirmed a channel removal → show the "channel removed" undo toast.
-    YtChannelUndo(i64),
-    /// Undo window elapsed → tell the page to actually delete the channel.
-    YtChannelReallyDelete(i64),
-    /// The page started/finished a "refresh all" worker → drive the spinner.
-    YtRefreshStarted(bool),
-    YtRefreshFinished,
-    // Streaming (internet radio) — transport; the page lives in the StreamPage
-    // component and reaches the transport through these.
-    /// Tap a station: starts it, toggle pause/resume on a running station.
-    ToggleStream(i64),
-    /// Record button of a station row: starts/stops the continuous recording.
-    StreamRecordToggle(i64),
-    /// Shared player-bar record button: records a voice memo (Memo section) or
-    /// toggles the running station's timeshift recording (Streaming section).
-    RecordToggle,
-    /// Title tag from the playback (for stations: the running ICY title).
-    StreamTitle(String),
-    /// Actually remove a station (after the undo toast; stops the player/recorder).
-    StreamDeleteConfirmed(i64),
-    // Recording (timeshift)
-    /// Stop the running recording.
-    RecordStop,
-    /// A background recording job (store + online cover embed) finished →
-    /// reload the recordings list. Sent from `store_segment` /
-    /// `maybe_fetch_live_cover` worker threads via `self.input`.
-    ReloadRecordings,
-    /// Open the replay subpage of a station.
-    OpenStreamReplay(i64),
-    /// Open the equalizer editor for a station (per-station EQ).
-    OpenStreamEq(i64),
-    /// Open the equalizer editor for a podcast subscription (per-podcast EQ).
-    OpenPodcastEq(i64),
-    /// Open the equalizer editor for a podcast episode (per-episode EQ).
-    OpenEpisodeEq {
-        url: String,
-        title: String,
-    },
-    /// Preview a buffered song (absolute byte range).
-    ReplayPlay {
-        start: u64,
-        end: u64,
-    },
-    /// Save a buffered song after the fact.
-    ReplaySave {
-        start: u64,
-        end: u64,
-        title: String,
-    },
-    /// Play a saved recording (path).
-    PlayRecording(String),
-    /// A background job touched the "Recently heard" history (e.g. a cover
-    /// landed) → reload the "Recently" list. Sent from a worker via `self.input`.
-    ReloadHeard,
-    /// Play a recognized song from the "Recently" list: prefer a saved timeshift
-    /// recording, then a matching library track, otherwise stream via YouTube.
-    PlayHeard {
-        artist: Option<String>,
-        title: String,
-    },
-    /// Download a recognized song from the "Recently" list via YouTube into the
-    /// music library (resolves the best match, then reuses the YouTube import).
-    DownloadHeard {
-        artist: Option<String>,
-        title: String,
-    },
-    // --- bridge from the StreamPage component to the shared parent chrome ---
-    /// The page confirmed a station removal → show the "station removed" undo toast.
-    StreamDeleteUndo(i64),
-    /// The page confirmed a recording deletion → show the "recording deleted" undo toast.
-    RecordingDeleteUndo(i64),
-    /// Undo window elapsed → tell the page to actually delete the recording.
-    StreamRecordingReallyDelete(i64),
-    /// A recording was copied into the music library → reload artist/album views.
-    StreamLibraryChanged,
-    /// Informational toast requested by the page.
-    StreamToast(String),
-    /// Open the waveform editor subpage for a recording (id).
-    EditRecording(i64),
-    /// Open the waveform editor subpage for a voice memo (id).
-    EditMemo(i64),
-    /// Preview a recording/memo file from a chosen position (ms) – editor playhead.
-    RecordingPlayFrom {
-        path: String,
-        ms: i64,
-    },
-    /// Pause the editor preview (pauses the main player it plays through).
-    RecordingPreviewPause,
-    /// Apply the editor's cut ranges (seconds) to a recording/memo and overwrite it.
-    EditApplyCut {
-        kind: EditKind,
-        id: i64,
-        cuts: Vec<(f64, f64)>,
-    },
-    /// Result of the background cut: new path (`None` = failed) + new duration.
-    EditCutDone {
-        kind: EditKind,
-        id: i64,
-        path: Option<String>,
-        duration_ms: i64,
-    },
 
     // ---- Voice memos ----
     /// Voice memos + categories (see [`crate::ui::app_memo`]).
     Memo(crate::ui::app_memo::MemoMsg),
+    /// StreamMsg — see `crate::ui::app_streaming`.
+    Stream(crate::ui::app_streaming::StreamMsg),
+    /// EditMsg — see `crate::ui::app_rec_edit`.
+    Edit(crate::ui::app_rec_edit::EditMsg),
+    /// YtMsg — see `crate::ui::app_yt_glue`.
+    Yt(crate::ui::app_yt_glue::YtMsg),
+    /// PodcastMsg — see `crate::ui::app_episode_playback`.
+    Podcast(crate::ui::app_episode_playback::PodcastMsg),
+    /// LyricsMsg — see `crate::ui::app_lyrics`.
+    Lyrics(crate::ui::app_lyrics::LyricsMsg),
+    /// ConcertMsg — see `crate::ui::app_concert`.
+    Concert(crate::ui::app_concert::ConcertMsg),
+    /// FavoriteMsg — see `crate::ui::app_favorites`.
+    Favorite(crate::ui::app_favorites::FavoriteMsg),
+    /// CoverMsg — see `crate::ui::app_covers`.
+    Cover(crate::ui::app_covers::CoverMsg),
+    /// SettingMsg — see `crate::ui::app_settings`.
+    Setting(crate::ui::app_settings::SettingMsg),
+    /// CtxMsg — see `crate::ui::app_dialogs`.
+    Ctx(crate::ui::app_dialogs::CtxMsg),
+    /// TransportMsg — see `crate::ui::app_playback`.
+    Transport(crate::ui::app_playback::TransportMsg),
 }
 
 /// Results of the background workers (read folder or online enrichment).
@@ -2379,17 +1007,17 @@ impl Component for App {
                                             gtk::Button {
                                                 set_label: &gettext("Import concerts"),
                                                 set_css_classes: &["suggested-action", "pill"],
-                                                connect_clicked => Msg::ConcertImport,
+                                                connect_clicked => Msg::Concert(ConcertMsg::ConcertImport),
                                             },
                                             gtk::Button {
                                                 set_label: &gettext("I'll do it myself"),
                                                 add_css_class: "pill",
-                                                connect_clicked => Msg::ConcertDismissHint,
+                                                connect_clicked => Msg::Concert(ConcertMsg::ConcertDismissHint),
                                             },
                                             gtk::Button {
                                                 set_label: &gettext("Hide menu item"),
                                                 add_css_class: "pill",
-                                                connect_clicked => Msg::ConcertHideSection,
+                                                connect_clicked => Msg::Concert(ConcertMsg::ConcertHideSection),
                                             },
                                         },
                                     },
@@ -2808,14 +1436,14 @@ impl Component for App {
                             set_visible: model.mini.now_playing.is_some() && !model.memo.recording,
                             // A plain tap on the song display opens the track detail view.
                             connect_clicked[sender] => move |_| {
-                                sender.input(Msg::OpenNowPlaying);
+                                sender.input(Msg::Transport(TransportMsg::OpenNowPlaying));
                             },
                             // Long press (touch) keeps working too; it claims the sequence
                             // so the button's own click won't also fire.
                             add_controller = gtk::GestureLongPress {
                                 connect_pressed[sender] => move |gesture, _, _| {
                                     gesture.set_state(gtk::EventSequenceState::Claimed);
-                                    sender.input(Msg::OpenNowPlaying);
+                                    sender.input(Msg::Transport(TransportMsg::OpenNowPlaying));
                                 },
                             },
                             // Right click (classic mouse): same detail view.
@@ -2823,7 +1451,7 @@ impl Component for App {
                                 set_button: gtk::gdk::BUTTON_SECONDARY,
                                 connect_pressed[sender] => move |gesture, _, _, _| {
                                     gesture.set_state(gtk::EventSequenceState::Claimed);
-                                    sender.input(Msg::OpenNowPlaying);
+                                    sender.input(Msg::Transport(TransportMsg::OpenNowPlaying));
                                 },
                             },
                             #[wrap(Some)]
@@ -2965,7 +1593,7 @@ impl Component for App {
                                                 #[watch]
                                                 set_value: model.mini.playback_rate,
                                                 connect_value_changed[sender] => move |s| {
-                                                    sender.input(Msg::SetPlaybackRate(s.value()));
+                                                    sender.input(Msg::Transport(TransportMsg::SetPlaybackRate(s.value())));
                                                 },
                                             },
                                         }
@@ -2986,7 +1614,7 @@ impl Component for App {
                                     set_active: model.transport.shuffle,
                                     #[watch]
                                     set_opacity: if model.transport.shuffle { 1.0 } else { 0.4 },
-                                    connect_clicked => Msg::ToggleShuffle,
+                                    connect_clicked => Msg::Transport(TransportMsg::ToggleShuffle),
                                 },
                                 // Repeat (loop): at the end of the queue or of the
                                 // single track, start over. Active = white, off = gray.
@@ -3002,7 +1630,7 @@ impl Component for App {
                                     set_active: model.transport.repeat,
                                     #[watch]
                                     set_opacity: if model.transport.repeat { 1.0 } else { 0.4 },
-                                    connect_clicked => Msg::ToggleRepeat,
+                                    connect_clicked => Msg::Transport(TransportMsg::ToggleRepeat),
                                 },
                             },
                             #[wrap(Some)]
@@ -3015,7 +1643,7 @@ impl Component for App {
                                     // Nothing selected → grayed out.
                                     #[watch]
                                     set_sensitive: model.mini.now_playing.is_some(),
-                                    connect_clicked => Msg::Prev,
+                                    connect_clicked => Msg::Transport(TransportMsg::Prev),
                                 },
                                 gtk::Button {
                                     // Play/pause icon, or a spinner while a slow
@@ -3050,7 +1678,7 @@ impl Component for App {
                                     set_sensitive: model.mini.now_playing.is_some()
                                         || !model.transport.queue.is_empty()
                                         || !model.transport.user_queue.is_empty(),
-                                    connect_clicked => Msg::TogglePlay,
+                                    connect_clicked => Msg::Transport(TransportMsg::TogglePlay),
                                 },
                                 // Shared record button, same size as play/pause
                                 // (emilia-bigplay); blinks red while recording. On the
@@ -3072,7 +1700,7 @@ impl Component for App {
                                         // Red even when idle; only pulses while recording.
                                         &["circular", "emilia-bigplay", "emilia-record-dot"]
                                     },
-                                    connect_clicked => Msg::RecordToggle,
+                                    connect_clicked => Msg::Stream(StreamMsg::RecordToggle),
                                 },
                                 gtk::Button {
                                     set_icon_name: "media-skip-forward-symbolic",
@@ -3080,7 +1708,7 @@ impl Component for App {
                                     add_css_class: "flat",
                                     #[watch]
                                     set_sensitive: model.mini.now_playing.is_some(),
-                                    connect_clicked => Msg::Next,
+                                    connect_clicked => Msg::Transport(TransportMsg::Next),
                                 },
                             },
                             // Bottom right: lyrics, the album shortcut and the queue.
@@ -3101,7 +1729,7 @@ impl Component for App {
                                     #[watch]
                                     set_visible: model.lyrics.current.as_ref()
                                         .is_some_and(|l| l.has_any()),
-                                    connect_clicked => Msg::ShowLyrics,
+                                    connect_clicked => Msg::Lyrics(LyricsMsg::ShowLyrics),
                                 },
                                 // Album shortcut: only while a local album track
                                 // plays. Opens the album's song page (back returns).
@@ -3112,7 +1740,7 @@ impl Component for App {
                                     add_css_class: "flat",
                                     #[watch]
                                     set_visible: model.mini.current_album.is_some(),
-                                    connect_clicked => Msg::ShowCurrentAlbum,
+                                    connect_clicked => Msg::Transport(TransportMsg::ShowCurrentAlbum),
                                 },
                                 gtk::Button {
                                     set_icon_name: "list-high-priority-symbolic",
@@ -3123,7 +1751,7 @@ impl Component for App {
                                     // queue view shows the user queue).
                                     #[watch]
                                     set_sensitive: !model.transport.user_queue.is_empty(),
-                                    connect_clicked => Msg::ShowQueue,
+                                    connect_clicked => Msg::Transport(TransportMsg::ShowQueue),
                                 },
                             },
                         },
@@ -3299,21 +1927,21 @@ impl Component for App {
             player.connect_bus_events(
                 {
                     let sender = sender.clone();
-                    move || sender.input(Msg::TrackFinished)
+                    move || sender.input(Msg::Transport(TransportMsg::TrackFinished))
                 },
                 {
                     let sender = sender.clone();
-                    move |title| sender.input(Msg::StreamTitle(title))
+                    move |title| sender.input(Msg::Stream(StreamMsg::StreamTitle(title)))
                 },
                 {
                     let sender = sender.clone();
-                    move || sender.input(Msg::PlaybackError)
+                    move || sender.input(Msg::Transport(TransportMsg::PlaybackError))
                 },
                 {
                     let sender = sender.clone();
-                    move || sender.input(Msg::PlaybackReady)
+                    move || sender.input(Msg::Transport(TransportMsg::PlaybackReady))
                 },
-                move || sender.input(Msg::GaplessAdvanced),
+                move || sender.input(Msg::Transport(TransportMsg::GaplessAdvanced)),
             );
         }
 
@@ -3330,7 +1958,7 @@ impl Component for App {
             let tick_active = tick_active.clone();
             gtk::glib::timeout_add_seconds_local(5, move || {
                 if tick_active.get() {
-                    sender.input(Msg::PersistResume);
+                    sender.input(Msg::Transport(TransportMsg::PersistResume));
                 }
                 gtk::glib::ControlFlow::Continue
             });
@@ -3343,7 +1971,7 @@ impl Component for App {
             let tick_active = tick_active.clone();
             gtk::glib::timeout_add_seconds_local(1, move || {
                 if tick_active.get() {
-                    sender.input(Msg::Tick);
+                    sender.input(Msg::Transport(TransportMsg::Tick));
                 }
                 gtk::glib::ControlFlow::Continue
             });
@@ -3379,9 +2007,9 @@ impl Component for App {
         // actually stale (so it costs nothing on most ticks).
         {
             let sender = sender.clone();
-            sender.input(Msg::YtDlpAutoUpdate);
+            sender.input(Msg::Yt(YtMsg::YtDlpAutoUpdate));
             gtk::glib::timeout_add_seconds_local(12 * 60 * 60, move || {
-                sender.input(Msg::YtDlpAutoUpdate);
+                sender.input(Msg::Yt(YtMsg::YtDlpAutoUpdate));
                 gtk::glib::ControlFlow::Continue
             });
         }
@@ -3435,16 +2063,22 @@ impl Component for App {
             .forward(sender.input_sender(), |out| {
                 use crate::ui::podcasts_page::PodcastsOutput as O;
                 match out {
-                    O::ToggleEpisode { url, title } => Msg::ToggleEpisode { url, title },
-                    O::EpisodeSeekTo { url, title, ms } => Msg::EpisodeSeekTo { url, title, ms },
-                    O::OpenPodcastEqualizer(id) => Msg::OpenPodcastEq(id),
-                    O::OpenEpisodeEqualizer { url, title } => Msg::OpenEpisodeEq { url, title },
-                    O::PushSubpage => Msg::PushPodcastSubpage,
-                    O::Share(sel) => Msg::ShareItems(*sel),
-                    O::Toast(s) => Msg::PodcastToast(s),
-                    O::DeletedUndoToast(id) => Msg::PodcastUndoToast(id),
-                    O::RefreshStarted(b) => Msg::PodcastRefreshStarted(b),
-                    O::RefreshFinished => Msg::PodcastRefreshFinished,
+                    O::ToggleEpisode { url, title } => {
+                        Msg::Podcast(PodcastMsg::ToggleEpisode { url, title })
+                    }
+                    O::EpisodeSeekTo { url, title, ms } => {
+                        Msg::Podcast(PodcastMsg::EpisodeSeekTo { url, title, ms })
+                    }
+                    O::OpenPodcastEqualizer(id) => Msg::Podcast(PodcastMsg::OpenPodcastEq(id)),
+                    O::OpenEpisodeEqualizer { url, title } => {
+                        Msg::Podcast(PodcastMsg::OpenEpisodeEq { url, title })
+                    }
+                    O::PushSubpage => Msg::Podcast(PodcastMsg::PushPodcastSubpage),
+                    O::Share(sel) => Msg::Ctx(CtxMsg::ShareItems(sel)),
+                    O::Toast(s) => Msg::Podcast(PodcastMsg::PodcastToast(s)),
+                    O::DeletedUndoToast(id) => Msg::Podcast(PodcastMsg::PodcastUndoToast(id)),
+                    O::RefreshStarted(b) => Msg::Podcast(PodcastMsg::PodcastRefreshStarted(b)),
+                    O::RefreshFinished => Msg::Podcast(PodcastMsg::PodcastRefreshFinished),
                     O::RefreshProgress { done, total, label } => {
                         Msg::RefreshProgress { done, total, label }
                     }
@@ -3459,49 +2093,53 @@ impl Component for App {
             .forward(sender.input_sender(), |out| {
                 use crate::ui::yt_page::YtOutput as O;
                 match out {
-                    O::PlayVideo { video_id, title } => Msg::YtPlayVideo { video_id, title },
+                    O::PlayVideo { video_id, title } => {
+                        Msg::Yt(YtMsg::YtPlayVideo { video_id, title })
+                    }
                     O::PlayVideoAt {
                         video_id,
                         title,
                         ms,
-                    } => Msg::YtPlayVideoAt {
+                    } => Msg::Yt(YtMsg::YtPlayVideoAt {
                         video_id,
                         title,
                         ms,
-                    },
-                    O::PlayChannel(id) => Msg::YtPlayChannel(id),
-                    O::StartPlaylist { url, title } => Msg::YtStartPlaylist { url, title },
+                    }),
+                    O::PlayChannel(id) => Msg::Yt(YtMsg::YtPlayChannel(id)),
+                    O::StartPlaylist { url, title } => {
+                        Msg::Yt(YtMsg::YtStartPlaylist { url, title })
+                    }
                     O::StartPlaylistAt {
                         url,
                         title,
                         index,
                         close,
                         videos,
-                    } => Msg::YtStartPlaylistAt {
+                    } => Msg::Yt(YtMsg::YtStartPlaylistAt {
                         url,
                         title,
                         index,
                         close,
                         videos,
-                    },
+                    }),
                     O::OpenTrackEq { path, title } => Msg::OpenTrackEq { path, title },
-                    O::OpenPlaylist { id, name } => Msg::YtOpenPlaylist { id, name },
+                    O::OpenPlaylist { id, name } => Msg::Yt(YtMsg::YtOpenPlaylist { id, name }),
                     O::OpenSettings => Msg::OpenSettings,
-                    O::Toast(s) => Msg::YtToast(s),
-                    O::Progress(s) => Msg::YtProgress(s),
-                    O::ProgressDone(s) => Msg::YtProgressDone(s),
-                    O::SetLoading(o) => Msg::YtSetLoading(o),
-                    O::LibraryChanged => Msg::YtLibraryChanged,
-                    O::PlaylistsChanged => Msg::YtPlaylistsChanged,
-                    O::PushSubpage => Msg::PushYtSubpage,
-                    O::DeleteChannelUndo(id) => Msg::YtChannelUndo(id),
-                    O::RefreshStarted(b) => Msg::YtRefreshStarted(b),
-                    O::RefreshFinished => Msg::YtRefreshFinished,
+                    O::Toast(s) => Msg::Yt(YtMsg::YtToast(s)),
+                    O::Progress(s) => Msg::Yt(YtMsg::YtProgress(s)),
+                    O::ProgressDone(s) => Msg::Yt(YtMsg::YtProgressDone(s)),
+                    O::SetLoading(o) => Msg::Yt(YtMsg::YtSetLoading(o)),
+                    O::LibraryChanged => Msg::Yt(YtMsg::YtLibraryChanged),
+                    O::PlaylistsChanged => Msg::Yt(YtMsg::YtPlaylistsChanged),
+                    O::PushSubpage => Msg::Yt(YtMsg::PushYtSubpage),
+                    O::DeleteChannelUndo(id) => Msg::Yt(YtMsg::YtChannelUndo(id)),
+                    O::RefreshStarted(b) => Msg::Yt(YtMsg::YtRefreshStarted(b)),
+                    O::RefreshFinished => Msg::Yt(YtMsg::YtRefreshFinished),
                     O::RefreshProgress { done, total, label } => {
                         Msg::RefreshProgress { done, total, label }
                     }
                     O::RefreshSummary(s) => Msg::RefreshSummary(s),
-                    O::Share(sel) => Msg::ShareItems(sel),
+                    O::Share(sel) => Msg::Ctx(CtxMsg::ShareItems(Box::new(sel))),
                     O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::YtChanged),
                 }
             });
@@ -3510,18 +2148,22 @@ impl Component for App {
             .forward(sender.input_sender(), |out| {
                 use crate::ui::stream_page::StreamOutput as O;
                 match out {
-                    O::ToggleStream(id) => Msg::ToggleStream(id),
-                    O::PlayRecording(path) => Msg::PlayRecording(path),
-                    O::OpenReplay(id) => Msg::OpenStreamReplay(id),
-                    O::OpenEqualizer(id) => Msg::OpenStreamEq(id),
-                    O::EditRecording(id) => Msg::EditRecording(id),
-                    O::StreamDeleteUndo(id) => Msg::StreamDeleteUndo(id),
-                    O::RecordingDeleteUndo(id) => Msg::RecordingDeleteUndo(id),
-                    O::LibraryChanged => Msg::StreamLibraryChanged,
-                    O::PlayHeard { artist, title } => Msg::PlayHeard { artist, title },
-                    O::DownloadHeard { artist, title } => Msg::DownloadHeard { artist, title },
-                    O::Share(sel) => Msg::ShareItems(*sel),
-                    O::Toast(s) => Msg::StreamToast(s),
+                    O::ToggleStream(id) => Msg::Stream(StreamMsg::ToggleStream(id)),
+                    O::PlayRecording(path) => Msg::Stream(StreamMsg::PlayRecording(path)),
+                    O::OpenReplay(id) => Msg::Stream(StreamMsg::OpenStreamReplay(id)),
+                    O::OpenEqualizer(id) => Msg::Stream(StreamMsg::OpenStreamEq(id)),
+                    O::EditRecording(id) => Msg::Edit(EditMsg::EditRecording(id)),
+                    O::StreamDeleteUndo(id) => Msg::Stream(StreamMsg::StreamDeleteUndo(id)),
+                    O::RecordingDeleteUndo(id) => Msg::Stream(StreamMsg::RecordingDeleteUndo(id)),
+                    O::LibraryChanged => Msg::Stream(StreamMsg::StreamLibraryChanged),
+                    O::PlayHeard { artist, title } => {
+                        Msg::Stream(StreamMsg::PlayHeard { artist, title })
+                    }
+                    O::DownloadHeard { artist, title } => {
+                        Msg::Stream(StreamMsg::DownloadHeard { artist, title })
+                    }
+                    O::Share(sel) => Msg::Ctx(CtxMsg::ShareItems(sel)),
+                    O::Toast(s) => Msg::Stream(StreamMsg::StreamToast(s)),
                     O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::StreamChanged),
                 }
             });
@@ -3532,11 +2174,11 @@ impl Component for App {
                     lang_code,
                     music_dir,
                     enabled_sections,
-                } => Msg::SetupFinished {
+                } => Msg::Setting(SettingMsg::SetupFinished {
                     lang_code,
                     music_dir,
                     enabled_sections,
-                },
+                }),
             },
         );
 
@@ -3917,7 +2559,6 @@ impl Component for App {
             Msg::ShowCompilationDetail(index) => {
                 self.on_show_compilation_detail(index, root, &sender)
             }
-            Msg::ShowConcertDetail(index) => self.on_show_concert_detail(index, root, &sender),
             Msg::OpenArtistTracks(index) => self.on_open_artist_tracks(index, &sender),
             Msg::OpenAlbumTracks { artist, album } => {
                 self.fetch_focus_album(&sender, &artist, &album);
@@ -3983,167 +2624,9 @@ impl Component for App {
                     });
                 }
             }
-            Msg::CtxPlay => self.on_ctx_play(),
-            Msg::CtxPlayAlbum => self.on_ctx_play_album(),
-            Msg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
-            Msg::CtxAddQueue => self.on_ctx_add_queue(),
-            Msg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, &sender),
             Msg::Playlist(m) => self.update_playlist(m, root, &sender),
-            // --- Streaming (internet radio) ---
-            // --- Streaming transport (requested by the StreamPage component) ---
-            Msg::ToggleStream(id) => self.toggle_stream(id),
-            Msg::StreamRecordToggle(id) => self.stream_record_toggle(&sender, id),
-            Msg::RecordToggle => {
-                // Context decides the action: a running timeshift recording can be
-                // stopped from any section (the button stays visible while it
-                // runs); otherwise start the timeshift in Streaming, or record a
-                // voice memo elsewhere.
-                if self.streaming.record_state.is_some() {
-                    sender.input(Msg::RecordStop);
-                } else if self.on_streaming_section() {
-                    if let Some(id) = self.streaming.playing_stream {
-                        sender.input(Msg::StreamRecordToggle(id));
-                    }
-                } else {
-                    self.toggle_memo_record(&sender);
-                }
-            }
-            Msg::StreamTitle(title) => self.stream_title(title),
-            Msg::StreamDeleteConfirmed(id) => self.stream_delete_confirmed(id),
-            // --- Recording (timeshift) ---
-            Msg::RecordStop => {
-                if self.streaming.record_state.is_some() {
-                    // Finalize the song still in progress so it isn't lost.
-                    self.finalize_recording();
-                    self.streaming.record_state = None;
-                    self.toast(&gettext("Recording stopped"));
-                    self.sync_live_recording();
-                }
-            }
-            Msg::ReloadRecordings => self
-                .stream_page
-                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings),
-            Msg::ReloadHeard => self
-                .stream_page
-                .emit(crate::ui::stream_page::StreamInput::ReloadHeard),
-            Msg::PlayHeard { artist, title } => self.play_heard(&sender, root, artist, title),
-            Msg::DownloadHeard { artist, title } => {
-                self.download_heard(&sender, root, artist, title)
-            }
-            Msg::OpenStreamReplay(id) => self.open_stream_replay(&sender, id),
-            Msg::OpenStreamEq(id) => self.open_stream_eq(root, &sender, id),
-            Msg::OpenPodcastEq(id) => self.open_podcast_eq(root, &sender, id),
-            Msg::OpenEpisodeEq { url, title } => self.open_episode_eq(root, &sender, url, title),
-            Msg::ReplayPlay { start, end } => self.replay_play(start, end),
-            Msg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
-            Msg::PlayRecording(path) => self.play_recording(path),
-            // --- bridge from the StreamPage component to the shared parent chrome ---
-            Msg::StreamDeleteUndo(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Station removed"),
-                    Msg::StreamDeleteConfirmed(id),
-                );
-            }
-            Msg::RecordingDeleteUndo(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Recording deleted"),
-                    Msg::StreamRecordingReallyDelete(id),
-                );
-            }
-            Msg::StreamRecordingReallyDelete(id) => self
-                .stream_page
-                .emit(crate::ui::stream_page::StreamInput::RecordingDeleteConfirmed(id)),
-            Msg::StreamLibraryChanged => self.reload_library_overviews(),
-            Msg::StreamToast(s) => self.toast(&s),
-            Msg::EditRecording(id) => self.open_recording_edit(&sender, EditKind::Recording, id),
-            Msg::EditMemo(id) => self.open_recording_edit(&sender, EditKind::Memo, id),
-            Msg::RecordingPlayFrom { path, ms } => {
-                self.transport.forced_start_ms = Some(ms);
-                self.play_recording(path);
-            }
-            Msg::RecordingPreviewPause => {
-                if self.mini.playing {
-                    self.player.pause();
-                    self.mini.playing = false;
-                    self.mpris.set_playing(false);
-                    self.refresh_queue_icons();
-                }
-            }
-            Msg::EditApplyCut { kind, id, cuts } => {
-                self.apply_recording_cut(&sender, kind, id, cuts)
-            }
-            Msg::EditCutDone {
-                kind,
-                id,
-                path,
-                duration_ms,
-            } => match path {
-                Some(p) => {
-                    self.nav.nav_view.pop();
-                    match kind {
-                        EditKind::Recording => {
-                            let _ = self.library.update_recording_file(id, &p, duration_ms);
-                            // A recording lives under <Music>/Streaming, so it is
-                            // also a normal library track. Re-read its tags into
-                            // the library DB and rebuild the overviews; otherwise
-                            // the album/song lists keep the old (longer) duration
-                            // after a cut. (The file browser re-reads from disk on
-                            // its own when navigated to.)
-                            crate::core::scanner::ingest_file(
-                                &self.library,
-                                std::path::Path::new(&p),
-                            );
-                            self.stream_page
-                                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings);
-                            self.reload_library_overviews();
-                            self.toast(&gettext("Recording edited"));
-                        }
-                        EditKind::Memo => {
-                            let _ = self.library.update_memo_file(id, &p, duration_ms);
-                            self.reload_memos(&sender);
-                            self.toast(&gettext("Memo edited"));
-                        }
-                    }
-                }
-                None => self.toast(&gettext("Editing failed")),
-            },
             // --- Voice memos ---
             Msg::Memo(m) => self.update_memo(m, root, &sender),
-            Msg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
-            Msg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
-            Msg::PushPodcastSubpage => {
-                if let Some((title, content)) = self.podcast_subpage.borrow_mut().take() {
-                    self.push_subpage(&title, &content);
-                    // The episode rows are now realized → let the page set their
-                    // play/pause icons to the current state.
-                    self.podcasts_page.emit(
-                        crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
-                            playing_url: self.podcasts.playing_episode_url.clone(),
-                            playing: self.mini.playing,
-                        },
-                    );
-                }
-            }
-            Msg::PodcastToast(s) => self.toast(&s),
-            Msg::PodcastUndoToast(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Podcast removed"),
-                    Msg::PodcastReallyDelete(id),
-                );
-            }
-            Msg::PodcastReallyDelete(id) => {
-                self.podcasts_page
-                    .emit(crate::ui::podcasts_page::PodcastsInput::DeleteConfirmed(id));
-            }
-            Msg::PodcastRefreshStarted(started) => {
-                if started {
-                    self.refresh_pending += 1;
-                }
-            }
-            Msg::PodcastRefreshFinished => self.refresh_done(),
             Msg::RefreshProgress { done, total, label } => {
                 self.refresh_summary = None;
                 self.refresh_progress = Some((done, total, label));
@@ -4162,92 +2645,6 @@ impl Component for App {
                 );
             }
             Msg::ClearRefreshSummary => self.refresh_summary = None,
-            // --- YouTube ---
-            Msg::FetchYtDlp => {
-                let update = self.youtube.ytdlp_version.is_some();
-                self.start_ytdlp_fetch(update, &sender);
-            }
-            Msg::YtDlpAutoUpdate => self.maybe_auto_update_ytdlp(&sender),
-            // --- transport (requested by the YtPage component / worker results) ---
-            Msg::YtPlayChannel(id) => self.yt_play_channel(id),
-            Msg::YtStartPlaylist { url, title } => self.yt_start_playlist(&sender, url, title),
-            Msg::YtStartPlaylistAt {
-                url,
-                title,
-                index,
-                close,
-                videos,
-            } => self.yt_start_playlist_at(url, title, index, close, videos),
-            Msg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
-            Msg::YtPlayVideoAt {
-                video_id,
-                title,
-                ms,
-            } => self.yt_play_video_at(video_id, title, ms),
-            Msg::YtStreamResolved {
-                video_id,
-                resume,
-                result,
-            } => self.yt_stream_resolved(&sender, video_id, resume, result),
-            Msg::YtChapters { video_id, chapters } => {
-                // Only if that video is still the one playing — the marks arrive
-                // from a worker and the user may have skipped on meanwhile.
-                if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
-                    self.set_chapters(chapters);
-                    self.update_current_chapter();
-                }
-            }
-            Msg::YtEnriched {
-                video_id,
-                artist,
-                cover,
-            } => self.yt_enriched(video_id, artist, cover),
-            // --- bridge from the YtPage component to the shared parent chrome ---
-            Msg::YtOpenPlaylist { id, name } => self.open_playlist(&sender, id, &name),
-            Msg::YtShowVideoDetail { video_id, title } => self
-                .yt_page
-                .emit(crate::ui::yt_page::YtInput::ShowVideoDetail { video_id, title }),
-            Msg::YtToast(s) => self.toast(&s),
-            Msg::YtProgress(s) => self.yt_progress(&s),
-            Msg::YtProgressDone(s) => self.yt_progress_done(&s),
-            Msg::YtSetLoading(o) => {
-                self.libview.loading = o.is_some();
-                self.libview.loading_label = o;
-            }
-            Msg::YtLibraryChanged => self.reload_library_overviews(),
-            Msg::YtPlaylistsChanged => self.reload_playlists(&sender),
-            Msg::PushYtSubpage => {
-                if let Some((title, content)) = self.yt_subpage.borrow_mut().take() {
-                    self.push_subpage(&title, &content);
-                    // The video rows are now realized → set their play/pause icons.
-                    self.yt_page
-                        .emit(crate::ui::yt_page::YtInput::PlaybackStateChanged {
-                            playing_video_id: self.youtube.playing_video_id.clone(),
-                            playing: self.mini.playing,
-                        });
-                }
-            }
-            Msg::YtChannelUndo(id) => {
-                self.undo_toast(
-                    &sender,
-                    &gettext("Channel removed"),
-                    Msg::YtChannelReallyDelete(id),
-                );
-            }
-            Msg::YtChannelReallyDelete(id) => {
-                self.yt_page
-                    .emit(crate::ui::yt_page::YtInput::DeleteChannelConfirmed(id));
-            }
-            Msg::YtRefreshStarted(started) => {
-                if started {
-                    self.refresh_pending += 1;
-                }
-            }
-            Msg::YtRefreshFinished => self.refresh_done(),
-            Msg::CtxEqualizer => self.open_eq_dialog(root, &sender),
-            Msg::CtxShare => self.on_ctx_share(root),
-            Msg::ShareItems(selection) => self.share_items(selection, root),
-            Msg::CtxRefresh => self.on_ctx_refresh(root, &sender),
             Msg::OpenSync => {
                 use crate::ui::sync_page::SyncInput;
                 self.sync_page.emit(SyncInput::Open(root.clone()));
@@ -4262,59 +2659,11 @@ impl Component for App {
                 // arrived → rebuild the artist/album overviews so they show up.
                 self.reload_library_overviews();
             }
-            Msg::TrackFinished => self.on_track_finished(),
-            Msg::GaplessAdvanced => self.on_gapless_advanced(),
-            Msg::PersistResume => self.on_persist_resume(),
-            Msg::Tick => self.on_tick(),
             Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
-            Msg::LoadLyrics(path) => self.load_lyrics(&sender, path),
-            Msg::ShowLyrics => self.show_lyrics(),
-            Msg::LyricsTick => self.update_lyrics_highlight(),
-            Msg::LyricsSeek(ts) => {
-                // Jump to the clicked line (its LRC time shifted by the delay).
-                let delay = self.lyrics.view.as_ref().map(|v| v.delay_ms).unwrap_or(0);
-                let target = (ts + delay).max(0);
-                self.mini.position_ms = target;
-                if self.player.seek_ms(target).is_ok() {
-                    self.mpris.seeked(target);
-                }
-                self.update_lyrics_highlight();
-            }
-            Msg::LyricsClosed => self.close_lyrics_view(),
-            Msg::LyricsToggleKaraoke => self.toggle_lyrics_karaoke(),
-            Msg::LyricsDelayAdjust(step) => self.adjust_lyrics_delay(step),
-            Msg::FileLyricsFetched { path, lyrics } => self.on_file_lyrics_fetched(path, lyrics),
-            Msg::Seek(ms) => {
-                let ms = ms.max(0);
-                self.mini.position_ms = ms;
-                if self.player.seek_ms(ms).is_ok() {
-                    self.mpris.seeked(ms);
-                }
-            }
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
             Msg::Mcp(cmd) => self.handle_mcp(cmd),
             Msg::McpSetting(m) => self.update_mcp_setting(m),
-            Msg::Next => self.skip_next(),
-            Msg::Prev => self.skip_prev(),
-            Msg::ToggleShuffle => {
-                self.transport.shuffle = !self.transport.shuffle;
-                // When enabling, build a fresh random order of the whole
-                // queue (running track first).
-                if self.transport.shuffle {
-                    self.rebuild_shuffle_order();
-                }
-                self.mpris.set_shuffle(self.transport.shuffle);
-                // Shuffle changes the "next" track → re-arm (or clear) gapless.
-                self.arm_gapless();
-            }
-            Msg::ToggleRepeat => {
-                self.transport.repeat = !self.transport.repeat;
-                let _ = self
-                    .library
-                    .set_setting("repeat", if self.transport.repeat { "1" } else { "0" });
-                self.mpris.set_repeat(self.transport.repeat);
-            }
             Msg::NavUp => self.on_nav_up(&sender),
             Msg::FilesGoStart => self.on_files_go_start(&sender),
             Msg::Refresh => self.on_refresh(&sender),
@@ -4333,221 +2682,25 @@ impl Component for App {
             Msg::OpenTrackEq { path, title } => {
                 self.open_eq_editor(root, &sender, "the track", &title, None, "track", path);
             }
-            Msg::ShowQueue => self.open_queue_dialog(root, &sender),
-            Msg::ShowCurrentAlbum => {
-                if let Some(album) = self.mini.current_album.clone() {
-                    self.open_album_by_name(&sender, &album);
-                }
-            }
             Msg::NavBack => {
                 self.nav.nav_view.pop();
             }
-            Msg::PlayQueueAt { start, len } => self.on_play_queue_at(start, len),
-            Msg::SetPlaybackRate(rate) => {
-                let rate = (rate / 0.25).round() * 0.25;
-                let rate = rate.clamp(0.25, 2.0);
-                // Guard against the scale's #[watch] re-emitting the same value.
-                if (rate - self.mini.playback_rate).abs() > 1e-3 {
-                    self.mini.playback_rate = rate;
-                    self.player.set_rate(rate);
-                }
-            }
-            Msg::PlaybackReady => {
-                // Source finished buffering → stop the loading spinner.
-                if self.mini.loading {
-                    self.mini.loading = false;
-                }
-            }
-            Msg::PlaybackError => {
-                // A failed start clears the loading spinner regardless of source.
-                self.mini.loading = false;
-                // Streams/episodes have no "next" → don't skip on their errors.
-                if self.streaming.playing_stream.is_some()
-                    || self.podcasts.playing_episode_url.is_some()
-                {
-                    return;
-                }
-                // Only skip when something is actually queued.
-                if self.files.playing_remote || !self.transport.queue.is_empty() {
-                    self.skip_current_track();
-                }
-            }
-            Msg::QueueClear => self.on_queue_clear(),
-            Msg::QueueMoveRange { from, len, to } => self.on_queue_move_range(from, len, to),
-            Msg::SetMusicDir(path) => self.on_set_music_dir(path, &sender),
-            Msg::SetupFinished {
-                lang_code,
-                music_dir,
-                enabled_sections,
-            } => self.on_setup_finished(lang_code, music_dir, enabled_sections, &sender),
             Msg::Source(m) => self.update_source(m, root, &sender),
-            Msg::SetAcoustidKey(key) => {
-                let key = key.trim().to_string();
-                let _ = self.library.set_secret_setting("acoustid_key", &key);
-                self.enrich_state.acoustid_key = if key.is_empty() { None } else { Some(key) };
-            }
-            Msg::SetAlbumCover {
-                artist,
-                album,
-                path,
-            } => self.set_album_cover(root, &sender, artist, album, path),
-            Msg::SetArtistImage { name, path } => self.set_artist_image(root, &sender, name, path),
-            Msg::CoverOptions => self.open_cover_options_dialog(root, &sender),
-            Msg::UploadCover => self.open_cover_upload_dialog(root, &sender),
-            Msg::RemoveCover => self.remove_cover(root, &sender),
-            Msg::SetFanartKey(key) => {
-                let key = key.trim().to_string();
-                let _ = self.library.set_secret_setting("fanart_key", &key);
-                self.enrich_state.fanart_key = if key.is_empty() { None } else { Some(key) };
-            }
-            Msg::SetAutoEnrich(on) => {
-                self.enrich_state.auto_enrich = on;
-                let _ = self
-                    .library
-                    .set_setting("auto_enrich", if on { "1" } else { "0" });
-            }
-            Msg::SetLanguage(lang) => self.on_set_language(lang, root),
-            Msg::SetLastSettingsPage(name) => {
-                let _ = self.library.set_setting("settings_last_page", &name);
-            }
             Msg::Design(m) => self.update_design(m, root, &sender),
             Msg::Tray(m) => self.update_tray(m, root, &sender),
-            Msg::SetGapless(on) => {
-                self.settings.gapless = on;
-                let _ = self
-                    .library
-                    .set_setting("gapless", if on { "1" } else { "0" });
-                self.apply_playback_prefs();
-            }
-            Msg::SetCrossfade(secs) => {
-                self.settings.crossfade_secs = secs.clamp(0.0, 12.0);
-                let _ = self
-                    .library
-                    .set_setting("crossfade_secs", &self.settings.crossfade_secs.to_string());
-                self.apply_playback_prefs();
-            }
             Msg::Sort(m) => self.update_sort(m, &sender),
-            Msg::SetAreas { scope, key, value } => self.set_areas(&sender, scope, key, value),
-            Msg::SetAlbumKind { album, kind } => {
-                match kind {
-                    Some(k) => {
-                        let _ = self.library.set_album_kind(&album, k);
-                    }
-                    None => {
-                        let _ = self.library.clear_album_kind(&album);
-                    }
-                }
-                // Refresh all three album views so the moved album appears in its
-                // new category (and disappears from the old one).
-                self.reload_albums();
-                self.reload_singles();
-                self.reload_compilations();
-            }
             Msg::Eq(m) => self.update_eq(m),
-            Msg::ConcertImport => self.concert_import(&sender),
-            Msg::ConcertDismissHint => {
-                self.concerts.concert_hint_dismissed = true;
-                let _ = self.library.set_setting("concert_hint_dismissed", "1");
-            }
-            Msg::ConcertHideSection => {
-                self.set_section_visible("concerts", false);
-                self.toast(&gettext("Hid the Concerts menu item"));
-            }
-            Msg::ConcertAdd(items) => self.concert_add(&sender, items),
-            Msg::PlayConcert(index) => {
-                if let Some((scope, key, _, is_dir)) =
-                    self.concerts.concert_items.get(index).cloned()
-                {
-                    self.play_entry(&scope, &key, is_dir);
-                }
-            }
-            Msg::OpenConcertEntry(index) => {
-                // Gallery tap: like the list tap – album/folder opens the
-                // track list, a single track is played.
-                if let Some((scope, key, _, is_dir)) =
-                    self.concerts.concert_items.get(index).cloned()
-                {
-                    if scope == "track" {
-                        self.play_entry(&scope, &key, is_dir);
-                    } else {
-                        sender.input(Msg::OpenEntryTracks { scope, key });
-                    }
-                }
-            }
-            Msg::SetSectionVisible { section, visible } => {
-                // The YouTube section is the opt-in feature; its menu switch is now
-                // the single enable/disable control, so route it through
-                // `set_youtube_enabled` (keeps the `youtube_enabled` flag + the
-                // background channel load in step). All other sections just toggle
-                // their menu visibility.
-                if section == "youtube" {
-                    self.set_youtube_enabled(visible, &sender);
-                } else {
-                    self.set_section_visible(section, visible);
-                }
-            }
-            Msg::MoveSection { from, to } => {
-                if from < self.nav.section_order.len()
-                    && to < self.nav.section_order.len()
-                    && from != to
-                {
-                    let name = self.nav.section_order.remove(from);
-                    self.nav.section_order.insert(to, name);
-                    let value = self.nav.section_order.join(",");
-                    let _ = self.library.set_setting("section_order", &value);
-                    // Apply the order to the existing buttons.
-                    self.apply_section_order();
-                }
-            }
-            Msg::UnhideEntry { scope, key } => {
-                // Delete the override → back to default (visible again).
-                let _ = self.library.set_category(&scope, &key, None);
-                self.reload_library_overviews();
-                self.load_concerts(&sender);
-                self.load_audiobooks(&sender);
-                self.load_dir(&sender);
-                self.toast(&gettext("Shown again"));
-            }
-            Msg::ToggleFavorite => self.toggle_favorite(&sender),
-            Msg::PlayFavorite(index) => self.play_favorite(&sender, index),
-            Msg::ShowFavoriteDetail(index) => {
-                if let Some((scope, key, _, is_dir)) =
-                    self.favorites.favorite_items.get(index).cloned()
-                {
-                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
-                    self.open_context_menu(root, &sender);
-                }
-            }
-            Msg::MoveFavorite { from, to } => self.move_favorite(&sender, from, to),
-            Msg::PlayAudiobook(index) => {
-                if let Some((scope, key, _, is_dir)) =
-                    self.favorites.audiobook_items.get(index).cloned()
-                {
-                    self.play_entry(&scope, &key, is_dir);
-                }
-            }
-            Msg::OpenAudiobookEntry(index) => {
-                // Gallery tap: album/folder opens the track list, a single track plays.
-                if let Some((scope, key, _, is_dir)) =
-                    self.favorites.audiobook_items.get(index).cloned()
-                {
-                    if scope == "track" {
-                        self.play_entry(&scope, &key, is_dir);
-                    } else {
-                        sender.input(Msg::OpenEntryTracks { scope, key });
-                    }
-                }
-            }
-            Msg::ShowAudiobookDetail(index) => {
-                if let Some((scope, key, _, is_dir)) =
-                    self.favorites.audiobook_items.get(index).cloned()
-                {
-                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
-                    self.open_context_menu(root, &sender);
-                }
-            }
-            Msg::TogglePlay => self.on_toggle_play(),
-            Msg::OpenNowPlaying => self.on_open_now_playing(root, &sender),
+            Msg::Stream(m) => self.update_stream(m, root, &sender),
+            Msg::Edit(m) => self.update_edit(m, root, &sender),
+            Msg::Yt(m) => self.update_yt(m, root, &sender),
+            Msg::Podcast(m) => self.update_podcast(m, root, &sender),
+            Msg::Lyrics(m) => self.update_lyrics(m, root, &sender),
+            Msg::Concert(m) => self.update_concert(m, root, &sender),
+            Msg::Favorite(m) => self.update_favorite(m, root, &sender),
+            Msg::Cover(m) => self.update_cover(m, root, &sender),
+            Msg::Setting(m) => self.update_setting(m, root, &sender),
+            Msg::Ctx(m) => self.update_ctx(m, root, &sender),
+            Msg::Transport(m) => self.update_transport(m, root, &sender),
         }
         // Suppress the per-second tick the moment the app goes idle (and resume
         // it when playback/recording starts) — see `tick_active`.
@@ -4818,31 +2971,5 @@ impl App {
                 .to_string(),
             None => gettext("No music folder – please set one in settings"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{section_description, SECTIONS};
-
-    /// Every menu section needs a subtitle for the setup assistant and
-    /// Settings → Menu. A missing arm used to fall through to the empty
-    /// string, which — passed through `gettext()` — rendered the whole
-    /// catalog header as the row's subtitle.
-    #[test]
-    fn every_section_has_a_description() {
-        for (name, _, _) in SECTIONS {
-            assert!(
-                !section_description(name).is_empty(),
-                "section {name:?} has no description"
-            );
-        }
-    }
-
-    /// The empty fallback must stay untranslated — `gettext("")` returns the
-    /// catalog header, not an empty string.
-    #[test]
-    fn unknown_section_yields_empty_description() {
-        assert_eq!(section_description("does-not-exist"), "");
     }
 }

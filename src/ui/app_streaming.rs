@@ -96,7 +96,7 @@ impl App {
     /// another recording, starting a track/podcast/YouTube/Nextcloud item, or
     /// deleting the running station) would silently drop the in-progress song
     /// and leave a stale live row in the list. Mirrors the explicit
-    /// `Msg::RecordStop` path.
+    /// `Msg::Stream(StreamMsg::RecordStop)` path.
     pub(crate) fn stop_recorder(&mut self) {
         if self.streaming.record_state.is_some() {
             self.finalize_recording();
@@ -216,7 +216,7 @@ impl App {
         let input = self.input.clone();
         std::thread::spawn(move || {
             let _ = crate::core::online::recording_cover(&raw, station.as_deref());
-            let _ = input.send(Msg::ReloadRecordings);
+            let _ = input.send(Msg::Stream(StreamMsg::ReloadRecordings));
         });
     }
 
@@ -405,7 +405,7 @@ impl App {
                     album.as_deref(),
                     &bytes,
                 );
-                let _ = input.send(Msg::ReloadRecordings);
+                let _ = input.send(Msg::Stream(StreamMsg::ReloadRecordings));
             }
         });
         true
@@ -539,11 +539,11 @@ impl App {
                 let sender = sender.clone();
                 let (start, e, title) = (song.start, end, song.title.clone());
                 save.connect_clicked(move |_| {
-                    sender.input(Msg::ReplaySave {
+                    sender.input(Msg::Stream(StreamMsg::ReplaySave {
                         start,
                         end: e,
                         title: title.clone(),
-                    });
+                    }));
                 });
             }
             let play = gtk::Button::builder()
@@ -556,7 +556,7 @@ impl App {
                 let sender = sender.clone();
                 let (start, e) = (song.start, end);
                 play.connect_clicked(move |_| {
-                    sender.input(Msg::ReplayPlay { start, end: e });
+                    sender.input(Msg::Stream(StreamMsg::ReplayPlay { start, end: e }));
                 });
             }
             row.add_suffix(&play);
@@ -591,7 +591,7 @@ impl App {
     pub(crate) fn stream_record_toggle(&mut self, sender: &ComponentSender<Self>, id: i64) {
         if self.streaming.record_state.as_ref().map(|r| r.stream_id) == Some(id) {
             // Running → stop.
-            sender.input(Msg::RecordStop);
+            sender.input(Msg::Stream(StreamMsg::RecordStop));
         } else if self.streaming.recording_buffer_minutes == 0 {
             self.toast(&gettext(
                 "Enable the recording buffer in the settings first",
@@ -663,7 +663,7 @@ impl App {
         let input = self.input.clone();
         std::thread::spawn(move || {
             if crate::core::online::recording_cover(&raw, st.as_deref()).is_some() {
-                let _ = input.send(Msg::ReloadHeard);
+                let _ = input.send(Msg::Stream(StreamMsg::ReloadHeard));
             }
         });
     }
@@ -924,6 +924,146 @@ pub(crate) fn plan_finalize(
         },
         Some(_) => FinalizePlan::Plain { end, incomplete },
         None => FinalizePlan::Nothing,
+    }
+}
+
+/// `Msg` sub-enum of the stream domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum StreamMsg {
+    // Streaming (internet radio) — transport; the page lives in the StreamPage
+    // component and reaches the transport through these.
+    /// Tap a station: starts it, toggle pause/resume on a running station.
+    ToggleStream(i64),
+    /// Record button of a station row: starts/stops the continuous recording.
+    StreamRecordToggle(i64),
+    /// Shared player-bar record button: records a voice memo (Memo section) or
+    /// toggles the running station's timeshift recording (Streaming section).
+    RecordToggle,
+    /// Title tag from the playback (for stations: the running ICY title).
+    StreamTitle(String),
+    /// Actually remove a station (after the undo toast; stops the player/recorder).
+    StreamDeleteConfirmed(i64),
+    // Recording (timeshift)
+    /// Stop the running recording.
+    RecordStop,
+    /// A background recording job (store + online cover embed) finished →
+    /// reload the recordings list. Sent from `store_segment` /
+    /// `maybe_fetch_live_cover` worker threads via `self.input`.
+    ReloadRecordings,
+    /// Open the replay subpage of a station.
+    OpenStreamReplay(i64),
+    /// Open the equalizer editor for a station (per-station EQ).
+    OpenStreamEq(i64),
+    /// Preview a buffered song (absolute byte range).
+    ReplayPlay { start: u64, end: u64 },
+    /// Save a buffered song after the fact.
+    ReplaySave { start: u64, end: u64, title: String },
+    /// Play a saved recording (path).
+    PlayRecording(String),
+    /// A background job touched the "Recently heard" history (e.g. a cover
+    /// landed) → reload the "Recently" list. Sent from a worker via `self.input`.
+    ReloadHeard,
+    /// Play a recognized song from the "Recently" list: prefer a saved timeshift
+    /// recording, then a matching library track, otherwise stream via YouTube.
+    PlayHeard {
+        artist: Option<String>,
+        title: String,
+    },
+    /// Download a recognized song from the "Recently" list via YouTube into the
+    /// music library (resolves the best match, then reuses the YouTube import).
+    DownloadHeard {
+        artist: Option<String>,
+        title: String,
+    },
+    // --- bridge from the StreamPage component to the shared parent chrome ---
+    /// The page confirmed a station removal → show the "station removed" undo toast.
+    StreamDeleteUndo(i64),
+    /// The page confirmed a recording deletion → show the "recording deleted" undo toast.
+    RecordingDeleteUndo(i64),
+    /// Undo window elapsed → tell the page to actually delete the recording.
+    StreamRecordingReallyDelete(i64),
+    /// A recording was copied into the music library → reload artist/album views.
+    StreamLibraryChanged,
+    /// Informational toast requested by the page.
+    StreamToast(String),
+}
+
+impl App {
+    /// Dispatch for [`StreamMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_stream(
+        &mut self,
+        msg: StreamMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            // --- Streaming (internet radio) ---
+            // --- Streaming transport (requested by the StreamPage component) ---
+            StreamMsg::ToggleStream(id) => self.toggle_stream(id),
+            StreamMsg::StreamRecordToggle(id) => self.stream_record_toggle(sender, id),
+            StreamMsg::RecordToggle => {
+                // Context decides the action: a running timeshift recording can be
+                // stopped from any section (the button stays visible while it
+                // runs); otherwise start the timeshift in Streaming, or record a
+                // voice memo elsewhere.
+                if self.streaming.record_state.is_some() {
+                    sender.input(Msg::Stream(StreamMsg::RecordStop));
+                } else if self.on_streaming_section() {
+                    if let Some(id) = self.streaming.playing_stream {
+                        sender.input(Msg::Stream(StreamMsg::StreamRecordToggle(id)));
+                    }
+                } else {
+                    self.toggle_memo_record(sender);
+                }
+            }
+            StreamMsg::StreamTitle(title) => self.stream_title(title),
+            StreamMsg::StreamDeleteConfirmed(id) => self.stream_delete_confirmed(id),
+            // --- Recording (timeshift) ---
+            StreamMsg::RecordStop => {
+                if self.streaming.record_state.is_some() {
+                    // Finalize the song still in progress so it isn't lost.
+                    self.finalize_recording();
+                    self.streaming.record_state = None;
+                    self.toast(&gettext("Recording stopped"));
+                    self.sync_live_recording();
+                }
+            }
+            StreamMsg::ReloadRecordings => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings),
+            StreamMsg::ReloadHeard => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::ReloadHeard),
+            StreamMsg::PlayHeard { artist, title } => self.play_heard(sender, root, artist, title),
+            StreamMsg::DownloadHeard { artist, title } => {
+                self.download_heard(sender, root, artist, title)
+            }
+            StreamMsg::OpenStreamReplay(id) => self.open_stream_replay(sender, id),
+            StreamMsg::OpenStreamEq(id) => self.open_stream_eq(root, sender, id),
+            StreamMsg::ReplayPlay { start, end } => self.replay_play(start, end),
+            StreamMsg::ReplaySave { start, end, title } => self.replay_save(start, end, title),
+            StreamMsg::PlayRecording(path) => self.play_recording(path),
+            // --- bridge from the StreamPage component to the shared parent chrome ---
+            StreamMsg::StreamDeleteUndo(id) => {
+                self.undo_toast(
+                    sender,
+                    &gettext("Station removed"),
+                    Msg::Stream(StreamMsg::StreamDeleteConfirmed(id)),
+                );
+            }
+            StreamMsg::RecordingDeleteUndo(id) => {
+                self.undo_toast(
+                    sender,
+                    &gettext("Recording deleted"),
+                    Msg::Stream(StreamMsg::StreamRecordingReallyDelete(id)),
+                );
+            }
+            StreamMsg::StreamRecordingReallyDelete(id) => self
+                .stream_page
+                .emit(crate::ui::stream_page::StreamInput::RecordingDeleteConfirmed(id)),
+            StreamMsg::StreamLibraryChanged => self.reload_library_overviews(),
+            StreamMsg::StreamToast(s) => self.toast(&s),
+        }
     }
 }
 

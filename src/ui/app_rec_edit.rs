@@ -592,7 +592,7 @@ impl App {
                     st.playing = false;
                     drop(st);
                     show_play_icon(&play_btn);
-                    sender.input(Msg::RecordingPreviewPause);
+                    sender.input(Msg::Edit(EditMsg::RecordingPreviewPause));
                 } else {
                     // → play: (re)start from the current (preview) playhead,
                     // mapped back onto the original file.
@@ -603,10 +603,10 @@ impl App {
                     drop(st);
                     play_btn.set_icon_name("media-playback-pause-symbolic");
                     play_btn.set_tooltip_text(Some(&gettext("Pause")));
-                    sender.input(Msg::RecordingPlayFrom {
+                    sender.input(Msg::Edit(EditMsg::RecordingPlayFrom {
                         path: path.clone(),
                         ms,
-                    });
+                    }));
                 }
             });
         }
@@ -680,7 +680,7 @@ impl App {
                 let cuts = state.borrow().cuts.clone();
                 if cuts.is_empty() {
                     // Let the apply path surface the "mark a part first" hint.
-                    sender.input(Msg::EditApplyCut { kind, id, cuts });
+                    sender.input(Msg::Edit(EditMsg::EditApplyCut { kind, id, cuts }));
                     return;
                 }
                 let dlg = adw::AlertDialog::new(
@@ -698,11 +698,11 @@ impl App {
                 let sender = sender.clone();
                 dlg.connect_response(None, move |_, resp| {
                     if resp == "ok" {
-                        sender.input(Msg::EditApplyCut {
+                        sender.input(Msg::Edit(EditMsg::EditApplyCut {
                             kind,
                             id,
                             cuts: cuts.clone(),
-                        });
+                        }));
                     }
                 });
                 dlg.present(Some(&overlay));
@@ -807,7 +807,7 @@ impl App {
                         st.last_seek_b = -1.0;
                     }
                     show_play_icon(&play_btn);
-                    sender.input(Msg::RecordingPreviewPause);
+                    sender.input(Msg::Edit(EditMsg::RecordingPreviewPause));
                     area.queue_draw();
                     return gtk::glib::ControlFlow::Continue;
                 }
@@ -859,7 +859,7 @@ impl App {
 
     /// Destructively applies the editor's cut ranges to a recording or memo. The
     /// decode + re-encode runs on a background thread (it would otherwise freeze
-    /// the UI for seconds); the result arrives as [`Msg::EditCutDone`], which
+    /// the UI for seconds); the result arrives as [`Msg::Edit(EditMsg::EditCutDone)`], which
     /// overwrites the DB row and returns to the list.
     pub(crate) fn apply_recording_cut(
         &mut self,
@@ -934,12 +934,12 @@ impl App {
                 }
                 Err(_) => (None, 0),
             };
-            sender.input(Msg::EditCutDone {
+            sender.input(Msg::Edit(EditMsg::EditCutDone {
                 kind,
                 id,
                 path,
                 duration_ms,
-            });
+            }));
         });
     }
 }
@@ -989,5 +989,181 @@ fn draw_waveform(cr: &gtk::cairo::Context, w: i32, h: i32, st: &EditState) {
         cr.move_to(px, 0.0);
         cr.line_to(px, h);
         let _ = cr.stroke();
+    }
+}
+
+/// `Msg` sub-enum of the edit domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum EditMsg {
+    /// Open the waveform editor subpage for a recording (id).
+    EditRecording(i64),
+    /// Open the waveform editor subpage for a voice memo (id).
+    EditMemo(i64),
+    /// Preview a recording/memo file from a chosen position (ms) – editor playhead.
+    RecordingPlayFrom { path: String, ms: i64 },
+    /// Pause the editor preview (pauses the main player it plays through).
+    RecordingPreviewPause,
+    /// Apply the editor's cut ranges (seconds) to a recording/memo and overwrite it.
+    EditApplyCut {
+        kind: EditKind,
+        id: i64,
+        cuts: Vec<(f64, f64)>,
+    },
+    /// Result of the background cut: new path (`None` = failed) + new duration.
+    EditCutDone {
+        kind: EditKind,
+        id: i64,
+        path: Option<String>,
+        duration_ms: i64,
+    },
+}
+
+impl App {
+    /// Dispatch for [`EditMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_edit(
+        &mut self,
+        msg: EditMsg,
+        _root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            EditMsg::EditRecording(id) => self.open_recording_edit(sender, EditKind::Recording, id),
+            EditMsg::EditMemo(id) => self.open_recording_edit(sender, EditKind::Memo, id),
+            EditMsg::RecordingPlayFrom { path, ms } => {
+                self.transport.forced_start_ms = Some(ms);
+                self.play_recording(path);
+            }
+            EditMsg::RecordingPreviewPause => {
+                if self.mini.playing {
+                    self.player.pause();
+                    self.mini.playing = false;
+                    self.mpris.set_playing(false);
+                    self.refresh_queue_icons();
+                }
+            }
+            EditMsg::EditApplyCut { kind, id, cuts } => {
+                self.apply_recording_cut(sender, kind, id, cuts)
+            }
+            EditMsg::EditCutDone {
+                kind,
+                id,
+                path,
+                duration_ms,
+            } => match path {
+                Some(p) => {
+                    self.nav.nav_view.pop();
+                    match kind {
+                        EditKind::Recording => {
+                            let _ = self.library.update_recording_file(id, &p, duration_ms);
+                            // A recording lives under <Music>/Streaming, so it is
+                            // also a normal library track. Re-read its tags into
+                            // the library DB and rebuild the overviews; otherwise
+                            // the album/song lists keep the old (longer) duration
+                            // after a cut. (The file browser re-reads from disk on
+                            // its own when navigated to.)
+                            crate::core::scanner::ingest_file(
+                                &self.library,
+                                std::path::Path::new(&p),
+                            );
+                            self.stream_page
+                                .emit(crate::ui::stream_page::StreamInput::ReloadRecordings);
+                            self.reload_library_overviews();
+                            self.toast(&gettext("Recording edited"));
+                        }
+                        EditKind::Memo => {
+                            let _ = self.library.update_memo_file(id, &p, duration_ms);
+                            self.reload_memos(sender);
+                            self.toast(&gettext("Memo edited"));
+                        }
+                    }
+                }
+                None => self.toast(&gettext("Editing failed")),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two cuts: 10–20 s and 30–35 s; kept: [0,10], [20,30], [35,…].
+    const CUTS: &[(f64, f64)] = &[(10.0, 20.0), (30.0, 35.0)];
+
+    #[test]
+    fn fmt_secs_rounds_and_clamps() {
+        assert_eq!(fmt_secs(0.0), "0:00");
+        assert_eq!(fmt_secs(65.0), "1:05");
+        assert_eq!(fmt_secs(59.4), "0:59");
+        assert_eq!(fmt_secs(59.5), "1:00");
+        assert_eq!(fmt_secs(0.5), "0:01");
+        assert_eq!(fmt_secs(-3.0), "0:00");
+        // No hour digit: minutes keep counting.
+        assert_eq!(fmt_secs(3600.0), "60:00");
+    }
+
+    #[test]
+    fn orig_to_preview_without_cuts_is_identity() {
+        assert_eq!(orig_to_preview(&[], 0.0), 0.0);
+        assert_eq!(orig_to_preview(&[], 7.5), 7.5);
+        assert_eq!(orig_to_preview(&[], -1.0), 0.0);
+    }
+
+    #[test]
+    fn orig_to_preview_subtracts_earlier_cuts() {
+        assert_eq!(orig_to_preview(CUTS, 5.0), 5.0);
+        assert_eq!(orig_to_preview(CUTS, 10.0), 10.0);
+        assert_eq!(orig_to_preview(CUTS, 20.0), 10.0);
+        assert_eq!(orig_to_preview(CUTS, 25.0), 15.0);
+        assert_eq!(orig_to_preview(CUTS, 30.0), 20.0);
+        assert_eq!(orig_to_preview(CUTS, 35.0), 20.0);
+        assert_eq!(orig_to_preview(CUTS, 40.0), 25.0);
+    }
+
+    #[test]
+    fn orig_to_preview_collapses_positions_inside_a_cut() {
+        assert_eq!(orig_to_preview(CUTS, 12.0), 10.0);
+        assert_eq!(orig_to_preview(CUTS, 19.99), 10.0);
+        assert_eq!(orig_to_preview(CUTS, 32.0), 20.0);
+        // A cut at the very start collapses onto zero.
+        assert_eq!(orig_to_preview(&[(0.0, 5.0)], 3.0), 0.0);
+        assert_eq!(orig_to_preview(&[(0.0, 5.0)], 8.0), 3.0);
+    }
+
+    #[test]
+    fn preview_to_orig_walks_the_kept_segments() {
+        assert_eq!(preview_to_orig(&[], 7.5), 7.5);
+        assert_eq!(preview_to_orig(CUTS, 0.0), 0.0);
+        assert_eq!(preview_to_orig(CUTS, 5.0), 5.0);
+        // The seam sits on the cut's start, matching `orig_to_preview`.
+        assert_eq!(preview_to_orig(CUTS, 10.0), 10.0);
+        assert_eq!(preview_to_orig(CUTS, 15.0), 25.0);
+        assert_eq!(preview_to_orig(CUTS, 20.0), 30.0);
+        assert_eq!(preview_to_orig(CUTS, 25.0), 40.0);
+        assert_eq!(preview_to_orig(&[(0.0, 5.0)], 3.0), 8.0);
+    }
+
+    #[test]
+    fn preview_positions_round_trip_through_the_original() {
+        let mut p = 0.0;
+        while p <= 30.0 {
+            let back = orig_to_preview(CUTS, preview_to_orig(CUTS, p));
+            assert!((back - p).abs() < 1e-9, "p={p} came back as {back}");
+            p += 0.25;
+        }
+    }
+
+    #[test]
+    fn kept_original_positions_round_trip_through_the_preview() {
+        let kept = [0.0, 3.0, 10.0, 20.5, 25.0, 30.0, 36.0, 42.0];
+        for t in kept {
+            let back = preview_to_orig(CUTS, orig_to_preview(CUTS, t));
+            assert!((back - t).abs() < 1e-9, "t={t} came back as {back}");
+        }
+        // Inside a cut — and at its end — the round trip lands on the cut's start.
+        assert_eq!(preview_to_orig(CUTS, orig_to_preview(CUTS, 20.0)), 10.0);
+        assert_eq!(preview_to_orig(CUTS, orig_to_preview(CUTS, 35.0)), 30.0);
+        assert_eq!(preview_to_orig(CUTS, orig_to_preview(CUTS, 15.0)), 10.0);
+        assert_eq!(preview_to_orig(CUTS, orig_to_preview(CUTS, 33.0)), 30.0);
     }
 }

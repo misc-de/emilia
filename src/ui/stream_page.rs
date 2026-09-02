@@ -1789,3 +1789,58 @@ impl StreamPage {
         present_detail(&dialog, &content, &root);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn station(tags: Option<&str>, country: Option<&str>) -> StreamItem {
+        StreamItem {
+            id: 1,
+            name: "Radio".into(),
+            url: "http://example.invalid/stream".into(),
+            favicon: None,
+            tags: tags.map(str::to_string),
+            country: country.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn no_tags_and_no_country_means_no_subtitle() {
+        assert_eq!(stream_subtitle(&station(None, None)), None);
+        assert_eq!(stream_subtitle(&station(Some("  "), Some(""))), None);
+        assert_eq!(stream_subtitle(&station(Some(", ,"), None)), None);
+    }
+
+    #[test]
+    fn tags_are_trimmed_and_capped_at_three() {
+        assert_eq!(
+            stream_subtitle(&station(Some("rock, pop"), None)),
+            Some("rock · pop".into())
+        );
+        assert_eq!(
+            stream_subtitle(&station(Some("a,b,c,d,e"), None)),
+            Some("a · b · c".into())
+        );
+        assert_eq!(
+            stream_subtitle(&station(Some(", ,rock,"), None)),
+            Some("rock".into())
+        );
+    }
+
+    #[test]
+    fn country_is_appended_after_a_dash() {
+        assert_eq!(
+            stream_subtitle(&station(Some("rock, pop"), Some("Germany"))),
+            Some("rock · pop — Germany".into())
+        );
+        assert_eq!(
+            stream_subtitle(&station(None, Some("Germany"))),
+            Some("Germany".into())
+        );
+        assert_eq!(
+            stream_subtitle(&station(Some("  "), Some("Germany"))),
+            Some("Germany".into())
+        );
+    }
+}

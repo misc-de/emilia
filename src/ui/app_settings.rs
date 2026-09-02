@@ -1,11 +1,14 @@
 //! Settings subpage: preferences, extra sources, section order & hidden items.
 //! Split out of app_dialogs.rs – pure reordering, no functional change.
 
+use std::path::PathBuf;
+
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{cover_widget, App, Msg};
 use crate::ui::app_mcp::McpSettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::app_tray::TrayMsg;
+use crate::ui::app_yt_glue::YtMsg;
 use crate::ui::theme::{DesignMsg, SOFT_STRENGTH_MAX};
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -113,7 +116,7 @@ impl App {
         {
             let sender = sender.clone();
             gapless_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetGapless(r.is_active()));
+                sender.input(Msg::Setting(SettingMsg::SetGapless(r.is_active())));
             });
         }
         playback_group.add(&gapless_row);
@@ -125,7 +128,7 @@ impl App {
         {
             let sender = sender.clone();
             xfade_row.connect_value_notify(move |r| {
-                sender.input(Msg::SetCrossfade(r.value()));
+                sender.input(Msg::Setting(SettingMsg::SetCrossfade(r.value())));
             });
         }
         playback_group.add(&xfade_row);
@@ -157,7 +160,7 @@ impl App {
         {
             let sender = sender.clone();
             auto_row.connect_active_notify(move |r| {
-                sender.input(Msg::SetAutoEnrich(r.is_active()));
+                sender.input(Msg::Setting(SettingMsg::SetAutoEnrich(r.is_active())));
             });
         }
         auto_group.add(&auto_row);
@@ -179,7 +182,9 @@ impl App {
         {
             let sender = sender.clone();
             key_row.connect_apply(move |r| {
-                sender.input(Msg::SetAcoustidKey(r.text().to_string()));
+                sender.input(Msg::Setting(SettingMsg::SetAcoustidKey(
+                    r.text().to_string(),
+                )));
             });
         }
         acoustid_group.add(&key_row);
@@ -199,7 +204,7 @@ impl App {
         {
             let sender = sender.clone();
             fanart_row.connect_apply(move |r| {
-                sender.input(Msg::SetFanartKey(r.text().to_string()));
+                sender.input(Msg::Setting(SettingMsg::SetFanartKey(r.text().to_string())));
             });
         }
         fanart_group.add(&fanart_row);
@@ -248,7 +253,7 @@ impl App {
                     .get(r.selected() as usize)
                     .copied()
                     .unwrap_or("system");
-                sender.input(Msg::SetLanguage(code.to_string()));
+                sender.input(Msg::Setting(SettingMsg::SetLanguage(code.to_string())));
             });
         }
         lang_group.add(&lang_row);
@@ -481,16 +486,17 @@ impl App {
             ))
             .build();
 
-        let mcp_modes = [
-            crate::core::mcp::McpMode::Off,
-            crate::core::mcp::McpMode::JsonRpc,
-            crate::core::mcp::McpMode::Sdk,
-        ];
-        let mcp_mode_labels = [
-            gettext("Off"),
-            gettext("JSON-RPC 2.0 (lean)"),
-            gettext("Tokio SDK"),
-        ];
+        // Only the backends this build carries (the SDK one is a cargo feature).
+        let mcp_modes: Vec<crate::core::mcp::McpMode> =
+            crate::core::mcp::McpMode::selectable().to_vec();
+        let mcp_mode_labels: Vec<String> = mcp_modes
+            .iter()
+            .map(|m| match m {
+                crate::core::mcp::McpMode::Off => gettext("Off"),
+                crate::core::mcp::McpMode::JsonRpc => gettext("JSON-RPC 2.0 (lean)"),
+                crate::core::mcp::McpMode::Sdk => gettext("Tokio SDK"),
+            })
+            .collect();
         let mcp_mode_refs: Vec<&str> = mcp_mode_labels.iter().map(String::as_str).collect();
         let mcp_mode_row = adw::ComboRow::builder()
             .title(gettext("Backend"))
@@ -1217,10 +1223,10 @@ impl App {
                 let group = hidden_group.clone();
                 let row = row.clone();
                 reveal.connect_clicked(move |_| {
-                    sender.input(Msg::UnhideEntry {
+                    sender.input(Msg::Setting(SettingMsg::UnhideEntry {
                         scope: scope.clone(),
                         key: key.clone(),
-                    });
+                    }));
                     group.remove(&row);
                 });
             }
@@ -1274,8 +1280,8 @@ impl App {
         {
             let sender = sender.clone();
             // Download vs. update is decided from the cached version at click time
-            // (see `Msg::FetchYtDlp`), so the button is correct even mid-probe.
-            dl_btn.connect_clicked(move |_| sender.input(Msg::FetchYtDlp));
+            // (see `Msg::Yt(YtMsg::FetchYtDlp)`), so the button is correct even mid-probe.
+            dl_btn.connect_clicked(move |_| sender.input(Msg::Yt(YtMsg::FetchYtDlp)));
         }
         ytdlp_row.add_suffix(&dl_btn);
         yt_group.add(&ytdlp_row);
@@ -1383,7 +1389,7 @@ impl App {
                 btn.connect_toggled(move |b| {
                     if b.is_active() {
                         stack.set_visible_child_name(&name);
-                        sender.input(Msg::SetLastSettingsPage(name.clone()));
+                        sender.input(Msg::Setting(SettingMsg::SetLastSettingsPage(name.clone())));
                     }
                 });
             }
@@ -1482,7 +1488,7 @@ fn rebuild_section_rows(
                     o.remove(from);
                     o.insert(to, name_static);
                 }
-                sender.input(Msg::MoveSection { from, to });
+                sender.input(Msg::Setting(SettingMsg::MoveSection { from, to }));
                 rebuild_section_rows(&list, &order, &hidden, &sender);
                 true
             });
@@ -1513,10 +1519,10 @@ fn rebuild_section_rows(
                 } else {
                     hidden.borrow_mut().insert(name.to_string());
                 }
-                sender.input(Msg::SetSectionVisible {
+                sender.input(Msg::Setting(SettingMsg::SetSectionVisible {
                     section: name,
                     visible: s.is_active(),
-                });
+                }));
             });
         }
         row.add_suffix(&sw);
@@ -1542,5 +1548,186 @@ fn hidden_kind(scope: &str) -> String {
         "artist" => gettext("Artist"),
         "folder" => gettext("Folder"),
         _ => gettext("Track"),
+    }
+}
+
+/// `Msg` sub-enum of the setting domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum SettingMsg {
+    SetMusicDir(PathBuf),
+    /// The first-run setup assistant completed: persist the chosen language,
+    /// music folder and enabled menu items, then scan (or restart for a language
+    /// change).
+    SetupFinished {
+        lang_code: String,
+        music_dir: PathBuf,
+        enabled_sections: Vec<String>,
+    },
+    SetAcoustidKey(String),
+    SetFanartKey(String),
+    /// Turn the automatic online fetch on/off.
+    SetAutoEnrich(bool),
+    /// Change the display language ("system"/"de"/"en"); restarts the app.
+    SetLanguage(String),
+    /// Remember the last opened settings category (page name) so the settings
+    /// dialog reopens on it.
+    SetLastSettingsPage(String),
+    /// Gapless playback on/off (settings); persisted + pushed to the player.
+    SetGapless(bool),
+    /// Crossfade window in seconds (settings); persisted + pushed to the player.
+    SetCrossfade(f64),
+    /// Show/hide a navigation menu item (stack name).
+    SetSectionVisible {
+        section: &'static str,
+        visible: bool,
+    },
+    /// Move a menu item in the order (indices in `section_order`).
+    MoveSection {
+        from: usize,
+        to: usize,
+    },
+    /// Show a hidden content again (reset the override).
+    UnhideEntry {
+        scope: String,
+        key: String,
+    },
+    /// Set a property of a level (or with `None` reset to "inherit").
+    /// Set the areas (properties) of a level; empty value = hidden.
+    SetAreas {
+        scope: &'static str,
+        key: String,
+        value: String,
+    },
+    /// Override an album's classification (Singles/Compilations) from the album
+    /// context menu; `kind` = `None` reverts to the automatic heuristic.
+    SetAlbumKind {
+        album: String,
+        kind: Option<crate::model::AlbumKind>,
+    },
+}
+
+impl App {
+    /// Dispatch for [`SettingMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_setting(
+        &mut self,
+        msg: SettingMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            SettingMsg::SetMusicDir(path) => self.on_set_music_dir(path, sender),
+            SettingMsg::SetupFinished {
+                lang_code,
+                music_dir,
+                enabled_sections,
+            } => self.on_setup_finished(lang_code, music_dir, enabled_sections, sender),
+            SettingMsg::SetAcoustidKey(key) => {
+                let key = key.trim().to_string();
+                let _ = self.library.set_secret_setting("acoustid_key", &key);
+                self.enrich_state.acoustid_key = if key.is_empty() { None } else { Some(key) };
+            }
+            SettingMsg::SetFanartKey(key) => {
+                let key = key.trim().to_string();
+                let _ = self.library.set_secret_setting("fanart_key", &key);
+                self.enrich_state.fanart_key = if key.is_empty() { None } else { Some(key) };
+            }
+            SettingMsg::SetAutoEnrich(on) => {
+                self.enrich_state.auto_enrich = on;
+                let _ = self
+                    .library
+                    .set_setting("auto_enrich", if on { "1" } else { "0" });
+            }
+            SettingMsg::SetLanguage(lang) => self.on_set_language(lang, root),
+            SettingMsg::SetLastSettingsPage(name) => {
+                let _ = self.library.set_setting("settings_last_page", &name);
+            }
+            SettingMsg::SetGapless(on) => {
+                self.settings.gapless = on;
+                let _ = self
+                    .library
+                    .set_setting("gapless", if on { "1" } else { "0" });
+                self.apply_playback_prefs();
+            }
+            SettingMsg::SetCrossfade(secs) => {
+                self.settings.crossfade_secs = secs.clamp(0.0, 12.0);
+                let _ = self
+                    .library
+                    .set_setting("crossfade_secs", &self.settings.crossfade_secs.to_string());
+                self.apply_playback_prefs();
+            }
+            SettingMsg::SetAreas { scope, key, value } => self.set_areas(sender, scope, key, value),
+            SettingMsg::SetAlbumKind { album, kind } => {
+                match kind {
+                    Some(k) => {
+                        let _ = self.library.set_album_kind(&album, k);
+                    }
+                    None => {
+                        let _ = self.library.clear_album_kind(&album);
+                    }
+                }
+                // Refresh all three album views so the moved album appears in its
+                // new category (and disappears from the old one).
+                self.reload_albums();
+                self.reload_singles();
+                self.reload_compilations();
+            }
+            SettingMsg::SetSectionVisible { section, visible } => {
+                // The YouTube section is the opt-in feature; its menu switch is now
+                // the single enable/disable control, so route it through
+                // `set_youtube_enabled` (keeps the `youtube_enabled` flag + the
+                // background channel load in step). All other sections just toggle
+                // their menu visibility.
+                if section == "youtube" {
+                    self.set_youtube_enabled(visible, sender);
+                } else {
+                    self.set_section_visible(section, visible);
+                }
+            }
+            SettingMsg::MoveSection { from, to } => {
+                if from < self.nav.section_order.len()
+                    && to < self.nav.section_order.len()
+                    && from != to
+                {
+                    let name = self.nav.section_order.remove(from);
+                    self.nav.section_order.insert(to, name);
+                    let value = self.nav.section_order.join(",");
+                    let _ = self.library.set_setting("section_order", &value);
+                    // Apply the order to the existing buttons.
+                    self.apply_section_order();
+                }
+            }
+            SettingMsg::UnhideEntry { scope, key } => {
+                // Delete the override → back to default (visible again).
+                let _ = self.library.set_category(&scope, &key, None);
+                self.reload_library_overviews();
+                self.load_concerts(sender);
+                self.load_audiobooks(sender);
+                self.load_dir(sender);
+                self.toast(&gettext("Shown again"));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hidden_icon, hidden_kind};
+
+    #[test]
+    fn hidden_icon_per_scope() {
+        assert_eq!(hidden_icon("album"), "media-optical-symbolic");
+        assert_eq!(hidden_icon("artist"), "avatar-default-symbolic");
+        assert_eq!(hidden_icon("folder"), "folder-symbolic");
+        assert_eq!(hidden_icon("track"), "audio-x-generic-symbolic");
+        assert_eq!(hidden_icon(""), "audio-x-generic-symbolic");
+    }
+
+    #[test]
+    fn hidden_kind_per_scope() {
+        assert_eq!(hidden_kind("album"), "Album");
+        assert_eq!(hidden_kind("artist"), "Artist");
+        assert_eq!(hidden_kind("folder"), "Folder");
+        assert_eq!(hidden_kind("track"), "Track");
+        assert_eq!(hidden_kind("anything"), "Track");
     }
 }

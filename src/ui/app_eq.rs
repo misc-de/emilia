@@ -7,7 +7,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::category;
-use crate::i18n::{gettext, gettext_f};
+use crate::i18n::{gettext, gettext_f, gettext_noop};
 use crate::ui::app::{App, CtxTarget, Msg};
 
 /// Fixed genre equalizer presets. Each holds the gain (dB) of the ten bands
@@ -185,21 +185,23 @@ impl App {
             String,
         ) = match entry {
             CtxTarget::Artist(m) => (
-                "the artist",
+                gettext_noop("the artist"),
                 m.name.clone(),
-                Some("Also applies to this artist's albums and tracks."),
+                Some(gettext_noop(
+                    "Also applies to this artist's albums and tracks.",
+                )),
                 "artist",
                 m.name.clone(),
             ),
             CtxTarget::Album(m) => (
-                "the album",
+                gettext_noop("the album"),
                 m.album.clone(),
-                Some("Also applies to this album's tracks."),
+                Some(gettext_noop("Also applies to this album's tracks.")),
                 "album",
                 category::album_key(&m.artist, &m.album),
             ),
             CtxTarget::Fs(e) if !e.is_dir() => (
-                "the track",
+                gettext_noop("the track"),
                 e.display_title(),
                 None,
                 "track",
@@ -230,9 +232,11 @@ impl App {
         self.open_eq_editor(
             root,
             sender,
-            "the global equalizer",
+            gettext_noop("the global equalizer"),
             "",
-            Some("Applies to everything without its own artist, album or track setting."),
+            Some(gettext_noop(
+                "Applies to everything without its own artist, album or track setting.",
+            )),
             "global",
             String::new(),
         );
@@ -258,9 +262,9 @@ impl App {
         self.open_eq_editor(
             root,
             sender,
-            "the station",
+            gettext_noop("the station"),
             &name,
-            Some("Applies while this station plays."),
+            Some(gettext_noop("Applies while this station plays.")),
             "stream",
             id.to_string(),
         );
@@ -284,9 +288,9 @@ impl App {
         self.open_eq_editor(
             root,
             sender,
-            "the podcast",
+            gettext_noop("the podcast"),
             &name,
-            Some("Also applies to this podcast's episodes."),
+            Some(gettext_noop("Also applies to this podcast's episodes.")),
             "podcast",
             id.to_string(),
         );
@@ -304,9 +308,9 @@ impl App {
         self.open_eq_editor(
             root,
             sender,
-            "the episode",
+            gettext_noop("the episode"),
             &title,
-            Some("Applies while this episode plays."),
+            Some(gettext_noop("Applies while this episode plays.")),
             "episode",
             url,
         );
@@ -751,6 +755,46 @@ impl App {
             // show the raw path for YouTube.
             let name = self.display_name(&path);
             self.open_eq_editor(root, sender, "the track", &name, None, "track", key);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{match_preset, GENRE_PRESETS};
+
+    #[test]
+    fn every_preset_matches_its_own_one_based_index() {
+        for (i, (name, bands)) in GENRE_PRESETS.iter().enumerate() {
+            assert_eq!(match_preset(bands), i + 1, "preset {name}");
+        }
+    }
+
+    #[test]
+    fn unknown_bands_are_custom() {
+        assert_eq!(match_preset(&[0.0; 10]), 0);
+        assert_eq!(match_preset(&[-3.0; 10]), 0);
+        let mut rock = GENRE_PRESETS[0].1;
+        rock[4] += 1.0;
+        assert_eq!(match_preset(&rock), 0);
+    }
+
+    #[test]
+    fn matching_tolerates_tiny_deviations_only() {
+        let mut jazz = GENRE_PRESETS[2].1;
+        for b in jazz.iter_mut() {
+            *b += 0.005;
+        }
+        assert_eq!(match_preset(&jazz), 3);
+        jazz[0] += 0.02;
+        assert_eq!(match_preset(&jazz), 0);
+    }
+
+    #[test]
+    fn presets_are_attenuation_only() {
+        for (name, bands) in GENRE_PRESETS {
+            assert!(bands.iter().all(|b| *b <= 0.0), "preset {name} boosts");
+            assert!(bands.contains(&0.0), "preset {name} has no 0 dB band");
         }
     }
 }

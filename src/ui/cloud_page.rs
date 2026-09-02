@@ -582,3 +582,26 @@ fn normalize_music_path(p: &str) -> String {
         format!("/{p}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_music_path;
+
+    #[test]
+    fn empty_or_root_paths_mean_the_cloud_root() {
+        assert_eq!(normalize_music_path(""), "");
+        assert_eq!(normalize_music_path("   "), "");
+        assert_eq!(normalize_music_path("/"), "");
+        assert_eq!(normalize_music_path("///"), "");
+    }
+
+    #[test]
+    fn paths_get_a_leading_and_lose_the_trailing_slash() {
+        assert_eq!(normalize_music_path("Music"), "/Music");
+        assert_eq!(normalize_music_path("/Music"), "/Music");
+        assert_eq!(normalize_music_path("Music/"), "/Music");
+        assert_eq!(normalize_music_path("/Music/"), "/Music");
+        assert_eq!(normalize_music_path(" /Music/ "), "/Music");
+        assert_eq!(normalize_music_path("a/b/c//"), "/a/b/c");
+    }
+}

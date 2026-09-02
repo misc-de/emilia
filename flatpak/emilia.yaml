@@ -1,0 +1,67 @@
+# Flatpak module for Emilia — shared by de.cais.Emilia.yaml (desktop) and
+# de.cais.Emilia.phone.yaml (phone). Paths are relative to this file.
+#
+# Neue eigene Icons unter data/icons müssen hier (und nur hier) eine
+# install-Zeile bekommen, sonst fehlen sie im installierten Flatpak.
+name: emilia
+buildsystem: simple
+build-commands:
+  # $EMILIA_CARGO_ARGS setzt das Top-Level-Manifest in build-options.env:
+  # leer für den Desktop, `--no-default-features` für das Phone (lässt das
+  # rmcp/tokio-MCP-Backend weg, siehe Cargo.toml [features]).
+  - cargo build --release --offline $EMILIA_CARGO_ARGS
+  - install -Dm755 target/release/emilia /app/bin/emilia
+  # Übersetzungskataloge (.po → .mo) für alle Sprachen aus po/LINGUAS bauen.
+  # Bewusst NICHT nach /app/share/locale: flatpak-builder lagert dort liegende
+  # Kataloge automatisch in die Locale-Extension (de.cais.Emilia.Locale) aus,
+  # die nur die auf dem Gerät konfigurierten Sprachen installiert – auf einem
+  # en-only-System fehlt damit der deutsche Katalog komplett. Emilia hat einen
+  # eigenen Sprachwähler, also müssen ALLE Kataloge immer vorhanden sein:
+  # privater Pfad + EMILIA_LOCALEDIR (siehe finish-args, src/i18n.rs).
+  - |
+    for lang in $(grep -v '^#' po/LINGUAS); do
+      install -d /app/share/emilia/translations/$lang/LC_MESSAGES
+      msgfmt --check po/$lang.po -o /app/share/emilia/translations/$lang/LC_MESSAGES/emilia.mo
+    done
+  - install -Dm644 data/de.cais.Emilia.desktop
+    /app/share/applications/de.cais.Emilia.desktop
+  - install -Dm644 data/de.cais.Emilia.metainfo.xml
+    /app/share/metainfo/de.cais.Emilia.metainfo.xml
+  - install -Dm644 data/icons/hicolor/256x256/apps/de.cais.Emilia.png
+    /app/share/icons/hicolor/256x256/apps/de.cais.Emilia.png
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-sleep-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-sleep-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-filter-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-filter-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-longpress-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-longpress-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/im-youtube-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/im-youtube-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/ticket-special-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/ticket-special-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/xsi-view-more-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/xsi-view-more-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/podcast-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/podcast-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/internet-radio-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/multimedia-equalizer-symbolic.svg
+sources:
+  # Der Quellbaum (dieses Verzeichnis liegt eine Ebene tiefer).
+  - type: dir
+    path: ..
+  # Gevendorte Cargo-Abhängigkeiten (offline-Build). Aus Cargo.lock erzeugt.
+  - ../generated-sources.json

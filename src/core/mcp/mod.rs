@@ -9,7 +9,8 @@
 //!   blocking HTTP helpers as the device-sync server ([`crate::core::http`]).
 //!   Default on aarch64 (phones).
 //! * `server_sdk` (rmcp/tokio) — the official SDK on its own runtime thread.
-//!   Default on desktop architectures. *(Added in a later step.)*
+//!   Only compiled with the `mcp-sdk` cargo feature (on by default; phone
+//!   builds leave it out — see [`SDK_AVAILABLE`]).
 //!
 //! Reads run on a fresh [`Library`](crate::core::db::Library) connection per
 //! request (WAL — safe alongside the running UI). Writes/playback are forwarded
@@ -20,6 +21,7 @@ pub mod command;
 pub mod jobs;
 pub mod protocol;
 pub mod server_jsonrpc;
+#[cfg(feature = "mcp-sdk")]
 pub mod server_sdk;
 pub mod state;
 pub mod tools;
@@ -29,6 +31,11 @@ pub use state::{new_handle, NowPlayingHandle};
 
 /// Preferred TCP port (next to the sync server's 8765).
 pub const PORT: u16 = 8770;
+
+/// Whether the rmcp/tokio SDK backend is part of this build (`mcp-sdk`
+/// feature). Builds without it — the phone Flatpak — offer only the lean
+/// JSON-RPC backend, and a persisted `"sdk"` choice degrades to it.
+pub const SDK_AVAILABLE: bool = cfg!(feature = "mcp-sdk");
 
 /// Binds a TCP listener with `SO_REUSEADDR` set. Without it, a freshly
 /// restarted Emilia would find its previous port still lingering in `TIME_WAIT`
@@ -67,11 +74,23 @@ pub enum McpMode {
 
 impl McpMode {
     /// Parse the persisted `mcp_mode` setting; unknown/missing → `Off` (opt-in).
+    /// `"sdk"` in a build without the SDK backend degrades to `JsonRpc`, so the
+    /// server still comes up instead of silently staying off.
     pub fn from_setting(s: &str) -> Self {
         match s {
             "jsonrpc" => Self::JsonRpc,
-            "sdk" => Self::Sdk,
+            "sdk" if SDK_AVAILABLE => Self::Sdk,
+            "sdk" => Self::JsonRpc,
             _ => Self::Off,
+        }
+    }
+
+    /// The backends this build can offer, in settings order.
+    pub fn selectable() -> &'static [McpMode] {
+        if SDK_AVAILABLE {
+            &[Self::Off, Self::JsonRpc, Self::Sdk]
+        } else {
+            &[Self::Off, Self::JsonRpc]
         }
     }
 
@@ -102,9 +121,24 @@ mod tests {
 
     #[test]
     fn setting_roundtrips() {
-        for m in [McpMode::Off, McpMode::JsonRpc, McpMode::Sdk] {
+        for m in [McpMode::Off, McpMode::JsonRpc] {
             assert_eq!(McpMode::from_setting(m.as_setting()), m);
         }
+        // "sdk" only survives the round trip when the backend is compiled in;
+        // otherwise it degrades to the lean backend rather than to "off".
+        let expected = if SDK_AVAILABLE {
+            McpMode::Sdk
+        } else {
+            McpMode::JsonRpc
+        };
+        assert_eq!(McpMode::from_setting(McpMode::Sdk.as_setting()), expected);
+    }
+
+    #[test]
+    fn selectable_matches_build() {
+        let modes = McpMode::selectable();
+        assert_eq!(modes[0], McpMode::Off);
+        assert_eq!(modes.contains(&McpMode::Sdk), SDK_AVAILABLE);
     }
 
     #[test]

@@ -213,7 +213,7 @@ impl App {
                     let ts = *ts;
                     click.connect_released(move |g, _, _, _| {
                         g.set_state(gtk::EventSequenceState::Claimed);
-                        let _ = input.send(Msg::LyricsSeek(ts));
+                        let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsSeek(ts)));
                     });
                 }
                 label.add_controller(click);
@@ -252,7 +252,7 @@ impl App {
             {
                 let input = self.input.clone();
                 karaoke_sw.connect_active_notify(move |_| {
-                    let _ = input.send(Msg::LyricsToggleKaraoke);
+                    let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsToggleKaraoke));
                 });
             }
             karaoke_row.append(&karaoke_lbl);
@@ -273,13 +273,13 @@ impl App {
             {
                 let input = self.input.clone();
                 minus.connect_clicked(move |_| {
-                    let _ = input.send(Msg::LyricsDelayAdjust(-100));
+                    let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsDelayAdjust(-100)));
                 });
             }
             {
                 let input = self.input.clone();
                 plus.connect_clicked(move |_| {
-                    let _ = input.send(Msg::LyricsDelayAdjust(100));
+                    let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsDelayAdjust(100)));
                 });
             }
             delay_box.append(&minus);
@@ -297,7 +297,7 @@ impl App {
         // Closing stops the timer and drops the view.
         let input = self.input.clone();
         dialog.connect_closed(move |_| {
-            let _ = input.send(Msg::LyricsClosed);
+            let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsClosed));
         });
 
         // Fine-grained karaoke timer – only while the dialog is open and karaoke on.
@@ -306,7 +306,7 @@ impl App {
             Some(gtk::glib::timeout_add_local(
                 Duration::from_millis(200),
                 move || {
-                    let _ = input.send(Msg::LyricsTick);
+                    let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsTick));
                     gtk::glib::ControlFlow::Continue
                 },
             ))
@@ -410,7 +410,7 @@ impl App {
                     view.timer = Some(gtk::glib::timeout_add_local(
                         Duration::from_millis(200),
                         move || {
-                            let _ = input.send(Msg::LyricsTick);
+                            let _ = input.send(Msg::Lyrics(LyricsMsg::LyricsTick));
                             gtk::glib::ControlFlow::Continue
                         },
                     ));
@@ -451,7 +451,7 @@ impl App {
 
     /// Kicks off an online lyrics lookup for an open file-info dialog whose
     /// `label`/`group` are kept in `lyrics.file_pending`. Result arrives as
-    /// [`Msg::FileLyricsFetched`].
+    /// [`Msg::Lyrics(LyricsMsg::FileLyricsFetched)`].
     pub(crate) fn fetch_file_lyrics(&self, path: &str) {
         if !online_available() {
             return;
@@ -467,7 +467,7 @@ impl App {
                 .fetch_lyrics(&artist, &title, album.as_deref(), dur)
                 .ok()
                 .flatten();
-            let _ = input.send(Msg::FileLyricsFetched { path, lyrics });
+            let _ = input.send(Msg::Lyrics(LyricsMsg::FileLyricsFetched { path, lyrics }));
         });
     }
 
@@ -509,5 +509,84 @@ impl App {
             label.set_label(&text);
             group.set_visible(true);
         }
+    }
+}
+
+/// `Msg` sub-enum of the lyrics domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum LyricsMsg {
+    /// Load lyrics for the just-started track: check embedded tags + the DB
+    /// cache, then fetch from LRCLIB in the background if needed.
+    LoadLyrics(PathBuf),
+    /// Open the karaoke dialog for the running track's synced lyrics.
+    ShowLyrics,
+    /// Fine-grained karaoke tick: refresh the highlighted line while the dialog
+    /// is open (no-op otherwise).
+    LyricsTick,
+    /// The karaoke dialog was closed: stop its timer and drop the view.
+    LyricsClosed,
+    /// Seek the song to a clicked karaoke line (its LRC timestamp in ms; the
+    /// current delay offset is applied by the handler).
+    LyricsSeek(i64),
+    /// Toggle timed karaoke highlighting for the running track (persisted).
+    LyricsToggleKaraoke,
+    /// Nudge the karaoke timing offset by the given ms (+ = later); persisted.
+    LyricsDelayAdjust(i64),
+    /// Online lyrics for an open file-info dialog returned (path + lyrics).
+    FileLyricsFetched {
+        path: String,
+        lyrics: Option<crate::core::lyrics::Lyrics>,
+    },
+}
+
+impl App {
+    /// Dispatch for [`LyricsMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_lyrics(
+        &mut self,
+        msg: LyricsMsg,
+        _root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            LyricsMsg::LoadLyrics(path) => self.load_lyrics(sender, path),
+            LyricsMsg::ShowLyrics => self.show_lyrics(),
+            LyricsMsg::LyricsTick => self.update_lyrics_highlight(),
+            LyricsMsg::LyricsSeek(ts) => {
+                // Jump to the clicked line (its LRC time shifted by the delay).
+                let delay = self.lyrics.view.as_ref().map(|v| v.delay_ms).unwrap_or(0);
+                let target = (ts + delay).max(0);
+                self.mini.position_ms = target;
+                if self.player.seek_ms(target).is_ok() {
+                    self.mpris.seeked(target);
+                }
+                self.update_lyrics_highlight();
+            }
+            LyricsMsg::LyricsClosed => self.close_lyrics_view(),
+            LyricsMsg::LyricsToggleKaraoke => self.toggle_lyrics_karaoke(),
+            LyricsMsg::LyricsDelayAdjust(step) => self.adjust_lyrics_delay(step),
+            LyricsMsg::FileLyricsFetched { path, lyrics } => {
+                self.on_file_lyrics_fetched(path, lyrics)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_delay;
+
+    #[test]
+    fn zero_delay_has_no_sign() {
+        assert_eq!(fmt_delay(0), "0.0 s");
+    }
+
+    #[test]
+    fn delays_carry_a_sign_and_one_decimal() {
+        assert_eq!(fmt_delay(1_500), "+1.5 s");
+        assert_eq!(fmt_delay(100), "+0.1 s");
+        assert_eq!(fmt_delay(1_234), "+1.2 s");
+        // Negative delays use the typographic minus.
+        assert_eq!(fmt_delay(-2_000), "\u{2212}2.0 s");
+        assert_eq!(fmt_delay(-760), "\u{2212}0.8 s");
     }
 }

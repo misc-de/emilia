@@ -5,8 +5,6 @@
 //! its runtime plus a play button (start here now). The whole queue is cleared
 //! via the header button (playback keeps running).
 
-use std::path::PathBuf;
-
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
@@ -14,6 +12,7 @@ use relm4::{adw, gtk};
 use crate::i18n::{gettext, ngettext_n};
 use crate::ui::app::{App, Msg};
 use crate::ui::app_favorites::{entry_is_active, mark_key};
+use crate::ui::app_playback::TransportMsg;
 
 impl App {
     /// Opens the queue dialog.
@@ -80,7 +79,7 @@ impl App {
                 let dialog = dialog.clone();
                 confirm.connect_response(None, move |_, resp| {
                     if resp == "clear" {
-                        sender.input(Msg::QueueClear);
+                        sender.input(Msg::Transport(TransportMsg::QueueClear));
                         dialog.close();
                     }
                 });
@@ -187,7 +186,7 @@ impl App {
                 let play = crate::ui::play_mark::button(&gettext("Play"), active, playing);
                 let input = self.input.clone();
                 play.connect_clicked(move |_| {
-                    let _ = input.send(Msg::PlayQueueAt { start, len });
+                    let _ = input.send(Msg::Transport(TransportMsg::PlayQueueAt { start, len }));
                 });
                 self.transport.queue_marks.add(key, &play);
                 row.add_suffix(&play);
@@ -218,7 +217,11 @@ impl App {
                     .and_then(|(a, b)| Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)))
                 {
                     Some((from, len)) => {
-                        let _ = input.send(Msg::QueueMoveRange { from, len, to });
+                        let _ = input.send(Msg::Transport(TransportMsg::QueueMoveRange {
+                            from,
+                            len,
+                            to,
+                        }));
                         true
                     }
                     None => false,
@@ -311,22 +314,111 @@ impl App {
     }
 
     /// Reorder the user queue: move the `len`-track block at `from` to `to`
-    /// (album rows move as one block).
+    /// (album rows move as one block). See [`move_range`] for the index rules.
     pub(crate) fn on_queue_move_range(&mut self, from: usize, len: usize, to: usize) {
-        let n = self.transport.user_queue.len();
-        // Dropping a block onto itself is a no-op.
-        if from < n && len >= 1 && !(to >= from && to < from + len) {
-            let len = len.min(n - from);
-            let block: Vec<PathBuf> = self.transport.user_queue.drain(from..from + len).collect();
-            // After removal everything past the block shifts left by `len`.
-            let insert_at =
-                if to > from { to - len } else { to }.min(self.transport.user_queue.len());
-            for (i, p) in block.into_iter().enumerate() {
-                self.transport.user_queue.insert(insert_at + i, p);
-            }
+        if move_range(&mut self.transport.user_queue, from, len, to) {
             self.reload_queue_list();
             self.refresh_queue_icons();
             self.save_queue();
         }
+    }
+}
+
+/// Moves the `len`-item block starting at `from` so that it lands in front of
+/// the item that sat at index `to` *before* the move (`to == items.len()`
+/// appends). `len` is clamped to the end of the list. Returns whether the block
+/// was re-inserted; nothing happens when `from` is out of range, `len` is zero
+/// or `to` points into the block itself (dropping a block onto itself).
+fn move_range<T>(items: &mut Vec<T>, from: usize, len: usize, to: usize) -> bool {
+    let n = items.len();
+    // Dropping a block onto itself is a no-op.
+    if from >= n || len == 0 || (to >= from && to < from + len) {
+        return false;
+    }
+    let len = len.min(n - from);
+    let block: Vec<T> = items.drain(from..from + len).collect();
+    // After removal everything past the block shifts left by `len`.
+    let insert_at = if to > from { to - len } else { to }.min(items.len());
+    for (i, p) in block.into_iter().enumerate() {
+        items.insert(insert_at + i, p);
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::move_range;
+
+    fn items() -> Vec<char> {
+        vec!['a', 'b', 'c', 'd', 'e']
+    }
+
+    #[test]
+    fn moves_a_single_item_forward() {
+        let mut v = items();
+        assert!(move_range(&mut v, 0, 1, 2));
+        assert_eq!(v, ['b', 'a', 'c', 'd', 'e']);
+        let mut v = items();
+        assert!(move_range(&mut v, 1, 1, 5));
+        assert_eq!(v, ['a', 'c', 'd', 'e', 'b']);
+    }
+
+    #[test]
+    fn moves_a_single_item_backward() {
+        let mut v = items();
+        assert!(move_range(&mut v, 3, 1, 1));
+        assert_eq!(v, ['a', 'd', 'b', 'c', 'e']);
+        let mut v = items();
+        assert!(move_range(&mut v, 4, 1, 0));
+        assert_eq!(v, ['e', 'a', 'b', 'c', 'd']);
+    }
+
+    #[test]
+    fn moves_a_block_as_one_unit() {
+        let mut v = items();
+        assert!(move_range(&mut v, 1, 2, 4));
+        assert_eq!(v, ['a', 'd', 'b', 'c', 'e']);
+        let mut v = items();
+        assert!(move_range(&mut v, 1, 2, 5));
+        assert_eq!(v, ['a', 'd', 'e', 'b', 'c']);
+        let mut v = items();
+        assert!(move_range(&mut v, 3, 2, 0));
+        assert_eq!(v, ['d', 'e', 'a', 'b', 'c']);
+    }
+
+    #[test]
+    fn dropping_a_block_onto_itself_is_a_no_op() {
+        for to in 1..=2 {
+            let mut v = items();
+            assert!(!move_range(&mut v, 1, 2, to), "to={to}");
+            assert_eq!(v, items());
+        }
+        // Dropping right behind the block re-inserts it where it was.
+        let mut v = items();
+        assert!(move_range(&mut v, 1, 2, 3));
+        assert_eq!(v, items());
+    }
+
+    #[test]
+    fn out_of_range_arguments_leave_the_list_untouched() {
+        let mut v = items();
+        assert!(!move_range(&mut v, 5, 1, 0));
+        assert!(!move_range(&mut v, 0, 0, 3));
+        assert_eq!(v, items());
+        let mut empty: Vec<char> = Vec::new();
+        assert!(!move_range(&mut empty, 0, 1, 0));
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn overlong_lengths_and_targets_are_clamped() {
+        // The block runs to the end of the list.
+        let mut v = items();
+        assert!(move_range(&mut v, 3, 10, 0));
+        assert_eq!(v, ['d', 'e', 'a', 'b', 'c']);
+        // A target past the end appends.
+        let mut v = items();
+        assert!(move_range(&mut v, 0, 1, 42));
+        assert_eq!(v, ['b', 'c', 'd', 'e', 'a']);
     }
 }

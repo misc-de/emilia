@@ -56,3 +56,33 @@ impl FactoryComponent for TrackItem {
         Self { track }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_duration;
+
+    #[test]
+    fn unknown_or_non_positive_durations_are_blank() {
+        assert_eq!(fmt_duration(None), "");
+        assert_eq!(fmt_duration(Some(0)), "");
+        assert_eq!(fmt_duration(Some(-5_000)), "");
+    }
+
+    #[test]
+    fn durations_below_an_hour_read_minutes_and_seconds() {
+        assert_eq!(fmt_duration(Some(5_000)), "0:05");
+        assert_eq!(fmt_duration(Some(65_000)), "1:05");
+        assert_eq!(fmt_duration(Some(600_000)), "10:00");
+        assert_eq!(fmt_duration(Some(3_599_000)), "59:59");
+    }
+
+    #[test]
+    fn durations_past_an_hour_carry_the_hour_and_truncate_millis() {
+        assert_eq!(fmt_duration(Some(3_600_000)), "1:00:00");
+        assert_eq!(fmt_duration(Some(3_930_000)), "1:05:30");
+        assert_eq!(fmt_duration(Some(36_000_000)), "10:00:00");
+        // Milliseconds are cut, not rounded.
+        assert_eq!(fmt_duration(Some(1_999)), "0:01");
+        assert_eq!(fmt_duration(Some(999)), "0:00");
+    }
+}

@@ -9,6 +9,7 @@ use relm4::ComponentSender;
 
 use crate::i18n::gettext;
 use crate::ui::app::{App, Msg};
+use crate::ui::app_playback::TransportMsg;
 use crate::ui::widgets::decode_scaled;
 
 /// Widgets of the tray media popup that need live updates.
@@ -79,15 +80,15 @@ impl MediaPopup {
             .build();
         {
             let s = sender.clone();
-            prev.connect_clicked(move |_| s.input(Msg::Prev));
+            prev.connect_clicked(move |_| s.input(Msg::Transport(TransportMsg::Prev)));
         }
         {
             let s = sender.clone();
-            play_btn.connect_clicked(move |_| s.input(Msg::TogglePlay));
+            play_btn.connect_clicked(move |_| s.input(Msg::Transport(TransportMsg::TogglePlay)));
         }
         {
             let s = sender.clone();
-            next.connect_clicked(move |_| s.input(Msg::Next));
+            next.connect_clicked(move |_| s.input(Msg::Transport(TransportMsg::Next)));
         }
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         controls.set_halign(gtk::Align::Center);

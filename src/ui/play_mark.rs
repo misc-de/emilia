@@ -153,3 +153,22 @@ pub(crate) struct PlaybackState {
 pub(crate) trait PlaybackSink {
     fn apply_playback(&self, state: &PlaybackState);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{classes, icon_name};
+
+    #[test]
+    fn only_the_running_entry_shows_a_pause_icon() {
+        assert_eq!(icon_name(true, true), "media-playback-pause-symbolic");
+        assert_eq!(icon_name(true, false), "media-playback-start-symbolic");
+        assert_eq!(icon_name(false, true), "media-playback-start-symbolic");
+        assert_eq!(icon_name(false, false), "media-playback-start-symbolic");
+    }
+
+    #[test]
+    fn the_accent_class_marks_the_active_entry() {
+        assert_eq!(classes(true), ["flat", "accent"]);
+        assert_eq!(classes(false), ["flat"]);
+    }
+}

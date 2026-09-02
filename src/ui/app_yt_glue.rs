@@ -59,10 +59,10 @@ impl App {
                 .or_else(|| cached.map(|(_, c)| c))
                 .unwrap_or_default();
             if !chapters.is_empty() {
-                let _ = input.send(Msg::YtChapters {
+                let _ = input.send(Msg::Yt(YtMsg::YtChapters {
                     video_id: vid.clone(),
                     chapters,
-                });
+                }));
             }
             let meta = details.map(|d| d.meta);
             if let (Some(l), Some(d)) = (lib.as_ref(), meta.as_ref().and_then(|m| m.duration)) {
@@ -80,11 +80,11 @@ impl App {
                 .or_else(|| {
                     crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid))
                 });
-            let _ = input.send(Msg::YtEnriched {
+            let _ = input.send(Msg::Yt(YtMsg::YtEnriched {
                 video_id: vid,
                 artist,
                 cover,
-            });
+            }));
         });
     }
 
@@ -441,5 +441,196 @@ impl App {
         let t = adw::Toast::new(msg);
         t.set_timeout(3);
         self.toast_overlay.add_toast(t);
+    }
+}
+
+/// `Msg` sub-enum of the yt domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum YtMsg {
+    // YouTube (optional feature). Enabling/disabling is driven by the "youtube"
+    // menu switch (see `Msg::Setting(SettingMsg::SetSectionVisible)`), not a dedicated settings toggle.
+    /// Fetch yt-dlp (settings button): installs it, or re-downloads the latest
+    /// when one is already present. The download/update choice is decided from the
+    /// cached version at handling time, so the button works even before the
+    /// background version probe has resolved.
+    FetchYtDlp,
+    /// Background tick (startup + slow timer): silently re-download the managed
+    /// yt-dlp when it has gone stale, so YouTube keeps working hands-off.
+    YtDlpAutoUpdate,
+    // --- transport, requested by the YtPage component (or a worker result) ---
+    /// Play a subscribed channel's cached videos as the queue.
+    YtPlayChannel(i64),
+    /// Start playing a whole playlist (loads its videos as the queue).
+    YtStartPlaylist {
+        url: String,
+        title: String,
+    },
+    /// Play a cached playlist (videos handed in) starting at `index`; `close`
+    /// pops the song-list subpage afterwards.
+    YtStartPlaylistAt {
+        url: String,
+        title: String,
+        index: usize,
+        close: bool,
+        videos: Vec<(String, String, Option<i64>)>,
+    },
+    /// Play a video: resolves the stream URL asynchronously (or plays the
+    /// offline copy), then starts playback.
+    YtPlayVideo {
+        video_id: String,
+        title: String,
+    },
+    /// Internal: a video's stream URL was resolved (or failed) in a worker →
+    /// start streaming. Dispatched from `play_current` for `yt:` tracks.
+    YtStreamResolved {
+        video_id: String,
+        resume: i64,
+        result: Result<String, String>,
+    },
+    /// Internal: online enrichment (artist + cover) for a played video finished.
+    /// Play a video starting at a jump mark from its description.
+    YtPlayVideoAt {
+        video_id: String,
+        title: String,
+        ms: i64,
+    },
+    /// Jump marks of the running YouTube video arrived (from its chapters or
+    /// its description) — set the seekbar markers, as for a podcast episode.
+    YtChapters {
+        video_id: String,
+        chapters: Vec<(i64, String)>,
+    },
+    YtEnriched {
+        video_id: String,
+        artist: Option<String>,
+        cover: Option<String>,
+    },
+    // --- bridge from the YtPage component to the shared parent chrome ---
+    /// Open a mirrored playlist in the Playlists section.
+    YtOpenPlaylist {
+        id: i64,
+        name: String,
+    },
+    /// Open a video's detail dialog (from a playlist row or the now-playing bar,
+    /// which only have the parent's sender) → forwarded to the YtPage component.
+    YtShowVideoDetail {
+        video_id: String,
+        title: String,
+    },
+    /// Informational toast requested by the page.
+    YtToast(String),
+    /// Show/update the persistent add-to-library progress toast.
+    YtProgress(String),
+    /// Finish the progress toast with a short final message.
+    YtProgressDone(String),
+    /// Set/clear the central loading overlay.
+    YtSetLoading(Option<String>),
+    /// A track/playlist was added → reload artist/album overviews.
+    YtLibraryChanged,
+    /// A playlist was saved → reload the Playlists section.
+    YtPlaylistsChanged,
+    /// The page parked a built subpage in `yt_subpage`; push it onto the nav.
+    PushYtSubpage,
+    /// The page confirmed a channel removal → show the "channel removed" undo toast.
+    YtChannelUndo(i64),
+    /// Undo window elapsed → tell the page to actually delete the channel.
+    YtChannelReallyDelete(i64),
+    /// The page started/finished a "refresh all" worker → drive the spinner.
+    YtRefreshStarted(bool),
+    YtRefreshFinished,
+}
+
+impl App {
+    /// Dispatch for [`YtMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_yt(
+        &mut self,
+        msg: YtMsg,
+        _root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            // --- YouTube ---
+            YtMsg::FetchYtDlp => {
+                let update = self.youtube.ytdlp_version.is_some();
+                self.start_ytdlp_fetch(update, sender);
+            }
+            YtMsg::YtDlpAutoUpdate => self.maybe_auto_update_ytdlp(sender),
+            // --- transport (requested by the YtPage component / worker results) ---
+            YtMsg::YtPlayChannel(id) => self.yt_play_channel(id),
+            YtMsg::YtStartPlaylist { url, title } => self.yt_start_playlist(sender, url, title),
+            YtMsg::YtStartPlaylistAt {
+                url,
+                title,
+                index,
+                close,
+                videos,
+            } => self.yt_start_playlist_at(url, title, index, close, videos),
+            YtMsg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
+            YtMsg::YtPlayVideoAt {
+                video_id,
+                title,
+                ms,
+            } => self.yt_play_video_at(video_id, title, ms),
+            YtMsg::YtStreamResolved {
+                video_id,
+                resume,
+                result,
+            } => self.yt_stream_resolved(sender, video_id, resume, result),
+            YtMsg::YtChapters { video_id, chapters } => {
+                // Only if that video is still the one playing — the marks arrive
+                // from a worker and the user may have skipped on meanwhile.
+                if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
+                    self.set_chapters(chapters);
+                    self.update_current_chapter();
+                }
+            }
+            YtMsg::YtEnriched {
+                video_id,
+                artist,
+                cover,
+            } => self.yt_enriched(video_id, artist, cover),
+            // --- bridge from the YtPage component to the shared parent chrome ---
+            YtMsg::YtOpenPlaylist { id, name } => self.open_playlist(sender, id, &name),
+            YtMsg::YtShowVideoDetail { video_id, title } => self
+                .yt_page
+                .emit(crate::ui::yt_page::YtInput::ShowVideoDetail { video_id, title }),
+            YtMsg::YtToast(s) => self.toast(&s),
+            YtMsg::YtProgress(s) => self.yt_progress(&s),
+            YtMsg::YtProgressDone(s) => self.yt_progress_done(&s),
+            YtMsg::YtSetLoading(o) => {
+                self.libview.loading = o.is_some();
+                self.libview.loading_label = o;
+            }
+            YtMsg::YtLibraryChanged => self.reload_library_overviews(),
+            YtMsg::YtPlaylistsChanged => self.reload_playlists(sender),
+            YtMsg::PushYtSubpage => {
+                if let Some((title, content)) = self.yt_subpage.borrow_mut().take() {
+                    self.push_subpage(&title, &content);
+                    // The video rows are now realized → set their play/pause icons.
+                    self.yt_page
+                        .emit(crate::ui::yt_page::YtInput::PlaybackStateChanged {
+                            playing_video_id: self.youtube.playing_video_id.clone(),
+                            playing: self.mini.playing,
+                        });
+                }
+            }
+            YtMsg::YtChannelUndo(id) => {
+                self.undo_toast(
+                    sender,
+                    &gettext("Channel removed"),
+                    Msg::Yt(YtMsg::YtChannelReallyDelete(id)),
+                );
+            }
+            YtMsg::YtChannelReallyDelete(id) => {
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::DeleteChannelConfirmed(id));
+            }
+            YtMsg::YtRefreshStarted(started) => {
+                if started {
+                    self.refresh_pending += 1;
+                }
+            }
+            YtMsg::YtRefreshFinished => self.refresh_done(),
+        }
     }
 }

@@ -29,3 +29,5 @@ po/*/LC_MESSAGES/*.mo
 .codex
 .agents
 docs
+# Python-Bytecode des Übersetzungshelfers (po/po_tool.py)
+__pycache__/

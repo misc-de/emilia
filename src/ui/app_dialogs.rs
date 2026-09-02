@@ -3,6 +3,7 @@
 
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, CtxTarget, FsKind, Msg};
+use crate::ui::app_favorites::FavoriteMsg;
 use crate::ui::app_views_sources::SourceMsg;
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -190,9 +191,9 @@ impl App {
                 let sender = sender.clone();
                 let dialog = dialog.clone();
                 play_row.connect_activated(move |_| {
-                    sender.input(Msg::CtxPlayArtist {
+                    sender.input(Msg::Ctx(CtxMsg::CtxPlayArtist {
                         newest_first: order.selected() == 1,
-                    });
+                    }));
                     dialog.close();
                 });
             }
@@ -200,7 +201,7 @@ impl App {
                 let sender = sender.clone();
                 let dialog = dialog.clone();
                 play_row.connect_activated(move |_| {
-                    sender.input(Msg::CtxPlayAlbum);
+                    sender.input(Msg::Ctx(CtxMsg::CtxPlayAlbum));
                     dialog.close();
                 });
             }
@@ -208,7 +209,7 @@ impl App {
                 let sender = sender.clone();
                 let dialog = dialog.clone();
                 play_row.connect_activated(move |_| {
-                    sender.input(Msg::CtxPlay);
+                    sender.input(Msg::Ctx(CtxMsg::CtxPlay));
                     dialog.close();
                 });
             }
@@ -257,7 +258,7 @@ impl App {
                 let sender = sender.clone();
                 let dialog = dialog.clone();
                 fav_row.connect_activated(move |_| {
-                    sender.input(Msg::ToggleFavorite);
+                    sender.input(Msg::Favorite(FavoriteMsg::ToggleFavorite));
                     dialog.close();
                 });
             }
@@ -267,23 +268,25 @@ impl App {
         // Remaining actions.
         let mut actions: Vec<(String, &str, fn() -> Msg)> =
             vec![(gettext("Add to queue"), "list-add-symbolic", || {
-                Msg::CtxAddQueue
+                Msg::Ctx(CtxMsg::CtxAddQueue)
             })];
         // "Add to playlist" only when Playlists is enabled as a nav section.
         if !self.nav.hidden_sections.contains("playlists") {
             actions.push((gettext("Add to playlist"), "view-list-symbolic", || {
-                Msg::CtxAddPlaylist
+                Msg::Ctx(CtxMsg::CtxAddPlaylist)
             }));
         }
         if show_eq {
             actions.push((
                 gettext("Equalizer settings"),
                 "multimedia-equalizer-symbolic",
-                || Msg::CtxEqualizer,
+                || Msg::Ctx(CtxMsg::CtxEqualizer),
             ));
         }
         // Same share icon as the title bar's device-sync button.
-        actions.push((gettext("Share"), "emilia-share-symbolic", || Msg::CtxShare));
+        actions.push((gettext("Share"), "emilia-share-symbolic", || {
+            Msg::Ctx(CtxMsg::CtxShare)
+        }));
         for (label, icon, make_msg) in actions {
             let row = adw::ActionRow::builder()
                 .title(&label)
@@ -337,7 +340,7 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             refresh.connect_clicked(move |_| {
-                sender.input(Msg::CtxRefresh);
+                sender.input(Msg::Ctx(CtxMsg::CtxRefresh));
                 dialog.close();
             });
         }
@@ -538,6 +541,53 @@ impl App {
                 "Added {n} tracks to the queue",
                 &[("n", &n.to_string())],
             ));
+        }
+    }
+}
+
+/// `Msg` sub-enum of the ctx domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum CtxMsg {
+    CtxPlay,
+    /// Play the album in track order (shuffle off, stop at the end).
+    CtxPlayAlbum,
+    /// Play all tracks of the artist: albums by year (newest or
+    /// oldest first), each album from track 1 top-down (shuffle off).
+    CtxPlayArtist {
+        newest_first: bool,
+    },
+    CtxAddQueue,
+    CtxAddPlaylist,
+    CtxEqualizer,
+    CtxShare,
+    /// Detail view's refresh button: re-fetch the cover/metadata of the open
+    /// target and rebuild the detail view.
+    CtxRefresh,
+    /// Share a ready-made selection over device sync (from the station / podcast
+    /// / playlist / YouTube detail views). Same path as the music "Share": size
+    /// confirmation when paired, otherwise open pairing.
+    /// Boxed: the selection is by far the largest payload of this enum.
+    ShareItems(Box<crate::core::sync::share::Selection>),
+}
+
+impl App {
+    /// Dispatch for [`CtxMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_ctx(
+        &mut self,
+        msg: CtxMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            CtxMsg::CtxPlay => self.on_ctx_play(),
+            CtxMsg::CtxPlayAlbum => self.on_ctx_play_album(),
+            CtxMsg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
+            CtxMsg::CtxAddQueue => self.on_ctx_add_queue(),
+            CtxMsg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, sender),
+            CtxMsg::CtxEqualizer => self.open_eq_dialog(root, sender),
+            CtxMsg::CtxShare => self.on_ctx_share(root),
+            CtxMsg::ShareItems(selection) => self.share_items(*selection, root),
+            CtxMsg::CtxRefresh => self.on_ctx_refresh(root, sender),
         }
     }
 }

@@ -571,3 +571,23 @@ pub fn busy_dialog(text: &str, width: i32) -> (adw::Dialog, gtk::Label) {
     dialog.set_child(Some(&content));
     (dialog, label)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::esc;
+
+    #[test]
+    fn esc_escapes_markup_metacharacters() {
+        assert_eq!(esc("Bonnie & Clyde"), "Bonnie &amp; Clyde");
+        assert_eq!(esc("<b>bold</b>"), "&lt;b&gt;bold&lt;/b&gt;");
+        assert_eq!(esc("say \"hi\""), "say &quot;hi&quot;");
+        assert_eq!(esc("rock'n'roll"), "rock&apos;n&apos;roll");
+    }
+
+    #[test]
+    fn esc_leaves_plain_text_alone() {
+        assert_eq!(esc(""), "");
+        assert_eq!(esc("Abbey Road"), "Abbey Road");
+        assert_eq!(esc("Zoë – 01. Song"), "Zoë – 01. Song");
+    }
+}

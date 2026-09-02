@@ -33,19 +33,19 @@ impl App {
                 &self.concerts.concerts_gallery,
                 &tiles,
                 headers.as_deref(),
-                Msg::OpenConcertEntry,
-                Msg::ShowConcertDetail,
+                |v0| Msg::Concert(ConcertMsg::OpenConcertEntry(v0)),
+                |v0| Msg::Concert(ConcertMsg::ShowConcertDetail(v0)),
             );
         } else {
             self.fill_entry_list(
                 &self.concerts.concerts_list,
                 &items,
                 sender,
-                Msg::PlayConcert,
+                |v0| Msg::Concert(ConcertMsg::PlayConcert(v0)),
                 // No trash button in the concert list – removal goes via the
                 // properties (deselect the "Concerts" area).
                 None,
-                Msg::ShowConcertDetail,
+                |v0| Msg::Concert(ConcertMsg::ShowConcertDetail(v0)),
                 None,
                 false,
                 true,
@@ -136,7 +136,7 @@ impl App {
                     .filter(|(_, r)| r.is_active())
                     .map(|(c, _)| (c.path.clone(), c.title.clone(), c.is_dir))
                     .collect();
-                sender.input(Msg::ConcertAdd(selected));
+                sender.input(Msg::Concert(ConcertMsg::ConcertAdd(selected)));
                 dialog.close();
             });
         }
@@ -206,5 +206,65 @@ impl App {
             "Added {n} concerts",
             n as u32,
         ));
+    }
+}
+
+/// `Msg` sub-enum of the concert domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum ConcertMsg {
+    // Concerts
+    ConcertImport,
+    ConcertDismissHint,
+    ConcertHideSection,
+    ConcertAdd(Vec<(String, String, bool)>),
+    PlayConcert(usize),
+    /// Open gallery concert (index): album/folder → track list, track → play.
+    OpenConcertEntry(usize),
+    ShowConcertDetail(usize),
+}
+
+impl App {
+    /// Dispatch for [`ConcertMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_concert(
+        &mut self,
+        msg: ConcertMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            ConcertMsg::ShowConcertDetail(index) => {
+                self.on_show_concert_detail(index, root, sender)
+            }
+            ConcertMsg::ConcertImport => self.concert_import(sender),
+            ConcertMsg::ConcertDismissHint => {
+                self.concerts.concert_hint_dismissed = true;
+                let _ = self.library.set_setting("concert_hint_dismissed", "1");
+            }
+            ConcertMsg::ConcertHideSection => {
+                self.set_section_visible("concerts", false);
+                self.toast(&gettext("Hid the Concerts menu item"));
+            }
+            ConcertMsg::ConcertAdd(items) => self.concert_add(sender, items),
+            ConcertMsg::PlayConcert(index) => {
+                if let Some((scope, key, _, is_dir)) =
+                    self.concerts.concert_items.get(index).cloned()
+                {
+                    self.play_entry(&scope, &key, is_dir);
+                }
+            }
+            ConcertMsg::OpenConcertEntry(index) => {
+                // Gallery tap: like the list tap – album/folder opens the
+                // track list, a single track is played.
+                if let Some((scope, key, _, is_dir)) =
+                    self.concerts.concert_items.get(index).cloned()
+                {
+                    if scope == "track" {
+                        self.play_entry(&scope, &key, is_dir);
+                    } else {
+                        sender.input(Msg::OpenEntryTracks { scope, key });
+                    }
+                }
+            }
+        }
     }
 }

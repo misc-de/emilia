@@ -1,0 +1,22 @@
+# Flatpak module for Emilia — shared by de.cais.Emilia.yaml (desktop) and
+# de.cais.Emilia.phone.yaml (phone). Paths are relative to this file.
+#
+# yt-dlp als gepinnte, sha256-verifizierte Binary mitliefern (statt sie zur
+# Laufzeit ungeprüft von GitHub zu laden). flatpak-builder lädt diese
+# Source in der Download-Phase (nicht im Offline-Build-Schritt). `x-checker-data`
+# erlaubt automatisches Bumpen via flatpak-external-data-checker. Die App
+# aktualisiert bei Bedarf eine neuere Version in den Datenordner (Vorrang vor
+# dieser Baseline), siehe `src/core/youtube.rs`.
+name: yt-dlp
+buildsystem: simple
+build-commands:
+  - install -Dm755 yt-dlp /app/bin/yt-dlp
+sources:
+  - type: file
+    url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp
+    sha256: 1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
+    x-checker-data:
+      type: json
+      url: https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest
+      version-query: .tag_name
+      url-query: .assets[] | select(.name == "yt-dlp") | .browser_download_url

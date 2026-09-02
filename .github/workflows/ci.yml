@@ -42,6 +42,11 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      # The phone Flatpak builds without the rmcp/tokio MCP backend; keep that
+      # configuration compiling and lint-clean too.
+      - name: Lint (clippy, without the SDK backend)
+        run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
+
       - name: Build
         run: cargo build --locked
 

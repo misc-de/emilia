@@ -5,13 +5,14 @@
 use std::path::{Path, PathBuf};
 
 use gtk::prelude::GtkWindowExt;
-use relm4::{adw, gtk, ComponentController};
+use relm4::{adw, gtk, ComponentController, ComponentSender};
 
 use crate::core::scanner;
 use crate::core::webdav::{self, Creds};
 use crate::model::Track;
 use crate::ui::app::{guarded_resume, ActiveSource, App, Msg, PlaySession, RemoteTrack};
 use crate::ui::app_favorites::EntryMarks;
+use crate::ui::app_lyrics::LyricsMsg;
 use crate::ui::fs_row::FsEntry;
 use crate::ui::play_mark::{PlaybackSink, PlaybackState};
 
@@ -203,7 +204,7 @@ impl App {
                 // Unreachable Nextcloud → skip to the next remote entry
                 // (message-driven, so no recursion here).
                 tracing::warn!("Remote playback failed, skipping: {e}");
-                let _ = self.input.send(Msg::PlaybackError);
+                let _ = self.input.send(Msg::Transport(TransportMsg::PlaybackError));
             }
         }
     }
@@ -910,11 +911,13 @@ impl App {
                 std::thread::spawn(move || {
                     let result =
                         crate::core::youtube::resolve_audio_url(&vid).map_err(|e| e.to_string());
-                    let _ = input.send(crate::ui::app::Msg::YtStreamResolved {
-                        video_id: vid,
-                        resume,
-                        result,
-                    });
+                    let _ = input.send(crate::ui::app::Msg::Yt(
+                        crate::ui::app_yt_glue::YtMsg::YtStreamResolved {
+                            video_id: vid,
+                            resume,
+                            result,
+                        },
+                    ));
                 });
                 return;
             }
@@ -1011,7 +1014,9 @@ impl App {
                 // Load lyrics for the new track (embedded/cache instantly, then
                 // LRCLIB in the background) – shows the karaoke button when synced
                 // lyrics exist.
-                let _ = self.input.send(Msg::LoadLyrics(path.clone()));
+                let _ = self
+                    .input
+                    .send(Msg::Lyrics(LyricsMsg::LoadLyrics(path.clone())));
                 // If usable tags are missing (artist/album), let the track be
                 // identified in the background via fingerprint – instead of a bulk
                 // run, only what is actually played. The actual gating checks (key,
@@ -1037,7 +1042,7 @@ impl App {
                 // Synchronous failure (e.g. Nextcloud source without credentials)
                 // → skip this entry (message-driven, so no recursion here).
                 tracing::warn!("Playback failed, skipping: {e}");
-                let _ = self.input.send(Msg::PlaybackError);
+                let _ = self.input.send(Msg::Transport(TransportMsg::PlaybackError));
             }
         }
     }
@@ -1656,5 +1661,140 @@ impl App {
         self.refresh_tray_state();
         // Mirror the pause/resume into the MCP now-playing snapshot.
         self.publish_now_playing();
+    }
+}
+
+/// `Msg` sub-enum of the transport domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum TransportMsg {
+    TrackFinished,
+    /// The active deck moved to the next queue track **gaplessly** (driven by
+    /// `playbin3`'s `about-to-finish`); advance the app's state to match.
+    GaplessAdvanced,
+    /// Periodic tick: save the resume position of the running track.
+    PersistResume,
+    /// 1-s tick: update position/duration of the seek bar.
+    Tick,
+    /// Jump to a position (ms) by dragging/clicking the seek bar.
+    Seek(i64),
+    Next,
+    Prev,
+    ToggleShuffle,
+    ToggleRepeat,
+    TogglePlay,
+    /// Open the detail view of the currently running track (click on the bar).
+    OpenNowPlaying,
+    /// Play a user-queue entry now (its index + length; album rows span `len`
+    /// tracks). The entry jumps ahead of the rest of the queue.
+    PlayQueueAt {
+        start: usize,
+        len: usize,
+    },
+    /// Set the playback speed (0.25–2.0, in 0.25 steps).
+    SetPlaybackRate(f64),
+    /// The current track failed to play (missing file/mount, unreachable
+    /// Nextcloud, …) → skip to the next entry.
+    PlaybackError,
+    /// The freshly loaded pipeline prerolled (buffered enough to play) → clear
+    /// the loading spinner of a slow source (Nextcloud/YouTube).
+    PlaybackReady,
+    /// Clear the user queue (after confirmation). Playback keeps running.
+    QueueClear,
+    /// Reorder the user queue: move the `len`-track block starting at `from` so
+    /// it lands at index `to` (album rows move as one block).
+    QueueMoveRange {
+        from: usize,
+        len: usize,
+        to: usize,
+    },
+    /// Open the queue dialog.
+    ShowQueue,
+    /// Open the song page of the album currently playing (player-bar shortcut).
+    ShowCurrentAlbum,
+}
+
+impl App {
+    /// Dispatch for [`TransportMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_transport(
+        &mut self,
+        msg: TransportMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            TransportMsg::TrackFinished => self.on_track_finished(),
+            TransportMsg::GaplessAdvanced => self.on_gapless_advanced(),
+            TransportMsg::PersistResume => self.on_persist_resume(),
+            TransportMsg::Tick => self.on_tick(),
+            TransportMsg::Seek(ms) => {
+                let ms = ms.max(0);
+                self.mini.position_ms = ms;
+                if self.player.seek_ms(ms).is_ok() {
+                    self.mpris.seeked(ms);
+                }
+            }
+            TransportMsg::Next => self.skip_next(),
+            TransportMsg::Prev => self.skip_prev(),
+            TransportMsg::ToggleShuffle => {
+                self.transport.shuffle = !self.transport.shuffle;
+                // When enabling, build a fresh random order of the whole
+                // queue (running track first).
+                if self.transport.shuffle {
+                    self.rebuild_shuffle_order();
+                }
+                self.mpris.set_shuffle(self.transport.shuffle);
+                // Shuffle changes the "next" track → re-arm (or clear) gapless.
+                self.arm_gapless();
+            }
+            TransportMsg::ToggleRepeat => {
+                self.transport.repeat = !self.transport.repeat;
+                let _ = self
+                    .library
+                    .set_setting("repeat", if self.transport.repeat { "1" } else { "0" });
+                self.mpris.set_repeat(self.transport.repeat);
+            }
+            TransportMsg::ShowQueue => self.open_queue_dialog(root, sender),
+            TransportMsg::ShowCurrentAlbum => {
+                if let Some(album) = self.mini.current_album.clone() {
+                    self.open_album_by_name(sender, &album);
+                }
+            }
+            TransportMsg::PlayQueueAt { start, len } => self.on_play_queue_at(start, len),
+            TransportMsg::SetPlaybackRate(rate) => {
+                let rate = (rate / 0.25).round() * 0.25;
+                let rate = rate.clamp(0.25, 2.0);
+                // Guard against the scale's #[watch] re-emitting the same value.
+                if (rate - self.mini.playback_rate).abs() > 1e-3 {
+                    self.mini.playback_rate = rate;
+                    self.player.set_rate(rate);
+                }
+            }
+            TransportMsg::PlaybackReady => {
+                // Source finished buffering → stop the loading spinner.
+                if self.mini.loading {
+                    self.mini.loading = false;
+                }
+            }
+            TransportMsg::PlaybackError => {
+                // A failed start clears the loading spinner regardless of source.
+                self.mini.loading = false;
+                // Streams/episodes have no "next" → don't skip on their errors.
+                if self.streaming.playing_stream.is_some()
+                    || self.podcasts.playing_episode_url.is_some()
+                {
+                    return;
+                }
+                // Only skip when something is actually queued.
+                if self.files.playing_remote || !self.transport.queue.is_empty() {
+                    self.skip_current_track();
+                }
+            }
+            TransportMsg::QueueClear => self.on_queue_clear(),
+            TransportMsg::QueueMoveRange { from, len, to } => {
+                self.on_queue_move_range(from, len, to)
+            }
+            TransportMsg::TogglePlay => self.on_toggle_play(),
+            TransportMsg::OpenNowPlaying => self.on_open_now_playing(root, sender),
+        }
     }
 }

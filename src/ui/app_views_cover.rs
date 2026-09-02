@@ -8,6 +8,7 @@ use relm4::{adw, gtk};
 
 use crate::core::{cover, scanner};
 use crate::ui::app::{ActiveSource, App, CtxTarget, FsKind, Msg};
+use crate::ui::app_covers::CoverMsg;
 use crate::ui::fs_row::FsEntry;
 
 impl App {
@@ -99,7 +100,7 @@ impl App {
                 let sender = sender.clone();
                 click.connect_pressed(move |g, _, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::CoverOptions);
+                    sender.input(Msg::Cover(CoverMsg::CoverOptions));
                 });
             }
             w.add_controller(click);
@@ -108,7 +109,7 @@ impl App {
                 let sender = sender.clone();
                 lp.connect_pressed(move |g, _, _| {
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(Msg::CoverOptions);
+                    sender.input(Msg::Cover(CoverMsg::CoverOptions));
                 });
             }
             w.add_controller(lp);
@@ -197,16 +198,16 @@ impl App {
                     return;
                 };
                 if let Some((artist, album)) = &album_id {
-                    sender.input(Msg::SetAlbumCover {
+                    sender.input(Msg::Cover(CoverMsg::SetAlbumCover {
                         artist: artist.clone(),
                         album: album.clone(),
                         path,
-                    });
+                    }));
                 } else if let Some(name) = &artist_id {
-                    sender.input(Msg::SetArtistImage {
+                    sender.input(Msg::Cover(CoverMsg::SetArtistImage {
                         name: name.clone(),
                         path,
-                    });
+                    }));
                 }
             });
         } else {

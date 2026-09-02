@@ -5,6 +5,7 @@ use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::model::AlbumHit;
 use crate::ui::app::{App, Msg};
+use crate::ui::app_streaming::StreamMsg;
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
@@ -233,7 +234,7 @@ impl App {
                     let dlg = dlg.clone();
                     let path = r.path.clone();
                     row.connect_activated(move |_| {
-                        sender.input(Msg::PlayRecording(path.clone()));
+                        sender.input(Msg::Stream(StreamMsg::PlayRecording(path.clone())));
                         dlg.close();
                     });
                     group.add(&row);
@@ -259,7 +260,7 @@ impl App {
                     let dlg = dlg.clone();
                     let path = m.path.clone();
                     row.connect_activated(move |_| {
-                        sender.input(Msg::PlayRecording(path.clone()));
+                        sender.input(Msg::Stream(StreamMsg::PlayRecording(path.clone())));
                         dlg.close();
                     });
                     group.add(&row);

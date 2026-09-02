@@ -819,3 +819,49 @@ fn action_shell(content: &gtk::Box, actions: &gtk::Box) -> gtk::Widget {
     outer.append(actions);
     outer.upcast()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn group(artist: Option<&str>) -> ArtistGroup {
+        ArtistGroup {
+            artist: artist.map(str::to_string),
+            albums: Vec::new(),
+            loose: Vec::new(),
+            tracks: 0,
+            size: 0,
+        }
+    }
+
+    #[test]
+    fn counts_line_names_albums_only_when_present() {
+        assert_eq!(counts_line(0, 1, 500), "1 song · 500 B");
+        assert_eq!(counts_line(0, 3, 2048), "3 songs · 2.0 KB");
+        assert_eq!(counts_line(0, 0, 0), "0 songs · 0 B");
+        assert_eq!(counts_line(1, 1, 0), "1 album · 1 song · 0 B");
+        assert_eq!(
+            counts_line(2, 10, 1_048_576),
+            "2 albums · 10 songs · 1.0 MB"
+        );
+    }
+
+    #[test]
+    fn with_artist_prefixes_the_line_when_known() {
+        assert_eq!(with_artist(Some("Bob"), "3 songs"), "Bob · 3 songs");
+        assert_eq!(with_artist(None, "3 songs"), "3 songs");
+    }
+
+    #[test]
+    fn group_title_falls_back_for_untagged_files() {
+        assert_eq!(group_title(&group(Some("Bob"))), "Bob");
+        assert_eq!(group_title(&group(None)), "Individual songs");
+    }
+
+    #[test]
+    fn names_of_maps_every_item() {
+        assert_eq!(names_of(&[1, 2, 3], |n| n.to_string()), ["1", "2", "3"]);
+        let empty: [u8; 0] = [];
+        assert!(names_of(&empty, |n| n.to_string()).is_empty());
+    }
+}

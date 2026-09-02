@@ -21,6 +21,9 @@ use crate::core::mic::MicRecorder;
 use crate::i18n::{gettext, ngettext_n};
 use crate::model::{MemoCategory, MemoItem};
 use crate::ui::app::{fmt_duration, App, MemoView, Msg};
+use crate::ui::app_dialogs::CtxMsg;
+use crate::ui::app_rec_edit::EditMsg;
+use crate::ui::app_streaming::StreamMsg;
 use crate::ui::widgets::{action_row, detail_box, present_detail};
 
 /// Stand-in category id for the "General" (unassigned) node in
@@ -540,14 +543,18 @@ impl App {
         {
             let sender = sender.clone();
             let path = m.path.clone();
-            play_btn.connect_clicked(move |_| sender.input(Msg::PlayRecording(path.clone())));
+            play_btn.connect_clicked(move |_| {
+                sender.input(Msg::Stream(StreamMsg::PlayRecording(path.clone())))
+            });
         }
         controls.append(&play_btn);
         row.add_suffix(&controls);
         {
             let sender = sender.clone();
             let path = m.path.clone();
-            row.connect_activated(move |_| sender.input(Msg::PlayRecording(path.clone())));
+            row.connect_activated(move |_| {
+                sender.input(Msg::Stream(StreamMsg::PlayRecording(path.clone())))
+            });
         }
         // Long press (touch) / right click (mouse) → detail dialog.
         crate::ui::app::on_secondary_click(&row, {
@@ -670,7 +677,7 @@ impl App {
         {
             let (sender, dialog, path) = (sender.clone(), dialog.clone(), m.path.clone());
             play.connect_activated(move |_| {
-                sender.input(Msg::PlayRecording(path.clone()));
+                sender.input(Msg::Stream(StreamMsg::PlayRecording(path.clone())));
                 dialog.close();
             });
         }
@@ -679,7 +686,7 @@ impl App {
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
             edit.connect_activated(move |_| {
-                sender.input(Msg::EditMemo(id));
+                sender.input(Msg::Edit(EditMsg::EditMemo(id)));
                 dialog.close();
             });
         }
@@ -710,10 +717,12 @@ impl App {
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
             share.connect_activated(move |_| {
-                sender.input(Msg::ShareItems(crate::core::sync::share::Selection {
-                    memos: vec![id],
-                    ..Default::default()
-                }));
+                sender.input(Msg::Ctx(CtxMsg::ShareItems(Box::new(
+                    crate::core::sync::share::Selection {
+                        memos: vec![id],
+                        ..Default::default()
+                    },
+                ))));
                 dialog.close();
             });
         }

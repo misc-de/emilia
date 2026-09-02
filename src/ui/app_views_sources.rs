@@ -12,6 +12,7 @@ use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::model::Source;
 use crate::ui::app::{confirm_destructive, ActiveSource, App, Cmd, Msg};
+use crate::ui::app_settings::SettingMsg;
 use crate::ui::fs_row::FsEntry;
 
 /// Music-source messages, dispatched by [`App::update_source`]. Grouped out of
@@ -481,7 +482,7 @@ impl App {
                 chooser.select_folder(Some(root), gtk::gio::Cancellable::NONE, move |res| {
                     if let Ok(f) = res {
                         if let Some(p) = f.path() {
-                            sender.input(Msg::SetMusicDir(p));
+                            sender.input(Msg::Setting(SettingMsg::SetMusicDir(p)));
                         }
                     }
                 });

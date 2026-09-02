@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{App, Msg};
+use crate::ui::app_dialogs::CtxMsg;
+use crate::ui::app_yt_glue::YtMsg;
 use crate::ui::entry_row::EntryRow;
 
 /// Content fingerprint of a cover file (length + first 64 KB), to de-duplicate
@@ -488,10 +490,10 @@ impl App {
             let (path, title) = (path.to_string(), display.clone());
             move || {
                 if let Some(video_id) = crate::core::youtube::parse_yt_path(&path) {
-                    sender.input(Msg::YtShowVideoDetail {
+                    sender.input(Msg::Yt(YtMsg::YtShowVideoDetail {
                         video_id,
                         title: title.clone(),
-                    });
+                    }));
                 } else {
                     sender.input(Msg::ShowTrackDetail(path.clone()));
                 }
@@ -693,10 +695,12 @@ impl App {
             let sender = sender.clone();
             let dialog = dialog.clone();
             share.connect_activated(move |_| {
-                sender.input(Msg::ShareItems(crate::core::sync::share::Selection {
-                    playlist_ids: vec![id],
-                    ..Default::default()
-                }));
+                sender.input(Msg::Ctx(CtxMsg::ShareItems(Box::new(
+                    crate::core::sync::share::Selection {
+                        playlist_ids: vec![id],
+                        ..Default::default()
+                    },
+                ))));
                 dialog.close();
             });
         }

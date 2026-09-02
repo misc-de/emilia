@@ -7,9 +7,11 @@
 //! canonical "an episode is playing" flag remains `self.podcasts.playing_episode_url`.
 
 use adw::prelude::*;
-use relm4::gtk;
+use relm4::{adw, gtk, ComponentController, ComponentSender};
 
-use crate::ui::app::App;
+use crate::i18n::gettext;
+
+use crate::ui::app::{App, Msg};
 
 impl App {
     /// Streams a podcast episode (replaces the current playback). Starts at
@@ -154,6 +156,96 @@ impl App {
         } else {
             // Otherwise start the episode at the jump mark.
             self.play_episode_at(&url, &title, ms);
+        }
+    }
+}
+
+/// `Msg` sub-enum of the podcast domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum PodcastMsg {
+    // Podcasts (episode playback only; the page lives in the PodcastsPage
+    // component — these two are mapped from its `Output`).
+    /// Toggle an episode: start or – if already the running one – pause/resume.
+    ToggleEpisode {
+        url: String,
+        title: String,
+    },
+    /// Click on a time-jump mark in the show notes: jump to the spot (start the
+    /// episode there if needed).
+    EpisodeSeekTo {
+        url: String,
+        title: String,
+        ms: i64,
+    },
+    // --- Bridge from the PodcastsPage component to the shared parent chrome ---
+    /// The page parked a built episode subpage in `podcast_subpage`; push it onto
+    /// the shared NavigationView. Unit so `Msg` stays `Send` (the `!Send` widget
+    /// travels through the shared slot, not the message).
+    PushPodcastSubpage,
+    /// Informational toast requested by the page.
+    PodcastToast(String),
+    /// The page confirmed a removal → show the "Podcast removed" undo toast.
+    PodcastUndoToast(i64),
+    /// Undo window elapsed → tell the page to actually delete the podcast.
+    PodcastReallyDelete(i64),
+    /// The page started/finished a "refresh all" worker → drive the spinner.
+    PodcastRefreshStarted(bool),
+    PodcastRefreshFinished,
+    /// Open the equalizer editor for a podcast subscription (per-podcast EQ).
+    OpenPodcastEq(i64),
+    /// Open the equalizer editor for a podcast episode (per-episode EQ).
+    OpenEpisodeEq {
+        url: String,
+        title: String,
+    },
+}
+
+impl App {
+    /// Dispatch for [`PodcastMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_podcast(
+        &mut self,
+        msg: PodcastMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            PodcastMsg::OpenPodcastEq(id) => self.open_podcast_eq(root, sender, id),
+            PodcastMsg::OpenEpisodeEq { url, title } => {
+                self.open_episode_eq(root, sender, url, title)
+            }
+            PodcastMsg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
+            PodcastMsg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
+            PodcastMsg::PushPodcastSubpage => {
+                if let Some((title, content)) = self.podcast_subpage.borrow_mut().take() {
+                    self.push_subpage(&title, &content);
+                    // The episode rows are now realized → let the page set their
+                    // play/pause icons to the current state.
+                    self.podcasts_page.emit(
+                        crate::ui::podcasts_page::PodcastsInput::PlaybackStateChanged {
+                            playing_url: self.podcasts.playing_episode_url.clone(),
+                            playing: self.mini.playing,
+                        },
+                    );
+                }
+            }
+            PodcastMsg::PodcastToast(s) => self.toast(&s),
+            PodcastMsg::PodcastUndoToast(id) => {
+                self.undo_toast(
+                    sender,
+                    &gettext("Podcast removed"),
+                    Msg::Podcast(PodcastMsg::PodcastReallyDelete(id)),
+                );
+            }
+            PodcastMsg::PodcastReallyDelete(id) => {
+                self.podcasts_page
+                    .emit(crate::ui::podcasts_page::PodcastsInput::DeleteConfirmed(id));
+            }
+            PodcastMsg::PodcastRefreshStarted(started) => {
+                if started {
+                    self.refresh_pending += 1;
+                }
+            }
+            PodcastMsg::PodcastRefreshFinished => self.refresh_done(),
         }
     }
 }

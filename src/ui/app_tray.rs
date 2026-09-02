@@ -11,6 +11,7 @@ use gtk::glib;
 
 use crate::core::tray::{self, EmiliaTray, TrayCmd};
 use crate::ui::app::{App, Msg};
+use crate::ui::app_playback::TransportMsg;
 
 /// Tray-icon settings + click actions, dispatched by [`App::update_tray`].
 /// Grouped out of the flat `Msg` enum (see `app.rs`): persisted bool prefs plus
@@ -137,9 +138,9 @@ impl App {
                 sender.input(match cmd {
                     TrayCmd::Popup(x, y) => Msg::Tray(TrayMsg::MediaPopup(x, y)),
                     TrayCmd::ShowHide => Msg::Tray(TrayMsg::ToggleWindow),
-                    TrayCmd::PlayPause => Msg::TogglePlay,
-                    TrayCmd::Next => Msg::Next,
-                    TrayCmd::Prev => Msg::Prev,
+                    TrayCmd::PlayPause => Msg::Transport(TransportMsg::TogglePlay),
+                    TrayCmd::Next => Msg::Transport(TransportMsg::Next),
+                    TrayCmd::Prev => Msg::Transport(TransportMsg::Prev),
                     TrayCmd::Quit => Msg::Tray(TrayMsg::Quit),
                 });
             }

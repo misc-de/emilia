@@ -200,6 +200,16 @@ fn locale_dir() -> PathBuf {
 ///
 /// Needed because `format!` does not accept a runtime string as a format
 /// template. Example: `gettext_f("Added {n} tracks", &[("n", &n.to_string())])`.
+/// Marks a string literal for extraction **without** translating it here —
+/// gettext's classic `N_()`. For literals that travel through tuples or
+/// parameters (EQ subjects and notes, "Year"/"Years") and are only turned into
+/// text later via [`gettext`] on the variable; `xtr` cannot follow those, so it
+/// is told to extract this function's argument instead (see the `pot` target
+/// in the Makefile). Returns the msgid unchanged.
+pub fn gettext_noop(msgid: &'static str) -> &'static str {
+    msgid
+}
+
 pub fn gettext_f(msgid: &str, args: &[(&str, &str)]) -> String {
     let mut s = gettext(msgid);
     for (key, value) in args {

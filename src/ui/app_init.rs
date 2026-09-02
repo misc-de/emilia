@@ -13,6 +13,8 @@ use crate::ui::app::{
     save_window_state, section_meta, ActiveSource, App, AppWidgets, Cmd, Msg, SortCrit, SECTIONS,
     SORTABLE_SECTIONS,
 };
+use crate::ui::app_playback::TransportMsg;
+use crate::ui::app_settings::SettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::theme::DesignMsg;
 
@@ -580,7 +582,7 @@ impl App {
         {
             let sender = sender.clone();
             widgets.seek_scale.connect_change_value(move |_, _, value| {
-                sender.input(Msg::Seek(value as i64));
+                sender.input(Msg::Transport(TransportMsg::Seek(value as i64)));
                 gtk::glib::Propagation::Proceed
             });
         }
@@ -1185,7 +1187,7 @@ impl App {
             }
         }
         // Re-root the file view to the chosen folder and start the scan.
-        sender.input(Msg::SetMusicDir(music_dir));
+        sender.input(Msg::Setting(SettingMsg::SetMusicDir(music_dir)));
     }
 
     /// The source list changed: reload it, fall back if the active one vanished,
@@ -1423,6 +1425,37 @@ impl App {
             && online_available()
         {
             self.run_enrich(sender, false, false);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mobile_nav_icon_px;
+
+    #[test]
+    fn icon_size_scales_from_the_34px_base() {
+        assert_eq!(mobile_nav_icon_px(0), 34);
+        assert_eq!(mobile_nav_icon_px(50), 51);
+        assert_eq!(mobile_nav_icon_px(-50), 17);
+        assert_eq!(mobile_nav_icon_px(10), 37);
+        assert_eq!(mobile_nav_icon_px(-10), 31);
+        assert_eq!(mobile_nav_icon_px(20), 41);
+        assert_eq!(mobile_nav_icon_px(-20), 27);
+    }
+
+    #[test]
+    fn offsets_outside_the_setting_range_are_clamped() {
+        assert_eq!(mobile_nav_icon_px(100), mobile_nav_icon_px(50));
+        assert_eq!(mobile_nav_icon_px(-100), mobile_nav_icon_px(-50));
+        assert_eq!(mobile_nav_icon_px(i32::MAX), 51);
+        assert_eq!(mobile_nav_icon_px(i32::MIN), 17);
+        let mut last = 0;
+        for off in -50..=50 {
+            let px = mobile_nav_icon_px(off);
+            assert!((10..=64).contains(&px));
+            assert!(px >= last, "size must not shrink at offset {off}");
+            last = px;
         }
     }
 }

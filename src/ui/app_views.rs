@@ -13,12 +13,13 @@ use relm4::{adw, gtk};
 use crate::core::category;
 use crate::core::db::Library;
 use crate::core::scanner;
-use crate::i18n::{gettext, ngettext_n, npgettext_n};
+use crate::i18n::{gettext, gettext_noop, ngettext_n, npgettext_n};
 use crate::model::{ArtistMeta, Track};
 use crate::ui::app::{
     album_subtitle, artist_count_subtitle, find_scroller, fmt_duration, most_common_artist,
     read_entries, ActiveSource, App, Cmd, CtxTarget, FsKind, Msg,
 };
+use crate::ui::app_settings::SettingMsg;
 use crate::ui::card_list::CardItem;
 use crate::ui::enrich::enrich_worker;
 use crate::ui::entry_row::EntryRow;
@@ -1933,18 +1934,20 @@ impl App {
     )> {
         match self.fs_music_kind(entry)? {
             FsKind::Artist(name) => Some((
-                "the artist",
+                gettext_noop("the artist"),
                 name.clone(),
-                Some("Also applies to this artist's albums and tracks."),
+                Some(gettext_noop(
+                    "Also applies to this artist's albums and tracks.",
+                )),
                 "artist",
                 name,
             )),
             FsKind::Album { artist, album } => {
                 let key = category::album_key(&artist, &album);
                 Some((
-                    "the album",
+                    gettext_noop("the album"),
                     album,
-                    Some("Also applies to this album's tracks."),
+                    Some(gettext_noop("Also applies to this album's tracks.")),
                     "album",
                     key,
                 ))
@@ -2063,9 +2066,9 @@ impl App {
         years.dedup();
         match years.as_slice() {
             [] => None,
-            [y] => Some(("Year", y.to_string())),
+            [y] => Some((gettext_noop("Year"), y.to_string())),
             _ => Some((
-                "Years",
+                gettext_noop("Years"),
                 format!("{} – {}", years[0], years[years.len() - 1]),
             )),
         }
@@ -2263,10 +2266,10 @@ impl App {
                 3 => Some(AlbumKind::Compilation),
                 _ => None,
             };
-            sender.input(Msg::SetAlbumKind {
+            sender.input(Msg::Setting(SettingMsg::SetAlbumKind {
                 album: album.clone(),
                 kind,
-            });
+            }));
         });
         group.add(&row);
         Some(group)
@@ -2375,11 +2378,11 @@ impl App {
                     sw.set_active(state.borrow().contains(area));
                 }
                 syncing.set(false);
-                sender.input(Msg::SetAreas {
+                sender.input(Msg::Setting(SettingMsg::SetAreas {
                     scope,
                     key: key.clone(),
                     value: areas_value(&state.borrow()),
-                });
+                }));
             });
         }
 
@@ -2412,11 +2415,11 @@ impl App {
                 let hidden = !visible_areas.iter().any(|a| state.borrow().contains(a));
                 hide_row.set_active(hidden);
                 syncing.set(false);
-                sender.input(Msg::SetAreas {
+                sender.input(Msg::Setting(SettingMsg::SetAreas {
                     scope,
                     key: key.clone(),
                     value: areas_value(&state.borrow()),
-                });
+                }));
             });
         }
 

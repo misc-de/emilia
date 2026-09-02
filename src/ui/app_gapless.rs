@@ -10,7 +10,37 @@
 //! * Crossfade is triggered from the 1 s tick ([`App::maybe_crossfade`]) once the
 //!   running track is within the fade window of its end.
 
+use std::path::{Path, PathBuf};
+
 use crate::ui::app::{App, Msg};
+use crate::ui::app_lyrics::LyricsMsg;
+
+/// The pure half of [`App::next_seq_local`]: the queue entry after `queue_pos`
+/// when the context allows a sequential hand-over — no shuffle, no pending
+/// user-queue, no foreign (stream/podcast/remote) playback — and that entry is a
+/// plain local path rather than a synthetic `yt:`/`nc:` one. Whether the file
+/// exists and has a URI is left to the caller.
+pub(crate) fn next_seq_candidate(
+    queue: &[PathBuf],
+    queue_pos: usize,
+    shuffle: bool,
+    user_queue_pending: bool,
+    foreign_playback: bool,
+) -> Option<(usize, &PathBuf)> {
+    if shuffle || user_queue_pending || foreign_playback {
+        return None;
+    }
+    let next = queue_pos.checked_add(1)?;
+    let path = queue.get(next)?;
+    let s = path.to_string_lossy();
+    // Synthetic remote paths (yt:/nc:) resolve asynchronously → not gapless.
+    if crate::core::youtube::parse_yt_path(&s).is_some()
+        || crate::core::webdav::parse_nc_path(&s).is_some()
+    {
+        return None;
+    }
+    Some((next, path))
+}
 
 impl App {
     /// Pushes the gapless / crossfade preferences to the player and re-arms the
@@ -26,29 +56,20 @@ impl App {
     /// user-queue and no active stream/remote playback. Returns `(index, file
     /// URI)`.
     pub(crate) fn next_seq_local(&self) -> Option<(usize, String)> {
-        if self.transport.shuffle || !self.transport.user_queue.is_empty() {
-            return None;
-        }
-        if self.files.playing_remote
+        let foreign = self.files.playing_remote
             || self.podcasts.playing_episode_url.is_some()
-            || self.streaming.playing_stream.is_some()
-        {
+            || self.streaming.playing_stream.is_some();
+        let (next, path) = next_seq_candidate(
+            &self.transport.queue,
+            self.transport.queue_pos,
+            self.transport.shuffle,
+            !self.transport.user_queue.is_empty(),
+            foreign,
+        )?;
+        if !Path::new(path).exists() {
             return None;
         }
-        let next = self.transport.queue_pos.checked_add(1)?;
-        let path = self.transport.queue.get(next)?;
-        let s = path.to_string_lossy();
-        // Synthetic remote paths (yt:/nc:) resolve asynchronously → not gapless.
-        if crate::core::youtube::parse_yt_path(&s).is_some() {
-            return None;
-        }
-        if crate::core::webdav::parse_nc_path(&s).is_some() {
-            return None;
-        }
-        if !std::path::Path::new(path).exists() {
-            return None;
-        }
-        let uri = crate::core::player::file_uri(&s)?;
+        let uri = crate::core::player::file_uri(&path.to_string_lossy())?;
         Some((next, uri))
     }
 
@@ -128,7 +149,7 @@ impl App {
         self.save_queue();
         self.transport.prev_ctx = Some((self.transport.queue.clone(), self.transport.queue_pos));
         self.set_chapters(Vec::new());
-        let _ = self.input.send(Msg::LoadLyrics(path));
+        let _ = self.input.send(Msg::Lyrics(LyricsMsg::LoadLyrics(path)));
     }
 
     /// `STREAM_START` arrived: the active deck continued gaplessly into the next
@@ -170,5 +191,67 @@ impl App {
         }
         self.advance_logical_to(next);
         self.arm_gapless();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn queue() -> Vec<PathBuf> {
+        vec![
+            PathBuf::from("/m/01.flac"),
+            PathBuf::from("/m/02.flac"),
+            PathBuf::from("/m/03.flac"),
+        ]
+    }
+
+    #[test]
+    fn the_next_local_entry_is_a_candidate() {
+        let q = queue();
+        assert_eq!(
+            next_seq_candidate(&q, 0, false, false, false),
+            Some((1, &q[1]))
+        );
+        assert_eq!(
+            next_seq_candidate(&q, 1, false, false, false),
+            Some((2, &q[2]))
+        );
+    }
+
+    #[test]
+    fn nothing_past_the_end_of_the_queue() {
+        let q = queue();
+        assert_eq!(next_seq_candidate(&q, 2, false, false, false), None);
+        assert_eq!(next_seq_candidate(&q, 7, false, false, false), None);
+        assert_eq!(
+            next_seq_candidate(&q, usize::MAX, false, false, false),
+            None
+        );
+        assert_eq!(next_seq_candidate(&[], 0, false, false, false), None);
+    }
+
+    #[test]
+    fn shuffle_user_queue_and_foreign_playback_disable_it() {
+        let q = queue();
+        assert_eq!(next_seq_candidate(&q, 0, true, false, false), None);
+        assert_eq!(next_seq_candidate(&q, 0, false, true, false), None);
+        assert_eq!(next_seq_candidate(&q, 0, false, false, true), None);
+    }
+
+    #[test]
+    fn synthetic_remote_paths_are_skipped() {
+        let q = vec![
+            PathBuf::from("/m/01.flac"),
+            PathBuf::from("yt:abc123"),
+            PathBuf::from("nc:3:/Music/x.mp3"),
+            PathBuf::from("/m/04.flac"),
+        ];
+        assert_eq!(next_seq_candidate(&q, 0, false, false, false), None);
+        assert_eq!(next_seq_candidate(&q, 1, false, false, false), None);
+        assert_eq!(
+            next_seq_candidate(&q, 2, false, false, false),
+            Some((3, &q[3]))
+        );
     }
 }

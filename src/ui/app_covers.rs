@@ -48,8 +48,8 @@ impl App {
         {
             let sender = sender.clone();
             dialog.connect_response(None, move |_, resp| match resp {
-                "upload" => sender.input(Msg::UploadCover),
-                "remove" => sender.input(Msg::RemoveCover),
+                "upload" => sender.input(Msg::Cover(CoverMsg::UploadCover)),
+                "remove" => sender.input(Msg::Cover(CoverMsg::RemoveCover)),
                 _ => {}
             });
         }
@@ -129,12 +129,16 @@ impl App {
                 return;
             };
             match dest {
-                CoverDest::Album(artist, album) => sender.input(Msg::SetAlbumCover {
-                    artist,
-                    album,
-                    path: cached,
-                }),
-                CoverDest::Artist(name) => sender.input(Msg::SetArtistImage { name, path: cached }),
+                CoverDest::Album(artist, album) => {
+                    sender.input(Msg::Cover(CoverMsg::SetAlbumCover {
+                        artist,
+                        album,
+                        path: cached,
+                    }))
+                }
+                CoverDest::Artist(name) => {
+                    sender.input(Msg::Cover(CoverMsg::SetArtistImage { name, path: cached }))
+                }
             }
         });
     }
@@ -242,4 +246,47 @@ fn store_custom_image(src: &std::path::Path, is_artist: bool) -> Option<String> 
     let out = dir.join(format!("custom_{stamp}.{ext}"));
     std::fs::copy(src, &out).ok()?;
     Some(out.to_string_lossy().into_owned())
+}
+
+/// `Msg` sub-enum of the cover domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum CoverMsg {
+    /// Set the primary cover of an album (last shown in the gallery carousel).
+    SetAlbumCover {
+        artist: String,
+        album: String,
+        path: String,
+    },
+    /// Set the primary photo of an artist (last shown in the gallery carousel).
+    SetArtistImage { name: String, path: String },
+    /// Image long-press/right-click: ask whether to upload, remove, or cancel.
+    CoverOptions,
+    /// Upload a custom cover/photo for the current detail target (file dialog).
+    UploadCover,
+    /// Remove the stored cover/photo of the current detail target.
+    RemoveCover,
+}
+
+impl App {
+    /// Dispatch for [`CoverMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_cover(
+        &mut self,
+        msg: CoverMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            CoverMsg::SetAlbumCover {
+                artist,
+                album,
+                path,
+            } => self.set_album_cover(root, sender, artist, album, path),
+            CoverMsg::SetArtistImage { name, path } => {
+                self.set_artist_image(root, sender, name, path)
+            }
+            CoverMsg::CoverOptions => self.open_cover_options_dialog(root, sender),
+            CoverMsg::UploadCover => self.open_cover_upload_dialog(root, sender),
+            CoverMsg::RemoveCover => self.remove_cover(root, sender),
+        }
+    }
 }

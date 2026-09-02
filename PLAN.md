@@ -1,128 +1,90 @@
-# Emilia – Musikplayer für Linux Phosh
+# Emilia – Architektur & Roadmap
 
-Adaptiver Musik- & Hörspielplayer für Phosh-Smartphones (Librem 5, PinePhone &
-Co.) auf **GTK4 + libadwaita**, geschrieben in **Rust** mit **relm4**.
+Adaptiver Musik-, Podcast- und Streaming-Player für Linux-Desktops und
+Phosh-Smartphones (Librem 5, PinePhone, FuriPhone), **GTK4 + libadwaita**,
+geschrieben in **Rust** mit **relm4**. Was die App kann, steht im
+[README](README.md); wie man sie baut, in [BUILDING.md](BUILDING.md). Diese
+Seite hält die Designprämissen, den Stand der Architektur und die offenen
+Vorhaben fest.
 
-## Zielplattform & Designprämissen
+## Designprämissen
 
-- **Phosh / GNOME Mobile**: adaptives UI, das mobil (Hochformat, schmal) und am
-  Desktop funktioniert → `Adw::NavigationSplitView`, das auf dem Phone kollabiert.
-- **Schwache Hardware**: niedriger RAM-/CPU-Verbrauch → Rust, `rusqlite` statt
-  Server-DB, Scannen im Hintergrund-Worker.
-- **Hörspiel-lastige Bibliothek** (siehe `Emilia-Musik`): lange Tracks, über Tage
-  gehört → **Resume-Position pro Track** und **Dateisystem-Navigation** als
-  gleichwertige erste Ansicht (Tags oft lückenhaft).
-- **PipeWire/Wireplumber** als Audio-Stack → GStreamer `playbin3`.
+- **Ein adaptives UI** für Hochformat (schmal) und Desktop:
+  `Adw::NavigationSplitView`, das auf dem Phone kollabiert; Seiten als
+  relm4-Components, Wiedergabe zentral im Root-Component.
+- **Schwache Hardware**: Rust, `rusqlite` (bundled SQLite) statt Server-DB,
+  Scannen und Online-Anreicherung in Hintergrund-Workern, feste
+  Speicherbudgets für lange Listen und Wellenformen.
+- **Hörspiel-lastige Bibliotheken**: lange Tracks, über Tage gehört →
+  Resume-Position pro Track/Episode und der Dateisystem-Browser als
+  gleichwertige erste Ansicht (Tags sind oft lückenhaft).
+- **Dateien werden nie beschrieben**: Tags, Cover, Lyrics und Online-Metadaten
+  landen ausschließlich in der SQLite-DB und im XDG-Cache.
+- **Opt-in für alles Netzwerkige**: Online-Metadaten, MCP-Server, Sync und
+  Nextcloud sind standardmäßig aus.
 
 ## Tech-Stack
 
-| Aufgabe              | Crate / Lib                                   |
-|----------------------|-----------------------------------------------|
-| UI-Framework         | `relm4`, `relm4-components`, `gtk4`, `libadwaita` |
-| Audio                | `gstreamer`, `playbin3` + `equalizer-10bands` |
-| Metadaten lesen      | `lofty` (Tags + Cover, viele Formate)         |
-| Bibliotheks-Index    | `rusqlite` (bundled SQLite)                   |
-| Lockscreen/Medientasten | `mpris-server` (zbus)                      |
-| XDG-Pfade            | `dirs`                                         |
+| Aufgabe                     | Crate / Lib                                          |
+|-----------------------------|------------------------------------------------------|
+| UI                          | `relm4`, `relm4-components`, `gtk4`, `libadwaita`    |
+| Audio                       | `gstreamer` (`playbin3`, `equalizer-10bands`, gapless/crossfade) |
+| Metadaten lesen             | `lofty`                                              |
+| Bibliotheks-Index           | `rusqlite` (bundled)                                 |
+| Lockscreen / Medientasten   | `mpris-server` (zbus)                                |
+| HTTP-Client                 | `ureq`                                               |
+| TLS / Sync / MCP-Server     | `rustls` 0.23 (ring), `rcgen`, eigener HTTP-Server (`core::http`) |
+| MCP-SDK-Backend (optional)  | `rmcp`, `axum`, `tokio` – hinter dem Cargo-Feature `mcp-sdk` |
+| QR-Code                     | `qrcode` (erzeugen), `rqrr` (Kamera-Scan)            |
+| Tray                        | `ksni`, `x11rb` (Skip-Taskbar unter X11)             |
+| i18n                        | `gettext-rs`, Extraktion mit `xtr`                   |
 
-Vorhandene System-Libs (verifiziert): GTK 4.22.4, libadwaita 1.9.1,
-GStreamer 1.28.3, gstreamer-player 1.28.3.
-**Fehlt noch: Rust-Toolchain (`cargo`/`rustc`).**
-
-## Modulstruktur
+## Architektur (Stand 2026-09)
 
 ```
 src/
-  main.rs            App-Init, Adw::Application
-  ui/
-    app.rs           Root-Component (Adw::NavigationSplitView → kollabiert mobil)
-    library.rs       Browser: Tabs Dateisystem | Interpreten | Alben
-    player_bar.rs    Mini-Player unten + ausklappbarer Vollbild-Player
-    queue.rs         Wiedergabeliste
-    eq.rs            Equalizer-Editor (10 Bänder, Scope-Auswahl)
-  core/
-    scanner.rs       Verzeichnis-Scan, lofty-Metadaten → DB (Background-Worker)
-    db.rs            rusqlite, Migrations
-    player.rs        GStreamer-Wrapper, Playback-State, Position speichern
-    eq_engine.rs     EQ-Auflösung (Kaskade) + live an GStreamer
-    mpris.rs         MPRIS-Bridge
-  model/
-    track.rs  album.rs  artist.rs  eq_preset.rs
+  main.rs       Adw::Application, Panic-Hook → tracing, i18n-Init
+  model.rs      Datenmodelle
+  i18n.rs       gettext-Helfer (gettext_f, ngettext_n, gettext_noop)
+  ui/           Root-Component `App` (app.rs + app_*.rs nach Domäne) und
+                eigenständige Seiten-Components (podcasts_page, stream_page,
+                yt_page, sync_page, cloud_page, stats_page, setup)
+  core/         GTK-freie Logik: db/ (SQLite, Submodule je Domäne), player,
+                scanner, online, lyrics, podcast, recorder, webdav, sync/,
+                mcp/ (Tool-Schicht + zwei Backends), mpris, youtube, …
 ```
 
-## Datenmodell (SQLite)
-
-```sql
-CREATE TABLE artist (id INTEGER PRIMARY KEY, name TEXT UNIQUE);
-CREATE TABLE album  (id INTEGER PRIMARY KEY, title TEXT, artist_id INTEGER,
-                     cover_path TEXT);
-CREATE TABLE track (
-  id INTEGER PRIMARY KEY,
-  path TEXT UNIQUE NOT NULL,      -- Dateisystem = verlässlichste Quelle
-  title TEXT, track_no INTEGER,
-  album_id INTEGER, artist_id INTEGER,
-  duration_ms INTEGER,
-  resume_ms INTEGER DEFAULT 0,    -- Wiedergabeposition (Hörspiele)
-  last_played INTEGER
-);
-
--- Equalizer-Kaskade: Track ▸ Album ▸ Interpret ▸ Global
-CREATE TABLE eq_preset (
-  id INTEGER PRIMARY KEY,
-  preamp REAL DEFAULT 0,
-  bands  TEXT NOT NULL            -- JSON [g0..g9] in dB (-24..+12)
-);
-CREATE TABLE eq_binding (
-  scope     TEXT CHECK(scope IN ('global','artist','album','track')),
-  target_id INTEGER,              -- NULL bei global
-  preset_id INTEGER REFERENCES eq_preset(id),
-  PRIMARY KEY(scope, target_id)
-);
-```
-
-## Equalizer-Konzept
-
-- GStreamer `equalizer-10bands` als `audio-filter` in `playbin3`; Band-Gains
-  werden beim Tracklauf **live** gesetzt (kein Stream-Neustart).
-- Auflösung beim Abspielen: spezifischste vorhandene Bindung gewinnt
-  (`track` → `album` → `artist` → `global`).
-- Optional obendrauf: **Kopfhörer-/Ausgabe-Profile** (z. B. „In-Ear neutral",
-  „BT-Box basslastig") als zusätzliche, manuell wählbare Ebene.
+- **Root-Component `App`**: Navigation, Player-Leiste, Warteschlange und
+  Wiedergabe (lokal, remote, Podcast, Stream, YouTube) bleiben bewusst im
+  Root, weil sie den einen Player, MPRIS, den Tick und die Statistik teilen.
+  Die flache `Msg`-Enum ist domänenweise in Sub-Enums gegliedert (`Playlist`,
+  `Memo`, `Design`, `Tray`, `Sort`, `Eq`, `Source`, `McpSetting`, …), jede mit
+  einem `update_<domain>` im Modul der Domäne. `view!` und das `App`-Literal
+  bleiben absichtlich am Stück (deklarativ, keine Logik).
+- **Datenbank**: eine Datei, WAL, Migrationen per Spalten-Probe plus
+  `PRAGMA user_version`; jeder Worker öffnet eine eigene Verbindung.
+- **Sicherheitsmodell**: MCP nur mit Bearer-Token, lokal gebunden, im
+  LAN-Modus TLS; Geräte-Sync mit selbstsigniertem Zertifikat und
+  SPKI-Fingerprint-Pinning per QR-Code; Passwörter und API-Keys im
+  Secret Service.
+- **Auslieferung**: signiertes Flatpak-OSTree-Repo für x86_64 (Desktop-
+  Manifest) und aarch64 (Phone-Manifest), Module geteilt unter `flatpak/`.
 
 ## Roadmap
 
-### Phase 0 – Setup
-- [x] Rust-Toolchain installieren (`rustup`), Ziel-Profil festlegen
-- [x] Cargo-Projekt + `Cargo.toml` mit Crates
-- [x] Kompilierende Adw-App: `NavigationSplitView`, leere Module
-- [x] Flatpak-Manifest-Stub (optional, für späteres Packaging)
+Erledigt: Bibliothek (Dateien/Interpreten/Alben/Singles/Kompilationen/
+Konzerte/Hörbücher/Favoriten/Playlists), Resume, Equalizer-Kaskade mit
+Ausgabeprofilen, MPRIS, Podcasts, Internetradio mit Timeshift-Recorder und
+Wellenform-Editor, Sprachmemos, YouTube, Nextcloud/WebDAV als Quelle,
+Geräte-Sync, MCP-Server, Lyrics/Karaoke, Sleep-Timer, Design-Seite mit Tray,
+12 Sprachen, Flatpak-Repo.
 
-### Phase 1 – MVP
-- [x] DB-Schema + Migrations (`rusqlite`)
-- [x] Scanner: Ordner rekursiv, `lofty`-Metadaten → DB (Hintergrund-Worker)
-- [x] Dateisystem-Browser (erste Navigation)
-- [x] Playback via `playbin3`: Play/Pause/Next/Prev, Position-Slider
-- [x] Mini-Player-Leiste
-- [x] MPRIS-Anbindung (Lockscreen/Medientasten)
+Offen / Ideen:
 
-### Phase 2 – Bibliothek
-- [x] Interpreten- & Album-Ansicht aus Metadaten
-- [x] Cover-Cache (XDG-Cache)
-- [x] Queue / Wiedergabeliste
-- [x] **Resume-Position pro Track** speichern & anbieten
-
-### Phase 3 – Equalizer
-- [x] `equalizer-10bands` im Audio-Graph
-- [x] EQ-Editor-UI (10 Bänder + Preamp)
-- [x] Kaskaden-Auflösung global → Interpret → Album → Track
-- [x] Kopfhörer-/Ausgabe-Profile
-
-### Phase 4 – Erweiterungen
-- [ ] Streaming-Backend (Subsonic/Navidrome oder Jellyfin)
-- [x] Podcasts (Feeds abonnieren, Episoden laden)
-
-## Offene Entscheidungen
-
-- App-ID / Namespace (z. B. `de.cais.Emilia`)?
-- Streaming-Backend in Phase 4: Subsonic/Navidrome **oder** Jellyfin zuerst?
-- Packaging-Weg final: Flatpak (eigenes OSTree-Repo) vs. Distro-Pakete (Mobian/postmarketOS)?
+- [ ] Weitere Streaming-Plattformen über yt-dlp (SoundCloud, Bandcamp,
+      Mixcloud) – Plandokument liegt lokal unter `docs/` (nicht im Repo)
+- [ ] Subsonic/Navidrome oder Jellyfin als Server-Backend (nach Nextcloud die
+      nächste Remote-Quelle; Entscheidung noch offen)
+- [ ] UI-Logik weiter testbar machen (reine Funktionen aus den Handlern
+      ziehen); Integrationstests für Wiedergabe-Übergänge
+- [ ] Distro-Pakete (Mobian/postmarketOS) zusätzlich zum Flatpak

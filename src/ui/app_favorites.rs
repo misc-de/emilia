@@ -145,21 +145,21 @@ impl App {
                 &self.favorites.favorites_gallery,
                 &tiles,
                 headers.as_deref(),
-                Msg::PlayFavorite,
-                Msg::ShowFavoriteDetail,
+                |v0| Msg::Favorite(FavoriteMsg::PlayFavorite(v0)),
+                |v0| Msg::Favorite(FavoriteMsg::ShowFavoriteDetail(v0)),
             );
         } else {
             // Drag-to-reorder only in the manual order; a sort would override it.
             let move_msg: Option<fn(usize, usize) -> Msg> =
-                manual.then_some(|from, to| Msg::MoveFavorite { from, to });
+                manual.then_some(|from, to| Msg::Favorite(FavoriteMsg::MoveFavorite { from, to }));
             self.fill_entry_list(
                 &self.favorites.favorites_list,
                 &items,
                 sender,
-                Msg::PlayFavorite,
+                |v0| Msg::Favorite(FavoriteMsg::PlayFavorite(v0)),
                 // No trash button - removal via long press ("More info" → star).
                 None,
-                Msg::ShowFavoriteDetail,
+                |v0| Msg::Favorite(FavoriteMsg::ShowFavoriteDetail(v0)),
                 move_msg,
                 true,
                 false,
@@ -194,17 +194,17 @@ impl App {
                 &self.favorites.audiobooks_gallery,
                 &tiles,
                 headers.as_deref(),
-                Msg::OpenAudiobookEntry,
-                Msg::ShowAudiobookDetail,
+                |v0| Msg::Favorite(FavoriteMsg::OpenAudiobookEntry(v0)),
+                |v0| Msg::Favorite(FavoriteMsg::ShowAudiobookDetail(v0)),
             );
         } else {
             self.fill_entry_list(
                 &self.favorites.audiobooks_list,
                 &items,
                 sender,
-                Msg::PlayAudiobook,
+                |v0| Msg::Favorite(FavoriteMsg::PlayAudiobook(v0)),
                 None,
-                Msg::ShowAudiobookDetail,
+                |v0| Msg::Favorite(FavoriteMsg::ShowAudiobookDetail(v0)),
                 None,
                 false,
                 true,
@@ -720,5 +720,108 @@ fn entry_kind(scope: &str) -> String {
         "artist" => gettext("Artist"),
         "folder" => gettext("Folder"),
         _ => gettext("Track"),
+    }
+}
+
+/// `Msg` sub-enum of the favorite domain (split out of `App::update`).
+#[derive(Debug)]
+pub(crate) enum FavoriteMsg {
+    // Favorites
+    /// Set/remove the current detail target as a favorite.
+    ToggleFavorite,
+    /// Play a favorite (index in `favorite_items`).
+    PlayFavorite(usize),
+    /// Open the detail view of a favorite.
+    ShowFavoriteDetail(usize),
+    /// Reorder favorites (indices in `favorite_items`).
+    MoveFavorite { from: usize, to: usize },
+    // Audiobooks
+    /// Play an audiobook (index in `audiobook_items`).
+    PlayAudiobook(usize),
+    /// Open gallery audiobook (index): album/folder → track list, track → play.
+    OpenAudiobookEntry(usize),
+    /// Open the detail view of an audiobook.
+    ShowAudiobookDetail(usize),
+}
+
+impl App {
+    /// Dispatch for [`FavoriteMsg`] (the former `App::update` arms, moved verbatim).
+    pub(crate) fn update_favorite(
+        &mut self,
+        msg: FavoriteMsg,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
+        match msg {
+            FavoriteMsg::ToggleFavorite => self.toggle_favorite(sender),
+            FavoriteMsg::PlayFavorite(index) => self.play_favorite(sender, index),
+            FavoriteMsg::ShowFavoriteDetail(index) => {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.favorite_items.get(index).cloned()
+                {
+                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
+                    self.open_context_menu(root, sender);
+                }
+            }
+            FavoriteMsg::MoveFavorite { from, to } => self.move_favorite(sender, from, to),
+            FavoriteMsg::PlayAudiobook(index) => {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.audiobook_items.get(index).cloned()
+                {
+                    self.play_entry(&scope, &key, is_dir);
+                }
+            }
+            FavoriteMsg::OpenAudiobookEntry(index) => {
+                // Gallery tap: album/folder opens the track list, a single track plays.
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.audiobook_items.get(index).cloned()
+                {
+                    if scope == "track" {
+                        self.play_entry(&scope, &key, is_dir);
+                    } else {
+                        sender.input(Msg::OpenEntryTracks { scope, key });
+                    }
+                }
+            }
+            FavoriteMsg::ShowAudiobookDetail(index) => {
+                if let Some((scope, key, _, is_dir)) =
+                    self.favorites.audiobook_items.get(index).cloned()
+                {
+                    self.nav.context_target = Some(self.entry_target(&scope, &key, is_dir));
+                    self.open_context_menu(root, sender);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{entry_icon, entry_kind, mark_key};
+
+    #[test]
+    fn mark_key_joins_scope_and_key_with_a_control_separator() {
+        assert_eq!(mark_key("album", "Abbey Road"), "album\u{1}Abbey Road");
+        assert_eq!(mark_key("track", "/m/a.mp3"), "track\u{1}/m/a.mp3");
+        assert_ne!(mark_key("album", "X"), mark_key("artist", "X"));
+        assert_ne!(mark_key("album", "X"), mark_key("album", "Y"));
+    }
+
+    #[test]
+    fn entry_icon_per_scope() {
+        assert_eq!(entry_icon("album"), "media-optical-symbolic");
+        assert_eq!(entry_icon("artist"), "avatar-default-symbolic");
+        assert_eq!(entry_icon("folder"), "folder-symbolic");
+        assert_eq!(entry_icon("track"), "audio-x-generic-symbolic");
+        assert_eq!(entry_icon(""), "audio-x-generic-symbolic");
+    }
+
+    #[test]
+    fn entry_kind_per_scope() {
+        assert_eq!(entry_kind("album"), "Album");
+        assert_eq!(entry_kind("artist"), "Artist");
+        assert_eq!(entry_kind("folder"), "Folder");
+        assert_eq!(entry_kind("track"), "Track");
+        assert_eq!(entry_kind("anything"), "Track");
     }
 }

@@ -450,3 +450,24 @@ fn fmt_listen(ms: i64) -> String {
         gettext_f("{m} min", &[("m", &m.to_string())])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_listen;
+
+    #[test]
+    fn listening_time_below_an_hour_is_minutes_only() {
+        assert_eq!(fmt_listen(0), "0 min");
+        assert_eq!(fmt_listen(59_999), "0 min");
+        assert_eq!(fmt_listen(60_000), "1 min");
+        assert_eq!(fmt_listen(12 * 60_000), "12 min");
+        assert_eq!(fmt_listen(-5_000), "0 min");
+    }
+
+    #[test]
+    fn listening_time_past_an_hour_adds_hours() {
+        assert_eq!(fmt_listen(60 * 60_000), "1 h 0 min");
+        assert_eq!(fmt_listen((3 * 60 + 12) * 60_000), "3 h 12 min");
+        assert_eq!(fmt_listen(25 * 60 * 60_000 + 30_000), "25 h 0 min");
+    }
+}

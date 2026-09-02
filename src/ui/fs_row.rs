@@ -529,3 +529,89 @@ impl crate::ui::play_mark::PlaybackSink for relm4::factory::FactoryVecDeque<FsRo
         self.broadcast(FsInput::Playback(state));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_string())
+    }
+
+    #[test]
+    fn split_stem_str_splits_at_the_last_dash() {
+        assert_eq!(
+            split_stem_str("Artist - Title"),
+            (s("Artist"), "Title".into())
+        );
+        assert_eq!(
+            split_stem_str("Artist-Title"),
+            (s("Artist"), "Title".into())
+        );
+        assert_eq!(split_stem_str("A - B - C"), (s("A - B"), "C".into()));
+        assert_eq!(
+            split_stem_str("  Artist  -  Title  "),
+            (s("Artist"), "Title".into())
+        );
+    }
+
+    #[test]
+    fn split_stem_str_without_dash_is_title_only() {
+        assert_eq!(split_stem_str("Title"), (None, "Title".into()));
+        assert_eq!(split_stem_str("01. Song"), (None, "01. Song".into()));
+        // An en dash is not a separator.
+        assert_eq!(split_stem_str("Zoë – Song"), (None, "Zoë – Song".into()));
+        assert_eq!(split_stem_str(""), (None, String::new()));
+    }
+
+    #[test]
+    fn split_stem_str_numbers_before_the_dash_count_as_artist() {
+        assert_eq!(split_stem_str("01 - Song"), (s("01"), "Song".into()));
+        assert_eq!(split_stem_str("12 - Song"), (s("12"), "Song".into()));
+        assert_eq!(split_stem_str("101 - Song"), (s("101"), "Song".into()));
+    }
+
+    #[test]
+    fn split_stem_str_handles_empty_halves() {
+        // Empty artist half → no artist.
+        assert_eq!(split_stem_str(" - Title"), (None, "Title".into()));
+        // Empty title half → the whole stem stays the title.
+        assert_eq!(split_stem_str("Title -"), (s("Title"), "Title -".into()));
+        assert_eq!(split_stem_str("-"), (None, "-".into()));
+        assert_eq!(split_stem_str(" - "), (None, " - ".into()));
+    }
+
+    #[test]
+    fn split_filename_strips_the_extension_first() {
+        assert_eq!(
+            split_filename("Artist - Song.mp3"),
+            (s("Artist"), "Song".into())
+        );
+        assert_eq!(split_filename("Song.flac"), (None, "Song".into()));
+        assert_eq!(
+            split_filename("Artist - Song.Part2.ogg"),
+            (s("Artist"), "Song.Part2".into())
+        );
+        assert_eq!(split_filename("noext"), (None, "noext".into()));
+        assert_eq!(split_filename(".hidden"), (None, ".hidden".into()));
+        assert_eq!(
+            split_filename("dir/Artist - Song.ogg"),
+            (s("Artist"), "Song".into())
+        );
+        assert_eq!(split_filename(""), (None, String::new()));
+    }
+
+    #[test]
+    fn split_stem_uses_the_file_stem_of_a_path() {
+        assert_eq!(
+            split_stem(Path::new("/music/Artist - Song.mp3")),
+            (s("Artist"), "Song".into())
+        );
+        assert_eq!(
+            split_stem(Path::new("/music/Song.mp3")),
+            (None, "Song".into())
+        );
+        // No file name at all → placeholder.
+        assert_eq!(split_stem(Path::new("/")), (None, "?".into()));
+    }
+}

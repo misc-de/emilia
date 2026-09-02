@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.24"
+version = "0.8.25"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -53,15 +53,23 @@ ksni = "0.2"
 gdk4-x11 = "0.9"
 x11rb = "0.13"
 # Optional "Tokio SDK" MCP backend (the lean JSON-RPC backend needs none of
-# this). rmcp's streamable-HTTP transport pulls in an async (tokio/axum) HTTP
-# stack; it is always compiled in but only runs when the user selects it. The
-# lean default on phones (aarch64) keeps this dormant. See src/core/mcp.
-rmcp = { version = "1", default-features = false, features = ["server", "transport-streamable-http-server"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# this). rmcp's streamable-HTTP transport pulls in an async (tokio/axum/hyper)
+# HTTP stack, so the whole group sits behind the `mcp-sdk` feature (on by
+# default; phone builds pass `--no-default-features`). See src/core/mcp.
+rmcp = { version = "1", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"], optional = true }
 # TLS for the "public (LAN)" SDK case, reusing the same rustls 0.23 identity as
 # device sync. Pinned to the matching rustls major.
-axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "time", "io-util"] }
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "time", "io-util"], optional = true }
+
+[features]
+default = ["mcp-sdk"]
+# The rmcp/tokio "Tokio SDK" MCP backend. Without it only the lean JSON-RPC
+# backend is compiled and the settings offer just that one; a saved "sdk"
+# choice then falls back to JSON-RPC. Phones build with `--no-default-features`
+# (smaller binary, ~40 fewer crates).
+mcp-sdk = ["dep:rmcp", "dep:axum", "dep:axum-server", "dep:tokio"]
 
 [profile.release]
 opt-level = "s"

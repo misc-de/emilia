@@ -11,8 +11,13 @@ use std::sync::Arc;
 
 use crate::core::mcp::{self, McpCommand, McpContext, McpMode};
 use crate::ui::app::{App, McpState, Msg, SleepChoice};
+use crate::ui::app_covers::CoverMsg;
+use crate::ui::app_episode_playback::PodcastMsg;
 use crate::ui::app_memo::MemoMsg;
+use crate::ui::app_playback::TransportMsg;
 use crate::ui::app_playlist::PlaylistMsg;
+use crate::ui::app_settings::SettingMsg;
+use crate::ui::app_streaming::StreamMsg;
 
 /// MCP-server settings messages, dispatched by [`App::update_mcp_setting`].
 /// Grouped out of the flat `Msg` enum (see `app.rs`); each persists a setting and
@@ -69,7 +74,7 @@ impl App {
             McpCommand::Prev => self.skip_prev(),
             // Re-dispatch through the normal message path (same as the seek bar).
             McpCommand::Seek(ms) => {
-                let _ = self.input.send(Msg::Seek(ms));
+                let _ = self.input.send(Msg::Transport(TransportMsg::Seek(ms)));
             }
             McpCommand::PlayAlbum { artist, album } => self.on_play_album(artist, album),
             McpCommand::PlayArtist(name) => self.mcp_play_artist(name),
@@ -103,30 +108,36 @@ impl App {
             }
             McpCommand::Enqueue(paths) => self.mcp_enqueue(paths),
             McpCommand::ToggleEpisodeListened { url, title } => {
-                let _ = self.input.send(Msg::ToggleEpisode { url, title });
+                let _ = self
+                    .input
+                    .send(Msg::Podcast(PodcastMsg::ToggleEpisode { url, title }));
             }
             McpCommand::DeleteMemo(id) => {
                 let _ = self.input.send(Msg::Memo(MemoMsg::DeleteConfirmed(id)));
             }
             McpCommand::DeleteRecording(id) => {
-                let _ = self.input.send(Msg::StreamRecordingReallyDelete(id));
+                let _ = self
+                    .input
+                    .send(Msg::Stream(StreamMsg::StreamRecordingReallyDelete(id)));
             }
             McpCommand::SetAlbumCover {
                 artist,
                 album,
                 path,
             } => {
-                let _ = self.input.send(Msg::SetAlbumCover {
+                let _ = self.input.send(Msg::Cover(CoverMsg::SetAlbumCover {
                     artist,
                     album,
                     path,
-                });
+                }));
             }
             McpCommand::SetArtistImage { name, path } => {
-                let _ = self.input.send(Msg::SetArtistImage { name, path });
+                let _ = self
+                    .input
+                    .send(Msg::Cover(CoverMsg::SetArtistImage { name, path }));
             }
             McpCommand::SetAreas { scope, key, value } => {
-                // `Msg::SetAreas` needs a `&'static` scope; map the known ones.
+                // `Msg::Setting(SettingMsg::SetAreas)` needs a `&'static` scope; map the known ones.
                 let scope: Option<&'static str> = match scope.as_str() {
                     "track" => Some("track"),
                     "album" => Some("album"),
@@ -134,7 +145,9 @@ impl App {
                     _ => None,
                 };
                 if let Some(scope) = scope {
-                    let _ = self.input.send(Msg::SetAreas { scope, key, value });
+                    let _ =
+                        self.input
+                            .send(Msg::Setting(SettingMsg::SetAreas { scope, key, value }));
                 }
             }
             McpCommand::SetSleepTimer(minutes) => {
@@ -238,6 +251,7 @@ impl App {
                     Err(e) => tracing::error!("MCP server failed to start: {e}"),
                 }
             }
+            #[cfg(feature = "mcp-sdk")]
             McpMode::Sdk => match mcp::server_sdk::start(ctx, token, public, stop.clone()) {
                 Ok(port) => {
                     self.mcp.stop = Some(stop);
@@ -247,6 +261,12 @@ impl App {
                 }
                 Err(e) => tracing::error!("MCP SDK server failed to start: {e}"),
             },
+            // `from_setting` never yields `Sdk` in a build without the backend;
+            // the arm only keeps the match exhaustive.
+            #[cfg(not(feature = "mcp-sdk"))]
+            McpMode::Sdk => {
+                tracing::warn!("MCP SDK backend is not compiled into this build");
+            }
             McpMode::Off => {}
         }
     }

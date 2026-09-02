@@ -80,9 +80,11 @@ uninstall:
 # Default-Keywords, deshalb müssen gettext/ngettext hier mit aufgeführt werden.
 pot:
 	xtr --keywords=gettext --keywords=ngettext:1,2 --keywords=gettext_f \
-		--keywords=ngettext_n:1,2 --package-name=Emilia \
+		--keywords=ngettext_n:1,2 --keywords=npgettext_n:1c,2,3 \
+		--keywords=gettext_noop --package-name=Emilia \
 		-o po/emilia.pot src/main.rs
-	@echo "po/emilia.pot aktualisiert. Kataloge angleichen: msgmerge -U po/de.po po/emilia.pot"
+	@echo "po/emilia.pot aktualisiert. Kataloge angleichen: for l in \$$(grep -v '^#' po/LINGUAS); do msgmerge -U --backup=none po/\$$l.po po/emilia.pot; done"
+	@echo "Offene Einträge exportieren/anwenden: po/po_tool.py dump|apply <lang> <json> (siehe Kopf der Datei)"
 
 # Entwicklung: Kataloge bauen und mit lokalem Katalogpfad starten.
 # Sprache wählen: make run LANG_OVERRIDE=de  (oder en)

@@ -72,7 +72,15 @@ cargo run
 # Optimized release binary:
 cargo build --release
 ./target/release/emilia
+
+# Without the optional rmcp/tokio MCP backend (what the phone Flatpak ships;
+# the lean JSON-RPC backend stays in — smaller binary, ~40 crates fewer):
+cargo build --release --no-default-features
 ```
+
+Cargo features: `mcp-sdk` (default on) compiles the "Tokio SDK" MCP backend.
+Turn it off with `--no-default-features`; the settings then offer only the lean
+JSON-RPC backend and a previously saved "Tokio SDK" choice falls back to it.
 
 > Note: when started from the project folder (`cargo run`) the icons in
 > `data/icons` are found. For permanent use, install it instead (below).
@@ -100,10 +108,20 @@ Remove again with `make uninstall` (same `PREFIX`). `make check` validates the
 
 ## Build the Flatpak yourself
 
-If you prefer to build a bundle yourself (instead of the pre-built one): a
-manifest is in [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml) (GNOME runtime +
-rust-stable SDK). Build with `flatpak-builder` – the exact commands are in the
-header of the manifest.
+If you prefer to build a bundle yourself (instead of the pre-built one), there
+are two thin manifests (GNOME runtime + rust-stable SDK) that share the module
+definitions under [`flatpak/`](flatpak/):
+
+- [`de.cais.Emilia.yaml`](de.cais.Emilia.yaml) – **desktop**: the camera for QR
+  scanning goes through the XDG camera portal, no raw device access.
+- [`de.cais.Emilia.phone.yaml`](de.cais.Emilia.phone.yaml) – **phone**
+  (FuriOS/Droidian/Halium, the published aarch64 build): direct `/dev/video*`
+  access because the portal does not expose Halium's V4L2 loopbacks, and a
+  build without the rmcp/tokio MCP backend (`--no-default-features`).
+
+Build with `flatpak-builder` – the exact commands are in the header of each
+manifest. Anything that changes for both (icons, translations, install lines)
+is edited once in `flatpak/emilia.yaml`.
 
 ---
 
@@ -115,7 +133,9 @@ src/
   model.rs           Data models (Track, AlbumMeta, ArtistMeta, MemoItem, …)
   i18n.rs            Internationalization (gettext)
   ui/
-    app.rs           Root component (init/update/view!), navigation, player bar
+    app.rs           Root component (Msg enum, init/update/view!), navigation, player bar
+    app_state.rs     Sub-state structs of the root component (transport, nav, mini-player, …)
+    app_sections.rs  Navigation-section metadata, sort/grouping capabilities, page view enums
     app_init.rs      Post-view_output!() wiring split out of init()
     setup.rs         First-run setup assistant (standalone component)
     app_views.rs     Load/group folder/album/artist, subpages, ctx/cover helpers
@@ -135,7 +155,9 @@ src/
     stream_page.rs   Internet-radio page component (stations, recordings)
     app_streaming.rs Streaming/timeshift transport (ICY, ring buffer, replay)
     app_rec_edit.rs  Recording/memo waveform editor (mark/cut, zoom/pan, overwrite)
-    yt_page.rs       YouTube page component (search, lists, dialogs)
+    yt_page.rs       YouTube page component (lists, search, sorting)
+    yt_page_detail.rs  YouTube detail views, cards, add-to-library, progress popups
+    yt_channels.rs   YouTube channel/feed refresh helpers
     app_yt_glue.rs   YouTube transport + yt-dlp/settings glue on App
     app_memo.rs      Voice-memo page (Recent/Category tabs, mic record button)
     cloud_page.rs    Nextcloud connect dialog (QR camera + manual)
@@ -152,8 +174,12 @@ src/
     app_helpers.rs   Small shared App helpers
     widgets.rs       Shared UI helpers (cover frames, thumbnails)
   core/
+    mcp/             Embedded MCP server: shared tool layer + two backends
+                     (lean JSON-RPC; rmcp/tokio SDK behind the `mcp-sdk` feature)
     scanner.rs       Directory scan + lofty metadata → DB (background worker)
-    db/              SQLite (rusqlite, bundled) + queries (split into submodules)
+    db/              SQLite (rusqlite, bundled): mod.rs opens the DB, migrate.rs the
+                     schema; one submodule per domain (track, album, artist, search,
+                     settings, source, lyrics, podcast, stream, youtube, memo, …)
     player.rs        GStreamer wrapper (playbin3, equalizer-10bands, gapless/crossfade)
     waveform.rs      Recording/memo waveform decode + region cut/re-encode
     online.rs        Online enrichment (MusicBrainz/CAA/Deezer/AcoustID/fanart)
