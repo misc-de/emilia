@@ -1,0 +1,18 @@
+# cargo-audit policy (CI job "Dependency audit").
+#
+# Advisories that only warn (unmaintained / unsound crates) never fail the job;
+# the entries below are *vulnerabilities* that are consciously accepted because
+# they cannot be fixed from this side of the tree and do not apply to how the
+# crate is used here. Each one names the path and the reason — re-check them
+# whenever the dependency in question gets an update.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — rsa: "Marvin attack" timing side channel in RSA
+    # private-key operations. Reaches Emilia only through the SMB client's
+    # authentication stack (smb -> sspi -> picky -> rsa). Emilia is an SMB
+    # *client* here and never holds an RSA private key that a remote party
+    # could probe, so the side channel has nothing to leak; sspi pins the
+    # 0.10 release candidate and no fixed release exists (2026-09-03).
+    "RUSTSEC-2023-0071",
+]
