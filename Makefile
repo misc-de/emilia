@@ -20,7 +20,7 @@ LOCALE_DIR = $(DESTDIR)$(PREFIX)/share/locale
 LINGUAS = $(shell grep -v '^\#' po/LINGUAS 2>/dev/null)
 MO_FILES = $(patsubst %,po/%/LC_MESSAGES/emilia.mo,$(LINGUAS))
 
-.PHONY: build mo install install-mo uninstall check pot run clean-mo release
+.PHONY: build mo install install-mo uninstall check pot run clean-mo release github-release
 
 build:
 	cargo build --release
@@ -121,7 +121,26 @@ release:
 	git add Cargo.toml Cargo.lock
 	git commit --no-verify -m "Release: $(VERSION)"
 	git tag "v$(VERSION)"
-	@echo "✓ v$(VERSION) getaggt. Pushen:  git push && git push origin v$(VERSION)"
+	@echo "✓ v$(VERSION) getaggt. Veröffentlichen:  make github-release VERSION=$(VERSION)   (pusht Branch + Tag, legt das GitHub-Release an)"
+
+# ---------------------------------------------------------------------------
+# GitHub-Release zum Tag anlegen:  make github-release [VERSION=0.2.0]
+#
+# Ein Tag allein erscheint auf GitHub nur unter „Tags“ – die Release-Liste und
+# das „Latest“-Abzeichen speisen sich ausschließlich aus eigens angelegten
+# Releases (deshalb blieb 0.8.19 bis zum 2026-09-03 als „Latest“ stehen).
+# Dieses Ziel pusht Branch und Tag und erzeugt das Release; sein Text ist die
+# <release>-Notiz aus der Metainfo (Englisch, darunter Deutsch), aufbereitet
+# von scripts/release-notes.py. Ohne VERSION gilt der Stand aus Cargo.toml.
+# Braucht ein angemeldetes `gh` (gh auth login).
+# ---------------------------------------------------------------------------
+github-release: VERSION ?= $(shell sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/p' Cargo.toml | head -1)
+github-release:
+	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "Tag v$(VERSION) fehlt – zuerst: make release VERSION=$(VERSION)"; exit 1; }
+	@! gh release view "v$(VERSION)" >/dev/null 2>&1 || { echo "Release v$(VERSION) existiert bereits auf GitHub."; exit 1; }
+	git push && git push origin "v$(VERSION)"
+	python3 scripts/release-notes.py "$(VERSION)" | gh release create "v$(VERSION)" --verify-tag --latest --title "Emilia $(VERSION)" --notes-file -
+	@echo "✓ Release v$(VERSION) auf GitHub angelegt."
 
 # ---------------------------------------------------------------------------
 # Flatpak: ein OSTree-Repo als Update-Quelle, das BEIDE Architekturen enthält.

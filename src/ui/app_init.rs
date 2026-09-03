@@ -1205,22 +1205,22 @@ impl App {
         self.reload_library_overviews();
     }
 
-    /// Probe the reachability of all WebDAV sources off-thread.
+    /// Probe the reachability of all remote sources off-thread.
     pub(crate) fn on_check_sources(&mut self, sender: &ComponentSender<Self>) {
-        let webdavs: Vec<crate::model::Source> = self
+        let remotes: Vec<crate::model::Source> = self
             .files
             .sources
             .iter()
-            .filter(|s| s.kind == "webdav")
+            .filter(|s| s.is_remote())
             .cloned()
             .collect();
-        if !webdavs.is_empty() {
+        if !remotes.is_empty() {
             sender.spawn_command(move |out| {
-                let status: Vec<(i64, bool)> = webdavs
+                let status: Vec<(i64, bool)> = remotes
                     .iter()
                     .map(|s| {
-                        let ok = crate::core::webdav::Creds::from_source(s)
-                            .map(|c| crate::core::webdav::test_connection(&c).is_ok())
+                        let ok = crate::core::remote::Backend::from_source(s)
+                            .map(|b| b.test_connection().is_ok())
                             .unwrap_or(false);
                         (s.id, ok)
                     })

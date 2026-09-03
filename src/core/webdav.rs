@@ -1,22 +1,22 @@
 //! Minimal, **read-only** WebDAV client (Nextcloud) via the blocking
-//! `ureq`. Can list directories (PROPFIND), read tags from the first
-//! kilobytes of a file (range GET) and download files (GET).
+//! `ureq`. Can list directories (PROPFIND), read the first kilobytes of a
+//! file (range GET) and download files (GET).
 //!
-//! Deliberately kept lean and called exclusively from background workers
-//! (see `src/ui/app_streaming` or the `Cmd::Remote*` paths).
-//! The audio files in the cloud are never modified in the process.
+//! Deliberately kept lean and called exclusively from background workers via
+//! [`crate::core::remote::Backend`], which owns everything shared with the
+//! other remote kinds (tag parsing, indexing, the synthetic `nc:` paths, the
+//! cache layout). The audio files in the cloud are never modified.
 
-use std::io::{Cursor, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use base64::Engine;
-use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::tag::Accessor;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 
 use crate::core::net;
+use crate::core::remote::{clamp_range, RangeBody};
 use crate::core::scanner;
 use crate::core::xml;
 use crate::model::Source;
@@ -268,19 +268,21 @@ fn eof_is_benign(err: &std::io::Error, got: usize, advertised: Option<u64>, max:
         && advertised.is_some_and(|n| got as u64 >= n.min(max))
 }
 
-/// Range-GETs the first bytes of a remote file with transient-failure retry.
-/// `Ok(buf)` on success (the buffer may be shorter than `max` for small files);
-/// `Err` only on a **final** transport/HTTP failure — so a caller can tell a
-/// genuine network problem apart from a file that merely has no readable tags.
-fn fetch_prefix(c: &Creds, rel: &str, range: &str, max: u64) -> Result<Vec<u8>> {
+/// Range-GETs the first `len` bytes of a remote file with transient-failure
+/// retry. `Ok(buf)` on success (the buffer may be shorter than `len` for small
+/// files); `Err` only on a **final** transport/HTTP failure — so a caller can
+/// tell a genuine network problem apart from a file that merely has no
+/// readable tags.
+pub fn fetch_prefix(c: &Creds, rel: &str, len: u64) -> Result<Vec<u8>> {
     let url = url_for(c, rel);
     let auth = auth_header(c);
     let agent = agent();
+    let range = format!("bytes=0-{}", len.saturating_sub(1));
     let resp = with_retry("range GET", || {
         agent
             .get(&url)
             .set("Authorization", &auth)
-            .set("Range", range)
+            .set("Range", &range)
             .call()
             .map_err(Box::new)
     })?;
@@ -290,17 +292,60 @@ fn fetch_prefix(c: &Creds, rel: &str, range: &str, max: u64) -> Result<Vec<u8>> 
         .header("Content-Length")
         .and_then(|s| s.trim().parse::<u64>().ok());
     let mut buf = Vec::new();
-    if let Err(e) = resp.into_reader().take(max).read_to_end(&mut buf) {
+    if let Err(e) = resp.into_reader().take(len).read_to_end(&mut buf) {
         // Tolerate a missing TLS `close_notify` once every advertised byte has
         // arrived: the track stays indexable instead of being dropped over a
         // cosmetic shutdown quirk. A short read is still a real failure, so the
         // track is skipped and retried on the next pass rather than stored
         // tag-less.
-        if !eof_is_benign(&e, buf.len(), advertised, max) {
+        if !eof_is_benign(&e, buf.len(), advertised, len) {
             return Err(e.into());
         }
     }
     Ok(buf)
+}
+
+/// Opens a byte range of a remote file for streaming (used by the generic
+/// downloader; Nextcloud playback itself streams straight from the DAV URL).
+pub fn open_range(c: &Creds, rel: &str, start: u64, end: Option<u64>) -> Result<RangeBody> {
+    let url = url_for(c, rel);
+    let auth = auth_header(c);
+    let agent = agent();
+    let range = match end {
+        Some(e) => format!("bytes={start}-{e}"),
+        None => format!("bytes={start}-"),
+    };
+    let resp = with_retry("range GET", || {
+        agent
+            .get(&url)
+            .set("Authorization", &auth)
+            .set("Range", &range)
+            .call()
+            .map_err(Box::new)
+    })?;
+    let content_length = resp
+        .header("Content-Length")
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    let total = if resp.status() == 206 {
+        resp.header("Content-Range")
+            .and_then(|cr| cr.rsplit('/').next())
+            .and_then(|t| t.trim().parse::<u64>().ok())
+    } else {
+        content_length
+    }
+    .ok_or_else(|| anyhow!("unknown file size"))?;
+    let (start, end) = if resp.status() == 206 {
+        clamp_range(total, start, end).ok_or_else(|| anyhow!("range not satisfiable"))?
+    } else {
+        (0, total.saturating_sub(1))
+    };
+    let len = end - start + 1;
+    Ok(RangeBody {
+        total,
+        start,
+        end,
+        body: Box::new(resp.into_reader().take(len)),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -436,99 +481,14 @@ pub fn test_connection(c: &Creds) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Tags & download
+// Synthetic paths & download
 // ---------------------------------------------------------------------------
 
-/// Reads title/artist/duration of a remote track — the subset of [`read_meta`]
-/// the file list needs, off the same single range GET. Best effort: an
-/// unreachable file, or one whose metadata sits at the end (e.g. unoptimized
-/// MP4) and is thus outside the fetched prefix, yields `None`s – the callers
-/// then fall back to the file name.
-pub fn read_tags(c: &Creds, rel: &str) -> (Option<String>, Option<String>, Option<i64>) {
-    match read_meta(c, rel) {
-        Ok(m) => (m.title, m.artist, m.duration_ms),
-        Err(_) => (None, None, None),
-    }
-}
-
-/// Complete metadata of a remote track (for indexing into the
-/// same database as local songs).
-#[derive(Default)]
-pub struct RemoteMeta {
-    pub title: Option<String>,
-    pub artist: Option<String>,
-    pub album: Option<String>,
-    pub genre: Option<String>,
-    pub track_no: Option<u32>,
-    pub disc_no: Option<u32>,
-    pub duration_ms: Option<i64>,
-    pub year: Option<i32>,
-}
-
-/// Like [`read_tags`], but reads **all** fields needed for the library
-/// (additionally album, genre, track/CD no.) from the first ~512 KB of the file.
-/// `Err` signals a **network** failure (so a caller indexing into the DB can
-/// skip the track instead of storing a degraded, tag-less entry); a reachable
-/// file with no readable tags yields `Ok` with default fields.
-pub fn read_meta(c: &Creds, rel: &str) -> Result<RemoteMeta> {
-    let buf = fetch_prefix(c, rel, "bytes=0-524287", 600_000)?;
-    Ok(parse_remote_meta(buf))
-}
-
-/// Runs `lofty` over an in-memory file prefix and pulls the library fields out.
-/// Unreadable/absent tags are not an error here — they just leave fields empty.
-fn parse_remote_meta(buf: Vec<u8>) -> RemoteMeta {
-    // `lofty::read_from` expects a `File`; with an in-memory buffer it works
-    // via `Probe` (Read + Seek on the `Cursor`, purely local – no HTTP seek).
-    let tagged = match lofty::probe::Probe::new(Cursor::new(buf)).guess_file_type() {
-        Ok(p) => match p.read() {
-            Ok(t) => t,
-            Err(_) => return RemoteMeta::default(),
-        },
-        Err(_) => return RemoteMeta::default(),
-    };
-    let duration_ms = match tagged.properties().duration().as_millis() {
-        0 => None,
-        ms => Some(ms as i64),
-    };
-    let mut m = RemoteMeta {
-        duration_ms,
-        ..Default::default()
-    };
-    if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
-        let clean = |s: Option<std::borrow::Cow<str>>| {
-            s.map(|c| c.trim().to_string()).filter(|s| !s.is_empty())
-        };
-        m.title = clean(tag.title());
-        m.artist = clean(tag.artist());
-        m.album = clean(tag.album());
-        m.genre = clean(tag.genre());
-        m.track_no = tag.track();
-        m.disc_no = tag.disk();
-        m.year = tag.year().map(|y| y as i32);
-    }
-    m
-}
-
 /// Synthetic path of a remote track: `nc:<source_id>:<rel>`. This way
-/// cloud tracks live in the same `track` table as local ones and behave 1:1.
+/// remote tracks (of every kind — the `nc:` prefix is historic) live in the
+/// same `track` table as local ones and behave 1:1.
 pub fn nc_path(source_id: i64, rel: &str) -> String {
     format!("nc:{source_id}:{rel}")
-}
-
-/// Reads the first **embedded** cover image of a remote track. Fetches a larger
-/// prefix than the tag read (covers usually sit right behind the text tags) and
-/// extracts the picture via lofty from the in-memory buffer. **Blocking** –
-/// only from worker threads.
-pub fn fetch_cover(c: &Creds, rel: &str) -> Option<Vec<u8>> {
-    let buf = fetch_prefix(c, rel, "bytes=0-4194303", 4_400_000).ok()?;
-    let tagged = lofty::probe::Probe::new(Cursor::new(buf))
-        .guess_file_type()
-        .ok()?
-        .read()
-        .ok()?;
-    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
-    Some(tag.pictures().first()?.data().to_vec())
 }
 
 /// Splits a synthetic path `nc:<id>:<rel>` into (source id, rel).
@@ -536,92 +496,6 @@ pub fn parse_nc_path(path: &str) -> Option<(i64, String)> {
     let rest = path.strip_prefix("nc:")?;
     let (id, rel) = rest.split_once(':')?;
     Some((id.parse().ok()?, rel.to_string()))
-}
-
-/// **Recursively** collects all audio file paths (relative to the music root)
-/// under `rel`. Defensively capped (directory/file count) so that a very large
-/// cloud does not run forever.
-pub fn walk(c: &Creds, rel: &str) -> Vec<String> {
-    const MAX_DIRS: usize = 4000;
-    const MAX_FILES: usize = 50_000;
-    let mut files = Vec::new();
-    let mut stack = vec![rel.to_string()];
-    let mut dirs_seen = 0usize;
-    while let Some(dir) = stack.pop() {
-        dirs_seen += 1;
-        if dirs_seen > MAX_DIRS || files.len() >= MAX_FILES {
-            tracing::warn!("WebDAV walk capped (dirs/files limit reached)");
-            break;
-        }
-        let Ok(entries) = list(c, &dir) else {
-            continue; // directory not readable – skip
-        };
-        for e in entries {
-            if e.is_dir {
-                stack.push(e.rel_path);
-            } else {
-                files.push(e.rel_path);
-            }
-        }
-    }
-    files
-}
-
-/// Recursively reads in the complete music library of a source and stores the
-/// tracks in the database (synthetic path). Afterwards they appear like
-/// local songs in artists/albums. **Blocking** – only from worker threads.
-/// Returns the number of indexed tracks.
-pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usize> {
-    let Some(c) = Creds::from_source(source) else {
-        return Err(anyhow!("incomplete source credentials"));
-    };
-    let files = walk(&c, "");
-    // Upsert in batches: one transaction (one fsync) per chunk instead of one per
-    // file — a large cloud can hold tens of thousands of tracks. The per-file
-    // metadata read over HTTP stays the dominant cost.
-    const BATCH: usize = 256;
-    let mut batch: Vec<crate::model::Track> = Vec::with_capacity(BATCH.min(files.len()));
-    let mut n = 0;
-    for rel in files {
-        // A network failure must not produce a degraded entry (filename as
-        // title, no tags) that then sticks in the DB; skip the track so a later
-        // re-index picks it up once the source is reachable again. A reachable
-        // file with no tags still indexes (Ok with empty fields).
-        let meta = match read_meta(&c, &rel) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("skipping {rel}: metadata read failed: {e}");
-                continue;
-            }
-        };
-        let name = rel.rsplit('/').next().unwrap_or(&rel);
-        let title = meta.title.unwrap_or_else(|| {
-            Path::new(name)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(name)
-                .to_string()
-        });
-        batch.push(crate::model::Track {
-            id: 0,
-            path: nc_path(source.id, &rel),
-            title,
-            artist: meta.artist,
-            album: meta.album,
-            genre: meta.genre,
-            track_no: meta.track_no,
-            disc_no: meta.disc_no,
-            duration_ms: meta.duration_ms,
-            resume_ms: 0,
-            year: meta.year,
-        });
-        if batch.len() >= BATCH {
-            n += lib.upsert_tracks_resilient(&batch);
-            batch.clear();
-        }
-    }
-    n += lib.upsert_tracks_resilient(&batch);
-    Ok(n)
 }
 
 /// Downloads a file completely to `dest` (atomically via a `.part` file). The

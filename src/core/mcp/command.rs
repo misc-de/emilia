@@ -70,6 +70,35 @@ pub enum McpCommand {
     },
     /// Arm the sleep timer for this many minutes; `0` turns it off.
     SetSleepTimer(u32),
+    /// Start a saved radio station (by its db id); idempotent when it already runs.
+    PlayStation(i64),
+    /// Start/stop the timeshift recording of a station.
+    ToggleStationRecording(i64),
+    /// Remove a saved station (destructive; the tool gate requires confirmation).
+    /// Stops it first if it is playing.
+    DeleteStation(i64),
+    /// The station list changed in the DB (added/renamed over MCP) → redraw it.
+    ReloadStations,
+    /// Unsubscribe a podcast (destructive; gated by confirmation).
+    DeletePodcast(i64),
+    /// The podcast list changed in the DB (subscribed over MCP) → redraw it.
+    ReloadPodcasts,
+    /// Re-fetch every subscribed feed (the page's "refresh all").
+    RefreshPodcasts,
+    /// Track rows changed in the DB (tags edited / files deleted over MCP) →
+    /// rebuild the artist/album overviews.
+    LibraryChanged,
+    /// Device sync: start the pairing server (offer a connection).
+    SyncStartServer,
+    /// Device sync: connect to a peer's pairing code (`emilia://pair?…`).
+    SyncPair(String),
+    /// Device sync: share a selection with the paired peer, sending without the
+    /// size-confirmation step. Boxed: `Selection` is large.
+    SyncShare(Box<crate::core::sync::share::Selection>),
+    /// Device sync: accept (everything new) or reject the pending incoming offer.
+    SyncRespond { accept: bool },
+    /// Device sync: end the live pairing.
+    SyncDisconnect,
 }
 
 /// Installed by the UI; invoked from the MCP server thread (any thread, hence

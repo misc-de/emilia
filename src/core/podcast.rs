@@ -10,6 +10,37 @@ use anyhow::{anyhow, Result};
 use crate::core::net;
 use crate::model::Episode;
 
+/// Subscribes to (or refreshes) the feed at `feed_url`: fetches it, stores the
+/// podcast row and its episodes and caches the feed image. Returns the podcast
+/// id, its title and how many of the fetched episodes were **new** — `0` for a
+/// first subscription (everything is new then; the count is meant for
+/// refreshes). Blocking (network) — call from a worker thread.
+pub fn subscribe_feed(
+    lib: &crate::core::db::Library,
+    feed_url: &str,
+) -> Result<(i64, String, usize)> {
+    let feed = fetch_feed(feed_url)?;
+    let id = lib.subscribe_podcast(&feed.title, feed_url, feed.image_url.as_deref())?;
+    // Episodes stored so far, to count the new arrivals (`set_episodes`
+    // replaces the whole list, so this has to happen before the write).
+    let known: std::collections::HashSet<String> = lib
+        .episodes(id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.audio_url)
+        .collect();
+    let fresh = feed
+        .episodes
+        .iter()
+        .filter(|e| !known.contains(&e.audio_url))
+        .count();
+    lib.set_episodes(id, &feed.episodes)?;
+    if let Some(img) = feed.image_url.as_deref() {
+        crate::core::online::cache_podcast_image(img);
+    }
+    Ok((id, feed.title, if known.is_empty() { 0 } else { fresh }))
+}
+
 /// Converts an RFC-2822 publication date ("Fri, 29 May 2026 22:00:00 -0000")
 /// into a **sortable** key `YYYYMMDDHHMMSS`. The time zone is ignored for
 /// sorting; unparsable/missing dates yield `0`.

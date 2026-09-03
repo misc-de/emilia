@@ -24,6 +24,8 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::db::Library;
+use crate::core::mcp::state::{OfferSummary, SyncSnapshot};
+use crate::core::mcp::SyncStateHandle;
 use crate::core::sync::client::SyncClient;
 use crate::core::sync::protocol::{self, Capabilities, PairingInfo};
 use crate::core::sync::scanner::Scanner;
@@ -98,6 +100,14 @@ pub(crate) struct SyncPage {
     incoming_manifest: Option<ShareManifest>,
     /// Stable device ID (cached from the settings).
     device_id: Option<String>,
+    /// Shared status snapshot the MCP `sync_*` tools read (see `core::mcp::state`).
+    mcp: SyncStateHandle,
+    /// Armed by an MCP-driven share: skip the size confirmation and send the
+    /// prepared offer straight away. Consumed by `on_manifest_ready`.
+    auto_send: bool,
+    /// Receiver classification of the pending incoming offer, kept so an
+    /// MCP-driven accept takes exactly what the review page would pre-select.
+    incoming_reviews: Vec<share::FileReview>,
 }
 
 #[derive(Debug)]
@@ -123,6 +133,20 @@ pub(crate) enum SyncInput {
     CancelShare,
     /// Review "Accept" → apply the (selectively) accepted offer.
     AcceptOffer,
+    /// Remember the main window (so an MCP-driven flow can present its dialog
+    /// on it) without opening anything.
+    SetWindow(adw::ApplicationWindow),
+    /// MCP-driven share: like `ShareSelection`, but the prepared offer is sent
+    /// without the size-confirmation step.
+    ShareHeadless {
+        window: adw::ApplicationWindow,
+        selection: Box<share::Selection>,
+    },
+    /// MCP-driven answer to the pending incoming offer: accept what the review
+    /// page would pre-select (`true`) or reject all (`false`).
+    RespondHeadless {
+        accept: bool,
+    },
     /// Review "Reject all".
     RejectOffer,
     /// Transfer-success "Done" → back to the connected panel (stay paired).
@@ -147,7 +171,7 @@ pub(crate) enum SyncOutput {
 
 #[relm4::component(pub(crate))]
 impl Component for SyncPage {
-    type Init = ();
+    type Init = SyncStateHandle;
     type Input = SyncInput;
     type Output = SyncOutput;
     type CommandOutput = SyncEvent;
@@ -159,7 +183,7 @@ impl Component for SyncPage {
     }
 
     fn init(
-        _init: Self::Init,
+        mcp: Self::Init,
         root: Self::Root,
         _sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
@@ -182,6 +206,9 @@ impl Component for SyncPage {
             synced_ok: false,
             sync_summary: String::new(),
             peer_caps: Capabilities::default(),
+            mcp,
+            auto_send: false,
+            incoming_reviews: Vec::new(),
             peer_name: String::new(),
             is_server: false,
             sub_toolbar: None,
@@ -210,6 +237,15 @@ impl Component for SyncPage {
                 self.window = Some(window);
                 self.share_selection(*selection, &sender);
             }
+            SyncInput::SetWindow(window) => self.window = Some(window),
+            SyncInput::ShareHeadless { window, selection } => {
+                self.window = Some(window);
+                // Arm the auto-send only when the share will actually run —
+                // otherwise a later UI share would skip its confirmation.
+                self.auto_send = self.connected;
+                self.share_selection(*selection, &sender);
+            }
+            SyncInput::RespondHeadless { accept } => self.respond_headless(accept, &sender),
             SyncInput::ConfirmSend => self.confirm_send(),
             SyncInput::CancelShare => self.show_connected_panel(&sender),
             SyncInput::AcceptOffer => self.accept_offer(&sender),
@@ -546,11 +582,18 @@ impl SyncPage {
                         &[("err", &e.to_string())],
                     ));
                 }
+                self.sync_state(|s| s.last_error = Some(e.to_string()));
                 return;
             }
         };
         self.share_chan = Some(server.share_channel());
         self.stop = Some(stop);
+        self.sync_state(|s| {
+            s.is_server = true;
+            s.listening = true;
+            s.phase = "pairing".into();
+            s.last_error = None;
+        });
         let (pair_url, host, port) = (server.pair_url(), server.host().to_string(), server.port());
         sender.spawn_command(move |out| {
             let _ = out.send(SyncEvent::ServerReady {
@@ -691,6 +734,9 @@ impl SyncPage {
                     if let Some(st) = &self.status {
                         st.set_text(&gettext("Invalid or expired pairing code."));
                     }
+                    self.sync_state(|s| {
+                        s.last_error = Some("invalid or expired pairing code".into())
+                    });
                 }
                 return; // other/invalid code – keep scanning
             }
@@ -706,6 +752,11 @@ impl SyncPage {
         let yt_enabled = self.youtube_enabled();
         let (cmd_tx, cmd_rx) = mpsc::channel();
         self.client_cmd = Some(cmd_tx);
+        self.sync_state(|s| {
+            s.is_server = false;
+            s.phase = "pairing".into();
+            s.last_error = None;
+        });
         sender.spawn_command(move |out| {
             run_client_session(info, device_id, device_name, yt_enabled, cmd_rx, &out);
         });
@@ -733,6 +784,12 @@ impl SyncPage {
                         &[("addr", &format!("{host}:{port}"))],
                     ));
                 }
+                self.sync_state(|s| {
+                    s.listening = true;
+                    s.pair_url = Some(pair_url);
+                    s.address = Some(format!("{host}:{port}"));
+                    s.phase = "pairing".into();
+                });
             }
             SyncEvent::PeerPaired {
                 peer_name,
@@ -741,6 +798,16 @@ impl SyncPage {
                 self.peer_caps = peer_caps;
                 self.peer_name = peer_name;
                 self.connected = true;
+                let (name, is_server) = (self.peer_name.clone(), self.is_server);
+                self.sync_state(|s| {
+                    s.connected = true;
+                    s.peer_name = Some(name);
+                    s.is_server = is_server;
+                    s.listening = false;
+                    s.pair_url = None;
+                    s.phase = "idle".into();
+                    s.last_error = None;
+                });
                 // Paired → tint the sync icon at the top green.
                 let _ = sender.output(SyncOutput::ConnectedChanged(true));
                 // The single connection-success screen ("Connected with X" with
@@ -808,6 +875,10 @@ impl SyncPage {
                     p.set_fraction(done as f64 / total.max(1) as f64);
                     p.set_text(Some(&format!("{done}/{total}")));
                 }
+                self.sync_state(|s| {
+                    s.progress = Some((done, total, name.clone()));
+                    s.phase = "transferring".into();
+                });
                 if let Some(st) = &self.status {
                     st.set_text(&name);
                 }
@@ -841,6 +912,13 @@ impl SyncPage {
                 }
                 self.prepared_manifest = None;
                 self.incoming_manifest = None;
+                self.incoming_reviews.clear();
+                self.sync_state(|s| {
+                    s.progress = None;
+                    s.last_transfer_files = Some(files);
+                    s.incoming_offer = None;
+                    s.phase = "done".into();
+                });
                 // The receiver registers each file as it lands; on the server side
                 // that finishes only now (after the client uploaded), so refresh the
                 // parent's library views once more here, when the files are in.
@@ -858,12 +936,14 @@ impl SyncPage {
             SyncEvent::ShareOffered { manifest } => self.on_share_offered(manifest, sender),
             SyncEvent::ManifestReady { manifest } => self.on_manifest_ready(manifest, sender),
             SyncEvent::OfferAccepted { .. } => {
+                self.sync_state(|s| s.phase = "sending".into());
                 if let Some(st) = &self.status {
                     st.set_text(&gettext("The other device accepted. Transferring …"));
                 }
             }
             SyncEvent::Error(msg) => {
                 tracing::warn!("Sync error: {msg}");
+                self.sync_state(|s| s.last_error = Some(msg.clone()));
                 if let Some(st) = &self.status {
                     st.set_text(&gettext_f("Error: {e}", &[("e", &msg)]));
                 }
@@ -917,6 +997,8 @@ impl SyncPage {
         let was_connected = self.connected;
         self.connected = false;
         self.client_cmd = None;
+        self.auto_send = false;
+        self.sync_state_reset();
         let _ = sender.output(SyncOutput::ConnectedChanged(false));
         // Only show the notice if the user is actually looking at the window and
         // we had a live pairing (avoid flashing it during a normal teardown).
@@ -969,6 +1051,10 @@ impl SyncPage {
         if let Some(st) = &self.status {
             st.set_text(&gettext("Preparing …"));
         }
+        self.sync_state(|s| {
+            s.phase = "preparing".into();
+            s.last_error = None;
+        });
         if self.is_server {
             let caps = self.peer_caps.clone();
             sender.spawn_oneshot_command(move || {
@@ -985,13 +1071,35 @@ impl SyncPage {
 
     /// Manifest built → show the size confirmation.
     fn on_manifest_ready(&mut self, manifest: ShareManifest, sender: &ComponentSender<Self>) {
+        if std::mem::take(&mut self.auto_send) {
+            // MCP-driven share: no confirmation step. An empty resolution is
+            // reported instead of offering the peer nothing.
+            if manifest.is_empty() {
+                self.sync_state(|s| {
+                    s.phase = "idle".into();
+                    s.last_error = Some("the selection resolved to nothing shareable".into());
+                });
+                self.show_connected_panel(sender);
+                return;
+            }
+            self.prepared_manifest = Some(manifest);
+            self.confirm_send();
+            return;
+        }
         let page = build_confirm(&manifest, sender);
         self.prepared_manifest = Some(manifest);
+        self.sync_state(|s| s.phase = "confirm_pending".into());
         self.set_sub_content_tall(&page);
     }
 
     /// Confirmation "Send" → park (server) or send (client) the prepared offer.
     fn confirm_send(&mut self) {
+        let phase = if self.is_server {
+            "waiting_for_peer"
+        } else {
+            "sending"
+        };
+        self.sync_state(|s| s.phase = phase.into());
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
         if self.is_server {
@@ -1026,6 +1134,12 @@ impl SyncPage {
         let yt = self.youtube_enabled();
         let (page, handles) = build_review(&manifest, &reviews, yt, sender);
         self.review = Some(handles);
+        let summary = offer_summary(&manifest, &reviews);
+        self.sync_state(|s| {
+            s.incoming_offer = Some(summary);
+            s.phase = "offer_pending".into();
+        });
+        self.incoming_reviews = reviews;
         self.incoming_manifest = Some(manifest);
         self.set_sub_content_tall(&page);
     }
@@ -1036,6 +1150,33 @@ impl SyncPage {
             return;
         };
         let decision = review.to_decision();
+        self.accept_with(decision, sender);
+    }
+
+    /// MCP-driven answer to the pending offer: accept what the review page would
+    /// pre-select, or reject all. No-op without a pending offer.
+    fn respond_headless(&mut self, accept: bool, sender: &ComponentSender<Self>) {
+        let Some(manifest) = self.incoming_manifest.clone() else {
+            return;
+        };
+        if !accept {
+            self.reject_offer(sender);
+            return;
+        }
+        let decision =
+            accept_all_decision(&manifest, &self.incoming_reviews, self.youtube_enabled());
+        // The review page (if shown) is superseded by this decision.
+        self.review = None;
+        self.accept_with(decision, sender);
+    }
+
+    /// Applies `decision` to the pending offer (shared by the review page's
+    /// "Accept" and the MCP-driven accept).
+    fn accept_with(&mut self, decision: ShareDecision, sender: &ComponentSender<Self>) {
+        self.sync_state(|s| {
+            s.incoming_offer = None;
+            s.phase = "receiving".into();
+        });
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
         if let Some(st) = &self.status {
@@ -1070,6 +1211,11 @@ impl SyncPage {
     fn reject_offer(&mut self, sender: &ComponentSender<Self>) {
         self.review = None;
         self.incoming_manifest = None;
+        self.incoming_reviews.clear();
+        self.sync_state(|s| {
+            s.incoming_offer = None;
+            s.phase = "idle".into();
+        });
         if self.is_server {
             if let Some(chan) = &self.share_chan {
                 if let Ok(mut c) = chan.lock() {
@@ -1094,6 +1240,8 @@ impl SyncPage {
             let _ = cmd.send(ClientCmd::Disconnect);
         }
         self.connected = false;
+        self.auto_send = false;
+        self.sync_state_reset();
         let _ = sender.output(SyncOutput::ConnectedChanged(false));
         if let Some(sub) = self.sub.take() {
             sub.close();
@@ -1126,6 +1274,8 @@ impl SyncPage {
         self.client_cmd = None; // dropping the sender ends the client worker
         self.connected = false;
         self.is_server = false;
+        self.auto_send = false;
+        self.sync_state_reset();
     }
 
     /// Drops the per-window widget handles (after the flow window is gone). Does
@@ -1148,6 +1298,74 @@ impl SyncPage {
 }
 
 /// A vertical box with the standard dialog padding.
+impl SyncPage {
+    /// Updates the shared MCP status snapshot under its lock.
+    fn sync_state(&self, f: impl FnOnce(&mut SyncSnapshot)) {
+        if let Ok(mut s) = self.mcp.lock() {
+            f(&mut s);
+        }
+    }
+
+    /// Resets the snapshot to idle (no pairing, no offer), keeping the last
+    /// transfer count and error so `sync_status` can still report them.
+    fn sync_state_reset(&self) {
+        self.sync_state(|s| {
+            let err = s.last_error.take();
+            let last = s.last_transfer_files;
+            *s = SyncSnapshot::default();
+            s.last_error = err;
+            s.last_transfer_files = last;
+        });
+    }
+}
+
+/// Summary of an incoming offer for the MCP `sync_status` tool.
+fn offer_summary(m: &ShareManifest, reviews: &[share::FileReview]) -> OfferSummary {
+    OfferSummary {
+        from: m.device_name.clone(),
+        files: m.files.len(),
+        new_files: reviews.iter().filter(|r| r.selected).count(),
+        total_size: m.total_size,
+        yt: m.yt.len(),
+        stations: m.stations.len(),
+        recordings: m.recordings.len(),
+        memos: m.memos.len(),
+        favorites: m.library.favorites.is_some(),
+        playlists: m.library.playlists.is_some(),
+        podcasts: m.library.podcasts.is_some(),
+        categories: m.library.categories.is_some(),
+        eq: m.library.eq.is_some(),
+    }
+}
+
+/// The decision an MCP-driven accept makes: exactly what the review page
+/// pre-selects — new files only (no overwrites, no duplicates), the YouTube
+/// items when YouTube is on locally, and every offered library blob.
+fn accept_all_decision(
+    m: &ShareManifest,
+    reviews: &[share::FileReview],
+    yt_enabled: bool,
+) -> ShareDecision {
+    ShareDecision {
+        accept: true,
+        files: reviews
+            .iter()
+            .filter(|r| r.selected)
+            .map(|r| r.file.rel_path.clone())
+            .collect(),
+        yt: if yt_enabled {
+            m.yt.iter().map(|y| y.id.clone()).collect()
+        } else {
+            Vec::new()
+        },
+        favorites: m.library.favorites.is_some(),
+        playlists: m.library.playlists.is_some(),
+        podcasts: m.library.podcasts.is_some(),
+        categories: m.library.categories.is_some(),
+        eq: m.library.eq.is_some(),
+    }
+}
+
 fn padded_vbox() -> gtk::Box {
     let b = gtk::Box::new(gtk::Orientation::Vertical, 12);
     b.set_margin_top(12);

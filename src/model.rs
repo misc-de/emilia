@@ -29,7 +29,8 @@ pub struct Track {
 #[derive(Debug, Clone)]
 pub struct Source {
     pub id: i64,
-    /// `local` (second folder) | `webdav` (Nextcloud share).
+    /// `local` (second folder) | `webdav` (Nextcloud share) | `smb` (SMB
+    /// share) | `gdrive` (Google Drive). See `core::remote::KIND_*`.
     pub kind: String,
     /// Display name (tab label).
     pub name: String,
@@ -38,14 +39,25 @@ pub struct Source {
     pub position: i64,
     /// Local: root path in the file system.
     pub path: Option<String>,
-    /// WebDAV: base URL, e.g. `https://cloud.example.com`.
+    /// Remote: where the source lives — WebDAV base URL
+    /// (`https://cloud.example.com`), SMB location (`smb://host/share`) or
+    /// `gdrive` (the account is in `username`).
     pub base_url: Option<String>,
-    /// WebDAV: username.
+    /// Remote: username (WebDAV/SMB) or account e-mail (Drive); a
+    /// `secret-tool:` reference when kept in the Secret Service.
     pub username: Option<String>,
-    /// WebDAV: app password/token.
+    /// Remote: app password (WebDAV), password (SMB) or OAuth refresh token
+    /// (Drive); a `secret-tool:` reference when kept in the Secret Service.
     pub password: Option<String>,
-    /// WebDAV: subpath to the music, e.g. `/Music`.
+    /// Remote: subpath to the music, e.g. `/Music`.
     pub music_path: Option<String>,
+}
+
+impl Source {
+    /// Whether this is a network source (anything but a local folder).
+    pub fn is_remote(&self) -> bool {
+        crate::core::remote::is_remote_kind(&self.kind)
+    }
 }
 
 /// Online-enriched album data (MusicBrainz + Cover Art Archive).

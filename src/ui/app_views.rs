@@ -640,7 +640,7 @@ impl App {
             .files
             .sources
             .iter()
-            .filter(|s| s.kind == "webdav")
+            .filter(|s| s.is_remote())
             .cloned()
             .collect();
         if sources.is_empty() {
@@ -649,7 +649,7 @@ impl App {
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = crate::core::db::Library::open() {
                 for s in &sources {
-                    match crate::core::webdav::index_into(&lib, s) {
+                    match crate::core::remote::index_into(&lib, s) {
                         Ok(n) => tracing::info!("Re-indexed {n} tracks from '{}'", s.name),
                         Err(e) => tracing::warn!("Re-index of '{}' failed: {e}", s.name),
                     }

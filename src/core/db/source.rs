@@ -1,4 +1,5 @@
-//! Music sources (local folders, WebDAV) for [`Library`] (split out of db.rs).
+//! Music sources (local folders, Nextcloud/SMB/Google Drive) for [`Library`]
+//! (split out of db.rs).
 
 use anyhow::Result;
 
@@ -119,6 +120,7 @@ impl Library {
     /// Removes a source by its ID.
     pub fn delete_source(&self, id: i64) -> Result<()> {
         crate::core::secrets::clear_source_password(id);
+        crate::core::gdrive::forget_source(id);
         self.conn
             .execute("DELETE FROM source WHERE id = ?1", [id])?;
         // Remove indexed cloud tracks of this source (synthetic path

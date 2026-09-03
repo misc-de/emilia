@@ -79,12 +79,12 @@ impl Library {
                 }
             }
         }
-        // Nextcloud/WebDAV credentials (username + app password).
+        // Remote-source credentials (username/account + app password/token).
         for s in self.list_sources().unwrap_or_default() {
-            if s.kind != "webdav" {
+            if !s.is_remote() {
                 continue;
             }
-            let label = format!("Emilia Nextcloud {}", s.name);
+            let label = crate::core::source::secret_label(&s.kind, &s.name);
             if let Some(pw) = s.password.as_deref() {
                 if !pw.is_empty()
                     && !pw.starts_with(secrets::SECRET_PREFIX)

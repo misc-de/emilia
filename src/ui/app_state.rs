@@ -621,4 +621,7 @@ pub(crate) struct McpState {
     /// Background-job registry (downloads), kept across server restarts.
     pub(crate) jobs: std::sync::Arc<crate::core::mcp::jobs::Jobs>,
     pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Device-sync status snapshot, written by the sync component and read by
+    /// the `sync_*` tools; created before the component so it can be handed in.
+    pub(crate) sync: crate::core::mcp::SyncStateHandle,
 }

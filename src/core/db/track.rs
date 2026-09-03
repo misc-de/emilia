@@ -175,6 +175,31 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Removes one track row by path. Only the `track` row goes — playlist and
+    /// favorite entries keyed by the path stay, exactly as the scan-time prune
+    /// leaves them, so a re-scan of a still-present file restores it seamlessly.
+    /// Returns whether a row was removed.
+    pub fn delete_track(&self, path: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM track WHERE path = ?1", [path])?
+            > 0)
+    }
+
+    /// All tracks whose path starts with the raw `prefix` — no separator is
+    /// appended, unlike [`Self::tracks_under_path`] — for a source root such as
+    /// `nc:3:` whose relative paths may or may not begin with a slash. Same
+    /// index-friendly range scan.
+    pub fn tracks_with_prefix(&self, prefix: &str) -> Result<Vec<Track>> {
+        let upper = format!("{prefix}\u{10FFFF}");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TRACK_COLS} FROM track
+             WHERE path >= ?1 AND path < ?2"
+        ))?;
+        let rows = stmt.query_map([prefix, upper.as_str()], row_to_track)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// All tracks whose path lies under `dir`, via an index-friendly range scan
     /// on the path (`[dir/, dir/\u{10FFFF})`) — far cheaper than loading every
     /// track and filtering by prefix in Rust, and exact (no LIKE/GLOB wildcards).

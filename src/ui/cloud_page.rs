@@ -548,7 +548,7 @@ impl CloudPage {
                 // like local ones (artists/albums + covers/photos).
                 sender.spawn_command(move |out| {
                     if let Ok(lib) = Library::open() {
-                        match crate::core::webdav::index_into(&lib, &src) {
+                        match crate::core::remote::index_into(&lib, &src) {
                             Ok(n) => tracing::info!("Indexed {n} Nextcloud tracks"),
                             Err(e) => tracing::warn!("Nextcloud indexing failed: {e}"),
                         }

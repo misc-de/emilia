@@ -447,18 +447,16 @@ impl App {
 
     /// Download a remote (active-source) file for offline playback.
     pub(crate) fn on_ctx_download_remote(&mut self, rel: String, sender: &ComponentSender<Self>) {
-        let Some(creds) = self.active_webdav_creds() else {
+        let Some(backend) = self.active_backend() else {
             return;
         };
         let Some(dest) = self.remote_cache_path(&rel) else {
             return;
         };
         self.toast(&gettext("Downloading …"));
-        sender.spawn_oneshot_command(move || {
-            match crate::core::webdav::download(&creds, &rel, &dest) {
-                Ok(()) => Cmd::RemoteDownloaded(Ok((rel, dest))),
-                Err(e) => Cmd::RemoteDownloaded(Err(e.to_string())),
-            }
+        sender.spawn_oneshot_command(move || match backend.download(&rel, &dest) {
+            Ok(()) => Cmd::RemoteDownloaded(Ok((rel, dest))),
+            Err(e) => Cmd::RemoteDownloaded(Err(e.to_string())),
         });
     }
 

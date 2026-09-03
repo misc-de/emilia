@@ -330,19 +330,20 @@ impl Library {
             -- primary directory stays the `music_dir` setting and is deliberately
             -- NOT listed here (no entry), so that scan/library are untouched.
             -- kind = 'local' (second folder, e.g. SD card) | 'webdav'
-            -- (Nextcloud share). The username and app password are stored as
+            -- (Nextcloud share) | 'smb' (SMB share) | 'gdrive' (Google Drive);
+            -- see core::remote. Username and password/token are stored as
             -- Secret Service references (`secret-tool:<id>`) when available;
             -- older/fallback rows may contain the values directly.
             CREATE TABLE IF NOT EXISTS source (
                 id         INTEGER PRIMARY KEY,
-                kind       TEXT NOT NULL CHECK(kind IN ('local','webdav')),
+                kind       TEXT NOT NULL,
                 name       TEXT NOT NULL,
                 position   INTEGER NOT NULL DEFAULT 0,
                 path       TEXT,   -- local:  root path in the filesystem
-                base_url   TEXT,   -- webdav: e.g. https://cloud.example.com
-                username   TEXT,   -- webdav: username (or secret-tool reference)
-                password   TEXT,   -- webdav: app password/token (or secret-tool ref)
-                music_path TEXT    -- webdav: subpath to the music, e.g. /Music
+                base_url   TEXT,   -- webdav: https://cloud.example.com | smb: smb://host/share | gdrive: 'gdrive'
+                username   TEXT,   -- remote: username / account (or secret-tool reference)
+                password   TEXT,   -- remote: app password / password / refresh token (or secret-tool ref)
+                music_path TEXT    -- remote: subpath to the music, e.g. /Music
             );
 
             -- Subscribed YouTube channels (the "bell"): newest videos are
@@ -914,6 +915,42 @@ impl Library {
                  );
                  INSERT INTO category SELECT * FROM category_old;
                  DROP TABLE category_old;
+                 COMMIT;",
+            )?;
+        }
+
+        // Migration: drop the old CHECK constraint on `source.kind` (only
+        // 'local'/'webdav' were allowed) so SMB and Google Drive sources can be
+        // stored. SQLite cannot alter a CHECK in place → atomic table rebuild.
+        let has_kind_check = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='source'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .map(|s| s.contains("CHECK(kind"))
+            .unwrap_or(false);
+        if has_kind_check {
+            self.conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE source RENAME TO source_old;
+                 CREATE TABLE source (
+                     id         INTEGER PRIMARY KEY,
+                     kind       TEXT NOT NULL,
+                     name       TEXT NOT NULL,
+                     position   INTEGER NOT NULL DEFAULT 0,
+                     path       TEXT,
+                     base_url   TEXT,
+                     username   TEXT,
+                     password   TEXT,
+                     music_path TEXT
+                 );
+                 INSERT INTO source (id, kind, name, position, path, base_url, username, password, music_path)
+                     SELECT id, kind, name, position, path, base_url, username, password, music_path
+                     FROM source_old;
+                 DROP TABLE source_old;
                  COMMIT;",
             )?;
         }

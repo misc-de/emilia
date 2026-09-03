@@ -120,6 +120,10 @@ pub struct App {
     pub(crate) sync_connected: bool,
     /// Nextcloud setup dialog, extracted into its own relm4 component.
     pub(crate) cloud_page: relm4::Controller<crate::ui::cloud_page::CloudPage>,
+    /// SMB share setup dialog (own relm4 component).
+    pub(crate) smb_page: relm4::Controller<crate::ui::smb_page::SmbPage>,
+    /// Google Drive setup dialog (own relm4 component, browser sign-in).
+    pub(crate) gdrive_page: relm4::Controller<crate::ui::gdrive_page::GDrivePage>,
     /// Podcasts page, extracted into its own relm4 component (list + dialogs +
     /// feed workers). Playback stays in the parent transport; the page reaches it
     /// via `PodcastsOutput` and is told the state back via `PlaybackStateChanged`.
@@ -2033,8 +2037,11 @@ impl Component for App {
         let stats_page = crate::ui::stats_page::StatsPage::builder()
             .launch(())
             .detach();
+        // MCP state is created up front: the sync component publishes its status
+        // into the shared sync snapshot the `sync_*` MCP tools read.
+        let mcp = McpState::new();
         let sync_page = crate::ui::sync_page::SyncPage::builder()
-            .launch(())
+            .launch(mcp.sync.clone())
             .forward(sender.input_sender(), |out| match out {
                 crate::ui::sync_page::SyncOutput::ConnectedChanged(b) => Msg::SyncConnected(b),
                 crate::ui::sync_page::SyncOutput::Imported => Msg::SyncImported,
@@ -2046,6 +2053,27 @@ impl Component for App {
                     Msg::Source(crate::ui::app_views_sources::SourceMsg::Added(id))
                 }
                 crate::ui::cloud_page::CloudOutput::Indexed => {
+                    Msg::Source(crate::ui::app_views_sources::SourceMsg::CloudIndexed)
+                }
+            });
+        let smb_page = crate::ui::smb_page::SmbPage::builder().launch(()).forward(
+            sender.input_sender(),
+            |out| match out {
+                crate::ui::smb_page::SmbOutput::SourcesChanged(id) => {
+                    Msg::Source(crate::ui::app_views_sources::SourceMsg::Added(id))
+                }
+                crate::ui::smb_page::SmbOutput::Indexed => {
+                    Msg::Source(crate::ui::app_views_sources::SourceMsg::CloudIndexed)
+                }
+            },
+        );
+        let gdrive_page = crate::ui::gdrive_page::GDrivePage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |out| match out {
+                crate::ui::gdrive_page::GDriveOutput::SourcesChanged(id) => {
+                    Msg::Source(crate::ui::app_views_sources::SourceMsg::Added(id))
+                }
+                crate::ui::gdrive_page::GDriveOutput::Indexed => {
                     Msg::Source(crate::ui::app_views_sources::SourceMsg::CloudIndexed)
                 }
             });
@@ -2206,7 +2234,7 @@ impl Component for App {
             player,
             mpris,
             input: sender.input_sender().clone(),
-            mcp: McpState::new(),
+            mcp,
             libview: LibView {
                 entries,
                 albums,
@@ -2411,6 +2439,8 @@ impl Component for App {
             sync_page,
             sync_connected: false,
             cloud_page,
+            smb_page,
+            gdrive_page,
             podcasts_page,
             podcast_subpage,
             yt_page,
@@ -2662,7 +2692,7 @@ impl Component for App {
             Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
-            Msg::Mcp(cmd) => self.handle_mcp(cmd),
+            Msg::Mcp(cmd) => self.handle_mcp(cmd, root),
             Msg::McpSetting(m) => self.update_mcp_setting(m),
             Msg::NavUp => self.on_nav_up(&sender),
             Msg::FilesGoStart => self.on_files_go_start(&sender),

@@ -184,13 +184,13 @@ pub(crate) fn enrich_worker(
             // Nextcloud albums/tracks (sample path `nc:<id>:<rel>`) can be pulled
             // over WebDAV – their `Path` is synthetic and has no local file.
             let sources = lib.list_sources().unwrap_or_default();
-            let remote = |path: &str| -> Option<(crate::core::webdav::Creds, String)> {
-                let (id, rel) = crate::core::webdav::parse_nc_path(path)?;
-                let creds = sources
+            let remote = |path: &str| -> Option<(crate::core::remote::Backend, String)> {
+                let (id, rel) = crate::core::remote::parse_nc_path(path)?;
+                let backend = sources
                     .iter()
                     .find(|s| s.id == id)
-                    .and_then(crate::core::webdav::Creds::from_source)?;
-                Some((creds, rel))
+                    .and_then(crate::core::remote::Backend::from_source)?;
+                Some((backend, rel))
             };
 
             let missing = lib.albums_missing_cover().unwrap_or_default();
@@ -199,7 +199,8 @@ pub(crate) fn enrich_worker(
                     break 'work;
                 }
                 let cover_path = match remote(path) {
-                    Some((creds, rel)) => crate::core::webdav::fetch_cover(&creds, &rel)
+                    Some((backend, rel)) => backend
+                        .fetch_cover(&rel)
                         .and_then(|b| online::store_album_cover_bytes(artist, album, &b)),
                     None => local_album_cover_scan(&lib, artist, album, path),
                 };
@@ -231,7 +232,7 @@ pub(crate) fn enrich_worker(
                 // 1) Embedded cover. Remote (NC) tracks need a WebDAV fetch;
                 //    local files are read directly (same as the display path).
                 let embedded = match remote(&key) {
-                    Some((creds, rel)) => crate::core::webdav::fetch_cover(&creds, &rel),
+                    Some((backend, rel)) => backend.fetch_cover(&rel),
                     None => crate::core::cover::embedded_cover(std::path::Path::new(&key)),
                 };
                 if let Some(bytes) = embedded {

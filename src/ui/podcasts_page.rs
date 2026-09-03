@@ -34,32 +34,10 @@ use crate::ui::widgets::{action_row, detail_box, present_detail};
 /// of the fetched episodes were **new** — so a refresh can report what it
 /// actually brought in instead of leaving the user guessing.
 pub(crate) fn fetch_and_store_podcast(feed_url: &str) -> Option<(String, usize)> {
-    let feed = crate::core::podcast::fetch_feed(feed_url).ok()?;
     let lib = Library::open().ok()?;
-    let id = lib
-        .subscribe_podcast(&feed.title, feed_url, feed.image_url.as_deref())
-        .ok()?;
-    // Episodes stored so far, to count the new arrivals (`set_episodes`
-    // replaces the whole list, so this has to happen before the write).
-    let known: std::collections::HashSet<String> = lib
-        .episodes(id)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|e| e.audio_url)
-        .collect();
-    let fresh = feed
-        .episodes
-        .iter()
-        .filter(|e| !known.contains(&e.audio_url))
-        .count();
-    let _ = lib.set_episodes(id, &feed.episodes);
-    // Load the feed image into the cache (worker thread, no UI block).
-    if let Some(img) = feed.image_url.as_deref() {
-        crate::core::online::cache_podcast_image(img);
-    }
-    // A first subscription reports no "new" episodes — everything is new then,
-    // and the count is meant for refreshes.
-    Some((feed.title, if known.is_empty() { 0 } else { fresh }))
+    crate::core::podcast::subscribe_feed(&lib, feed_url)
+        .ok()
+        .map(|(_, title, fresh)| (title, fresh))
 }
 
 /// Fetches the feed images not yet in the cache (worker thread — network).

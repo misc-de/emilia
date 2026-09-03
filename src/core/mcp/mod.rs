@@ -27,7 +27,7 @@ pub mod state;
 pub mod tools;
 
 pub use command::{ControlFn, McpCommand};
-pub use state::{new_handle, NowPlayingHandle};
+pub use state::{new_handle, new_sync_handle, NowPlayingHandle, SyncStateHandle};
 
 /// Preferred TCP port (next to the sync server's 8765).
 pub const PORT: u16 = 8770;
@@ -113,6 +113,8 @@ pub struct McpContext {
     pub control: ControlFn,
     /// Registry of long-running background jobs (downloads).
     pub jobs: std::sync::Arc<jobs::Jobs>,
+    /// Device-sync state the `sync_*` tools report and gate on.
+    pub sync: SyncStateHandle,
 }
 
 #[cfg(test)]

@@ -19,7 +19,9 @@ use super::protocol::{
 };
 use super::McpContext;
 use crate::core::db::Library;
-use crate::model::Track;
+use crate::core::mcp::state::SyncSnapshot;
+use crate::core::sync::share::Selection;
+use crate::model::{StreamItem, Track};
 
 // ---- small argument helpers --------------------------------------------------
 
@@ -78,6 +80,185 @@ fn track_json(t: &Track) -> Value {
         "track_no": t.track_no,
         "duration_ms": t.duration_ms,
         "year": t.year,
+    })
+}
+
+/// A string array argument (missing/invalid → empty; blank entries dropped).
+fn arg_str_list(args: &Value, key: &str) -> Vec<String> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// An integer array argument (missing/invalid → empty).
+fn arg_i64_list(args: &Value, key: &str) -> Vec<i64> {
+    args.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_i64()).collect())
+        .unwrap_or_default()
+}
+
+fn station_json(s: &StreamItem) -> Value {
+    json!({
+        "id": s.id,
+        "name": s.name,
+        "url": s.url,
+        "tags": s.tags,
+        "country": s.country,
+        "has_logo": s.favicon.is_some(),
+    })
+}
+
+fn station_by_id(lib: &Library, id: i64) -> Result<StreamItem> {
+    lib.streams()?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| anyhow!("no station with id {id} (see list_stations)"))
+}
+
+/// A library track that lives on local disk. Tracks of network sources
+/// (`nc:` paths) are read-only over MCP, and a path the library does not know
+/// is refused so a tool can never touch arbitrary files.
+fn local_track(lib: &Library, path: &str) -> Result<Track> {
+    if crate::core::webdav::parse_nc_path(path).is_some() {
+        return Err(anyhow!("tracks on network sources are read-only over MCP"));
+    }
+    lib.track_by_path(path)?.ok_or_else(|| {
+        anyhow!("no library track at '{path}' (paths come from list_tracks/search_library)")
+    })
+}
+
+/// Moves a file to the desktop trash — recoverable, never an outright delete.
+fn trash_file(path: &std::path::Path) -> Result<()> {
+    use gtk::gio;
+    use gtk::prelude::FileExt;
+    if !path.is_file() {
+        return Err(anyhow!("{} is not a file", path.display()));
+    }
+    gio::File::for_path(path)
+        .trash(gio::Cancellable::NONE)
+        .map_err(|e| anyhow!("could not move {} to the trash: {e}", path.display()))
+}
+
+fn sync_snapshot(ctx: &McpContext) -> SyncSnapshot {
+    ctx.sync.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Polls the sync snapshot (every 100 ms, up to `timeout`) until `f` yields.
+fn sync_wait<T>(
+    ctx: &McpContext,
+    timeout: std::time::Duration,
+    f: impl Fn(&SyncSnapshot) -> Option<T>,
+) -> Option<T> {
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(v) = f(&sync_snapshot(ctx)) {
+            return Some(v);
+        }
+        if start.elapsed() >= timeout {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+fn sync_json(s: &SyncSnapshot) -> Value {
+    let role = if s.connected || s.listening {
+        Some(if s.is_server { "server" } else { "client" })
+    } else {
+        None
+    };
+    json!({
+        "connected": s.connected,
+        "peer_name": s.peer_name,
+        "role": role,
+        "listening": s.listening,
+        "pair_url": s.pair_url,
+        "address": s.address,
+        "phase": if s.phase.is_empty() { "idle" } else { s.phase.as_str() },
+        "incoming_offer": s.incoming_offer.as_ref().map(|o| json!({
+            "from": o.from,
+            "files": o.files,
+            "new_files": o.new_files,
+            "total_size": o.total_size,
+            "youtube_items": o.yt,
+            "stations": o.stations,
+            "recordings": o.recordings,
+            "memos": o.memos,
+            "favorites": o.favorites,
+            "playlists": o.playlists,
+            "podcasts": o.podcasts,
+            "categories": o.categories,
+            "eq": o.eq,
+        })),
+        "progress": s.progress.as_ref().map(|(done, total, name)| json!({
+            "done": done, "total": total, "file": name,
+        })),
+        "last_transfer_files": s.last_transfer_files,
+        "last_error": s.last_error,
+    })
+}
+
+/// Builds a share [`Selection`] from the `sync_share` arguments. Podcast ids are
+/// resolved to feed URLs (opening the library only when there are any).
+fn selection_from_args(args: &Value) -> Result<Selection> {
+    let mut albums = Vec::new();
+    if let Some(list) = args.get("albums").and_then(|v| v.as_array()) {
+        for a in list {
+            let artist = a
+                .get("artist")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            let album = a.get("album").and_then(|v| v.as_str()).unwrap_or("").trim();
+            if album.is_empty() {
+                return Err(anyhow!(
+                    "each entry of `albums` needs an `album` (and `artist`)"
+                ));
+            }
+            albums.push((artist.to_string(), album.to_string()));
+        }
+    }
+    let podcast_ids = arg_i64_list(args, "podcast_ids");
+    let mut podcast_feeds = Vec::new();
+    if !podcast_ids.is_empty() {
+        let lib = Library::open()?;
+        for id in podcast_ids {
+            let url = lib
+                .podcast_feed_url(id)?
+                .ok_or_else(|| anyhow!("no podcast with id {id} (see list_podcasts)"))?;
+            podcast_feeds.push(url);
+        }
+    }
+    Ok(Selection {
+        whole_library: arg_bool(args, "whole_library").unwrap_or(false),
+        artists: arg_str_list(args, "artists"),
+        albums,
+        song_paths: arg_str_list(args, "tracks"),
+        audiobooks: arg_bool(args, "audiobooks").unwrap_or(false),
+        concerts: arg_bool(args, "concerts").unwrap_or(false),
+        stations: arg_i64_list(args, "station_ids"),
+        recordings: arg_i64_list(args, "recording_ids"),
+        memos: arg_i64_list(args, "memo_ids"),
+        podcast_feeds,
+        playlist_ids: arg_i64_list(args, "playlist_ids"),
+        include_metadata: arg_bool(args, "include_metadata").unwrap_or(true),
+        yt_channels: Vec::new(),
+        yt_playlists: Vec::new(),
+        yt_songs: arg_str_list(args, "yt_videos"),
+        include_favorites: arg_bool(args, "include_favorites").unwrap_or(false),
+        include_playlists: arg_bool(args, "include_playlists").unwrap_or(false),
+        include_podcasts: arg_bool(args, "include_podcasts").unwrap_or(false),
+        include_eq: arg_bool(args, "include_eq").unwrap_or(false),
+        include_categories: arg_bool(args, "include_categories").unwrap_or(false),
     })
 }
 
@@ -922,6 +1103,384 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             Ok(json!({ "jobs": items }))
         }
 
+        // --- podcasts: subscriptions -------------------------------------------
+        "subscribe_podcast" => {
+            let url = req_str(args, "feed_url")?;
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(anyhow!(
+                    "`feed_url` must be an http(s) RSS feed URL (see search_podcasts)"
+                ));
+            }
+            let lib = Library::open()?;
+            let (id, title, _) = crate::core::podcast::subscribe_feed(&lib, url)?;
+            let episodes = lib.episodes(id).map(|e| e.len()).unwrap_or(0);
+            (ctx.control)(McpCommand::ReloadPodcasts);
+            Ok(json!({ "id": id, "title": title, "episodes": episodes }))
+        }
+        "unsubscribe_podcast" => {
+            require_confirm(args)?;
+            let id = req_i64(args, "podcast_id")?;
+            let lib = Library::open()?;
+            let title = lib
+                .podcast_title(id)?
+                .ok_or_else(|| anyhow!("no podcast with id {id} (see list_podcasts)"))?;
+            (ctx.control)(McpCommand::DeletePodcast(id));
+            Ok(json!({ "ok": true, "id": id, "title": title }))
+        }
+        "refresh_podcasts" => {
+            (ctx.control)(McpCommand::RefreshPodcasts);
+            Ok(json!({ "ok": true }))
+        }
+        "delete_episode_download" => {
+            require_confirm(args)?;
+            let url = req_str(args, "url")?;
+            let lib = Library::open()?;
+            let path = lib
+                .delete_episode_download(url)?
+                .ok_or_else(|| anyhow!("this episode has no offline download"))?;
+            let file_removed = std::fs::remove_file(&path).is_ok();
+            (ctx.control)(McpCommand::ReloadPodcasts);
+            Ok(json!({ "ok": true, "path": path, "file_removed": file_removed }))
+        }
+
+        // --- radio stations (live streams) ------------------------------------
+        "list_stations" => {
+            let lib = Library::open()?;
+            let items: Vec<Value> = lib.streams()?.iter().map(station_json).collect();
+            Ok(json!({ "stations": items }))
+        }
+        "search_stations" => {
+            let query = req_str(args, "query")?;
+            let limit = arg_i64(args, "limit").unwrap_or(15).clamp(1, 50) as usize;
+            let hits = crate::core::streaming::search_stations(query)?;
+            let items: Vec<Value> = hits
+                .iter()
+                .take(limit)
+                .map(|r| {
+                    json!({
+                        "name": r.name,
+                        "url": r.url,
+                        "favicon": r.favicon,
+                        "tags": r.tags,
+                        "country": r.country,
+                        "codec": r.codec,
+                        "bitrate": r.bitrate,
+                    })
+                })
+                .collect();
+            Ok(json!({ "results": items }))
+        }
+        "add_station" => {
+            let url = req_str(args, "url")?;
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(anyhow!("`url` must be an http(s) stream URL"));
+            }
+            let name = arg_str(args, "name")
+                .map(str::to_string)
+                .unwrap_or_else(|| crate::core::streaming::name_from_url(url));
+            let lib = Library::open()?;
+            let id = lib.add_stream(
+                &name,
+                url,
+                arg_str(args, "favicon"),
+                arg_str(args, "tags"),
+                arg_str(args, "country"),
+                arg_str(args, "codec"),
+                arg_i64(args, "bitrate"),
+            )?;
+            (ctx.control)(McpCommand::ReloadStations);
+            Ok(json!({ "id": id, "name": name, "url": url }))
+        }
+        "rename_station" => {
+            let id = req_i64(args, "station_id")?;
+            let name = req_str(args, "name")?;
+            let lib = Library::open()?;
+            station_by_id(&lib, id)?;
+            lib.rename_stream(id, name)?;
+            (ctx.control)(McpCommand::ReloadStations);
+            Ok(json!({ "ok": true, "id": id, "name": name }))
+        }
+        "delete_station" => {
+            require_confirm(args)?;
+            let id = req_i64(args, "station_id")?;
+            let lib = Library::open()?;
+            let st = station_by_id(&lib, id)?;
+            (ctx.control)(McpCommand::DeleteStation(id));
+            Ok(json!({ "ok": true, "id": id, "name": st.name }))
+        }
+        "play_station" => {
+            let id = req_i64(args, "station_id")?;
+            let lib = Library::open()?;
+            let st = station_by_id(&lib, id)?;
+            (ctx.control)(McpCommand::PlayStation(id));
+            Ok(json!({ "ok": true, "id": id, "name": st.name }))
+        }
+        "toggle_station_recording" => {
+            let id = req_i64(args, "station_id")?;
+            let lib = Library::open()?;
+            station_by_id(&lib, id)?;
+            (ctx.control)(McpCommand::ToggleStationRecording(id));
+            Ok(json!({ "ok": true }))
+        }
+
+        // --- library: tag editing + deletion ------------------------------------
+        "set_track_tags" => {
+            let path = req_str(args, "path")?;
+            // An empty string clears a text tag; `0` clears a numeric one.
+            let text = |k: &str| args.get(k).and_then(|v| v.as_str()).map(str::to_string);
+            let num = |k: &str| -> Result<Option<u32>> {
+                match args.get(k) {
+                    None | Some(Value::Null) => Ok(None),
+                    Some(v) => v
+                        .as_u64()
+                        .map(|n| Some(n as u32))
+                        .ok_or_else(|| anyhow!("`{k}` must be a non-negative integer")),
+                }
+            };
+            let edit = crate::core::scanner::TagEdit {
+                title: text("title"),
+                artist: text("artist"),
+                album: text("album"),
+                album_artist: text("album_artist"),
+                genre: text("genre"),
+                year: num("year")?,
+                track_no: num("track_no")?,
+                disc_no: num("disc_no")?,
+            };
+            if edit.is_empty() {
+                return Err(anyhow!(
+                    "nothing to change: pass at least one of title, artist, album, album_artist, genre, year, track_no, disc_no"
+                ));
+            }
+            let lib = Library::open()?;
+            local_track(&lib, path)?;
+            let file = std::path::Path::new(path);
+            crate::core::scanner::write_tags(file, &edit)?;
+            // Re-read the file so the row reflects exactly what was written.
+            let track = crate::core::scanner::read_track(file)?;
+            lib.upsert_track(&track)?;
+            (ctx.control)(McpCommand::LibraryChanged);
+            Ok(json!({ "ok": true, "track": track_json(&track) }))
+        }
+        "delete_track" => {
+            require_confirm(args)?;
+            let path = req_str(args, "path")?;
+            let lib = Library::open()?;
+            let track = local_track(&lib, path)?;
+            trash_file(std::path::Path::new(path))?;
+            lib.delete_track(path)?;
+            (ctx.control)(McpCommand::LibraryChanged);
+            Ok(json!({ "ok": true, "trashed": path, "title": track.title }))
+        }
+        "delete_album" => {
+            require_confirm(args)?;
+            let artist = req_str(args, "artist")?;
+            let album = req_str(args, "album")?;
+            let lib = Library::open()?;
+            let paths = lib.album_track_paths(artist, album)?;
+            if paths.is_empty() {
+                return Err(anyhow!(
+                    "no album '{album}' by '{artist}' in the library (see list_albums)"
+                ));
+            }
+            let mut trashed = Vec::new();
+            let mut skipped = Vec::new();
+            for p in &paths {
+                if crate::core::webdav::parse_nc_path(p).is_some() {
+                    skipped.push(json!({ "path": p, "reason": "network source (read-only)" }));
+                    continue;
+                }
+                match trash_file(std::path::Path::new(p)) {
+                    Ok(()) => {
+                        let _ = lib.delete_track(p);
+                        trashed.push(p.clone());
+                    }
+                    Err(e) => skipped.push(json!({ "path": p, "reason": e.to_string() })),
+                }
+            }
+            (ctx.control)(McpCommand::LibraryChanged);
+            Ok(json!({ "ok": skipped.is_empty(), "trashed": trashed, "skipped": skipped }))
+        }
+
+        // --- sources + folder browsing ------------------------------------------
+        "list_sources" => {
+            let lib = Library::open()?;
+            let music_dir = lib.get_setting("music_dir")?.unwrap_or_default();
+            let mut items = vec![json!({
+                "id": 0, "kind": "local", "name": "Music", "root": music_dir, "primary": true,
+            })];
+            for s in lib.list_sources()? {
+                let root = if s.is_remote() {
+                    format!("nc:{}:", s.id)
+                } else {
+                    s.path.clone().unwrap_or_default()
+                };
+                items.push(json!({
+                    "id": s.id,
+                    "kind": s.kind,
+                    "name": s.name,
+                    "root": root,
+                    "location": s.base_url,
+                    "music_path": s.music_path,
+                    "primary": false,
+                }));
+            }
+            Ok(json!({ "sources": items }))
+        }
+        "list_folder" => {
+            let lib = Library::open()?;
+            let path = match arg_str(args, "path") {
+                Some(p) => p.to_string(),
+                None => lib
+                    .get_setting("music_dir")?
+                    .ok_or_else(|| anyhow!("no music folder configured"))?,
+            };
+            let limit = arg_i64(args, "limit").unwrap_or(200).clamp(1, 2000) as usize;
+            // A source root `nc:<id>:` is matched raw (its relative paths may or
+            // may not start with a slash); anything else is a folder prefix.
+            let is_source_root =
+                crate::core::webdav::parse_nc_path(&path).is_some_and(|(_, rel)| rel.is_empty());
+            let prefix = if is_source_root {
+                path.clone()
+            } else {
+                format!("{}/", path.trim_end_matches('/'))
+            };
+            let tracks = lib.tracks_with_prefix(&prefix)?;
+            let mut folders: std::collections::BTreeMap<String, (String, usize)> =
+                std::collections::BTreeMap::new();
+            let mut files = Vec::new();
+            for t in &tracks {
+                let rest = t.path[prefix.len()..].trim_start_matches('/');
+                match rest.split_once('/') {
+                    Some((dir, _)) => {
+                        // The child's own path, taken from the real track path so
+                        // the separator convention of the source is kept.
+                        let head = t.path.len() - rest.len();
+                        let child = format!("{}{}", &t.path[..head], dir);
+                        folders.entry(dir.to_string()).or_insert((child, 0)).1 += 1;
+                    }
+                    None => files.push(t),
+                }
+            }
+            let total = files.len();
+            let items: Vec<Value> = files.iter().take(limit).map(|t| track_json(t)).collect();
+            let folders: Vec<Value> = folders
+                .into_iter()
+                .map(|(name, (path, n))| json!({ "name": name, "path": path, "tracks": n }))
+                .collect();
+            Ok(json!({
+                "path": path,
+                "folders": folders,
+                "tracks": items,
+                "total_tracks": total,
+                "truncated": total > limit,
+            }))
+        }
+
+        // --- device sync ----------------------------------------------------------
+        "sync_status" => Ok(sync_json(&sync_snapshot(ctx))),
+        "sync_start_server" => {
+            let snap = sync_snapshot(ctx);
+            if snap.connected {
+                return Err(anyhow!(
+                    "already paired with {}",
+                    snap.peer_name.unwrap_or_default()
+                ));
+            }
+            if !snap.listening {
+                (ctx.control)(McpCommand::SyncStartServer);
+            }
+            let ready = sync_wait(ctx, std::time::Duration::from_secs(3), |s| {
+                s.pair_url.clone().map(|u| (u, s.address.clone()))
+            });
+            match ready {
+                Some((pair_url, address)) => Ok(json!({
+                    "ok": true,
+                    "pair_url": pair_url,
+                    "address": address,
+                    "expires_in_s": crate::core::sync::QR_TTL.as_secs(),
+                    "hint": "On the other device open Connect → scan the QR shown on this device, or paste this code there.",
+                })),
+                None => Err(anyhow!(
+                    "{}",
+                    sync_snapshot(ctx).last_error.unwrap_or_else(|| {
+                        "the pairing server reported no code in time; poll sync_status".into()
+                    })
+                )),
+            }
+        }
+        "sync_pair" => {
+            let code = req_str(args, "code")?.trim().to_string();
+            crate::core::sync::protocol::parse_pair_url(&code, crate::core::sync::now_unix())
+                .map_err(|e| anyhow!("invalid or expired pairing code: {e}"))?;
+            let snap = sync_snapshot(ctx);
+            if snap.connected {
+                return Err(anyhow!(
+                    "already paired with {}",
+                    snap.peer_name.unwrap_or_default()
+                ));
+            }
+            if snap.listening {
+                return Err(anyhow!(
+                    "this device is offering a connection itself; run sync_disconnect first"
+                ));
+            }
+            (ctx.control)(McpCommand::SyncPair(code));
+            let paired = sync_wait(ctx, std::time::Duration::from_secs(8), |s| {
+                if s.connected {
+                    Some(s.peer_name.clone())
+                } else {
+                    None
+                }
+            });
+            let snap = sync_snapshot(ctx);
+            Ok(json!({
+                "ok": true,
+                "connected": paired.is_some(),
+                "peer_name": paired.flatten(),
+                "error": snap.last_error,
+                "note": if snap.connected { Value::Null } else { json!("pairing still in progress — poll sync_status") },
+            }))
+        }
+        "sync_share" => {
+            let snap = sync_snapshot(ctx);
+            if !snap.connected {
+                return Err(anyhow!(
+                    "not paired with another device — run sync_start_server (or sync_pair) first"
+                ));
+            }
+            let sel = selection_from_args(args)?;
+            if sel.is_empty() {
+                return Err(anyhow!(
+                    "nothing selected: pass artists, albums, tracks, playlist_ids, podcast_ids, station_ids, memo_ids, recording_ids, yt_videos or whole_library"
+                ));
+            }
+            (ctx.control)(McpCommand::SyncShare(Box::new(sel)));
+            Ok(json!({
+                "ok": true,
+                "peer_name": snap.peer_name,
+                "note": "the offer is being prepared and sent; the other device has to accept it — poll sync_status for the phase and transfer progress",
+            }))
+        }
+        "sync_respond" => {
+            let accept = arg_bool(args, "accept")
+                .ok_or_else(|| anyhow!("missing required boolean argument 'accept'"))?;
+            let snap = sync_snapshot(ctx);
+            if snap.incoming_offer.is_none() {
+                return Err(anyhow!("no pending incoming offer (see sync_status)"));
+            }
+            (ctx.control)(McpCommand::SyncRespond { accept });
+            Ok(json!({ "ok": true, "accepted": accept }))
+        }
+        "sync_disconnect" => {
+            let snap = sync_snapshot(ctx);
+            if !snap.connected && !snap.listening {
+                return Err(anyhow!("no live pairing or pairing server"));
+            }
+            (ctx.control)(McpCommand::SyncDisconnect);
+            Ok(json!({ "ok": true }))
+        }
+
         other => Err(anyhow!("unknown tool '{other}'")),
     }
 }
@@ -1388,6 +1947,231 @@ pub fn tool_list() -> Value {
             "description": "List background download jobs and their state (running / done / error), newest first.",
             "inputSchema": empty(),
         },
+        // --- podcasts: subscriptions ---
+        {
+            "name": "subscribe_podcast",
+            "description": "Subscribe to a podcast by its RSS feed URL (from search_podcasts, or any feed URL): fetches the feed, stores the show and its episodes. Re-subscribing an existing feed refreshes it. Network call.",
+            "inputSchema": obj(
+                json!({ "feed_url": { "type": "string", "description": "RSS feed URL (the `feed_url` field from search_podcasts)." } }),
+                json!(["feed_url"]),
+            ),
+        },
+        {
+            "name": "unsubscribe_podcast",
+            "description": "Remove a podcast subscription and its episode list (by `podcast_id` from list_podcasts). Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "podcast_id": { "type": "integer", "description": "Podcast id." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually remove." },
+                }),
+                json!(["podcast_id", "confirm"]),
+            ),
+        },
+        {
+            "name": "refresh_podcasts",
+            "description": "Re-fetch every subscribed feed for new episodes (the podcasts page's refresh-all). Runs in the background; list_episodes reflects the result once done.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "delete_episode_download",
+            "description": "Delete the offline download of a podcast episode (by its audio URL); the episode itself stays and can still be streamed. Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "url": { "type": "string", "description": "Episode audio URL (from list_episodes)." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually delete." },
+                }),
+                json!(["url", "confirm"]),
+            ),
+        },
+        // --- radio stations (live streams) ---
+        {
+            "name": "list_stations",
+            "description": "List the saved internet-radio stations (live streams) with their id, stream URL, genre tags and country. Use the `id` with play_station / rename_station / delete_station.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "search_stations",
+            "description": "Search the Radio Browser directory for internet-radio stations by name, genre or country. Returns name/url/tags/country/codec/bitrate — pass a hit's fields to add_station to save it. Network call.",
+            "inputSchema": obj(
+                json!({
+                    "query": { "type": "string", "description": "Station name, genre or country." },
+                    "limit": { "type": "integer", "description": "Max results (default 15).", "minimum": 1, "maximum": 50 },
+                }),
+                json!(["query"]),
+            ),
+        },
+        {
+            "name": "add_station",
+            "description": "Save an internet-radio station (live stream) by its http(s) stream URL. `name` defaults to a name derived from the URL; the optional fields are usually copied from a search_stations hit. Saving an already-saved URL updates that station.",
+            "inputSchema": obj(
+                json!({
+                    "url": { "type": "string", "description": "Stream URL (http/https)." },
+                    "name": { "type": "string", "description": "Display name (optional)." },
+                    "favicon": { "type": "string", "description": "Logo URL (optional)." },
+                    "tags": { "type": "string", "description": "Comma-separated genre tags (optional)." },
+                    "country": { "type": "string", "description": "Country (optional)." },
+                    "codec": { "type": "string", "description": "Codec, e.g. MP3/AAC (optional)." },
+                    "bitrate": { "type": "integer", "description": "Bitrate in kbit/s (optional)." },
+                }),
+                json!(["url"]),
+            ),
+        },
+        {
+            "name": "rename_station",
+            "description": "Rename a saved station.",
+            "inputSchema": obj(
+                json!({
+                    "station_id": { "type": "integer", "description": "Station id (from list_stations)." },
+                    "name": { "type": "string", "description": "New name." },
+                }),
+                json!(["station_id", "name"]),
+            ),
+        },
+        {
+            "name": "delete_station",
+            "description": "Remove a saved station (stops it first if it is playing). Its recordings are kept. Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "station_id": { "type": "integer", "description": "Station id (from list_stations)." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually remove." },
+                }),
+                json!(["station_id", "confirm"]),
+            ),
+        },
+        {
+            "name": "play_station",
+            "description": "Start a saved internet-radio station (live stream) by its id. Use playback_control to pause/resume it afterwards.",
+            "inputSchema": obj(
+                json!({ "station_id": { "type": "integer", "description": "Station id (from list_stations)." } }),
+                json!(["station_id"]),
+            ),
+        },
+        {
+            "name": "toggle_station_recording",
+            "description": "Start or stop the timeshift recording of a station (the station's record button). Needs the recording buffer enabled in the app settings; recorded songs appear in list_memos-like recordings and can be removed with delete_recording.",
+            "inputSchema": obj(
+                json!({ "station_id": { "type": "integer", "description": "Station id (from list_stations)." } }),
+                json!(["station_id"]),
+            ),
+        },
+        // --- library: tag editing + deletion ---
+        {
+            "name": "set_track_tags",
+            "description": "Edit the metadata tags of a local library track in the audio file itself, then re-index it. Only the passed fields change; an empty string clears a text tag, `0` clears a numeric one. Tracks on network sources are read-only.",
+            "inputSchema": obj(
+                json!({
+                    "path": { "type": "string", "description": "Track path (from list_tracks/search_library)." },
+                    "title": { "type": "string" },
+                    "artist": { "type": "string" },
+                    "album": { "type": "string" },
+                    "album_artist": { "type": "string" },
+                    "genre": { "type": "string" },
+                    "year": { "type": "integer", "minimum": 0 },
+                    "track_no": { "type": "integer", "minimum": 0 },
+                    "disc_no": { "type": "integer", "minimum": 0 },
+                }),
+                json!(["path"]),
+            ),
+        },
+        {
+            "name": "delete_track",
+            "description": "Move a local library track's audio file to the desktop trash and drop it from the library. Recoverable from the trash. Tracks on network sources cannot be deleted. Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "path": { "type": "string", "description": "Track path (from list_tracks/search_library)." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually delete." },
+                }),
+                json!(["path", "confirm"]),
+            ),
+        },
+        {
+            "name": "delete_album",
+            "description": "Move every local track of an album (exact artist + album) to the desktop trash and drop them from the library. Tracks on network sources are skipped and reported. Destructive: requires `confirm: true`.",
+            "inputSchema": obj(
+                json!({
+                    "artist": { "type": "string", "description": "Album artist exactly as listed." },
+                    "album": { "type": "string", "description": "Album name exactly as listed." },
+                    "confirm": { "type": "boolean", "description": "Must be true to actually delete." },
+                }),
+                json!(["artist", "album", "confirm"]),
+            ),
+        },
+        // --- sources + folder browsing ---
+        {
+            "name": "list_sources",
+            "description": "List the music sources shown as tabs in Files: the primary music folder plus any extra local folders and network shares (Nextcloud/WebDAV, SMB, Google Drive). Credentials are never returned. Each carries a `root` usable with list_folder.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "list_folder",
+            "description": "Browse the indexed library by folder, like the Files tabs: returns the immediate subfolders (with track counts) and the tracks directly in `path`. Defaults to the primary music folder; pass a `root` from list_sources or a folder `path` from a previous call to descend.",
+            "inputSchema": obj(
+                json!({
+                    "path": { "type": "string", "description": "Folder path or source root (optional; default: the music folder)." },
+                    "limit": { "type": "integer", "description": "Max tracks returned (default 200).", "minimum": 1, "maximum": 2000 },
+                }),
+                json!([]),
+            ),
+        },
+        // --- device sync ---
+        {
+            "name": "sync_status",
+            "description": "State of the device-sync connection: whether another device is paired (and its name), whether this device is offering a pairing code, the current flow phase, a pending incoming offer (what the peer wants to send: file counts, size, library data), transfer progress, and the last error.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "sync_start_server",
+            "description": "Offer a device-sync connection: starts the pairing server and shows the QR code in the app; returns the pairing code (an emilia://pair URL) that the other device scans or pastes. The code expires after about two minutes. Poll sync_status until `connected` is true.",
+            "inputSchema": empty(),
+        },
+        {
+            "name": "sync_pair",
+            "description": "Connect to another device that is offering a connection, by pasting its pairing code (the emilia://pair URL from its QR / sync_start_server). Waits a few seconds for the pairing to complete.",
+            "inputSchema": obj(
+                json!({ "code": { "type": "string", "description": "Pairing code (emilia://pair?…)." } }),
+                json!(["code"]),
+            ),
+        },
+        {
+            "name": "sync_share",
+            "description": "Send content to the paired device (requires `connected` in sync_status). Select what to share: artists, albums, track paths, playlists, podcasts, stations, memos, recordings, YouTube videos, or the whole library, plus optional library data (favorites, playlists, podcasts, EQ, categories). The offer is sent without a confirmation step; the other device still has to accept it. Poll sync_status for progress.",
+            "inputSchema": obj(
+                json!({
+                    "artists": { "type": "array", "items": { "type": "string" }, "description": "Artist names (all their albums)." },
+                    "albums": { "type": "array", "items": { "type": "object", "properties": { "artist": { "type": "string" }, "album": { "type": "string" } }, "required": ["artist", "album"] } },
+                    "tracks": { "type": "array", "items": { "type": "string" }, "description": "Track paths." },
+                    "playlist_ids": { "type": "array", "items": { "type": "integer" } },
+                    "podcast_ids": { "type": "array", "items": { "type": "integer" } },
+                    "station_ids": { "type": "array", "items": { "type": "integer" } },
+                    "memo_ids": { "type": "array", "items": { "type": "integer" } },
+                    "recording_ids": { "type": "array", "items": { "type": "integer" } },
+                    "yt_videos": { "type": "array", "items": { "type": "string" }, "description": "YouTube video ids (only delivered when the peer has YouTube enabled)." },
+                    "whole_library": { "type": "boolean" },
+                    "audiobooks": { "type": "boolean", "description": "All audiobooks." },
+                    "concerts": { "type": "boolean", "description": "All concerts." },
+                    "include_metadata": { "type": "boolean", "description": "Send the covers/photos/years and area assignments of the shared music (default true)." },
+                    "include_favorites": { "type": "boolean" },
+                    "include_playlists": { "type": "boolean" },
+                    "include_podcasts": { "type": "boolean", "description": "All podcast subscriptions." },
+                    "include_eq": { "type": "boolean" },
+                    "include_categories": { "type": "boolean" },
+                }),
+                json!([]),
+            ),
+        },
+        {
+            "name": "sync_respond",
+            "description": "Answer the pending incoming offer shown in sync_status: `accept: true` takes what the review would pre-select (new files only — nothing is overwritten — plus the offered library data), `false` rejects everything.",
+            "inputSchema": obj(
+                json!({ "accept": { "type": "boolean", "description": "Accept (true) or reject (false) the offer." } }),
+                json!(["accept"]),
+            ),
+        },
+        {
+            "name": "sync_disconnect",
+            "description": "End the live device-sync pairing (or stop offering a pairing code).",
+            "inputSchema": empty(),
+        },
     ])
 }
 
@@ -1406,6 +2190,7 @@ mod tests {
             now: state::new_handle(),
             control: Arc::new(move |c| sink.lock().unwrap().push(c)),
             jobs: Arc::new(crate::core::mcp::jobs::Jobs::default()),
+            sync: state::new_sync_handle(),
         };
         (ctx, log)
     }
@@ -1475,6 +2260,171 @@ mod tests {
             assert!(t["name"].is_string());
             assert!(t["inputSchema"]["type"] == json!("object"));
         }
+    }
+
+    #[test]
+    fn tool_names_are_unique() {
+        let list = tool_list();
+        let names: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        let set: std::collections::HashSet<&str> = names.iter().copied().collect();
+        assert_eq!(names.len(), set.len(), "duplicate tool name");
+    }
+
+    #[test]
+    fn destructive_tools_require_confirm() {
+        let (ctx, log) = ctx_recording();
+        for (tool, args) in [
+            ("delete_track", json!({ "path": "/x.mp3" })),
+            ("delete_album", json!({ "artist": "A", "album": "B" })),
+            ("delete_station", json!({ "station_id": 1 })),
+            ("unsubscribe_podcast", json!({ "podcast_id": 1 })),
+            (
+                "delete_episode_download",
+                json!({ "url": "http://x/e.mp3" }),
+            ),
+        ] {
+            let err = dispatch(&ctx, tool, &args).unwrap_err().to_string();
+            assert!(err.contains("confirm"), "{tool}: {err}");
+        }
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn add_station_and_subscribe_reject_non_http_urls() {
+        let (ctx, log) = ctx_recording();
+        assert!(dispatch(&ctx, "add_station", &json!({ "url": "ftp://x/y" })).is_err());
+        assert!(dispatch(&ctx, "subscribe_podcast", &json!({ "feed_url": "x" })).is_err());
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn set_track_tags_needs_a_field() {
+        let (ctx, _) = ctx_recording();
+        let err = dispatch(&ctx, "set_track_tags", &json!({ "path": "/x.mp3" }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nothing to change"));
+        let err = dispatch(
+            &ctx,
+            "set_track_tags",
+            &json!({ "path": "/x.mp3", "year": -1 }),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("year"));
+    }
+
+    #[test]
+    fn sync_status_reports_the_snapshot() {
+        let (ctx, _) = ctx_recording();
+        let out = dispatch(&ctx, "sync_status", &json!({})).unwrap();
+        assert_eq!(out["connected"], json!(false));
+        assert_eq!(out["phase"], json!("idle"));
+        {
+            let mut s = ctx.sync.lock().unwrap();
+            s.connected = true;
+            s.peer_name = Some("Phone".into());
+            s.is_server = true;
+            s.phase = "offer_pending".into();
+            s.incoming_offer = Some(state::OfferSummary {
+                from: "Phone".into(),
+                files: 3,
+                new_files: 2,
+                ..Default::default()
+            });
+        }
+        let out = dispatch(&ctx, "sync_status", &json!({})).unwrap();
+        assert_eq!(out["connected"], json!(true));
+        assert_eq!(out["peer_name"], json!("Phone"));
+        assert_eq!(out["role"], json!("server"));
+        assert_eq!(out["incoming_offer"]["new_files"], json!(2));
+    }
+
+    #[test]
+    fn sync_share_needs_a_pairing_and_a_selection() {
+        let (ctx, log) = ctx_recording();
+        let err = dispatch(&ctx, "sync_share", &json!({ "artists": ["Nirvana"] }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not paired"));
+        ctx.sync.lock().unwrap().connected = true;
+        let err = dispatch(&ctx, "sync_share", &json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nothing selected"));
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn sync_share_maps_the_selection() {
+        let (ctx, log) = ctx_recording();
+        ctx.sync.lock().unwrap().connected = true;
+        let out = dispatch(
+            &ctx,
+            "sync_share",
+            &json!({
+                "artists": ["Nirvana"],
+                "albums": [{ "artist": "Beck", "album": "Odelay" }],
+                "tracks": ["/m/a.mp3"],
+                "station_ids": [4],
+                "include_metadata": false,
+                "include_favorites": true,
+            }),
+        )
+        .unwrap();
+        assert_eq!(out["ok"], json!(true));
+        let expected = Selection {
+            artists: vec!["Nirvana".into()],
+            albums: vec![("Beck".into(), "Odelay".into())],
+            song_paths: vec!["/m/a.mp3".into()],
+            stations: vec![4],
+            include_metadata: false,
+            include_favorites: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[McpCommand::SyncShare(Box::new(expected))]
+        );
+    }
+
+    #[test]
+    fn sync_respond_needs_a_pending_offer() {
+        let (ctx, log) = ctx_recording();
+        assert!(dispatch(&ctx, "sync_respond", &json!({ "accept": true })).is_err());
+        ctx.sync.lock().unwrap().incoming_offer = Some(state::OfferSummary::default());
+        dispatch(&ctx, "sync_respond", &json!({ "accept": false })).unwrap();
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[McpCommand::SyncRespond { accept: false }]
+        );
+    }
+
+    #[test]
+    fn sync_pair_rejects_a_bad_code() {
+        let (ctx, log) = ctx_recording();
+        let err = dispatch(&ctx, "sync_pair", &json!({ "code": "not a code" }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("pairing code"));
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn sync_disconnect_needs_something_to_end() {
+        let (ctx, log) = ctx_recording();
+        assert!(dispatch(&ctx, "sync_disconnect", &json!({})).is_err());
+        ctx.sync.lock().unwrap().listening = true;
+        dispatch(&ctx, "sync_disconnect", &json!({})).unwrap();
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[McpCommand::SyncDisconnect]
+        );
     }
 
     #[test]

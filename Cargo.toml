@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.27"
+version = "0.8.28"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -32,12 +32,18 @@ socket2 = "0.6"
 rcgen = { version = "0.14.8", default-features = false, features = ["ring", "pem"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging"] }
 x509-parser = "0.18.1"
-sha2 = "0.11.0"
+# sha2 0.10: the `sspi` crate (NTLM for the SMB client) pins sha2 0.11.0-rc.2, which
+# cannot coexist with a stable 0.11 in one lockfile; 0.10 has the same API.
+sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.2"
 qrcode = { version = "0.14.1", default-features = false }
 async-channel = "2.5"
 quick-xml = "0.41"
+# SMB2/3 client for "SMB share" music sources — pure Rust (NTLM via `sspi`), so
+# the Flatpak needs neither libsmbclient nor a gvfs backend on the host. The
+# synchronous `multi_threaded` model is used (no tokio); see src/core/smb.rs.
+smb = { version = "0.11.2", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
 percent-encoding = "2"
 gstreamer-app = "0.23"
 # QR *decoding* (camera scanner). default-features off → drop the heavy `image`

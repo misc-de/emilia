@@ -127,7 +127,9 @@ now you know.
   QR-code pairing handshake.
 - **MCP server** (optional) – expose the library and playback to an **MCP host**
   (e.g. Claude) over a local, token-protected endpoint, to browse and control
-  Emilia by natural language. Off by default; enable it under **Settings**.
+  Emilia by natural language: library, playlists, podcasts, radio stations,
+  tag editing, downloads and device sync (offer, send and accept transfers).
+  Off by default; enable it under **Settings**.
 - **Equalizer with cascade** – 10-band EQ (`equalizer-10bands`), live during
   playback. Settings apply in the order **Global → Artist → Album → Track** (the
   most specific level wins), additionally per **output device/headphones**

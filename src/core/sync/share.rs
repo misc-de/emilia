@@ -164,7 +164,7 @@ pub struct ShareDecision {
 // ---------------------------------------------------------------------------
 
 /// What the sender ticked in the picker, before resolution to concrete files.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Selection {
     pub whole_library: bool,
     pub artists: Vec<String>,

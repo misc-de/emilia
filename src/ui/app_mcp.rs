@@ -9,6 +9,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use relm4::ComponentController;
+
 use crate::core::mcp::{self, McpCommand, McpContext, McpMode};
 use crate::ui::app::{App, McpState, Msg, SleepChoice};
 use crate::ui::app_covers::CoverMsg;
@@ -18,6 +20,9 @@ use crate::ui::app_playback::TransportMsg;
 use crate::ui::app_playlist::PlaylistMsg;
 use crate::ui::app_settings::SettingMsg;
 use crate::ui::app_streaming::StreamMsg;
+use crate::ui::podcasts_page::PodcastsInput;
+use crate::ui::stream_page::StreamInput;
+use crate::ui::sync_page::SyncInput;
 
 /// MCP-server settings messages, dispatched by [`App::update_mcp_setting`].
 /// Grouped out of the flat `Msg` enum (see `app.rs`); each persists a setting and
@@ -55,8 +60,9 @@ impl App {
         }
     }
 
-    /// Runs a single MCP command on the UI thread.
-    pub(crate) fn handle_mcp(&mut self, cmd: McpCommand) {
+    /// Runs a single MCP command on the UI thread. `root` is the main window,
+    /// needed by the sync flows that present their dialog on it.
+    pub(crate) fn handle_mcp(&mut self, cmd: McpCommand, root: &relm4::adw::ApplicationWindow) {
         match cmd {
             // Idempotent play/pause: only toggle when the state actually differs.
             McpCommand::Play => {
@@ -158,6 +164,56 @@ impl App {
                 };
                 let _ = self.input.send(Msg::SetSleepTimer(choice));
             }
+            // --- radio stations ---
+            McpCommand::PlayStation(id) => {
+                // Idempotent: a running station keeps running, a paused one
+                // resumes, anything else starts it (the same path as a tap).
+                if self.streaming.playing_stream != Some(id) || !self.mini.playing {
+                    self.toggle_stream(id);
+                }
+            }
+            McpCommand::ToggleStationRecording(id) => {
+                let _ = self
+                    .input
+                    .send(Msg::Stream(StreamMsg::StreamRecordToggle(id)));
+            }
+            McpCommand::DeleteStation(id) => {
+                let _ = self
+                    .input
+                    .send(Msg::Stream(StreamMsg::StreamDeleteConfirmed(id)));
+            }
+            McpCommand::ReloadStations => self.stream_page.emit(StreamInput::Reload),
+            // --- podcasts ---
+            McpCommand::DeletePodcast(id) => {
+                let _ = self
+                    .input
+                    .send(Msg::Podcast(PodcastMsg::PodcastReallyDelete(id)));
+            }
+            McpCommand::ReloadPodcasts => self.podcasts_page.emit(PodcastsInput::Reload),
+            McpCommand::RefreshPodcasts => self.podcasts_page.emit(PodcastsInput::RefreshAll),
+            // --- library rows changed behind the UI's back (tags / deletions) ---
+            McpCommand::LibraryChanged => self.reload_library_overviews(),
+            // --- device sync (the SyncPage component owns the flow) ---
+            McpCommand::SyncStartServer => {
+                // Same as the "Offer connection" button: the QR dialog opens on
+                // the main window so the code can be scanned from the phone.
+                self.sync_page.emit(SyncInput::SetWindow(root.clone()));
+                self.sync_page.emit(SyncInput::StartServer);
+            }
+            McpCommand::SyncPair(code) => {
+                self.sync_page.emit(SyncInput::SetWindow(root.clone()));
+                self.sync_page.emit(SyncInput::PasteCode(code));
+            }
+            McpCommand::SyncShare(selection) => {
+                self.sync_page.emit(SyncInput::ShareHeadless {
+                    window: root.clone(),
+                    selection,
+                });
+            }
+            McpCommand::SyncRespond { accept } => {
+                self.sync_page.emit(SyncInput::RespondHeadless { accept });
+            }
+            McpCommand::SyncDisconnect => self.sync_page.emit(SyncInput::Disconnect),
         }
         // Reflect any resulting playback change in the snapshot immediately.
         self.publish_now_playing();
@@ -233,6 +289,7 @@ impl App {
             now: self.mcp.now.clone(),
             control,
             jobs: self.mcp.jobs.clone(),
+            sync: self.mcp.sync.clone(),
         });
         let stop = Arc::new(AtomicBool::new(false));
         let bind = if public { "0.0.0.0" } else { "127.0.0.1" };
@@ -299,6 +356,7 @@ impl McpState {
             now: mcp::new_handle(),
             jobs: std::sync::Arc::new(mcp::jobs::Jobs::default()),
             stop: None,
+            sync: mcp::new_sync_handle(),
         }
     }
 }

@@ -219,6 +219,104 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
     ))
 }
 
+/// A tag edit for [`write_tags`]: `Some` fields are written, `None` fields are
+/// left alone. An empty string (or `0` for the numeric fields) clears the tag.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagEdit {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<u32>,
+    pub track_no: Option<u32>,
+    pub disc_no: Option<u32>,
+}
+
+impl TagEdit {
+    /// Whether the edit names no field at all.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Writes `edit` into the file's primary tag (creating one when the file has
+/// none) and saves the file in place. Only the named fields change; everything
+/// else in the tag — pictures, lyrics, other frames — is preserved.
+pub fn write_tags(path: &Path, edit: &TagEdit) -> Result<()> {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::Accessor;
+    use lofty::tag::{ItemKey, Tag};
+
+    let mut tagged = lofty::read_from_path(path)?;
+    if tagged.primary_tag().is_none() {
+        let kind = tagged.primary_tag_type();
+        tagged.insert_tag(Tag::new(kind));
+    }
+    let tag = tagged
+        .primary_tag_mut()
+        .ok_or_else(|| anyhow::anyhow!("the file format has no writable tag"))?;
+    let clean = |v: &str| -> Option<String> {
+        let t = v.trim();
+        (!t.is_empty()).then(|| t.to_string())
+    };
+    if let Some(v) = &edit.title {
+        match clean(v) {
+            Some(t) => tag.set_title(t),
+            None => tag.remove_title(),
+        }
+    }
+    if let Some(v) = &edit.artist {
+        match clean(v) {
+            Some(t) => tag.set_artist(t),
+            None => tag.remove_artist(),
+        }
+    }
+    if let Some(v) = &edit.album {
+        match clean(v) {
+            Some(t) => tag.set_album(t),
+            None => tag.remove_album(),
+        }
+    }
+    if let Some(v) = &edit.genre {
+        match clean(v) {
+            Some(t) => tag.set_genre(t),
+            None => tag.remove_genre(),
+        }
+    }
+    if let Some(v) = &edit.album_artist {
+        match clean(v) {
+            Some(t) => {
+                tag.insert_text(ItemKey::AlbumArtist, t);
+            }
+            None => tag.remove_key(&ItemKey::AlbumArtist),
+        }
+    }
+    if let Some(y) = edit.year {
+        if y == 0 {
+            tag.remove_year();
+        } else {
+            tag.set_year(y);
+        }
+    }
+    if let Some(n) = edit.track_no {
+        if n == 0 {
+            tag.remove_track();
+        } else {
+            tag.set_track(n);
+        }
+    }
+    if let Some(n) = edit.disc_no {
+        if n == 0 {
+            tag.remove_disk();
+        } else {
+            tag.set_disk(n);
+        }
+    }
+    tagged.save_to_path(path, WriteOptions::default())?;
+    Ok(())
+}
+
 /// Scans `root` and writes all found tracks into the library, then removes
 /// tracks under `root` whose files have vanished (deleted/moved).
 /// Returns the number of successfully read files.

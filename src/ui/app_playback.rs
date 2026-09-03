@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use gtk::prelude::GtkWindowExt;
 use relm4::{adw, gtk, ComponentController, ComponentSender};
 
+use crate::core::remote::{self, Backend};
 use crate::core::scanner;
-use crate::core::webdav::{self, Creds};
 use crate::model::Track;
 use crate::ui::app::{guarded_resume, ActiveSource, App, Msg, PlaySession, RemoteTrack};
 use crate::ui::app_favorites::EntryMarks;
@@ -86,16 +86,16 @@ impl App {
         self.arm_gapless();
     }
 
-    /// Credentials of the currently active WebDAV source (if one is active).
-    pub(crate) fn active_webdav_creds(&self) -> Option<Creds> {
+    /// Backend of the currently active remote source (if one is active).
+    pub(crate) fn active_backend(&self) -> Option<Backend> {
         let ActiveSource::Source(id) = self.files.active_source else {
             return None;
         };
         let s = self.files.sources.iter().find(|s| s.id == id)?;
-        if s.kind != "webdav" {
+        if !s.is_remote() {
             return None;
         }
-        Creds::from_source(s)
+        Backend::from_source(s)
     }
 
     /// Local cache path of a remote file of the active source (or `None`).
@@ -103,7 +103,7 @@ impl App {
         let ActiveSource::Source(id) = self.files.active_source else {
             return None;
         };
-        Some(webdav::cache_path(id, rel))
+        Some(remote::cache_path(id, rel))
     }
 
     /// Tap a remote file: tapping the running track again
@@ -154,7 +154,10 @@ impl App {
     /// downloaded) or streamed. Self-contained like podcast/station; the
     /// local `PathBuf` queue stays empty in the process.
     pub(crate) fn play_remote_current(&mut self) {
-        let Some(creds) = self.active_webdav_creds() else {
+        let ActiveSource::Source(source_id) = self.files.active_source else {
+            return;
+        };
+        let Some(backend) = self.active_backend() else {
             return;
         };
         let Some(track) = self.files.remote_queue.get(self.files.remote_pos).cloned() else {
@@ -170,9 +173,9 @@ impl App {
         let is_stream = !matches!(&cached, Some(p) if p.exists());
         let result = match &cached {
             Some(p) if p.exists() => self.player.play_file(&p.to_string_lossy(), 0),
-            _ => self
-                .player
-                .play_uri(&webdav::stream_uri(&creds, &track.rel_path), 0),
+            _ => backend
+                .stream_uri(source_id, &track.rel_path)
+                .and_then(|uri| self.player.play_uri(&uri, 0)),
         };
         match result {
             Ok(()) => {
@@ -501,27 +504,27 @@ impl App {
                 "YouTube stream must be resolved asynchronously"
             ));
         }
-        if let Some((sid, rel)) = crate::core::webdav::parse_nc_path(path_str) {
-            let cache = crate::core::webdav::cache_path(sid, &rel);
+        if let Some((sid, rel)) = remote::parse_nc_path(path_str) {
+            let cache = remote::cache_path(sid, &rel);
             if cache.exists() {
                 return self
                     .player
                     .play_file(&cache.to_string_lossy(), resume_ms)
                     .map(|_| false);
             }
-            if let Some(creds) = self
+            if let Some(backend) = self
                 .files
                 .sources
                 .iter()
                 .find(|s| s.id == sid)
-                .and_then(crate::core::webdav::Creds::from_source)
+                .and_then(Backend::from_source)
             {
-                return self
-                    .player
-                    .play_uri(&crate::core::webdav::stream_uri(&creds, &rel), resume_ms)
+                return backend
+                    .stream_uri(sid, &rel)
+                    .and_then(|uri| self.player.play_uri(&uri, resume_ms))
                     .map(|_| true);
             }
-            return Err(anyhow::anyhow!("Nextcloud source unavailable"));
+            return Err(anyhow::anyhow!("remote source unavailable"));
         }
         // Local file: a missing path usually means an unmounted SD card / mount
         // point. Fail fast so the caller skips it (instead of a GStreamer round-trip).

@@ -51,6 +51,10 @@ pub(crate) enum SourceMsg {
     AddLocalFolder,
     /// Open the Nextcloud setup dialog (QR scan or manual).
     AddCloud,
+    /// Open the SMB share setup dialog.
+    AddSmb,
+    /// Open the Google Drive setup dialog (browser sign-in).
+    AddGDrive,
     /// The CloudPage component finished indexing a newly added source.
     CloudIndexed,
     /// Download a remote file offline (rel path in the active source).
@@ -113,6 +117,29 @@ impl App {
                     .filter(|s| s.kind == "webdav")
                     .collect();
                 self.cloud_page.emit(CloudInput::Open {
+                    window: root.clone(),
+                    mobile: self.is_mobile(),
+                    existing,
+                });
+            }
+            SourceMsg::AddSmb => {
+                use crate::ui::smb_page::SmbInput;
+                self.smb_page.emit(SmbInput::Open {
+                    window: root.clone(),
+                    mobile: self.is_mobile(),
+                });
+            }
+            SourceMsg::AddGDrive => {
+                use crate::ui::gdrive_page::GDriveInput;
+                // Offer already signed-in Google accounts for reuse.
+                let existing = self
+                    .library
+                    .list_sources()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|s| s.kind == crate::core::remote::KIND_GDRIVE)
+                    .collect();
+                self.gdrive_page.emit(GDriveInput::Open {
                     window: root.clone(),
                     mobile: self.is_mobile(),
                     existing,
@@ -220,10 +247,10 @@ impl App {
             self.files.source_tabs.append(&filler);
         }
 
-        // Trailing "+": add a local folder or a Nextcloud. Always present.
+        // Trailing "+": add a local folder or a remote source. Always present.
         let add = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text(gettext("Add folder or Nextcloud"))
+            .tooltip_text(gettext("Add a source"))
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
@@ -241,7 +268,8 @@ impl App {
         !self.files.source_tab_buttons.is_empty()
     }
 
-    /// The "+" in the tab bar: ask whether to add a local folder or a Nextcloud.
+    /// The "+" in the tab bar: ask whether to add a local folder, a Nextcloud,
+    /// an SMB share or a Google Drive.
     pub(crate) fn open_add_source_menu(
         &self,
         root: &adw::ApplicationWindow,
@@ -250,12 +278,14 @@ impl App {
         let dialog = adw::AlertDialog::new(
             Some(&gettext("Add a source")),
             Some(&gettext(
-                "Add a local folder or connect a Nextcloud as another tab.",
+                "Add a local folder or connect a Nextcloud, an SMB share or Google Drive as another tab.",
             )),
         );
         dialog.add_response("cancel", &gettext("Cancel"));
         dialog.add_response("folder", &gettext("Local folder"));
         dialog.add_response("nextcloud", &gettext("Nextcloud"));
+        dialog.add_response("smb", &gettext("SMB share"));
+        dialog.add_response("gdrive", &gettext("Google Drive"));
         dialog.set_default_response(Some("folder"));
         dialog.set_close_response("cancel");
         {
@@ -263,6 +293,8 @@ impl App {
             dialog.connect_response(None, move |_, resp| match resp {
                 "folder" => sender.input(Msg::Source(SourceMsg::AddLocalFolder)),
                 "nextcloud" => sender.input(Msg::Source(SourceMsg::AddCloud)),
+                "smb" => sender.input(Msg::Source(SourceMsg::AddSmb)),
+                "gdrive" => sender.input(Msg::Source(SourceMsg::AddGDrive)),
                 _ => {}
             });
         }
@@ -380,12 +412,12 @@ impl App {
                 }
                 menu.append(&rename);
 
-                let is_webdav = self
+                let is_remote = self
                     .files
                     .sources
                     .iter()
-                    .any(|s| s.id == id && s.kind == "webdav");
-                let edit_label = if is_webdav {
+                    .any(|s| s.id == id && s.is_remote());
+                let edit_label = if is_remote {
                     gettext("Change music folder")
                 } else {
                     gettext("Change folder")
@@ -491,7 +523,7 @@ impl App {
                 let Some(src) = self.files.sources.iter().find(|s| s.id == id).cloned() else {
                     return;
                 };
-                if src.kind == "webdav" {
+                if src.is_remote() {
                     let dialog = adw::AlertDialog::new(
                         Some(&gettext("Change music folder")),
                         Some(&gettext("Subfolder on the server to index, e.g. /Music.")),
@@ -550,7 +582,7 @@ impl App {
         }
     }
 
-    /// Applies a new music subpath to a WebDAV source: persist it, drop the old
+    /// Applies a new music subpath to a remote source: persist it, drop the old
     /// indexed tracks and re-index in the background, then reload it if active.
     pub(crate) fn on_source_set_music_path(
         &mut self,
@@ -571,12 +603,14 @@ impl App {
         sender.spawn_oneshot_command(move || {
             if let Ok(lib) = Library::open() {
                 let _ = lib.clear_source_tracks(id);
+                // Drive ids were resolved relative to the old music root.
+                crate::core::gdrive::forget_source(id);
                 if let Some(src) = lib
                     .list_sources()
                     .ok()
                     .and_then(|v| v.into_iter().find(|s| s.id == id))
                 {
-                    match crate::core::webdav::index_into(&lib, &src) {
+                    match crate::core::remote::index_into(&lib, &src) {
                         Ok(n) => tracing::info!("Re-indexed {n} tracks after music path change"),
                         Err(e) => tracing::warn!("Re-index after music path change failed: {e}"),
                     }
@@ -652,7 +686,7 @@ impl App {
         self.load_dir(sender);
     }
 
-    /// The active source as a WebDAV source (if it is one).
+    /// The active source as a remote source (if it is one).
     pub(crate) fn active_remote_source(&self) -> Option<crate::model::Source> {
         let ActiveSource::Source(id) = self.files.active_source else {
             return None;
@@ -660,18 +694,18 @@ impl App {
         self.files
             .sources
             .iter()
-            .find(|s| s.id == id && s.kind == "webdav")
+            .find(|s| s.id == id && s.is_remote())
             .cloned()
     }
 
-    /// Loads a folder of the active remote source (PROPFIND in the background).
+    /// Loads a folder of the active remote source (listing in the background).
     pub(crate) fn load_remote_dir(
         &mut self,
         sender: &ComponentSender<Self>,
         source: crate::model::Source,
     ) {
         let rel = self.files.remote_browse.clone().unwrap_or_default();
-        let Some(creds) = crate::core::webdav::Creds::from_source(&source) else {
+        let Some(backend) = crate::core::remote::Backend::from_source(&source) else {
             self.libview.entries.guard().clear();
             self.libview.loading = false;
             self.files.remote_error = Some(gettext(
@@ -684,7 +718,7 @@ impl App {
         self.libview.loading = true;
         let active = self.files.active_source.clone();
         sender.spawn_oneshot_command(move || {
-            let res = crate::core::webdav::list(&creds, &rel).map_err(|e| e.to_string());
+            let res = backend.list(&rel).map_err(|e| e.to_string());
             Cmd::RemoteEntries(res, active, rel)
         });
     }
@@ -698,7 +732,7 @@ impl App {
         sender: &ComponentSender<Self>,
         source: &crate::model::Source,
     ) {
-        let Some(creds) = crate::core::webdav::Creds::from_source(source) else {
+        let Some(backend) = crate::core::remote::Backend::from_source(source) else {
             return;
         };
         let rels: Vec<String> = {
@@ -725,7 +759,7 @@ impl App {
         }
         sender.spawn_command(move |out| {
             for r in rels {
-                let (t, a, d) = crate::core::webdav::read_tags(&creds, &r);
+                let (t, a, d) = backend.read_tags(&r);
                 if t.is_some() || a.is_some() || d.is_some() {
                     let _ = out.send(Cmd::RemoteTags(vec![(r, t, a, d)]));
                 }
@@ -768,7 +802,7 @@ impl App {
 
     /// Is this track path from a currently disconnected source?
     pub(crate) fn is_offline_path(&self, path: &str) -> bool {
-        crate::core::webdav::parse_nc_path(path)
+        crate::core::remote::parse_nc_path(path)
             .map(|(id, _)| self.offline_sources.contains(&id))
             .unwrap_or(false)
     }

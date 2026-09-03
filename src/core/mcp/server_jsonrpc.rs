@@ -287,6 +287,7 @@ mod tests {
             now: state::new_handle(),
             control: Arc::new(move |c| sink.lock().unwrap().push(c)),
             jobs: Arc::new(crate::core::mcp::jobs::Jobs::default()),
+            sync: crate::core::mcp::new_sync_handle(),
         });
         (ctx, log)
     }
