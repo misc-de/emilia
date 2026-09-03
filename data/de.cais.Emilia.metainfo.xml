@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.28" date="2026-09-03">
+      <description>
+        <p>Emilia's MCP interface now reaches every corner of the app. An assistant can subscribe to and remove podcasts; search for internet-radio stations and save, rename, play or record them; edit the tags of a track in the audio file itself; delete tracks or whole albums (they go to the desktop trash, never straight to nowhere); browse the music sources folder by folder; and drive device sync — offer or join a pairing, send a selection to the paired device, and accept or reject what the other side offers. Two new kinds of music source join the Files tabs: an SMB network share and Google Drive, both streamed through a small local relay so playback and seeking work like a local folder.</p>
+        <p xml:lang="de">Die MCP-Schnittstelle von Emilia reicht jetzt in jeden Winkel der App. Ein Assistent kann Podcasts abonnieren und entfernen, Internetradio-Sender suchen und speichern, umbenennen, abspielen oder aufnehmen, die Tags eines Titels direkt in der Audiodatei bearbeiten, Titel oder ganze Alben löschen (sie wandern in den Papierkorb, nie ins Nichts), die Musikquellen Ordner für Ordner durchstöbern und die Gerätesynchronisierung steuern – eine Kopplung anbieten oder beitreten, eine Auswahl an das gekoppelte Gerät senden und annehmen oder ablehnen, was die Gegenseite anbietet. Zwei neue Arten von Musikquellen kommen zu den Dateien-Reitern: eine SMB-Netzwerkfreigabe und Google Drive, beide über eine kleine lokale Weiterleitung gestreamt, sodass Wiedergabe und Spulen wie bei einem lokalen Ordner funktionieren.</p>
+      </description>
+    </release>
     <release version="0.8.27" date="2026-09-02">
       <description>
         <p>The stepper rows in the settings — app size, menu icon size, tiles per row and crossfade — sit right again. The value and its −/+ buttons now end flush with the right edge in every row, in line with the switches above and below, and the dark slab that the blurred-background look painted behind them is gone. The step field had been stretching across half the row, so its buttons landed wherever the title happened to end.</p>
