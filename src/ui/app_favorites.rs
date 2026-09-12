@@ -651,9 +651,13 @@ impl App {
                 self.save_resume();
                 self.player.pause();
                 self.mini.playing = false;
-            } else {
-                self.player.resume();
+            } else if self.player.resume() {
                 self.mini.playing = true;
+            } else {
+                // Pipeline empty (queue restored at startup, or a desktop
+                // Stop): the full toggle reloads the track and reports itself.
+                self.on_toggle_play();
+                return;
             }
             self.mpris.set_playing(self.mini.playing);
             self.refresh_queue_icons();

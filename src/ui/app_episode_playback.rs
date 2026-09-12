@@ -105,7 +105,26 @@ impl App {
                 self.mini.position_ms = resume.max(0);
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
-                self.mpris.set_metadata(0, title, None, None, None, None);
+                // Show title as the "album" and its cached cover, so the lock
+                // screen shows the same thing a music track does. The cover is
+                // only used if it is already in the cache (no network here).
+                let show = self
+                    .library
+                    .podcast_show_for_episode_url(url)
+                    .ok()
+                    .flatten();
+                let art = show
+                    .as_ref()
+                    .and_then(|(_, img)| img.as_deref())
+                    .and_then(crate::core::online::podcast_image_path);
+                self.mpris.set_metadata(
+                    0,
+                    title,
+                    None,
+                    show.as_ref().map(|(t, _)| t.as_str()),
+                    None,
+                    art.as_deref(),
+                );
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
                 // Chapters (time + label) from the shownotes: set seekbar

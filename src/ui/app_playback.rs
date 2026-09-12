@@ -756,14 +756,11 @@ impl App {
     /// store ([`Self::save_resume`], [`Self::save_episode_progress`],
     /// [`Self::save_yt_progress`]), so the caller saves before calling.
     pub(crate) fn flip_playing(&mut self) {
-        if self.mini.playing {
-            self.player.pause();
-        } else {
-            self.player.resume();
-        }
-        self.mini.playing = !self.mini.playing;
-        self.mpris.set_playing(self.mini.playing);
-        self.refresh_queue_icons();
+        // Same path as the player bar's button: it also covers the case where
+        // the app has a current track but the pipeline holds nothing (a queue
+        // restored at startup, or after a desktop Stop), which a bare
+        // `resume()` would turn into a silent, forever-"playing" state.
+        self.on_toggle_play();
     }
 
     /// Tapping the entry of the file that is *already loaded* must not restart
@@ -1234,6 +1231,67 @@ impl App {
         }
     }
 
+    /// `OpenUri` from the desktop (a file manager's "open with", a browser
+    /// handing over a stream). Local paths go through the normal play path — a
+    /// folder becomes a queue, a file a single track; network URLs take the
+    /// episode route, which keeps position/resume bookkeeping keyed by the URL.
+    /// Anything else is refused, matching the advertised `SupportedUriSchemes`.
+    fn open_uri_from_desktop(&mut self, uri: &str) {
+        let scheme = uri.split_once(':').map(|(s, _)| s).unwrap_or("");
+        match scheme.to_ascii_lowercase().as_str() {
+            "file" => {
+                let Ok((path, _)) = gtk::glib::filename_from_uri(uri) else {
+                    tracing::warn!("MPRIS OpenUri: not a local path: {uri}");
+                    return;
+                };
+                if !path.exists() {
+                    tracing::warn!("MPRIS OpenUri: no such path: {}", path.display());
+                    return;
+                }
+                let is_dir = path.is_dir();
+                self.play_path(&path.to_string_lossy(), is_dir);
+            }
+            "http" | "https" => {
+                // A known enclosure keeps its episode title; otherwise name it
+                // after the last path segment, falling back to the URL.
+                let title = self
+                    .library
+                    .episode_title_by_url(uri)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| {
+                        uri.rsplit('/')
+                            .next()
+                            .and_then(|seg| seg.split(['?', '#']).next())
+                            .filter(|seg| !seg.is_empty())
+                            .unwrap_or(uri)
+                            .to_owned()
+                    });
+                self.play_episode(uri, &title);
+            }
+            _ => tracing::warn!("MPRIS OpenUri: unsupported scheme in {uri}"),
+        }
+    }
+
+    /// Length of what is playing, from the pipeline (authoritative) or the last
+    /// value the tick saw. `None` for a live stream, which has no end to run
+    /// past.
+    fn playing_length_ms(&self) -> Option<i64> {
+        self.player
+            .duration_ms()
+            .filter(|&d| d > 0)
+            .or(Some(self.mini.track_duration_ms).filter(|&d| d > 0))
+    }
+
+    /// Seeks on behalf of the desktop and reports the jump back to it.
+    fn seek_from_desktop(&mut self, target_ms: i64) {
+        if self.player.seek_ms(target_ms).is_ok() {
+            self.mini.position_ms = target_ms;
+            self.mpris.set_position(target_ms);
+            self.mpris.seeked(target_ms);
+        }
+    }
+
     /// Handle a desktop / lock-screen MPRIS command (media keys, etc.).
     pub(crate) fn handle_mpris(
         &mut self,
@@ -1242,29 +1300,19 @@ impl App {
     ) {
         use crate::core::mpris::MprisCommand as M;
         match cmd {
-            M::PlayPause => {
-                if self.mini.now_playing.is_some() {
-                    if self.mini.playing {
-                        self.save_resume();
-                    }
-                    self.flip_playing();
-                }
-            }
+            // All three go through the player bar's own toggle: it is the only
+            // path that knows how to (re)load when the app has a current track
+            // but the pipeline is empty — reporting "playing" for an empty
+            // pipeline is exactly what the desktop must not be told.
+            M::PlayPause => self.on_toggle_play(),
             M::Play => {
-                if self.mini.now_playing.is_some() && !self.mini.playing {
-                    self.player.resume();
-                    self.mini.playing = true;
-                    self.mpris.set_playing(true);
-                    self.refresh_queue_icons();
+                if !self.mini.playing {
+                    self.on_toggle_play();
                 }
             }
             M::Pause => {
-                if self.mini.now_playing.is_some() && self.mini.playing {
-                    self.save_resume();
-                    self.player.pause();
-                    self.mini.playing = false;
-                    self.mpris.set_playing(false);
-                    self.refresh_queue_icons();
+                if self.mini.playing {
+                    self.on_toggle_play();
                 }
             }
             M::Next => self.skip_next(),
@@ -1279,20 +1327,24 @@ impl App {
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
+                // The tick no longer runs, so the last position would stay
+                // frozen in the property — a stopped player is at 0.
+                self.mpris.set_position(0);
                 self.refresh_queue_icons();
             }
             M::Raise => root.present(),
             M::SeekBy(offset_us) => {
-                let cur = self.player.position_ms().unwrap_or(0);
-                let target = (cur + offset_us / 1000).max(0);
-                if self.player.seek_ms(target).is_ok() {
-                    self.mpris.seeked(target);
+                let cur = self.player.position_ms().unwrap_or(self.mini.position_ms);
+                match relative_seek(cur, offset_us / 1000, self.playing_length_ms()) {
+                    SeekTarget::To(ms) => self.seek_from_desktop(ms),
+                    SeekTarget::Next => self.skip_next(),
+                    SeekTarget::Ignore => {}
                 }
             }
             M::SetPosition(pos_us) => {
-                let target = (pos_us / 1000).max(0);
-                if self.player.seek_ms(target).is_ok() {
-                    self.mpris.seeked(target);
+                match absolute_seek(pos_us / 1000, self.playing_length_ms()) {
+                    SeekTarget::To(ms) => self.seek_from_desktop(ms),
+                    SeekTarget::Next | SeekTarget::Ignore => {}
                 }
             }
             M::SetShuffle(on) => {
@@ -1312,6 +1364,13 @@ impl App {
                         .set_setting("repeat", if on { "1" } else { "0" });
                 }
                 self.mpris.set_repeat(self.transport.repeat);
+            }
+            M::OpenUri(uri) => self.open_uri_from_desktop(&uri),
+            M::SetVolume(vol) => {
+                self.player.set_master_volume(vol);
+                // The MPRIS setter only calls back, so mirror the (clamped)
+                // value into the property the desktop reads.
+                self.mpris.set_volume(self.player.master_volume());
             }
         }
     }
@@ -1547,6 +1606,10 @@ impl App {
             }
             if let Some(dur) = self.player.duration_ms() {
                 self.mini.track_duration_ms = dur;
+                // The pipeline only knows the length a moment after the start,
+                // and stations / YouTube / podcasts / remote files never carry
+                // one up front – hand it to the lock screen once it is known.
+                self.mpris.set_length(dur);
             }
             // Keep the MCP now-playing snapshot fresh (position + state).
             self.publish_now_playing();
@@ -1635,18 +1698,28 @@ impl App {
             self.mini.playing = false;
             // Pausing during buffering stops the spinner (no longer "loading").
             self.mini.loading = false;
-        } else if self.transport.playing_path.is_some()
+        } else if (self.transport.playing_path.is_some()
             || self.streaming.playing_stream.is_some()
-            || self.podcasts.playing_episode_url.is_some()
+            || self.podcasts.playing_episode_url.is_some())
+            && self.player.resume()
         {
             // Paused (file, station or episode) → resume.
-            self.player.resume();
             self.mini.playing = true;
         } else if !self.transport.queue.is_empty() {
             // Playback had ended → restart from the current position (rewound
             // to 0 after the end). play_current sets
             // playing/MPRIS/icons itself.
             self.play_current();
+            return;
+        } else if let Some(id) = self.streaming.playing_stream {
+            // The station is still the current context but the pipeline is gone
+            // (torn down by a desktop Stop) → start it over.
+            self.play_stream(id);
+            return;
+        } else if let Some(url) = self.podcasts.playing_episode_url.clone() {
+            // Same for an episode; it resumes at its stored position.
+            let title = self.mini.now_playing.clone().unwrap_or_default();
+            self.play_episode(&url, &title);
             return;
         } else if !self.transport.user_queue.is_empty() {
             // Nothing loaded, but the user queued tracks → start the queue
@@ -1799,5 +1872,76 @@ impl App {
             TransportMsg::TogglePlay => self.on_toggle_play(),
             TransportMsg::OpenNowPlaying => self.on_open_now_playing(root, sender),
         }
+    }
+}
+
+/// What a seek request from the desktop should do, given the track length.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SeekTarget {
+    /// Seek to this position (ms).
+    To(i64),
+    /// Skip to the next track.
+    Next,
+    /// Do nothing at all.
+    Ignore,
+}
+
+/// `Seek` (relative) per the MPRIS spec: before the start clamps to 0, past the
+/// end "acts like a call to Next". Seeking past the end for real would leave the
+/// pipeline playing silence beyond the data — a network source never reaches an
+/// EOS there, so it would run on (and hold the audio sink awake) forever.
+/// A live stream has no length, so nothing can be past its end.
+pub(crate) fn relative_seek(pos_ms: i64, offset_ms: i64, length_ms: Option<i64>) -> SeekTarget {
+    let target = pos_ms.saturating_add(offset_ms);
+    match length_ms {
+        Some(len) if target >= len => SeekTarget::Next,
+        _ => SeekTarget::To(target.max(0)),
+    }
+}
+
+/// `SetPosition` per the MPRIS spec: a position outside the track (negative, or
+/// beyond its length) is ignored rather than clamped.
+pub(crate) fn absolute_seek(pos_ms: i64, length_ms: Option<i64>) -> SeekTarget {
+    if pos_ms < 0 {
+        return SeekTarget::Ignore;
+    }
+    match length_ms {
+        Some(len) if pos_ms > len => SeekTarget::Ignore,
+        _ => SeekTarget::To(pos_ms),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{absolute_seek, relative_seek, SeekTarget};
+
+    #[test]
+    fn relative_seek_past_the_end_skips_instead_of_running_on() {
+        let len = Some(180_000);
+        assert_eq!(relative_seek(10_000, 20_000, len), SeekTarget::To(30_000));
+        // The case that wedged the player: far beyond the end.
+        assert_eq!(relative_seek(10_000, 600_000, len), SeekTarget::Next);
+        // Exactly at the end is the end, too.
+        assert_eq!(relative_seek(170_000, 10_000, len), SeekTarget::Next);
+        // Backwards past the start clamps to 0 (spec).
+        assert_eq!(relative_seek(5_000, -20_000, len), SeekTarget::To(0));
+    }
+
+    /// A station has no length; every seek stays a seek (the pipeline itself
+    /// refuses what it cannot do).
+    #[test]
+    fn relative_seek_without_a_length_never_skips() {
+        assert_eq!(relative_seek(1_000, 600_000, None), SeekTarget::To(601_000));
+        assert_eq!(relative_seek(1_000, -600_000, None), SeekTarget::To(0));
+    }
+
+    #[test]
+    fn absolute_seek_ignores_positions_outside_the_track() {
+        let len = Some(180_000);
+        assert_eq!(absolute_seek(120_000, len), SeekTarget::To(120_000));
+        assert_eq!(absolute_seek(180_000, len), SeekTarget::To(180_000));
+        assert_eq!(absolute_seek(600_000, len), SeekTarget::Ignore);
+        assert_eq!(absolute_seek(-1, len), SeekTarget::Ignore);
+        assert_eq!(absolute_seek(600_000, None), SeekTarget::To(600_000));
     }
 }

@@ -13,7 +13,7 @@ use gtk::glib;
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId};
 
 /// Command from the desktop to the app. Delivered on the main thread.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum MprisCommand {
     PlayPause,
     Play,
@@ -31,16 +31,106 @@ pub enum MprisCommand {
     /// Desktop changed the loop/repeat status (the app only has whole-queue
     /// repeat, so this collapses to on/off).
     SetRepeat(bool),
+    /// Desktop moved the volume slider (0.0–1.0).
+    SetVolume(f64),
+    /// Desktop asked to play a URI (`OpenUri`) — a file manager's "open with",
+    /// a browser handing over a stream. Only the advertised schemes arrive
+    /// here in practice; the app decides what it can do with it.
+    OpenUri(String),
 }
 
 /// The `Player` is built up asynchronously; until then (or when no D-Bus
 /// is present) the slot stays empty and all calls have no effect.
 type Slot = Rc<RefCell<Option<Rc<Player>>>>;
 
+/// The metadata last published to the desktop. Kept around so a late-arriving
+/// duration can be merged in: GStreamer only knows a track's length a moment
+/// after playback starts, and for stations / streams the app never learns it
+/// up front at all – without this, `mpris:length` would stay missing.
+#[derive(Default)]
+struct Current {
+    index: usize,
+    title: String,
+    artist: Option<String>,
+    album: Option<String>,
+    length_ms: Option<i64>,
+    art_uri: Option<String>,
+    /// Counter behind `mpris:trackid`, bumped whenever the identifying fields
+    /// change. Clients that spot track changes by ID (scrobblers) need it to
+    /// move on every new song – the queue position alone stays 0 for stations,
+    /// YouTube, podcasts and remote files.
+    track_no: u64,
+    /// Whether anything has been published yet (an empty title is legitimate).
+    set: bool,
+}
+
+impl Current {
+    /// Takes over a fresh set of metadata, bumping `track_no` whenever the
+    /// identifying fields (queue position, title, artist, album) differ from
+    /// what is currently published — that is what makes a track change visible
+    /// to clients even where the queue position is always 0.
+    fn update(
+        &mut self,
+        index: usize,
+        title: &str,
+        artist: Option<String>,
+        album: Option<String>,
+        length_ms: Option<i64>,
+        art_uri: Option<String>,
+    ) {
+        let is_new = !self.set
+            || self.index != index
+            || self.title != title
+            || self.artist != artist
+            || self.album != album;
+        *self = Current {
+            index,
+            title: title.to_owned(),
+            artist,
+            album,
+            length_ms: length_ms.filter(|&ms| ms > 0),
+            art_uri,
+            track_no: self.track_no + u64::from(is_new),
+            set: true,
+        };
+    }
+
+    /// Merges a duration that only became known later. Returns whether the
+    /// published metadata needs to be sent again.
+    fn merge_length(&mut self, length_ms: i64) -> bool {
+        if !self.set || length_ms <= 0 || self.length_ms == Some(length_ms) {
+            return false;
+        }
+        self.length_ms = Some(length_ms);
+        true
+    }
+
+    fn build(&self) -> Metadata {
+        let mut b = Metadata::builder().title(&self.title);
+        if let Ok(tid) = TrackId::try_from(format!("/de/cais/Emilia/track/{}", self.track_no)) {
+            b = b.trackid(tid);
+        }
+        if let Some(a) = &self.artist {
+            b = b.artist([a]);
+        }
+        if let Some(al) = &self.album {
+            b = b.album(al);
+        }
+        if let Some(ms) = self.length_ms {
+            b = b.length(Time::from_millis(ms));
+        }
+        if let Some(uri) = &self.art_uri {
+            b = b.art_url(uri.clone());
+        }
+        b.build()
+    }
+}
+
 /// Handle on the running MPRIS service for updating the state.
 #[derive(Clone)]
 pub struct Mpris {
     player: Slot,
+    current: Rc<RefCell<Current>>,
 }
 
 impl Mpris {
@@ -83,6 +173,26 @@ impl Mpris {
                     .can_seek(true)
                     .can_control(true)
                     .can_raise(true)
+                    .volume(1.0)
+                    // What `OpenUri` accepts. Leaving these empty (the default)
+                    // told clients the method was useless — and it was, until
+                    // it got wired up below.
+                    .supported_uri_schemes(["file", "http", "https"])
+                    .supported_mime_types([
+                        "audio/mpeg",
+                        "audio/mp4",
+                        "audio/aac",
+                        "audio/flac",
+                        "audio/ogg",
+                        "audio/opus",
+                        "audio/x-vorbis+ogg",
+                        "audio/x-wav",
+                        "audio/x-m4a",
+                        "audio/x-ms-wma",
+                        "audio/x-aiff",
+                        "audio/x-matroska",
+                        "audio/x-mpegurl",
+                    ])
                     .shuffle(false)
                     .loop_status(LoopStatus::None)
                     .build()
@@ -133,6 +243,16 @@ impl Mpris {
                         cb(MprisCommand::SetRepeat(status != LoopStatus::None))
                     });
                 }
+                {
+                    let cb = on_cmd.clone();
+                    player.connect_set_volume(move |_, vol: f64| cb(MprisCommand::SetVolume(vol)));
+                }
+                {
+                    let cb = on_cmd.clone();
+                    player.connect_open_uri(move |_, uri: &str| {
+                        cb(MprisCommand::OpenUri(uri.to_owned()))
+                    });
+                }
 
                 // Start serving method calls, then publish the player so the app
                 // can push state. `run()` returns a 'static future, so the borrow
@@ -149,7 +269,10 @@ impl Mpris {
             }
         });
 
-        Mpris { player: slot }
+        Mpris {
+            player: slot,
+            current: Rc::new(RefCell::new(Current::default())),
+        }
     }
 
     /// Sets the playback status (Playing/Paused).
@@ -174,8 +297,11 @@ impl Mpris {
         });
     }
 
-    /// Updates the track metadata for the lock screen. `index` serves
-    /// as a stable (session) track ID; `length_ms`/`art_path` are optional.
+    /// Updates the track metadata for the lock screen. `index` (the queue
+    /// position) takes part in identifying the track, but the published
+    /// `mpris:trackid` is a counter of its own – see `Current::track_no`.
+    /// `length_ms`/`art_path` are optional; a duration that only shows up later
+    /// is merged in by `set_length`.
     pub fn set_metadata(
         &self,
         index: usize,
@@ -185,29 +311,40 @@ impl Mpris {
         length_ms: Option<i64>,
         art_path: Option<&str>,
     ) {
+        let artist = artist.filter(|s| !s.is_empty()).map(str::to_owned);
+        let album = album.filter(|s| !s.is_empty()).map(str::to_owned);
+        let art_uri = art_path
+            .filter(|s| !s.is_empty())
+            .and_then(|p| glib::filename_to_uri(p, None).ok())
+            .map(|uri| uri.to_string());
+        let metadata = {
+            let mut cur = self.current.borrow_mut();
+            cur.update(index, title, artist, album, length_ms, art_uri);
+            cur.build()
+        };
+        self.publish(metadata);
+    }
+
+    /// Merges a duration that only became known after playback started (the
+    /// pipeline reports it a moment in, and the non-library sources have no
+    /// duration at all when they start) into the published metadata. Cheap to
+    /// call from the 1 s tick: it only republishes when the value actually
+    /// changes.
+    pub fn set_length(&self, length_ms: i64) {
+        let metadata = {
+            let mut cur = self.current.borrow_mut();
+            if !cur.merge_length(length_ms) {
+                return;
+            }
+            cur.build()
+        };
+        self.publish(metadata);
+    }
+
+    fn publish(&self, metadata: Metadata) {
         let Some(player) = self.player.borrow().clone() else {
             return;
         };
-        let mut b = Metadata::builder().title(title);
-        if let Ok(tid) = TrackId::try_from(format!("/de/cais/Emilia/track/{index}")) {
-            b = b.trackid(tid);
-        }
-        if let Some(a) = artist.filter(|s| !s.is_empty()) {
-            b = b.artist([a]);
-        }
-        if let Some(al) = album.filter(|s| !s.is_empty()) {
-            b = b.album(al);
-        }
-        if let Some(ms) = length_ms.filter(|&m| m > 0) {
-            b = b.length(Time::from_millis(ms));
-        }
-        if let Some(uri) = art_path
-            .filter(|s| !s.is_empty())
-            .and_then(|p| glib::filename_to_uri(p, None).ok())
-        {
-            b = b.art_url(uri.to_string());
-        }
-        let metadata = b.build();
         glib::spawn_future_local(async move {
             let _ = player.set_metadata(metadata).await;
         });
@@ -228,6 +365,19 @@ impl Mpris {
         };
         glib::spawn_future_local(async move {
             let _ = player.seeked(Time::from_millis(pos_ms.max(0))).await;
+        });
+    }
+
+    /// Reflects the output volume to the desktop. The MPRIS setter only calls
+    /// back – the property does not follow by itself – so every volume change,
+    /// whether it came from the lock screen or from the app, is mirrored here.
+    pub fn set_volume(&self, vol: f64) {
+        let Some(player) = self.player.borrow().clone() else {
+            return;
+        };
+        let vol = vol.clamp(0.0, 1.0);
+        glib::spawn_future_local(async move {
+            let _ = player.set_volume(vol).await;
         });
     }
 
@@ -255,5 +405,60 @@ impl Mpris {
         glib::spawn_future_local(async move {
             let _ = player.set_loop_status(status).await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Current;
+
+    fn song(cur: &mut Current, index: usize, title: &str, length_ms: Option<i64>) {
+        cur.update(index, title, None, None, length_ms, None);
+    }
+
+    /// The track ID only moves on a real track change — re-publishing the same
+    /// track (the app updates its metadata more than once per song) must not
+    /// look like a new one to a scrobbler.
+    #[test]
+    fn track_id_follows_track_changes_only() {
+        let mut cur = Current::default();
+        song(&mut cur, 0, "One", None);
+        let first = cur.track_no;
+        song(&mut cur, 0, "One", None);
+        assert_eq!(cur.track_no, first, "identical metadata is the same track");
+        // Same queue position, new title: what a station's ICY updates and
+        // YouTube / podcasts / remote files look like (index stays 0).
+        song(&mut cur, 0, "Two", None);
+        assert_eq!(cur.track_no, first + 1);
+        // Same title, new queue position: the same song twice in a queue.
+        song(&mut cur, 1, "Two", None);
+        assert_eq!(cur.track_no, first + 2);
+    }
+
+    #[test]
+    fn length_is_merged_once_it_is_known() {
+        let mut cur = Current::default();
+        // Nothing published yet → nothing to merge into.
+        assert!(!cur.merge_length(1000));
+        song(&mut cur, 0, "Stream", None);
+        assert!(cur.merge_length(180_000), "first duration is published");
+        assert_eq!(cur.length_ms, Some(180_000));
+        assert!(!cur.merge_length(180_000), "unchanged duration stays quiet");
+        assert!(!cur.merge_length(0), "an unknown duration is not published");
+        assert_eq!(cur.length_ms, Some(180_000));
+        // A new track drops the old duration instead of carrying it over.
+        song(&mut cur, 1, "Next", None);
+        assert_eq!(cur.length_ms, None);
+    }
+
+    /// A zero/negative length from the library must not reach the desktop as
+    /// `mpris:length: 0` — clients render that as a 0:00 track.
+    #[test]
+    fn zero_length_is_dropped() {
+        let mut cur = Current::default();
+        song(&mut cur, 0, "Untagged", Some(0));
+        assert_eq!(cur.length_ms, None);
+        song(&mut cur, 1, "Tagged", Some(4_000));
+        assert_eq!(cur.length_ms, Some(4_000));
     }
 }

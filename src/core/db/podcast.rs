@@ -282,6 +282,40 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Title of an episode by its audio URL — so a URL handed in from outside
+    /// (MPRIS `OpenUri`) can be named properly instead of by its file name.
+    pub fn episode_title_by_url(&self, url: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT title FROM episode WHERE audio_url = ?1 LIMIT 1",
+                rusqlite::params![url],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .filter(|t| !t.trim().is_empty()))
+    }
+
+    /// Show title and image URL of the podcast an episode belongs to — for the
+    /// lock-screen metadata (album + cover) of a running episode.
+    pub fn podcast_show_for_episode_url(
+        &self,
+        url: &str,
+    ) -> Result<Option<(String, Option<String>)>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT p.title, p.image_url FROM episode e
+                 JOIN podcast p ON p.id = e.podcast_id
+                 WHERE e.audio_url = ?1 LIMIT 1",
+                rusqlite::params![url],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?)
+    }
+
     /// The podcast an episode (identified by its audio URL) belongs to — used to
     /// load its sibling episodes for next/previous navigation.
     pub fn podcast_id_for_episode_url(&self, url: &str) -> Result<Option<i64>> {

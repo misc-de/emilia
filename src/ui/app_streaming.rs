@@ -61,7 +61,14 @@ impl App {
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
-                self.mpris.set_metadata(0, &st.name, None, None, None, None);
+                self.mpris.set_metadata(
+                    0,
+                    &st.name,
+                    None,
+                    None,
+                    None,
+                    self.station_art(&st).as_deref(),
+                );
                 self.mpris.set_playing(true);
                 self.refresh_queue_icons();
                 self.set_chapters(Vec::new());
@@ -148,6 +155,12 @@ impl App {
 
     /// Looks up a saved station by id (the station list now lives in the
     /// StreamPage component, so the transport reads it straight from the DB).
+    /// Cached logo of a station for the lock screen, if it was already
+    /// downloaded (display path only – fetching happens on the station pages).
+    fn station_art(&self, st: &StreamItem) -> Option<String> {
+        crate::core::online::station_image_path(st.favicon.as_deref()?)
+    }
+
     fn stream_item(&self, id: i64) -> Option<StreamItem> {
         self.library
             .streams()
@@ -576,9 +589,12 @@ impl App {
             if self.mini.playing {
                 self.player.pause();
                 self.mini.playing = false;
-            } else {
-                self.player.resume();
+            } else if self.player.resume() {
                 self.mini.playing = true;
+            } else {
+                // Nothing left in the pipeline (a desktop Stop tore it down) →
+                // start the station over instead of pretending to play.
+                self.play_stream(id);
             }
             self.mpris.set_playing(self.mini.playing);
         } else {
@@ -624,8 +640,15 @@ impl App {
                     Some(name) => format!("{name} — {title}"),
                     None => title.clone(),
                 });
-                self.mpris
-                    .set_metadata(0, &title, station.as_deref(), None, None, None);
+                let art = self.stream_item(id).and_then(|st| self.station_art(&st));
+                self.mpris.set_metadata(
+                    0,
+                    &title,
+                    station.as_deref(),
+                    station.as_deref(),
+                    None,
+                    art.as_deref(),
+                );
                 self.note_heard_song(&title, station.as_deref());
             }
         }

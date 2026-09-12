@@ -148,6 +148,10 @@ struct Deck {
     fresh_load: Rc<Cell<bool>>,
     /// Resume position (ms) to seek to once this deck has prerolled (`AsyncDone`).
     pending_seek_ms: Rc<Cell<i64>>,
+    /// This deck's transition factor (0…1): 1 in normal playback, ramped by the
+    /// crossfade. Kept separate from the master/sleep gain so the two can be
+    /// combined instead of overwriting each other – see `write_volume`.
+    ramp: Rc<Cell<f64>>,
 }
 
 impl Deck {
@@ -167,8 +171,27 @@ impl Deck {
             equalizer,
             fresh_load: Rc::new(Cell::new(false)),
             pending_seek_ms: Rc::new(Cell::new(0)),
+            ramp: Rc::new(Cell::new(1.0)),
         })
     }
+
+    /// Sets this deck's transition factor and writes the resulting volume.
+    fn set_ramp(&self, ramp: f64, gain: f64) {
+        self.ramp.set(ramp.clamp(0.0, 1.0));
+        write_volume(&self.bin, self.ramp.get(), gain);
+    }
+
+    /// Re-writes this deck's volume after a change to the master/sleep gain,
+    /// keeping the transition factor it currently sits at.
+    fn apply_gain(&self, gain: f64) {
+        write_volume(&self.bin, self.ramp.get(), gain);
+    }
+}
+
+/// A deck's output volume is its transition factor (crossfade ramp) times the
+/// gain shared by both decks (master volume × sleep-timer fade).
+fn write_volume(bin: &gst::Element, ramp: f64, gain: f64) {
+    bin.set_property("volume", (ramp * gain).clamp(0.0, 1.0));
 }
 
 pub struct Player {
@@ -187,6 +210,10 @@ pub struct Player {
     /// URI the active deck's `about-to-finish` will continue into (gapless).
     /// Set by the app, consumed on the streaming thread → `Arc<Mutex>`.
     next_uri: Arc<Mutex<Option<String>>>,
+    /// Master output volume (0…1), driven by the desktop's MPRIS volume slider.
+    master: Rc<Cell<f64>>,
+    /// Sleep-timer fade factor (0…1); 1 outside the final fade-out window.
+    fade: Rc<Cell<f64>>,
     /// The running crossfade ramp timer (so a new transition can cancel it).
     fade_source: Rc<RefCell<Option<gst::glib::SourceId>>>,
     /// Keeps the per-deck bus watches alive.
@@ -208,6 +235,8 @@ impl Player {
             gapless: Arc::new(AtomicBool::new(true)),
             crossfade_ms: Arc::new(AtomicU64::new(0)),
             next_uri: Arc::new(Mutex::new(None)),
+            master: Rc::new(Cell::new(1.0)),
+            fade: Rc::new(Cell::new(1.0)),
             fade_source: Rc::new(RefCell::new(None)),
             bus_watches: RefCell::new(Vec::new()),
         })
@@ -260,10 +289,31 @@ impl Player {
         }
     }
 
-    /// Sets the linear output volume (0.0–1.0) on the active deck. Used by the
-    /// sleep-timer fade-out; crossfading drives both decks' volumes directly.
-    pub fn set_volume(&self, vol: f64) {
-        self.cur().set_property("volume", vol.clamp(0.0, 1.0));
+    /// Gain shared by both decks: master volume × sleep-timer fade.
+    fn gain(&self) -> f64 {
+        self.master.get() * self.fade.get()
+    }
+
+    /// Sets the sleep-timer fade factor (0.0–1.0) on the active deck. Multiplies
+    /// with the master volume, so fading out does not lose the user's setting.
+    pub fn set_fade(&self, factor: f64) {
+        self.fade.set(factor.clamp(0.0, 1.0));
+        self.cur_deck().apply_gain(self.gain());
+    }
+
+    /// Sets the master output volume (0.0–1.0), i.e. the desktop's volume
+    /// slider. Applies to both decks so a running crossfade follows along.
+    pub fn set_master_volume(&self, vol: f64) {
+        self.master.set(vol.clamp(0.0, 1.0));
+        let gain = self.gain();
+        for deck in &self.decks {
+            deck.apply_gain(gain);
+        }
+    }
+
+    /// The master output volume (0.0–1.0).
+    pub fn master_volume(&self) -> f64 {
+        self.master.get()
     }
 
     // --- Loading / playback ------------------------------------------------
@@ -296,7 +346,7 @@ impl Player {
         let cur = self.cur();
         cur.set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
-        cur.set_property("volume", 1.0_f64);
+        self.cur_deck().set_ramp(1.0, self.gain());
         cur.set_property("uri", uri);
         self.start(resume_ms)
     }
@@ -341,7 +391,7 @@ impl Player {
             .bin
             .set_state(gst::State::Ready)
             .map_err(|e| anyhow!("Failed to reset crossfade deck: {e}"))?;
-        in_deck.bin.set_property("volume", 0.0_f64);
+        in_deck.set_ramp(0.0, self.gain());
         in_deck.bin.set_property("uri", uri);
         in_deck.fresh_load.set(true);
         in_deck.pending_seek_ms.set(resume_ms.max(0));
@@ -361,17 +411,26 @@ impl Player {
         let step_ms = 50u64;
         let from_bin = self.decks[from].bin.clone();
         let to_bin = self.decks[to].bin.clone();
+        let from_ramp = self.decks[from].ramp.clone();
+        let to_ramp = self.decks[to].ramp.clone();
+        let master = self.master.clone();
+        let fade = self.fade.clone();
         let fade_source = self.fade_source.clone();
         let elapsed = Cell::new(0u64);
         let id = gst::glib::timeout_add_local(Duration::from_millis(step_ms), move || {
             let e = elapsed.get() + step_ms;
             elapsed.set(e);
             let t = (e as f64 / total_ms as f64).min(1.0);
-            from_bin.set_property("volume", (1.0 - t).clamp(0.0, 1.0));
-            to_bin.set_property("volume", t.clamp(0.0, 1.0));
+            // Re-read the gain every step: the volume slider may move mid-fade.
+            let gain = master.get() * fade.get();
+            from_ramp.set(1.0 - t);
+            to_ramp.set(t);
+            write_volume(&from_bin, 1.0 - t, gain);
+            write_volume(&to_bin, t, gain);
             if t >= 1.0 {
                 let _ = from_bin.set_state(gst::State::Null);
-                from_bin.set_property("volume", 1.0_f64);
+                from_ramp.set(1.0);
+                write_volume(&from_bin, 1.0, gain);
                 *fade_source.borrow_mut() = None;
                 gst::glib::ControlFlow::Break
             } else {
@@ -389,8 +448,9 @@ impl Player {
         }
         let idle = 1 - self.active.load(Ordering::Relaxed);
         let _ = self.decks[idle].bin.set_state(gst::State::Null);
-        self.decks[idle].bin.set_property("volume", 1.0_f64);
-        self.cur().set_property("volume", 1.0_f64);
+        let gain = self.gain();
+        self.decks[idle].set_ramp(1.0, gain);
+        self.cur_deck().set_ramp(1.0, gain);
     }
 
     /// Registers the per-deck bus watches and `about-to-finish` handlers.
@@ -534,8 +594,24 @@ impl Player {
         let _ = self.cur().set_state(gst::State::Paused);
     }
 
-    pub fn resume(&self) {
-        let _ = self.cur().set_state(gst::State::Playing);
+    /// Resumes the active deck. Returns `false` when there is nothing loaded:
+    /// `playbin` accepts the state change on an empty pipeline and then sits in
+    /// Playing without content, which callers used to report to the desktop as
+    /// "playing" (silently, forever).
+    pub fn resume(&self) -> bool {
+        if !self.has_content() {
+            return false;
+        }
+        self.cur().set_state(gst::State::Playing).is_ok()
+    }
+
+    /// Whether the active deck has a URI loaded, i.e. whether there is anything
+    /// to resume or seek in. `stop()` tears the pipeline down, so this is false
+    /// after it (and before the first track of a session).
+    pub fn has_content(&self) -> bool {
+        self.cur()
+            .property::<Option<String>>("uri")
+            .is_some_and(|uri| !uri.is_empty())
     }
 
     pub fn stop(&self) {
@@ -563,12 +639,20 @@ impl Player {
             .map(|t| t.mseconds() as i64)
     }
 
-    /// Seeks the active deck to the given position (e.g. for resume).
+    /// Seeks the active deck to the given position (e.g. for resume). The
+    /// target is clamped to the track: seeking past the end is accepted by
+    /// `playbin` but leaves the pipeline running in silence — with a network
+    /// source there is no EOS to end it, so the deck (and the audio sink) would
+    /// stay awake with the position frozen or ticking on forever.
     pub fn seek_ms(&self, ms: i64) -> Result<()> {
+        let mut target = ms.max(0);
+        if let Some(dur) = self.duration_ms().filter(|&d| d > 0) {
+            target = target.min(dur);
+        }
         self.cur()
             .seek_simple(
                 gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
-                gst::ClockTime::from_mseconds(ms.max(0) as u64),
+                gst::ClockTime::from_mseconds(target as u64),
             )
             .map_err(|e| anyhow!("Seek failed: {e}"))?;
         Ok(())

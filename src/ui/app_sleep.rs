@@ -108,7 +108,7 @@ impl App {
             }
         }
         // Undo any fade left over from a previous timer.
-        self.player.set_volume(1.0);
+        self.player.set_fade(1.0);
         self.refresh_sleep_ui();
         if let Some(pop) = self.sleep.button.popover() {
             pop.popdown();
@@ -151,7 +151,7 @@ impl App {
         // Gentle fade over the final stretch (leave full volume before that).
         if (rem as f64) < SLEEP_FADE_S {
             self.player
-                .set_volume((rem as f64 / SLEEP_FADE_S).clamp(0.0, 1.0));
+                .set_fade((rem as f64 / SLEEP_FADE_S).clamp(0.0, 1.0));
         }
         self.refresh_sleep_ui();
     }
@@ -164,7 +164,7 @@ impl App {
             self.save_episode_progress();
         }
         self.player.pause();
-        self.player.set_volume(1.0);
+        self.player.set_fade(1.0);
         self.mini.playing = false;
         self.mini.loading = false;
         self.sleep.remaining_s = None;
