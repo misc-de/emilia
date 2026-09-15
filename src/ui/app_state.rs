@@ -241,8 +241,12 @@ pub(crate) struct TransportState {
     pub(crate) play_history: Vec<PathBuf>,
     /// When jumping back out of history, do not write to the history again.
     pub(crate) skip_history_push: bool,
-    /// Queue paused while a single song is played in between (list + position).
-    pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize)>,
+    /// Queue paused while a single song is played in between: list, position in
+    /// it, and how far the interrupted track had played (ms). The last one is
+    /// carried here rather than read back from the DB, because a plain song
+    /// keeps no resume position of its own (see `App::should_resume`) — yet an
+    /// interruption the user did not ask to restart must continue where it was.
+    pub(crate) interrupted_queue: Option<(Vec<PathBuf>, usize, i64)>,
     /// Back stack of displaced playback contexts (queue + position).
     pub(crate) nav_stack: Vec<(Vec<PathBuf>, usize)>,
     /// Context last played by `play_current` (to detect queue replacement).
@@ -271,8 +275,16 @@ pub(crate) struct TransportState {
     pub(crate) skip_count: u32,
     /// One-shot start position (ms) for the next `play_current`, overriding the
     /// saved resume position. Used by the recording editor's "play from the
-    /// playhead" preview. Consumed (reset to `None`) on use.
+    /// playhead" preview and when an [`Self::interrupted_queue`] is picked back
+    /// up. Consumed (reset to `None`) on use.
     pub(crate) forced_start_ms: Option<i64>,
+    /// One-shot marker that the next `play_current` is a **move within the
+    /// running queue** (end-of-track advance, skip buttons, unplayable skip):
+    /// such a start begins at 0 rather than at the track's stored resume
+    /// position. Moving on to the next piece means starting it, not resuming a
+    /// half-heard earlier visit — even for an audiobook, whose next chapter
+    /// begins at its beginning. Consumed (reset to `false`) by `play_current`.
+    pub(crate) fresh_start: bool,
 }
 
 /// Mini-player / now-playing strip state, grouped off the `App` god-object.

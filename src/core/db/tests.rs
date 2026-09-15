@@ -1430,3 +1430,62 @@ fn lyrics_cache_roundtrip_and_negative() {
     assert!(lib.get_cached_lyrics("/m/inst.mp3").is_none());
     assert!(lib.lyrics_recently_missing("/m/inst.mp3"));
 }
+
+/// Only long-form material and audiobooks keep a playback position — a plain
+/// song does not, so listening through an album never drops into the middle
+/// of a track that was sampled before.
+#[test]
+fn only_longform_and_audiobooks_resume() {
+    let lib = Library::open_in_memory().unwrap();
+
+    // A three-minute song: no resume, whatever its (default) areas are.
+    let mut song = track("/m/song.mp3", Some("A"), Some("Album"));
+    song.duration_ms = Some(3 * 60_000);
+    assert!(!lib.track_resumable(&song));
+
+    // Exactly at the threshold is still a song; one second past it is not.
+    song.duration_ms = Some(crate::core::youtube::LONGFORM_SECS * 1000);
+    assert!(!lib.track_resumable(&song));
+    song.duration_ms = Some(crate::core::youtube::LONGFORM_SECS * 1000 + 1000);
+    assert!(lib.track_resumable(&song));
+
+    // Unknown length counts as a song (nothing to justify a mid-track start).
+    let mut unknown = track("/m/unknown.mp3", Some("A"), Some("Album"));
+    unknown.duration_ms = None;
+    assert!(!lib.track_resumable(&unknown));
+
+    // A short audiobook chapter resumes — the area decides, not the length.
+    let mut chapter = track("/b/ch1.mp3", Some("Reader"), Some("Book"));
+    chapter.duration_ms = Some(4 * 60_000);
+    assert!(!lib.track_resumable(&chapter));
+    lib.set_category("artist", "Reader", Some("audiobooks"))
+        .unwrap();
+    assert!(lib.track_resumable(&chapter));
+}
+
+/// The one-off cleanup drops the positions that older versions stored for
+/// every track, and leaves the ones that are still wanted alone.
+#[test]
+fn stale_resume_positions_are_cleared() {
+    let lib = Library::open_in_memory().unwrap();
+    lib.set_category("artist", "Reader", Some("audiobooks"))
+        .unwrap();
+
+    let mut song = track("/m/song.mp3", Some("A"), Some("Album"));
+    song.duration_ms = Some(3 * 60_000);
+    let mut talk = track("/m/talk.mp3", Some("A"), Some("Album"));
+    talk.duration_ms = Some(45 * 60_000);
+    let mut chapter = track("/b/ch1.mp3", Some("Reader"), Some("Book"));
+    chapter.duration_ms = Some(4 * 60_000);
+    for t in [&song, &talk, &chapter] {
+        lib.upsert_track(t).unwrap();
+        lib.set_resume_path(&t.path, 30_000).unwrap();
+    }
+
+    lib.clear_stale_resume().unwrap();
+
+    let pos = |p: &str| lib.track_by_path(p).unwrap().unwrap().resume_ms;
+    assert_eq!(pos("/m/song.mp3"), 0, "a song keeps no position");
+    assert_eq!(pos("/m/talk.mp3"), 30_000, "long-form keeps its position");
+    assert_eq!(pos("/b/ch1.mp3"), 30_000, "an audiobook keeps its position");
+}

@@ -955,6 +955,20 @@ impl Library {
             )?;
         }
 
+        // Migration: drop the resume positions of tracks that are no longer
+        // resumed at all (plain songs). They were stored for every track once,
+        // so an old value would still pull a song into its middle when tapped.
+        // Guarded by a setting rather than the schema version — it touches data,
+        // not the schema, and must run exactly once.
+        if self
+            .get_setting("resume_cleanup_v1")
+            .unwrap_or(None)
+            .is_none()
+        {
+            self.clear_stale_resume()?;
+            let _ = self.set_setting("resume_cleanup_v1", "1");
+        }
+
         // All migrations applied → stamp the schema version (read back by the
         // downgrade guard at the top). PRAGMA takes no bind parameters.
         self.conn

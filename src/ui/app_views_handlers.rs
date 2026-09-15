@@ -57,8 +57,11 @@ impl App {
                         && self.transport.queue.len() > 1
                         && self.transport.interrupted_queue.is_none()
                     {
-                        self.transport.interrupted_queue =
-                            Some((self.transport.queue.clone(), self.transport.queue_pos));
+                        self.transport.interrupted_queue = Some((
+                            self.transport.queue.clone(),
+                            self.transport.queue_pos,
+                            self.player.position_ms().unwrap_or(0),
+                        ));
                     }
                     self.transport.queue = vec![path];
                     self.transport.queue_pos = 0;

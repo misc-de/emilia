@@ -329,6 +329,15 @@ impl App {
         self.transport.shuffle_idx = 0;
     }
 
+    /// [`Self::play_current`] for a move **within** the running queue: the piece
+    /// that is stepped to starts at its beginning instead of at a resume
+    /// position left over from an earlier, partial listen (see
+    /// [`crate::ui::app_state::TransportState::fresh_start`]).
+    fn play_current_fresh(&mut self) {
+        self.transport.fresh_start = true;
+        self.play_current();
+    }
+
     /// Next track: when shuffling, the next of the shuffle order, otherwise the
     /// following one. At the end: with `wrap` (an explicit user "next") playback
     /// restarts from the start of the queue (a single track restarts itself);
@@ -350,7 +359,7 @@ impl App {
             self.transport.queue_pos = at;
             // The context length changed → let the shuffle order rebuild.
             self.transport.shuffle_order.clear();
-            self.play_current();
+            self.play_current_fresh();
             self.refresh_queue_icons();
             self.reload_queue_list();
             self.save_queue();
@@ -384,7 +393,7 @@ impl App {
         match next {
             Some(n) => {
                 self.transport.queue_pos = n;
-                self.play_current();
+                self.play_current_fresh();
             }
             None if (self.transport.repeat || wrap) && !self.transport.queue.is_empty() => {
                 // Repeat or an explicit "next" at the end: start over from the
@@ -397,7 +406,7 @@ impl App {
                 } else {
                     self.transport.queue_pos = 0;
                 }
-                self.play_current();
+                self.play_current_fresh();
             }
             None => {
                 // End of playback: stop and rewind to the start of the queue
@@ -434,7 +443,7 @@ impl App {
         if self.transport.queue_pos > 0 && self.transport.queue.len() > 1 {
             self.transport.skip_history_push = true;
             self.transport.queue_pos -= 1;
-            self.play_current();
+            self.play_current_fresh();
             return;
         }
 
@@ -467,7 +476,7 @@ impl App {
         // Nothing before this: restart the current track from the beginning.
         if self.transport.playing_path.is_some() {
             self.transport.skip_history_push = true;
-            self.play_current();
+            self.play_current_fresh();
         }
     }
 
@@ -610,12 +619,13 @@ impl App {
         }
     }
 
-    /// A resume position is kept for **all** tracks: on the next start
-    /// the track continues where it was stopped. The `guarded_resume`
-    /// guards ensure that a nearly finished or just-started
-    /// track starts over from the beginning.
-    pub(crate) fn should_resume(&self, _t: &Track) -> bool {
-        true
+    /// Whether this track keeps a resume position: only long-form material and
+    /// audiobooks do (see [`crate::core::db::Library::track_resumable`]) — a
+    /// song is always started from the beginning. On top of that the
+    /// `guarded_resume` guards drop a position that is very close to the start
+    /// or the end of the track.
+    pub(crate) fn should_resume(&self, t: &Track) -> bool {
+        self.library.track_resumable(t)
     }
 
     /// Saves the current queue (paths + position) for
@@ -812,6 +822,9 @@ impl App {
     }
 
     pub(crate) fn play_current(&mut self) {
+        // Consume the "moving on within the queue" marker first, so it can never
+        // leak into a later start — not even when this call returns early below.
+        let fresh_start = std::mem::take(&mut self.transport.fresh_start);
         // Save the position of the previously running track before a new one is loaded.
         self.save_resume();
         // If a podcast episode was playing before, save its resume position.
@@ -873,14 +886,18 @@ impl App {
             if !has_local {
                 // Long-form items (talks/streams/podcasts) continue where they
                 // were left off; songs have no stored position and start at 0.
-                // A tapped jump mark wins over both for this one start.
+                // Advancing within the queue always starts at 0 as well. A
+                // tapped jump mark wins over all of that for this one start.
                 let resume = self
                     .youtube
                     .pending_seek
                     .take()
                     .filter(|(v, _)| v == video_id)
                     .map(|(_, ms)| ms)
-                    .unwrap_or_else(|| self.library.yt_progress(video_id).unwrap_or(0).max(0));
+                    .unwrap_or_else(|| match fresh_start {
+                        true => 0,
+                        false => self.library.yt_progress(video_id).unwrap_or(0).max(0),
+                    });
                 // Optimistic now-playing state; the worker resolves the stream.
                 self.transport.skip_count = 0;
                 self.transport.playing_path = Some(path.clone());
@@ -922,11 +939,14 @@ impl App {
                 return;
             }
         }
-        // Saved resume position (for all tracks; see should_resume). A one-shot
-        // forced start (recording editor preview) overrides it for this start.
+        // Saved resume position (long-form/audiobooks only; see should_resume).
+        // A one-shot forced start (recording editor preview, or picking an
+        // interrupted queue back up) overrides it for this start, and moving on
+        // within the queue drops it entirely.
         let track = self.library.track_by_path(&path_str).ok().flatten();
         let resume_ms = match self.transport.forced_start_ms.take() {
             Some(ms) => ms.max(0),
+            None if fresh_start => 0,
             // An offline copy of a long-form YouTube item has no library row —
             // its resume point lives in `yt_progress`, like the streamed case.
             None => match (&track, &yt_video) {
@@ -1525,9 +1545,15 @@ impl App {
             // If a single song was slipped in between, now resume the interrupted
             // queue at its spot.
             if self.transport.queue.len() == 1 && self.transport.interrupted_queue.is_some() {
-                if let Some((q, pos)) = self.transport.interrupted_queue.take() {
+                if let Some((q, pos, at_ms)) = self.transport.interrupted_queue.take() {
                     self.transport.queue = q;
                     self.transport.queue_pos = pos;
+                    // Pick the interrupted track up where it was cut off — the
+                    // user never asked to restart it, and a song carries no
+                    // resume position of its own any more.
+                    if at_ms > 0 {
+                        self.transport.forced_start_ms = Some(at_ms);
+                    }
                     self.play_current();
                 }
             } else {

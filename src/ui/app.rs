@@ -2341,6 +2341,7 @@ impl Component for App {
                 queue_marks: Default::default(),
                 skip_count: 0,
                 forced_start_ms: None,
+                fresh_start: false,
             },
             mini: MiniState {
                 now_playing: None,

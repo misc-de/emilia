@@ -108,6 +108,46 @@ impl Library {
         }
     }
 
+    /// Whether a track's playback position is worth remembering at all.
+    /// Long-form material — audiobook chapters, talks, DJ sets, live
+    /// recordings — is continued where it was left off; a plain song is not,
+    /// so listening through an album never drops into the middle of a track
+    /// that was sampled earlier. The threshold is the same ten minutes
+    /// YouTube uses for its watch positions
+    /// ([`crate::core::youtube::LONGFORM_SECS`]).
+    pub fn track_resumable(&self, t: &Track) -> bool {
+        if t.duration_ms
+            .is_some_and(|ms| ms / 1000 > crate::core::youtube::LONGFORM_SECS)
+        {
+            return true;
+        }
+        // Audiobook chapters can be short; there the position is the whole point.
+        self.resolve_areas(t.artist.as_deref(), t.album.as_deref(), &t.path)
+            .contains(&crate::core::category::Area::Audiobooks)
+    }
+
+    /// One-off cleanup: resume positions used to be kept for *every* track,
+    /// which is why an album could start a song in the middle. Clears the
+    /// stored position of every track that no longer qualifies (see
+    /// [`Self::track_resumable`]). Only tracks that actually carry a position
+    /// are looked at, so this stays cheap even on a large library.
+    pub(super) fn clear_stale_resume(&self) -> Result<()> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TRACK_COLS} FROM track WHERE resume_ms > 0"
+        ))?;
+        let tracks: Vec<Track> = stmt
+            .query_map([], row_to_track)?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+        for t in tracks {
+            if !self.track_resumable(&t) {
+                self.set_resume_path(&t.path, 0)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Stores the resume position by path. The
     /// queue is path-based; nothing happens for an unknown path.
     pub fn set_resume_path(&self, path: &str, resume_ms: i64) -> Result<()> {
