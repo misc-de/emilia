@@ -278,6 +278,14 @@ pub(crate) struct TransportState {
     /// playhead" preview and when an [`Self::interrupted_queue`] is picked back
     /// up. Consumed (reset to `None`) on use.
     pub(crate) forced_start_ms: Option<i64>,
+    /// Where the track that was loaded when the app last closed (or was paused
+    /// and then stopped) had got to: `(path, ms)`, restored from the playback
+    /// state at startup. Applied by the first `play_current` that starts that
+    /// very path — picking a paused album back up mid-song — and dropped
+    /// otherwise, so it can never bleed into a different track. Unlike a
+    /// track's own resume point this exists for songs too; it describes the
+    /// playback session, not the track (see `App::save_resume`).
+    pub(crate) resume_current: Option<(PathBuf, i64)>,
     /// One-shot marker that the next `play_current` is a **move within the
     /// running queue** (end-of-track advance, skip buttons, unplayable skip):
     /// such a start begins at 0 rather than at the track's stored resume

@@ -13,7 +13,7 @@ use crate::ui::app::{
     save_window_state, section_meta, ActiveSource, App, AppWidgets, Cmd, Msg, SortCrit, SECTIONS,
     SORTABLE_SECTIONS,
 };
-use crate::ui::app_playback::TransportMsg;
+use crate::ui::app_playback::{TransportMsg, CURRENT_PATH_KEY, CURRENT_POS_KEY};
 use crate::ui::app_settings::SettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::theme::DesignMsg;
@@ -1016,9 +1016,23 @@ impl App {
         let close_session = self.transport.close_session.clone();
         root.connect_close_request(move |win| {
             // Save the last listening position (covers the gap to the 5-s save).
+            // Mirrors `App::save_resume`: the playback state is written for every
+            // track, so the running song is picked back up where it stood on the
+            // next start; the track's own resume point only for material that
+            // keeps one (audiobooks, long-form).
             if let Some((path, pos, dur)) = close_resume.borrow().clone() {
                 if let Ok(lib) = Library::open() {
-                    let _ = lib.set_resume_path(&path, guarded_resume(pos, dur));
+                    let at = guarded_resume(pos, dur);
+                    let _ = lib.set_setting(CURRENT_PATH_KEY, &path);
+                    let _ = lib.set_setting(CURRENT_POS_KEY, &at.to_string());
+                    let keeps_one = lib
+                        .track_by_path(&path)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|t| lib.track_resumable(&t));
+                    if keeps_one {
+                        let _ = lib.set_resume_path(&path, at);
+                    }
                 }
             }
             // Save the running listening session as the last event (otherwise the

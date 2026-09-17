@@ -16,6 +16,13 @@ use crate::ui::app_lyrics::LyricsMsg;
 use crate::ui::fs_row::FsEntry;
 use crate::ui::play_mark::{PlaybackSink, PlaybackState};
 
+/// Settings key: path of the track the player currently has loaded. Together
+/// with [`CURRENT_POS_KEY`] it forms the playback state that survives a
+/// restart, alongside the saved queue (`queue_paths` / `queue_pos`).
+pub(crate) const CURRENT_PATH_KEY: &str = "current_path";
+/// Settings key: how far [`CURRENT_PATH_KEY`]'s track has played, in ms.
+pub(crate) const CURRENT_POS_KEY: &str = "current_pos_ms";
+
 impl App {
     /// Gathers what is playing right now, in the terms the lists ask in (see
     /// [`PlaybackState`]). Built once per change so no list has to dig through
@@ -653,27 +660,51 @@ impl App {
         let _ = self.library.set_setting("user_queue_paths", &user_paths);
     }
 
-    /// Saves the current playback position of the loaded track as a
-    /// resume point. Near the start or end it is reset to 0 so that a
-    /// nearly finished track starts over from the beginning next time.
+    /// Saves how far the loaded track has played — in two places, with two
+    /// very different lifetimes:
+    ///
+    /// * As part of the **playback state** ([`Self::save_current_position`]),
+    ///   for every track. This is what lets a paused or stopped album pick the
+    ///   running song back up where it stood, a restart of the app included.
+    ///   It belongs to *this* track being the loaded one and is left behind as
+    ///   soon as another one starts.
+    /// * As the track's **own resume point**, only for material that keeps one
+    ///   (see [`Self::should_resume`]). That one outlives the session: an
+    ///   audiobook tapped weeks later still continues where it was left off.
+    ///
+    /// Near the start or the end both are reset to 0, so a nearly finished
+    /// track starts over rather than ending a moment after it began.
     pub(crate) fn save_resume(&self) {
         let Some(path) = self.transport.playing_path.clone() else {
             return;
         };
         let path_str = path.to_string_lossy();
-        let Some(track) = self.library.track_by_path(&path_str).ok().flatten() else {
-            return;
-        };
-        if !self.should_resume(&track) {
-            return;
-        }
         let Some(pos) = self.player.position_ms() else {
             return;
         };
-        let dur = self.player.duration_ms().or(track.duration_ms).unwrap_or(0);
+        let track = self.library.track_by_path(&path_str).ok().flatten();
+        let dur = self
+            .player
+            .duration_ms()
+            .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
+            .unwrap_or(0);
+        self.save_current_position(&path_str, pos, dur);
+        if matches!(&track, Some(t) if self.should_resume(t)) {
+            let _ = self
+                .library
+                .set_resume_path(&path_str, guarded_resume(pos, dur));
+        }
+    }
+
+    /// Records which track is loaded and how far it has played, as **playback
+    /// state** rather than as a property of the track (see [`Self::save_resume`]
+    /// for why the two are kept apart). Read back on the next start, where it
+    /// only applies if that same track is still the one the queue points at.
+    pub(crate) fn save_current_position(&self, path: &str, pos_ms: i64, dur_ms: i64) {
+        let _ = self.library.set_setting(CURRENT_PATH_KEY, path);
         let _ = self
             .library
-            .set_resume_path(&path_str, guarded_resume(pos, dur));
+            .set_setting(CURRENT_POS_KEY, &guarded_resume(pos_ms, dur_ms).to_string());
     }
 
     /// Saves the playback position of the running podcast episode (resume,
@@ -822,9 +853,12 @@ impl App {
     }
 
     pub(crate) fn play_current(&mut self) {
-        // Consume the "moving on within the queue" marker first, so it can never
-        // leak into a later start — not even when this call returns early below.
+        // Consume the one-shot start markers first, so neither can leak into a
+        // later start — not even when this call returns early below. The
+        // restored session position is taken here and matched against the path
+        // further down: whatever starts now, it is spent either way.
         let fresh_start = std::mem::take(&mut self.transport.fresh_start);
+        let restored_session = self.transport.resume_current.take();
         // Save the position of the previously running track before a new one is loaded.
         self.save_resume();
         // If a podcast episode was playing before, save its resume position.
@@ -939,22 +973,29 @@ impl App {
                 return;
             }
         }
-        // Saved resume position (long-form/audiobooks only; see should_resume).
-        // A one-shot forced start (recording editor preview, or picking an
-        // interrupted queue back up) overrides it for this start, and moving on
-        // within the queue drops it entirely.
+        // Where to start. A one-shot forced start (recording editor preview, or
+        // picking an interrupted queue back up) wins; moving on within the queue
+        // always starts at 0; otherwise the track continues where the playback
+        // session left it, and failing that at its own resume point — which
+        // only long-form material and audiobooks have (see `should_resume`).
         let track = self.library.track_by_path(&path_str).ok().flatten();
-        let resume_ms = match self.transport.forced_start_ms.take() {
-            Some(ms) => ms.max(0),
-            None if fresh_start => 0,
-            // An offline copy of a long-form YouTube item has no library row —
-            // its resume point lives in `yt_progress`, like the streamed case.
-            None => match (&track, &yt_video) {
-                (_, Some(vid)) => self.library.yt_progress(vid).unwrap_or(0).max(0),
-                (Some(t), None) if self.should_resume(t) => t.resume_ms,
-                _ => 0,
-            },
+        // The restored session position counts for its own track only.
+        let restored = restored_session
+            .filter(|(p, _)| *p == path)
+            .map(|(_, ms)| ms);
+        // An offline copy of a long-form YouTube item has no library row — its
+        // resume point lives in `yt_progress`, like the streamed case.
+        let stored_ms = match (&track, &yt_video) {
+            (_, Some(vid)) => self.library.yt_progress(vid).unwrap_or(0).max(0),
+            (Some(t), None) if self.should_resume(t) => t.resume_ms,
+            _ => 0,
         };
+        let resume_ms = start_position(
+            self.transport.forced_start_ms.take(),
+            fresh_start,
+            restored,
+            stored_ms,
+        );
         match self.start_track_playback(&path_str, resume_ms) {
             Ok(is_network_stream) => {
                 // A track started → reset the unplayable-skip guard.
@@ -1013,10 +1054,11 @@ impl App {
                     .duration_ms()
                     .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
                     .unwrap_or(0);
-                // Snapshot for saving on close (resume tracks only).
-                let resumable = matches!(&track, Some(t) if self.should_resume(t));
+                // Snapshot for saving on close — kept for every track: the
+                // close handler writes the playback state from it always and
+                // the track's own resume point only where one is wanted.
                 *self.transport.close_resume.borrow_mut() =
-                    resumable.then(|| (path_str.clone(), start, self.mini.track_duration_ms));
+                    Some((path_str.clone(), start, self.mini.track_duration_ms));
                 // Start a new listening session for the statistics.
                 self.start_play_session(path.clone(), self.mini.track_duration_ms);
                 // Adjust the play/queue markers in the list to the new track.
@@ -1937,9 +1979,33 @@ pub(crate) fn absolute_seek(pos_ms: i64, length_ms: Option<i64>) -> SeekTarget {
     }
 }
 
+/// Where a start of a track begins, in ms — the pure half of the decision in
+/// [`App::play_current`]. In order of precedence:
+///
+/// 1. `forced_ms`: a one-shot start demanded by the caller (the recording
+///    editor's "play from the playhead", an interrupted queue picked back up).
+/// 2. `fresh_start`: moving on **within** the running queue always begins at
+///    the beginning — an album's next song, an audiobook's next chapter.
+/// 3. `restored_ms`: where this very track stood when listening stopped, from
+///    the playback state restored at startup. A song has one of these too.
+/// 4. `stored_ms`: the track's own resume point, which only long-form material
+///    and audiobooks carry (see [`App::should_resume`]); 0 for everything else.
+pub(crate) fn start_position(
+    forced_ms: Option<i64>,
+    fresh_start: bool,
+    restored_ms: Option<i64>,
+    stored_ms: i64,
+) -> i64 {
+    match forced_ms {
+        Some(ms) => ms.max(0),
+        None if fresh_start => 0,
+        None => restored_ms.unwrap_or(stored_ms).max(0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{absolute_seek, relative_seek, SeekTarget};
+    use super::{absolute_seek, relative_seek, start_position, SeekTarget};
 
     #[test]
     fn relative_seek_past_the_end_skips_instead_of_running_on() {
@@ -1969,5 +2035,44 @@ mod tests {
         assert_eq!(absolute_seek(600_000, len), SeekTarget::Ignore);
         assert_eq!(absolute_seek(-1, len), SeekTarget::Ignore);
         assert_eq!(absolute_seek(600_000, None), SeekTarget::To(600_000));
+    }
+    /// The whole point of the resume rework: moving on within a queue starts
+    /// the next piece at its beginning, while a paused album picks the song it
+    /// stood on back up — and a song that was merely sampled once does not
+    /// drag its old position along.
+    #[test]
+    fn start_position_follows_its_order_of_precedence() {
+        // Nothing to go on: the beginning.
+        assert_eq!(start_position(None, false, None, 0), 0);
+
+        // The track's own resume point (audiobook, long-form) is used…
+        assert_eq!(start_position(None, false, None, 42_000), 42_000);
+        // …but never when moving on within the queue: the next chapter of an
+        // audiobook begins at its beginning.
+        assert_eq!(start_position(None, true, None, 42_000), 0);
+
+        // A paused album carries on mid-song, even though a song keeps no
+        // resume point of its own (stored_ms = 0).
+        assert_eq!(start_position(None, false, Some(75_000), 0), 75_000);
+        // Advancing wins over that too — it is the *next* song starting.
+        assert_eq!(start_position(None, true, Some(75_000), 0), 0);
+        // And it takes precedence over a stored point for the same track.
+        assert_eq!(start_position(None, false, Some(75_000), 42_000), 75_000);
+
+        // A forced start beats everything, advance included.
+        assert_eq!(
+            start_position(Some(9_000), false, Some(75_000), 42_000),
+            9_000
+        );
+        assert_eq!(
+            start_position(Some(9_000), true, Some(75_000), 42_000),
+            9_000
+        );
+        // Even a forced start of 0 is honoured as "from the top".
+        assert_eq!(start_position(Some(0), false, Some(75_000), 0), 0);
+
+        // Negatives can't reach the player.
+        assert_eq!(start_position(Some(-5), false, None, 0), 0);
+        assert_eq!(start_position(None, false, Some(-5), 0), 0);
     }
 }

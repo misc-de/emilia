@@ -2342,6 +2342,7 @@ impl Component for App {
                 skip_count: 0,
                 forced_start_ms: None,
                 fresh_start: false,
+                resume_current: None,
             },
             mini: MiniState {
                 now_playing: None,
@@ -2488,6 +2489,38 @@ impl Component for App {
         if !q.is_empty() {
             q_pos = q_pos.min(q.len() - 1);
             model.mini.now_playing = Some(model.display_name(&q[q_pos]));
+            // How far that track had played when Emilia was last closed. Kept
+            // for every track (a song included), because it describes where
+            // listening stopped rather than a property of the track — so a
+            // paused album carries on mid-song instead of restarting it. It
+            // only counts for this one track; `play_current` drops it as soon
+            // as anything else starts.
+            let at: i64 = model
+                .library
+                .get_setting(crate::ui::app_playback::CURRENT_POS_KEY)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let same_track = model
+                .library
+                .get_setting(crate::ui::app_playback::CURRENT_PATH_KEY)
+                .ok()
+                .flatten()
+                .is_some_and(|p| std::path::Path::new(&p) == q[q_pos]);
+            if at > 0 && same_track {
+                model.transport.resume_current = Some((q[q_pos].clone(), at));
+                // Show the position in the player bar right away, so the bar
+                // reflects where pressing play will pick things up.
+                model.mini.position_ms = at;
+                model.mini.track_duration_ms = model
+                    .library
+                    .track_by_path(&q[q_pos].to_string_lossy())
+                    .ok()
+                    .flatten()
+                    .and_then(|t| t.duration_ms)
+                    .unwrap_or(0);
+            }
             model.transport.queue = q;
             model.transport.queue_pos = q_pos;
         }

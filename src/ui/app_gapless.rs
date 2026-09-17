@@ -141,9 +141,10 @@ impl App {
             .duration_ms()
             .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
             .unwrap_or(0);
-        let resumable = matches!(&track, Some(t) if self.should_resume(t));
+        // Kept for every track (see the same snapshot in `play_current`): the
+        // close handler decides what of it is worth persisting.
         *self.transport.close_resume.borrow_mut() =
-            resumable.then(|| (path_str.clone(), 0, self.mini.track_duration_ms));
+            Some((path_str.clone(), 0, self.mini.track_duration_ms));
         self.start_play_session(path.clone(), self.mini.track_duration_ms);
         self.refresh_queue_icons();
         self.save_queue();
