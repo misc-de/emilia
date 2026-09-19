@@ -379,7 +379,12 @@ fn fetch_artists_parallel(
             let Some(name) = jobs.lock().unwrap().pop_front() else {
                 break;
             };
-            let (image, errored) = match client.fetch_artist_image(&name) {
+            // In the "exactly as tagged" credit mode an entry can be a whole
+            // credit ("A feat. B"), which no photo service knows – ask for the
+            // main artist and file the result under the entry's own name. For
+            // every other name this is a no-op.
+            let query = crate::core::artist::primary_artist(&name);
+            let (image, errored) = match client.fetch_artist_image(&query) {
                 Ok(img) => (img, false),
                 Err(_) => (None, true),
             };

@@ -1829,6 +1829,7 @@ impl Component for App {
             gallery_columns,
             recording_buffer_minutes,
             saved_section,
+            artist_credit_mode,
         } = Self::read_init_state(&library);
 
         // Runtime theming (scaling + design) and tray prefs. Plain DB reads, so
@@ -2300,6 +2301,7 @@ impl Component for App {
                 active_output,
                 gapless,
                 crossfade_secs,
+                artist_credit_mode,
             },
             files: FilesState {
                 music_dir,

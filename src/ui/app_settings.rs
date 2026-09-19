@@ -401,6 +401,50 @@ impl App {
         // "List display" sits right after "Scaling" on the View page.
         page.add(&gallery_group);
 
+        // How compound credits ("A feat. B & C") appear in the artist list.
+        // Splitting them is what makes guests discoverable, but it also tears
+        // apart band names carrying "&" or a comma – hence the choice.
+        let credit_group = adw::PreferencesGroup::builder()
+            .title(gettext("Artists"))
+            .description(gettext(
+                "How artist tags like \"A feat. B\" are listed. The tags themselves are never changed.",
+            ))
+            .build();
+        use crate::core::artist::CreditMode;
+        let credit_modes = [CreditMode::Split, CreditMode::Primary, CreditMode::Raw];
+        let credit_labels = [
+            gettext("List guests separately"),
+            gettext("Main artist only"),
+            gettext("Exactly as tagged"),
+        ];
+        let credit_label_refs: Vec<&str> = credit_labels.iter().map(String::as_str).collect();
+        let credit_row = adw::ComboRow::builder()
+            .title(gettext("Featured artists"))
+            .subtitle(gettext(
+                "\"List guests separately\" gives every guest their own entry",
+            ))
+            .model(&gtk::StringList::new(&credit_label_refs))
+            .build();
+        let cur_credit_idx = credit_modes
+            .iter()
+            .position(|m| *m == self.settings.artist_credit_mode)
+            .unwrap_or(0);
+        credit_row.set_selected(cur_credit_idx as u32);
+        {
+            // Connect only after `set_selected`, so the preselection doesn't
+            // trigger a rebuild.
+            let sender = sender.clone();
+            credit_row.connect_selected_notify(move |r| {
+                let mode = credit_modes
+                    .get(r.selected() as usize)
+                    .copied()
+                    .unwrap_or_default();
+                sender.input(Msg::Setting(SettingMsg::SetArtistCreditMode(mode)));
+            });
+        }
+        credit_group.add(&credit_row);
+        page.add(&credit_group);
+
         // System: optional desktop tray icon + window behavior. There is no tray
         // on a phone, so the whole group stays hidden in the narrow layout.
         let tray_group = adw::PreferencesGroup::builder()
@@ -1588,6 +1632,9 @@ pub(crate) enum SettingMsg {
     SetGapless(bool),
     /// Crossfade window in seconds (settings); persisted + pushed to the player.
     SetCrossfade(f64),
+    /// How compound artist credits are listed (settings); persisted + applied
+    /// to the splitting, then the artist views are rebuilt.
+    SetArtistCreditMode(crate::core::artist::CreditMode),
     /// Show/hide a navigation menu item (stack name).
     SetSectionVisible {
         section: &'static str,
@@ -1666,6 +1713,14 @@ impl App {
                     .library
                     .set_setting("crossfade_secs", &self.settings.crossfade_secs.to_string());
                 self.apply_playback_prefs();
+            }
+            SettingMsg::SetArtistCreditMode(mode) => {
+                self.settings.artist_credit_mode = mode;
+                let _ = self.library.set_setting("artist_credit_mode", mode.key());
+                crate::core::artist::set_credit_mode(mode);
+                // The mode decides which names exist at all, so the whole
+                // artist overview (and its counts) has to be rebuilt.
+                self.reload_artists();
             }
             SettingMsg::SetAreas { scope, key, value } => self.set_areas(sender, scope, key, value),
             SettingMsg::SetAlbumKind { album, kind } => {

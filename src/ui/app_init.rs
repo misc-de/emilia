@@ -44,6 +44,10 @@ pub(crate) struct InitState {
     pub gallery_columns: u32,
     pub recording_buffer_minutes: u32,
     pub saved_section: Option<String>,
+    /// How compound artist credits ("A feat. B") are listed. Already applied
+    /// process-wide by [`App::read_init_state`]; carried along only so the
+    /// settings page can preselect it.
+    pub artist_credit_mode: crate::core::artist::CreditMode,
 }
 
 /// Mobile top-bar nav icon size for a user offset (-50..=50 %, the mobile-only
@@ -315,6 +319,21 @@ impl App {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(5)
             .min(60);
+        // How compound artist credits are listed (split guests / main artist
+        // only / as tagged). Applied right here rather than handed to the model
+        // first: the artist views are built further down in `init()`, and the
+        // splitting happens deep in the library queries, which have no access to
+        // the UI settings.
+        let artist_credit_mode = crate::core::artist::CreditMode::from_key(
+            library
+                .get_setting("artist_credit_mode")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .as_str(),
+        );
+        crate::core::artist::set_credit_mode(artist_credit_mode);
+
         // Most recently open navigation item (only allow valid section names).
         let saved_section = library
             .get_setting("active_section")
@@ -345,6 +364,7 @@ impl App {
             gallery_columns,
             recording_buffer_minutes,
             saved_section,
+            artist_credit_mode,
         }
     }
 

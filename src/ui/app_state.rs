@@ -618,6 +618,10 @@ pub(crate) struct Settings {
     pub(crate) gapless: bool,
     /// Crossfade window in seconds between tracks (0 = off, default off).
     pub(crate) crossfade_secs: f64,
+    /// How compound artist credits ("A feat. B") appear in the artist views
+    /// (see [`crate::core::artist::CreditMode`]). The authoritative copy lives
+    /// in that module's process-wide flag; this one backs the settings row.
+    pub(crate) artist_credit_mode: crate::core::artist::CreditMode,
 }
 
 /// Desktop tray-icon options + the running service handle. The bool prefs are

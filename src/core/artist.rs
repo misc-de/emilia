@@ -3,6 +3,12 @@
 //! "Drake feat. Rihanna & Future" → `["Drake", "Rihanna", "Future"]`. This way a
 //! track is assigned to each participating artist individually (artist view,
 //! photo fetch). Nothing about the file is changed in the process – only the display.
+//!
+//! How far that goes is the user's choice: [`CreditMode`] (settings → "Artists",
+//! persisted as `artist_credit_mode`) switches [`split_artists`] between listing
+//! every guest, only the main artist, or the credit exactly as tagged. Album
+//! grouping never follows it – [`primary_artist`] and [`primary_credit_matches`]
+//! always split, so "A" and "A feat. B" keep sharing one album card.
 
 /// Word separators (with surrounding spaces), case-insensitive.
 const WORD_SEPARATORS: &[&str] = &[
@@ -24,12 +30,93 @@ const CHAR_SEPARATORS: &[char] = &['&', ',', '/', '+', ';', '×'];
 /// display – a live recording is the same artist.
 const QUALIFIER_KEYWORDS: &[&str] = &["live", "concert", "konzert", "unplugged"];
 
-/// Splits an artist entry into individual, trimmed artist names.
-/// Duplicates (case-insensitive) are removed, the order is preserved.
+/// How a compound credit is turned into the artist names the library lists.
+/// A user setting (settings → "Artists"): the split is a discovery aid some
+/// people love and others find noisy, so it can be dialed back without touching
+/// a single tag.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CreditMode {
+    /// "A feat. B" → `["A", "B"]`: every participant gets their own entry
+    /// (the default, and what makes guests discoverable).
+    #[default]
+    Split,
+    /// "A feat. B" → `["A"]`: the track counts toward the main artist only,
+    /// guests are never listed on their own.
+    Primary,
+    /// "A feat. B" → `["A feat. B"]`: the credit stands as tagged, so band
+    /// names carrying "&" or a comma stay intact.
+    Raw,
+}
+
+impl CreditMode {
+    /// Persisted settings value (see `artist_credit_mode`).
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Split => "split",
+            Self::Primary => "primary",
+            Self::Raw => "raw",
+        }
+    }
+
+    /// Parses a persisted value; anything unknown (or missing) is the default.
+    pub fn from_key(s: &str) -> Self {
+        match s {
+            "primary" => Self::Primary,
+            "raw" => Self::Raw,
+            _ => Self::Split,
+        }
+    }
+}
+
+/// Active mode as a [`CreditMode`] discriminant. Process-wide and atomic
+/// because the splitting runs on the DB/query side (`Library` has no access to
+/// the UI settings) and off the main thread during scans and enrichment.
+static CREDIT_MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Applies the user's choice; takes effect on the next artist view reload.
+pub fn set_credit_mode(mode: CreditMode) {
+    CREDIT_MODE.store(mode as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Currently active mode.
+pub fn credit_mode() -> CreditMode {
+    match CREDIT_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => CreditMode::Primary,
+        2 => CreditMode::Raw,
+        _ => CreditMode::Split,
+    }
+}
+
+/// The artist names an entry contributes to the library, per the active
+/// [`CreditMode`]. Duplicates (case-insensitive) are removed, the order is
+/// preserved.
+pub fn split_artists(raw: &str) -> Vec<String> {
+    split_artists_with(credit_mode(), raw)
+}
+
+/// [`split_artists`] for an explicit mode (the global one is what the settings
+/// switch; this is the pure function behind it).
+pub fn split_artists_with(mode: CreditMode, raw: &str) -> Vec<String> {
+    match mode {
+        CreditMode::Split => split_all(raw),
+        // Only the first name; `split_all` already strips its qualifiers.
+        CreditMode::Primary => split_all(raw).into_iter().take(1).collect(),
+        // The credit as a whole – qualifiers ("(Live)") still go, since a live
+        // recording is the same artist in every mode.
+        CreditMode::Raw => match strip_qualifiers(raw.trim()) {
+            name if name.is_empty() => Vec::new(),
+            name => vec![name],
+        },
+    }
+}
+
+/// Splits an artist entry into individual, trimmed artist names, regardless of
+/// the user's [`CreditMode`]. Duplicates (case-insensitive) are removed, the
+/// order is preserved.
 ///
 /// Note: band names with commas/`&` (e.g. "Earth, Wind & Fire") are also split
 /// in the process – a deliberate compromise in favor of feat. resolution.
-pub fn split_artists(raw: &str) -> Vec<String> {
+fn split_all(raw: &str) -> Vec<String> {
     // 1) Normalize word separators to ';' (case-insensitive, ASCII-safe).
     let mut normalized = format!(" {} ", raw);
     for sep in WORD_SEPARATORS {
@@ -134,7 +221,7 @@ pub fn primary_credit_matches(credit: &str, target_key: &str) -> bool {
     if is_plain_credit(credit) {
         return norm_key(credit) == target_key;
     }
-    split_artists(credit)
+    split_all(credit)
         .first()
         .is_some_and(|p| norm_key(p) == target_key)
 }
@@ -142,7 +229,7 @@ pub fn primary_credit_matches(credit: &str, target_key: &str) -> bool {
 /// Primary artist of an entry (the first named, before "feat."). Used for
 /// album grouping: "Beginner feat. X" belongs to the album by "Beginner".
 pub fn primary_artist(raw: &str) -> String {
-    split_artists(raw)
+    split_all(raw)
         .into_iter()
         .next()
         .unwrap_or_else(|| raw.trim().to_string())
@@ -380,5 +467,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn credit_mode_primary_keeps_only_the_main_artist() {
+        use super::{split_artists_with, CreditMode as M};
+        assert_eq!(
+            split_artists_with(M::Primary, "Drake feat. Rihanna & Future"),
+            vec!["Drake"]
+        );
+        // A qualifier still goes, and a plain credit is untouched.
+        assert_eq!(
+            split_artists_with(M::Primary, "Queen (Live) feat. Bowie"),
+            vec!["Queen"]
+        );
+        assert_eq!(split_artists_with(M::Primary, "Björk"), vec!["Björk"]);
+        assert!(split_artists_with(M::Primary, "   ").is_empty());
+    }
+
+    #[test]
+    fn credit_mode_raw_keeps_the_credit_as_tagged() {
+        use super::{split_artists_with, CreditMode as M};
+        assert_eq!(
+            split_artists_with(M::Raw, "Drake feat. Rihanna & Future"),
+            vec!["Drake feat. Rihanna & Future"]
+        );
+        // The whole point of this mode: band names stay intact.
+        assert_eq!(
+            split_artists_with(M::Raw, "Earth, Wind & Fire"),
+            vec!["Earth, Wind & Fire"]
+        );
+        // Performance additions are folded away in every mode.
+        assert_eq!(split_artists_with(M::Raw, "Eagles - Live"), vec!["Eagles"]);
+        assert!(split_artists_with(M::Raw, "   ").is_empty());
+    }
+
+    #[test]
+    fn album_grouping_ignores_the_credit_mode() {
+        use super::{credit_mode, primary_artist, primary_credit_matches, CreditMode};
+        // These two drive the album cards and must never follow the setting –
+        // whatever the mode, "Beginner feat. X" stays on Beginner's album.
+        assert_eq!(credit_mode(), CreditMode::Split, "default mode");
+        assert_eq!(primary_artist("Beginner feat. Megaloh"), "Beginner");
+        assert!(primary_credit_matches("Beginner feat. Megaloh", "beginner"));
+        assert!(!primary_credit_matches("Beginner feat. Megaloh", "megaloh"));
+    }
+
+    #[test]
+    fn credit_mode_round_trips_through_its_settings_key() {
+        use super::CreditMode as M;
+        for m in [M::Split, M::Primary, M::Raw] {
+            assert_eq!(M::from_key(m.key()), m);
+        }
+        assert_eq!(M::from_key("nonsense"), M::default());
     }
 }
