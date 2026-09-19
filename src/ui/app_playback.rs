@@ -16,6 +16,13 @@ use crate::ui::app_lyrics::LyricsMsg;
 use crate::ui::fs_row::FsEntry;
 use crate::ui::play_mark::{PlaybackSink, PlaybackState};
 
+/// How far into a track "previous" still steps **back** instead of restarting
+/// it. Past this the first press sends the running track to its start and only
+/// a second one steps to the track before it — what music players have taught
+/// everyone to expect, while the first seconds stay usable for paging back
+/// through a list quickly.
+pub(crate) const PREV_RESTART_MS: i64 = 3_000;
+
 /// Settings key: path of the track the player currently has loaded. Together
 /// with [`CURRENT_POS_KEY`] it forms the playback state that survives a
 /// restart, alongside the saved queue (`queue_paths` / `queue_pos`).
@@ -440,12 +447,47 @@ impl App {
         }
     }
 
-    /// Back button. Behaves like a list: it steps to the **previous track** of
-    /// the running queue. Only at the very start of the queue (or a lone
-    /// single-song context) does it fall back to restoring a context that a
-    /// single-song tap displaced, then the most recently played track, and
-    /// finally – with nothing before it – a restart of the current track.
+    /// Back button, in the order the presses are meant:
+    ///
+    /// 1. Playback ran out and stopped → play that track again.
+    /// 2. The running track is past [`PREV_RESTART_MS`] → send it back to its
+    ///    start. A second press then falls through to the step below, which is
+    ///    how "back, back" reaches the previous track.
+    /// 3. Step to the **previous track** of the running queue.
+    /// 4. At the very start of the queue (or a lone single-song context):
+    ///    restore a context that a single-song tap displaced, then the most
+    ///    recently played track, and finally — with nothing before it — a
+    ///    restart of the current track.
     pub(crate) fn play_prev(&mut self) {
+        // Playback ran out and stopped: "previous" means "that one again". The
+        // track just heard is the one the press is about — stepping back into
+        // the album it interrupted would be a jump the user did not ask for.
+        if self.transport.playing_path.is_none() {
+            if let Some(path) = self.transport.last_finished.clone() {
+                match self.transport.queue.iter().position(|p| *p == path) {
+                    Some(pos) => self.transport.queue_pos = pos,
+                    None => {
+                        self.transport.queue = vec![path];
+                        self.transport.queue_pos = 0;
+                    }
+                }
+                self.transport.skip_history_push = true;
+                self.play_current_fresh();
+                return;
+            }
+        }
+
+        // Past the first few seconds, "previous" first sends the running track
+        // back to its start; pressing again gets to the one before it. The
+        // position used is the one shown in the bar, so a source that is still
+        // loading (a YouTube stream resolves in a worker) counts as being at its
+        // start and steps back rather than restarting nothing.
+        if self.transport.playing_path.is_some() && self.mini.position_ms > PREV_RESTART_MS {
+            self.transport.skip_history_push = true;
+            self.play_current_fresh();
+            return;
+        }
+
         // One track back within the running queue (the common "list" case).
         if self.transport.queue_pos > 0 && self.transport.queue.len() > 1 {
             self.transport.skip_history_push = true;
@@ -859,6 +901,9 @@ impl App {
         // further down: whatever starts now, it is spent either way.
         let fresh_start = std::mem::take(&mut self.transport.fresh_start);
         let restored_session = self.transport.resume_current.take();
+        // Something is starting, so there is no finished track waiting to be
+        // replayed any more (see `play_prev`).
+        self.transport.last_finished = None;
         // Save the position of the previously running track before a new one is loaded.
         self.save_resume();
         // If a podcast episode was playing before, save its resume position.
@@ -1570,7 +1615,16 @@ impl App {
             // `take()` prevents play_current from saving the (end) position again
             // as a resume point.
             if let Some(path) = self.transport.playing_path.take() {
-                let _ = self.library.set_resume_path(&path.to_string_lossy(), 0);
+                let path_str = path.to_string_lossy().into_owned();
+                let _ = self.library.set_resume_path(&path_str, 0);
+                // The playback state has to be cleared here as well — with
+                // `playing_path` gone, `save_resume` no longer reaches it, and a
+                // stale "a few seconds before the end" would otherwise be waiting
+                // for the next start of the app.
+                self.save_current_position(&path_str, 0, 0);
+                // Remember it for "previous": a finished track that nothing
+                // followed is played again rather than stepped past.
+                self.transport.last_finished = Some(path);
             }
             // A long-form YouTube item that ran out counts as watched: keep the
             // mark (instead of a resume point) and show it in its rows at once.
@@ -1669,15 +1723,24 @@ impl App {
         if self.mini.playing {
             // Advance the sleep-timer countdown / fade-out (only while playing).
             self.sleep_tick();
-            if let Some(pos) = self.player.position_ms() {
-                self.mini.position_ms = pos;
-            }
-            if let Some(dur) = self.player.duration_ms() {
-                self.mini.track_duration_ms = dur;
-                // The pipeline only knows the length a moment after the start,
-                // and stations / YouTube / podcasts / remote files never carry
-                // one up front – hand it to the lock screen once it is known.
-                self.mpris.set_length(dur);
+            // Only read the pipeline once the new source is actually on it.
+            // While `loading` is set, the deck still holds the **previous**
+            // track: a YouTube stream is resolved by a worker (yt-dlp takes
+            // seconds), and the optimistic now-playing state is shown meanwhile.
+            // Reading the position then drags the old track's playhead — usually
+            // sitting at its very end — into the bar of the new one, which looks
+            // exactly like a jump to a few seconds before the end.
+            if !self.mini.loading {
+                if let Some(pos) = self.player.position_ms() {
+                    self.mini.position_ms = pos;
+                }
+                if let Some(dur) = self.player.duration_ms() {
+                    self.mini.track_duration_ms = dur;
+                    // The pipeline only knows the length a moment after the start,
+                    // and stations / YouTube / podcasts / remote files never carry
+                    // one up front – hand it to the lock screen once it is known.
+                    self.mpris.set_length(dur);
+                }
             }
             // Keep the MCP now-playing snapshot fresh (position + state).
             self.publish_now_playing();

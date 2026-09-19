@@ -278,6 +278,12 @@ pub(crate) struct TransportState {
     /// playhead" preview and when an [`Self::interrupted_queue`] is picked back
     /// up. Consumed (reset to `None`) on use.
     pub(crate) forced_start_ms: Option<i64>,
+    /// Track that ran out while nothing followed it, so playback came to a
+    /// stop. "Previous" then means "play that one again" rather than stepping
+    /// back into whatever context came before it — pressing back on a finished
+    /// song is a request to hear it once more. Cleared as soon as anything
+    /// starts playing again.
+    pub(crate) last_finished: Option<PathBuf>,
     /// Where the track that was loaded when the app last closed (or was paused
     /// and then stopped) had got to: `(path, ms)`, restored from the playback
     /// state at startup. Applied by the first `play_current` that starts that
