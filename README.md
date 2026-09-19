@@ -4,10 +4,13 @@
 Phosh smartphones** (Librem 5, PinePhone & co.) – one adaptive interface for both, with a
 built-in MCP server for remote control by an AI assistant (e.g. Claude).
 
-⚠️ **AI-assisted project** – large parts of Emilia's code, its translations and
-the release notes were written with the help of an AI assistant (Claude) and
-reviewed, tested and shipped by a human maintainer. If that matters to you,
-now you know.
+---
+⚠️ **AI-assisted project**  
+Large parts of Emilia's code, its translations and the release notes were written
+with the help of an AI assistant (Claude) and reviewed, tested and shipped by a
+human maintainer. If that matters to you, now you know.
+
+---
 
 > App ID: `de.cais.Emilia` · License: GPL-3.0-or-later
 
