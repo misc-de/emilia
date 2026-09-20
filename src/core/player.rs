@@ -218,6 +218,16 @@ pub struct Player {
     fade_source: Rc<RefCell<Option<gst::glib::SourceId>>>,
     /// Keeps the per-deck bus watches alive.
     bus_watches: RefCell<Vec<gst::bus::BusWatchGuard>>,
+    /// Whether the app *wants* audio right now. Only the explicit transport
+    /// calls (`start`, `crossfade_to`, `resume`, `pause`, `stop`) move it, and
+    /// the bus watch asks it before starting a deck on its own: a preroll that
+    /// completes late - after the user paused, or after the audio sink was
+    /// pulled away and the pipeline renegotiated - must never put the pipeline
+    /// back into PLAYING behind the app's back. The app's own state would stay
+    /// "paused" while sound comes out of the speaker, which is exactly what
+    /// nobody can then stop: not the UI, not the lock screen, not a desktop
+    /// service watching MPRIS.
+    wants_playing: Rc<Cell<bool>>,
 }
 
 impl Player {
@@ -239,6 +249,7 @@ impl Player {
             fade: Rc::new(Cell::new(1.0)),
             fade_source: Rc::new(RefCell::new(None)),
             bus_watches: RefCell::new(Vec::new()),
+            wants_playing: Rc::new(Cell::new(false)),
         })
     }
 
@@ -358,6 +369,9 @@ impl Player {
     fn start(&self, resume_ms: i64) -> Result<()> {
         let deck = self.cur_deck();
         deck.fresh_load.set(true);
+        // An explicit load is meant to play - including the resume path below,
+        // which reaches PLAYING only from the bus watch.
+        self.wants_playing.set(true);
         if resume_ms > 0 {
             deck.pending_seek_ms.set(resume_ms);
             deck.bin
@@ -395,6 +409,7 @@ impl Player {
         in_deck.bin.set_property("uri", uri);
         in_deck.fresh_load.set(true);
         in_deck.pending_seek_ms.set(resume_ms.max(0));
+        self.wants_playing.set(true);
         in_deck
             .bin
             .set_state(gst::State::Playing)
@@ -515,6 +530,7 @@ impl Player {
             let on_error = on_error.clone();
             let on_ready = on_ready.clone();
             let on_stream_start = on_stream_start.clone();
+            let wants_playing = self.wants_playing.clone();
             let guard = bus.add_watch_local(move |_, msg| {
                 let is_active = active.load(Ordering::Relaxed) == idx;
                 match msg.view() {
@@ -553,7 +569,14 @@ impl Player {
                                     pos,
                                 );
                             }
-                            let _ = bin.set_state(gst::State::Playing);
+                            // Only if the app still wants audio. A sink that
+                            // disappears (earbuds running flat) makes the
+                            // pipeline preroll again, and starting it here
+                            // would resume playback nobody asked for, on
+                            // whichever output is left - the loudspeaker.
+                            if wants_playing.get() {
+                                let _ = bin.set_state(gst::State::Playing);
+                            }
                         } else if fresh && want_rate {
                             let pos = bin
                                 .query_position::<gst::ClockTime>()
@@ -591,6 +614,7 @@ impl Player {
         if self.fade_source.borrow().is_some() {
             self.cancel_crossfade();
         }
+        self.wants_playing.set(false);
         let _ = self.cur().set_state(gst::State::Paused);
     }
 
@@ -602,7 +626,12 @@ impl Player {
         if !self.has_content() {
             return false;
         }
-        self.cur().set_state(gst::State::Playing).is_ok()
+        self.wants_playing.set(true);
+        let started = self.cur().set_state(gst::State::Playing).is_ok();
+        if !started {
+            self.wants_playing.set(false);
+        }
+        started
     }
 
     /// Whether the active deck has a URI loaded, i.e. whether there is anything
@@ -616,6 +645,7 @@ impl Player {
 
     pub fn stop(&self) {
         self.cancel_crossfade();
+        self.wants_playing.set(false);
         let _ = self.cur().set_state(gst::State::Null);
     }
 
