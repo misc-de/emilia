@@ -1603,6 +1603,20 @@ impl App {
                 self.podcasts_page
                     .emit(crate::ui::podcasts_page::PodcastsInput::EpisodeFinished { url });
             }
+            // Tear the pipeline down, the way the end of a queue does (see
+            // `play_next`). EOS does not change a pipeline's state: without
+            // this the deck stays in PLAYING with its PulseAudio stream open,
+            // while the app already believes nothing is playing. Any later
+            // change of the audio route - earbuds running flat, a call
+            // ending, headphones plugged in - makes that leftover pipeline
+            // preroll again and play the finished episode into the room. And
+            // because the app's state, and with it MPRIS, still says
+            // "paused", nothing has anything to stop: not the player bar, not
+            // the lock screen, not a desktop service watching MPRIS. Seen
+            // twice on 2026-09-20 with an episode that had ended at 02:37:
+            // once at 06:44 when the earbuds ran out of battery, once at
+            // 10:18 at the end of a phone call.
+            self.player.stop();
             self.mini.playing = false;
             self.podcasts.playing_episode_url = None;
             self.mpris.set_playing(false);
