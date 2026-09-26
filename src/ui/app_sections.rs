@@ -275,6 +275,8 @@ pub(crate) enum YtView {
     Recent,
     /// Overview of the subscribed channels.
     Channels,
+    /// Saved live streams (24/7 radio channels), streamed only.
+    Live,
 }
 
 /// Time period of the listening statistics. Deliberately sliding windows

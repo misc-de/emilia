@@ -63,6 +63,13 @@ pub(crate) struct MemoState {
     pub(crate) rec_meter: gtk::DrawingArea,
     /// The running poll timeout while recording; removed on stop.
     rec_tick: Option<gtk::glib::SourceId>,
+    /// Title / category an MCP request asked for, applied when the running
+    /// recording is saved (a plain button recording leaves it `None`).
+    pub(crate) pending_meta: Option<(Option<String>, Option<i64>)>,
+    /// Counts recordings, so an automatic stop only ends the one it was armed for.
+    pub(crate) rec_generation: u64,
+    /// Start of the running recording (Unix seconds).
+    pub(crate) rec_started_at: Option<i64>,
 }
 
 impl MemoState {
@@ -97,6 +104,9 @@ impl MemoState {
             rec_channels,
             rec_meter,
             rec_tick: None,
+            pending_meta: None,
+            rec_generation: 0,
+            rec_started_at: None,
         }
     }
 }
@@ -179,6 +189,8 @@ pub(crate) enum MemoMsg {
         path: Option<String>,
         duration_ms: i64,
     },
+    /// Timed stop of an MCP recording; only ends recording number `generation`.
+    AutoStop(u64),
     /// Switch the memo view: Recent list or Category tree.
     SetView(MemoView),
     /// Open a memo's detail dialog (id) – via long press.
@@ -215,15 +227,38 @@ impl App {
         sender: &ComponentSender<Self>,
     ) {
         match msg {
-            MemoMsg::RecordSaved { path, duration_ms } => match path {
-                Some(p) => {
-                    let title = memo_default_title();
-                    let _ = self.library.add_memo(&p, &title, None, duration_ms);
-                    self.reload_memos(sender);
-                    self.toast(&gettext("Memo saved"));
+            MemoMsg::RecordSaved { path, duration_ms } => {
+                let (title, category_id) = self.memo.pending_meta.take().unwrap_or_default();
+                match path {
+                    Some(p) => {
+                        let title = title
+                            .filter(|t| !t.trim().is_empty())
+                            .unwrap_or_else(memo_default_title);
+                        let saved = self.library.add_memo(&p, &title, category_id, duration_ms);
+                        self.reload_memos(sender);
+                        self.toast(&gettext("Memo saved"));
+                        self.publish_memo_event(
+                            saved.ok().map(|id| crate::core::mcp::state::SavedMemo {
+                                id,
+                                title,
+                                path: p,
+                                duration_ms,
+                                category_id,
+                            }),
+                            None,
+                        );
+                    }
+                    None => {
+                        self.toast(&gettext("Recording failed"));
+                        self.publish_memo_event(None, Some("recording failed".into()));
+                    }
                 }
-                None => self.toast(&gettext("Recording failed")),
-            },
+            }
+            MemoMsg::AutoStop(generation) => {
+                if generation == self.memo.rec_generation && self.memo.recorder.is_some() {
+                    self.stop_memo_record(sender);
+                }
+            }
             MemoMsg::SetView(view) => {
                 if self.memo.view != view {
                     self.memo.view = view;
@@ -286,23 +321,88 @@ impl App {
         if self.memo.recorder.is_some() {
             self.stop_memo_record(sender);
         } else {
-            self.start_memo_record();
+            let _ = self.start_memo_record();
         }
     }
 
-    fn start_memo_record(&mut self) {
+    /// Starts a recording; the error text when the microphone would not open.
+    fn start_memo_record(&mut self) -> Result<(), String> {
         match MicRecorder::start(&crate::core::mic::memos_dir()) {
             Ok(rec) => {
                 self.start_rec_meter(rec.level_handle());
                 self.memo.recorder = Some(rec);
                 self.memo.recording = true;
+                self.memo.rec_generation += 1;
+                self.memo.rec_started_at = Some(crate::core::sync::now_unix() as i64);
                 self.toast(&gettext("Recording …"));
+                Ok(())
             }
             Err(e) => {
                 tracing::warn!("Starting the microphone failed: {e}");
                 self.toast(&gettext("Microphone not available"));
+                Err(e.to_string())
             }
         }
+    }
+
+    /// MCP: start a recording, optionally stopping itself after `stop_after_s`
+    /// and saving under `title` / `category_id`. Reports the outcome through the
+    /// MCP snapshot.
+    pub(crate) fn mcp_start_memo(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        stop_after_s: Option<u32>,
+        title: Option<String>,
+        category_id: Option<i64>,
+    ) {
+        if self.memo.recorder.is_some() {
+            self.publish_memo_event(None, Some("a memo is already being recorded".into()));
+            return;
+        }
+        if let Err(e) = self.start_memo_record() {
+            self.publish_memo_event(None, Some(format!("microphone not available: {e}")));
+            return;
+        }
+        self.memo.pending_meta = Some((title, category_id));
+        if let Some(secs) = stop_after_s {
+            let (generation, sender) = (self.memo.rec_generation, sender.clone());
+            gtk::glib::timeout_add_seconds_local_once(secs, move || {
+                sender.input(Msg::Memo(MemoMsg::AutoStop(generation)));
+            });
+        }
+        self.publish_memo_event(None, None);
+    }
+
+    /// MCP: stop the running recording; the save arrives as `RecordSaved`.
+    pub(crate) fn mcp_stop_memo(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        title: Option<String>,
+        category_id: Option<i64>,
+    ) {
+        if self.memo.recorder.is_none() {
+            self.publish_memo_event(None, Some("no memo is being recorded".into()));
+            return;
+        }
+        let (old_title, old_cat) = self.memo.pending_meta.take().unwrap_or_default();
+        self.memo.pending_meta = Some((title.or(old_title), category_id.or(old_cat)));
+        self.stop_memo_record(sender);
+    }
+
+    /// Bumps the MCP memo event counter with the outcome of the latest action.
+    fn publish_memo_event(
+        &self,
+        saved: Option<crate::core::mcp::state::SavedMemo>,
+        error: Option<String>,
+    ) {
+        if let Ok(mut np) = self.mcp.now.lock() {
+            np.memo_seq += 1;
+            if saved.is_some() {
+                np.last_memo = saved;
+            }
+            np.memo_error = error;
+        }
+        self.publish_now_playing();
     }
 
     /// Polls the live mic level (~30 fps) and redraws the meter while recording.
@@ -352,6 +452,7 @@ impl App {
             return;
         };
         self.memo.recording = false;
+        self.memo.rec_started_at = None;
         self.stop_rec_meter();
         let (tx, rx) = async_channel::bounded(1);
         std::thread::spawn(move || {

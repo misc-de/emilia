@@ -530,6 +530,14 @@ pub(crate) struct YoutubeState {
     /// marker, read across the transport). The page keeps a mirror (pushed via
     /// `YtInput::PlaybackStateChanged`) for its row icons.
     pub(crate) playing_video_id: Option<String>,
+    /// Video id of the YouTube **live stream** playing (Live tab). Kept apart
+    /// from `playing_video_id` on purpose: a live stream is played like a radio
+    /// station — no queue, resume position, watch progress or download.
+    pub(crate) playing_live: Option<String>,
+    /// When the running live stream actually started, to tell a stream that
+    /// ended after a while (expired HLS address → restart) from one that fails
+    /// right away (offline → stop).
+    pub(crate) live_started: Option<std::time::Instant>,
     /// Titles for the videos in the current play context (video id → title), so
     /// `yt:` tracks not in the library show a name instead of their id.
     pub(crate) video_titles: std::collections::HashMap<String, String>,

@@ -1566,7 +1566,8 @@ impl Component for App {
                                     #[watch]
                                     set_label: &fmt_rate(model.mini.playback_rate),
                                     #[watch]
-                                    set_visible: model.streaming.playing_stream.is_none(),
+                                    set_visible: model.streaming.playing_stream.is_none()
+                                        && model.youtube.playing_live.is_none(),
                                     #[watch]
                                     set_sensitive: model.mini.now_playing.is_some(),
                                     #[wrap(Some)]
@@ -2125,6 +2126,9 @@ impl Component for App {
                     O::PlayVideo { video_id, title } => {
                         Msg::Yt(YtMsg::YtPlayVideo { video_id, title })
                     }
+                    O::PlayLive { video_id, title } => {
+                        Msg::Yt(YtMsg::YtPlayLive { video_id, title })
+                    }
                     O::PlayVideoAt {
                         video_id,
                         title,
@@ -2413,6 +2417,8 @@ impl Component for App {
                 settings_dl_btn: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ytdlp_busy: false,
                 playing_video_id: None,
+                playing_live: None,
+                live_started: None,
                 video_titles: std::collections::HashMap::new(),
                 playing_playlist: false,
                 pending_seek: None,
@@ -2729,7 +2735,7 @@ impl Component for App {
             Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
-            Msg::Mcp(cmd) => self.handle_mcp(cmd, root),
+            Msg::Mcp(cmd) => self.handle_mcp(cmd, root, &sender),
             Msg::McpSetting(m) => self.update_mcp_setting(m),
             Msg::NavUp => self.on_nav_up(&sender),
             Msg::FilesGoStart => self.on_files_go_start(&sender),

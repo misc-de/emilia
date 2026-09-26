@@ -508,6 +508,10 @@ impl App {
             // detail is the episode dialog (resolved from the audio URL).
             self.podcasts_page
                 .emit(crate::ui::podcasts_page::PodcastsInput::ShowEpisodeDetailByUrl { url });
+        } else if let Some(video_id) = self.youtube.playing_live.clone() {
+            // A YouTube live stream: its Live-tab dialog (no download actions).
+            self.yt_page
+                .emit(crate::ui::yt_page::YtInput::ShowLiveDetail(video_id));
         } else if let Some(id) = self.streaming.playing_stream {
             // Internet radio: the station's detail dialog.
             self.stream_page

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-19 06:18+0000\n"
+"POT-Creation-Date: 2026-09-26 06:38+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -21,18 +21,18 @@ msgstr ""
 msgid "Show / Hide"
 msgstr "Onyesha / Ficha"
 
-#: src/core/tray.rs:85 src/ui/app_rec_edit.rs:605
+#: src/core/tray.rs:85 src/ui/app_rec_edit.rs:605 src/ui/yt_live.rs:121
 msgid "Pause"
 msgstr "Sitisha"
 
 #: src/core/tray.rs:87 src/ui/app_dialogs.rs:176 src/ui/app_favorites.rs:309
 #: src/ui/app_memo.rs:535 src/ui/app_memo.rs:676 src/ui/app_playlist.rs:336
 #: src/ui/app_playlist.rs:510 src/ui/app_queue.rs:186
-#: src/ui/app_streaming.rs:565 src/ui/app_views.rs:1262
+#: src/ui/app_streaming.rs:566 src/ui/app_views.rs:1262
 #: src/ui/app_views.rs:1561 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
 #: src/ui/stream_page.rs:1403 src/ui/stream_page.rs:1492
-#: src/ui/stream_page.rs:1690 src/ui/stream_page.rs:1771
-#: src/ui/yt_page.rs:1806 src/ui/yt_page_detail.rs:97
+#: src/ui/stream_page.rs:1690 src/ui/stream_page.rs:1771 src/ui/yt_live.rs:123
+#: src/ui/yt_page.rs:1905 src/ui/yt_page_detail.rs:97
 #: src/ui/yt_page_detail.rs:428
 msgid "Play"
 msgstr "Cheza"
@@ -49,19 +49,19 @@ msgstr "Iliyotangulia"
 msgid "Quit Emilia"
 msgstr "Funga Emilia"
 
-#: src/ui/app.rs:548 src/ui/app.rs:704 src/ui/app.rs:1645 src/ui/setup.rs:701
+#: src/ui/app.rs:548 src/ui/app.rs:704 src/ui/app.rs:1646 src/ui/setup.rs:701
 msgid "Back"
 msgstr "Nyuma"
 
 #: src/ui/app.rs:560 src/ui/app_search.rs:22 src/ui/app_search.rs:328
 #: src/ui/podcasts_page.rs:1967 src/ui/podcasts_page.rs:1979
 #: src/ui/stream_page.rs:1109 src/ui/stream_page.rs:1121
-#: src/ui/yt_page.rs:1520 src/ui/yt_page.rs:1531
+#: src/ui/yt_page.rs:1604 src/ui/yt_page.rs:1615
 msgid "Search"
 msgstr "Tafuta"
 
 #: src/ui/app.rs:569 src/ui/app_init.rs:855 src/ui/app_settings.rs:1465
-#: src/ui/yt_page.rs:420
+#: src/ui/yt_page.rs:443
 msgid "Settings"
 msgstr "Mipangilio"
 
@@ -73,7 +73,7 @@ msgstr "Panga"
 msgid "Sleep timer"
 msgstr "Kipima muda cha kulala"
 
-#: src/ui/app.rs:593 src/ui/app_dialogs.rs:338 src/ui/yt_page.rs:1815
+#: src/ui/app.rs:593 src/ui/app_dialogs.rs:338 src/ui/yt_page.rs:1914
 msgid "Refresh"
 msgstr "Onyesha upya"
 
@@ -179,7 +179,7 @@ msgstr "Hakuna matamasha"
 msgid "Mark an album or a track as a concert via the options."
 msgstr "Weka albamu au wimbo kama tamasha kupitia chaguo."
 
-#: src/ui/app.rs:1041 src/ui/sync_share_ui.rs:468 src/ui/yt_page.rs:1497
+#: src/ui/app.rs:1041 src/ui/sync_share_ui.rs:468 src/ui/yt_page.rs:1573
 msgid "Playlists"
 msgstr "Orodha za kucheza"
 
@@ -234,7 +234,7 @@ msgid "Memo"
 msgstr "Memo"
 
 #: src/ui/app.rs:1213 src/ui/podcasts_page.rs:428 src/ui/stream_page.rs:274
-#: src/ui/yt_page.rs:436
+#: src/ui/yt_page.rs:459
 msgid "Recently"
 msgstr "Hivi karibuni"
 
@@ -276,11 +276,11 @@ msgstr "MB {done} kati ya MB {total}"
 #: src/ui/app_memo.rs:840 src/ui/app_memo.rs:863 src/ui/app_playlist.rs:853
 #: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
 #: src/ui/app_rec_edit.rs:693 src/ui/app_sections.rs:94
-#: src/ui/app_settings.rs:651 src/ui/app_views_handlers.rs:733
+#: src/ui/app_settings.rs:651 src/ui/app_views_handlers.rs:737
 #: src/ui/app_views_sources.rs:284 src/ui/app_views_sources.rs:479
 #: src/ui/app_views_sources.rs:538 src/ui/podcasts_page.rs:942
 #: src/ui/setup.rs:699 src/ui/stream_page.rs:668 src/ui/stream_page.rs:1080
-#: src/ui/sync_share_ui.rs:159
+#: src/ui/sync_share_ui.rs:159 src/ui/yt_live.rs:151
 msgid "Cancel"
 msgstr "Ghairi"
 
@@ -298,76 +298,76 @@ msgstr "Kiwango cha kurekodi"
 msgid "Equalizer for this track"
 msgstr "Kisawazishi cha wimbo huu"
 
-#: src/ui/app.rs:1565 src/ui/app.rs:1582
+#: src/ui/app.rs:1565 src/ui/app.rs:1583
 msgid "Playback speed"
 msgstr "Kasi ya kucheza"
 
-#: src/ui/app.rs:1610
+#: src/ui/app.rs:1611
 msgid "Shuffle"
 msgstr "Changanya"
 
-#: src/ui/app.rs:1628
+#: src/ui/app.rs:1629
 msgid "Repeat"
 msgstr "Rudia"
 
-#: src/ui/app.rs:1672 src/ui/podcasts_page.rs:2112 src/ui/stream_page.rs:929
-#: src/ui/yt_page_detail.rs:503
+#: src/ui/app.rs:1673 src/ui/podcasts_page.rs:2112 src/ui/stream_page.rs:929
+#: src/ui/yt_live.rs:41 src/ui/yt_page_detail.rs:503
 msgid "Play/Pause"
 msgstr "Cheza/Sitisha"
 
-#: src/ui/app.rs:1711
+#: src/ui/app.rs:1712
 msgid "Forward"
 msgstr "Mbele"
 
-#: src/ui/app.rs:1730 src/ui/app_dialogs.rs:87 src/ui/app_lyrics.rs:160
+#: src/ui/app.rs:1731 src/ui/app_dialogs.rs:87 src/ui/app_lyrics.rs:160
 #: src/ui/app_lyrics.rs:165
 msgid "Lyrics"
 msgstr "Maneno ya wimbo"
 
-#: src/ui/app.rs:1742
+#: src/ui/app.rs:1743
 msgid "Show album"
 msgstr "Onyesha albamu"
 
-#: src/ui/app.rs:1751 src/ui/app_queue.rs:51
+#: src/ui/app.rs:1752 src/ui/app_queue.rs:51
 msgid "Queue"
 msgstr "Foleni"
 
-#: src/ui/app.rs:2803
+#: src/ui/app.rs:2809
 msgid "Download complete"
 msgstr "Upakuaji umekamilika"
 
-#: src/ui/app.rs:2807 src/ui/podcasts_page.rs:830
+#: src/ui/app.rs:2813 src/ui/podcasts_page.rs:830
 msgid "Download failed"
 msgstr "Upakuaji umeshindwa"
 
-#: src/ui/app.rs:2840
+#: src/ui/app.rs:2846
 msgid "No new concert candidates found"
 msgstr "Hakuna matamasha mapya yanayowezekana yaliyopatikana"
 
-#: src/ui/app.rs:2850
+#: src/ui/app.rs:2856
 msgid "yt-dlp ready (version {v})"
 msgstr "yt-dlp iko tayari (toleo {v})"
 
-#: src/ui/app.rs:2854
+#: src/ui/app.rs:2860
 msgid "yt-dlp download failed"
 msgstr "Upakuaji wa yt-dlp umeshindwa"
 
-#: src/ui/app.rs:2963
+#: src/ui/app.rs:2969
 msgid ""
 "Reading in your music collection — this may take a moment the first time"
 msgstr ""
 "Inasoma mkusanyiko wako wa muziki — mara ya kwanza inaweza kuchukua muda "
 "kidogo"
 
-#: src/ui/app.rs:2965
+#: src/ui/app.rs:2971
 msgid "Updating …"
 msgstr "Inasasisha …"
 
-#: src/ui/app.rs:3013 src/ui/app_init.rs:429 src/ui/app_views_sources.rs:172
+#: src/ui/app.rs:3019 src/ui/app_init.rs:429 src/ui/app_views_sources.rs:172
 msgid "Music"
 msgstr "Muziki"
 
-#: src/ui/app.rs:3039
+#: src/ui/app.rs:3045
 msgid "No music folder – please set one in settings"
 msgstr "Hakuna folda ya muziki – tafadhali weka moja katika mipangilio"
 
@@ -419,7 +419,7 @@ msgstr "Pakia picha mpya au uondoe ya sasa?"
 #: src/ui/app_favorites.rs:294 src/ui/app_settings.rs:826
 #: src/ui/app_views_sources.rs:102 src/ui/app_views_sources.rs:438
 #: src/ui/podcasts_page.rs:943 src/ui/stream_page.rs:1050
-#: src/ui/yt_page.rs:1850
+#: src/ui/yt_live.rs:152 src/ui/yt_page.rs:1949
 msgid "Remove"
 msgstr "Ondoa"
 
@@ -460,7 +460,7 @@ msgid "Album order"
 msgstr "Mpangilio wa albamu"
 
 #: src/ui/app_dialogs.rs:231 src/ui/app_settings.rs:1329
-#: src/ui/app_yt_glue.rs:398 src/ui/podcasts_page.rs:1587
+#: src/ui/app_yt_glue.rs:529 src/ui/podcasts_page.rs:1587
 msgid "Download"
 msgstr "Pakua"
 
@@ -489,7 +489,7 @@ msgstr "Mipangilio ya kisawazishi"
 #: src/ui/app_dialogs.rs:287 src/ui/app_memo.rs:716 src/ui/app_playlist.rs:692
 #: src/ui/podcasts_page.rs:1796 src/ui/smb_page.rs:132
 #: src/ui/stream_page.rs:1027 src/ui/stream_page.rs:1519
-#: src/ui/yt_page.rs:1824 src/ui/yt_page_detail.rs:164
+#: src/ui/yt_page.rs:1923 src/ui/yt_page_detail.rs:164
 msgid "Share"
 msgstr "Shiriki"
 
@@ -530,7 +530,7 @@ msgstr "Wimbo"
 msgid "Nothing here to share"
 msgstr "Hakuna cha kushiriki hapa"
 
-#: src/ui/app_dialogs.rs:524 src/ui/yt_page.rs:807
+#: src/ui/app_dialogs.rs:524 src/ui/yt_page.rs:883
 msgid "Refreshing …"
 msgstr "Inaonyesha upya …"
 
@@ -538,7 +538,7 @@ msgstr "Inaonyesha upya …"
 msgid "Added {n} tracks to the queue"
 msgstr "Imeongeza nyimbo {n} kwenye foleni"
 
-#: src/ui/app_episode_playback.rs:254
+#: src/ui/app_episode_playback.rs:255
 msgid "Podcast removed"
 msgstr "Podikasti imeondolewa"
 
@@ -667,7 +667,7 @@ msgid "Removed from favorites"
 msgstr "Imeondolewa kwenye vipendwa"
 
 #: src/ui/app_helpers.rs:621 src/ui/app_helpers.rs:632 src/ui/app_views.rs:281
-#: src/ui/app_views.rs:2477 src/ui/sync_share_ui.rs:289 src/ui/yt_page.rs:1378
+#: src/ui/app_views.rs:2477 src/ui/sync_share_ui.rs:289 src/ui/yt_page.rs:1454
 msgid "{n} song"
 msgid_plural "{n} songs"
 msgstr[0] "wimbo {n}"
@@ -756,7 +756,7 @@ msgstr "Memo imefutwa"
 msgid "Category removed"
 msgstr "Kategoria imeondolewa"
 
-#: src/ui/app_memo.rs:299 src/ui/app_streaming.rs:196
+#: src/ui/app_memo.rs:299 src/ui/app_streaming.rs:197
 #: src/ui/stream_page.rs:1361
 msgid "Recording …"
 msgstr "Inarekodi …"
@@ -777,8 +777,8 @@ msgstr "Kategoria mpya"
 msgid "Recorded"
 msgstr "Imerekodiwa"
 
-#: src/ui/app_memo.rs:641 src/ui/app_sections.rs:338 src/ui/stream_page.rs:707
-#: src/ui/yt_page.rs:1102
+#: src/ui/app_memo.rs:641 src/ui/app_sections.rs:340 src/ui/stream_page.rs:707
+#: src/ui/yt_page.rs:1178
 msgid "Length"
 msgstr "Urefu"
 
@@ -853,11 +853,11 @@ msgstr "Hamishia kwenye Jumla"
 msgid "Delete memos"
 msgstr "Futa memo hizo"
 
-#: src/ui/app_playback.rs:1181
+#: src/ui/app_playback.rs:1193
 msgid "No playable tracks"
 msgstr "Hakuna nyimbo zinazochezeka"
 
-#: src/ui/app_playback.rs:1186
+#: src/ui/app_playback.rs:1198
 msgid "Skipping unavailable track"
 msgstr "Inaruka wimbo usiopatikana"
 
@@ -886,7 +886,7 @@ msgstr "Ongeza nyimbo kupitia chaguo za wimbo, albamu au msanii."
 
 #. Labelled "Songs" (de "Lieder"): in this music app the video search
 #. is used to find songs. It still searches YtKind::Video.
-#: src/ui/app_playlist.rs:371 src/ui/app_search.rs:175 src/ui/yt_page.rs:1493
+#: src/ui/app_playlist.rs:371 src/ui/app_search.rs:175 src/ui/yt_page.rs:1569
 msgid "Songs"
 msgstr "Nyimbo"
 
@@ -914,10 +914,10 @@ msgstr "Futa orodha ya kucheza"
 msgid "New playlist"
 msgstr "Orodha mpya ya kucheza"
 
-#: src/ui/app_playlist.rs:778 src/ui/app_sections.rs:337
+#: src/ui/app_playlist.rs:778 src/ui/app_sections.rs:339
 #: src/ui/podcasts_page.rs:974 src/ui/stream_page.rs:699
-#: src/ui/stream_page.rs:705 src/ui/stream_page.rs:714 src/ui/yt_page.rs:1064
-#: src/ui/yt_page.rs:1100
+#: src/ui/stream_page.rs:705 src/ui/stream_page.rs:714 src/ui/yt_page.rs:1140
+#: src/ui/yt_page.rs:1176
 msgid "Name"
 msgstr "Jina"
 
@@ -965,7 +965,7 @@ msgstr "Foleni imefutwa"
 msgid "Play from the playhead"
 msgstr "Cheza kuanzia kielekezi"
 
-#: src/ui/app_rec_edit.rs:259 src/ui/app_streaming.rs:765
+#: src/ui/app_rec_edit.rs:259 src/ui/app_streaming.rs:768
 #: src/ui/stream_page.rs:1570
 msgid "File not found"
 msgstr "Faili halikupatikana"
@@ -987,7 +987,7 @@ msgid "Zoom in"
 msgstr "Kuza"
 
 #: src/ui/app_rec_edit.rs:436 src/ui/app_rec_edit.rs:694
-#: src/ui/app_streaming.rs:548 src/ui/app_views_sources.rs:539
+#: src/ui/app_streaming.rs:549 src/ui/app_views_sources.rs:539
 #: src/ui/cloud_page.rs:328 src/ui/gdrive_page.rs:338 src/ui/smb_page.rs:187
 msgid "Save"
 msgstr "Hifadhi"
@@ -1159,16 +1159,16 @@ msgstr "Maelezo ya sauti ya haraka yaliyorekodiwa kwa maikrofoni."
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "Takwimu za kusikiliza na wasanii na nyimbo unazocheza zaidi."
 
-#: src/ui/app_sections.rs:340 src/ui/stream_page.rs:706
-#: src/ui/stream_page.rs:715 src/ui/yt_page.rs:1101
+#: src/ui/app_sections.rs:342 src/ui/stream_page.rs:706
+#: src/ui/stream_page.rs:715 src/ui/yt_page.rs:1177
 msgid "Date"
 msgstr "Tarehe"
 
-#: src/ui/app_sections.rs:341
+#: src/ui/app_sections.rs:343
 msgid "Number of songs"
 msgstr "Idadi ya nyimbo"
 
-#: src/ui/app_sections.rs:342
+#: src/ui/app_sections.rs:344
 msgid "Custom order"
 msgstr "Mpangilio maalum"
 
@@ -1317,7 +1317,7 @@ msgstr "Onyesho la orodha"
 
 #: src/ui/app_settings.rs:316 src/ui/app_sort.rs:545
 #: src/ui/podcasts_page.rs:989 src/ui/stream_page.rs:735
-#: src/ui/yt_page.rs:1078
+#: src/ui/yt_page.rs:1154
 msgid "Gallery view"
 msgstr "Mwonekano wa matunzio"
 
@@ -1666,15 +1666,15 @@ msgstr ""
 "Washa sehemu ya YouTube yenyewe kwenye Menyu. Inaweza kuzuiwa katika baadhi "
 "ya nchi."
 
-#: src/ui/app_settings.rs:1322 src/ui/app_yt_glue.rs:388
+#: src/ui/app_settings.rs:1322 src/ui/app_yt_glue.rs:519
 msgid "Installed (version {v})"
 msgstr "Imesakinishwa (toleo {v})"
 
-#: src/ui/app_settings.rs:1323 src/ui/app_yt_glue.rs:385
+#: src/ui/app_settings.rs:1323 src/ui/app_yt_glue.rs:516
 msgid "Working …"
 msgstr "Inafanya kazi …"
 
-#: src/ui/app_settings.rs:1327 src/ui/app_yt_glue.rs:396
+#: src/ui/app_settings.rs:1327 src/ui/app_yt_glue.rs:527
 msgid "Update"
 msgstr "Sasisha"
 
@@ -1728,7 +1728,7 @@ msgstr "Kupanda"
 # Sort popover: discreet toggle to sort without section headings (added
 # 2026-06-07).
 #: src/ui/app_sort.rs:530 src/ui/podcasts_page.rs:982
-#: src/ui/stream_page.rs:724 src/ui/yt_page.rs:1071
+#: src/ui/stream_page.rs:724 src/ui/yt_page.rs:1147
 msgid "Without grouping"
 msgstr "Bila kupanga makundi"
 
@@ -1740,69 +1740,69 @@ msgstr "Mwaka usiojulikana"
 msgid "Reading music data"
 msgstr "Inasoma data ya muziki"
 
-#: src/ui/app_streaming.rs:252
+#: src/ui/app_streaming.rs:253
 msgid "Recording stopped (stream ended)"
 msgstr "Kurekodi kumesimamishwa (mtiririko umeisha)"
 
-#: src/ui/app_streaming.rs:364
+#: src/ui/app_streaming.rs:365
 msgid "Recording"
 msgstr "Rekodi"
 
-#: src/ui/app_streaming.rs:437
+#: src/ui/app_streaming.rs:438
 msgid "Talk"
 msgstr "Mazungumzo"
 
-#: src/ui/app_streaming.rs:528
+#: src/ui/app_streaming.rs:529
 msgid "Recently detected"
 msgstr "Imegunduliwa hivi karibuni"
 
-#: src/ui/app_streaming.rs:533
+#: src/ui/app_streaming.rs:534
 msgid "Nothing buffered yet"
 msgstr "Bado hakuna kilicho kwenye akiba"
 
-#: src/ui/app_streaming.rs:543
+#: src/ui/app_streaming.rs:544
 msgid "Beginning missing"
 msgstr "Mwanzo umekosekana"
 
-#: src/ui/app_streaming.rs:581
+#: src/ui/app_streaming.rs:582
 msgid "Replay – {name}"
 msgstr "Cheza tena – {name}"
 
-#: src/ui/app_streaming.rs:613
+#: src/ui/app_streaming.rs:614
 msgid "Enable the recording buffer in the settings first"
 msgstr "Washa kwanza akiba ya kurekodi katika mipangilio"
 
-#: src/ui/app_streaming.rs:722
+#: src/ui/app_streaming.rs:724
 msgid "Replay"
 msgstr "Cheza tena"
 
-#: src/ui/app_streaming.rs:733 src/ui/app_streaming.rs:747
+#: src/ui/app_streaming.rs:736 src/ui/app_streaming.rs:750
 msgid "Could not extract from buffer"
 msgstr "Imeshindwa kutoa kutoka kwenye akiba"
 
-#: src/ui/app_streaming.rs:819 src/ui/app_views_handlers.rs:771
+#: src/ui/app_streaming.rs:822 src/ui/app_views_handlers.rs:775
 msgid "Enable YouTube in the settings to use this"
 msgstr "Washa YouTube katika mipangilio ili kutumia hii"
 
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
-#: src/ui/app_streaming.rs:828
+#: src/ui/app_streaming.rs:831
 msgid "Looking online …"
 msgstr "Inaangalia mtandaoni …"
 
-#: src/ui/app_streaming.rs:856 src/ui/app_views_handlers.rs:845
+#: src/ui/app_streaming.rs:859 src/ui/app_views_handlers.rs:849
 msgid "Not found on YouTube"
 msgstr "Haikupatikana kwenye YouTube"
 
-#: src/ui/app_streaming.rs:1050
+#: src/ui/app_streaming.rs:1053
 msgid "Recording stopped"
 msgstr "Kurekodi kumesimamishwa"
 
-#: src/ui/app_streaming.rs:1073
+#: src/ui/app_streaming.rs:1076
 msgid "Station removed"
 msgstr "Kituo kimeondolewa"
 
-#: src/ui/app_streaming.rs:1080
+#: src/ui/app_streaming.rs:1083
 msgid "Recording deleted"
 msgstr "Rekodi imefutwa"
 
@@ -1922,12 +1922,12 @@ msgstr "Imeondolewa kwenye foleni"
 msgid "Will play next"
 msgstr "Itachezwa baadaye"
 
-#: src/ui/app_views_handlers.rs:459 src/ui/app_views_handlers.rs:943
+#: src/ui/app_views_handlers.rs:459 src/ui/app_views_handlers.rs:947
 #: src/ui/podcasts_page.rs:153
 msgid "Downloading …"
 msgstr "Inapakua …"
 
-#: src/ui/app_views_handlers.rs:729
+#: src/ui/app_views_handlers.rs:733
 msgid ""
 "“{title}” is missing from this album. Search for it online and add it to the"
 " album?"
@@ -1935,31 +1935,31 @@ msgstr ""
 "«{title}» haipo katika albamu hii. Itafute mtandaoni na kuiongeza kwenye "
 "albamu?"
 
-#: src/ui/app_views_handlers.rs:732
+#: src/ui/app_views_handlers.rs:736
 msgid "Add missing track"
 msgstr "Ongeza wimbo unaokosekana"
 
-#: src/ui/app_views_handlers.rs:734
+#: src/ui/app_views_handlers.rs:738
 msgid "Search & add"
 msgstr "Tafuta na uongeze"
 
-#: src/ui/app_views_handlers.rs:776 src/ui/app_views_handlers.rs:939
+#: src/ui/app_views_handlers.rs:780 src/ui/app_views_handlers.rs:943
 msgid "Cannot determine the album folder"
 msgstr "Imeshindwa kubaini folda ya albamu"
 
-#: src/ui/app_views_handlers.rs:781
+#: src/ui/app_views_handlers.rs:785
 msgid "Searching online …"
 msgstr "Inatafuta mtandaoni …"
 
-#: src/ui/app_views_handlers.rs:850
+#: src/ui/app_views_handlers.rs:854
 msgid "Choose a version"
 msgstr "Chagua toleo"
 
-#: src/ui/app_views_handlers.rs:864
+#: src/ui/app_views_handlers.rs:868
 msgid "Pick the version of “{title}” to add"
 msgstr "Chagua toleo la «{title}» la kuongeza"
 
-#: src/ui/app_views_handlers.rs:957
+#: src/ui/app_views_handlers.rs:961
 msgid "Track added"
 msgstr "Wimbo umeongezwa"
 
@@ -2028,7 +2028,7 @@ msgid "This source is not configured correctly (URL/login missing)."
 msgstr ""
 "Chanzo hiki hakijasanidiwa ipasavyo (URL/data ya kuingia inakosekana)."
 
-#: src/ui/app_yt_glue.rs:131 src/ui/yt_page.rs:1729
+#: src/ui/app_yt_glue.rs:131 src/ui/yt_page.rs:1828
 #: src/ui/yt_page_detail.rs:401
 msgid "No videos"
 msgstr "Hakuna video"
@@ -2041,27 +2041,35 @@ msgstr "Inaanza orodha ya kucheza «{title}» …"
 msgid "Playlist is empty"
 msgstr "Orodha ya kucheza ni tupu"
 
-#: src/ui/app_yt_glue.rs:334
+#: src/ui/app_yt_glue.rs:406
+msgid "Could not play live stream"
+msgstr "Imeshindwa kucheza mtiririko wa moja kwa moja"
+
+#: src/ui/app_yt_glue.rs:427
+msgid "The live stream is not available"
+msgstr "Mtiririko wa moja kwa moja haupatikani"
+
+#: src/ui/app_yt_glue.rs:465
 msgid "Could not play video"
 msgstr "Imeshindwa kucheza video"
 
-#: src/ui/app_yt_glue.rs:346
+#: src/ui/app_yt_glue.rs:477
 msgid "Updating yt-dlp …"
 msgstr "Inasasisha yt-dlp …"
 
-#: src/ui/app_yt_glue.rs:348
+#: src/ui/app_yt_glue.rs:479
 msgid "Downloading yt-dlp …"
 msgstr "Inapakua yt-dlp …"
 
-#: src/ui/app_yt_glue.rs:389
+#: src/ui/app_yt_glue.rs:520
 msgid "Not installed"
 msgstr "Haijasakinishwa"
 
-#: src/ui/app_yt_glue.rs:415
+#: src/ui/app_yt_glue.rs:546
 msgid "Download yt-dlp in the settings to use YouTube"
 msgstr "Pakua yt-dlp katika mipangilio ili kutumia YouTube"
 
-#: src/ui/app_yt_glue.rs:620
+#: src/ui/app_yt_glue.rs:763
 msgid "Channel removed"
 msgstr "Chaneli imeondolewa"
 
@@ -2268,7 +2276,7 @@ msgstr "{pct} % · imebaki {time}"
 msgid "{pct} % downloaded"
 msgstr "{pct} % imepakuliwa"
 
-#: src/ui/podcasts_page.rs:435 src/ui/yt_page.rs:443
+#: src/ui/podcasts_page.rs:435 src/ui/yt_page.rs:466
 msgid "Newest"
 msgstr "Mpya zaidi"
 
@@ -2316,7 +2324,7 @@ msgstr "Inapakia mlisho …"
 msgid "Updating feed …"
 msgstr "Inasasisha mlisho …"
 
-#: src/ui/podcasts_page.rs:804 src/ui/yt_page.rs:909
+#: src/ui/podcasts_page.rs:804 src/ui/yt_page.rs:985
 msgid "Subscribed: {t}"
 msgstr "Umejisajili: {t}"
 
@@ -2344,19 +2352,19 @@ msgstr "Ondoa podikasti hii?"
 msgid "Number of episodes"
 msgstr "Idadi ya vipindi"
 
-#: src/ui/podcasts_page.rs:1188 src/ui/yt_page.rs:1300
+#: src/ui/podcasts_page.rs:1188 src/ui/yt_page.rs:1376
 msgid "Today"
 msgstr "Leo"
 
-#: src/ui/podcasts_page.rs:1189 src/ui/yt_page.rs:1301
+#: src/ui/podcasts_page.rs:1189 src/ui/yt_page.rs:1377
 msgid "Yesterday"
 msgstr "Jana"
 
-#: src/ui/podcasts_page.rs:1190 src/ui/yt_page.rs:1302
+#: src/ui/podcasts_page.rs:1190 src/ui/yt_page.rs:1378
 msgid "This week"
 msgstr "Wiki hii"
 
-#: src/ui/podcasts_page.rs:1191 src/ui/yt_page.rs:1303
+#: src/ui/podcasts_page.rs:1191 src/ui/yt_page.rs:1379
 msgid "This month"
 msgstr "Mwezi huu"
 
@@ -3127,7 +3135,22 @@ msgid_plural "{n} channels failed"
 msgstr[0] "Chaneli {n} imeshindwa"
 msgstr[1] "Chaneli {n} zimeshindwa"
 
-#: src/ui/yt_page.rs:419
+#: src/ui/yt_live.rs:104 src/ui/yt_page.rs:480 src/ui/yt_page.rs:1578
+#: src/ui/yt_page.rs:1708
+msgid "Live"
+msgstr "Mubashara"
+
+# Settings → Library: confirm before removing an extra source (added
+# 2026-06-07).
+#: src/ui/yt_live.rs:143
+msgid "Remove live stream"
+msgstr "Ondoa mtiririko wa moja kwa moja"
+
+#: src/ui/yt_live.rs:150
+msgid "Remove this live stream?"
+msgstr "Ondoa mtiririko huu wa moja kwa moja?"
+
+#: src/ui/yt_page.rs:442
 msgid ""
 "YouTube isn't working right now – update yt-dlp in the settings, or wait for"
 " a newer release."
@@ -3135,137 +3158,149 @@ msgstr ""
 "YouTube haifanyi kazi kwa sasa – sasisha yt-dlp katika mipangilio, au subiri"
 " toleo jipya zaidi."
 
-#: src/ui/yt_page.rs:450
+#: src/ui/yt_page.rs:473
 msgid "Subscriptions"
 msgstr "Usajili"
 
-#: src/ui/yt_page.rs:458 src/ui/yt_page.rs:1478
+#: src/ui/yt_page.rs:488 src/ui/yt_page.rs:1554
 msgid "Search YouTube"
 msgstr "Tafuta YouTube"
 
-#: src/ui/yt_page.rs:482
+#: src/ui/yt_page.rs:512
 msgid "No videos yet"
 msgstr "Bado hakuna video"
 
-#: src/ui/yt_page.rs:483
+#: src/ui/yt_page.rs:513
 msgid "Subscribe to a channel to follow its newest videos."
 msgstr "Jisajili kwa chaneli ili kufuata video zake mpya zaidi."
 
-#: src/ui/yt_page.rs:507
+#: src/ui/yt_page.rs:537
 msgid "Nothing played yet"
 msgstr "Bado hakuna kilichochezwa"
 
-#: src/ui/yt_page.rs:508
+#: src/ui/yt_page.rs:538
 msgid "Videos you play appear here."
 msgstr "Video unazocheza zinaonekana hapa."
 
-#: src/ui/yt_page.rs:545 src/ui/yt_page_detail.rs:684
+#: src/ui/yt_page.rs:575 src/ui/yt_page_detail.rs:684
 msgid "No subscriptions"
 msgstr "Hakuna usajili"
 
-#: src/ui/yt_page.rs:546
+#: src/ui/yt_page.rs:576
 msgid "Search YouTube and subscribe to a channel."
 msgstr "Tafuta YouTube na ujisajili kwa chaneli."
 
-#: src/ui/yt_page.rs:761
+#: src/ui/yt_page.rs:600
+msgid "No live streams"
+msgstr "Hakuna mitiririko ya moja kwa moja"
+
+#: src/ui/yt_page.rs:601
+msgid ""
+"Search YouTube for live streams, such as lofi radio, and add them here. They"
+" are only streamed, never downloaded."
+msgstr ""
+"Tafuta mitiririko ya moja kwa moja kwenye YouTube, kama redio ya lofi, na "
+"uiongeze hapa. Inatiririshwa tu, haipakuliwi kamwe."
+
+#: src/ui/yt_page.rs:837
 msgid "Subscribing to {t} …"
 msgstr "Inajisajili kwa {t} …"
 
-#: src/ui/yt_page.rs:912
+#: src/ui/yt_page.rs:988
 msgid "Could not load channel"
 msgstr "Imeshindwa kupakia chaneli"
 
-#: src/ui/yt_page.rs:939
+#: src/ui/yt_page.rs:1015
 msgid "yt-dlp is missing — install or update it in the settings"
 msgstr "yt-dlp haipo — isakinishe au uisasishe katika mipangilio"
 
-#: src/ui/yt_page.rs:955
+#: src/ui/yt_page.rs:1031
 msgid "Adding to library … ({done}/{total})"
 msgstr "Inaongeza kwenye maktaba … ({done}/{total})"
 
-#: src/ui/yt_page.rs:972
+#: src/ui/yt_page.rs:1048
 msgid "Added {n} track(s) to your library"
 msgstr "Imeongeza nyimbo {n} kwenye maktaba yako"
 
-#: src/ui/yt_page.rs:979
+#: src/ui/yt_page.rs:1055
 msgid "Could not add to library"
 msgstr "Imeshindwa kuongeza kwenye maktaba"
 
-#: src/ui/yt_page.rs:1001
+#: src/ui/yt_page.rs:1077
 msgid "Saved {n} song(s) to Playlists"
 msgstr "Imehifadhi nyimbo {n} kwenye Orodha za kucheza"
 
-#: src/ui/yt_page.rs:1008
+#: src/ui/yt_page.rs:1084
 msgid "Could not save playlist"
 msgstr "Imeshindwa kuhifadhi orodha ya kucheza"
 
-#: src/ui/yt_page.rs:1065
+#: src/ui/yt_page.rs:1141
 msgid "Number of videos"
 msgstr "Idadi ya video"
 
-#: src/ui/yt_page.rs:1304
+#: src/ui/yt_page.rs:1380
 msgid "Older"
 msgstr "Za zamani zaidi"
 
-#: src/ui/yt_page.rs:1377
+#: src/ui/yt_page.rs:1453
 msgid "Playlist · {n}"
 msgstr "Orodha ya kucheza · {n}"
 
-#: src/ui/yt_page.rs:1396 src/ui/yt_page_detail.rs:288
+#: src/ui/yt_page.rs:1472 src/ui/yt_page_detail.rs:288
 msgid "Start Playlist"
 msgstr "Anza orodha ya kucheza"
 
-#: src/ui/yt_page.rs:1470
+#: src/ui/yt_page.rs:1546
 msgid "Download yt-dlp in the settings first"
 msgstr "Pakua kwanza yt-dlp katika mipangilio"
 
-#: src/ui/yt_page.rs:1500
+#: src/ui/yt_page.rs:1576
 msgid "Channels"
 msgstr "Chaneli"
 
-#: src/ui/yt_page.rs:1527
+#: src/ui/yt_page.rs:1611
 msgid "Search term …"
 msgstr "Neno la kutafuta …"
 
-#: src/ui/yt_page.rs:1601
+#: src/ui/yt_page.rs:1685
 msgid "YouTube unreachable"
 msgstr "YouTube haifikiki"
 
-#: src/ui/yt_page.rs:1603
+#: src/ui/yt_page.rs:1687
 msgid "Check your connection, or update yt-dlp in the settings"
 msgstr "Angalia muunganisho wako, au sasisha yt-dlp katika mipangilio"
 
-#: src/ui/yt_page.rs:1610
+#: src/ui/yt_page.rs:1694
 msgid "Nothing found"
 msgstr "Hakuna kilichopatikana"
 
-#: src/ui/yt_page.rs:1623
+#: src/ui/yt_page.rs:1709
 msgid "Video"
 msgstr "Video"
 
-#: src/ui/yt_page.rs:1624 src/ui/yt_page_detail.rs:283
+#: src/ui/yt_page.rs:1710 src/ui/yt_page_detail.rs:283
 msgid "Playlist"
 msgstr "Orodha ya kucheza"
 
-#: src/ui/yt_page.rs:1625
+#: src/ui/yt_page.rs:1711
 msgid "Channel"
 msgstr "Chaneli"
 
-#: src/ui/yt_page.rs:1655
+#: src/ui/yt_page.rs:1754
 msgid "List as newest"
 msgstr "Orodhesha kama mpya zaidi"
 
-#: src/ui/yt_page.rs:1771
+#: src/ui/yt_page.rs:1870
 msgid "Channel – {title}"
 msgstr "Chaneli – {title}"
 
-#: src/ui/yt_page.rs:1796
+#: src/ui/yt_page.rs:1895
 msgid "{n} video"
 msgid_plural "{n} videos"
 msgstr[0] "video {n}"
 msgstr[1] "video {n}"
 
-#: src/ui/yt_page.rs:1837
+#: src/ui/yt_page.rs:1936
 msgid "Notify of newest publications"
 msgstr "Arifu kuhusu machapisho mapya zaidi"
 

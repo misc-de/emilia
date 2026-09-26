@@ -58,7 +58,8 @@ impl App {
     pub(crate) fn next_seq_local(&self) -> Option<(usize, String)> {
         let foreign = self.files.playing_remote
             || self.podcasts.playing_episode_url.is_some()
-            || self.streaming.playing_stream.is_some();
+            || self.streaming.playing_stream.is_some()
+            || self.youtube.playing_live.is_some();
         let (next, path) = next_seq_candidate(
             &self.transport.queue,
             self.transport.queue_pos,
@@ -113,6 +114,7 @@ impl App {
         self.transport.playing_path = Some(path.clone());
         self.podcasts.playing_episode_url = None;
         self.streaming.playing_stream = None;
+        self.youtube.playing_live = None;
         self.youtube.playing_video_id = None;
         self.files.playing_remote = false;
         self.mini.now_playing = Some(self.display_name(&path));

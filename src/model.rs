@@ -179,6 +179,16 @@ pub struct YtVideo {
     pub thumbnail: Option<String>,
 }
 
+/// A saved YouTube live stream (Live tab). Played live only, never downloaded.
+#[derive(Debug, Clone)]
+pub struct YtLive {
+    pub video_id: String,
+    pub title: String,
+    /// Channel name, when the search result carried it.
+    pub channel: Option<String>,
+    pub thumbnail: Option<String>,
+}
+
 /// A recently played YouTube video (history). `artist`/`thumbnail` are filled
 /// in by the on-play online enrichment.
 #[derive(Debug, Clone)]

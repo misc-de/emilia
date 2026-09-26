@@ -16,6 +16,48 @@ pub struct NowPlaying {
     pub album: Option<String>,
     pub position_ms: i64,
     pub duration_ms: i64,
+    /// What kind of item is loaded: `track`, `episode`, `station`, `youtube`,
+    /// `youtube_live` or `remote`; `None` when nothing is.
+    pub kind: Option<&'static str>,
+    /// Its identifier in the terms of the matching tools: a library path, an
+    /// episode URL, a station id, a video id or a remote path.
+    pub id: Option<String>,
+    /// The play context (library paths / `yt:<id>`), and where in it we are.
+    pub queue: Vec<String>,
+    pub queue_pos: usize,
+    /// Tracks explicitly enqueued ("play next"), consumed as they play.
+    pub user_queue: Vec<String>,
+    pub shuffle: bool,
+    pub repeat: bool,
+    pub playback_rate: f64,
+    /// A voice memo is being recorded from the microphone.
+    pub memo_recording: bool,
+    /// When the running memo recording started (Unix seconds).
+    pub memo_started_at: Option<i64>,
+    /// Bumped on every memo event (started, failed to start, saved, failed to
+    /// save), so a tool can wait for the outcome of its own request.
+    pub memo_seq: u64,
+    /// Outcome of the latest memo event: the saved memo, or the error.
+    pub last_memo: Option<SavedMemo>,
+    pub memo_error: Option<String>,
+}
+
+/// A memo the recorder just saved.
+#[derive(Debug, Clone)]
+pub struct SavedMemo {
+    pub id: i64,
+    pub title: String,
+    pub path: String,
+    pub duration_ms: i64,
+    pub category_id: Option<i64>,
+}
+
+impl NowPlaying {
+    /// Live items (a radio station, a YouTube live stream) have no position to
+    /// seek to and no duration.
+    pub fn is_live(&self) -> bool {
+        matches!(self.kind, Some("station" | "youtube_live"))
+    }
 }
 
 /// Shared handle the UI writes and the MCP tools read.

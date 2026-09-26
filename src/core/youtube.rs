@@ -507,6 +507,71 @@ pub fn search(query: &str, kind: YtKind, n: usize) -> Result<Vec<YtResult>> {
         .collect())
 }
 
+/// Drops the ` YYYY-MM-DD HH:MM` timestamp yt-dlp appends to the title of a
+/// live stream in a full (non-flat) extraction, so a saved stream keeps its
+/// plain name.
+pub fn strip_live_timestamp(title: &str) -> String {
+    let t = title.trim_end();
+    let b = t.as_bytes();
+    // " 2026-09-26 09:19" = 17 bytes.
+    if b.len() > 17 {
+        let tail = &b[b.len() - 17..];
+        let digit = |i: usize| tail[i].is_ascii_digit();
+        let shape = tail[0] == b' '
+            && (1..5).all(digit)
+            && tail[5] == b'-'
+            && (6..8).all(digit)
+            && tail[8] == b'-'
+            && (9..11).all(digit)
+            && tail[11] == b' '
+            && (12..14).all(digit)
+            && tail[14] == b':'
+            && (15..17).all(digit);
+        if shape {
+            return t[..t.len() - 17].trim_end().to_string();
+        }
+    }
+    t.to_string()
+}
+
+/// Searches YouTube for streams that are **live right now** (24/7 radio
+/// channels such as lofi beats). Uses the search page's "Live" filter and then
+/// keeps only entries yt-dlp reports as `is_live` — the filter also lets
+/// finished broadcasts and upcoming premieres through. Hits come back as
+/// [`YtKind::Video`] (a live stream is a video id); they are played through
+/// [`resolve_audio_url`], which picks the audio-only HLS rendition, and never
+/// downloaded. **Network – worker threads only.**
+pub fn search_live(query: &str, n: usize) -> Result<Vec<YtResult>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    // A pasted watch link: take it as is (its live state is checked on play).
+    if let Some(id) = video_id_from_url(query) {
+        let mut hit = video_meta(&id)?;
+        hit.title = strip_live_timestamp(&hit.title);
+        return Ok(vec![hit]);
+    }
+    let n = n.clamp(1, 50);
+    let source = search_results_url(query, "EgJAAQ%3D%3D");
+    // The filter page mixes in ended/upcoming streams, so fetch a few more than
+    // asked and cut back after dropping those.
+    let entries = dump_entries(&[
+        "--flat-playlist",
+        "--playlist-end",
+        &(n * 2).min(60).to_string(),
+        "--",
+        &source,
+    ])?;
+    Ok(entries
+        .into_iter()
+        .filter(RawEntry::is_live_now)
+        .filter_map(|e| e.into_result())
+        .filter(|r| r.kind == YtKind::Video)
+        .take(n)
+        .collect())
+}
+
 /// Lists the entries (videos) of a channel or playlist URL. For a channel the
 /// uploads tab is targeted (`…/videos`). **Network – worker threads only.**
 pub fn list_entries(url: &str, limit: usize) -> Result<Vec<YtResult>> {
@@ -833,6 +898,28 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn live_titles_lose_the_extraction_timestamp() {
+        assert_eq!(
+            strip_live_timestamp("jazz lofi radio 🎷 beats 2026-09-26 09:19"),
+            "jazz lofi radio 🎷 beats"
+        );
+        // Anything else stays as it is.
+        assert_eq!(strip_live_timestamp("Mix 2026-09-26"), "Mix 2026-09-26");
+        assert_eq!(strip_live_timestamp("short"), "short");
+    }
+
+    #[test]
+    fn only_running_streams_count_as_live() {
+        let entry = |json: &str| serde_json::from_str::<RawEntry>(json).unwrap();
+        assert!(entry(r#"{"id":"a","live_status":"is_live"}"#).is_live_now());
+        assert!(!entry(r#"{"id":"a","live_status":"was_live"}"#).is_live_now());
+        assert!(!entry(r#"{"id":"a","live_status":"is_upcoming"}"#).is_live_now());
+        // Older yt-dlp: only the boolean.
+        assert!(entry(r#"{"id":"a","is_live":true}"#).is_live_now());
+        assert!(!entry(r#"{"id":"a"}"#).is_live_now());
+    }
 
     #[test]
     fn youtube_chapters_win_over_the_description() {
@@ -1277,6 +1364,11 @@ struct RawEntry {
     /// YouTube's own chapter marks, when the video has them.
     #[serde(default)]
     chapters: Option<Vec<RawChapter>>,
+    /// `is_live` / `was_live` / `is_upcoming` / `not_live` / `post_live`.
+    #[serde(default)]
+    live_status: Option<String>,
+    #[serde(default)]
+    is_live: Option<bool>,
 }
 
 /// One chapter of yt-dlp's `chapters` array.
@@ -1295,6 +1387,14 @@ struct RawThumb {
 }
 
 impl RawEntry {
+    /// Whether the entry is a stream broadcasting right now.
+    fn is_live_now(&self) -> bool {
+        match self.live_status.as_deref() {
+            Some(status) => status == "is_live",
+            None => self.is_live == Some(true),
+        }
+    }
+
     fn into_result(self) -> Option<YtResult> {
         let id = self.id.clone().filter(|s| !s.trim().is_empty())?;
         let url = self

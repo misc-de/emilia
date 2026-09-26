@@ -349,6 +349,32 @@ fn yt_download_links_video_to_local_path_and_upserts() {
 }
 
 #[test]
+fn youtube_live_streams_save_update_and_remove() {
+    let lib = Library::open_in_memory().unwrap();
+    lib.add_live(
+        "b",
+        "lofi hip hop radio",
+        Some("Lofi Girl"),
+        Some("http://t/b"),
+    )
+    .unwrap();
+    lib.add_live("a", "Jazz radio", None, None).unwrap();
+    // Saving again keeps a known channel/thumbnail the new hit lacks.
+    lib.add_live("b", "lofi hip hop radio 📚", None, None)
+        .unwrap();
+    let live = lib.live_streams().unwrap();
+    assert_eq!(
+        live.iter().map(|l| l.video_id.as_str()).collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+    assert_eq!(live[1].title, "lofi hip hop radio 📚");
+    assert_eq!(live[1].channel.as_deref(), Some("Lofi Girl"));
+    assert_eq!(live[1].thumbnail.as_deref(), Some("http://t/b"));
+    lib.delete_live("a").unwrap();
+    assert_eq!(lib.live_streams().unwrap().len(), 1);
+}
+
+#[test]
 fn youtube_recent_history_orders_and_enriches() {
     let lib = Library::open_in_memory().unwrap();
     lib.add_recent_video("a", "First", None).unwrap();

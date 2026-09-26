@@ -54,6 +54,7 @@ impl App {
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = Some(id);
                 self.youtube.playing_video_id = None;
+                self.youtube.playing_live = None;
                 self.files.playing_remote = false;
                 self.streaming.stream_title = None;
                 self.transport.queue.clear();
@@ -697,6 +698,7 @@ impl App {
             self.player.stop();
             self.mini.playing = false;
             self.streaming.playing_stream = None;
+            self.youtube.playing_live = None;
             self.mini.now_playing = None;
             self.mpris.set_playing(false);
             self.stop_recorder();
@@ -725,6 +727,7 @@ impl App {
                         self.transport.playing_path = Some(path);
                         self.podcasts.playing_episode_url = None;
                         self.streaming.playing_stream = None;
+                        self.youtube.playing_live = None;
                         self.mpris.set_playing(true);
                     }
                     Err(e) => tracing::error!("Replay failed: {e}"),

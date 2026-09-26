@@ -391,6 +391,51 @@ impl Library {
         Ok(())
     }
 
+    /// Saves a live stream to the Live tab (updates title/channel/thumbnail of
+    /// one already saved, keeping its place).
+    pub fn add_live(
+        &self,
+        video_id: &str,
+        title: &str,
+        channel: Option<&str>,
+        thumbnail: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO yt_live (video_id, title, channel, thumbnail, added_at)
+             VALUES (?1, ?2, ?3, ?4, strftime('%s','now'))
+             ON CONFLICT(video_id) DO UPDATE SET
+                title = excluded.title,
+                channel = COALESCE(excluded.channel, yt_live.channel),
+                thumbnail = COALESCE(excluded.thumbnail, yt_live.thumbnail)",
+            rusqlite::params![video_id, title, channel, thumbnail],
+        )?;
+        Ok(())
+    }
+
+    /// The saved live streams, by title.
+    pub fn live_streams(&self) -> Result<Vec<YtLive>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT video_id, title, channel, thumbnail FROM yt_live
+             ORDER BY title COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(YtLive {
+                video_id: r.get(0)?,
+                title: r.get(1)?,
+                channel: r.get(2)?,
+                thumbnail: r.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Removes a live stream from the Live tab.
+    pub fn delete_live(&self, video_id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM yt_live WHERE video_id = ?1", [video_id])?;
+        Ok(())
+    }
+
     /// Whether a path/URL is a known podcast episode (its audio enclosure URL).
     /// Used to label a playlist entry's source.
     pub fn is_podcast_episode(&self, url: &str) -> Result<bool> {

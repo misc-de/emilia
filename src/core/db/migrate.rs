@@ -426,6 +426,15 @@ impl Library {
                 chapters    TEXT,
                 fetched_at  INTEGER NOT NULL DEFAULT 0
             );
+            -- Saved YouTube live streams (24/7 radio channels). Played live
+            -- only — never downloaded, no resume position.
+            CREATE TABLE IF NOT EXISTS yt_live (
+                video_id  TEXT PRIMARY KEY,
+                title     TEXT NOT NULL,
+                channel   TEXT,
+                thumbnail TEXT,
+                added_at  INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS yt_playlist_cache (
                 url        TEXT PRIMARY KEY,
                 title      TEXT NOT NULL,

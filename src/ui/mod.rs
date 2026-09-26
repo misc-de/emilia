@@ -50,5 +50,6 @@ pub mod theme;
 pub mod tray_popup;
 pub mod widgets;
 pub mod yt_channels;
+pub mod yt_live;
 pub mod yt_page;
 pub mod yt_page_detail;

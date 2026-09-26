@@ -88,7 +88,13 @@ pub(crate) struct YtPage {
     newest_list: gtk::Box,
     recent_items: Vec<crate::model::YtRecent>,
     recent_list: gtk::Box,
+    /// Saved live streams (Live tab).
+    pub(super) live_items: Vec<crate::model::YtLive>,
+    pub(super) live_list: gtk::ListBox,
     search_results: Vec<YtResult>,
+    /// What the shown search results were searched as (live hits are saved to
+    /// the Live tab instead of opening the video dialog).
+    search_kind: SearchKind,
     search_failed: bool,
     /// Monotonic search counter. Every new search bumps it; command results
     /// carrying an older value are ignored. This keeps the "Searching …"
@@ -127,6 +133,14 @@ pub(super) struct ProgressPopup {
     /// Which download this popup tracks, so stray progress/finish commands for a
     /// different video don't retarget or close it.
     pub(super) video_id: String,
+}
+
+/// What the search dialog looks for: one of the regular result kinds, or
+/// streams that are live right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchKind {
+    Yt(YtKind),
+    Live,
 }
 
 #[derive(Debug)]
@@ -168,7 +182,11 @@ pub(crate) enum YtInput {
     /// Banner button → ask the parent to open the settings (yt-dlp update).
     OpenSettings,
     Subscribe,
-    Search(String, YtKind),
+    Search(String, SearchKind),
+    /// Save the live search hit at this index to the Live tab.
+    AddLive(usize),
+    ShowLiveDetail(String),
+    RemoveLive(String),
     SubscribeChannel(String),
     OpenChannel(i64),
     OpenChannelAt(usize),
@@ -236,6 +254,11 @@ pub(crate) enum YtOutput {
         video_id: String,
         title: String,
         ms: i64,
+    },
+    /// Transport: play/pause a saved live stream (streamed only, like a station).
+    PlayLive {
+        video_id: String,
+        title: String,
     },
     /// Transport: play a subscribed channel's videos as the queue.
     PlayChannel(i64),
@@ -453,6 +476,13 @@ impl Component for YtPage {
                     set_active: model.yt_view == YtView::Channels,
                     connect_clicked => YtInput::SetView(YtView::Channels),
                 },
+                gtk::ToggleButton {
+                    set_label: &gettext("Live"),
+                    set_hexpand: true,
+                    #[watch]
+                    set_active: model.yt_view == YtView::Live,
+                    connect_clicked => YtInput::SetView(YtView::Live),
+                },
                 gtk::Button {
                     set_icon_name: "list-add-symbolic",
                     set_tooltip_text: Some(&gettext("Search YouTube")),
@@ -548,6 +578,31 @@ impl Component for YtPage {
                 #[watch]
                 set_visible: model.yt_view == YtView::Channels && model.channel_items.is_empty(),
             },
+
+            // "Live"
+            gtk::ScrolledWindow {
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.yt_view == YtView::Live && !model.live_items.is_empty(),
+                #[local_ref]
+                yt_live_list -> gtk::ListBox {
+                    set_valign: gtk::Align::Start,
+                    set_margin_top: 10,
+                    set_margin_bottom: 12,
+                    set_margin_start: 12,
+                    set_margin_end: 12,
+                    set_selection_mode: gtk::SelectionMode::None,
+                    set_css_classes: &["boxed-list"],
+                },
+            },
+            adw::StatusPage {
+                set_icon_name: Some("internet-radio-symbolic"),
+                set_title: &gettext("No live streams"),
+                set_description: Some(&gettext("Search YouTube for live streams, such as lofi radio, and add them here. They are only streamed, never downloaded.")),
+                set_vexpand: true,
+                #[watch]
+                set_visible: model.yt_view == YtView::Live && model.live_items.is_empty(),
+            },
         }
     }
 
@@ -561,6 +616,7 @@ impl Component for YtPage {
         let yt_channels_gallery = gtk::FlowBox::new();
         let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let yt_recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let yt_live_list = gtk::ListBox::new();
         // Restore the persisted subscriptions sort (default: by name, ascending) +
         // the grouping/gallery choices.
         let channels_sort = read_sort(&library, "channels", SortCrit::Name, false);
@@ -588,7 +644,7 @@ impl Component for YtPage {
         yt_channels_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             channel_headers.clone(),
         ));
-        let model = YtPage {
+        let mut model = YtPage {
             library,
             window: None,
             playing_video_id: None,
@@ -611,7 +667,10 @@ impl Component for YtPage {
             newest_list: yt_newest_list.clone(),
             recent_items: Vec::new(),
             recent_list: yt_recent_list.clone(),
+            live_items: Vec::new(),
+            live_list: yt_live_list.clone(),
             search_results: Vec::new(),
+            search_kind: SearchKind::Yt(YtKind::Video),
             search_failed: false,
             search_seq: 0,
             search: Rc::new(RefCell::new(None)),
@@ -631,6 +690,7 @@ impl Component for YtPage {
         // background; the page is rebuilt only if one came in.
         sender.spawn_oneshot_command(|| YtCmd::CoversCached(cache_missing_channel_thumbs()));
         let widgets = view_output!();
+        model.reload_live(&sender);
         // Build the header sort popover for the restored subscriptions sort.
         model.rebuild_sort(&sender);
         ComponentParts { model, widgets }
@@ -638,7 +698,10 @@ impl Component for YtPage {
 
     fn update(&mut self, msg: YtInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            YtInput::Reload => self.reload_channels(&sender),
+            YtInput::Reload => {
+                self.reload_channels(&sender);
+                self.reload_live(&sender);
+            }
             YtInput::RefreshAll => self.refresh_all_channels(&sender),
             YtInput::ReloadRecent => self.reload_yt_recent(&sender),
             YtInput::PlaybackStateChanged {
@@ -669,6 +732,12 @@ impl Component for YtPage {
             YtInput::RefreshBroken => self.ytdlp_broken = youtube::extraction_broken(),
             YtInput::SetView(v) => {
                 self.yt_view = v;
+                // The rows built in `init` were not in the window yet, so their
+                // play marks were already discarded (`Marks` drops rootless
+                // widgets) — rebuild now that the page is shown.
+                if v == YtView::Live {
+                    self.reload_live(&sender);
+                }
                 // Each view has its own sort control (Newest: none).
                 self.rebuild_sort(&sender);
             }
@@ -731,9 +800,14 @@ impl Component for YtPage {
                 if !term.is_empty() {
                     self.search_seq = self.search_seq.wrapping_add(1);
                     let seq = self.search_seq;
+                    self.search_kind = kind;
                     self.show_youtube_search_spinner();
                     sender.spawn_command(move |out| {
-                        let results = match youtube::search(&term, kind, 25) {
+                        let found = match kind {
+                            SearchKind::Yt(kind) => youtube::search(&term, kind, 25),
+                            SearchKind::Live => youtube::search_live(&term, 25),
+                        };
+                        let results = match found {
                             Ok(r) => r,
                             Err(_) => {
                                 let _ = out.send(YtCmd::SearchFailed(seq));
@@ -749,6 +823,17 @@ impl Component for YtPage {
                         let _ = out.send(YtCmd::SearchThumbsReady(seq));
                     });
                 }
+            }
+            YtInput::AddLive(index) => {
+                if let Some(hit) = self.search_results.get(index).cloned() {
+                    self.add_live(&sender, hit);
+                }
+            }
+            YtInput::ShowLiveDetail(video_id) => self.show_live_detail(&sender, &video_id),
+            YtInput::RemoveLive(video_id) => {
+                let _ = self.library.delete_live(&video_id);
+                self.reload_live(&sender);
+                self.rebuild_sort(&sender);
             }
             YtInput::SubscribeChannel(url) => {
                 if let Some(r) = self
@@ -1053,7 +1138,7 @@ impl YtPage {
     /// (Re)builds the header sort button: direction icon + criteria popover
     /// (name / video count) plus the grouping + gallery toggles. Called on init
     /// and whenever the sort/grouping/gallery changes.
-    fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
+    pub(super) fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
         use crate::ui::app_sort::SortToggle;
         let input = sender.input_sender().clone();
         // Subscriptions and Recent both sort; Newest stays date-grouped (no sort).
@@ -1112,7 +1197,7 @@ impl YtPage {
                 );
                 (!self.recent_items.is_empty()).then_some((popover, desc))
             }
-            YtView::Newest => None,
+            YtView::Newest | YtView::Live => None,
         };
         *self.sort_slot.borrow_mut() = slot;
         let _ = sender.output(YtOutput::SortChanged);
@@ -1480,7 +1565,7 @@ impl YtPage {
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
-        let kind = Rc::new(Cell::new(YtKind::Video));
+        let kind = Rc::new(Cell::new(SearchKind::Yt(YtKind::Video)));
         let kind_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .css_classes(["linked", "emilia-tabbar"])
@@ -1499,12 +1584,20 @@ impl YtPage {
         let b_channel = gtk::ToggleButton::builder()
             .label(gettext("Channels"))
             .build();
+        let b_live = gtk::ToggleButton::builder().label(gettext("Live")).build();
         b_playlist.set_group(Some(&b_video));
         b_channel.set_group(Some(&b_video));
+        b_live.set_group(Some(&b_video));
+        // Opened from the Live tab → search live streams right away.
+        if self.yt_view == YtView::Live {
+            b_live.set_active(true);
+            kind.set(SearchKind::Live);
+        }
         for (btn, k) in [
-            (&b_video, YtKind::Video),
-            (&b_playlist, YtKind::Playlist),
-            (&b_channel, YtKind::Channel),
+            (&b_video, SearchKind::Yt(YtKind::Video)),
+            (&b_playlist, SearchKind::Yt(YtKind::Playlist)),
+            (&b_channel, SearchKind::Yt(YtKind::Channel)),
+            (&b_live, SearchKind::Live),
         ] {
             let kind = kind.clone();
             btn.connect_toggled(move |b| {
@@ -1618,8 +1711,10 @@ impl YtPage {
         let rows = self.search_results.len() as i32;
         dialog.set_content_height((340 + rows * 66).min(760));
 
-        for r in &self.search_results {
+        let live = self.search_kind == SearchKind::Live;
+        for (index, r) in self.search_results.iter().enumerate() {
             let mut subtitle = match r.kind {
+                _ if live => gettext("Live"),
                 YtKind::Video => gettext("Video"),
                 YtKind::Playlist => gettext("Playlist"),
                 YtKind::Channel => gettext("Channel"),
@@ -1643,9 +1738,22 @@ impl YtPage {
                 .and_then(crate::core::online::youtube_thumb_path);
             let icon = match r.kind {
                 YtKind::Channel => "avatar-default-symbolic",
+                _ if live => "internet-radio-symbolic",
                 _ => "audio-x-generic-symbolic",
             };
             row.add_prefix(&cover_widget(cover.as_deref(), icon));
+            if live {
+                // Tapping a live hit saves it to the Live tab (like subscribing
+                // to a channel); it is played from there, never downloaded.
+                row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
+                let (sender, dialog) = (sender.clone(), dialog.clone());
+                row.connect_activated(move |_| {
+                    sender.input(YtInput::AddLive(index));
+                    dialog.close();
+                });
+                list.append(&row);
+                continue;
+            }
             match r.kind {
                 YtKind::Video => {
                     let btn = gtk::Button::builder()

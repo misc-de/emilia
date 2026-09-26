@@ -324,6 +324,137 @@ impl App {
         }
     }
 
+    // ---- live streams (Live tab) -----------------------------------------
+
+    /// Play/pause toggle of a live stream's play button.
+    pub(crate) fn yt_toggle_live(&mut self, video_id: String, title: String) {
+        if self.youtube.playing_live.as_deref() == Some(video_id.as_str()) {
+            self.flip_playing();
+        } else {
+            self.play_yt_live(video_id, title);
+        }
+    }
+
+    /// Starts a YouTube live stream the way a radio station starts: it replaces
+    /// the current playback, clears the queue and keeps no position. The HLS
+    /// address expires after a few hours, so it is resolved fresh on every
+    /// start (worker thread) and never stored.
+    pub(crate) fn play_yt_live(&mut self, video_id: String, title: String) {
+        self.save_resume();
+        self.save_episode_progress();
+        self.finalize_play_session(false);
+        // Silence the previous item while the address resolves.
+        self.player.stop();
+        self.mini.now_playing = Some(title.clone());
+        self.mini.current_album = None;
+        self.mini.playing = true;
+        self.mini.loading = true;
+        self.transport.playing_path = None;
+        self.podcasts.playing_episode_url = None;
+        self.streaming.playing_stream = None;
+        self.streaming.stream_title = None;
+        self.youtube.playing_video_id = None;
+        self.youtube.playing_live = Some(video_id.clone());
+        self.youtube.live_started = None;
+        self.files.playing_remote = false;
+        self.stop_recorder();
+        self.transport.queue.clear();
+        self.transport.queue_pos = 0;
+        self.mini.position_ms = 0;
+        self.mini.track_duration_ms = 0;
+        *self.transport.close_resume.borrow_mut() = None;
+        self.set_chapters(Vec::new());
+        self.close_lyrics_view();
+        self.lyrics.current = None;
+        self.lyrics.for_path = None;
+        let art = self
+            .library
+            .live_streams()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|l| l.video_id == video_id)
+            .and_then(|l| l.thumbnail)
+            .and_then(|t| crate::core::online::youtube_thumb_path(&t));
+        self.mpris
+            .set_metadata(0, &title, None, None, None, art.as_deref());
+        self.mpris.set_playing(true);
+        self.refresh_queue_icons();
+        let input = self.input.clone();
+        std::thread::spawn(move || {
+            let result = youtube::resolve_audio_url(&video_id).map_err(|e| e.to_string());
+            let _ = input.send(Msg::Yt(YtMsg::YtLiveResolved { video_id, result }));
+        });
+    }
+
+    /// The live stream's address came back → start streaming it.
+    fn yt_live_resolved(&mut self, video_id: String, result: Result<String, String>) {
+        // Something else was started (or it was stopped) meanwhile.
+        if self.youtube.playing_live.as_deref() != Some(video_id.as_str()) {
+            return;
+        }
+        let started =
+            result.and_then(|url| self.player.play_uri(&url, 0).map_err(|e| e.to_string()));
+        match started {
+            Ok(()) => {
+                self.youtube.live_started = Some(std::time::Instant::now());
+                self.settings.active_output =
+                    crate::core::output::default_output().unwrap_or_default();
+                self.apply_current_eq();
+            }
+            Err(e) => {
+                tracing::warn!("yt live start failed: {e}");
+                self.stop_yt_live(&gettext("Could not play live stream"));
+            }
+        }
+    }
+
+    /// The live stream stopped delivering (end of stream or a playback error).
+    /// After a while of running that is usually the HLS address expiring →
+    /// rejoin with a fresh one. Failing right away means the broadcast is over
+    /// or unreachable → stop instead of retrying in a loop.
+    pub(crate) fn yt_live_ended(&mut self) {
+        let Some(video_id) = self.youtube.playing_live.clone() else {
+            return;
+        };
+        let ran_a_while = self
+            .youtube
+            .live_started
+            .is_some_and(|t| t.elapsed() > std::time::Duration::from_secs(60));
+        if ran_a_while {
+            let title = self.mini.now_playing.clone().unwrap_or_default();
+            self.play_yt_live(video_id, title);
+        } else {
+            self.stop_yt_live(&gettext("The live stream is not available"));
+        }
+    }
+
+    /// Tears a live stream down and tells the user why.
+    fn stop_yt_live(&mut self, message: &str) {
+        self.player.stop();
+        self.mini.playing = false;
+        self.mini.loading = false;
+        self.youtube.playing_live = None;
+        self.youtube.live_started = None;
+        self.mpris.set_playing(false);
+        self.refresh_queue_icons();
+        self.toast(message);
+    }
+
+    /// Next/previous on a live stream: the neighbouring saved one, cycling.
+    pub(crate) fn yt_live_step(&mut self, dir: i32) {
+        let Some(cur) = self.youtube.playing_live.clone() else {
+            return;
+        };
+        let list = self.library.live_streams().unwrap_or_default();
+        if list.is_empty() {
+            return;
+        }
+        let pos = list.iter().position(|l| l.video_id == cur).unwrap_or(0);
+        let next = (pos as i32 + dir).rem_euclid(list.len() as i32) as usize;
+        let item = list[next].clone();
+        self.play_yt_live(item.video_id, item.title);
+    }
+
     /// Resets the optimistic now-playing state after a failed resolve/stream.
     pub(crate) fn youtube_playback_failed(&mut self, _sender: &ComponentSender<Self>) {
         self.mini.playing = false;
@@ -487,6 +618,16 @@ pub(crate) enum YtMsg {
         resume: i64,
         result: Result<String, String>,
     },
+    /// Play/pause a saved live stream (Live tab).
+    YtPlayLive {
+        video_id: String,
+        title: String,
+    },
+    /// Internal: a live stream's HLS address was resolved (or failed).
+    YtLiveResolved {
+        video_id: String,
+        result: Result<String, String>,
+    },
     /// Internal: online enrichment (artist + cover) for a played video finished.
     /// Play a video starting at a jump mark from its description.
     YtPlayVideoAt {
@@ -566,6 +707,8 @@ impl App {
                 videos,
             } => self.yt_start_playlist_at(url, title, index, close, videos),
             YtMsg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
+            YtMsg::YtPlayLive { video_id, title } => self.yt_toggle_live(video_id, title),
+            YtMsg::YtLiveResolved { video_id, result } => self.yt_live_resolved(video_id, result),
             YtMsg::YtPlayVideoAt {
                 video_id,
                 title,

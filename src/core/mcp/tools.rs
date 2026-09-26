@@ -25,31 +25,31 @@ use crate::model::{StreamItem, Track};
 
 // ---- small argument helpers --------------------------------------------------
 
-fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+pub(super) fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key)
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
 }
 
-fn req_str<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
+pub(super) fn req_str<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     arg_str(args, key).ok_or_else(|| anyhow!("missing required string argument '{key}'"))
 }
 
-fn arg_i64(args: &Value, key: &str) -> Option<i64> {
+pub(super) fn arg_i64(args: &Value, key: &str) -> Option<i64> {
     args.get(key).and_then(|v| v.as_i64())
 }
 
-fn req_i64(args: &Value, key: &str) -> Result<i64> {
+pub(super) fn req_i64(args: &Value, key: &str) -> Result<i64> {
     arg_i64(args, key).ok_or_else(|| anyhow!("missing required integer argument '{key}'"))
 }
 
-fn arg_bool(args: &Value, key: &str) -> Option<bool> {
+pub(super) fn arg_bool(args: &Value, key: &str) -> Option<bool> {
     args.get(key).and_then(|v| v.as_bool())
 }
 
 /// Gate for destructive tools: the caller must pass `"confirm": true`, so a
 /// model cannot delete something by reflex without an explicit acknowledgement.
-fn require_confirm(args: &Value) -> Result<()> {
+pub(super) fn require_confirm(args: &Value) -> Result<()> {
     if args.get("confirm").and_then(|v| v.as_bool()) == Some(true) {
         Ok(())
     } else {
@@ -61,7 +61,7 @@ fn require_confirm(args: &Value) -> Result<()> {
 
 /// Human-readable `H:MM:SS` (or `M:SS`) rendering of a millisecond duration,
 /// emitted alongside the raw `*_ms` value by the analysis tools.
-fn fmt_hms(ms: i64) -> String {
+pub(super) fn fmt_hms(ms: i64) -> String {
     let secs = ms.max(0) / 1000;
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     if h > 0 {
@@ -346,6 +346,10 @@ pub(crate) const YOUTUBE_TOOLS: [&str; 4] = [
     "download_youtube",
 ];
 
+fn is_youtube_tool(name: &str) -> bool {
+    YOUTUBE_TOOLS.contains(&name) || super::tools_ext::YOUTUBE_TOOLS_EXT.contains(&name)
+}
+
 /// Reads the `youtube_enabled` UI setting (default: off, matching the app). Opens
 /// its own short-lived read connection — `tool_list`/`dispatch` are already
 /// per-request, so this adds at most one cheap WAL read.
@@ -367,7 +371,7 @@ fn youtube_enabled() -> bool {
 pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
     // A disabled YouTube integration is inert over MCP: its tools are not even
     // advertised (see `tool_list_enabled`), and invoking one directly is refused.
-    if YOUTUBE_TOOLS.contains(&name) && !youtube_enabled() {
+    if is_youtube_tool(name) && !youtube_enabled() {
         return Err(anyhow!(
             "the YouTube integration is disabled in the app settings"
         ));
@@ -378,11 +382,17 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let np = ctx.now.lock().unwrap_or_else(|e| e.into_inner()).clone();
             Ok(json!({
                 "playing": np.playing,
+                "kind": np.kind,
+                "id": np.id,
                 "title": np.title,
                 "artist": np.artist,
                 "album": np.album,
+                "live": np.is_live(),
                 "position_ms": np.position_ms,
                 "duration_ms": np.duration_ms,
+                "shuffle": np.shuffle,
+                "repeat": np.repeat,
+                "playback_rate": np.playback_rate,
             }))
         }
 
@@ -551,6 +561,12 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
                 "memos_duration": fmt_hms(o.memos_duration_ms),
                 "youtube_channels": o.youtube_channels,
                 "youtube_videos": o.youtube_videos,
+                "youtube_live_streams": lib.live_streams()?.len(),
+                "stations": lib.streams()?.len(),
+                "recordings": lib.recordings()?.len(),
+                "favorites": lib.favorites()?.len(),
+                "audiobooks": lib.area_entries(crate::core::category::Area::Audiobooks, true, false).len(),
+                "concerts": lib.area_entries(crate::core::category::Area::Concerts, true, false).len(),
             }))
         }
 
@@ -651,13 +667,22 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
 
         "list_memos" => {
             let lib = Library::open()?;
-            let items: Vec<Value> = lib
-                .memos()?
+            // `category_id`: a category's memos; `null` → "General" only.
+            let memos = match args.get("category_id") {
+                None => lib.memos()?,
+                Some(Value::Null) => lib.memos_in_category(None)?,
+                Some(v) => lib.memos_in_category(Some(
+                    v.as_i64()
+                        .ok_or_else(|| anyhow!("`category_id` must be an integer or null"))?,
+                ))?,
+            };
+            let items: Vec<Value> = memos
                 .into_iter()
                 .map(|m| {
                     json!({
                         "id": m.id,
                         "title": m.title,
+                        "category_id": m.category_id,
                         "path": m.path,
                         "recorded_at": m.recorded_at,
                         "duration_ms": m.duration_ms,
@@ -710,6 +735,11 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
         "seek" => {
             let ms = arg_i64(args, "position_ms")
                 .ok_or_else(|| anyhow!("missing required integer argument 'position_ms'"))?;
+            if ctx.now.lock().unwrap_or_else(|e| e.into_inner()).is_live() {
+                return Err(anyhow!(
+                    "a live stream (station / YouTube live) cannot be seeked"
+                ));
+            }
             (ctx.control)(McpCommand::Seek(ms.max(0)));
             Ok(json!({ "ok": true }))
         }
@@ -750,6 +780,18 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
 
         "play_youtube" => {
             let raw = req_str(args, "id")?;
+            // A playlist URL (from search_youtube kind=playlist or list_youtube)
+            // plays the whole list.
+            if raw.contains("list=") && crate::core::youtube::video_id_from_url(raw).is_none() {
+                let title = arg_str(args, "title")
+                    .unwrap_or("YouTube playlist")
+                    .to_string();
+                (ctx.control)(McpCommand::PlayYoutubePlaylist {
+                    url: raw.to_string(),
+                    title,
+                });
+                return Ok(json!({ "ok": true, "playlist": raw }));
+            }
             // Accept a full watch URL as well as a bare video id.
             let video_id =
                 crate::core::youtube::video_id_from_url(raw).unwrap_or_else(|| raw.to_string());
@@ -804,9 +846,17 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             let scope = req_str(args, "scope")?;
             let key = req_str(args, "key")?;
             let title = arg_str(args, "title").unwrap_or(key);
+            if !matches!(scope, "track" | "folder" | "album" | "artist") {
+                return Err(anyhow!(
+                    "scope must be one of: track, folder, album, artist"
+                ));
+            }
             let lib = Library::open()?;
             let now_on = !lib.is_favorite(scope, key);
-            lib.set_favorite(scope, key, title, false, now_on)?;
+            // Folders are stored as directories, like the UI does, so playing
+            // the favorite later plays the folder's contents.
+            lib.set_favorite(scope, key, title, scope == "folder", now_on)?;
+            (ctx.control)(McpCommand::ReloadFavorites);
             Ok(json!({ "favorite": now_on }))
         }
 
@@ -992,17 +1042,23 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             }
             let query = req_str(args, "query")?;
             let limit = arg_i64(args, "limit").unwrap_or(15).clamp(1, 50) as usize;
+            let live = arg_str(args, "kind") == Some("live");
             let kind = match arg_str(args, "kind") {
                 Some("playlist") => YtKind::Playlist,
                 Some("channel") => YtKind::Channel,
                 _ => YtKind::Video,
             };
             let kind_str = |k: &YtKind| match k {
+                _ if live => "live",
                 YtKind::Video => "video",
                 YtKind::Playlist => "playlist",
                 YtKind::Channel => "channel",
             };
-            let results = youtube::search(query, kind, limit)?;
+            let results = if live {
+                youtube::search_live(query, limit)?
+            } else {
+                youtube::search(query, kind, limit)?
+            };
             let items: Vec<Value> = results
                 .iter()
                 .map(|r| {
@@ -1481,7 +1537,8 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
             Ok(json!({ "ok": true }))
         }
 
-        other => Err(anyhow!("unknown tool '{other}'")),
+        other => super::tools_ext::dispatch_ext(ctx, other, args)
+            .unwrap_or_else(|| Err(anyhow!("unknown tool '{other}'"))),
     }
 }
 
@@ -1497,16 +1554,25 @@ pub fn tool_list_enabled() -> Value {
             arr.retain(|t| {
                 t.get("name")
                     .and_then(|n| n.as_str())
-                    .is_none_or(|n| !YOUTUBE_TOOLS.contains(&n))
+                    .is_none_or(|n| !is_youtube_tool(n))
             });
         }
     }
     list
 }
 
-/// The full list of tool descriptors returned by `tools/list`. Schemas are kept
-/// hand-written (small, stable set) rather than derived.
+/// The full list of tool descriptors returned by `tools/list`: the core set
+/// plus [`super::tools_ext::tool_list_ext`].
 pub fn tool_list() -> Value {
+    let mut list = tool_list_core();
+    if let Some(arr) = list.as_array_mut() {
+        arr.extend(super::tools_ext::tool_list_ext());
+    }
+    list
+}
+
+/// The core tool descriptors. Schemas are kept hand-written rather than derived.
+fn tool_list_core() -> Value {
     let obj = |props: Value, required: Value| json!({ "type": "object", "properties": props, "required": required });
     let empty = || obj(json!({}), json!([]));
 
@@ -2292,6 +2358,255 @@ mod tests {
             assert!(err.contains("confirm"), "{tool}: {err}");
         }
         assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_memo_category_requires_confirm() {
+        let (ctx, log) = ctx_recording();
+        let err = dispatch(&ctx, "delete_memo_category", &json!({ "category_id": 1 }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("confirm"), "{err}");
+        dispatch(
+            &ctx,
+            "delete_memo_category",
+            &json!({ "category_id": 1, "with_memos": true, "confirm": true }),
+        )
+        .unwrap();
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[McpCommand::DeleteMemoCategory {
+                id: 1,
+                with_memos: true
+            }]
+        );
+    }
+
+    /// A context whose control sink answers memo commands the way the app does:
+    /// through the snapshot's memo event counter.
+    fn ctx_memo(mic_ok: bool) -> McpContext {
+        let now = state::new_handle();
+        let snap = now.clone();
+        McpContext {
+            now,
+            control: Arc::new(move |c| {
+                let mut np = snap.lock().unwrap();
+                np.memo_seq += 1;
+                match c {
+                    McpCommand::StartMemo { .. } if mic_ok => {
+                        np.memo_recording = true;
+                        np.memo_error = None;
+                    }
+                    McpCommand::StartMemo { .. } => {
+                        np.memo_error = Some("microphone not available".into());
+                    }
+                    McpCommand::StopMemo { title, .. } => {
+                        np.memo_recording = false;
+                        np.memo_error = None;
+                        np.last_memo = Some(state::SavedMemo {
+                            id: 7,
+                            title: title.unwrap_or_default(),
+                            path: "/m/7.ogg".into(),
+                            duration_ms: 3000,
+                            category_id: None,
+                        });
+                    }
+                    _ => {}
+                }
+            }),
+            jobs: Arc::new(crate::core::mcp::jobs::Jobs::default()),
+            sync: state::new_sync_handle(),
+        }
+    }
+
+    #[test]
+    fn record_memo_starts_stops_and_reports_the_saved_memo() {
+        let ctx = ctx_memo(true);
+        assert!(dispatch(&ctx, "record_memo", &json!({ "action": "stop" })).is_err());
+        assert!(dispatch(
+            &ctx,
+            "record_memo",
+            &json!({ "action": "start", "duration_s": 0 })
+        )
+        .is_err());
+        let started = dispatch(&ctx, "record_memo", &json!({ "action": "start" })).unwrap();
+        assert_eq!(started["recording"], json!(true));
+        // A second start is refused while one runs.
+        assert!(dispatch(&ctx, "record_memo", &json!({ "action": "start" })).is_err());
+        let stopped = dispatch(
+            &ctx,
+            "record_memo",
+            &json!({ "action": "stop", "title": "Einkauf" }),
+        )
+        .unwrap();
+        assert_eq!(stopped["memo"]["id"], json!(7));
+        assert_eq!(stopped["memo"]["title"], json!("Einkauf"));
+        let status = dispatch(&ctx, "record_memo", &json!({ "action": "status" })).unwrap();
+        assert_eq!(status["recording"], json!(false));
+        assert_eq!(status["last_memo"]["id"], json!(7));
+    }
+
+    #[test]
+    fn record_memo_reports_a_missing_microphone() {
+        let ctx = ctx_memo(false);
+        let err = dispatch(&ctx, "record_memo", &json!({ "action": "start" }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("microphone"), "{err}");
+    }
+
+    #[test]
+    fn live_items_refuse_seek_and_speed() {
+        let (ctx, log) = ctx_recording();
+        ctx.now.lock().unwrap().kind = Some("youtube_live");
+        assert!(dispatch(&ctx, "seek", &json!({ "position_ms": 1000 })).is_err());
+        assert!(dispatch(&ctx, "set_playback_speed", &json!({ "rate": 1.5 })).is_err());
+        assert!(log.lock().unwrap().is_empty());
+        let np = dispatch(&ctx, "now_playing", &json!({})).unwrap();
+        assert_eq!(np["live"], json!(true));
+        assert_eq!(np["kind"], json!("youtube_live"));
+    }
+
+    #[test]
+    fn transport_modes_map_to_commands() {
+        let (ctx, log) = ctx_recording();
+        dispatch(&ctx, "set_shuffle", &json!({ "on": true })).unwrap();
+        dispatch(&ctx, "set_repeat", &json!({ "on": false })).unwrap();
+        // Snapped to the app's quarter steps.
+        let out = dispatch(&ctx, "set_playback_speed", &json!({ "rate": 1.3 })).unwrap();
+        assert_eq!(out["rate"], json!(1.25));
+        assert!(dispatch(&ctx, "set_playback_speed", &json!({ "rate": 3.0 })).is_err());
+        dispatch(&ctx, "clear_queue", &json!({})).unwrap();
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[
+                McpCommand::SetShuffle(true),
+                McpCommand::SetRepeat(false),
+                McpCommand::SetPlaybackRate(1.25),
+                McpCommand::ClearQueue,
+            ]
+        );
+    }
+
+    #[test]
+    fn get_queue_shows_the_upcoming_part() {
+        let (ctx, _) = ctx_recording();
+        {
+            let mut np = ctx.now.lock().unwrap();
+            np.queue = vec!["/a".into(), "/b".into(), "/c".into()];
+            np.queue_pos = 1;
+            np.shuffle = true;
+        }
+        let q = dispatch(&ctx, "get_queue", &json!({})).unwrap();
+        assert_eq!(q["queue_length"], json!(3));
+        assert_eq!(q["from_position"], json!(["/b", "/c"]));
+        assert_eq!(q["shuffle"], json!(true));
+    }
+
+    #[test]
+    fn set_equalizer_validates_and_builds_keys() {
+        let (ctx, log) = ctx_recording();
+        // Wrong band count / unknown scope / missing key are refused.
+        assert!(dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "global", "bands": [1, 2] })
+        )
+        .is_err());
+        assert!(dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "room", "reset": true })
+        )
+        .is_err());
+        assert!(dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "artist", "reset": true })
+        )
+        .is_err());
+        assert!(log.lock().unwrap().is_empty());
+        let bands = json!([20, 0, 0, 0, 0, 0, 0, 0, 0, -3]);
+        dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "album", "artist": "A", "album": "B", "bands": bands }),
+        )
+        .unwrap();
+        dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "stream", "key": 7, "reset": true }),
+        )
+        .unwrap();
+        let mut expected = [0.0; 10];
+        expected[0] = 12.0; // clamped
+        expected[9] = -3.0;
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[
+                McpCommand::SetEqualizer {
+                    scope: "album".into(),
+                    key: "A\u{1}B".into(),
+                    bands: Some(expected),
+                },
+                McpCommand::SetEqualizer {
+                    scope: "stream".into(),
+                    key: "7".into(),
+                    bands: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn play_entry_builds_album_keys_and_checks_scope() {
+        let (ctx, log) = ctx_recording();
+        assert!(dispatch(&ctx, "play_entry", &json!({ "scope": "genre", "key": "x" })).is_err());
+        dispatch(
+            &ctx,
+            "play_entry",
+            &json!({ "scope": "album", "artist": "A", "album": "B" }),
+        )
+        .unwrap();
+        dispatch(
+            &ctx,
+            "play_entry",
+            &json!({ "scope": "folder", "key": "/m/x" }),
+        )
+        .unwrap();
+        assert_eq!(
+            log.lock().unwrap().as_slice(),
+            &[
+                McpCommand::PlayEntry {
+                    scope: "album".into(),
+                    key: "A\u{1}B".into(),
+                    is_dir: false,
+                },
+                McpCommand::PlayEntry {
+                    scope: "folder".into(),
+                    key: "/m/x".into(),
+                    is_dir: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gated_youtube_tools_are_advertised() {
+        let list = tool_list();
+        let names: std::collections::HashSet<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        for n in YOUTUBE_TOOLS
+            .iter()
+            .chain(super::super::tools_ext::YOUTUBE_TOOLS_EXT.iter())
+        {
+            assert!(names.contains(n), "gated tool {n} is not in the list");
+        }
     }
 
     #[test]

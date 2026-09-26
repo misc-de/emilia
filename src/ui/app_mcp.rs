@@ -9,12 +9,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use relm4::ComponentController;
+use relm4::{ComponentController, ComponentSender};
 
 use crate::core::mcp::{self, McpCommand, McpContext, McpMode};
 use crate::ui::app::{App, McpState, Msg, SleepChoice};
 use crate::ui::app_covers::CoverMsg;
 use crate::ui::app_episode_playback::PodcastMsg;
+use crate::ui::app_eq::EqMsg;
 use crate::ui::app_memo::MemoMsg;
 use crate::ui::app_playback::TransportMsg;
 use crate::ui::app_playlist::PlaylistMsg;
@@ -23,6 +24,7 @@ use crate::ui::app_streaming::StreamMsg;
 use crate::ui::podcasts_page::PodcastsInput;
 use crate::ui::stream_page::StreamInput;
 use crate::ui::sync_page::SyncInput;
+use crate::ui::yt_page::YtInput;
 
 /// MCP-server settings messages, dispatched by [`App::update_mcp_setting`].
 /// Grouped out of the flat `Msg` enum (see `app.rs`); each persists a setting and
@@ -62,7 +64,12 @@ impl App {
 
     /// Runs a single MCP command on the UI thread. `root` is the main window,
     /// needed by the sync flows that present their dialog on it.
-    pub(crate) fn handle_mcp(&mut self, cmd: McpCommand, root: &relm4::adw::ApplicationWindow) {
+    pub(crate) fn handle_mcp(
+        &mut self,
+        cmd: McpCommand,
+        root: &relm4::adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+    ) {
         match cmd {
             // Idempotent play/pause: only toggle when the state actually differs.
             McpCommand::Play => {
@@ -214,6 +221,103 @@ impl App {
                 self.sync_page.emit(SyncInput::RespondHeadless { accept });
             }
             McpCommand::SyncDisconnect => self.sync_page.emit(SyncInput::Disconnect),
+            // --- YouTube ---
+            McpCommand::PlayYoutubePlaylist { url, title } => {
+                self.yt_start_playlist(sender, url, title)
+            }
+            McpCommand::PlayLive { video_id, title } => {
+                // Idempotent like `play_station`: a running stream keeps running.
+                let current = self.youtube.playing_live.as_deref() == Some(video_id.as_str());
+                if !(current && self.mini.playing) {
+                    self.yt_toggle_live(video_id, title);
+                }
+            }
+            McpCommand::PlayYoutubeChannel(id) => self.yt_play_channel(id),
+            McpCommand::RefreshYoutube(Some(id)) => self.yt_page.emit(YtInput::RefreshChannel(id)),
+            McpCommand::RefreshYoutube(None) => self.yt_page.emit(YtInput::RefreshAll),
+            McpCommand::DeleteYoutubeChannel(id) => {
+                self.yt_page.emit(YtInput::DeleteChannelConfirmed(id))
+            }
+            McpCommand::ReloadYoutube => self.yt_page.emit(YtInput::Reload),
+            // --- favorites / audiobooks / concerts ---
+            McpCommand::PlayEntry { scope, key, is_dir } => self.play_entry(&scope, &key, is_dir),
+            McpCommand::ReloadFavorites => self.load_favorites(sender),
+            // --- memos (through the page's own messages, which also redraw) ---
+            McpCommand::RenameMemo { id, title } => {
+                let _ = self.input.send(Msg::Memo(MemoMsg::Rename { id, title }));
+            }
+            McpCommand::SetMemoCategory { id, category_id } => {
+                let _ = self
+                    .input
+                    .send(Msg::Memo(MemoMsg::SetCategory { id, category_id }));
+            }
+            McpCommand::RenameMemoCategory { id, name } => {
+                let _ = self
+                    .input
+                    .send(Msg::Memo(MemoMsg::CategoryRename { id, name }));
+            }
+            McpCommand::DeleteMemoCategory { id, with_memos } => {
+                let _ = self.input.send(Msg::Memo(if with_memos {
+                    MemoMsg::CategoryDeleteWithMemos(id)
+                } else {
+                    MemoMsg::CategoryDeleteKeepMemos(id)
+                }));
+            }
+            McpCommand::StartMemo {
+                stop_after_s,
+                title,
+                category_id,
+            } => self.mcp_start_memo(sender, stop_after_s, title, category_id),
+            McpCommand::StopMemo { title, category_id } => {
+                self.mcp_stop_memo(sender, title, category_id)
+            }
+            McpCommand::ReloadMemos => {
+                self.reload_memo_categories(sender);
+                self.reload_memos(sender);
+            }
+            // --- queue + transport modes ---
+            McpCommand::ClearQueue => {
+                let _ = self.input.send(Msg::Transport(TransportMsg::QueueClear));
+            }
+            McpCommand::SetShuffle(on) => {
+                if self.transport.shuffle != on {
+                    let _ = self.input.send(Msg::Transport(TransportMsg::ToggleShuffle));
+                }
+            }
+            McpCommand::SetRepeat(on) => {
+                if self.transport.repeat != on {
+                    let _ = self.input.send(Msg::Transport(TransportMsg::ToggleRepeat));
+                }
+            }
+            McpCommand::SetPlaybackRate(rate) => {
+                let _ = self
+                    .input
+                    .send(Msg::Transport(TransportMsg::SetPlaybackRate(rate)));
+            }
+            // --- equalizer (default output = the basis for every output) ---
+            McpCommand::SetEqualizer { scope, key, bands } => {
+                // `EqMsg` wants a `&'static` scope; map the known ones.
+                let scope: &'static str = match scope.as_str() {
+                    "global" => "global",
+                    "artist" => "artist",
+                    "album" => "album",
+                    "track" => "track",
+                    "stream" => "stream",
+                    "podcast" => "podcast",
+                    "episode" => "episode",
+                    _ => return,
+                };
+                let output = String::new();
+                let _ = self.input.send(Msg::Eq(match bands {
+                    Some(bands) => EqMsg::Set {
+                        output,
+                        scope,
+                        key,
+                        bands,
+                    },
+                    None => EqMsg::Clear { output, scope, key },
+                }));
+            }
         }
         // Reflect any resulting playback change in the snapshot immediately.
         self.publish_now_playing();
@@ -247,12 +351,81 @@ impl App {
     /// Copies the live mini-player state into the shared now-playing snapshot the
     /// server thread reads. Cheap; called from the tick and after commands.
     pub(crate) fn publish_now_playing(&self) {
-        if let Ok(mut np) = self.mcp.now.lock() {
-            np.playing = self.mini.playing;
-            np.title = self.mini.now_playing.clone();
-            np.album = self.mini.current_album.clone();
-            np.position_ms = self.mini.position_ms;
-            np.duration_ms = self.mini.track_duration_ms;
+        let (kind, id) = self.now_playing_ref();
+        let Ok(mut np) = self.mcp.now.lock() else {
+            return;
+        };
+        np.playing = self.mini.playing;
+        np.title = self.mini.now_playing.clone();
+        np.album = self.mini.current_album.clone();
+        np.position_ms = self.mini.position_ms;
+        np.duration_ms = self.mini.track_duration_ms;
+        // The artist is a DB read — only when the item changed, not every tick.
+        if np.kind != kind || np.id != id {
+            np.artist = match (kind, id.as_deref()) {
+                (Some("track"), Some(path)) => self
+                    .library
+                    .track_by_path(path)
+                    .ok()
+                    .flatten()
+                    .and_then(|t| t.artist),
+                (Some("youtube_live"), Some(vid)) => self
+                    .library
+                    .live_streams()
+                    .ok()
+                    .and_then(|l| l.into_iter().find(|l| l.video_id == vid))
+                    .and_then(|l| l.channel),
+                (Some("youtube"), Some(vid)) => self
+                    .library
+                    .yt_video_info(vid)
+                    .ok()
+                    .flatten()
+                    .map(|(channel, _, _)| channel),
+                _ => None,
+            };
+            np.kind = kind;
+            np.id = id;
+        }
+        // Queue: copied only when it changed (a long context is not cloned
+        // every second).
+        let differs = |a: &[String], b: &[std::path::PathBuf]| {
+            a.len() != b.len() || a.iter().zip(b).any(|(x, y)| std::path::Path::new(x) != y)
+        };
+        if differs(&np.queue, &self.transport.queue) {
+            np.queue = paths_to_strings(&self.transport.queue);
+        }
+        if differs(&np.user_queue, &self.transport.user_queue) {
+            np.user_queue = paths_to_strings(&self.transport.user_queue);
+        }
+        np.queue_pos = self.transport.queue_pos;
+        np.shuffle = self.transport.shuffle;
+        np.repeat = self.transport.repeat;
+        np.playback_rate = self.mini.playback_rate;
+        np.memo_recording = self.memo.recorder.is_some();
+        np.memo_started_at = self.memo.rec_started_at;
+    }
+
+    /// What is loaded, as (kind, id) in the MCP tools' terms.
+    fn now_playing_ref(&self) -> (Option<&'static str>, Option<String>) {
+        if let Some(vid) = &self.youtube.playing_live {
+            (Some("youtube_live"), Some(vid.clone()))
+        } else if let Some(id) = self.streaming.playing_stream {
+            (Some("station"), Some(id.to_string()))
+        } else if let Some(url) = &self.podcasts.playing_episode_url {
+            (Some("episode"), Some(url.clone()))
+        } else if self.files.playing_remote {
+            let rel = self
+                .files
+                .remote_queue
+                .get(self.files.remote_pos)
+                .map(|t| t.rel_path.clone());
+            (Some("remote"), rel)
+        } else if let Some(vid) = &self.youtube.playing_video_id {
+            (Some("youtube"), Some(vid.clone()))
+        } else if let Some(p) = self.transport.queue.get(self.transport.queue_pos) {
+            (Some("track"), Some(p.to_string_lossy().into_owned()))
+        } else {
+            (None, None)
         }
     }
 
@@ -293,6 +466,9 @@ impl App {
         });
         let stop = Arc::new(AtomicBool::new(false));
         let bind = if public { "0.0.0.0" } else { "127.0.0.1" };
+        // Fill the snapshot once up front — the tick only publishes while
+        // something plays, so an idle app would otherwise answer with defaults.
+        self.publish_now_playing();
 
         match mode {
             McpMode::JsonRpc => {
@@ -347,6 +523,13 @@ impl App {
         let _ = self.library.set_secret_setting("mcp_token", &token);
         token
     }
+}
+
+fn paths_to_strings(paths: &[std::path::PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
 }
 
 /// Constructs the initial (server-off) MCP state for the `App` literal.

@@ -51,7 +51,12 @@ impl App {
                 })
                 .flatten(),
             episode_url: self.podcasts.playing_episode_url.clone(),
-            video_id: self.youtube.playing_video_id.clone(),
+            // A live stream is marked by its video id as well (Live tab rows).
+            video_id: self
+                .youtube
+                .playing_video_id
+                .clone()
+                .or_else(|| self.youtube.playing_live.clone()),
             // The "in queue" marker reflects the explicit user queue, not the
             // active context (the album currently playing through).
             queued: self.transport.user_queue.iter().cloned().collect(),
@@ -77,6 +82,9 @@ impl App {
         for sink in sinks {
             sink.apply_playback(&state);
         }
+        // Keep the MCP snapshot current while paused, too (the tick only
+        // publishes during playback).
+        self.publish_now_playing();
         for marks in [
             &self.favorites.favorite_marks,
             &self.favorites.audiobook_marks,
@@ -203,6 +211,7 @@ impl App {
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
+                self.youtube.playing_live = None;
                 self.youtube.playing_video_id = None;
                 self.files.playing_remote = true;
                 self.stop_recorder();
@@ -263,6 +272,8 @@ impl App {
             self.podcast_step(1);
         } else if self.streaming.playing_stream.is_some() {
             self.station_step(1);
+        } else if self.youtube.playing_live.is_some() {
+            self.yt_live_step(1);
         } else if self.files.playing_remote {
             self.remote_next(true);
         } else {
@@ -276,6 +287,8 @@ impl App {
             self.podcast_step(-1);
         } else if self.streaming.playing_stream.is_some() {
             self.station_step(-1);
+        } else if self.youtube.playing_live.is_some() {
+            self.yt_live_step(-1);
         } else if self.files.playing_remote {
             self.remote_prev();
         } else {
@@ -982,6 +995,7 @@ impl App {
                 self.transport.playing_path = Some(path.clone());
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
+                self.youtube.playing_live = None;
                 self.files.playing_remote = false;
                 self.youtube.playing_video_id = Some(video_id.clone());
                 self.stop_recorder();
@@ -1053,6 +1067,7 @@ impl App {
                 // remote file active anymore.
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
+                self.youtube.playing_live = None;
                 self.files.playing_remote = false;
                 // For a YouTube track this is its id (marks the row); None resets it.
                 self.youtube.playing_video_id = yt_video.clone();
@@ -1231,6 +1246,16 @@ impl App {
             let bands = self
                 .library
                 .resolve_eq_stream(&self.settings.active_output, &id.to_string())
+                .unwrap_or([0.0; 10]);
+            self.player.set_eq_bands(&bands);
+            return;
+        }
+        // A YouTube live stream has no EQ of its own: the global one (the
+        // station cascade finds no station under this key and falls back).
+        if let Some(vid) = self.youtube.playing_live.as_deref() {
+            let bands = self
+                .library
+                .resolve_eq_stream(&self.settings.active_output, &format!("yt-live:{vid}"))
                 .unwrap_or([0.0; 10]);
             self.player.set_eq_bands(&bands);
             return;
@@ -1585,6 +1610,10 @@ impl App {
         if self.sleep_stop_at_track_end() {
             return;
         }
+        if self.youtube.playing_live.is_some() {
+            self.yt_live_ended();
+            return;
+        }
         if self.files.playing_remote {
             // Remote queue: advance to the next track (or stop at the
             // end). Runs separately from the local queue.
@@ -1744,7 +1773,10 @@ impl App {
             // Reading the position then drags the old track's playhead — usually
             // sitting at its very end — into the bar of the new one, which looks
             // exactly like a jump to a few seconds before the end.
-            if !self.mini.loading {
+            // A YouTube live stream reports its place in the ~1 h DVR window
+            // (with no duration), which reads as a full bar at "59:51" — keep it
+            // at 0:00 like a radio station.
+            if !self.mini.loading && self.youtube.playing_live.is_none() {
                 if let Some(pos) = self.player.position_ms() {
                     self.mini.position_ms = pos;
                 }
@@ -1843,6 +1875,13 @@ impl App {
             self.mini.playing = false;
             // Pausing during buffering stops the spinner (no longer "loading").
             self.mini.loading = false;
+        } else if let Some(vid) = self.youtube.playing_live.clone() {
+            // A paused live stream rejoins the broadcast where it is *now*
+            // (resuming the old buffer would lag behind, or fail once its HLS
+            // segments are gone).
+            let title = self.mini.now_playing.clone().unwrap_or_default();
+            self.play_yt_live(vid, title);
+            return;
         } else if (self.transport.playing_path.is_some()
             || self.streaming.playing_stream.is_some()
             || self.podcasts.playing_episode_url.is_some())
@@ -1947,6 +1986,8 @@ impl App {
             TransportMsg::GaplessAdvanced => self.on_gapless_advanced(),
             TransportMsg::PersistResume => self.on_persist_resume(),
             TransportMsg::Tick => self.on_tick(),
+            // A live stream is not seekable (see `on_tick`).
+            TransportMsg::Seek(_) if self.youtube.playing_live.is_some() => {}
             TransportMsg::Seek(ms) => {
                 let ms = ms.max(0);
                 self.mini.position_ms = ms;
@@ -1999,6 +2040,11 @@ impl App {
             TransportMsg::PlaybackError => {
                 // A failed start clears the loading spinner regardless of source.
                 self.mini.loading = false;
+                // A live stream whose address expired restarts (or stops).
+                if self.youtube.playing_live.is_some() {
+                    self.yt_live_ended();
+                    return;
+                }
                 // Streams/episodes have no "next" → don't skip on their errors.
                 if self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
