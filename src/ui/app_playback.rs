@@ -262,12 +262,62 @@ impl App {
         }
     }
 
-    /// Unified "next" for the headphone / MPRIS / UI next button: routes to the
-    /// active context so the command is never a silent no-op. A podcast steps to
-    /// the neighbouring episode of its feed, radio to the neighbouring saved
-    /// station, a remote row to its next track, everything else to the next queue
-    /// track (wrapping to the start at the end).
+    /// Unified "next" for the headphone / MPRIS / UI next button. Something
+    /// with jump marks (audiobook chapters, podcast shownotes, a YouTube video's
+    /// chapters) first steps through them; only past the last mark does it move
+    /// on to the next item (see [`Self::skip_next_item`]).
     pub(crate) fn skip_next(&mut self) {
+        if !self.chapter_step(1) {
+            self.skip_next_item();
+        }
+    }
+
+    /// Unified "previous" counterpart to [`Self::skip_next`]: back to the start
+    /// of the running chapter, pressed again to the one before it, and from the
+    /// first chapter on to the previous item.
+    pub(crate) fn skip_prev(&mut self) {
+        if !self.chapter_step(-1) {
+            self.skip_prev_item();
+        }
+    }
+
+    /// Seeks to the neighbouring jump mark (`dir` = +1 / −1) of what is
+    /// playing. `false` when there is none in that direction (no marks, past
+    /// the last one, within the first one), so the caller changes the item.
+    fn chapter_step(&mut self, dir: i32) -> bool {
+        let something_seekable = self.transport.playing_path.is_some()
+            || self.podcasts.playing_episode_url.is_some()
+            || self.youtube.playing_video_id.is_some();
+        if !something_seekable || !self.player.has_content() {
+            return false;
+        }
+        let starts: Vec<i64> = self
+            .mini
+            .chapters
+            .borrow()
+            .iter()
+            .map(|(ms, _)| *ms)
+            .collect();
+        if starts.is_empty() {
+            return false;
+        }
+        let pos = self.player.position_ms().unwrap_or(self.mini.position_ms);
+        match chapter_target(&starts, pos, dir, self.playing_length_ms()) {
+            Some(ms) => {
+                self.seek_from_desktop(ms);
+                self.update_current_chapter();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Next item without looking at jump marks: routes to the active context so
+    /// the command is never a silent no-op. A podcast steps to the neighbouring
+    /// episode of its feed, radio to the neighbouring saved station, a remote row
+    /// to its next track, everything else to the next queue track (wrapping to
+    /// the start at the end).
+    pub(crate) fn skip_next_item(&mut self) {
         if self.podcasts.playing_episode_url.is_some() {
             self.podcast_step(1);
         } else if self.streaming.playing_stream.is_some() {
@@ -281,8 +331,8 @@ impl App {
         }
     }
 
-    /// Unified "previous" counterpart to [`Self::skip_next`].
-    pub(crate) fn skip_prev(&mut self) {
+    /// Previous item, the counterpart to [`Self::skip_next_item`].
+    pub(crate) fn skip_prev_item(&mut self) {
         if self.podcasts.playing_episode_url.is_some() {
             self.podcast_step(-1);
         } else if self.streaming.playing_stream.is_some() {
@@ -1469,7 +1519,7 @@ impl App {
                 let cur = self.player.position_ms().unwrap_or(self.mini.position_ms);
                 match relative_seek(cur, offset_us / 1000, self.playing_length_ms()) {
                     SeekTarget::To(ms) => self.seek_from_desktop(ms),
-                    SeekTarget::Next => self.skip_next(),
+                    SeekTarget::Next => self.skip_next_item(),
                     SeekTarget::Ignore => {}
                 }
             }
@@ -1958,6 +2008,9 @@ pub(crate) enum TransportMsg {
     /// The freshly loaded pipeline prerolled (buffered enough to play) → clear
     /// the loading spinner of a slow source (Nextcloud/YouTube).
     PlaybackReady,
+    /// The playing file carries its own chapters (a container TOC — an
+    /// audiobook in one m4b/mp3). Used when nothing else supplied jump marks.
+    EmbeddedChapters(Vec<(i64, String)>),
     /// Clear the user queue (after confirmation). Playback keeps running.
     QueueClear,
     /// Reorder the user queue: move the `len`-track block starting at `from` so
@@ -2031,6 +2084,14 @@ impl App {
                     self.player.set_rate(rate);
                 }
             }
+            TransportMsg::EmbeddedChapters(chapters) => {
+                // Shownotes / YouTube marks were set on purpose for this
+                // playback; the file's own TOC only fills the gap.
+                if self.mini.chapters.borrow().is_empty() {
+                    self.set_chapters(chapters);
+                    self.update_current_chapter();
+                }
+            }
             TransportMsg::PlaybackReady => {
                 // Source finished buffering → stop the loading spinner.
                 if self.mini.loading {
@@ -2063,6 +2124,42 @@ impl App {
             TransportMsg::TogglePlay => self.on_toggle_play(),
             TransportMsg::OpenNowPlaying => self.on_open_now_playing(root, sender),
         }
+    }
+}
+
+/// Tolerance around a jump mark: a key-unit seek lands a little before the
+/// mark, and the position then must still count as "in" that chapter, or the
+/// next press would target the same mark again.
+const CHAPTER_SLACK_MS: i64 = 1_500;
+
+/// Where a chapter skip (`dir` = +1 next / −1 previous) goes from `pos_ms`,
+/// given the sorted chapter starts. The part before the first mark counts as a
+/// chapter of its own. `None` = no mark in that direction: past the last
+/// chapter going forward, within the first seconds of the first going back.
+/// Previous inside a chapter first restarts it (as for tracks, after
+/// [`PREV_RESTART_MS`]).
+pub(crate) fn chapter_target(
+    starts: &[i64],
+    pos_ms: i64,
+    dir: i32,
+    length_ms: Option<i64>,
+) -> Option<i64> {
+    let mut marks: Vec<i64> = std::iter::once(0)
+        .chain(starts.iter().copied().filter(|&ms| ms > 0))
+        .filter(|&ms| length_ms.is_none_or(|len| ms < len))
+        .collect();
+    marks.sort_unstable();
+    marks.dedup();
+    let cur = marks
+        .iter()
+        .rposition(|&ms| ms <= pos_ms + CHAPTER_SLACK_MS)
+        .unwrap_or(0);
+    if dir > 0 {
+        marks.get(cur + 1).copied()
+    } else if pos_ms - marks[cur] > PREV_RESTART_MS {
+        Some(marks[cur])
+    } else {
+        cur.checked_sub(1).map(|i| marks[i])
     }
 }
 
@@ -2128,6 +2225,41 @@ pub(crate) fn start_position(
 
 #[cfg(test)]
 mod tests {
+    use super::chapter_target;
+
+    #[test]
+    fn chapter_next_steps_through_marks_then_gives_up() {
+        let marks = [0, 60_000, 120_000];
+        assert_eq!(
+            chapter_target(&marks, 5_000, 1, Some(180_000)),
+            Some(60_000)
+        );
+        // Landed slightly before the mark (key-unit seek) → still the next one.
+        assert_eq!(
+            chapter_target(&marks, 59_200, 1, Some(180_000)),
+            Some(120_000)
+        );
+        assert_eq!(chapter_target(&marks, 130_000, 1, Some(180_000)), None);
+        // A mark at/after the end does not count.
+        assert_eq!(chapter_target(&[0, 200_000], 5_000, 1, Some(180_000)), None);
+    }
+
+    #[test]
+    fn chapter_prev_restarts_then_steps_back() {
+        let marks = [0, 60_000, 120_000];
+        assert_eq!(chapter_target(&marks, 90_000, -1, None), Some(60_000));
+        assert_eq!(chapter_target(&marks, 61_000, -1, None), Some(0));
+        assert_eq!(chapter_target(&marks, 10_000, -1, None), Some(0));
+        assert_eq!(chapter_target(&marks, 1_000, -1, None), None);
+    }
+
+    #[test]
+    fn intro_before_first_mark_is_a_chapter() {
+        let marks = [30_000, 90_000];
+        assert_eq!(chapter_target(&marks, 5_000, 1, None), Some(30_000));
+        assert_eq!(chapter_target(&marks, 31_000, -1, None), Some(0));
+    }
+
     use super::{absolute_seek, relative_seek, start_position, SeekTarget};
 
     #[test]

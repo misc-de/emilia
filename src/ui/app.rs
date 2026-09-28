@@ -1947,7 +1947,13 @@ impl Component for App {
                     let sender = sender.clone();
                     move || sender.input(Msg::Transport(TransportMsg::PlaybackReady))
                 },
-                move || sender.input(Msg::Transport(TransportMsg::GaplessAdvanced)),
+                {
+                    let sender = sender.clone();
+                    move || sender.input(Msg::Transport(TransportMsg::GaplessAdvanced))
+                },
+                move |chapters| {
+                    sender.input(Msg::Transport(TransportMsg::EmbeddedChapters(chapters)))
+                },
             );
         }
 

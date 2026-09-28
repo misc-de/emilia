@@ -151,7 +151,7 @@ impl App {
         self.refresh_queue_icons();
         self.save_queue();
         self.transport.prev_ctx = Some((self.transport.queue.clone(), self.transport.queue_pos));
-        self.set_chapters(Vec::new());
+        self.set_chapters(self.local_yt_chapters(&path_str));
         let _ = self.input.send(Msg::Lyrics(LyricsMsg::LoadLyrics(path)));
     }
 

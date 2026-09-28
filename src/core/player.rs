@@ -43,6 +43,31 @@ fn is_allowed_remote_uri(uri: &str) -> bool {
 
 /// `file://` URI for a local path, or `None` if it can't be represented (used to
 /// arm the next gapless track from the app side).
+/// The chapters of a container TOC as (start ms, title), sorted by start.
+/// Editions only group chapters, and nested chapters (sub-chapters) count as
+/// jump marks of their own.
+fn toc_chapters(toc: &gst::Toc) -> Vec<(i64, String)> {
+    fn collect(entries: Vec<gst::TocEntry>, out: &mut Vec<(i64, String)>) {
+        for entry in entries {
+            if entry.entry_type() == gst::TocEntryType::Chapter {
+                if let Some((start, _)) = entry.start_stop_times() {
+                    let title = entry
+                        .tags()
+                        .and_then(|t| t.get::<gst::tags::Title>().map(|v| v.get().to_string()))
+                        .unwrap_or_default();
+                    out.push((start.max(0) / 1_000_000, title));
+                }
+            }
+            collect(entry.sub_entries(), out);
+        }
+    }
+    let mut out = Vec::new();
+    collect(toc.entries(), &mut out);
+    out.sort_by_key(|(ms, _)| *ms);
+    out.dedup_by_key(|(ms, _)| *ms);
+    out
+}
+
 pub fn file_uri(path: &str) -> Option<String> {
     gst::glib::filename_to_uri(path, None)
         .ok()
@@ -472,26 +497,30 @@ impl Player {
     /// `on_eos` fires at the active deck's end (advance / stop), `on_title` on a
     /// title tag (ICY "now playing" for stations), `on_stream_start` when the
     /// active deck begins a **gapless** continuation (so the app advances its
-    /// state to match). Runs on the main loop.
-    pub fn connect_bus_events<E, T, R, A, S>(
+    /// state to match), `on_toc` with the chapters a file carries itself (m4b /
+    /// ID3 `CHAP` / Matroska — an audiobook in one file). Runs on the main loop.
+    pub fn connect_bus_events<E, T, R, A, S, C>(
         &self,
         on_eos: E,
         on_title: T,
         on_error: R,
         on_ready: A,
         on_stream_start: S,
+        on_toc: C,
     ) where
         E: Fn() + 'static,
         T: Fn(String) + 'static,
         R: Fn() + 'static,
         A: Fn() + 'static,
         S: Fn() + 'static,
+        C: Fn(Vec<(i64, String)>) + 'static,
     {
         let on_eos = Rc::new(on_eos);
         let on_title = Rc::new(on_title);
         let on_error = Rc::new(on_error);
         let on_ready = Rc::new(on_ready);
         let on_stream_start = Rc::new(on_stream_start);
+        let on_toc = Rc::new(on_toc);
 
         for idx in 0..self.decks.len() {
             let deck = &self.decks[idx];
@@ -530,6 +559,7 @@ impl Player {
             let on_error = on_error.clone();
             let on_ready = on_ready.clone();
             let on_stream_start = on_stream_start.clone();
+            let on_toc = on_toc.clone();
             let wants_playing = self.wants_playing.clone();
             let guard = bus.add_watch_local(move |_, msg| {
                 let is_active = active.load(Ordering::Relaxed) == idx;
@@ -588,6 +618,12 @@ impl Player {
                         tracing::error!("GStreamer error: {} ({:?})", err.error(), err.debug());
                         if is_active {
                             on_error();
+                        }
+                    }
+                    gst::MessageView::Toc(toc) if is_active => {
+                        let chapters = toc_chapters(&toc.toc().0);
+                        if !chapters.is_empty() {
+                            on_toc(chapters);
                         }
                     }
                     gst::MessageView::Tag(tag) if is_active => {

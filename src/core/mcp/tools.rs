@@ -1705,7 +1705,7 @@ fn tool_list_core() -> Value {
         },
         {
             "name": "playback_control",
-            "description": "Control transport: play, pause, toggle, next, prev.",
+            "description": "Control transport: play, pause, toggle, next, prev. With chapters (audiobook, podcast shownotes, YouTube), next/prev first jump between chapters; only past the last (or within the first) do they change the item.",
             "inputSchema": obj(
                 json!({ "action": { "type": "string", "enum": ["play", "pause", "toggle", "next", "prev"] } }),
                 json!(["action"]),
