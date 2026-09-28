@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.37" date="2026-09-28">
+      <description>
+        <p>A maintenance release. The library that reads the QR code when pairing a device for sync is updated to a version that no longer carries a memory-safety flaw in one of its own dependencies, and two further components that their authors had withdrawn are replaced by corrected releases. Nothing changes in how Emilia looks or behaves; pairing works as before.</p>
+        <p xml:lang="de">Eine Wartungsversion. Die Bibliothek, die beim Koppeln eines Geräts für die Synchronisierung den QR-Code liest, ist auf eine Version aktualisiert, die keinen Speicherfehler in einer ihrer eigenen Abhängigkeiten mehr mitbringt, und zwei weitere Bausteine, die ihre Autoren zurückgezogen hatten, sind durch korrigierte Fassungen ersetzt. An Aussehen und Verhalten von Emilia ändert sich nichts; das Koppeln funktioniert wie bisher.</p>
+      </description>
+    </release>
     <release version="0.8.36" date="2026-09-28">
       <description>
         <p>Next and previous now know about chapters. When what is playing has jump marks — the chapters of a YouTube video, the timestamps in a podcast's shownotes, or chapters a file carries itself — a press on next goes to the next chapter rather than to the next episode, video or track. Only after the last chapter does it move on. Previous works the same way backwards: more than three seconds into a chapter it goes back to that chapter's start, a second press goes to the chapter before it, and from the first chapter it steps back to the previous item as before. This holds for the buttons in the player bar, for media keys and for a double tap on headphones alike.</p>
