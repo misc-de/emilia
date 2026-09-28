@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.36" date="2026-09-28">
+      <description>
+        <p>Next and previous now know about chapters. When what is playing has jump marks — the chapters of a YouTube video, the timestamps in a podcast's shownotes, or chapters a file carries itself — a press on next goes to the next chapter rather than to the next episode, video or track. Only after the last chapter does it move on. Previous works the same way backwards: more than three seconds into a chapter it goes back to that chapter's start, a second press goes to the chapter before it, and from the first chapter it steps back to the previous item as before. This holds for the buttons in the player bar, for media keys and for a double tap on headphones alike.</p>
+        <p xml:lang="de">Vor und Zurück kennen jetzt Kapitel. Hat das, was gerade läuft, Sprungmarken – die Kapitel eines YouTube-Videos, die Zeitmarken in den Shownotes eines Podcasts oder Kapitel, die eine Datei selbst mitbringt –, springt ein Druck auf Vor zum nächsten Kapitel statt zur nächsten Folge, zum nächsten Video oder Titel. Erst nach dem letzten Kapitel geht es weiter. Zurück arbeitet genauso rückwärts: Mehr als drei Sekunden in einem Kapitel geht es an dessen Anfang, ein zweiter Druck ins Kapitel davor, und aus dem ersten Kapitel heraus wie bisher zum vorherigen Eintrag. Das gilt für die Tasten in der Abspielleiste, für Medientasten und für den Doppeltipp am Kopfhörer gleichermaßen.</p>
+      </description>
+    </release>
     <release version="0.8.35" date="2026-09-26">
       <description>
         <p>The YouTube section has a fourth tab, Live, for the streams that never end — lofi radio, jazz around the clock, rain sounds. Search for them with the new Live option in the YouTube search, which only lists streams that are on the air right now, and tap one to keep it. A live stream plays the way a radio station does: there is nothing to download and nothing to remember, no position, no progress bar to drag and no speed control. Pausing and resuming joins the broadcast where it is now rather than where you left it, and next and previous step through your saved live streams. YouTube hands out the address of a live stream for a few hours only; when it runs out, Emilia fetches a fresh one and carries on.</p>
