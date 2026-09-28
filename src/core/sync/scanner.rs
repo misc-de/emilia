@@ -296,3 +296,37 @@ fn decode_sample(sample: &gst::Sample) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    /// The pairing QR the app renders (`qrcode`) must come back out of the
+    /// decoder the scanner uses (`rqrr`) — guards against a decoder update
+    /// that silently stops reading our codes.
+    #[test]
+    fn rqrr_reads_a_pairing_qr() {
+        let payload = "emilia://pair?host=192.168.0.10&port=8771&token=abc123";
+        let code = qrcode::QrCode::new(payload.as_bytes()).unwrap();
+        let modules = code.width();
+        let (scale, quiet) = (4, 4);
+        let side = (modules + 2 * quiet) * scale;
+        let colors = code.to_colors();
+        let pixel = |x: usize, y: usize| {
+            let (mx, my) = (x / scale, y / scale);
+            let dark = mx >= quiet
+                && my >= quiet
+                && mx < quiet + modules
+                && my < quiet + modules
+                && colors[(my - quiet) * modules + (mx - quiet)] == qrcode::Color::Dark;
+            if dark {
+                0
+            } else {
+                255
+            }
+        };
+        let mut img = rqrr::PreparedImage::prepare_from_greyscale(side, side, pixel);
+        let grids = img.detect_grids();
+        assert_eq!(grids.len(), 1);
+        let (_meta, content) = grids[0].decode().unwrap();
+        assert_eq!(content, payload);
+    }
+}

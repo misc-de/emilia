@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.36"
+version = "0.8.37"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -48,7 +48,7 @@ percent-encoding = "2"
 gstreamer-app = "0.23"
 # QR *decoding* (camera scanner). default-features off → drop the heavy `image`
 # integration; we feed a raw grayscale buffer via `prepare_from_greyscale`.
-rqrr = { version = "0.10.1", default-features = false }
+rqrr = { version = "0.11", default-features = false }
 # Optional desktop tray icon (StatusNotifierItem). Pure-Rust over zbus — no C
 # deps, Flatpak-friendly. Runs its own background thread; commands are bridged
 # back to the glib main loop via an `async-channel` (see src/core/tray.rs).
