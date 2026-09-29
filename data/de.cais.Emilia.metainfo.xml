@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.38" date="2026-09-29">
+      <description>
+        <p>Switching the sound system while Emilia is running – from PulseAudio to PipeWire or back, or restarting it – no longer leaves the player silent until the app is restarted. Emilia notices that its audio output went away, reconnects on its own and carries on at the same position; a paused track stays paused. The lost output also no longer skips ahead through the queue.</p>
+        <p xml:lang="de">Wer bei laufendem Emilia das Soundsystem wechselt – von PulseAudio zu PipeWire oder zurück – oder es neu startet, muss die App nicht mehr neu starten, um wieder etwas zu hören. Emilia bemerkt, dass die Tonausgabe weg ist, verbindet sich selbst neu und spielt an derselben Stelle weiter; ein pausierter Titel bleibt pausiert. Der Ausfall springt außerdem nicht mehr durch die Warteschlange.</p>
+      </description>
+    </release>
     <release version="0.8.37" date="2026-09-28">
       <description>
         <p>A maintenance release. The library that reads the QR code when pairing a device for sync is updated to a version that no longer carries a memory-safety flaw in one of its own dependencies, and two further components that their authors had withdrawn are replaced by corrected releases. Nothing changes in how Emilia looks or behaves; pairing works as before.</p>
