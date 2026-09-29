@@ -118,6 +118,86 @@ fn rate_seek(playbin: &gst::Element, rate: f64, pos: gst::ClockTime) {
     );
 }
 
+/// Whether a bus error was raised by the audio output (`autoaudiosink` or the
+/// `pulsesink` / `alsasink` / `pipewiresink` inside it) rather than by the
+/// source or a decoder. Walks up from the posting element, since the actual
+/// sink sits inside `autoaudiosink` inside `playsink`.
+fn is_audio_sink_error(msg: &gst::Message) -> bool {
+    let mut obj = msg.src().cloned();
+    while let Some(o) = obj {
+        if let Some(factory) = o.downcast_ref::<gst::Element>().and_then(|e| e.factory()) {
+            let klass = factory.klass();
+            if klass.contains("Sink") && klass.contains("Audio") {
+                return true;
+            }
+        }
+        obj = o.parent();
+    }
+    false
+}
+
+/// Starts a deck again after its audio output was lost and the deck torn down
+/// to `Null` (which makes `autoaudiosink` pick and connect an output afresh).
+/// Resumes at `pos_ms` via the bus watch's armed seek, and only plays if the
+/// app still wants audio - a paused deck comes back paused at its position.
+fn reopen_deck(
+    bin: &gst::Element,
+    pos_ms: i64,
+    play: bool,
+    fresh_load: &Cell<bool>,
+    pending_seek: &Cell<i64>,
+) {
+    // Marks the restart as an explicit load: its STREAM_START must not be read
+    // as a gapless advance, and the rate is re-applied once prerolled.
+    fresh_load.set(true);
+    pending_seek.set(pos_ms.max(0));
+    // With a position to restore, preroll paused and let `AsyncDone` seek and
+    // start; the armed seek is what goes to PLAYING then.
+    let target = if play && pos_ms <= 0 {
+        gst::State::Playing
+    } else {
+        gst::State::Paused
+    };
+    // A live source (radio) does not preroll, so no `AsyncDone` would come to
+    // start it.
+    if let Ok(gst::StateChangeSuccess::NoPreroll) = bin.set_state(target) {
+        if play {
+            let _ = bin.set_state(gst::State::Playing);
+        }
+    }
+}
+
+/// How often a lost audio output is re-opened before the error is handed to
+/// the app, and the delay step between attempts (attempt n waits n × step):
+/// together about 20 s, enough for a sound server that is being swapped
+/// (PulseAudio ⇄ PipeWire) or restarted to come back.
+const SINK_RETRY_MAX: u32 = 8;
+const SINK_RETRY_STEP_MS: u64 = 500;
+
+/// Recovery state after the audio output went away. A sound-server connection
+/// is opened once when the pipeline leaves `Null` and is never re-established
+/// on its own, so a deck whose server disappeared stays silent until it is
+/// torn down to `Null` and started again - which is what recovery does.
+#[derive(Default)]
+struct SinkRecovery {
+    /// Attempts since the output last prerolled successfully.
+    attempts: Cell<u32>,
+    /// The pending restart (at most one; follow-up errors of the same failure
+    /// are ignored while it waits).
+    timer: RefCell<Option<gst::glib::SourceId>>,
+}
+
+impl SinkRecovery {
+    /// Drops a pending restart and the attempt count. Explicit transport calls
+    /// use it: the user's new intent replaces whatever recovery was restoring.
+    fn cancel(&self) {
+        if let Some(id) = self.timer.borrow_mut().take() {
+            id.remove();
+        }
+        self.attempts.set(0);
+    }
+}
+
 /// A cheap, cloneable handle to query the live playback state from the UI
 /// without going through the 1 s `Tick` — used by the recording editor to keep
 /// its timeline and waveform playhead in sync with the audio. Holds a clone of
@@ -253,6 +333,12 @@ pub struct Player {
     /// nobody can then stop: not the UI, not the lock screen, not a desktop
     /// service watching MPRIS.
     wants_playing: Rc<Cell<bool>>,
+    /// Re-opening the audio output after the sound server went away.
+    recovery: Rc<SinkRecovery>,
+    /// Last position (ms) the app read from the active deck. A deck whose
+    /// output just died may no longer answer a position query; recovery then
+    /// resumes from here.
+    last_pos_ms: Rc<Cell<i64>>,
 }
 
 impl Player {
@@ -275,6 +361,8 @@ impl Player {
             fade_source: Rc::new(RefCell::new(None)),
             bus_watches: RefCell::new(Vec::new()),
             wants_playing: Rc::new(Cell::new(false)),
+            recovery: Rc::new(SinkRecovery::default()),
+            last_pos_ms: Rc::new(Cell::new(0)),
         })
     }
 
@@ -376,6 +464,7 @@ impl Player {
     /// `playbin3` only re-reads `uri` on a state change, so the deck is reset to
     /// `Ready` first.
     fn hard_load(&self, uri: &str, resume_ms: i64) -> Result<()> {
+        self.recovery.cancel();
         self.cancel_crossfade();
         // The playback context just changed – drop any armed gapless follow.
         self.arm_next_gapless(None);
@@ -384,6 +473,7 @@ impl Player {
             .map_err(|e| anyhow!("Failed to reset pipeline: {e}"))?;
         self.cur_deck().set_ramp(1.0, self.gain());
         cur.set_property("uri", uri);
+        self.last_pos_ms.set(resume_ms.max(0));
         self.start(resume_ms)
     }
 
@@ -422,6 +512,7 @@ impl Player {
         if secs <= 0.0 {
             return self.hard_load(uri, resume_ms);
         }
+        self.recovery.cancel();
         self.cancel_crossfade();
         let from = self.active.load(Ordering::Relaxed);
         let to = 1 - from;
@@ -441,6 +532,7 @@ impl Player {
             .map_err(|e| anyhow!("Failed to start crossfade deck: {e}"))?;
         // The incoming deck is now the one the app queries / controls.
         self.active.store(to, Ordering::Relaxed);
+        self.last_pos_ms.set(resume_ms.max(0));
         self.start_fade_ramp(from, to, secs);
         Ok(())
     }
@@ -561,6 +653,8 @@ impl Player {
             let on_stream_start = on_stream_start.clone();
             let on_toc = on_toc.clone();
             let wants_playing = self.wants_playing.clone();
+            let recovery = self.recovery.clone();
+            let last_pos = self.last_pos_ms.clone();
             let guard = bus.add_watch_local(move |_, msg| {
                 let is_active = active.load(Ordering::Relaxed) == idx;
                 match msg.view() {
@@ -584,6 +678,11 @@ impl Player {
                         // AsyncDone, but the armed values are already cleared.
                         let target = pending_seek.replace(0);
                         let fresh = fresh_load.replace(false);
+                        if is_active {
+                            // The output took the stream: a later loss starts
+                            // counting its retries afresh.
+                            recovery.attempts.set(0);
+                        }
                         if fresh && is_active {
                             on_ready();
                         }
@@ -616,7 +715,59 @@ impl Player {
                     }
                     gst::MessageView::Error(err) => {
                         tracing::error!("GStreamer error: {} ({:?})", err.error(), err.debug());
-                        if is_active {
+                        if is_audio_sink_error(msg) {
+                            if !is_active {
+                                // An idle / outgoing crossfade deck: nothing to
+                                // restore, just release the dead output.
+                                let _ = bin.set_state(gst::State::Null);
+                            } else if recovery.timer.borrow().is_some() {
+                                // Follow-up error of a loss already being handled.
+                            } else if recovery.attempts.get() < SINK_RETRY_MAX {
+                                let attempt = recovery.attempts.get() + 1;
+                                recovery.attempts.set(attempt);
+                                let pos = bin
+                                    .query_position::<gst::ClockTime>()
+                                    .map(|t| t.mseconds() as i64)
+                                    .filter(|&ms| ms > 0)
+                                    .unwrap_or_else(|| last_pos.get());
+                                tracing::warn!(
+                                    "Audio output lost – reopening in {} ms (attempt {attempt}/{SINK_RETRY_MAX}, at {pos} ms)",
+                                    SINK_RETRY_STEP_MS * attempt as u64
+                                );
+                                let _ = bin.set_state(gst::State::Null);
+                                let timer = {
+                                    let recovery = recovery.clone();
+                                    let bin = bin.clone();
+                                    let active = active.clone();
+                                    let fresh_load = fresh_load.clone();
+                                    let pending_seek = pending_seek.clone();
+                                    let wants_playing = wants_playing.clone();
+                                    gst::glib::timeout_add_local_once(
+                                        Duration::from_millis(SINK_RETRY_STEP_MS * attempt as u64),
+                                        move || {
+                                            // Fired: forget the id without removing it.
+                                            recovery.timer.borrow_mut().take();
+                                            if active.load(Ordering::Relaxed) != idx {
+                                                return;
+                                            }
+                                            reopen_deck(
+                                                &bin,
+                                                pos,
+                                                wants_playing.get(),
+                                                &fresh_load,
+                                                &pending_seek,
+                                            );
+                                        },
+                                    )
+                                };
+                                *recovery.timer.borrow_mut() = Some(timer);
+                            } else {
+                                tracing::error!("Audio output did not come back – giving up");
+                                recovery.attempts.set(0);
+                                let _ = bin.set_state(gst::State::Null);
+                                on_error();
+                            }
+                        } else if is_active {
                             on_error();
                         }
                     }
@@ -680,15 +831,27 @@ impl Player {
     }
 
     pub fn stop(&self) {
+        self.recovery.cancel();
         self.cancel_crossfade();
         self.wants_playing.set(false);
         let _ = self.cur().set_state(gst::State::Null);
     }
 
     pub fn position_ms(&self) -> Option<i64> {
-        self.cur()
+        // While a lost output is being reopened the deck sits at 0 (or in
+        // `Null`) until the armed seek lands; report where it will resume, so
+        // the resume point saved meanwhile is not reset to the start.
+        if self.recovery.timer.borrow().is_some() || self.cur_deck().pending_seek_ms.get() > 0 {
+            return Some(self.last_pos_ms.get());
+        }
+        let pos = self
+            .cur()
             .query_position::<gst::ClockTime>()
-            .map(|t| t.mseconds() as i64)
+            .map(|t| t.mseconds() as i64);
+        if let Some(ms) = pos {
+            self.last_pos_ms.set(ms);
+        }
+        pos
     }
 
     /// A cheap, cloneable view onto the active pipeline for live UI probing
