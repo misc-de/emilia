@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.39" date="2026-10-02">
+      <description>
+        <p>YouTube live streams now have their own equalizer, reachable from the player's equalizer button and from the stream's detail view; without a setting of its own a stream uses the global equalizer. While a live stream plays, the progress bar is hidden, since there is nothing to seek. The YouTube video details no longer show the description, chapters stay. "Refresh all" for YouTube channels and podcasts checks several subscriptions at once and finishes much faster. The "+" in Podcasts and YouTube opens a centered window, like the one in Files.</p>
+        <p xml:lang="de">YouTube-Livestreams haben jetzt einen eigenen Equalizer, erreichbar über den Equalizer-Knopf im Player und über die Detailansicht des Streams; ohne eigene Einstellung gilt der globale Equalizer. Während ein Livestream läuft, ist die Fortschrittsleiste ausgeblendet, denn dort gibt es nichts zu spulen. Die Detailansicht von YouTube-Videos zeigt die Beschreibung nicht mehr, die Kapitel bleiben. „Alle aktualisieren“ prüft bei YouTube-Kanälen und Podcasts mehrere Abos gleichzeitig und ist dadurch deutlich schneller fertig. Das „+“ bei Podcasts und YouTube öffnet ein zentriertes Fenster wie bei Dateien.</p>
+      </description>
+    </release>
     <release version="0.8.38" date="2026-09-29">
       <description>
         <p>Switching the sound system while Emilia is running – from PulseAudio to PipeWire or back, or restarting it – no longer leaves the player silent until the app is restarted. Emilia notices that its audio output went away, reconnects on its own and carries on at the same position; a paused track stays paused. The lost output also no longer skips ahead through the queue.</p>
