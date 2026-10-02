@@ -1565,7 +1565,9 @@ impl YtPage {
         let dialog = adw::Dialog::builder()
             .title(gettext("Search YouTube"))
             .build();
-        self.adapt_detail_dialog(&dialog);
+        // The "+" opens a centered modal like the Files "+", also on the
+        // phone — not the bottom sheet of the detail dialogs.
+        dialog.set_presentation_mode(adw::DialogPresentationMode::Floating);
         let content = detail_box();
 
         let kind = Rc::new(Cell::new(SearchKind::Yt(YtKind::Video)));
