@@ -29,6 +29,9 @@ use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
 use crate::ui::widgets::{action_row, detail_box, present_detail};
 
+/// How many feeds "Refresh all" fetches at once (plain HTTP, cheap).
+const FEED_REFRESH_THREADS: usize = 8;
+
 /// Fetches a feed and stores podcast + episodes (runs in the worker thread,
 /// its own DB connection). Returns the podcast title on success, plus how many
 /// of the fetched episodes were **new** — so a refresh can report what it
@@ -873,7 +876,7 @@ impl Component for PodcastsPage {
 
 impl PodcastsPage {
     /// "Refresh all" from the header button: re-fetch every subscribed feed,
-    /// one after another. Each step reports back so the loading overlay can show
+    /// several at once. Each step reports back so the loading overlay can show
     /// a progress bar with the feed being fetched — a bare spinner left the user
     /// unable to tell whether anything was happening at all. The cases that used
     /// to end in silence (no subscriptions, no network) now say so.
@@ -899,28 +902,32 @@ impl PodcastsPage {
             label: feeds[0].0.clone(),
         });
         sender.spawn_command(move |out| {
-            let (mut updated, mut failed, mut new_episodes) = (0usize, 0usize, 0usize);
-            for (i, (title, url)) in feeds.iter().enumerate() {
+            // Several feeds at once: each one is mostly network wait, so a
+            // serial loop over many subscriptions took ages.
+            use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+            let [done, updated, failed, new_episodes] = [(); 4].map(|_| AtomicUsize::new(0));
+            crate::core::pool::for_each(&feeds, FEED_REFRESH_THREADS, |_, (title, url)| {
                 let _ = out.send(PodcastsCmd::RefreshProgress {
-                    done: i,
+                    done: done.load(Relaxed),
                     total,
                     title: title.clone(),
                 });
                 match fetch_and_store_podcast(url) {
                     Some((_, fresh)) => {
-                        updated += 1;
-                        new_episodes += fresh;
+                        updated.fetch_add(1, Relaxed);
+                        new_episodes.fetch_add(fresh, Relaxed);
                     }
                     None => {
                         tracing::warn!("Podcast refresh failed for {url}");
-                        failed += 1;
+                        failed.fetch_add(1, Relaxed);
                     }
                 }
-            }
+                done.fetch_add(1, Relaxed);
+            });
             let _ = out.send(PodcastsCmd::Refreshed {
-                updated,
-                failed,
-                new_episodes,
+                updated: updated.into_inner(),
+                failed: failed.into_inner(),
+                new_episodes: new_episodes.into_inner(),
             });
         });
     }

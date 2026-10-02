@@ -211,6 +211,10 @@ fn backfill_published(
     changed
 }
 
+/// How many channels a refresh lists at once. Each may run a yt-dlp process,
+/// so this stays modest (a phone has to carry it too).
+pub(crate) const CHANNEL_REFRESH_THREADS: usize = 4;
+
 /// Refreshes a subscribed channel's newest videos (worker thread, own DB).
 /// Returns the channel title plus how many of the listed videos were **new**,
 /// so a refresh can report what it actually brought in.

@@ -77,7 +77,7 @@ impl YtPage {
         self.rebuild_sort(sender);
     }
 
-    /// Detail dialog of a saved live stream: play/pause and remove. Deliberately
+    /// Detail dialog of a saved live stream: play/pause, equalizer and remove. Deliberately
     /// without the video dialog's download / add-to-library actions.
     pub(super) fn show_live_detail(&self, sender: &ComponentSender<Self>, video_id: &str) {
         let Some(root) = self.window.clone() else {
@@ -140,6 +140,22 @@ impl YtPage {
             });
         }
         actions.add(&play);
+        let eq = action_row(
+            &gettext("Equalizer settings"),
+            "multimedia-equalizer-symbolic",
+        );
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            let (vid, title) = (item.video_id.clone(), item.title.clone());
+            eq.connect_activated(move |_| {
+                let _ = sender.output(YtOutput::OpenLiveEq {
+                    video_id: vid.clone(),
+                    title: title.clone(),
+                });
+                dialog.close();
+            });
+        }
+        actions.add(&eq);
         let remove = action_row(&gettext("Remove live stream"), "user-trash-symbolic");
         {
             let (sender, dialog, root) = (sender.clone(), dialog.clone(), root.clone());

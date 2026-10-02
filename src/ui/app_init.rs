@@ -468,15 +468,21 @@ impl App {
                     let _ = lib.set_setting("yt_dlp_app_version", cur);
                 }
                 if online && crate::core::youtube::available() {
-                    for (id, title, url, thumb, _) in lib.channels().unwrap_or_default() {
-                        crate::ui::yt_page::ensure_channel_image(
-                            &lib,
-                            id,
-                            &title,
-                            thumb.as_deref(),
-                        );
-                        let _ = crate::ui::yt_page::refresh_channel_videos(id, &title, &url);
-                    }
+                    crate::core::pool::for_each(
+                        &lib.channels().unwrap_or_default(),
+                        crate::ui::yt_channels::CHANNEL_REFRESH_THREADS,
+                        |_, (id, title, url, thumb, _)| {
+                            if let Ok(lib) = Library::open() {
+                                crate::ui::yt_page::ensure_channel_image(
+                                    &lib,
+                                    *id,
+                                    title,
+                                    thumb.as_deref(),
+                                );
+                            }
+                            let _ = crate::ui::yt_page::refresh_channel_videos(*id, title, url);
+                        },
+                    );
                 }
                 Cmd::YtReload
             });

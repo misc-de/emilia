@@ -275,6 +275,11 @@ pub(crate) enum YtOutput {
         close: bool,
         videos: Vec<(String, String, Option<i64>)>,
     },
+    /// Open the equalizer dialog of a live stream (Live tab detail).
+    OpenLiveEq {
+        video_id: String,
+        title: String,
+    },
     /// Open the equalizer dialog for a `yt:<id>` track.
     OpenTrackEq {
         path: String,
@@ -352,8 +357,7 @@ pub(crate) enum YtCmd {
         uploader: Option<String>,
         duration: Option<i64>,
         cover: Option<String>,
-        /// Description text and its jump marks (empty when the video has none).
-        description: Option<String>,
+        /// Jump marks from the description (empty when the video has none).
         chapters: Vec<(i64, String)>,
     },
     LibraryProgress {
@@ -1029,11 +1033,10 @@ impl Component for YtPage {
                 uploader,
                 duration,
                 cover,
-                description,
                 chapters,
             } => {
                 self.apply_video_meta(&video_id, uploader, duration, cover);
-                self.fill_video_description(&sender, &video_id, description.as_deref(), &chapters);
+                self.fill_video_chapters(&sender, &video_id, &chapters);
             }
             YtCmd::LibraryProgress { done, total } => {
                 let _ = sender.output(YtOutput::Progress(gettext_f(

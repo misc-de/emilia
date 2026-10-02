@@ -742,12 +742,38 @@ impl App {
         dialog.present(Some(root));
     }
 
+    /// Per-live-stream equalizer. A YouTube live stream plays queue-less like a
+    /// radio station: its EQ is the `stream` level under `yt-live:<id>`
+    /// (live → global during playback).
+    pub(crate) fn open_live_eq(
+        &self,
+        root: &adw::ApplicationWindow,
+        sender: &ComponentSender<Self>,
+        video_id: &str,
+        title: &str,
+    ) {
+        self.open_eq_editor(
+            root,
+            sender,
+            gettext_noop("the live stream"),
+            title,
+            Some(gettext_noop("Applies while this live stream plays.")),
+            "stream",
+            format!("yt-live:{video_id}"),
+        );
+    }
+
     /// Open the track-level equalizer for the currently running track.
     pub(crate) fn on_open_current_eq(
         &mut self,
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
+        if let Some(vid) = self.youtube.playing_live.clone() {
+            let name = self.mini.now_playing.clone().unwrap_or_default();
+            self.open_live_eq(root, sender, &vid, &name);
+            return;
+        }
         if let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() {
             let key = path.to_string_lossy().into_owned();
             // `display_name` resolves YouTube titles (yt:<id>) and the

@@ -17,6 +17,7 @@ use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_
 use crate::ui::widgets::{action_row, detail_box, present_detail};
 use crate::ui::yt_channels::{
     duration_chip, ensure_channel_image, fmt_duration, refresh_channel_videos, WatchRow,
+    CHANNEL_REFRESH_THREADS,
 };
 use crate::ui::yt_page::{ProgressPopup, YtCmd, YtInput, YtOutput, YtPage};
 
@@ -185,8 +186,7 @@ impl YtPage {
         }
         content.append(&actions);
 
-        // Chapters + description (the YouTube counterpart of podcast shownotes)
-        // are filled in below — right away when they are cached, otherwise when
+        // Chapters are filled in below — right away when they are cached, otherwise when
         // the worker's `VideoMeta` arrives.
         let desc_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -196,8 +196,8 @@ impl YtPage {
         self.ctx_video_desc
             .replace(Some((video_id.to_string(), title.to_string(), desc_box)));
         let cached_detail = self.library.yt_detail(video_id).ok().flatten();
-        if let Some((description, chapters)) = cached_detail.as_ref() {
-            self.fill_video_description(sender, video_id, description.as_deref(), chapters);
+        if let Some((_, chapters)) = cached_detail.as_ref() {
+            self.fill_video_chapters(sender, video_id, chapters);
         }
 
         self.ctx_video_download.replace(Some((
@@ -234,15 +234,12 @@ impl YtPage {
                 let cover = crate::core::online::youtube_cover_path(&vid).or_else(|| {
                     crate::core::online::cache_youtube_thumb(&youtube::thumbnail_url(&vid))
                 });
-                let (description, chapters) = details
-                    .map(|d| (d.description, d.chapters))
-                    .unwrap_or_default();
+                let chapters = details.map(|d| d.chapters).unwrap_or_default();
                 let _ = out.send(YtCmd::VideoMeta {
                     video_id: vid,
                     uploader,
                     duration,
                     cover,
-                    description,
                     chapters,
                 });
             });
@@ -700,31 +697,39 @@ impl YtPage {
                 let _ = out.send(YtCmd::RefreshUnavailable);
                 return;
             }
-            let (mut updated, mut failed, mut new_videos) = (0usize, 0usize, 0usize);
-            for (i, (id, title, url, thumb, _)) in channels.iter().enumerate() {
-                let _ = out.send(YtCmd::RefreshProgress {
-                    done: i,
-                    total,
-                    title: title.clone(),
-                });
-                if let Ok(lib) = Library::open() {
-                    ensure_channel_image(&lib, *id, title, thumb.as_deref());
-                }
-                match refresh_channel_videos(*id, title, url) {
-                    Some((_, fresh)) => {
-                        updated += 1;
-                        new_videos += fresh;
+            // Several channels at once: each one is mostly network wait
+            // (RSS feed, yt-dlp listing), so a serial loop took minutes.
+            use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+            let [done, updated, failed, new_videos] = [(); 4].map(|_| AtomicUsize::new(0));
+            crate::core::pool::for_each(
+                &channels,
+                CHANNEL_REFRESH_THREADS,
+                |_, (id, title, url, thumb, _)| {
+                    let _ = out.send(YtCmd::RefreshProgress {
+                        done: done.load(Relaxed),
+                        total,
+                        title: title.clone(),
+                    });
+                    if let Ok(lib) = Library::open() {
+                        ensure_channel_image(&lib, *id, title, thumb.as_deref());
                     }
-                    None => {
-                        tracing::warn!("YouTube refresh returned no videos for {url}");
-                        failed += 1;
+                    match refresh_channel_videos(*id, title, url) {
+                        Some((_, fresh)) => {
+                            updated.fetch_add(1, Relaxed);
+                            new_videos.fetch_add(fresh, Relaxed);
+                        }
+                        None => {
+                            tracing::warn!("YouTube refresh returned no videos for {url}");
+                            failed.fetch_add(1, Relaxed);
+                        }
                     }
-                }
-            }
+                    done.fetch_add(1, Relaxed);
+                },
+            );
             let _ = out.send(YtCmd::ChannelsRefreshed {
-                updated,
-                failed,
-                new_videos,
+                updated: updated.into_inner(),
+                failed: failed.into_inner(),
+                new_videos: new_videos.into_inner(),
             });
         });
     }
@@ -817,17 +822,13 @@ impl YtPage {
         }
     }
 
-    /// Fills an open video detail dialog with metadata that arrived async.
-    /// Fills the open video dialog's chapters + description. Chapters become
-    /// tappable rows (they start playback at that mark), and the description is
-    /// shown with its timestamps linkified — the same treatment podcast
-    /// shownotes get, so both media behave alike. A no-op when the dialog was
-    /// closed meanwhile or shows a different video.
-    pub(super) fn fill_video_description(
+    /// Fills the open video dialog's chapters: tappable rows that start
+    /// playback at that mark. The description itself is not shown. A no-op
+    /// when the dialog was closed meanwhile or shows a different video.
+    pub(super) fn fill_video_chapters(
         &self,
         sender: &ComponentSender<Self>,
         video_id: &str,
-        description: Option<&str>,
         chapters: &[(i64, String)],
     ) {
         let guard = self.ctx_video_desc.borrow();
@@ -840,12 +841,7 @@ impl YtPage {
         while let Some(child) = container.first_child() {
             container.remove(&child);
         }
-        let description = description.map(str::trim).filter(|d| !d.is_empty());
-        if chapters.is_empty() && description.is_none() {
-            return;
-        }
-
-        // Chapters: one row per mark, tapping it plays from there.
+        // One row per mark, tapping it plays from there.
         if !chapters.is_empty() {
             let group = adw::PreferencesGroup::new();
             let expander = adw::ExpanderRow::builder()
@@ -874,55 +870,6 @@ impl YtPage {
                 });
                 expander.add_row(&row);
             }
-            group.add(&expander);
-            container.append(&group);
-        }
-
-        // Description: timestamps in the text stay tappable as well.
-        if let Some(text) = description {
-            let group = adw::PreferencesGroup::new();
-            let label = gtk::Label::builder()
-                .label(crate::core::podcast::linkify_timestamps(text))
-                .use_markup(true)
-                .wrap(true)
-                // Wrap inside long unbreakable tokens (URLs) too, so a
-                // description can never force the dialog wider than the screen.
-                .wrap_mode(gtk::pango::WrapMode::WordChar)
-                .xalign(0.0)
-                .selectable(true)
-                .build();
-            label.add_css_class("body");
-            {
-                let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.clone());
-                label.connect_activate_link(move |_, uri| {
-                    if let Some(ms) = uri
-                        .strip_prefix("emilia-seek:")
-                        .and_then(|s| s.parse::<i64>().ok())
-                    {
-                        let _ = sender.output(YtOutput::PlayVideoAt {
-                            video_id: vid.clone(),
-                            title: t.clone(),
-                            ms,
-                        });
-                        return gtk::glib::Propagation::Stop;
-                    }
-                    gtk::glib::Propagation::Proceed
-                });
-            }
-            let wrap = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(6)
-                .margin_top(10)
-                .margin_bottom(10)
-                .margin_start(14)
-                .margin_end(14)
-                .build();
-            wrap.append(&label);
-            let expander = adw::ExpanderRow::builder()
-                .title(gettext("Description"))
-                .expanded(false)
-                .build();
-            expander.add_row(&wrap);
             group.add(&expander);
             container.append(&group);
         }

@@ -17,6 +17,7 @@ pub mod output;
 pub mod placeholder;
 pub mod player;
 pub mod podcast;
+pub mod pool;
 pub mod proc;
 pub mod recorder;
 pub mod remote;

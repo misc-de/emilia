@@ -289,6 +289,11 @@ pub enum Msg {
     OpenGlobalEq,
     /// Open the equalizer for the currently running track.
     OpenCurrentEq,
+    /// Open the equalizer of a YouTube live stream (from its detail dialog).
+    OpenLiveEq {
+        video_id: String,
+        title: String,
+    },
     /// Open the track-level equalizer for a specific path (e.g. a YouTube
     /// video from its detail view). `title` is only the header label.
     OpenTrackEq {
@@ -1505,12 +1510,14 @@ impl Component for App {
                         },
 
                         // Seek bar: position / slider / total duration.
+                        // Hidden for YouTube live streams: no seek, no duration.
                         gtk::Box {
                             set_spacing: 6,
                             set_margin_start: 4,
                             set_margin_end: 4,
                             #[watch]
-                            set_visible: model.mini.now_playing.is_some(),
+                            set_visible: model.mini.now_playing.is_some()
+                                && model.youtube.playing_live.is_none(),
 
                             gtk::Label {
                                 add_css_class: "caption",
@@ -2162,6 +2169,7 @@ impl Component for App {
                         videos,
                     }),
                     O::OpenTrackEq { path, title } => Msg::OpenTrackEq { path, title },
+                    O::OpenLiveEq { video_id, title } => Msg::OpenLiveEq { video_id, title },
                     O::OpenPlaylist { id, name } => Msg::Yt(YtMsg::YtOpenPlaylist { id, name }),
                     O::OpenSettings => Msg::OpenSettings,
                     O::Toast(s) => Msg::Yt(YtMsg::YtToast(s)),
@@ -2758,6 +2766,9 @@ impl Component for App {
             Msg::SearchOpenArtist(name) => self.on_search_open_artist(name, &sender),
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
             Msg::OpenCurrentEq => self.on_open_current_eq(root, &sender),
+            Msg::OpenLiveEq { video_id, title } => {
+                self.open_live_eq(root, &sender, &video_id, &title);
+            }
             Msg::OpenTrackEq { path, title } => {
                 self.open_eq_editor(root, &sender, "the track", &title, None, "track", path);
             }

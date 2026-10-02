@@ -1300,8 +1300,8 @@ impl App {
             self.player.set_eq_bands(&bands);
             return;
         }
-        // A YouTube live stream has no EQ of its own: the global one (the
-        // station cascade finds no station under this key and falls back).
+        // A YouTube live stream: its own `stream`-level EQ keyed by
+        // `yt-live:<id>` (set from the player's EQ button), else the global one.
         if let Some(vid) = self.youtube.playing_live.as_deref() {
             let bands = self
                 .library
