@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.40" date="2026-10-03">
+      <description>
+        <p>Radio stations and streamed podcast episodes now survive a lost network connection, for example when the phone switches from 5G to 4G or passes through a tunnel. Emilia notices both a connection that breaks off and one that just goes quiet, reconnects on its own for about five minutes and carries on: a station rejoins the live broadcast, an episode continues where it stopped. The loading spinner shows while it reconnects. If the stream does not come back, playback stops with a notice instead of claiming to play. The timeshift buffer for station recordings reconnects as well and keeps what it has already recorded.</p>
+        <p xml:lang="de">Radiosender und gestreamte Podcast-Folgen überstehen jetzt einen Verbindungsabbruch, etwa wenn das Handy von 5G auf 4G wechselt oder durch einen Tunnel fährt. Emilia erkennt sowohl eine abgerissene als auch eine einfach verstummte Verbindung, verbindet sich etwa fünf Minuten lang selbst neu und macht weiter: Ein Sender steigt wieder live ein, eine Folge läuft an der Stelle weiter, an der sie stehen geblieben ist. Während des Wiederverbindens dreht sich der Lade-Spinner. Kommt der Stream nicht zurück, stoppt die Wiedergabe mit einem Hinweis, statt weiter „spielt“ anzuzeigen. Der Timeshift-Puffer für Senderaufnahmen verbindet sich ebenfalls neu und behält, was er schon aufgenommen hat.</p>
+      </description>
+    </release>
     <release version="0.8.39" date="2026-10-02">
       <description>
         <p>YouTube live streams now have their own equalizer, reachable from the player's equalizer button and from the stream's detail view; without a setting of its own a stream uses the global equalizer. While a live stream plays, the progress bar is hidden, since there is nothing to seek. The YouTube video details no longer show the description, chapters stay. "Refresh all" for YouTube channels and podcasts checks several subscriptions at once and finishes much faster. The "+" in Podcasts and YouTube opens a centered window, like the one in Files.</p>
