@@ -396,6 +396,9 @@ impl App {
             result.and_then(|url| self.player.play_uri(&url, 0).map_err(|e| e.to_string()));
         match started {
             Ok(()) => {
+                // Its address expires: a broken connection is re-resolved by
+                // `yt_live_ended`, not re-opened as it is.
+                self.player.set_net_reconnect(false);
                 self.youtube.live_started = Some(std::time::Instant::now());
                 self.settings.active_output =
                     crate::core::output::default_output().unwrap_or_default();

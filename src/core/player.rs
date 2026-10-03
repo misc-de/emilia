@@ -198,6 +198,163 @@ impl SinkRecovery {
     }
 }
 
+/// Waits before each reconnect after a network stream broke off (attempt n
+/// waits entry n): quick tries for a short hiccup (a 5G → 4G handover), then
+/// every 30 s, about five minutes in all - enough for a tunnel or a dead zone
+/// on the train. Each attempt can itself take up to the source's own timeout.
+const NET_RETRY_DELAYS_MS: [u64; 14] = [
+    1_000, 2_000, 4_000, 8_000, 15_000, 30_000, 30_000, 30_000, 30_000, 30_000, 30_000, 30_000,
+    30_000, 30_000,
+];
+
+/// A connection that ran at least this long before it broke counts as
+/// recovered: its loss starts the retry schedule afresh. A server that accepts
+/// the connection only to drop it again keeps counting instead, and runs out.
+const NET_STABLE_MS: u64 = 30_000;
+
+/// A playing network stream whose position stands still this long counts as
+/// a broken connection, and so does a reconnect attempt that has not got going
+/// after [`NET_ATTEMPT_TIMEOUT_MS`].
+const NET_STALL_MS: u64 = 10_000;
+const NET_ATTEMPT_TIMEOUT_MS: u64 = 20_000;
+
+/// Recovery state after a network stream (station, podcast episode, remote
+/// file) broke off: the source gives up once its own retries fail, and the
+/// deck then sits in an error state that nothing restarts on its own.
+#[derive(Default)]
+struct NetRecovery {
+    /// Off for sources the app re-resolves itself (a YouTube live stream,
+    /// whose address expires). Every explicit load turns it back on.
+    enabled: Cell<bool>,
+    /// When the current load last prerolled; `None` while it never played
+    /// - a stream that fails right at its start is reported, not retried.
+    ok_at: Cell<Option<std::time::Instant>>,
+    /// The pipeline reported a length at some point: an episode / file, which
+    /// resumes at its position, rather than a live station, which rejoins.
+    had_duration: Cell<bool>,
+    /// Attempts since the connection last ran for [`NET_STABLE_MS`].
+    attempts: Cell<u32>,
+    /// The pending reconnect (at most one).
+    timer: RefCell<Option<gst::glib::SourceId>>,
+    /// Where the pending reconnect resumes (ms, 0 for a live stream).
+    resume_at: Cell<i64>,
+    /// Between the loss and the reconnect having prerolled again.
+    reconnecting: Cell<bool>,
+}
+
+impl NetRecovery {
+    /// Fresh state for a new load.
+    fn reset(&self) {
+        self.cancel();
+        self.enabled.set(true);
+        self.ok_at.set(None);
+        self.had_duration.set(false);
+    }
+
+    /// Drops a pending reconnect and the attempt count.
+    fn cancel(&self) {
+        if let Some(id) = self.timer.borrow_mut().take() {
+            id.remove();
+        }
+        self.attempts.set(0);
+        self.reconnecting.set(false);
+    }
+}
+
+/// Schedules re-opening the active deck `idx` after its network connection
+/// broke off. Returns `false` when this loss is not one to retry - recovery is
+/// off, the stream never played, or the attempts ran out - and the caller
+/// reports it as before.
+fn schedule_net_reconnect(
+    net: &Rc<NetRecovery>,
+    bin: &gst::Element,
+    idx: usize,
+    active: &Arc<AtomicUsize>,
+    fresh_load: &Rc<Cell<bool>>,
+    pending_seek: &Rc<Cell<i64>>,
+    wants_playing: &Rc<Cell<bool>>,
+    last_pos: &Cell<i64>,
+) -> bool {
+    if net.timer.borrow().is_some() {
+        // Follow-up message of a loss already being handled.
+        return true;
+    }
+    let Some(ok_at) = net.ok_at.get() else {
+        return false;
+    };
+    if !net.enabled.get() || !is_network_deck(bin) {
+        return false;
+    }
+    if !net.reconnecting.get() && ok_at.elapsed() >= Duration::from_millis(NET_STABLE_MS) {
+        net.attempts.set(0);
+    }
+    let attempt = net.attempts.get() as usize;
+    let Some(&delay) = NET_RETRY_DELAYS_MS.get(attempt) else {
+        tracing::error!("Network stream did not come back – giving up");
+        net.cancel();
+        let _ = bin.set_state(gst::State::Null);
+        return false;
+    };
+    net.attempts.set(attempt as u32 + 1);
+    // A live station rejoins the broadcast; an episode / file resumes where
+    // it broke off.
+    let live = !net.had_duration.get()
+        && bin
+            .query_duration::<gst::ClockTime>()
+            .is_none_or(|d| d == gst::ClockTime::ZERO);
+    let pos = if live {
+        0
+    } else {
+        bin.query_position::<gst::ClockTime>()
+            .map(|t| t.mseconds() as i64)
+            .filter(|&ms| ms > 0)
+            .unwrap_or_else(|| last_pos.get())
+    };
+    if !live {
+        last_pos.set(pos);
+    }
+    net.resume_at.set(pos);
+    net.reconnecting.set(true);
+    tracing::warn!(
+        "Network stream lost – reconnecting in {delay} ms (attempt {}/{}, at {pos} ms)",
+        attempt + 1,
+        NET_RETRY_DELAYS_MS.len()
+    );
+    let _ = bin.set_state(gst::State::Null);
+    let timer = {
+        let net = net.clone();
+        let bin = bin.clone();
+        let active = active.clone();
+        let fresh_load = fresh_load.clone();
+        let pending_seek = pending_seek.clone();
+        let wants_playing = wants_playing.clone();
+        gst::glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            // Fired: forget the id without removing it.
+            net.timer.borrow_mut().take();
+            if active.load(Ordering::Relaxed) != idx {
+                return;
+            }
+            reopen_deck(
+                &bin,
+                net.resume_at.get(),
+                wants_playing.get(),
+                &fresh_load,
+                &pending_seek,
+            );
+        })
+    };
+    *net.timer.borrow_mut() = Some(timer);
+    true
+}
+
+/// Whether a deck plays from the network (and a lost connection can be
+/// re-opened), judged by the URI it was loaded with.
+fn is_network_deck(bin: &gst::Element) -> bool {
+    bin.property::<Option<String>>("current-uri")
+        .or_else(|| bin.property::<Option<String>>("uri"))
+        .is_some_and(|uri| is_allowed_remote_uri(&uri))
+}
+
 /// A cheap, cloneable handle to query the live playback state from the UI
 /// without going through the 1 s `Tick` — used by the recording editor to keep
 /// its timeline and waveform playhead in sync with the audio. Holds a clone of
@@ -335,6 +492,8 @@ pub struct Player {
     wants_playing: Rc<Cell<bool>>,
     /// Re-opening the audio output after the sound server went away.
     recovery: Rc<SinkRecovery>,
+    /// Re-opening a network stream whose connection broke off.
+    net: Rc<NetRecovery>,
     /// Last position (ms) the app read from the active deck. A deck whose
     /// output just died may no longer answer a position query; recovery then
     /// resumes from here.
@@ -362,6 +521,7 @@ impl Player {
             bus_watches: RefCell::new(Vec::new()),
             wants_playing: Rc::new(Cell::new(false)),
             recovery: Rc::new(SinkRecovery::default()),
+            net: Rc::new(NetRecovery::default()),
             last_pos_ms: Rc::new(Cell::new(0)),
         })
     }
@@ -465,6 +625,7 @@ impl Player {
     /// `Ready` first.
     fn hard_load(&self, uri: &str, resume_ms: i64) -> Result<()> {
         self.recovery.cancel();
+        self.net.reset();
         self.cancel_crossfade();
         // The playback context just changed – drop any armed gapless follow.
         self.arm_next_gapless(None);
@@ -513,6 +674,7 @@ impl Player {
             return self.hard_load(uri, resume_ms);
         }
         self.recovery.cancel();
+        self.net.reset();
         self.cancel_crossfade();
         let from = self.active.load(Ordering::Relaxed);
         let to = 1 - from;
@@ -655,11 +817,28 @@ impl Player {
             let wants_playing = self.wants_playing.clone();
             let recovery = self.recovery.clone();
             let last_pos = self.last_pos_ms.clone();
+            let net = self.net.clone();
             let guard = bus.add_watch_local(move |_, msg| {
                 let is_active = active.load(Ordering::Relaxed) == idx;
+                let net_reconnect = || {
+                    schedule_net_reconnect(
+                        &net,
+                        &bin,
+                        idx,
+                        &active,
+                        &fresh_load,
+                        &pending_seek,
+                        &wants_playing,
+                        &last_pos,
+                    )
+                };
                 match msg.view() {
                     gst::MessageView::Eos(_) => {
-                        if is_active {
+                        // A live station has no end: its EOS is the server
+                        // closing the connection (or the network dropping it).
+                        let live = !net.had_duration.get()
+                            && bin.query_duration::<gst::ClockTime>().is_none();
+                        if is_active && !(live && net_reconnect()) {
                             on_eos();
                         }
                     }
@@ -682,6 +861,9 @@ impl Player {
                             // The output took the stream: a later loss starts
                             // counting its retries afresh.
                             recovery.attempts.set(0);
+                            // The stream flows (again).
+                            net.ok_at.set(Some(std::time::Instant::now()));
+                            net.reconnecting.set(false);
                         }
                         if fresh && is_active {
                             on_ready();
@@ -767,7 +949,7 @@ impl Player {
                                 let _ = bin.set_state(gst::State::Null);
                                 on_error();
                             }
-                        } else if is_active {
+                        } else if is_active && !net_reconnect() {
                             on_error();
                         }
                     }
@@ -793,6 +975,90 @@ impl Player {
                 self.bus_watches.borrow_mut().push(guard);
             }
         }
+        self.start_stall_watchdog();
+    }
+
+    /// Watches the active network stream for a connection that hangs without
+    /// failing. When the phone hands over between cells (5G → 4G) its address
+    /// changes and the old TCP connection simply goes quiet: no reset, no
+    /// error, the pipeline stays in PLAYING with the position frozen - for
+    /// good. A position that stops moving is treated like a broken connection.
+    /// A reconnect attempt that never gets going counts the same way.
+    fn start_stall_watchdog(&self) {
+        let decks: Vec<_> = self
+            .decks
+            .iter()
+            .map(|d| {
+                (
+                    d.bin.clone(),
+                    d.fresh_load.clone(),
+                    d.pending_seek_ms.clone(),
+                )
+            })
+            .collect();
+        let active = self.active.clone();
+        let net = self.net.clone();
+        let wants_playing = self.wants_playing.clone();
+        let sink = self.recovery.clone();
+        let last_pos = self.last_pos_ms.clone();
+        let mut seen: Option<i64> = None;
+        let mut since = std::time::Instant::now();
+        gst::glib::timeout_add_seconds_local(1, move || {
+            let idx = active.load(Ordering::Relaxed);
+            let (bin, fresh_load, pending_seek) = &decks[idx];
+            // Remember that this is an episode / file while the pipeline can
+            // still tell: once the connection broke, it reports no length.
+            if !net.had_duration.get()
+                && bin
+                    .query_duration::<gst::ClockTime>()
+                    .is_some_and(|d| d > gst::ClockTime::ZERO)
+            {
+                net.had_duration.set(true);
+            }
+            let attempt_running = net.reconnecting.get() && net.timer.borrow().is_none();
+            let watch = wants_playing.get()
+                && net.enabled.get()
+                && net.ok_at.get().is_some()
+                && net.timer.borrow().is_none()
+                && sink.timer.borrow().is_none()
+                && (attempt_running || bin.current_state() == gst::State::Playing)
+                && is_network_deck(bin);
+            let pos = bin
+                .query_position::<gst::ClockTime>()
+                .map(|t| t.mseconds() as i64);
+            // Keep the resume point current on our own (not only when the app
+            // asks), but never with the 0 of a deck still seeking back.
+            if watch && !net.reconnecting.get() && pending_seek.get() == 0 {
+                if let Some(ms) = pos.filter(|&ms| ms > 0) {
+                    last_pos.set(ms);
+                }
+            }
+            if !watch || pos != seen {
+                seen = pos;
+                since = std::time::Instant::now();
+                return gst::glib::ControlFlow::Continue;
+            }
+            let limit = if attempt_running {
+                NET_ATTEMPT_TIMEOUT_MS
+            } else {
+                NET_STALL_MS
+            };
+            if since.elapsed() >= Duration::from_millis(limit) {
+                tracing::warn!("Network stream stalled for {limit} ms");
+                since = std::time::Instant::now();
+                schedule_net_reconnect(
+                    &net,
+                    bin,
+                    idx,
+                    &active,
+                    fresh_load,
+                    pending_seek,
+                    &wants_playing,
+                    &last_pos,
+                );
+            }
+            gst::glib::ControlFlow::Continue
+        });
     }
 
     pub fn pause(&self) {
@@ -814,6 +1080,20 @@ impl Player {
             return false;
         }
         self.wants_playing.set(true);
+        // Waiting to reconnect: try right away instead of starting the broken
+        // pipeline as it is (which would also lose the resume position).
+        if let Some(id) = self.net.timer.borrow_mut().take() {
+            id.remove();
+            let deck = self.cur_deck();
+            reopen_deck(
+                &deck.bin,
+                self.net.resume_at.get(),
+                true,
+                &deck.fresh_load,
+                &deck.pending_seek_ms,
+            );
+            return true;
+        }
         let started = self.cur().set_state(gst::State::Playing).is_ok();
         if !started {
             self.wants_playing.set(false);
@@ -832,6 +1112,7 @@ impl Player {
 
     pub fn stop(&self) {
         self.recovery.cancel();
+        self.net.cancel();
         self.cancel_crossfade();
         self.wants_playing.set(false);
         let _ = self.cur().set_state(gst::State::Null);
@@ -841,7 +1122,10 @@ impl Player {
         // While a lost output is being reopened the deck sits at 0 (or in
         // `Null`) until the armed seek lands; report where it will resume, so
         // the resume point saved meanwhile is not reset to the start.
-        if self.recovery.timer.borrow().is_some() || self.cur_deck().pending_seek_ms.get() > 0 {
+        if self.recovery.timer.borrow().is_some()
+            || self.net.reconnecting.get()
+            || self.cur_deck().pending_seek_ms.get() > 0
+        {
             return Some(self.last_pos_ms.get());
         }
         let pos = self
@@ -863,9 +1147,28 @@ impl Player {
     }
 
     pub fn duration_ms(&self) -> Option<i64> {
-        self.cur()
+        let dur = self
+            .cur()
             .query_duration::<gst::ClockTime>()
             .map(|t| t.mseconds() as i64)
+            .filter(|&ms| ms > 0);
+        if dur.is_some() {
+            self.net.had_duration.set(true);
+        }
+        dur
+    }
+
+    /// Lets a lost network connection be re-opened automatically (on by
+    /// default, reset by every load). Turned off for a YouTube live stream,
+    /// whose address expires and which the app re-resolves itself.
+    pub fn set_net_reconnect(&self, on: bool) {
+        self.net.enabled.set(on);
+    }
+
+    /// Whether a broken network stream is being re-opened right now (the UI
+    /// shows its loading spinner meanwhile).
+    pub fn is_reconnecting(&self) -> bool {
+        self.net.reconnecting.get()
     }
 
     /// Seeks the active deck to the given position (e.g. for resume). The

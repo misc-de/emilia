@@ -283,8 +283,82 @@ fn cleanup_stale_buffers(dir: &Path) {
     }
 }
 
+/// Waits before each reconnect after the recorder's connection broke off
+/// (attempt n waits entry n, in seconds) - the same ~5 minute window the
+/// player gives a station (`NET_RETRY_DELAYS_MS` in `player.rs`).
+const RECONNECT_DELAYS_SECS: [u64; 14] = [1, 2, 4, 8, 15, 30, 30, 30, 30, 30, 30, 30, 30, 30];
+
+/// A connection that ran this long before it broke starts the retry schedule
+/// afresh.
+const RECONNECT_STABLE_SECS: u64 = 30;
+
+/// Sleeps the delay of reconnect `attempt`, checking `stop` meanwhile.
+/// `false` = the attempts ran out, or the recorder was stopped.
+fn reconnect_wait(attempt: &mut usize, stop: &AtomicBool) -> bool {
+    let Some(&secs) = RECONNECT_DELAYS_SECS.get(*attempt) else {
+        return false;
+    };
+    *attempt += 1;
+    tracing::warn!(
+        "Stream recorder lost its connection – reconnecting in {secs} s (attempt {attempt}/{})",
+        RECONNECT_DELAYS_SECS.len()
+    );
+    let until = std::time::Instant::now() + Duration::from_secs(secs);
+    while std::time::Instant::now() < until {
+        if stop.load(Ordering::Relaxed) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    !stop.load(Ordering::Relaxed)
+}
+
+/// Connects to the station with ICY metadata requested.
+fn connect(agent: &ureq::Agent, url: &str) -> Result<ureq::Response> {
+    Ok(agent
+        .get(url)
+        .set("Icy-MetaData", "1")
+        .set(
+            "User-Agent",
+            &format!("Emilia/{}", env!("CARGO_PKG_VERSION")),
+        )
+        .call()?)
+}
+
+/// The ring buffer and its byte rate, fixed by the first connection: a
+/// reconnect keeps appending to the same ring at the same offsets.
+struct Ring {
+    file: std::fs::File,
+    cap: u64,
+    bytes_per_sec: u64,
+}
+
+/// Song-boundary tracking that carries over a reconnect.
+#[derive(Default)]
+struct Cursor {
+    /// Running (absolute, monotonic) byte offset of the buffer end.
+    total: u64,
+    /// Candidate for the next song boundary: (start offset, title).
+    pending: Option<(u64, String)>,
+    /// Offset at which the ICY title most recently went empty (while a song
+    /// was running). Once the clear persists for `min_gap`, the song ends here
+    /// and an untitled gap segment begins. Reset when a title reappears.
+    empty_since: Option<u64>,
+}
+
+/// How a connection's read loop ended.
+enum Pumped {
+    /// The recorder was stopped.
+    Stopped,
+    /// The connection closed or broke off.
+    Lost(anyhow::Error),
+}
+
 /// Worker loop: reads the ICY stream, buffers audio in the ring and tracks the
-/// song boundaries.
+/// song boundaries. A connection that breaks off after it worked (a phone
+/// handing over from 5G to 4G, a tunnel) is re-opened with backoff instead of
+/// ending the buffer; only a station that cannot be reached at all, or does
+/// not come back, ends it.
 fn run(
     url: &str,
     cap_minutes: u32,
@@ -298,15 +372,81 @@ fn run(
         .timeout_connect(Duration::from_secs(8))
         .timeout_read(Duration::from_secs(20))
         .build();
-    let resp = agent
-        .get(url)
-        .set("Icy-MetaData", "1")
-        .set(
-            "User-Agent",
-            &format!("Emilia/{}", env!("CARGO_PKG_VERSION")),
-        )
-        .call()?;
+    let mut ring: Option<Ring> = None;
+    let mut cursor = Cursor::default();
+    let mut attempt = 0usize;
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let resp = match connect(&agent, url) {
+            Ok(resp) => resp,
+            // Never reached → end, as before.
+            Err(e) if ring.is_none() => return Err(e),
+            Err(e) => {
+                tracing::info!("Stream recorder reconnect failed: {e}");
+                if !reconnect_wait(&mut attempt, stop) {
+                    return Err(anyhow!("stream did not come back"));
+                }
+                continue;
+            }
+        };
+        let connected_at = std::time::Instant::now();
+        match pump(
+            resp,
+            cap_minutes,
+            station,
+            buffer_path,
+            shared,
+            stop,
+            ext_out,
+            &mut ring,
+            &mut cursor,
+        )? {
+            Pumped::Stopped => return Ok(()),
+            Pumped::Lost(e) => tracing::info!("Stream recorder connection lost: {e}"),
+        }
+        if connected_at.elapsed() >= Duration::from_secs(RECONNECT_STABLE_SECS) {
+            attempt = 0;
+        }
+        // Audio is missing from here on: end the running song at the loss
+        // point instead of splicing the two halves into one file. The song
+        // still playing after the reconnect becomes its own (partial) entry.
+        if let Some(ring) = ring.as_ref() {
+            let mut s = shared.lock_or_recover();
+            if s.current_title.is_some() {
+                s.markers.push(Marker {
+                    offset: cursor.total,
+                    title: String::new(),
+                    pad: SAVE_GUARD_MIN_SECS * ring.bytes_per_sec,
+                });
+                s.current_title = None;
+                prune_markers(&mut s);
+            }
+        }
+        cursor.pending = None;
+        cursor.empty_since = None;
+        if !reconnect_wait(&mut attempt, stop) {
+            return Err(anyhow!("stream did not come back"));
+        }
+    }
+}
 
+/// Reads one connection into the ring until it ends. Sets up the ring on the
+/// first connection. `Err` only for a failure that a reconnect cannot cure
+/// (the buffer file).
+#[allow(clippy::too_many_arguments)]
+fn pump(
+    resp: ureq::Response,
+    cap_minutes: u32,
+    station: Option<&str>,
+    buffer_path: &Path,
+    shared: &Arc<Mutex<Shared>>,
+    stop: &Arc<AtomicBool>,
+    ext_out: &Arc<Mutex<String>>,
+    ring: &mut Option<Ring>,
+    cursor: &mut Cursor,
+) -> Result<Pumped> {
     let metaint: usize = resp
         .header("icy-metaint")
         .and_then(|s| s.parse().ok())
@@ -320,9 +460,26 @@ fn run(
         .and_then(|s| s.trim().parse().ok())
         .filter(|&b: &u64| b > 0)
         .unwrap_or(256);
-    let bytes_per_sec = (br_kbps * 1000 / 8).max(8_000);
-    let cap = (cap_minutes as u64 * 60 * bytes_per_sec).max(bytes_per_sec * 10);
-    shared.lock_or_recover().cap = cap;
+    let ring = match ring {
+        Some(ring) => ring,
+        None => {
+            let bytes_per_sec = (br_kbps * 1000 / 8).max(8_000);
+            let cap = (cap_minutes as u64 * 60 * bytes_per_sec).max(bytes_per_sec * 10);
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .truncate(true)
+                .open(buffer_path)?;
+            shared.lock_or_recover().cap = cap;
+            ring.insert(Ring {
+                file,
+                cap,
+                bytes_per_sec,
+            })
+        }
+    };
+    let (cap, bytes_per_sec) = (ring.cap, ring.bytes_per_sec);
 
     // Station idents/self-promo that some stations inject into the ICY title
     // (e.g. "1LIVE DIGGI auch als Stream: 1LIVEDIGGI.de") are not songs. Build the
@@ -330,15 +487,7 @@ fn run(
     // `icy-name`); such titles are then treated like a cleared title (a gap)
     // instead of being saved as a bogus song that also splits the real one.
     let idents = station_idents(station, resp.header("icy-name"));
-
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(true)
-        .open(buffer_path)?;
     let mut reader = std::io::BufReader::new(resp.into_reader());
-    let mut total: u64 = 0;
     let mut buf = vec![0u8; 16 * 1024];
     // Debounce: a new `StreamTitle` only counts as a real song boundary once
     // it has been present for at least `min_bytes` (≈ MIN_SONG_SECS seconds). This
@@ -348,16 +497,12 @@ fn run(
     // Like `min_bytes`, but for the *cleared*-title gap: the title must stay empty
     // this long before we end the running song (filters brief title flicker).
     let min_gap = MIN_GAP_SECS * bytes_per_sec;
-    // Candidate for the next song boundary: (start offset, title).
-    let mut pending: Option<(u64, String)> = None;
-    // Offset at which the ICY title most recently went empty (while a song was
-    // running). Once the clear persists for `min_gap`, the song ends here and an
-    // untitled gap segment begins. Reset when a title reappears.
-    let mut empty_since: Option<u64> = None;
-
-    loop {
+    let mut total = cursor.total;
+    let mut pending = cursor.pending.take();
+    let mut empty_since = cursor.empty_since.take();
+    let outcome = 'conn: loop {
         if stop.load(Ordering::Relaxed) {
-            return Ok(());
+            break 'conn Pumped::Stopped;
         }
         // Read the audio portion (either up to the next metadata marker, or –
         // without ICY metadata – simply block by block).
@@ -365,15 +510,16 @@ fn run(
         let mut remaining = chunk;
         while remaining > 0 {
             let want = remaining.min(buf.len());
-            let n = reader.read(&mut buf[..want])?;
-            if n == 0 {
-                return Ok(());
-            }
-            write_ring(&mut file, cap, total, &buf[..n])?;
+            let n = match reader.read(&mut buf[..want]) {
+                Ok(0) => break 'conn Pumped::Lost(anyhow!("stream closed")),
+                Ok(n) => n,
+                Err(e) => break 'conn Pumped::Lost(e.into()),
+            };
+            write_ring(&mut ring.file, cap, total, &buf[..n])?;
             total += n as u64;
             remaining -= n;
             if stop.load(Ordering::Relaxed) {
-                return Ok(());
+                break 'conn Pumped::Stopped;
             }
         }
         // Decide what (if anything) to commit under a short lock, then refine the
@@ -450,13 +596,17 @@ fn run(
 
         // Metadata block: 1 length byte, then len*16 bytes of text.
         let mut lenb = [0u8; 1];
-        if reader.read(&mut lenb)? == 0 {
-            return Ok(());
+        match reader.read(&mut lenb) {
+            Ok(0) => break 'conn Pumped::Lost(anyhow!("stream closed")),
+            Ok(_) => {}
+            Err(e) => break 'conn Pumped::Lost(e.into()),
         }
         let mlen = lenb[0] as usize * 16;
         if mlen > 0 {
             let mut meta = vec![0u8; mlen];
-            reader.read_exact(&mut meta)?;
+            if let Err(e) = reader.read_exact(&mut meta) {
+                break 'conn Pumped::Lost(e.into());
+            }
             if let Some(title) = parse_stream_title(&meta) {
                 let title = title.trim().to_string();
                 if title.is_empty() || is_station_ident(&title, &idents) {
@@ -482,7 +632,11 @@ fn run(
                 }
             }
         }
-    }
+    };
+    cursor.total = total;
+    cursor.pending = pending;
+    cursor.empty_since = empty_since;
+    Ok(outcome)
 }
 
 /// Minimum duration (seconds) a title must be present to count as its own song.

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 18:24+0000\n"
+"POT-Creation-Date: 2026-10-03 07:22+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -15,8 +15,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 "
-"&& n%100<=10 ? 3 : n%100>=11 ? 4 : 5);\n"
+"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5);\n"
 
 #: src/core/tray.rs:75
 msgid "Show / Hide"
@@ -33,8 +32,8 @@ msgstr "إيقاف مؤقت"
 #: src/ui/app_views.rs:1561 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
 #: src/ui/stream_page.rs:1403 src/ui/stream_page.rs:1492
 #: src/ui/stream_page.rs:1690 src/ui/stream_page.rs:1771 src/ui/yt_live.rs:123
-#: src/ui/yt_page.rs:1912 src/ui/yt_page_detail.rs:97
-#: src/ui/yt_page_detail.rs:424
+#: src/ui/yt_page.rs:1919 src/ui/yt_page_detail.rs:98
+#: src/ui/yt_page_detail.rs:425
 msgid "Play"
 msgstr "تشغيل"
 
@@ -50,103 +49,103 @@ msgstr "السابق"
 msgid "Quit Emilia"
 msgstr "إنهاء Emilia"
 
-#: src/ui/app.rs:548 src/ui/app.rs:704 src/ui/app.rs:1648 src/ui/setup.rs:701
+#: src/ui/app.rs:553 src/ui/app.rs:709 src/ui/app.rs:1653 src/ui/setup.rs:701
 msgid "Back"
 msgstr "رجوع"
 
-#: src/ui/app.rs:560 src/ui/app_search.rs:22 src/ui/app_search.rs:328
-#: src/ui/podcasts_page.rs:1967 src/ui/podcasts_page.rs:1979
-#: src/ui/stream_page.rs:1109 src/ui/stream_page.rs:1121 src/ui/yt_page.rs:1611
-#: src/ui/yt_page.rs:1622
+#: src/ui/app.rs:565 src/ui/app_search.rs:22 src/ui/app_search.rs:328
+#: src/ui/podcasts_page.rs:1976 src/ui/podcasts_page.rs:1988
+#: src/ui/stream_page.rs:1109 src/ui/stream_page.rs:1121
+#: src/ui/yt_page.rs:1618 src/ui/yt_page.rs:1629
 msgid "Search"
 msgstr "بحث"
 
-#: src/ui/app.rs:569 src/ui/app_init.rs:855 src/ui/app_settings.rs:1465
-#: src/ui/yt_page.rs:442
+#: src/ui/app.rs:574 src/ui/app_init.rs:861 src/ui/app_settings.rs:1465
+#: src/ui/yt_page.rs:447
 msgid "Settings"
 msgstr "الإعدادات"
 
-#: src/ui/app.rs:579
+#: src/ui/app.rs:584
 msgid "Sort"
 msgstr "ترتيب"
 
-#: src/ui/app.rs:589 src/ui/app_sleep.rs:37
+#: src/ui/app.rs:594 src/ui/app_sleep.rs:37
 msgid "Sleep timer"
 msgstr "مؤقت النوم"
 
-#: src/ui/app.rs:593 src/ui/app_dialogs.rs:338 src/ui/yt_page.rs:1921
+#: src/ui/app.rs:598 src/ui/app_dialogs.rs:338 src/ui/yt_page.rs:1928
 msgid "Refresh"
 msgstr "تحديث"
 
-#: src/ui/app.rs:608 src/ui/sync_page.rs:332 src/ui/sync_page.rs:386
+#: src/ui/app.rs:613 src/ui/sync_page.rs:332 src/ui/sync_page.rs:386
 #: src/ui/sync_page.rs:450 src/ui/sync_page.rs:1012 src/ui/sync_page.rs:1047
 #: src/ui/sync_page.rs:1132
 msgid "Connect to share"
 msgstr "الاتصال للمشاركة"
 
-#: src/ui/app.rs:670 src/ui/sync_share_ui.rs:423
+#: src/ui/app.rs:675 src/ui/sync_share_ui.rs:423
 msgid "Files"
 msgstr "الملفات"
 
-#: src/ui/app.rs:746
+#: src/ui/app.rs:751
 msgid "Could not load the folder"
 msgstr "تعذّر تحميل المجلد"
 
-#: src/ui/app.rs:754
+#: src/ui/app.rs:759
 msgid "Retry"
 msgstr "إعادة المحاولة"
 
-#: src/ui/app.rs:763 src/ui/app_search.rs:106 src/ui/app_settings.rs:408
+#: src/ui/app.rs:768 src/ui/app_search.rs:106 src/ui/app_settings.rs:408
 #: src/ui/stats_page.rs:282
 msgid "Artists"
 msgstr "الفنانون"
 
-#: src/ui/app.rs:769
+#: src/ui/app.rs:774
 msgid "No artists"
 msgstr "لا فنانين"
 
-#: src/ui/app.rs:771 src/ui/app.rs:822
+#: src/ui/app.rs:776 src/ui/app.rs:827
 msgid "Scan a music folder and fetch online metadata"
 msgstr "افحص مجلد موسيقى واجلب البيانات الوصفية عبر الإنترنت"
 
-#: src/ui/app.rs:813 src/ui/app_playlist.rs:309 src/ui/app_search.rs:133
+#: src/ui/app.rs:818 src/ui/app_playlist.rs:309 src/ui/app_search.rs:133
 #: src/ui/app_views.rs:1145 src/ui/stats_page.rs:286
 msgid "Albums"
 msgstr "الألبومات"
 
-#: src/ui/app.rs:820
+#: src/ui/app.rs:825
 msgid "No albums"
 msgstr "لا ألبومات"
 
-#: src/ui/app.rs:864 src/ui/app_search.rs:141 src/ui/app_views.rs:1222
+#: src/ui/app.rs:869 src/ui/app_search.rs:141 src/ui/app_views.rs:1222
 msgid "Singles"
 msgstr "الأغاني المنفردة"
 
-#: src/ui/app.rs:870
+#: src/ui/app.rs:875
 msgid "No singles"
 msgstr "لا أغانٍ منفردة"
 
-#: src/ui/app.rs:872
+#: src/ui/app.rs:877
 msgid "Singles are one-artist releases with just a few tracks"
 msgstr "الأغاني المنفردة إصدارات لفنان واحد ببضعة مقاطع فقط"
 
-#: src/ui/app.rs:912 src/ui/app_search.rs:149
+#: src/ui/app.rs:917 src/ui/app_search.rs:149
 msgid "Compilations"
 msgstr "التجميعات"
 
-#: src/ui/app.rs:918
+#: src/ui/app.rs:923
 msgid "No compilations"
 msgstr "لا تجميعات"
 
-#: src/ui/app.rs:920
+#: src/ui/app.rs:925
 msgid "Compilations are albums with tracks by several artists"
 msgstr "التجميعات ألبومات تضم مقاطع لعدة فنانين"
 
-#: src/ui/app.rs:960 src/ui/app.rs:1001 src/ui/app_search.rs:157
+#: src/ui/app.rs:965 src/ui/app.rs:1006 src/ui/app_search.rs:157
 msgid "Concerts"
 msgstr "الحفلات"
 
-#: src/ui/app.rs:1002
+#: src/ui/app.rs:1007
 msgid ""
 "Here you can list your collected concerts. Via Import concerts you get an "
 "overview of likely concerts: albums with live, unplugged or concert in the "
@@ -159,211 +158,212 @@ msgstr ""
 "إضافةً إلى الملفات المفردة التي تبلغ 30 دقيقة أو أكثر. ضع علامة عليها كحفلة "
 "وستظهر هنا. يمكنك أيضًا إضافة الحفلات في أي وقت عبر الخيارات."
 
-#: src/ui/app.rs:1012 src/ui/app_concert.rs:70
+#: src/ui/app.rs:1017 src/ui/app_concert.rs:70
 msgid "Import concerts"
 msgstr "استيراد الحفلات"
 
-#: src/ui/app.rs:1017
+#: src/ui/app.rs:1022
 msgid "I'll do it myself"
 msgstr "سأفعل ذلك بنفسي"
 
-#: src/ui/app.rs:1022
+#: src/ui/app.rs:1027
 msgid "Hide menu item"
 msgstr "إخفاء عنصر القائمة"
 
-#: src/ui/app.rs:1034
+#: src/ui/app.rs:1039
 msgid "No concerts"
 msgstr "لا حفلات"
 
-#: src/ui/app.rs:1035
+#: src/ui/app.rs:1040
 msgid "Mark an album or a track as a concert via the options."
 msgstr "ضع علامة على ألبوم أو مقطع كحفلة عبر الخيارات."
 
-#: src/ui/app.rs:1041 src/ui/sync_share_ui.rs:468 src/ui/yt_page.rs:1580
+#: src/ui/app.rs:1046 src/ui/sync_share_ui.rs:468 src/ui/yt_page.rs:1587
 msgid "Playlists"
 msgstr "قوائم التشغيل"
 
-#: src/ui/app.rs:1078
+#: src/ui/app.rs:1083
 msgid "No playlists"
 msgstr "لا قوائم تشغيل"
 
-#: src/ui/app.rs:1079
+#: src/ui/app.rs:1084
 msgid "Create a playlist or add tracks via the options."
 msgstr "أنشئ قائمة تشغيل أو أضف مقاطع عبر الخيارات."
 
-#: src/ui/app.rs:1089 src/ui/sync_share_ui.rs:469
+#: src/ui/app.rs:1094 src/ui/sync_share_ui.rs:469
 msgid "Podcasts"
 msgstr "البودكاست"
 
 #. Internet radio lives in its own relm4 component.
-#: src/ui/app.rs:1095
+#: src/ui/app.rs:1100
 msgid "Streaming"
 msgstr "البث"
 
-#: src/ui/app.rs:1100 src/ui/sync_share_ui.rs:467
+#: src/ui/app.rs:1105 src/ui/sync_share_ui.rs:467
 msgid "Favorites"
 msgstr "المفضلة"
 
-#: src/ui/app.rs:1137
+#: src/ui/app.rs:1142
 msgid "No favorites"
 msgstr "لا مفضلة"
 
-#: src/ui/app.rs:1138
+#: src/ui/app.rs:1143
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
 msgstr ""
 "ضع علامة على المقاطع أو الألبومات أو الفنانين بالنجمة ضمن «مزيد من "
 "المعلومات»."
 
-#: src/ui/app.rs:1145 src/ui/app_settings.rs:1302 src/ui/sync_share_ui.rs:438
+#: src/ui/app.rs:1150 src/ui/app_settings.rs:1302 src/ui/sync_share_ui.rs:438
 msgid "YouTube"
 msgstr "يوتيوب"
 
-#: src/ui/app.rs:1150 src/ui/app_search.rs:165
+#: src/ui/app.rs:1155 src/ui/app_search.rs:165
 msgid "Audiobooks"
 msgstr "الكتب الصوتية"
 
-#: src/ui/app.rs:1189
+#: src/ui/app.rs:1194
 msgid "No audiobooks"
 msgstr "لا كتب صوتية"
 
-#: src/ui/app.rs:1190
+#: src/ui/app.rs:1195
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
 msgstr "ضع علامة على الألبومات أو المجلدات أو المقاطع ككتب صوتية عبر الخصائص."
 
-#: src/ui/app.rs:1196 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
+#: src/ui/app.rs:1201 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
 msgid "Memo"
 msgstr "مذكرة"
 
-#: src/ui/app.rs:1213 src/ui/podcasts_page.rs:428 src/ui/stream_page.rs:274
-#: src/ui/yt_page.rs:458
+#: src/ui/app.rs:1218 src/ui/podcasts_page.rs:431 src/ui/stream_page.rs:274
+#: src/ui/yt_page.rs:463
 msgid "Recently"
 msgstr "مؤخرًا"
 
-#: src/ui/app.rs:1220 src/ui/app_memo.rs:761 src/ui/app_views.rs:2241
+#: src/ui/app.rs:1225 src/ui/app_memo.rs:761 src/ui/app_views.rs:2241
 msgid "Category"
 msgstr "الفئة"
 
-#: src/ui/app.rs:1228
+#: src/ui/app.rs:1233
 msgid "Add category"
 msgstr "إضافة فئة"
 
-#: src/ui/app.rs:1250
+#: src/ui/app.rs:1255
 msgid "No memos yet"
 msgstr "لا مذكرات بعد"
 
-#: src/ui/app.rs:1251
+#: src/ui/app.rs:1256
 msgid "Use the microphone button in the player bar to record a voice memo."
 msgstr "استخدم زر الميكروفون في شريط المشغّل لتسجيل مذكرة صوتية."
 
-#: src/ui/app.rs:1262
+#: src/ui/app.rs:1267
 msgid "Statistics"
 msgstr "الإحصائيات"
 
-#: src/ui/app.rs:1329
+#: src/ui/app.rs:1334
 msgid "{done} of {total}"
 msgstr "{done} من {total}"
 
-#: src/ui/app.rs:1375
+#: src/ui/app.rs:1380
 msgid "{done} of {total} songs"
 msgstr "{done} من {total} أغنية"
 
-#: src/ui/app.rs:1388
+#: src/ui/app.rs:1393
 msgid "{done} MB of {total} MB"
 msgstr "{done} MB من {total} MB"
 
-#: src/ui/app.rs:1399 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
+#: src/ui/app.rs:1404 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:941 src/ui/app_memo.rs:964 src/ui/app_playlist.rs:853
-#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657 src/ui/app_rec_edit.rs:693
-#: src/ui/app_sections.rs:94 src/ui/app_settings.rs:651
-#: src/ui/app_views_handlers.rs:737 src/ui/app_views_sources.rs:284
-#: src/ui/app_views_sources.rs:479 src/ui/app_views_sources.rs:538
-#: src/ui/podcasts_page.rs:942 src/ui/setup.rs:699 src/ui/stream_page.rs:668
-#: src/ui/stream_page.rs:1080 src/ui/sync_share_ui.rs:159 src/ui/yt_live.rs:151
+#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
+#: src/ui/app_rec_edit.rs:693 src/ui/app_sections.rs:94
+#: src/ui/app_settings.rs:651 src/ui/app_views_handlers.rs:737
+#: src/ui/app_views_sources.rs:284 src/ui/app_views_sources.rs:479
+#: src/ui/app_views_sources.rs:538 src/ui/podcasts_page.rs:949
+#: src/ui/setup.rs:699 src/ui/stream_page.rs:668 src/ui/stream_page.rs:1080
+#: src/ui/sync_share_ui.rs:159 src/ui/yt_live.rs:167
 msgid "Cancel"
 msgstr "إلغاء"
 
 # Mini-player: tap the song display to open the track detail view (added
 # 2026-06-07).
-#: src/ui/app.rs:1433
+#: src/ui/app.rs:1438
 msgid "Show details of the current track"
 msgstr "عرض تفاصيل المقطع الحالي"
 
-#: src/ui/app.rs:1490
+#: src/ui/app.rs:1495
 msgid "Recording level"
 msgstr "مستوى التسجيل"
 
-#: src/ui/app.rs:1554
+#: src/ui/app.rs:1559
 msgid "Equalizer for this track"
 msgstr "معادل الصوت لهذا المقطع"
 
-#: src/ui/app.rs:1567 src/ui/app.rs:1585
+#: src/ui/app.rs:1572 src/ui/app.rs:1590
 msgid "Playback speed"
 msgstr "سرعة التشغيل"
 
-#: src/ui/app.rs:1613
+#: src/ui/app.rs:1618
 msgid "Shuffle"
 msgstr "عشوائي"
 
-#: src/ui/app.rs:1631
+#: src/ui/app.rs:1636
 msgid "Repeat"
 msgstr "تكرار"
 
-#: src/ui/app.rs:1675 src/ui/podcasts_page.rs:2112 src/ui/stream_page.rs:929
-#: src/ui/yt_live.rs:41 src/ui/yt_page_detail.rs:499
+#: src/ui/app.rs:1680 src/ui/podcasts_page.rs:2121 src/ui/stream_page.rs:929
+#: src/ui/yt_live.rs:41 src/ui/yt_page_detail.rs:500
 msgid "Play/Pause"
 msgstr "تشغيل/إيقاف مؤقت"
 
-#: src/ui/app.rs:1714
+#: src/ui/app.rs:1719
 msgid "Forward"
 msgstr "تقديم"
 
-#: src/ui/app.rs:1733 src/ui/app_dialogs.rs:87 src/ui/app_lyrics.rs:160
+#: src/ui/app.rs:1738 src/ui/app_dialogs.rs:87 src/ui/app_lyrics.rs:160
 #: src/ui/app_lyrics.rs:165
 msgid "Lyrics"
 msgstr "كلمات الأغنية"
 
-#: src/ui/app.rs:1745
+#: src/ui/app.rs:1750
 msgid "Show album"
 msgstr "عرض الألبوم"
 
-#: src/ui/app.rs:1754 src/ui/app_queue.rs:51
+#: src/ui/app.rs:1759 src/ui/app_queue.rs:51
 msgid "Queue"
 msgstr "قائمة الانتظار"
 
-#: src/ui/app.rs:2817
+#: src/ui/app.rs:2826
 msgid "Download complete"
 msgstr "اكتمل التنزيل"
 
-#: src/ui/app.rs:2821 src/ui/podcasts_page.rs:830
+#: src/ui/app.rs:2830 src/ui/podcasts_page.rs:833
 msgid "Download failed"
 msgstr "فشل التنزيل"
 
-#: src/ui/app.rs:2854
+#: src/ui/app.rs:2863
 msgid "No new concert candidates found"
 msgstr "لم يُعثر على حفلات محتملة جديدة"
 
-#: src/ui/app.rs:2864
+#: src/ui/app.rs:2873
 msgid "yt-dlp ready (version {v})"
 msgstr "yt-dlp جاهز (الإصدار {v})"
 
-#: src/ui/app.rs:2868
+#: src/ui/app.rs:2877
 msgid "yt-dlp download failed"
 msgstr "فشل تنزيل yt-dlp"
 
-#: src/ui/app.rs:2977
+#: src/ui/app.rs:2986
 msgid ""
 "Reading in your music collection — this may take a moment the first time"
 msgstr "جارٍ قراءة مجموعتك الموسيقية — قد يستغرق هذا لحظة في المرة الأولى"
 
-#: src/ui/app.rs:2979
+#: src/ui/app.rs:2988
 msgid "Updating …"
 msgstr "جارٍ التحديث …"
 
-#: src/ui/app.rs:3027 src/ui/app_init.rs:429 src/ui/app_views_sources.rs:172
+#: src/ui/app.rs:3036 src/ui/app_init.rs:429 src/ui/app_views_sources.rs:172
 msgid "Music"
 msgstr "الموسيقى"
 
-#: src/ui/app.rs:3053
+#: src/ui/app.rs:3062
 msgid "No music folder – please set one in settings"
 msgstr "لا مجلد موسيقى – يرجى تحديد واحد في الإعدادات"
 
@@ -422,8 +422,8 @@ msgstr "هل تريد رفع صورة جديدة أم إزالة الحالية�
 #: src/ui/app_covers.rs:42 src/ui/app_favorites.rs:285
 #: src/ui/app_favorites.rs:294 src/ui/app_settings.rs:826
 #: src/ui/app_views_sources.rs:102 src/ui/app_views_sources.rs:438
-#: src/ui/podcasts_page.rs:943 src/ui/stream_page.rs:1050 src/ui/yt_live.rs:152
-#: src/ui/yt_page.rs:1956
+#: src/ui/podcasts_page.rs:950 src/ui/stream_page.rs:1050
+#: src/ui/yt_live.rs:168 src/ui/yt_page.rs:1963
 msgid "Remove"
 msgstr "إزالة"
 
@@ -464,7 +464,7 @@ msgid "Album order"
 msgstr "ترتيب الألبومات"
 
 #: src/ui/app_dialogs.rs:231 src/ui/app_settings.rs:1329
-#: src/ui/app_yt_glue.rs:529 src/ui/podcasts_page.rs:1587
+#: src/ui/app_yt_glue.rs:532 src/ui/podcasts_page.rs:1594
 msgid "Download"
 msgstr "تنزيل"
 
@@ -484,16 +484,17 @@ msgstr "إضافة إلى قائمة الانتظار"
 msgid "Add to playlist"
 msgstr "إضافة إلى قائمة التشغيل"
 
-#: src/ui/app_dialogs.rs:281 src/ui/podcasts_page.rs:1630
-#: src/ui/podcasts_page.rs:1783 src/ui/stream_page.rs:1016
-#: src/ui/sync_share_ui.rs:129 src/ui/yt_page_detail.rs:145
+#: src/ui/app_dialogs.rs:281 src/ui/podcasts_page.rs:1637
+#: src/ui/podcasts_page.rs:1790 src/ui/stream_page.rs:1016
+#: src/ui/sync_share_ui.rs:129 src/ui/yt_live.rs:144
+#: src/ui/yt_page_detail.rs:146
 msgid "Equalizer settings"
 msgstr "إعدادات معادل الصوت"
 
 #: src/ui/app_dialogs.rs:287 src/ui/app_memo.rs:817 src/ui/app_playlist.rs:692
-#: src/ui/podcasts_page.rs:1796 src/ui/smb_page.rs:132
-#: src/ui/stream_page.rs:1027 src/ui/stream_page.rs:1519 src/ui/yt_page.rs:1930
-#: src/ui/yt_page_detail.rs:164
+#: src/ui/podcasts_page.rs:1803 src/ui/smb_page.rs:132
+#: src/ui/stream_page.rs:1027 src/ui/stream_page.rs:1519
+#: src/ui/yt_page.rs:1937 src/ui/yt_page_detail.rs:165
 msgid "Share"
 msgstr "مشاركة"
 
@@ -502,7 +503,7 @@ msgstr "مشاركة"
 #: src/ui/app_views.rs:2099 src/ui/app_views.rs:2115 src/ui/app_views.rs:2541
 #: src/ui/app_views.rs:2563 src/ui/app_views.rs:2590 src/ui/app_views.rs:2644
 #: src/ui/stream_page.rs:1471 src/ui/stream_page.rs:1759
-#: src/ui/yt_page_detail.rs:68
+#: src/ui/yt_page_detail.rs:69
 msgid "Artist"
 msgstr "الفنان"
 
@@ -516,7 +517,7 @@ msgstr "كتاب صوتي"
 #: src/ui/app_favorites.rs:254 src/ui/app_favorites.rs:723
 #: src/ui/app_settings.rs:1603 src/ui/app_views.rs:2121
 #: src/ui/app_views.rs:2250 src/ui/app_views.rs:2547 src/ui/app_views.rs:2600
-#: src/ui/stream_page.rs:1474 src/ui/yt_page_detail.rs:74
+#: src/ui/stream_page.rs:1474 src/ui/yt_page_detail.rs:75
 msgid "Album"
 msgstr "الألبوم"
 
@@ -534,7 +535,7 @@ msgstr "مقطع"
 msgid "Nothing here to share"
 msgstr "لا شيء هنا للمشاركة"
 
-#: src/ui/app_dialogs.rs:524 src/ui/yt_page.rs:891
+#: src/ui/app_dialogs.rs:524 src/ui/yt_page.rs:896
 msgid "Refreshing …"
 msgstr "جارٍ التحديث …"
 
@@ -678,7 +679,7 @@ msgid "Removed from favorites"
 msgstr "أُزيل من المفضلة"
 
 #: src/ui/app_helpers.rs:621 src/ui/app_helpers.rs:632 src/ui/app_views.rs:281
-#: src/ui/app_views.rs:2477 src/ui/sync_share_ui.rs:289 src/ui/yt_page.rs:1461
+#: src/ui/app_views.rs:2477 src/ui/sync_share_ui.rs:289 src/ui/yt_page.rs:1466
 msgid "{n} song"
 msgid_plural "{n} songs"
 msgstr[0] "{n} أغنية"
@@ -698,7 +699,7 @@ msgstr[3] "{n} ألبومات"
 msgstr[4] "{n} ألبوم"
 msgstr[5] "{n} ألبوم"
 
-#: src/ui/app_helpers.rs:673 src/ui/podcasts_page.rs:1889
+#: src/ui/app_helpers.rs:673 src/ui/podcasts_page.rs:1896
 msgid "Listened"
 msgstr "تم الاستماع"
 
@@ -715,11 +716,11 @@ msgid "Note"
 msgstr "ملاحظة"
 
 # Restart-to-apply-language confirmation (added 2026-06-06).
-#: src/ui/app_init.rs:1288
+#: src/ui/app_init.rs:1294
 msgid "Restart to change the language?"
 msgstr "إعادة التشغيل لتغيير اللغة؟"
 
-#: src/ui/app_init.rs:1290
+#: src/ui/app_init.rs:1296
 msgid ""
 "The new language is loaded only after a restart. Restart now, or do it "
 "yourself later."
@@ -727,15 +728,15 @@ msgstr ""
 "لا يتم تحميل اللغة الجديدة إلا بعد إعادة التشغيل. أعد التشغيل الآن، أو افعل "
 "ذلك بنفسك لاحقًا."
 
-#: src/ui/app_init.rs:1293
+#: src/ui/app_init.rs:1299
 msgid "Later"
 msgstr "لاحقًا"
 
-#: src/ui/app_init.rs:1294
+#: src/ui/app_init.rs:1300
 msgid "Restart now"
 msgstr "أعد التشغيل الآن"
 
-#: src/ui/app_init.rs:1420
+#: src/ui/app_init.rs:1426
 msgid "Import cancelled"
 msgstr "أُلغي الاستيراد"
 
@@ -797,7 +798,7 @@ msgid "Recorded"
 msgstr "سُجّل في"
 
 #: src/ui/app_memo.rs:742 src/ui/app_sections.rs:340 src/ui/stream_page.rs:707
-#: src/ui/yt_page.rs:1185
+#: src/ui/yt_page.rs:1190
 msgid "Length"
 msgstr "المدة"
 
@@ -806,9 +807,10 @@ msgid "Edit"
 msgstr "تعديل"
 
 #: src/ui/app_memo.rs:795 src/ui/app_memo.rs:810 src/ui/app_memo.rs:899
-#: src/ui/app_memo.rs:910 src/ui/app_playlist.rs:709 src/ui/app_playlist.rs:854
-#: src/ui/app_rec_edit.rs:301 src/ui/app_views_sources.rs:402
-#: src/ui/app_views_sources.rs:480 src/ui/stream_page.rs:1081
+#: src/ui/app_memo.rs:910 src/ui/app_playlist.rs:709
+#: src/ui/app_playlist.rs:854 src/ui/app_rec_edit.rs:301
+#: src/ui/app_views_sources.rs:402 src/ui/app_views_sources.rs:480
+#: src/ui/stream_page.rs:1081
 msgid "Rename"
 msgstr "إعادة التسمية"
 
@@ -859,12 +861,15 @@ msgstr "هل تريد حذف هذه الفئة؟"
 msgid "The category contains {n} memo. Delete it too, or move it to General?"
 msgid_plural ""
 "The category contains {n} memos. Delete them too, or move them to General?"
-msgstr[0] "تحتوي الفئة على {n} مذكرات. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
+msgstr[0] ""
+"تحتوي الفئة على {n} مذكرات. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
 msgstr[1] "تحتوي الفئة على {n} مذكرة. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
 msgstr[2] ""
 "تحتوي الفئة على {n} مذكرتين. هل تريد حذفهما أيضًا أم نقلهما إلى «عام»؟"
-msgstr[3] "تحتوي الفئة على {n} مذكرات. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
-msgstr[4] "تحتوي الفئة على {n} مذكرةً. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
+msgstr[3] ""
+"تحتوي الفئة على {n} مذكرات. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
+msgstr[4] ""
+"تحتوي الفئة على {n} مذكرةً. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
 msgstr[5] "تحتوي الفئة على {n} مذكرة. هل تريد حذفها أيضًا أم نقلها إلى «عام»؟"
 
 #: src/ui/app_memo.rs:963
@@ -886,6 +891,10 @@ msgstr "لا مقاطع قابلة للتشغيل"
 #: src/ui/app_playback.rs:1251
 msgid "Skipping unavailable track"
 msgstr "جارٍ تخطي مقطع غير متاح"
+
+#: src/ui/app_playback.rs:2133
+msgid "Stream not reachable – playback stopped"
+msgstr "تعذّر الوصول إلى البث – توقف التشغيل"
 
 #: src/ui/app_playlist.rs:183
 msgid "Playlist deleted"
@@ -916,7 +925,7 @@ msgstr "أضف مقاطع عبر خيارات أغنية أو ألبوم أو ف
 
 #. Labelled "Songs" (de "Lieder"): in this music app the video search
 #. is used to find songs. It still searches YtKind::Video.
-#: src/ui/app_playlist.rs:371 src/ui/app_search.rs:175 src/ui/yt_page.rs:1576
+#: src/ui/app_playlist.rs:371 src/ui/app_search.rs:175 src/ui/yt_page.rs:1583
 msgid "Songs"
 msgstr "الأغاني"
 
@@ -945,9 +954,9 @@ msgid "New playlist"
 msgstr "قائمة تشغيل جديدة"
 
 #: src/ui/app_playlist.rs:778 src/ui/app_sections.rs:339
-#: src/ui/podcasts_page.rs:974 src/ui/stream_page.rs:699
-#: src/ui/stream_page.rs:705 src/ui/stream_page.rs:714 src/ui/yt_page.rs:1147
-#: src/ui/yt_page.rs:1183
+#: src/ui/podcasts_page.rs:981 src/ui/stream_page.rs:699
+#: src/ui/stream_page.rs:705 src/ui/stream_page.rs:714 src/ui/yt_page.rs:1152
+#: src/ui/yt_page.rs:1188
 msgid "Name"
 msgstr "الاسم"
 
@@ -1139,7 +1148,8 @@ msgstr "ألبومات تضم مقاطع لعدة فنانين، مثل المخ
 
 #: src/ui/app_sections.rs:64
 msgid "Live and concert recordings you marked, kept apart from your albums."
-msgstr "تسجيلات الحفلات والعروض الحية التي وضعت لها علامة، منفصلة عن ألبوماتك."
+msgstr ""
+"تسجيلات الحفلات والعروض الحية التي وضعت لها علامة، منفصلة عن ألبوماتك."
 
 #: src/ui/app_sections.rs:65
 msgid "Subscribe to podcast feeds and play or download their episodes."
@@ -1156,16 +1166,16 @@ msgid ""
 "Search and play YouTube, follow channels and keep videos offline. Needs the "
 "yt-dlp tool."
 msgstr ""
-"ابحث وشغّل يوتيوب، تابع القنوات واحتفظ بالفيديوهات دون اتصال. يحتاج إلى أداة "
-"yt-dlp."
+"ابحث وشغّل يوتيوب، تابع القنوات واحتفظ بالفيديوهات دون اتصال. يحتاج إلى أداة"
+" yt-dlp."
 
 #: src/ui/app_sections.rs:73
 msgid ""
 "Albums, folders or tracks you marked as audiobooks, resuming where you left "
 "off."
 msgstr ""
-"الألبومات أو المجلدات أو المقاطع التي وضعت لها علامة ككتب صوتية، مع المتابعة "
-"من حيث توقفت."
+"الألبومات أو المجلدات أو المقاطع التي وضعت لها علامة ككتب صوتية، مع المتابعة"
+" من حيث توقفت."
 
 #: src/ui/app_sections.rs:75
 msgid "Your own playlists, arranged in any order you like."
@@ -1180,7 +1190,7 @@ msgid "Listening statistics and your most-played artists and tracks."
 msgstr "إحصاءات الاستماع وأكثر الفنانين والمقاطع تشغيلًا لديك."
 
 #: src/ui/app_sections.rs:342 src/ui/stream_page.rs:706
-#: src/ui/stream_page.rs:715 src/ui/yt_page.rs:1184
+#: src/ui/stream_page.rs:715 src/ui/yt_page.rs:1189
 msgid "Date"
 msgstr "التاريخ"
 
@@ -1201,8 +1211,8 @@ msgid ""
 "Global sound control. It applies everywhere unless a custom setting is set "
 "for an artist, an album or a track."
 msgstr ""
-"تحكّم عام في الصوت. يُطبَّق في كل مكان ما لم يُحدَّد إعداد مخصص لفنان أو ألبوم أو "
-"مقطع."
+"تحكّم عام في الصوت. يُطبَّق في كل مكان ما لم يُحدَّد إعداد مخصص لفنان أو "
+"ألبوم أو مقطع."
 
 #: src/ui/app_settings.rs:102
 msgid "Global equalizer"
@@ -1245,7 +1255,8 @@ msgid "Read music data"
 msgstr "قراءة بيانات الموسيقى"
 
 #: src/ui/app_settings.rs:162
-msgid "Complete missing cover art, photos and tracks from open online sources."
+msgid ""
+"Complete missing cover art, photos and tracks from open online sources."
 msgstr "أكمِل الأغلفة والصور والمقاطع المفقودة من مصادر مفتوحة عبر الإنترنت."
 
 #: src/ui/app_settings.rs:166
@@ -1262,8 +1273,8 @@ msgstr "AcoustID"
 
 #: src/ui/app_settings.rs:185
 msgid ""
-"Optional key for fingerprint-based track detection (free at acoustid.org/new-"
-"application)."
+"Optional key for fingerprint-based track detection (free at "
+"acoustid.org/new-application)."
 msgstr ""
 "مفتاح اختياري للتعرّف على المقاطع بالبصمة (مجانًا على acoustid.org/new-"
 "application)."
@@ -1329,7 +1340,8 @@ msgid "List display"
 msgstr "عرض القائمة"
 
 #: src/ui/app_settings.rs:316 src/ui/app_sort.rs:545
-#: src/ui/podcasts_page.rs:989 src/ui/stream_page.rs:735 src/ui/yt_page.rs:1161
+#: src/ui/podcasts_page.rs:996 src/ui/stream_page.rs:735
+#: src/ui/yt_page.rs:1166
 msgid "Gallery view"
 msgstr "عرض المعرض"
 
@@ -1363,9 +1375,10 @@ msgstr "يغيّر حجم أيقونات القائمة (الهاتف، بالن
 
 #: src/ui/app_settings.rs:410
 msgid ""
-"How artist tags like \"A feat. B\" are listed. The tags themselves are never "
-"changed."
-msgstr "كيفية إدراج وسوم الفنانين مثل «A feat. B». لا تُغيَّر الوسوم نفسها أبدًا."
+"How artist tags like \"A feat. B\" are listed. The tags themselves are never"
+" changed."
+msgstr ""
+"كيفية إدراج وسوم الفنانين مثل «A feat. B». لا تُغيَّر الوسوم نفسها أبدًا."
 
 #: src/ui/app_settings.rs:416
 msgid "List guests separately"
@@ -1433,14 +1446,14 @@ msgstr "خادم MCP"
 
 #: src/ui/app_settings.rs:540
 msgid ""
-"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST "
-"http://127.0.0.1:8770/mcp with the bearer token below."
+"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST"
+" http://127.0.0.1:8770/mcp with the bearer token below."
 msgstr ""
-"يتيح المكتبة والتشغيل لمضيف MCP (مثل Claude). نقطة النهاية: POST http://"
-"127.0.0.1:8770/mcp مع الرمز المميز أدناه."
+"يتيح المكتبة والتشغيل لمضيف MCP (مثل Claude). نقطة النهاية: POST "
+"http://127.0.0.1:8770/mcp مع الرمز المميز أدناه."
 
-#: src/ui/app_settings.rs:551 src/ui/app_settings.rs:849 src/ui/app_sleep.rs:73
-#: src/ui/app_sleep.rs:133
+#: src/ui/app_settings.rs:551 src/ui/app_settings.rs:849
+#: src/ui/app_sleep.rs:73 src/ui/app_sleep.rs:133
 msgid "Off"
 msgstr "إيقاف"
 
@@ -1489,8 +1502,8 @@ msgid ""
 "A new bearer token is created immediately. Existing connections stop "
 "working, and every MCP host must be updated with the new token."
 msgstr ""
-"سيُنشأ رمز مميز جديد فورًا. ستتوقف الاتصالات الحالية عن العمل، ويجب تحديث كل "
-"مضيف MCP بالرمز الجديد."
+"سيُنشأ رمز مميز جديد فورًا. ستتوقف الاتصالات الحالية عن العمل، ويجب تحديث كل"
+" مضيف MCP بالرمز الجديد."
 
 #: src/ui/app_settings.rs:652
 msgid "Generate new token"
@@ -1668,19 +1681,19 @@ msgid ""
 "versions, you can update it to a newer one here. Turn the YouTube section "
 "itself on under Menu. May be restricted in some countries."
 msgstr ""
-"يستخدم يوتيوب أداة yt-dlp المضمَّنة. وبما أن يوتيوب يُعطِّل غالبًا الإصدارات "
-"الأقدم، يمكنك تحديثها إلى إصدار أحدث من هنا. فعِّل قسم يوتيوب نفسه من القائمة. "
-"قد يكون مقيّدًا في بعض البلدان."
+"يستخدم يوتيوب أداة yt-dlp المضمَّنة. وبما أن يوتيوب يُعطِّل غالبًا الإصدارات"
+" الأقدم، يمكنك تحديثها إلى إصدار أحدث من هنا. فعِّل قسم يوتيوب نفسه من "
+"القائمة. قد يكون مقيّدًا في بعض البلدان."
 
-#: src/ui/app_settings.rs:1322 src/ui/app_yt_glue.rs:519
+#: src/ui/app_settings.rs:1322 src/ui/app_yt_glue.rs:522
 msgid "Installed (version {v})"
 msgstr "مُثبَّت (الإصدار {v})"
 
-#: src/ui/app_settings.rs:1323 src/ui/app_yt_glue.rs:516
+#: src/ui/app_settings.rs:1323 src/ui/app_yt_glue.rs:519
 msgid "Working …"
 msgstr "جارٍ العمل …"
 
-#: src/ui/app_settings.rs:1327 src/ui/app_yt_glue.rs:527
+#: src/ui/app_settings.rs:1327 src/ui/app_yt_glue.rs:530
 msgid "Update"
 msgstr "تحديث"
 
@@ -1733,8 +1746,8 @@ msgstr "تصاعدي"
 
 # Sort popover: discreet toggle to sort without section headings (added
 # 2026-06-07).
-#: src/ui/app_sort.rs:530 src/ui/podcasts_page.rs:982 src/ui/stream_page.rs:724
-#: src/ui/yt_page.rs:1154
+#: src/ui/app_sort.rs:530 src/ui/podcasts_page.rs:989
+#: src/ui/stream_page.rs:724 src/ui/yt_page.rs:1159
 msgid "Without grouping"
 msgstr "بدون تجميع"
 
@@ -1902,7 +1915,7 @@ msgid "Undo"
 msgstr "تراجع"
 
 #: src/ui/app_views.rs:2583 src/ui/app_views.rs:2642
-#: src/ui/yt_page_detail.rs:80
+#: src/ui/yt_page_detail.rs:81
 msgid "Title"
 msgstr "العنوان"
 
@@ -1910,8 +1923,8 @@ msgstr "العنوان"
 msgid "Composer"
 msgstr "الملحّن"
 
-#: src/ui/app_views.rs:2609 src/ui/podcasts_page.rs:1581
-#: src/ui/yt_page_detail.rs:86
+#: src/ui/app_views.rs:2609 src/ui/podcasts_page.rs:1588
+#: src/ui/yt_page_detail.rs:87
 msgid "Duration"
 msgstr "المدة"
 
@@ -1936,14 +1949,14 @@ msgid "Will play next"
 msgstr "سيُشغَّل تاليًا"
 
 #: src/ui/app_views_handlers.rs:459 src/ui/app_views_handlers.rs:947
-#: src/ui/podcasts_page.rs:153
+#: src/ui/podcasts_page.rs:156
 msgid "Downloading …"
 msgstr "جارٍ التنزيل …"
 
 #: src/ui/app_views_handlers.rs:733
 msgid ""
-"“{title}” is missing from this album. Search for it online and add it to the "
-"album?"
+"“{title}” is missing from this album. Search for it online and add it to the"
+" album?"
 msgstr ""
 "«{title}» مفقود من هذا الألبوم. هل تريد البحث عنه عبر الإنترنت وإضافته إلى "
 "الألبوم؟"
@@ -1991,8 +2004,8 @@ msgid ""
 "Add a local folder or connect a Nextcloud, an SMB share or Google Drive as "
 "another tab."
 msgstr ""
-"أضف مجلدًا محليًا أو اربط Nextcloud أو مشاركة SMB أو Google Drive كعلامة تبويب "
-"أخرى."
+"أضف مجلدًا محليًا أو اربط Nextcloud أو مشاركة SMB أو Google Drive كعلامة "
+"تبويب أخرى."
 
 #: src/ui/app_views_sources.rs:285
 msgid "Local folder"
@@ -2040,8 +2053,8 @@ msgstr "المجلد الفرعي على الخادم المراد فهرسته�
 msgid "This source is not configured correctly (URL/login missing)."
 msgstr "هذا المصدر غير مُهيَّأ بشكل صحيح (عنوان URL أو بيانات الدخول مفقودة)."
 
-#: src/ui/app_yt_glue.rs:131 src/ui/yt_page.rs:1835
-#: src/ui/yt_page_detail.rs:397
+#: src/ui/app_yt_glue.rs:131 src/ui/yt_page.rs:1842
+#: src/ui/yt_page_detail.rs:398
 msgid "No videos"
 msgstr "لا فيديوهات"
 
@@ -2053,35 +2066,35 @@ msgstr "جارٍ بدء قائمة التشغيل «{title}» …"
 msgid "Playlist is empty"
 msgstr "قائمة التشغيل فارغة"
 
-#: src/ui/app_yt_glue.rs:406
+#: src/ui/app_yt_glue.rs:409
 msgid "Could not play live stream"
 msgstr "تعذّر تشغيل البث المباشر"
 
-#: src/ui/app_yt_glue.rs:427
+#: src/ui/app_yt_glue.rs:430
 msgid "The live stream is not available"
 msgstr "البث المباشر غير متاح"
 
-#: src/ui/app_yt_glue.rs:465
+#: src/ui/app_yt_glue.rs:468
 msgid "Could not play video"
 msgstr "تعذّر تشغيل الفيديو"
 
-#: src/ui/app_yt_glue.rs:477
+#: src/ui/app_yt_glue.rs:480
 msgid "Updating yt-dlp …"
 msgstr "جارٍ تحديث yt-dlp …"
 
-#: src/ui/app_yt_glue.rs:479
+#: src/ui/app_yt_glue.rs:482
 msgid "Downloading yt-dlp …"
 msgstr "جارٍ تنزيل yt-dlp …"
 
-#: src/ui/app_yt_glue.rs:520
+#: src/ui/app_yt_glue.rs:523
 msgid "Not installed"
 msgstr "غير مُثبَّت"
 
-#: src/ui/app_yt_glue.rs:546
+#: src/ui/app_yt_glue.rs:549
 msgid "Download yt-dlp in the settings to use YouTube"
 msgstr "نزّل yt-dlp في الإعدادات لاستخدام يوتيوب"
 
-#: src/ui/app_yt_glue.rs:763
+#: src/ui/app_yt_glue.rs:766
 msgid "Channel removed"
 msgstr "أُزيلت القناة"
 
@@ -2199,12 +2212,12 @@ msgstr "عميل OAuth"
 
 #: src/ui/gdrive_page.rs:263
 msgid ""
-"Google requires an OAuth client per app: create one of type “Desktop app” in "
-"the Google Cloud console (with the Drive API enabled) and paste its ID and "
+"Google requires an OAuth client per app: create one of type “Desktop app” in"
+" the Google Cloud console (with the Drive API enabled) and paste its ID and "
 "secret here."
 msgstr ""
-"يشترط Google عميل OAuth لكل تطبيق: أنشئ عميلًا من النوع «تطبيق سطح المكتب» في "
-"وحدة تحكّم Google Cloud (مع تفعيل Drive API) والصق معرّفه وسرّه هنا."
+"يشترط Google عميل OAuth لكل تطبيق: أنشئ عميلًا من النوع «تطبيق سطح المكتب» "
+"في وحدة تحكّم Google Cloud (مع تفعيل Drive API) والصق معرّفه وسرّه هنا."
 
 #: src/ui/gdrive_page.rs:267
 msgid "Client ID"
@@ -2220,11 +2233,11 @@ msgstr "تسجيل الدخول باستخدام Google"
 
 #: src/ui/gdrive_page.rs:289
 msgid ""
-"The browser opens Google's sign-in page; Emilia only asks for read access to "
-"your Drive. Return here afterwards."
+"The browser opens Google's sign-in page; Emilia only asks for read access to"
+" your Drive. Return here afterwards."
 msgstr ""
-"يفتح المتصفح صفحة تسجيل الدخول إلى Google؛ لا تطلب Emilia سوى صلاحية القراءة "
-"على Drive الخاص بك. عد إلى هنا بعد ذلك."
+"يفتح المتصفح صفحة تسجيل الدخول إلى Google؛ لا تطلب Emilia سوى صلاحية القراءة"
+" على Drive الخاص بك. عد إلى هنا بعد ذلك."
 
 #: src/ui/gdrive_page.rs:319
 msgid "Folder in My Drive (e.g. /Music)"
@@ -2250,7 +2263,7 @@ msgstr "في انتظار تسجيل الدخول في المتصفح …"
 msgid "Please sign in first"
 msgstr "يرجى تسجيل الدخول أولًا"
 
-#: src/ui/podcasts_page.rs:76
+#: src/ui/podcasts_page.rs:79
 msgid "{n} podcast updated"
 msgid_plural "{n} podcasts updated"
 msgstr[0] "تم تحديث {n} بودكاست"
@@ -2260,7 +2273,7 @@ msgstr[3] "تم تحديث {n} بودكاست"
 msgstr[4] "تم تحديث {n} بودكاست"
 msgstr[5] "تم تحديث {n} بودكاست"
 
-#: src/ui/podcasts_page.rs:83
+#: src/ui/podcasts_page.rs:86
 msgid "{n} new episode"
 msgid_plural "{n} new episodes"
 msgstr[0] "{n} حلقات جديدة"
@@ -2270,7 +2283,7 @@ msgstr[3] "{n} حلقات جديدة"
 msgstr[4] "{n} حلقةً جديدةً"
 msgstr[5] "{n} حلقة جديدة"
 
-#: src/ui/podcasts_page.rs:90
+#: src/ui/podcasts_page.rs:93
 msgid "{n} feed failed"
 msgid_plural "{n} feeds failed"
 msgstr[0] "فشلت {n} خلاصات"
@@ -2280,131 +2293,131 @@ msgstr[3] "فشلت {n} خلاصات"
 msgstr[4] "فشلت {n} خلاصةً"
 msgstr[5] "فشلت {n} خلاصة"
 
-#: src/ui/podcasts_page.rs:96 src/ui/yt_channels.rs:337
+#: src/ui/podcasts_page.rs:99 src/ui/yt_channels.rs:341
 msgid "Nothing new"
 msgstr "لا جديد"
 
-#: src/ui/podcasts_page.rs:156
+#: src/ui/podcasts_page.rs:159
 msgid "Downloading … {size}"
 msgstr "جارٍ التنزيل … {size}"
 
-#: src/ui/podcasts_page.rs:163
+#: src/ui/podcasts_page.rs:166
 msgid "{pct} % · {time} left"
 msgstr "{pct} % · متبقٍ {time}"
 
-#: src/ui/podcasts_page.rs:169
+#: src/ui/podcasts_page.rs:172
 msgid "{pct} % downloaded"
 msgstr "نُزّل {pct} %"
 
-#: src/ui/podcasts_page.rs:435 src/ui/yt_page.rs:465
+#: src/ui/podcasts_page.rs:438 src/ui/yt_page.rs:470
 msgid "Newest"
 msgstr "الأحدث"
 
 # --- Podcasts: 'Subscribed' tab label (own msgid; user wants "Abo") ---
-#: src/ui/podcasts_page.rs:442
+#: src/ui/podcasts_page.rs:445
 msgid "Subscribed"
 msgstr "الاشتراكات"
 
-#: src/ui/podcasts_page.rs:450 src/ui/podcasts_page.rs:1960
+#: src/ui/podcasts_page.rs:453 src/ui/podcasts_page.rs:1967
 msgid "Subscribe to podcast"
 msgstr "الاشتراك في بودكاست"
 
-#: src/ui/podcasts_page.rs:474 src/ui/stream_page.rs:377
+#: src/ui/podcasts_page.rs:477 src/ui/stream_page.rs:377
 msgid "Nothing heard yet"
 msgstr "لم يُسمع شيء بعد"
 
-#: src/ui/podcasts_page.rs:475
+#: src/ui/podcasts_page.rs:478
 msgid ""
 "Episodes you have started appear here, showing how far you have listened."
 msgstr "تظهر هنا الحلقات التي بدأتها، مع مقدار ما استمعت إليه منها."
 
-#: src/ui/podcasts_page.rs:499 src/ui/podcasts_page.rs:1865
+#: src/ui/podcasts_page.rs:502 src/ui/podcasts_page.rs:1872
 msgid "No episodes"
 msgstr "لا حلقات"
 
-#: src/ui/podcasts_page.rs:536
+#: src/ui/podcasts_page.rs:539
 msgid "No podcasts"
 msgstr "لا بودكاست"
 
-#: src/ui/podcasts_page.rs:537
+#: src/ui/podcasts_page.rs:540
 msgid "Subscribe to a podcast via its feed address (RSS)."
 msgstr "اشترك في بودكاست عبر عنوان خلاصته (RSS)."
 
-#: src/ui/podcasts_page.rs:718 src/ui/stream_page.rs:581
+#: src/ui/podcasts_page.rs:721 src/ui/stream_page.rs:581
 #: src/ui/yt_channels.rs:40
 msgid "Searching …"
 msgstr "جارٍ البحث …"
 
-#: src/ui/podcasts_page.rs:742
+#: src/ui/podcasts_page.rs:745
 msgid "Loading feed …"
 msgstr "جارٍ تحميل الخلاصة …"
 
-#: src/ui/podcasts_page.rs:751
+#: src/ui/podcasts_page.rs:754
 msgid "Updating feed …"
 msgstr "جارٍ تحديث الخلاصة …"
 
-#: src/ui/podcasts_page.rs:804 src/ui/yt_page.rs:993
+#: src/ui/podcasts_page.rs:807 src/ui/yt_page.rs:998
 msgid "Subscribed: {t}"
 msgstr "تم الاشتراك: {t}"
 
-#: src/ui/podcasts_page.rs:810
+#: src/ui/podcasts_page.rs:813
 msgid "Could not load feed"
 msgstr "تعذّر تحميل الخلاصة"
 
-#: src/ui/podcasts_page.rs:826
+#: src/ui/podcasts_page.rs:829
 msgid "Episode downloaded"
 msgstr "نُزّلت الحلقة"
 
-#: src/ui/podcasts_page.rs:884
+#: src/ui/podcasts_page.rs:887
 msgid "No podcasts subscribed"
 msgstr "لا اشتراكات في بودكاست"
 
-#: src/ui/podcasts_page.rs:890 src/ui/yt_page_detail.rs:684
+#: src/ui/podcasts_page.rs:893 src/ui/yt_page_detail.rs:685
 msgid "No internet connection"
 msgstr "لا اتصال بالإنترنت"
 
-#: src/ui/podcasts_page.rs:941
+#: src/ui/podcasts_page.rs:948
 msgid "Remove this podcast?"
 msgstr "هل تريد إزالة هذا البودكاست؟"
 
-#: src/ui/podcasts_page.rs:975
+#: src/ui/podcasts_page.rs:982
 msgid "Number of episodes"
 msgstr "عدد الحلقات"
 
-#: src/ui/podcasts_page.rs:1188 src/ui/yt_page.rs:1383
+#: src/ui/podcasts_page.rs:1195 src/ui/yt_page.rs:1388
 msgid "Today"
 msgstr "اليوم"
 
-#: src/ui/podcasts_page.rs:1189 src/ui/yt_page.rs:1384
+#: src/ui/podcasts_page.rs:1196 src/ui/yt_page.rs:1389
 msgid "Yesterday"
 msgstr "أمس"
 
-#: src/ui/podcasts_page.rs:1190 src/ui/yt_page.rs:1385
+#: src/ui/podcasts_page.rs:1197 src/ui/yt_page.rs:1390
 msgid "This week"
 msgstr "هذا الأسبوع"
 
-#: src/ui/podcasts_page.rs:1191 src/ui/yt_page.rs:1386
+#: src/ui/podcasts_page.rs:1198 src/ui/yt_page.rs:1391
 msgid "This month"
 msgstr "هذا الشهر"
 
-#: src/ui/podcasts_page.rs:1228 src/ui/podcasts_page.rs:1395
-#: src/ui/podcasts_page.rs:1908
+#: src/ui/podcasts_page.rs:1235 src/ui/podcasts_page.rs:1402
+#: src/ui/podcasts_page.rs:1915
 msgid "{position} listened"
 msgstr "تم الاستماع إلى {position}"
 
-#: src/ui/podcasts_page.rs:1528
+#: src/ui/podcasts_page.rs:1535
 msgid "Podcast"
 msgstr "بودكاست"
 
-#: src/ui/podcasts_page.rs:1578
+#: src/ui/podcasts_page.rs:1585
 msgid "Published"
 msgstr "نُشر في"
 
-#: src/ui/podcasts_page.rs:1692
+#: src/ui/podcasts_page.rs:1699
 msgid "Shownotes"
 msgstr "ملاحظات الحلقة"
 
-#: src/ui/podcasts_page.rs:1754
+#: src/ui/podcasts_page.rs:1761
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] "{n} حلقة"
@@ -2414,67 +2427,67 @@ msgstr[3] "{n} حلقات"
 msgstr[4] "{n} حلقة"
 msgstr[5] "{n} حلقة"
 
-#: src/ui/podcasts_page.rs:1764
+#: src/ui/podcasts_page.rs:1771
 msgid "Open episodes"
 msgstr "فتح الحلقات"
 
-#: src/ui/podcasts_page.rs:1773
+#: src/ui/podcasts_page.rs:1780
 msgid "Refresh feed"
 msgstr "تحديث الخلاصة"
 
-#: src/ui/podcasts_page.rs:1809
+#: src/ui/podcasts_page.rs:1816
 msgid "Remove podcast"
 msgstr "إزالة البودكاست"
 
-#: src/ui/podcasts_page.rs:1902
+#: src/ui/podcasts_page.rs:1909
 msgid "{position} of {total} listened"
 msgstr "تم الاستماع إلى {position} من {total}"
 
-#: src/ui/podcasts_page.rs:1949
+#: src/ui/podcasts_page.rs:1956
 msgid "Podcast – {title}"
 msgstr "بودكاست – {title}"
 
-#: src/ui/podcasts_page.rs:1968
+#: src/ui/podcasts_page.rs:1977
 msgid "Find a podcast by name"
 msgstr "ابحث عن بودكاست بالاسم"
 
-#: src/ui/podcasts_page.rs:1975
+#: src/ui/podcasts_page.rs:1984
 msgid "Podcast name …"
 msgstr "اسم البودكاست …"
 
-#: src/ui/podcasts_page.rs:2015
+#: src/ui/podcasts_page.rs:2024
 msgid "Or enter feed address"
 msgstr "أو أدخل عنوان الخلاصة"
 
-#: src/ui/podcasts_page.rs:2018
+#: src/ui/podcasts_page.rs:2027
 msgid "Feed address (RSS)"
 msgstr "عنوان الخلاصة (RSS)"
 
-#: src/ui/podcasts_page.rs:2060
+#: src/ui/podcasts_page.rs:2069
 msgid "Search service unreachable"
 msgstr "تعذّر الوصول إلى خدمة البحث"
 
-#: src/ui/podcasts_page.rs:2061 src/ui/stream_page.rs:1200
+#: src/ui/podcasts_page.rs:2070 src/ui/stream_page.rs:1200
 msgid "Check your connection and try again"
 msgstr "تحقق من اتصالك وحاول مجددًا"
 
-#: src/ui/podcasts_page.rs:2067
+#: src/ui/podcasts_page.rs:2076
 msgid "No podcasts found"
 msgstr "لم يُعثر على بودكاست"
 
-#: src/ui/podcasts_page.rs:2189
+#: src/ui/podcasts_page.rs:2198
 msgid "Remove download"
 msgstr "إزالة التنزيل"
 
-#: src/ui/podcasts_page.rs:2191
+#: src/ui/podcasts_page.rs:2200
 msgid "For offline listening"
 msgstr "للاستماع دون اتصال"
 
-#: src/ui/podcasts_page.rs:2210
+#: src/ui/podcasts_page.rs:2219
 msgid "Download removed"
 msgstr "أُزيل التنزيل"
 
-#: src/ui/podcasts_page.rs:2217
+#: src/ui/podcasts_page.rs:2226
 msgid "Downloading “{title}” …"
 msgstr "جارٍ تنزيل «{title}» …"
 
@@ -2574,8 +2587,8 @@ msgstr "اختر مجلد الموسيقى"
 
 #: src/ui/setup.rs:653
 msgid ""
-"Pick the folder that already holds your collection. You can add more sources "
-"later in Settings."
+"Pick the folder that already holds your collection. You can add more sources"
+" later in Settings."
 msgstr ""
 "اختر المجلد الذي يحتوي على مجموعتك بالفعل. يمكنك إضافة مصادر أخرى لاحقًا في "
 "الإعدادات."
@@ -2761,14 +2774,14 @@ msgstr "سجّل الأغنية الحالية أثناء تشغيل محطة."
 
 #: src/ui/stream_page.rs:378
 msgid ""
-"Songs are recognized from the title a station broadcasts while it plays, and "
-"collected here — so you can play them back later (from your library, "
+"Songs are recognized from the title a station broadcasts while it plays, and"
+" collected here — so you can play them back later (from your library, "
 "otherwise via YouTube). This only works for stations that transmit the "
 "current title."
 msgstr ""
-"تُتعرَّف الأغاني من العنوان الذي تبثّه المحطة أثناء التشغيل وتُجمع هنا — لتتمكن "
-"من تشغيلها لاحقًا (من مكتبتك، وإلا فعبر يوتيوب). يعمل هذا فقط مع المحطات التي "
-"تبثّ العنوان الحالي."
+"تُتعرَّف الأغاني من العنوان الذي تبثّه المحطة أثناء التشغيل وتُجمع هنا — "
+"لتتمكن من تشغيلها لاحقًا (من مكتبتك، وإلا فعبر يوتيوب). يعمل هذا فقط مع "
+"المحطات التي تبثّ العنوان الحالي."
 
 #: src/ui/stream_page.rs:630
 msgid "Removed from the list"
@@ -2838,8 +2851,8 @@ msgstr "غير مكتمل (كانت البداية مفقودة)"
 msgid "Station"
 msgstr "المحطة"
 
-#: src/ui/stream_page.rs:1501 src/ui/yt_page_detail.rs:121
-#: src/ui/yt_page_detail.rs:318 src/ui/yt_page_detail.rs:665
+#: src/ui/stream_page.rs:1501 src/ui/yt_page_detail.rs:122
+#: src/ui/yt_page_detail.rs:319 src/ui/yt_page_detail.rs:666
 msgid "Add to library"
 msgstr "إضافة إلى المكتبة"
 
@@ -3013,8 +3026,8 @@ msgstr "انقطع الاتصال."
 msgid "Connect again"
 msgstr "إعادة الاتصال"
 
-#: src/ui/sync_page.rs:1052 src/ui/yt_page_detail.rs:750
-#: src/ui/yt_page_detail.rs:783
+#: src/ui/sync_page.rs:1052 src/ui/yt_page_detail.rs:759
+#: src/ui/yt_page_detail.rs:792
 msgid "Preparing …"
 msgstr "جارٍ التحضير …"
 
@@ -3135,7 +3148,7 @@ msgstr "سيستبدل ملفًا آخر"
 msgid "Nothing playing"
 msgstr "لا شيء قيد التشغيل"
 
-#: src/ui/yt_channels.rs:317
+#: src/ui/yt_channels.rs:321
 msgid "{n} channel updated"
 msgid_plural "{n} channels updated"
 msgstr[0] "تم تحديث {n} قنوات"
@@ -3145,7 +3158,7 @@ msgstr[3] "تم تحديث {n} قنوات"
 msgstr[4] "تم تحديث {n} قناةً"
 msgstr[5] "تم تحديث {n} قناة"
 
-#: src/ui/yt_channels.rs:324
+#: src/ui/yt_channels.rs:328
 msgid "{n} new video"
 msgid_plural "{n} new videos"
 msgstr[0] "{n} فيديوهات جديدة"
@@ -3155,7 +3168,7 @@ msgstr[3] "{n} فيديوهات جديدة"
 msgstr[4] "{n} فيديو جديدًا"
 msgstr[5] "{n} فيديو جديد"
 
-#: src/ui/yt_channels.rs:331
+#: src/ui/yt_channels.rs:335
 msgid "{n} channel failed"
 msgid_plural "{n} channels failed"
 msgstr[0] "فشلت {n} قنوات"
@@ -3165,164 +3178,165 @@ msgstr[3] "فشلت {n} قنوات"
 msgstr[4] "فشلت {n} قناةً"
 msgstr[5] "فشلت {n} قناة"
 
-#: src/ui/yt_live.rs:104 src/ui/yt_page.rs:479 src/ui/yt_page.rs:1585
-#: src/ui/yt_page.rs:1715
+#: src/ui/yt_live.rs:104 src/ui/yt_page.rs:484 src/ui/yt_page.rs:1592
+#: src/ui/yt_page.rs:1722
 msgid "Live"
 msgstr "مباشر"
 
 # Settings → Library: confirm before removing an extra source (added
 # 2026-06-07).
-#: src/ui/yt_live.rs:143
+#: src/ui/yt_live.rs:159
 msgid "Remove live stream"
 msgstr "إزالة البث المباشر"
 
-#: src/ui/yt_live.rs:150
+#: src/ui/yt_live.rs:166
 msgid "Remove this live stream?"
 msgstr "هل تريد إزالة هذا البث المباشر؟"
 
-#: src/ui/yt_page.rs:441
+#: src/ui/yt_page.rs:446
 msgid ""
-"YouTube isn't working right now – update yt-dlp in the settings, or wait for "
-"a newer release."
-msgstr "يوتيوب لا يعمل حاليًا – حدّث yt-dlp في الإعدادات، أو انتظر إصدارًا أحدث."
+"YouTube isn't working right now – update yt-dlp in the settings, or wait for"
+" a newer release."
+msgstr ""
+"يوتيوب لا يعمل حاليًا – حدّث yt-dlp في الإعدادات، أو انتظر إصدارًا أحدث."
 
-#: src/ui/yt_page.rs:472
+#: src/ui/yt_page.rs:477
 msgid "Subscriptions"
 msgstr "الاشتراكات"
 
-#: src/ui/yt_page.rs:487 src/ui/yt_page.rs:1561
+#: src/ui/yt_page.rs:492 src/ui/yt_page.rs:1566
 msgid "Search YouTube"
 msgstr "البحث في يوتيوب"
 
-#: src/ui/yt_page.rs:511
+#: src/ui/yt_page.rs:516
 msgid "No videos yet"
 msgstr "لا فيديوهات بعد"
 
-#: src/ui/yt_page.rs:512
+#: src/ui/yt_page.rs:517
 msgid "Subscribe to a channel to follow its newest videos."
 msgstr "اشترك في قناة لمتابعة أحدث فيديوهاتها."
 
-#: src/ui/yt_page.rs:536
+#: src/ui/yt_page.rs:541
 msgid "Nothing played yet"
 msgstr "لم يُشغَّل شيء بعد"
 
-#: src/ui/yt_page.rs:537
+#: src/ui/yt_page.rs:542
 msgid "Videos you play appear here."
 msgstr "تظهر الفيديوهات التي تشغّلها هنا."
 
-#: src/ui/yt_page.rs:574 src/ui/yt_page_detail.rs:680
+#: src/ui/yt_page.rs:579 src/ui/yt_page_detail.rs:681
 msgid "No subscriptions"
 msgstr "لا اشتراكات"
 
-#: src/ui/yt_page.rs:575
+#: src/ui/yt_page.rs:580
 msgid "Search YouTube and subscribe to a channel."
 msgstr "ابحث في يوتيوب واشترك في قناة."
 
-#: src/ui/yt_page.rs:599
+#: src/ui/yt_page.rs:604
 msgid "No live streams"
 msgstr "لا توجد بثوث مباشرة"
 
-#: src/ui/yt_page.rs:600
+#: src/ui/yt_page.rs:605
 msgid ""
-"Search YouTube for live streams, such as lofi radio, and add them here. They "
-"are only streamed, never downloaded."
+"Search YouTube for live streams, such as lofi radio, and add them here. They"
+" are only streamed, never downloaded."
 msgstr ""
 "ابحث في YouTube عن بثوث مباشرة، مثل راديو لوفاي، وأضفها هنا. تُبث فقط ولا "
 "تُنزَّل أبدًا."
 
-#: src/ui/yt_page.rs:845
+#: src/ui/yt_page.rs:850
 msgid "Subscribing to {t} …"
 msgstr "جارٍ الاشتراك في {t} …"
 
-#: src/ui/yt_page.rs:996
+#: src/ui/yt_page.rs:1001
 msgid "Could not load channel"
 msgstr "تعذّر تحميل القناة"
 
-#: src/ui/yt_page.rs:1023
+#: src/ui/yt_page.rs:1028
 msgid "yt-dlp is missing — install or update it in the settings"
 msgstr "yt-dlp مفقود — ثبّته أو حدّثه في الإعدادات"
 
-#: src/ui/yt_page.rs:1038
+#: src/ui/yt_page.rs:1043
 msgid "Adding to library … ({done}/{total})"
 msgstr "جارٍ الإضافة إلى المكتبة … ({done}/{total})"
 
-#: src/ui/yt_page.rs:1055
+#: src/ui/yt_page.rs:1060
 msgid "Added {n} track(s) to your library"
 msgstr "أُضيف {n} مقطع إلى مكتبتك"
 
-#: src/ui/yt_page.rs:1062
+#: src/ui/yt_page.rs:1067
 msgid "Could not add to library"
 msgstr "تعذّرت الإضافة إلى المكتبة"
 
-#: src/ui/yt_page.rs:1084
+#: src/ui/yt_page.rs:1089
 msgid "Saved {n} song(s) to Playlists"
 msgstr "حُفظت {n} أغنية في قوائم التشغيل"
 
-#: src/ui/yt_page.rs:1091
+#: src/ui/yt_page.rs:1096
 msgid "Could not save playlist"
 msgstr "تعذّر حفظ قائمة التشغيل"
 
-#: src/ui/yt_page.rs:1148
+#: src/ui/yt_page.rs:1153
 msgid "Number of videos"
 msgstr "عدد الفيديوهات"
 
-#: src/ui/yt_page.rs:1387
+#: src/ui/yt_page.rs:1392
 msgid "Older"
 msgstr "أقدم"
 
-#: src/ui/yt_page.rs:1460
+#: src/ui/yt_page.rs:1465
 msgid "Playlist · {n}"
 msgstr "قائمة التشغيل · {n}"
 
-#: src/ui/yt_page.rs:1479 src/ui/yt_page_detail.rs:284
+#: src/ui/yt_page.rs:1484 src/ui/yt_page_detail.rs:285
 msgid "Start Playlist"
 msgstr "بدء قائمة التشغيل"
 
-#: src/ui/yt_page.rs:1553
+#: src/ui/yt_page.rs:1558
 msgid "Download yt-dlp in the settings first"
 msgstr "نزّل yt-dlp أولًا في الإعدادات"
 
-#: src/ui/yt_page.rs:1583
+#: src/ui/yt_page.rs:1590
 msgid "Channels"
 msgstr "القنوات"
 
-#: src/ui/yt_page.rs:1618
+#: src/ui/yt_page.rs:1625
 msgid "Search term …"
 msgstr "مصطلح البحث …"
 
-#: src/ui/yt_page.rs:1692
+#: src/ui/yt_page.rs:1699
 msgid "YouTube unreachable"
 msgstr "تعذّر الوصول إلى يوتيوب"
 
-#: src/ui/yt_page.rs:1694
+#: src/ui/yt_page.rs:1701
 msgid "Check your connection, or update yt-dlp in the settings"
 msgstr "تحقق من اتصالك، أو حدّث yt-dlp في الإعدادات"
 
-#: src/ui/yt_page.rs:1701
+#: src/ui/yt_page.rs:1708
 msgid "Nothing found"
 msgstr "لم يُعثر على شيء"
 
-#: src/ui/yt_page.rs:1716
+#: src/ui/yt_page.rs:1723
 msgid "Video"
 msgstr "فيديو"
 
-#: src/ui/yt_page.rs:1717 src/ui/yt_page_detail.rs:279
+#: src/ui/yt_page.rs:1724 src/ui/yt_page_detail.rs:280
 msgid "Playlist"
 msgstr "قائمة التشغيل"
 
-#: src/ui/yt_page.rs:1718
+#: src/ui/yt_page.rs:1725
 msgid "Channel"
 msgstr "قناة"
 
-#: src/ui/yt_page.rs:1761
+#: src/ui/yt_page.rs:1768
 msgid "List as newest"
 msgstr "إدراجه ضمن الأحدث"
 
-#: src/ui/yt_page.rs:1877
+#: src/ui/yt_page.rs:1884
 msgid "Channel – {title}"
 msgstr "قناة – {title}"
 
-#: src/ui/yt_page.rs:1902
+#: src/ui/yt_page.rs:1909
 msgid "{n} video"
 msgid_plural "{n} videos"
 msgstr[0] "{n} فيديو"
@@ -3332,47 +3346,47 @@ msgstr[3] "{n} فيديوهات"
 msgstr[4] "{n} فيديو"
 msgstr[5] "{n} فيديو"
 
-#: src/ui/yt_page.rs:1943
+#: src/ui/yt_page.rs:1950
 msgid "Notify of newest publications"
 msgstr "إعلام بأحدث المنشورات"
 
-#: src/ui/yt_page_detail.rs:177 src/ui/yt_page_detail.rs:336
+#: src/ui/yt_page_detail.rs:178 src/ui/yt_page_detail.rs:337
 msgid "Remove from recent"
 msgstr "إزالة من الأخيرة"
 
-#: src/ui/yt_page_detail.rs:301
+#: src/ui/yt_page_detail.rs:302
 msgid "Add to Playlists"
 msgstr "إضافة إلى قوائم التشغيل"
 
-#: src/ui/yt_page_detail.rs:358
+#: src/ui/yt_page_detail.rs:359
 msgid "Loading “{title}” …"
 msgstr "جارٍ تحميل «{title}» …"
 
-#: src/ui/yt_page_detail.rs:467
+#: src/ui/yt_page_detail.rs:468
 msgid "Playlist – {title}"
 msgstr "قائمة التشغيل – {title}"
 
-#: src/ui/yt_page_detail.rs:657
+#: src/ui/yt_page_detail.rs:658
 msgid "Already in your library"
 msgstr "موجود في مكتبتك بالفعل"
 
-#: src/ui/yt_page_detail.rs:661
+#: src/ui/yt_page_detail.rs:662
 msgid "Adding to library …"
 msgstr "جارٍ الإضافة إلى المكتبة …"
 
-#: src/ui/yt_page_detail.rs:788
+#: src/ui/yt_page_detail.rs:797
 msgid "Downloading … {pct}%"
 msgstr "جارٍ التنزيل … {pct}%"
 
-#: src/ui/yt_page_detail.rs:794
+#: src/ui/yt_page_detail.rs:803
 msgid "Converting …"
 msgstr "جارٍ التحويل …"
 
-#: src/ui/yt_page_detail.rs:839
+#: src/ui/yt_page_detail.rs:848
 msgid "Chapters"
 msgstr "فصول"
 
-#: src/ui/yt_page_detail.rs:841
+#: src/ui/yt_page_detail.rs:850
 msgid "{n} chapter"
 msgid_plural "{n} chapters"
 msgstr[0] "{n} فصل"
@@ -3382,27 +3396,27 @@ msgstr[3] "{n} فصول"
 msgstr[4] "{n} فصلاً"
 msgstr[5] "{n} فصل"
 
-#: src/ui/yt_page_detail.rs:942 src/ui/yt_page_detail.rs:997
+#: src/ui/yt_page_detail.rs:951 src/ui/yt_page_detail.rs:1006
 msgid "Set a music folder in settings first"
 msgstr "حدّد أولًا مجلد موسيقى في الإعدادات"
 
-#: src/ui/yt_page_detail.rs:1002
+#: src/ui/yt_page_detail.rs:1011
 msgid "Adding playlist “{title}” to library …"
 msgstr "جارٍ إضافة قائمة التشغيل «{title}» إلى المكتبة …"
 
-#: src/ui/yt_page_detail.rs:1043
+#: src/ui/yt_page_detail.rs:1052
 msgid "Saving “{title}” to Playlists …"
 msgstr "جارٍ حفظ «{title}» في قوائم التشغيل …"
 
-#: src/ui/yt_page_detail.rs:1130
+#: src/ui/yt_page_detail.rs:1139
 msgid "Song already exists"
 msgstr "الأغنية موجودة بالفعل"
 
-#: src/ui/yt_page_detail.rs:1135
+#: src/ui/yt_page_detail.rs:1144
 msgid "Overwrite existing song?"
 msgstr "هل تريد استبدال الأغنية الموجودة؟"
 
-#: src/ui/yt_page_detail.rs:1137
+#: src/ui/yt_page_detail.rs:1146
 msgid ""
 "“{title}” is already saved at:\n"
 "{dest}"
@@ -3410,15 +3424,15 @@ msgstr ""
 "«{title}» محفوظ بالفعل في:\n"
 "{dest}"
 
-#: src/ui/yt_page_detail.rs:1141
+#: src/ui/yt_page_detail.rs:1150
 msgid "Skip"
 msgstr "تخطٍّ"
 
-#: src/ui/yt_page_detail.rs:1142
+#: src/ui/yt_page_detail.rs:1151
 msgid "Overwrite"
 msgstr "استبدال"
 
-#: src/ui/yt_page_detail.rs:1179
+#: src/ui/yt_page_detail.rs:1188
 msgid "Could not load playlist"
 msgstr "تعذّر تحميل قائمة التشغيل"
 
@@ -3432,9 +3446,9 @@ msgstr "تعذّر تحميل قائمة التشغيل"
 #~ msgstr "إعادة فحص المجلد"
 
 #~ msgid ""
-#~ "YouTube isn't working right now – it changed and the installed yt-dlp "
-#~ "can't read it. Look for a newer version of the app or update yt-dlp in "
-#~ "the settings. If neither helps, please wait for a new yt-dlp release."
+#~ "YouTube isn't working right now – it changed and the installed yt-dlp can't "
+#~ "read it. Look for a newer version of the app or update yt-dlp in the "
+#~ "settings. If neither helps, please wait for a new yt-dlp release."
 #~ msgstr ""
 #~ "يوتيوب لا يعمل حاليًا: لقد تغيّر ولا يستطيع yt-dlp المثبَّت قراءته. ابحث عن "
 #~ "إصدار أحدث من التطبيق أو حدّث yt-dlp في الإعدادات. إذا لم يُجدِ ذلك نفعًا، "
@@ -3486,14 +3500,14 @@ msgstr "تعذّر تحميل قائمة التشغيل"
 #~ msgstr "مخزن التسجيل المؤقت (دقائق)"
 
 #~ msgid ""
-#~ "Keep the last minutes of a station so you can record a song after it "
-#~ "played. 0 turns it off."
+#~ "Keep the last minutes of a station so you can record a song after it played."
+#~ " 0 turns it off."
 #~ msgstr ""
 #~ "يحتفظ بآخر دقائق من المحطة لتتمكن من تسجيل أغنية بعد تشغيلها. 0 يوقف ذلك."
 
 #~ msgid ""
-#~ "Search and play YouTube, follow channels, add videos/playlists to your "
-#~ "music or keep them offline. May be restricted in some countries."
+#~ "Search and play YouTube, follow channels, add videos/playlists to your music"
+#~ " or keep them offline. May be restricted in some countries."
 #~ msgstr ""
 #~ "ابحث في يوتيوب وشغّله، وتابع القنوات، وأضف الفيديوهات/قوائم التشغيل إلى "
 #~ "موسيقاك أو احتفظ بها دون اتصال. قد يكون مقيَّدًا في بعض البلدان."

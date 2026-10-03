@@ -1814,6 +1814,11 @@ impl App {
         // Sync the play/pause and record icons of the station rows.
         self.sync_stream_page_icons();
         if self.mini.playing {
+            // A broken network stream is being re-opened: show the spinner
+            // until it has prerolled again (`PlaybackReady` clears it).
+            if self.player.is_reconnecting() {
+                self.mini.loading = true;
+            }
             // Advance the sleep-timer countdown / fade-out (only while playing).
             self.sleep_tick();
             // Only read the pipeline once the new source is actually on it.
@@ -2107,9 +2112,26 @@ impl App {
                     return;
                 }
                 // Streams/episodes have no "next" → don't skip on their errors.
+                // The player already tried to reconnect: stop for real, so the
+                // bar and the lock screen don't go on claiming "playing".
                 if self.streaming.playing_stream.is_some()
                     || self.podcasts.playing_episode_url.is_some()
                 {
+                    // One failure posts several errors: handle the first.
+                    if !self.mini.playing {
+                        return;
+                    }
+                    if self.podcasts.playing_episode_url.is_some() {
+                        self.save_episode_progress();
+                    }
+                    self.finalize_play_session(false);
+                    self.player.stop();
+                    self.mini.playing = false;
+                    self.mpris.set_playing(false);
+                    self.refresh_queue_icons();
+                    self.toast(&crate::i18n::gettext(
+                        "Stream not reachable – playback stopped",
+                    ));
                     return;
                 }
                 // Only skip when something is actually queued.
