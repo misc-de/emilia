@@ -422,7 +422,10 @@ pub(crate) fn export_stations(lib: &Library, ids: &[i64]) -> Vec<StationRec> {
         .map(|s| StationRec {
             name: s.name,
             url: s.url,
-            favicon: s.favicon,
+            // A hand-picked local logo only exists on this device.
+            favicon: s
+                .favicon
+                .filter(|f| !crate::core::online::is_local_station_logo(f)),
             homepage: None,
             genre: s.tags,
         })

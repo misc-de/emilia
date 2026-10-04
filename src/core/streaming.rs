@@ -45,6 +45,15 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
         "/json/stations/search?limit=60&hidebroken=true&order=votes&reverse=true&name={}",
         crate::core::online::percent_encode(term),
     );
+    match rb_get(&query)? {
+        Some(body) => parse_stations(&body),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Runs one Radio-Browser API request (path + query) across the mirrors and
+/// returns the raw body. `Ok(None)` = 404. **Blocking.**
+fn rb_get(query: &str) -> Result<Option<Vec<u8>>> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(8))
         .timeout_read(Duration::from_secs(20))
@@ -61,13 +70,39 @@ pub fn search_stations(term: &str) -> Result<Vec<StationResult>> {
                 resp.into_reader()
                     .take(8 * 1024 * 1024) // Cap against unexpectedly large responses.
                     .read_to_end(&mut bytes)?;
-                return parse_stations(&bytes);
+                return Ok(Some(bytes));
             }
-            Ok(None) => return Ok(Vec::new()), // 404 (unlikely) — no results
-            Err(e) => last_err = Some(e),      // mirror unreachable — try the next
+            Ok(None) => return Ok(None),  // 404 (unlikely) — no results
+            Err(e) => last_err = Some(e), // mirror unreachable — try the next
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow!("no Radio-Browser mirror reachable")))
+}
+
+/// What Radio-Browser knows about a stream URL that helps finding its logo:
+/// the listed favicons and homepages of all entries with that URL. Empty if the
+/// stream isn't listed. **Blocking.**
+pub fn logo_hints_by_url(stream_url: &str) -> Result<(Vec<String>, Vec<String>)> {
+    let query = format!(
+        "/json/stations/byurl?url={}",
+        crate::core::online::percent_encode(stream_url.trim()),
+    );
+    let Some(body) = rb_get(&query)? else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let raw: Vec<RbStation> = serde_json::from_slice(&body)?;
+    let mut favicons = Vec::new();
+    let mut homepages = Vec::new();
+    for s in raw {
+        let clean = |v: Option<String>| v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        if let Some(f) = clean(s.favicon).filter(|f| !favicons.contains(f)) {
+            favicons.push(f);
+        }
+        if let Some(h) = clean(s.homepage).filter(|h| !homepages.contains(h)) {
+            homepages.push(h);
+        }
+    }
+    Ok((favicons, homepages))
 }
 
 /// Parses the Radio-Browser response. Results without a playable URL are
@@ -135,6 +170,8 @@ struct RbStation {
     url_resolved: Option<String>,
     #[serde(default)]
     favicon: Option<String>,
+    #[serde(default)]
+    homepage: Option<String>,
     #[serde(default)]
     tags: Option<String>,
     #[serde(default)]

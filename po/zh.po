@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-04 09:35+0000\n"
+"POT-Creation-Date: 2026-10-04 12:45+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -30,8 +30,8 @@ msgstr "暂停"
 #: src/ui/app_playlist.rs:532 src/ui/app_queue.rs:186
 #: src/ui/app_streaming.rs:568 src/ui/app_views.rs:1265
 #: src/ui/app_views.rs:1564 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
-#: src/ui/stream_page.rs:1441 src/ui/stream_page.rs:1530
-#: src/ui/stream_page.rs:1728 src/ui/stream_page.rs:1809 src/ui/yt_live.rs:123
+#: src/ui/stream_page.rs:1614 src/ui/stream_page.rs:1703
+#: src/ui/stream_page.rs:1901 src/ui/stream_page.rs:1982 src/ui/yt_live.rs:123
 #: src/ui/yt_page.rs:1957 src/ui/yt_page_detail.rs:98
 #: src/ui/yt_page_detail.rs:425
 msgid "Play"
@@ -55,8 +55,8 @@ msgstr "返回"
 
 #: src/ui/app.rs:565 src/ui/app_search.rs:22 src/ui/app_search.rs:328
 #: src/ui/podcasts_page.rs:2015 src/ui/podcasts_page.rs:2027
-#: src/ui/stream_page.rs:1147 src/ui/stream_page.rs:1159 src/ui/yt_page.rs:1656
-#: src/ui/yt_page.rs:1667
+#: src/ui/stream_page.rs:1305 src/ui/stream_page.rs:1317
+#: src/ui/yt_page.rs:1656 src/ui/yt_page.rs:1667
 msgid "Search"
 msgstr "搜索"
 
@@ -153,8 +153,8 @@ msgid ""
 "they'll appear here. You can also add concerts later at any time via the "
 "options."
 msgstr ""
-"您可以在此列出收藏的演唱会。通过“导入演唱会”可获得可能的演唱会概览：名称中含有 live、unplugged 或 concert 的专辑，以及时长 30"
-" 分钟以上的单个文件。将它们标记为演唱会后即会显示在这里。您也可以随时通过选项添加演唱会。"
+"您可以在此列出收藏的演唱会。通过“导入演唱会”可获得可能的演唱会概览：名称中含有 live、unplugged 或 concert 的专辑，以及时长 "
+"30 分钟以上的单个文件。将它们标记为演唱会后即会显示在这里。您也可以随时通过选项添加演唱会。"
 
 #: src/ui/app.rs:1017 src/ui/app_concert.rs:71
 msgid "Import concerts"
@@ -229,7 +229,7 @@ msgstr "通过属性将专辑、文件夹或曲目标记为有声书。"
 msgid "Memo"
 msgstr "备忘"
 
-#: src/ui/app.rs:1218 src/ui/podcasts_page.rs:437 src/ui/stream_page.rs:280
+#: src/ui/app.rs:1218 src/ui/podcasts_page.rs:437 src/ui/stream_page.rs:295
 #: src/ui/yt_page.rs:468
 msgid "Recently"
 msgstr "最近"
@@ -268,12 +268,14 @@ msgstr "{done} MB / {total} MB"
 
 #: src/ui/app.rs:1404 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:941 src/ui/app_memo.rs:964 src/ui/app_playlist.rs:879
-#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657 src/ui/app_rec_edit.rs:693
-#: src/ui/app_sections.rs:94 src/ui/app_settings.rs:651
-#: src/ui/app_views_handlers.rs:737 src/ui/app_views_sources.rs:281
-#: src/ui/app_views_sources.rs:477 src/ui/app_views_sources.rs:536
-#: src/ui/podcasts_page.rs:971 src/ui/setup.rs:699 src/ui/stream_page.rs:690
-#: src/ui/stream_page.rs:1118 src/ui/sync_share_ui.rs:159 src/ui/yt_live.rs:167
+#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
+#: src/ui/app_rec_edit.rs:693 src/ui/app_sections.rs:94
+#: src/ui/app_settings.rs:651 src/ui/app_views_handlers.rs:737
+#: src/ui/app_views_sources.rs:281 src/ui/app_views_sources.rs:477
+#: src/ui/app_views_sources.rs:536 src/ui/podcasts_page.rs:971
+#: src/ui/setup.rs:699 src/ui/stream_page.rs:775 src/ui/stream_page.rs:1212
+#: src/ui/stream_page.rs:1260 src/ui/sync_share_ui.rs:159
+#: src/ui/yt_live.rs:167
 msgid "Cancel"
 msgstr "取消"
 
@@ -303,7 +305,7 @@ msgstr "随机播放"
 msgid "Repeat"
 msgstr "重复"
 
-#: src/ui/app.rs:1680 src/ui/podcasts_page.rs:2160 src/ui/stream_page.rs:967
+#: src/ui/app.rs:1680 src/ui/podcasts_page.rs:2160 src/ui/stream_page.rs:1052
 #: src/ui/yt_live.rs:41 src/ui/yt_page_detail.rs:500
 msgid "Play/Pause"
 msgstr "播放/暂停"
@@ -407,8 +409,8 @@ msgstr "上传新图片，还是移除当前图片？"
 #: src/ui/app_covers.rs:42 src/ui/app_favorites.rs:287
 #: src/ui/app_favorites.rs:296 src/ui/app_settings.rs:826
 #: src/ui/app_views_sources.rs:102 src/ui/app_views_sources.rs:436
-#: src/ui/podcasts_page.rs:972 src/ui/stream_page.rs:1088 src/ui/yt_live.rs:168
-#: src/ui/yt_page.rs:2001
+#: src/ui/podcasts_page.rs:972 src/ui/stream_page.rs:1182
+#: src/ui/yt_live.rs:168 src/ui/yt_page.rs:2001
 msgid "Remove"
 msgstr "移除"
 
@@ -417,6 +419,7 @@ msgid "Upload"
 msgstr "上传"
 
 #: src/ui/app_covers.rs:113 src/ui/app_settings.rs:967
+#: src/ui/stream_page.rs:1275
 msgid "Images"
 msgstr "图片"
 
@@ -470,7 +473,7 @@ msgid "Add to playlist"
 msgstr "添加到播放列表"
 
 #: src/ui/app_dialogs.rs:281 src/ui/podcasts_page.rs:1675
-#: src/ui/podcasts_page.rs:1828 src/ui/stream_page.rs:1054
+#: src/ui/podcasts_page.rs:1828 src/ui/stream_page.rs:1148
 #: src/ui/sync_share_ui.rs:129 src/ui/yt_live.rs:144
 #: src/ui/yt_page_detail.rs:146
 msgid "Equalizer settings"
@@ -478,8 +481,8 @@ msgstr "均衡器设置"
 
 #: src/ui/app_dialogs.rs:287 src/ui/app_memo.rs:817 src/ui/app_playlist.rs:718
 #: src/ui/podcasts_page.rs:1841 src/ui/smb_page.rs:132
-#: src/ui/stream_page.rs:1065 src/ui/stream_page.rs:1557 src/ui/yt_page.rs:1975
-#: src/ui/yt_page_detail.rs:165
+#: src/ui/stream_page.rs:1159 src/ui/stream_page.rs:1730
+#: src/ui/yt_page.rs:1975 src/ui/yt_page_detail.rs:165
 msgid "Share"
 msgstr "分享"
 
@@ -487,7 +490,7 @@ msgstr "分享"
 #: src/ui/app_favorites.rs:726 src/ui/app_settings.rs:1604
 #: src/ui/app_views.rs:2083 src/ui/app_views.rs:2099 src/ui/app_views.rs:2525
 #: src/ui/app_views.rs:2547 src/ui/app_views.rs:2574 src/ui/app_views.rs:2628
-#: src/ui/stream_page.rs:1509 src/ui/stream_page.rs:1797
+#: src/ui/stream_page.rs:1682 src/ui/stream_page.rs:1970
 #: src/ui/yt_page_detail.rs:69
 msgid "Artist"
 msgstr "艺术家"
@@ -502,7 +505,7 @@ msgstr "有声书"
 #: src/ui/app_favorites.rs:256 src/ui/app_favorites.rs:725
 #: src/ui/app_settings.rs:1603 src/ui/app_views.rs:2105
 #: src/ui/app_views.rs:2234 src/ui/app_views.rs:2531 src/ui/app_views.rs:2584
-#: src/ui/stream_page.rs:1512 src/ui/yt_page_detail.rs:75
+#: src/ui/stream_page.rs:1685 src/ui/yt_page_detail.rs:75
 msgid "Album"
 msgstr "专辑"
 
@@ -686,7 +689,7 @@ msgstr "想法"
 msgid "Task"
 msgstr "任务"
 
-#: src/ui/app_init.rs:434 src/ui/stream_page.rs:1523
+#: src/ui/app_init.rs:434 src/ui/stream_page.rs:1696
 msgid "Note"
 msgstr "备注"
 
@@ -750,7 +753,7 @@ msgid "Category removed"
 msgstr "已移除分类"
 
 #: src/ui/app_memo.rs:337 src/ui/app_streaming.rs:199
-#: src/ui/stream_page.rs:1399
+#: src/ui/stream_page.rs:1572
 msgid "Recording …"
 msgstr "正在录音 …"
 
@@ -766,23 +769,24 @@ msgstr "常规"
 msgid "New category"
 msgstr "新建分类"
 
-#: src/ui/app_memo.rs:738 src/ui/stream_page.rs:1518
+#: src/ui/app_memo.rs:738 src/ui/stream_page.rs:1691
 msgid "Recorded"
 msgstr "录制于"
 
-#: src/ui/app_memo.rs:742 src/ui/app_sections.rs:340 src/ui/stream_page.rs:729
+#: src/ui/app_memo.rs:742 src/ui/app_sections.rs:340 src/ui/stream_page.rs:814
 #: src/ui/yt_page.rs:1222
 msgid "Length"
 msgstr "时长"
 
-#: src/ui/app_memo.rs:786 src/ui/stream_page.rs:1548
+#: src/ui/app_memo.rs:786 src/ui/stream_page.rs:1721
 msgid "Edit"
 msgstr "编辑"
 
 #: src/ui/app_memo.rs:795 src/ui/app_memo.rs:810 src/ui/app_memo.rs:899
-#: src/ui/app_memo.rs:910 src/ui/app_playlist.rs:735 src/ui/app_playlist.rs:880
-#: src/ui/app_rec_edit.rs:301 src/ui/app_views_sources.rs:400
-#: src/ui/app_views_sources.rs:478 src/ui/stream_page.rs:1119
+#: src/ui/app_memo.rs:910 src/ui/app_playlist.rs:735
+#: src/ui/app_playlist.rs:880 src/ui/app_rec_edit.rs:301
+#: src/ui/app_views_sources.rs:400 src/ui/app_views_sources.rs:478
+#: src/ui/stream_page.rs:1213
 msgid "Rename"
 msgstr "重命名"
 
@@ -798,7 +802,7 @@ msgstr "删除备忘"
 msgid "Delete this memo?"
 msgstr "删除此备忘吗？"
 
-#: src/ui/app_memo.rs:840 src/ui/app_memo.rs:942 src/ui/stream_page.rs:1580
+#: src/ui/app_memo.rs:840 src/ui/app_memo.rs:942 src/ui/stream_page.rs:1753
 msgid "Delete"
 msgstr "删除"
 
@@ -907,8 +911,8 @@ msgid "New playlist"
 msgstr "新建播放列表"
 
 #: src/ui/app_playlist.rs:804 src/ui/app_sections.rs:339
-#: src/ui/podcasts_page.rs:1003 src/ui/stream_page.rs:721
-#: src/ui/stream_page.rs:727 src/ui/stream_page.rs:736 src/ui/yt_page.rs:1173
+#: src/ui/podcasts_page.rs:1003 src/ui/stream_page.rs:806
+#: src/ui/stream_page.rs:812 src/ui/stream_page.rs:821 src/ui/yt_page.rs:1173
 #: src/ui/yt_page.rs:1220
 msgid "Name"
 msgstr "名称"
@@ -958,7 +962,7 @@ msgid "Play from the playhead"
 msgstr "从播放位置开始播放"
 
 #: src/ui/app_rec_edit.rs:259 src/ui/app_streaming.rs:770
-#: src/ui/stream_page.rs:1608
+#: src/ui/stream_page.rs:1781
 msgid "File not found"
 msgstr "找不到文件"
 
@@ -1058,7 +1062,7 @@ msgstr "艺术家、专辑、歌曲、电台、视频、备忘 …"
 msgid "No results"
 msgstr "没有结果"
 
-#: src/ui/app_search.rs:214 src/ui/stream_page.rs:287
+#: src/ui/app_search.rs:214 src/ui/stream_page.rs:302
 msgid "Recordings"
 msgstr "录音"
 
@@ -1134,8 +1138,8 @@ msgstr "用麦克风录制的快速语音备忘。"
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "收听统计以及你最常播放的艺术家和曲目。"
 
-#: src/ui/app_sections.rs:342 src/ui/stream_page.rs:728
-#: src/ui/stream_page.rs:737 src/ui/yt_page.rs:1221
+#: src/ui/app_sections.rs:342 src/ui/stream_page.rs:813
+#: src/ui/stream_page.rs:822 src/ui/yt_page.rs:1221
 msgid "Date"
 msgstr "日期"
 
@@ -1198,7 +1202,8 @@ msgid "Read music data"
 msgstr "读取音乐数据"
 
 #: src/ui/app_settings.rs:162
-msgid "Complete missing cover art, photos and tracks from open online sources."
+msgid ""
+"Complete missing cover art, photos and tracks from open online sources."
 msgstr "从开放的在线来源补全缺失的封面、照片和曲目。"
 
 #: src/ui/app_settings.rs:166
@@ -1215,8 +1220,8 @@ msgstr "AcoustID"
 
 #: src/ui/app_settings.rs:185
 msgid ""
-"Optional key for fingerprint-based track detection (free at acoustid.org/new-"
-"application)."
+"Optional key for fingerprint-based track detection (free at "
+"acoustid.org/new-application)."
 msgstr "用于基于指纹的曲目识别的可选密钥（在 acoustid.org/new-application 免费获取）。"
 
 #: src/ui/app_settings.rs:189
@@ -1279,8 +1284,8 @@ msgstr "主题"
 msgid "List display"
 msgstr "列表显示"
 
-#: src/ui/app_settings.rs:316 src/ui/app_sort.rs:589
-#: src/ui/podcasts_page.rs:1020 src/ui/stream_page.rs:758
+#: src/ui/app_settings.rs:316 src/ui/app_sort.rs:591
+#: src/ui/podcasts_page.rs:1020 src/ui/stream_page.rs:843
 #: src/ui/yt_page.rs:1189
 msgid "Gallery view"
 msgstr "画廊视图"
@@ -1315,8 +1320,8 @@ msgstr "缩放菜单图标（移动端，百分比）"
 
 #: src/ui/app_settings.rs:410
 msgid ""
-"How artist tags like \"A feat. B\" are listed. The tags themselves are never "
-"changed."
+"How artist tags like \"A feat. B\" are listed. The tags themselves are never"
+" changed."
 msgstr "如何列出“A feat. B”这类艺术家标签。标签本身永远不会被更改。"
 
 #: src/ui/app_settings.rs:416
@@ -1385,14 +1390,14 @@ msgstr "MCP 服务器"
 
 #: src/ui/app_settings.rs:540
 msgid ""
-"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST "
-"http://127.0.0.1:8770/mcp with the bearer token below."
+"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST"
+" http://127.0.0.1:8770/mcp with the bearer token below."
 msgstr ""
-"将音乐库和播放功能提供给 MCP 主机（例如 Claude）。端点：POST http://127.0.0.1:8770/mcp，使用下方的 Bearer"
-" 令牌。"
+"将音乐库和播放功能提供给 MCP 主机（例如 Claude）。端点：POST http://127.0.0.1:8770/mcp，使用下方的 "
+"Bearer 令牌。"
 
-#: src/ui/app_settings.rs:551 src/ui/app_settings.rs:849 src/ui/app_sleep.rs:73
-#: src/ui/app_sleep.rs:133
+#: src/ui/app_settings.rs:551 src/ui/app_settings.rs:849
+#: src/ui/app_sleep.rs:73 src/ui/app_sleep.rs:133
 msgid "Off"
 msgstr "关闭"
 
@@ -1438,8 +1443,8 @@ msgstr "生成新令牌吗？"
 
 #: src/ui/app_settings.rs:646
 msgid ""
-"A new bearer token is created immediately. Existing connections stop working,"
-" and every MCP host must be updated with the new token."
+"A new bearer token is created immediately. Existing connections stop "
+"working, and every MCP host must be updated with the new token."
 msgstr "将立即创建一个新的 Bearer 令牌。现有连接将失效，所有 MCP 主机都必须更新为新令牌。"
 
 #: src/ui/app_settings.rs:652
@@ -1664,33 +1669,33 @@ msgstr "睡眠定时器：已暂停播放"
 msgid "Sleep timer: playback stopped"
 msgstr "睡眠定时器：已停止播放"
 
-#: src/ui/app_sort.rs:133 src/ui/app_sort.rs:509
+#: src/ui/app_sort.rs:135 src/ui/app_sort.rs:511
 msgid "Sort by"
 msgstr "排序方式"
 
-#: src/ui/app_sort.rs:143 src/ui/app_sort.rs:153 src/ui/app_sort.rs:519
-#: src/ui/app_sort.rs:530
+#: src/ui/app_sort.rs:145 src/ui/app_sort.rs:155 src/ui/app_sort.rs:521
+#: src/ui/app_sort.rs:532
 msgid "Descending"
 msgstr "降序"
 
-#: src/ui/app_sort.rs:145 src/ui/app_sort.rs:155 src/ui/app_sort.rs:521
-#: src/ui/app_sort.rs:532
+#: src/ui/app_sort.rs:147 src/ui/app_sort.rs:157 src/ui/app_sort.rs:523
+#: src/ui/app_sort.rs:534
 msgid "Ascending"
 msgstr "升序"
 
 # Sort popover: discreet toggle to sort without section headings (added
 # 2026-06-07).
-#: src/ui/app_sort.rs:574 src/ui/podcasts_page.rs:1012
-#: src/ui/stream_page.rs:746 src/ui/yt_page.rs:1181
+#: src/ui/app_sort.rs:576 src/ui/podcasts_page.rs:1012
+#: src/ui/stream_page.rs:831 src/ui/yt_page.rs:1181
 msgid "Without grouping"
 msgstr "不分组"
 
-#: src/ui/app_sort.rs:602 src/ui/podcasts_page.rs:1028
-#: src/ui/stream_page.rs:767 src/ui/yt_page.rs:1197
+#: src/ui/app_sort.rs:604 src/ui/podcasts_page.rs:1028
+#: src/ui/stream_page.rs:852 src/ui/yt_page.rs:1197
 msgid "Show description"
 msgstr "显示描述"
 
-#: src/ui/app_sort.rs:650 src/ui/app_sort.rs:689
+#: src/ui/app_sort.rs:652 src/ui/app_sort.rs:691
 msgid "Unknown year"
 msgstr "未知年份"
 
@@ -1884,8 +1889,8 @@ msgstr "正在下载 …"
 
 #: src/ui/app_views_handlers.rs:733
 msgid ""
-"“{title}” is missing from this album. Search for it online and add it to the "
-"album?"
+"“{title}” is missing from this album. Search for it online and add it to the"
+" album?"
 msgstr "此专辑缺少“{title}”。要在线搜索并将其添加到专辑吗？"
 
 #: src/ui/app_views_handlers.rs:736
@@ -2131,8 +2136,8 @@ msgstr "OAuth 客户端"
 
 #: src/ui/gdrive_page.rs:263
 msgid ""
-"Google requires an OAuth client per app: create one of type “Desktop app” in "
-"the Google Cloud console (with the Drive API enabled) and paste its ID and "
+"Google requires an OAuth client per app: create one of type “Desktop app” in"
+" the Google Cloud console (with the Drive API enabled) and paste its ID and "
 "secret here."
 msgstr ""
 "Google 要求每个应用使用各自的 OAuth 客户端：请在 Google Cloud 控制台中创建一个“桌面应用”类型的客户端（并启用 Drive "
@@ -2152,8 +2157,8 @@ msgstr "使用 Google 账号登录"
 
 #: src/ui/gdrive_page.rs:289
 msgid ""
-"The browser opens Google's sign-in page; Emilia only asks for read access to "
-"your Drive. Return here afterwards."
+"The browser opens Google's sign-in page; Emilia only asks for read access to"
+" your Drive. Return here afterwards."
 msgstr "浏览器会打开 Google 的登录页面；Emilia 仅请求对您的 Google Drive 的读取权限。完成后请返回此处。"
 
 #: src/ui/gdrive_page.rs:319
@@ -2224,7 +2229,7 @@ msgstr "订阅"
 msgid "Subscribe to podcast"
 msgstr "订阅播客"
 
-#: src/ui/podcasts_page.rs:483 src/ui/stream_page.rs:383
+#: src/ui/podcasts_page.rs:483 src/ui/stream_page.rs:398
 msgid "Nothing heard yet"
 msgstr "尚未收听任何内容"
 
@@ -2245,7 +2250,7 @@ msgstr "没有播客"
 msgid "Subscribe to a podcast via its feed address (RSS)."
 msgstr "通过订阅源地址（RSS）订阅播客。"
 
-#: src/ui/podcasts_page.rs:743 src/ui/stream_page.rs:603
+#: src/ui/podcasts_page.rs:743 src/ui/stream_page.rs:618
 #: src/ui/yt_channels.rs:40
 msgid "Searching …"
 msgstr "正在搜索 …"
@@ -2364,7 +2369,7 @@ msgstr "订阅源地址（RSS）"
 msgid "Search service unreachable"
 msgstr "无法连接搜索服务"
 
-#: src/ui/podcasts_page.rs:2109 src/ui/stream_page.rs:1238
+#: src/ui/podcasts_page.rs:2109 src/ui/stream_page.rs:1396
 msgid "Check your connection and try again"
 msgstr "请检查网络连接后重试"
 
@@ -2479,8 +2484,8 @@ msgstr "选择您的音乐文件夹"
 
 #: src/ui/setup.rs:653
 msgid ""
-"Pick the folder that already holds your collection. You can add more sources "
-"later in Settings."
+"Pick the folder that already holds your collection. You can add more sources"
+" later in Settings."
 msgstr "选择已存放您音乐收藏的文件夹。您稍后可以在“设置”中添加更多来源。"
 
 #: src/ui/setup.rs:657
@@ -2645,154 +2650,200 @@ msgstr "{h} 小时 {m} 分"
 msgid "{m} min"
 msgstr "{m} 分"
 
-#: src/ui/stream_page.rs:273
+#: src/ui/stream_page.rs:288
 msgid "Stations"
 msgstr "电台"
 
-#: src/ui/stream_page.rs:295 src/ui/stream_page.rs:1142
+#: src/ui/stream_page.rs:310 src/ui/stream_page.rs:1300
 msgid "Add station"
 msgstr "添加电台"
 
-#: src/ui/stream_page.rs:335
+#: src/ui/stream_page.rs:350
 msgid "No stations"
 msgstr "没有电台"
 
-#: src/ui/stream_page.rs:336
+#: src/ui/stream_page.rs:351
 msgid "Add a stream address or search for a station worldwide."
 msgstr "添加流地址或搜索全球电台。"
 
-#: src/ui/stream_page.rs:359
+#: src/ui/stream_page.rs:374
 msgid "No recordings"
 msgstr "没有录音"
 
-#: src/ui/stream_page.rs:360
+#: src/ui/stream_page.rs:375
 msgid "Record the current song while a station plays."
 msgstr "在电台播放时录制当前歌曲。"
 
-#: src/ui/stream_page.rs:384
+#: src/ui/stream_page.rs:399
 msgid ""
-"Songs are recognized from the title a station broadcasts while it plays, and "
-"collected here — so you can play them back later (from your library, "
+"Songs are recognized from the title a station broadcasts while it plays, and"
+" collected here — so you can play them back later (from your library, "
 "otherwise via YouTube). This only works for stations that transmit the "
 "current title."
 msgstr ""
 "歌曲会根据电台播放时传送的标题被识别并收集到这里——这样你以后可以重新播放它们（优先从你的音乐库，否则通过 "
 "YouTube）。这仅适用于会传送当前标题的电台。"
 
-#: src/ui/stream_page.rs:652
+#: src/ui/stream_page.rs:679
+msgid "Could not load the image"
+msgstr "无法加载图片"
+
+#: src/ui/stream_page.rs:693
+msgid "Searching for a logo…"
+msgstr "正在搜索台标…"
+
+#: src/ui/stream_page.rs:720
 msgid "Removed from the list"
 msgstr "已从列表移除"
 
-#: src/ui/stream_page.rs:1034
+#: src/ui/stream_page.rs:753
+msgid "Logo updated"
+msgstr "台标已更新"
+
+#: src/ui/stream_page.rs:757
+msgid "No logo found"
+msgstr "未找到台标"
+
+#: src/ui/stream_page.rs:1119
 msgid "Replay (buffer)"
 msgstr "重新播放（缓冲区）"
 
-#: src/ui/stream_page.rs:1044 src/ui/stream_page.rs:1110
+#: src/ui/stream_page.rs:1129 src/ui/stream_page.rs:1204
 msgid "Rename station"
 msgstr "重命名电台"
 
-#: src/ui/stream_page.rs:1079
+#: src/ui/stream_page.rs:1138 src/ui/stream_page.rs:1245
+msgid "Change logo"
+msgstr "更换台标"
+
+#: src/ui/stream_page.rs:1173
 msgid "Remove station"
 msgstr "移除电台"
 
-#: src/ui/stream_page.rs:1087
+#: src/ui/stream_page.rs:1181
 msgid "Remove this station?"
 msgstr "移除此电台吗？"
 
-#: src/ui/stream_page.rs:1148
+#: src/ui/stream_page.rs:1247
+msgid ""
+"Search the station's website for its logo, choose an image file, or enter "
+"the address of an image."
+msgstr "在电台网站上搜索台标、选择图片文件，或输入图片地址。"
+
+#: src/ui/stream_page.rs:1253
+msgid "Image URL (https://…)"
+msgstr "图片 URL (https://…)"
+
+#: src/ui/stream_page.rs:1261
+msgid "Search online"
+msgstr "在线搜索"
+
+#: src/ui/stream_page.rs:1262
+msgid "Choose image…"
+msgstr "选择图片…"
+
+#: src/ui/stream_page.rs:1263
+msgid "Use URL"
+msgstr "使用 URL"
+
+#: src/ui/stream_page.rs:1279
+msgid "Choose logo"
+msgstr "选择台标"
+
+#: src/ui/stream_page.rs:1306
 msgid "Find a station worldwide by name"
 msgstr "按名称查找全球电台"
 
-#: src/ui/stream_page.rs:1155
+#: src/ui/stream_page.rs:1313
 msgid "Station name …"
 msgstr "电台名称 …"
 
-#: src/ui/stream_page.rs:1193
+#: src/ui/stream_page.rs:1351
 msgid "Or enter a stream address"
 msgstr "或输入流地址"
 
-#: src/ui/stream_page.rs:1196
+#: src/ui/stream_page.rs:1354
 msgid "Stream address (URL)"
 msgstr "流地址（URL）"
 
-#: src/ui/stream_page.rs:1237
+#: src/ui/stream_page.rs:1395
 msgid "Station service unreachable"
 msgstr "无法连接电台服务"
 
-#: src/ui/stream_page.rs:1244
+#: src/ui/stream_page.rs:1402
 msgid "No stations found"
 msgstr "未找到电台"
 
-#: src/ui/stream_page.rs:1313
+#: src/ui/stream_page.rs:1471
 msgid "Added: {n}"
 msgstr "已添加：{n}"
 
-#: src/ui/stream_page.rs:1324 src/ui/stream_page.rs:1343
+#: src/ui/stream_page.rs:1495 src/ui/stream_page.rs:1516
 msgid "Could not add station"
 msgstr "无法添加电台"
 
-#: src/ui/stream_page.rs:1340
+#: src/ui/stream_page.rs:1511
 msgid "Station added"
 msgstr "已添加电台"
 
-#: src/ui/stream_page.rs:1386
+#: src/ui/stream_page.rs:1559
 msgid "Current recording"
 msgstr "当前录音"
 
-#: src/ui/stream_page.rs:1455 src/ui/stream_page.rs:1524
+#: src/ui/stream_page.rs:1628 src/ui/stream_page.rs:1697
 msgid "Incomplete (beginning was missing)"
 msgstr "不完整（缺少开头）"
 
-#: src/ui/stream_page.rs:1515 src/ui/stream_page.rs:1800
+#: src/ui/stream_page.rs:1688 src/ui/stream_page.rs:1973
 msgid "Station"
 msgstr "电台"
 
-#: src/ui/stream_page.rs:1539 src/ui/yt_page_detail.rs:122
+#: src/ui/stream_page.rs:1712 src/ui/yt_page_detail.rs:122
 #: src/ui/yt_page_detail.rs:319 src/ui/yt_page_detail.rs:666
 msgid "Add to library"
 msgstr "添加到音乐库"
 
-#: src/ui/stream_page.rs:1571
+#: src/ui/stream_page.rs:1744
 msgid "Delete recording"
 msgstr "删除录音"
 
-#: src/ui/stream_page.rs:1579
+#: src/ui/stream_page.rs:1752
 msgid "Delete this recording?"
 msgstr "删除此录音吗？"
 
-#: src/ui/stream_page.rs:1603
+#: src/ui/stream_page.rs:1776
 msgid "Set a music folder first"
 msgstr "请先设置音乐文件夹"
 
-#: src/ui/stream_page.rs:1650
+#: src/ui/stream_page.rs:1823
 msgid "Already in the library"
 msgstr "已在音乐库中"
 
-#: src/ui/stream_page.rs:1658 src/ui/stream_page.rs:1681
+#: src/ui/stream_page.rs:1831 src/ui/stream_page.rs:1854
 msgid "Could not add to the library"
 msgstr "无法添加到音乐库"
 
-#: src/ui/stream_page.rs:1678
+#: src/ui/stream_page.rs:1851
 msgid "Added to the library"
 msgstr "已添加到音乐库"
 
-#: src/ui/stream_page.rs:1718
+#: src/ui/stream_page.rs:1891
 msgid "{n}×"
 msgstr "{n}×"
 
-#: src/ui/stream_page.rs:1802
+#: src/ui/stream_page.rs:1975
 msgid "Heard"
 msgstr "听到于"
 
-#: src/ui/stream_page.rs:1804
+#: src/ui/stream_page.rs:1977
 msgid "Times heard"
 msgstr "听到次数"
 
-#: src/ui/stream_page.rs:1822
+#: src/ui/stream_page.rs:1995
 msgid "Download via YouTube"
 msgstr "通过 YouTube 下载"
 
-#: src/ui/stream_page.rs:1835
+#: src/ui/stream_page.rs:2008
 msgid "Remove from list"
 msgstr "从列表移除"
 
@@ -2945,8 +2996,8 @@ msgstr "传输摘要"
 
 #: src/ui/sync_share_ui.rs:48
 msgid ""
-"Send to offer this to the other device — it then reviews the list and chooses"
-" what to keep."
+"Send to offer this to the other device — it then reviews the list and "
+"chooses what to keep."
 msgstr "点击“发送”将这些内容提供给另一台设备——对方随后会查看列表并选择要保留的内容。"
 
 #: src/ui/sync_share_ui.rs:74
@@ -3075,8 +3126,8 @@ msgstr "要移除此直播吗？"
 
 #: src/ui/yt_page.rs:451
 msgid ""
-"YouTube isn't working right now – update yt-dlp in the settings, or wait for "
-"a newer release."
+"YouTube isn't working right now – update yt-dlp in the settings, or wait for"
+" a newer release."
 msgstr "YouTube 目前无法使用——请在设置中更新 yt-dlp，或等待更新的版本。"
 
 #: src/ui/yt_page.rs:482
@@ -3117,8 +3168,8 @@ msgstr "没有直播"
 
 #: src/ui/yt_page.rs:610
 msgid ""
-"Search YouTube for live streams, such as lofi radio, and add them here. They "
-"are only streamed, never downloaded."
+"Search YouTube for live streams, such as lofi radio, and add them here. They"
+" are only streamed, never downloaded."
 msgstr "在 YouTube 上搜索直播（例如 lofi 电台）并添加到这里。直播只能在线收听，不会下载。"
 
 #: src/ui/yt_page.rs:871
@@ -3368,13 +3419,13 @@ msgstr "无法加载播放列表"
 #~ msgstr "录音缓冲区（分钟）"
 
 #~ msgid ""
-#~ "Keep the last minutes of a station so you can record a song after it played. "
-#~ "0 turns it off."
+#~ "Keep the last minutes of a station so you can record a song after it played."
+#~ " 0 turns it off."
 #~ msgstr "保留电台最近的几分钟，以便在歌曲播放后录制它。0 表示关闭。"
 
 #~ msgid ""
-#~ "Search and play YouTube, follow channels, add videos/playlists to your music "
-#~ "or keep them offline. May be restricted in some countries."
+#~ "Search and play YouTube, follow channels, add videos/playlists to your music"
+#~ " or keep them offline. May be restricted in some countries."
 #~ msgstr "搜索并播放 YouTube、关注频道、将视频/播放列表添加到您的音乐或离线保存。在某些国家/地区可能受限。"
 
 #~ msgid "Enable YouTube"

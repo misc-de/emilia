@@ -864,11 +864,36 @@ pub fn cache_podcast_image(url: &str) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
 }
 
+/// Prefix of a station "favicon" that points at a logo the user picked from a
+/// local file (copied into [`station_logo_dir`]) instead of an image URL.
+const LOCAL_LOGO_PREFIX: &str = "file://";
+
+/// Directory for station logos picked from a local file:
+/// `$XDG_DATA_HOME/emilia/station-logos`. Lives under the **data** dir so the OS
+/// never purges a logo the user chose by hand.
+fn station_logo_dir() -> PathBuf {
+    let mut dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("emilia");
+    dir.push("station-logos");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Whether a station favicon is a hand-picked local logo (`file://…`), which
+/// only exists on this device.
+pub fn is_local_station_logo(favicon: &str) -> bool {
+    favicon.starts_with(LOCAL_LOGO_PREFIX)
+}
+
 /// Local cache path of a station logo (key = image URL), **only if the file is
 /// already present** – without network access (for display in the UI thread).
+/// A hand-picked local logo (`file://…`) resolves to its own file.
 pub fn station_image_path(url: &str) -> Option<String> {
     if url.trim().is_empty() {
         return None;
+    }
+    if let Some(local) = url.strip_prefix(LOCAL_LOGO_PREFIX) {
+        return Path::new(local).exists().then(|| local.to_string());
     }
     let mut p = cover_cache_dir();
     p.push(format!("station_{}.img", name_hash(url)));
@@ -882,14 +907,62 @@ pub fn cache_station_image(url: &str) -> Option<String> {
     if let Some(p) = station_image_path(url) {
         return Some(p);
     }
-    if url.trim().is_empty() {
+    if url.trim().is_empty() || is_local_station_logo(url) {
         return None;
     }
     let bytes = shared_client().get_image(url).ok().flatten()?;
+    store_station_image(url, &bytes)
+}
+
+/// Like [`cache_station_image`], but only accepts a download that really is a
+/// decodable image of at least `min_edge` px (a soft-404 HTML page or a 16 px
+/// favicon is rejected). Used when probing candidate logo URLs. **Network.**
+pub fn cache_station_image_checked(url: &str, min_edge: i32) -> Option<String> {
+    if let Some(p) = station_image_path(url) {
+        return Some(p);
+    }
+    let bytes = shared_client().get_image(url).ok().flatten()?;
+    let (w, h) = image_size(&bytes)?;
+    if w.max(h) < min_edge {
+        return None;
+    }
+    store_station_image(url, &bytes)
+}
+
+/// Pixel size of encoded image bytes, `None` if they don't decode.
+fn image_size(bytes: &[u8]) -> Option<(i32, i32)> {
+    use gtk::gdk_pixbuf::PixbufLoader;
+    use gtk::prelude::*;
+    let loader = PixbufLoader::new();
+    if loader.write(bytes).is_err() || loader.close().is_err() {
+        return None;
+    }
+    let pb = loader.pixbuf()?;
+    Some((pb.width(), pb.height()))
+}
+
+fn store_station_image(url: &str, bytes: &[u8]) -> Option<String> {
     let mut p = cover_cache_dir();
     p.push(format!("station_{}.img", name_hash(url)));
-    std::fs::write(&p, &bytes).ok()?;
+    std::fs::write(&p, bytes).ok()?;
     Some(p.to_string_lossy().into_owned())
+}
+
+/// Copies a user-picked image file into [`station_logo_dir`] (downscaled like
+/// any cover) and returns the favicon value to store for the station
+/// (`file://…`). `None` if the file can't be read or isn't an image.
+pub fn import_station_logo(src: &Path) -> Option<String> {
+    let bytes = std::fs::read(src).ok()?;
+    image_size(&bytes)?;
+    let bytes = shrink_image(bytes);
+    let mut p = station_logo_dir();
+    // Content hash as name: picking the same image again reuses the file, a
+    // different one gets a new path (so no stale thumbnail is shown).
+    let mut h = DefaultHasher::new();
+    bytes.hash(&mut h);
+    p.push(format!("{:016x}.img", h.finish()));
+    std::fs::write(&p, &bytes).ok()?;
+    Some(format!("{LOCAL_LOGO_PREFIX}{}", p.to_string_lossy()))
 }
 
 /// Local cache path of an enriched YouTube cover (key = video id), if present.

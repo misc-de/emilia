@@ -166,6 +166,14 @@ pub(crate) enum StreamInput {
         name: String,
     },
     Delete(i64),
+    /// Open the "Change logo" dialog of a station.
+    LogoDialog(i64),
+    /// Set a station's logo to an image URL (`None`/empty = remove the logo).
+    SetLogoUrl(i64, Option<String>),
+    /// Use a local image file as a station's logo.
+    SetLogoFile(i64, std::path::PathBuf),
+    /// Search the web for a station's logo (`true` = report the outcome).
+    FindLogo(i64, bool),
     OpenRecording(i64),
     RecordingDelete(i64),
     RecordingDeleteConfirmed(i64),
@@ -230,6 +238,13 @@ pub(crate) enum StreamCmd {
     /// Startup logo cache finished; `true` if it brought in a logo that was
     /// missing → redraw the stations (they were built from the cache).
     LogosCached(bool),
+    /// Background logo search for a station finished (`favicon` = found image
+    /// URL, already cached); `report` = tell the user the outcome.
+    LogoFound {
+        id: i64,
+        favicon: Option<String>,
+        report: bool,
+    },
 }
 
 /// Fetches the station logos not yet in the cache (worker thread — network).
@@ -633,6 +648,59 @@ impl Component for StreamPage {
             StreamInput::Delete(id) => {
                 let _ = sender.output(StreamOutput::StreamDeleteUndo(id));
             }
+            StreamInput::LogoDialog(id) => self.open_logo_dialog(&sender, id),
+            StreamInput::SetLogoUrl(id, url) => {
+                let url = url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+                let _ = self.library.set_stream_favicon(id, url.as_deref());
+                self.reload_streams(&sender);
+                if let Some(url) = url {
+                    sender.spawn_command(move |out| {
+                        let ok = crate::core::online::cache_station_image(&url).is_some();
+                        let _ = out.send(if ok {
+                            StreamCmd::ReloadStreams
+                        } else {
+                            StreamCmd::LogoFound {
+                                id,
+                                favicon: None,
+                                report: true,
+                            }
+                        });
+                    });
+                }
+            }
+            StreamInput::SetLogoFile(id, path) => {
+                match crate::core::online::import_station_logo(&path) {
+                    Some(fav) => {
+                        let _ = self.library.set_stream_favicon(id, Some(&fav));
+                        self.reload_streams(&sender);
+                    }
+                    None => {
+                        let _ =
+                            sender.output(StreamOutput::Toast(gettext("Could not load the image")));
+                    }
+                }
+            }
+            StreamInput::FindLogo(id, report) => {
+                let Some(url) = self
+                    .stream_items
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.url.clone())
+                else {
+                    return;
+                };
+                if report {
+                    let _ = sender.output(StreamOutput::Toast(gettext("Searching for a logo…")));
+                }
+                sender.spawn_command(move |out| {
+                    let favicon = crate::core::station_logo::find_logo(&url);
+                    let _ = out.send(StreamCmd::LogoFound {
+                        id,
+                        favicon,
+                        report,
+                    });
+                });
+            }
             StreamInput::OpenRecording(id) => self.open_recording(&sender, id),
             StreamInput::RecordingDelete(id) => {
                 let _ = sender.output(StreamOutput::RecordingDeleteUndo(id));
@@ -673,6 +741,23 @@ impl Component for StreamPage {
                     self.reload_streams(&sender);
                 }
             }
+            StreamCmd::LogoFound {
+                id,
+                favicon,
+                report,
+            } => match favicon {
+                Some(fav) => {
+                    let _ = self.library.set_stream_favicon(id, Some(&fav));
+                    self.reload_streams(&sender);
+                    if report {
+                        let _ = sender.output(StreamOutput::Toast(gettext("Logo updated")));
+                    }
+                }
+                None if report => {
+                    let _ = sender.output(StreamOutput::Toast(gettext("No logo found")));
+                }
+                None => {}
+            },
         }
     }
 }
@@ -1050,6 +1135,15 @@ impl StreamPage {
             });
         }
         actions.add(&rename);
+        let logo_row = action_row(&gettext("Change logo"), "image-x-generic-symbolic");
+        {
+            let (sender, dialog) = (sender.clone(), dialog.clone());
+            logo_row.connect_activated(move |_| {
+                sender.input(StreamInput::LogoDialog(id));
+                dialog.close();
+            });
+        }
+        actions.add(&logo_row);
         let eq = action_row(
             &gettext("Equalizer settings"),
             "multimedia-equalizer-symbolic",
@@ -1134,90 +1228,101 @@ impl StreamPage {
         dialog.present(Some(&root));
     }
 
-    /// Dialog for adding a station (worldwide search + manual URL).
+    /// Dialog: change a station's logo — search it online, pick an image file,
+    /// or enter an image URL (an empty URL removes the logo).
+    fn open_logo_dialog(&self, sender: &ComponentSender<Self>, id: i64) {
+        let Some(root) = self.window.clone() else {
+            return;
+        };
+        let current = self
+            .stream_items
+            .iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.favicon.clone())
+            .filter(|f| !crate::core::online::is_local_station_logo(f))
+            .unwrap_or_default();
+        let dialog = adw::AlertDialog::new(
+            Some(&gettext("Change logo")),
+            Some(&gettext(
+                "Search the station's website for its logo, choose an image file, \
+                 or enter the address of an image.",
+            )),
+        );
+        let entry = gtk::Entry::builder()
+            .text(&current)
+            .placeholder_text(gettext("Image URL (https://…)"))
+            .input_purpose(gtk::InputPurpose::Url)
+            .activates_default(true)
+            .build();
+        crate::ui::widgets::no_autofocus(&entry);
+        dialog.set_extra_child(Some(&entry));
+        dialog.add_responses(&[
+            ("cancel", &gettext("Cancel")),
+            ("search", &gettext("Search online")),
+            ("file", &gettext("Choose image…")),
+            ("apply", &gettext("Use URL")),
+        ]);
+        dialog.set_response_appearance("apply", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("apply"));
+        {
+            let (sender, root) = (sender.clone(), root.clone());
+            dialog.connect_response(None, move |_, resp| match resp {
+                "search" => sender.input(StreamInput::FindLogo(id, true)),
+                "apply" => sender.input(StreamInput::SetLogoUrl(id, Some(entry.text().into()))),
+                "file" => {
+                    let filter = gtk::FileFilter::new();
+                    filter.add_pixbuf_formats();
+                    filter.set_name(Some(&gettext("Images")));
+                    let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
+                    filters.append(&filter);
+                    let chooser = gtk::FileDialog::builder()
+                        .title(gettext("Choose logo"))
+                        .filters(&filters)
+                        .build();
+                    let sender = sender.clone();
+                    chooser.open(Some(&root), gtk::gio::Cancellable::NONE, move |res| {
+                        if let Some(path) = res.ok().and_then(|f| f.path()) {
+                            sender.input(StreamInput::SetLogoFile(id, path));
+                        }
+                    });
+                }
+                _ => {}
+            });
+        }
+        dialog.present(Some(&root));
+    }
+
+    /// The "+": a centered choice modal like the Files "+" — search the
+    /// worldwide station directory, or enter a stream address by hand.
     fn open_add_stream_dialog(&self, sender: &ComponentSender<Self>) {
         let Some(root) = self.window.clone() else {
             return;
         };
-        let dialog = adw::Dialog::builder().title(gettext("Add station")).build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-
-        let search_group = adw::PreferencesGroup::builder()
-            .title(gettext("Search"))
-            .description(gettext("Find a station worldwide by name"))
-            .build();
-        let search_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(6)
-            .build();
-        let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text(gettext("Station name …"))
-            .hexpand(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&search_entry);
-        let search_btn = gtk::Button::builder().label(gettext("Search")).build();
-        search_btn.add_css_class("suggested-action");
-        search_row.append(&search_entry);
-        search_row.append(&search_btn);
-        search_group.add(&search_row);
-        content.append(&search_group);
-
-        {
-            let (sender, entry) = (sender.clone(), search_entry.clone());
-            search_entry.connect_activate(move |_| {
-                let term = entry.text().to_string();
-                if !term.trim().is_empty() {
-                    sender.input(StreamInput::Search(term));
+        let slot = self.stream_search.clone();
+        let (sender, win) = (sender.clone(), root.clone());
+        let dialog = crate::ui::widgets::choice_modal(
+            &gettext("Add station"),
+            &[
+                ("search", gettext("Search stations")),
+                ("url", gettext("Enter stream address")),
+            ],
+            "search",
+            move |resp| match resp {
+                "search" => open_stream_search_modal(&sender, &slot, &win),
+                "url" => {
+                    let sender = sender.clone();
+                    let (dialog, _) = crate::ui::widgets::entry_modal(
+                        &gettext("Enter stream address"),
+                        &gettext("Stream address (URL)"),
+                        &gettext("Add"),
+                        move |url| sender.input(StreamInput::AddUrl(url)),
+                    );
+                    dialog.present(Some(&win));
                 }
-            });
-        }
-        {
-            let (sender, entry) = (sender.clone(), search_entry.clone());
-            search_btn.connect_clicked(move |_| {
-                let term = entry.text().to_string();
-                if !term.trim().is_empty() {
-                    sender.input(StreamInput::Search(term));
-                }
-            });
-        }
-
-        let results = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .build();
-        results.add_css_class("boxed-list");
-        results.set_visible(false);
-        content.append(&results);
-
-        let url_group = adw::PreferencesGroup::builder()
-            .title(gettext("Or enter a stream address"))
-            .build();
-        let url_entry = adw::EntryRow::builder()
-            .title(gettext("Stream address (URL)"))
-            .show_apply_button(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&url_entry);
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            url_entry.connect_apply(move |e| {
-                let url = e.text().to_string();
-                if !url.trim().is_empty() {
-                    sender.input(StreamInput::AddUrl(url));
-                    dialog.close();
-                }
-            });
-        }
-        url_group.add(&url_entry);
-        content.append(&url_group);
-
-        *self.stream_search.borrow_mut() = Some((dialog.clone(), results.clone()));
-        {
-            let slot = self.stream_search.clone();
-            dialog.connect_closed(move |_| {
-                *slot.borrow_mut() = None;
-            });
-        }
-        present_detail(&dialog, &content, &root);
+                _ => {}
+            },
+        );
+        dialog.present(Some(&root));
     }
 
     /// Redraws the results list in the open add dialog.
@@ -1246,12 +1351,8 @@ impl StreamPage {
             };
             row.set_sensitive(false);
             list.append(&row);
-            dialog.set_content_height(300);
             return;
         }
-
-        let rows = self.stream_search_results.len() as i32;
-        dialog.set_content_height((320 + rows * 66).min(760));
 
         for (i, r) in self.stream_search_results.iter().enumerate() {
             let row = adw::ActionRow::builder()
@@ -1307,18 +1408,31 @@ impl StreamPage {
             r.codec.as_deref(),
             r.bitrate,
         ) {
-            Ok(_) => {
+            Ok(id) => {
                 self.reload_streams(sender);
                 let _ = sender.output(StreamOutput::Toast(gettext_f(
                     "Added: {n}",
                     &[("n", &r.name)],
                 )));
-                if let Some(fav) = r.favicon.clone() {
-                    sender.spawn_command(move |out| {
-                        crate::core::online::cache_station_image(&fav);
-                        let _ = out.send(StreamCmd::ReloadStreams);
+                // Radio-Browser's favicon is often missing or dead (404) —
+                // then search the station's website for a logo instead.
+                let fav = r.favicon.clone();
+                let url = r.url.clone();
+                sender.spawn_command(move |out| {
+                    let cached = fav
+                        .as_deref()
+                        .and_then(crate::core::online::cache_station_image)
+                        .is_some();
+                    let _ = out.send(if cached {
+                        StreamCmd::ReloadStreams
+                    } else {
+                        StreamCmd::LogoFound {
+                            id,
+                            favicon: crate::core::station_logo::find_logo(&url),
+                            report: false,
+                        }
                     });
-                }
+                });
             }
             Err(_) => {
                 let _ = sender.output(StreamOutput::Toast(gettext("Could not add station")));
@@ -1335,9 +1449,11 @@ impl StreamPage {
                 .library
                 .add_stream(&name, &url, None, None, None, None, None)
             {
-                Ok(_) => {
+                Ok(id) => {
                     self.reload_streams(sender);
                     let _ = sender.output(StreamOutput::Toast(gettext("Station added")));
+                    // A station added by URL brings no logo — look one up.
+                    sender.input(StreamInput::FindLogo(id, false));
                 }
                 Err(_) => {
                     let _ = sender.output(StreamOutput::Toast(gettext("Could not add station")));
@@ -1900,4 +2016,28 @@ mod tests {
             Some("Germany".into())
         );
     }
+}
+
+/// Second step of the stations "+": the directory search. Registers the dialog
+/// in `slot` so the worker's results land in its list.
+fn open_stream_search_modal(
+    sender: &ComponentSender<StreamPage>,
+    slot: &Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    root: &impl IsA<gtk::Widget>,
+) {
+    let sender = sender.clone();
+    let (dialog, entry, results) = crate::ui::widgets::search_modal(
+        &gettext("Search stations"),
+        &gettext("Station name …"),
+        move |term| sender.input(StreamInput::Search(term)),
+    );
+    *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
+    {
+        let slot = slot.clone();
+        dialog.connect_closed(move |_| {
+            *slot.borrow_mut() = None;
+        });
+    }
+    dialog.present(Some(root));
+    entry.grab_focus();
 }

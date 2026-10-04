@@ -25,6 +25,7 @@ pub mod scanner;
 pub mod secrets;
 pub mod smb;
 pub mod source;
+pub mod station_logo;
 pub mod streaming;
 pub mod sync;
 pub mod tray;

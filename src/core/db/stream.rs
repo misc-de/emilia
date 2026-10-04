@@ -25,7 +25,7 @@ impl Library {
             "INSERT INTO stream (name, url, favicon, tags, country, codec, bitrate, added_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))
              ON CONFLICT(url) DO UPDATE SET
-                name = excluded.name, favicon = excluded.favicon, tags = excluded.tags,
+                name = excluded.name, favicon = COALESCE(excluded.favicon, favicon), tags = excluded.tags,
                 country = excluded.country, codec = excluded.codec, bitrate = excluded.bitrate",
             rusqlite::params![name, url, favicon, tags, country, codec, bitrate],
         )?;
@@ -59,6 +59,16 @@ impl Library {
         self.conn.execute(
             "UPDATE stream SET name = ?1 WHERE id = ?2",
             rusqlite::params![name, id],
+        )?;
+        Ok(())
+    }
+
+    /// Sets (or with `None` removes) a station's logo: an image URL, or a
+    /// hand-picked local logo (`file://…`).
+    pub fn set_stream_favicon(&self, id: i64, favicon: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE stream SET favicon = ?1 WHERE id = ?2",
+            rusqlite::params![favicon, id],
         )?;
         Ok(())
     }
