@@ -285,6 +285,7 @@ impl App {
         dialog.add_response("gdrive", &gettext("Google Drive"));
         dialog.set_default_response(Some("folder"));
         dialog.set_close_response("cancel");
+        crate::ui::widgets::close_on_outside_click(&dialog);
         {
             let sender = sender.clone();
             dialog.connect_response(None, move |_, resp| match resp {

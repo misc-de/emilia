@@ -1969,6 +1969,7 @@ impl PodcastsPage {
         // The "+" opens a centered modal like the Files "+", also on the
         // phone — not the bottom sheet of the detail dialogs.
         dialog.set_presentation_mode(adw::DialogPresentationMode::Floating);
+        crate::ui::widgets::close_on_outside_click(&dialog);
         let content = detail_box();
 
         // --- Search (iTunes directory) ---
