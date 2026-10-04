@@ -275,12 +275,9 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let dialog = adw::AlertDialog::new(
-            Some(&gettext("Add a source")),
-            Some(&gettext(
-                "Add a local folder or connect a Nextcloud, an SMB share or Google Drive as another tab.",
-            )),
-        );
+        let dialog = adw::AlertDialog::new(Some(&gettext("Add a source")), None);
+        // CSS hook: sets Cancel apart (gap above it, muted red).
+        dialog.add_css_class("emilia-add-source");
         dialog.add_response("cancel", &gettext("Cancel"));
         dialog.add_response("folder", &gettext("Local folder"));
         dialog.add_response("nextcloud", &gettext("Nextcloud"));

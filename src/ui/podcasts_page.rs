@@ -23,7 +23,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
-use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
+use crate::ui::app_gallery::{gallery_cell_bare, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
@@ -1110,7 +1110,7 @@ impl PodcastsPage {
             let cover = image
                 .as_deref()
                 .and_then(crate::core::online::podcast_image_path);
-            let (cell, pic) = gallery_cell(cover.as_deref(), "microphone-symbolic", title);
+            let (cell, pic) = gallery_cell_bare(cover.as_deref(), "microphone-symbolic", title);
             if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
                 if crate::ui::widgets::cached_thumb(path).is_none() {
                     to_decode.push((path.to_string(), pic));

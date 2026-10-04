@@ -90,6 +90,26 @@ pub(crate) fn gallery_cell(
     icon: &str,
     title: &str,
 ) -> (SquareBin, Option<gtk::Picture>) {
+    build_gallery_cell(cover_path, icon, title, false)
+}
+
+/// Like [`gallery_cell`], but just the cover: no card frame and no title
+/// overlay (the artwork already carries the name). Only a cell without a
+/// cover keeps its title, otherwise the placeholder icon would be anonymous.
+pub(crate) fn gallery_cell_bare(
+    cover_path: Option<&str>,
+    icon: &str,
+    title: &str,
+) -> (SquareBin, Option<gtk::Picture>) {
+    build_gallery_cell(cover_path, icon, title, true)
+}
+
+fn build_gallery_cell(
+    cover_path: Option<&str>,
+    icon: &str,
+    title: &str,
+    bare: bool,
+) -> (SquareBin, Option<gtk::Picture>) {
     let overlay = gtk::Overlay::new();
     overlay.set_halign(gtk::Align::Fill);
     overlay.set_valign(gtk::Align::Fill);
@@ -100,7 +120,7 @@ pub(crate) fn gallery_cell(
     frame.set_vexpand(true);
     frame.set_halign(gtk::Align::Fill);
     frame.set_valign(gtk::Align::Fill);
-    frame.add_css_class("card");
+    frame.add_css_class(if bare { "emilia-gallery-bare" } else { "card" });
 
     let picture = match cover_path {
         Some(path) => {
@@ -127,6 +147,12 @@ pub(crate) fn gallery_cell(
         }
     };
     overlay.set_child(Some(&frame));
+
+    if bare && picture.is_some() {
+        let cell = SquareBin::new(&overlay);
+        cell.set_hexpand(true);
+        return (cell, picture);
+    }
 
     let label = gtk::Label::new(Some(title));
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);

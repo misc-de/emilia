@@ -1376,6 +1376,11 @@ impl App {
                  label.numeric.dim-label { opacity: 1; }\
                  progressbar.emilia-hourbar, progressbar.emilia-hourbar > trough, progressbar.emilia-hourbar > trough > progress { min-width: 0px; }\
                  label.emilia-gallery-title { background-color: alpha(black, 0.55); color: white; padding: 3px 8px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }\
+                 box.emilia-gallery-bare { border-radius: 6px; }\
+                 /* 'Add a source': Cancel is the first response, stacked at \
+                    the bottom — push it down a row and tint it a muted red. */\
+                 dialog.emilia-add-source .response-area.compact > button:first-child { margin-top: 18px; background-color: mix(@destructive_bg_color, @window_bg_color, 0.35); color: @destructive_fg_color; }\
+                 dialog.emilia-add-source .response-area.compact > button:first-child:hover { background-color: mix(@destructive_bg_color, @window_bg_color, 0.45); }\
                  flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\
                  flowbox.emilia-gallery > flowboxchild:selected { background: none; }\
                  label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\
