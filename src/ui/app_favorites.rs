@@ -147,6 +147,7 @@ impl App {
                 headers.as_deref(),
                 |v0| Msg::Favorite(FavoriteMsg::PlayFavorite(v0)),
                 |v0| Msg::Favorite(FavoriteMsg::ShowFavoriteDetail(v0)),
+                self.libview.gallery_desc_on("favorites"),
             );
         } else {
             // Drag-to-reorder only in the manual order; a sort would override it.
@@ -196,6 +197,7 @@ impl App {
                 headers.as_deref(),
                 |v0| Msg::Favorite(FavoriteMsg::OpenAudiobookEntry(v0)),
                 |v0| Msg::Favorite(FavoriteMsg::ShowAudiobookDetail(v0)),
+                self.libview.gallery_desc_on("audiobooks"),
             );
         } else {
             self.fill_entry_list(

@@ -231,6 +231,7 @@ impl App {
                 headers.as_deref(),
                 |i| Msg::Playlist(PlaylistMsg::OpenAt(i)),
                 |i| Msg::Playlist(PlaylistMsg::ShowDetailAt(i)),
+                self.libview.gallery_desc_on("playlists"),
             );
             return;
         }

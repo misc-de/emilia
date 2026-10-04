@@ -112,6 +112,10 @@ pub(crate) struct StreamPage {
     /// Stations gallery on/off (cover grid of station logos). Persisted as
     /// "gallery_stations". Recordings carry no covers, so they have no gallery.
     stations_gallery: bool,
+    /// "Show description" (sort popover): station gallery tiles framed with
+    /// their name instead of the bare logo. Persisted as
+    /// "gallery_desc_stations".
+    stations_gallery_desc: bool,
     /// Tiles per row in the stations gallery (mirrors the global setting).
     gallery_columns: u32,
     /// Per-row alphabetical headings of the stations / recordings / heard lists.
@@ -149,6 +153,8 @@ pub(crate) enum StreamInput {
     SetNoGroup(bool),
     /// Toggle the stations gallery (Channels sub-view only).
     SetGallery(bool),
+    /// Toggle the stations gallery tiles' name ("Show description").
+    SetGalleryDesc(bool),
     Add,
     Search(String),
     AddResult(usize),
@@ -432,6 +438,12 @@ impl Component for StreamPage {
                 .as_deref(),
             Some("1")
         );
+        let stations_gallery_desc = library
+            .get_setting("gallery_desc_stations")
+            .ok()
+            .flatten()
+            .as_deref()
+            != Some("0");
         let gallery_columns = library
             .get_setting("gallery_columns")
             .ok()
@@ -479,6 +491,7 @@ impl Component for StreamPage {
             recordings_no_group,
             heard_no_group,
             stations_gallery: stations_gallery_on,
+            stations_gallery_desc,
             gallery_columns,
             station_headers,
             recording_headers,
@@ -571,6 +584,15 @@ impl Component for StreamPage {
                     let _ = self
                         .library
                         .set_setting("gallery_stations", if on { "1" } else { "0" });
+                    self.reload_streams(&sender);
+                }
+            }
+            StreamInput::SetGalleryDesc(on) => {
+                if self.stations_gallery_desc != on {
+                    self.stations_gallery_desc = on;
+                    let _ = self
+                        .library
+                        .set_setting("gallery_desc_stations", if on { "1" } else { "0" });
                     self.reload_streams(&sender);
                 }
             }
@@ -726,6 +748,7 @@ impl StreamPage {
             on_toggle: Box::new(move |off| {
                 let _ = group_input.send(StreamInput::SetNoGroup(off));
             }),
+            sub: false,
         }];
         // The stations sub-view additionally offers a logo gallery (recordings
         // carry no covers, so they group but never gallery).
@@ -737,6 +760,16 @@ impl StreamPage {
                 on_toggle: Box::new(move |on| {
                     let _ = gallery_input.send(StreamInput::SetGallery(on));
                 }),
+                sub: false,
+            });
+            let desc_input = input.clone();
+            toggles.push(SortToggle {
+                label: gettext("Show description"),
+                active: self.stations_gallery_desc,
+                on_toggle: Box::new(move |on| {
+                    let _ = desc_input.send(StreamInput::SetGalleryDesc(on));
+                }),
+                sub: true,
             });
         }
         let popover = sort_popover(
@@ -820,7 +853,12 @@ impl StreamPage {
                 .favicon
                 .as_deref()
                 .and_then(crate::core::online::station_image_path);
-            let (cell, pic) = gallery_cell(logo.as_deref(), STREAM_ICON, &st.name);
+            let (cell, pic) = gallery_cell(
+                logo.as_deref(),
+                STREAM_ICON,
+                &st.name,
+                self.stations_gallery_desc,
+            );
             if let (Some(path), Some(pic)) = (logo.as_deref(), pic) {
                 if crate::ui::widgets::cached_thumb(path).is_none() {
                     to_decode.push((path.to_string(), pic));

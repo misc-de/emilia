@@ -85,30 +85,16 @@ mod square_bin {
 }
 use square_bin::SquareBin;
 
+/// One square gallery tile. `described` (the sort popover's "Show
+/// description") frames the cover as a card with its title over the bottom
+/// edge; without it the tile is just the cover — no frame, no title (the
+/// artwork already carries the name). Only a tile without a cover keeps its
+/// title then, otherwise the placeholder icon would be anonymous.
 pub(crate) fn gallery_cell(
     cover_path: Option<&str>,
     icon: &str,
     title: &str,
-) -> (SquareBin, Option<gtk::Picture>) {
-    build_gallery_cell(cover_path, icon, title, false)
-}
-
-/// Like [`gallery_cell`], but just the cover: no card frame and no title
-/// overlay (the artwork already carries the name). Only a cell without a
-/// cover keeps its title, otherwise the placeholder icon would be anonymous.
-pub(crate) fn gallery_cell_bare(
-    cover_path: Option<&str>,
-    icon: &str,
-    title: &str,
-) -> (SquareBin, Option<gtk::Picture>) {
-    build_gallery_cell(cover_path, icon, title, true)
-}
-
-fn build_gallery_cell(
-    cover_path: Option<&str>,
-    icon: &str,
-    title: &str,
-    bare: bool,
+    described: bool,
 ) -> (SquareBin, Option<gtk::Picture>) {
     let overlay = gtk::Overlay::new();
     overlay.set_halign(gtk::Align::Fill);
@@ -120,7 +106,11 @@ fn build_gallery_cell(
     frame.set_vexpand(true);
     frame.set_halign(gtk::Align::Fill);
     frame.set_valign(gtk::Align::Fill);
-    frame.add_css_class(if bare { "emilia-gallery-bare" } else { "card" });
+    frame.add_css_class(if described {
+        "card"
+    } else {
+        "emilia-gallery-bare"
+    });
 
     let picture = match cover_path {
         Some(path) => {
@@ -148,7 +138,7 @@ fn build_gallery_cell(
     };
     overlay.set_child(Some(&frame));
 
-    if bare && picture.is_some() {
+    if !described && picture.is_some() {
         let cell = SquareBin::new(&overlay);
         cell.set_hexpand(true);
         return (cell, picture);
@@ -281,13 +271,14 @@ impl App {
         labels: Option<&[String]>,
         activate: fn(usize) -> Msg,
         detail: fn(usize) -> Msg,
+        described: bool,
     ) {
         while let Some(c) = container.first_child() {
             container.remove(&c);
         }
         let Some(labels) = labels.filter(|l| l.len() == items.len()) else {
             container.append(single);
-            self.fill_gallery(single, items, activate, detail);
+            self.fill_gallery(single, items, activate, detail, described);
             return;
         };
         let mut i = 0;
@@ -304,20 +295,22 @@ impl App {
             container.append(&header);
             let fb = gtk::FlowBox::new();
             container.append(&fb);
-            self.fill_gallery_into(&fb, &items[i..j], i, activate, detail, false);
+            self.fill_gallery_into(&fb, &items[i..j], i, activate, detail, described, false);
             i = j;
         }
     }
 
-    /// Fills a FlowBox as a gallery: tiles from `(cover, icon, title)`.
+    /// Fills a FlowBox as a gallery: tiles from `(cover, icon, title)`, framed
+    /// with their title when `described` (see [`gallery_cell`]).
     pub(crate) fn fill_gallery(
         &self,
         fb: &gtk::FlowBox,
         items: &[(Option<String>, &'static str, String)],
         activate: fn(usize) -> Msg,
         detail: fn(usize) -> Msg,
+        described: bool,
     ) {
-        self.fill_gallery_into(fb, items, 0, activate, detail, true);
+        self.fill_gallery_into(fb, items, 0, activate, detail, described, true);
     }
 
     /// Like [`Self::fill_gallery`], but the click/detail message indices are
@@ -331,13 +324,14 @@ impl App {
         base: usize,
         activate: fn(usize) -> Msg,
         detail: fn(usize) -> Msg,
+        described: bool,
         hook: bool,
     ) {
         crate::ui::widgets::reset_gallery_grid(fb, self.libview.gallery_columns);
 
         let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (cover, icon, title)) in items.iter().enumerate() {
-            let (cell, pic) = gallery_cell(cover.as_deref(), icon, title);
+            let (cell, pic) = gallery_cell(cover.as_deref(), icon, title, described);
             if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
                 if crate::ui::widgets::cached_thumb(path).is_none() {
                     to_decode.push((path.to_string(), pic));

@@ -35,6 +35,7 @@ impl App {
                 headers.as_deref(),
                 |v0| Msg::Concert(ConcertMsg::OpenConcertEntry(v0)),
                 |v0| Msg::Concert(ConcertMsg::ShowConcertDetail(v0)),
+                self.libview.gallery_desc_on("concerts"),
             );
         } else {
             self.fill_entry_list(

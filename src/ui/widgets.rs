@@ -683,6 +683,30 @@ pub fn adapt_dialog(dialog: &adw::Dialog, mobile: bool) {
     }
 }
 
+/// Closes a centered (floating) dialog when the user clicks or taps beside it.
+/// libadwaita does that only for the bottom sheet; a floating dialog ignores
+/// clicks on its dimmed backdrop. The dialog widget spans the whole window
+/// (the backdrop is part of it), so a press is "beside" when it misses the
+/// dialog's content. Its popovers are surfaces of their own and never reach
+/// here; neither does a dialog stacked on top of this one.
+pub fn close_on_outside_click(dialog: &impl IsA<adw::Dialog>) {
+    let click = gtk::GestureClick::new();
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    click.connect_pressed(|gesture, _, x, y| {
+        let Some(dialog) = gesture.widget().and_downcast::<adw::Dialog>() else {
+            return;
+        };
+        let Some(bounds) = dialog.child().and_then(|c| c.compute_bounds(&dialog)) else {
+            return;
+        };
+        if !bounds.contains_point(&gtk::graphene::Point::new(x as f32, y as f32)) {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            dialog.close();
+        }
+    });
+    dialog.upcast_ref::<adw::Dialog>().add_controller(click);
+}
+
 /// Empties a gallery flow box and (re-)applies its fixed grid: exactly
 /// `columns` equally wide tiles per row. No reflow to fewer columns — the user
 /// picks the grid, and each tile is kept square by its `SquareBin`.

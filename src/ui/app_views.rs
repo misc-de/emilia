@@ -475,6 +475,7 @@ impl App {
                 headers.as_deref(),
                 show_tracks,
                 show_detail,
+                self.libview.gallery_desc_on(section),
             );
         } else {
             let offline_keys = self.offline_album_keys();
@@ -521,6 +522,7 @@ impl App {
                 headers.as_deref(),
                 Msg::ShowAlbumTracks,
                 Msg::ShowAlbumDetail,
+                self.libview.gallery_desc_on("albums"),
             );
         } else {
             self.libview
@@ -727,6 +729,7 @@ impl App {
                 headers.as_deref(),
                 Msg::OpenArtistTracks,
                 Msg::ShowArtistDetail,
+                self.libview.gallery_desc_on("artists"),
             );
         } else {
             let offline_names = self.offline_artist_names_lc();

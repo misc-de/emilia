@@ -41,6 +41,7 @@ pub(crate) struct InitState {
     pub no_group: std::collections::HashMap<&'static str, bool>,
     pub gallery_view: bool,
     pub section_gallery: std::collections::HashMap<&'static str, bool>,
+    pub gallery_desc: std::collections::HashMap<&'static str, bool>,
     pub gallery_columns: u32,
     pub recording_buffer_minutes: u32,
     pub saved_section: Option<String>,
@@ -302,6 +303,21 @@ impl App {
                 _ => {}
             }
         }
+        // Per-section "Show description" ("gallery_desc_<section>"): only a
+        // stored "0" hides the tile titles; absent means shown.
+        let mut gallery_desc: std::collections::HashMap<&'static str, bool> =
+            std::collections::HashMap::new();
+        for &section in SORTABLE_SECTIONS {
+            if library
+                .get_setting(&format!("gallery_desc_{section}"))
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("0")
+            {
+                gallery_desc.insert(section, false);
+            }
+        }
         // Tiles per row (2–8). Initial default depends on the form factor:
         // 3 on phone-sized screens, 4 on the desktop (see `initial_gallery_columns`).
         let gallery_columns = library
@@ -361,6 +377,7 @@ impl App {
             no_group,
             gallery_view,
             section_gallery,
+            gallery_desc,
             gallery_columns,
             recording_buffer_minutes,
             saved_section,

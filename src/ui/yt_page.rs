@@ -74,6 +74,9 @@ pub(crate) struct YtPage {
     /// Per-view gallery override (sort popover); `None` follows the global
     /// `gallery_view`. Persisted as "gallery_channels".
     gallery_override: Option<bool>,
+    /// "Show description" (sort popover): gallery tiles framed with their title
+    /// instead of the bare cover. Persisted as "gallery_desc_channels".
+    gallery_desc: bool,
     /// Per-row alphabetical headings of the channels list (name sort).
     channel_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
@@ -174,6 +177,8 @@ pub(crate) enum YtInput {
     SetNoGroup(bool),
     /// Per-view gallery override for the channels (sort popover toggle).
     SetGallery(bool),
+    /// Toggle the gallery tiles' title ("Show description").
+    SetGalleryDesc(bool),
     SetGalleryView(bool),
     SetGalleryColumns(u32),
     SetMobile(bool),
@@ -644,6 +649,12 @@ impl Component for YtPage {
             Some("0") => Some(false),
             _ => None,
         };
+        let gallery_desc = library
+            .get_setting("gallery_desc_channels")
+            .ok()
+            .flatten()
+            .as_deref()
+            != Some("0");
         let channel_headers = std::rc::Rc::new(std::cell::RefCell::new(None));
         yt_channels_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             channel_headers.clone(),
@@ -662,6 +673,7 @@ impl Component for YtPage {
             channels_no_group,
             recent_sort,
             gallery_override,
+            gallery_desc,
             channel_headers,
             sort_slot,
             channel_items: Vec::new(),
@@ -780,6 +792,15 @@ impl Component for YtPage {
                     let _ = self
                         .library
                         .set_setting("gallery_channels", if on { "1" } else { "0" });
+                    self.reload_channels(&sender);
+                }
+            }
+            YtInput::SetGalleryDesc(on) => {
+                if self.gallery_desc != on {
+                    self.gallery_desc = on;
+                    let _ = self
+                        .library
+                        .set_setting("gallery_desc_channels", if on { "1" } else { "0" });
                     self.reload_channels(&sender);
                 }
             }
@@ -1154,6 +1175,7 @@ impl YtPage {
                 ];
                 let group_input = input.clone();
                 let gallery_input = input.clone();
+                let desc_input = input.clone();
                 let toggles = vec![
                     SortToggle {
                         label: gettext("Without grouping"),
@@ -1161,6 +1183,7 @@ impl YtPage {
                         on_toggle: Box::new(move |off| {
                             let _ = group_input.send(YtInput::SetNoGroup(off));
                         }),
+                        sub: false,
                     },
                     SortToggle {
                         label: gettext("Gallery view"),
@@ -1168,6 +1191,15 @@ impl YtPage {
                         on_toggle: Box::new(move |on| {
                             let _ = gallery_input.send(YtInput::SetGallery(on));
                         }),
+                        sub: false,
+                    },
+                    SortToggle {
+                        label: gettext("Show description"),
+                        active: self.gallery_desc,
+                        on_toggle: Box::new(move |on| {
+                            let _ = desc_input.send(YtInput::SetGalleryDesc(on));
+                        }),
+                        sub: true,
                     },
                 ];
                 let popover = sort_popover(
@@ -1320,7 +1352,12 @@ impl YtPage {
             let cover = thumb
                 .as_deref()
                 .and_then(crate::core::online::youtube_thumb_path);
-            let (cell, pic) = gallery_cell(cover.as_deref(), "avatar-default-symbolic", title);
+            let (cell, pic) = gallery_cell(
+                cover.as_deref(),
+                "avatar-default-symbolic",
+                title,
+                self.gallery_desc,
+            );
             if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
                 if crate::ui::widgets::cached_thumb(path).is_none() {
                     to_decode.push((path.to_string(), pic));
@@ -1568,6 +1605,7 @@ impl YtPage {
         // The "+" opens a centered modal like the Files "+", also on the
         // phone — not the bottom sheet of the detail dialogs.
         dialog.set_presentation_mode(adw::DialogPresentationMode::Floating);
+        crate::ui::widgets::close_on_outside_click(&dialog);
         let content = detail_box();
 
         let kind = Rc::new(Cell::new(SearchKind::Yt(YtKind::Video)));

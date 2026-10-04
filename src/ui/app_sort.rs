@@ -106,7 +106,13 @@ pub(crate) struct SortToggle {
     pub label: String,
     pub active: bool,
     pub on_toggle: Box<dyn Fn(bool)>,
+    /// Indented beneath the previous toggle and only sensitive while that one
+    /// is active (e.g. "Show description" under "Gallery view").
+    pub sub: bool,
 }
+
+/// Indent of a [`SortToggle::sub`] toggle beneath its parent.
+const SUB_TOGGLE_INDENT: i32 = 24;
 
 pub(crate) fn sort_popover(
     crits: &[(SortCrit, String)],
@@ -180,12 +186,21 @@ pub(crate) fn sort_popover(
         sep.set_margin_top(4);
         sep.set_margin_bottom(2);
         bx.append(&sep);
+        let mut prev: Option<gtk::CheckButton> = None;
         for t in toggles {
             let cb = gtk::CheckButton::with_label(&t.label);
             cb.add_css_class("dim-label");
             cb.set_active(t.active);
+            if let (true, Some(parent)) = (t.sub, &prev) {
+                cb.set_margin_start(SUB_TOGGLE_INDENT);
+                parent
+                    .bind_property("active", &cb, "sensitive")
+                    .sync_create()
+                    .build();
+            }
             cb.connect_toggled(move |b| (t.on_toggle)(b.is_active()));
             bx.append(&cb);
+            prev = Some(cb);
         }
     }
 
@@ -224,6 +239,9 @@ pub(crate) enum SortMsg {
     SetNoGroup(bool),
     /// Toggle the gallery view for the current section only.
     SectionGallery(bool),
+    /// Toggle the gallery tiles' title ("Show description") for the current
+    /// section only.
+    SectionGalleryDesc(bool),
     /// The PodcastsPage updated its sort slot → mirror onto the title-bar button.
     PodcastChanged,
     /// The StreamPage updated its sort slot → mirror onto the title-bar button.
@@ -286,6 +304,14 @@ impl App {
                 };
                 if self.libview.gallery_on(&section) != on {
                     self.set_section_gallery(&section, on, sender);
+                }
+            }
+            SortMsg::SectionGalleryDesc(on) => {
+                let Some(section) = self.current_section() else {
+                    return;
+                };
+                if self.libview.gallery_desc_on(&section) != on {
+                    self.set_section_gallery_desc(&section, on, sender);
                 }
             }
             SortMsg::GalleryView(on) => {
@@ -408,6 +434,24 @@ impl App {
         let _ = self
             .library
             .set_setting(&format!("gallery_{key}"), if on { "1" } else { "0" });
+        self.reload_section(key, sender);
+    }
+
+    /// Stores a section's "Show description" choice (gallery tiles with or
+    /// without their title), persists it and rebuilds the overview.
+    pub(crate) fn set_section_gallery_desc(
+        &mut self,
+        section: &str,
+        on: bool,
+        sender: &ComponentSender<Self>,
+    ) {
+        let Some(&key) = SORTABLE_SECTIONS.iter().find(|s| **s == section) else {
+            return;
+        };
+        self.libview.gallery_desc.insert(key, on);
+        let _ = self
+            .library
+            .set_setting(&format!("gallery_desc_{key}"), if on { "1" } else { "0" });
         self.reload_section(key, sender);
     }
 
@@ -552,6 +596,24 @@ impl App {
                 });
             }
             bx.append(&gallery);
+            // "Show description": the tiles' title (card + caption) or just the
+            // bare cover. Only meaningful in the gallery, so it sits indented
+            // beneath that toggle and is greyed out while the list shows.
+            let desc = gtk::CheckButton::with_label(&gettext("Show description"));
+            desc.add_css_class("dim-label");
+            desc.set_margin_start(SUB_TOGGLE_INDENT);
+            desc.set_active(self.libview.gallery_desc_on(&section));
+            gallery
+                .bind_property("active", &desc, "sensitive")
+                .sync_create()
+                .build();
+            {
+                let input = self.input.clone();
+                desc.connect_toggled(move |b| {
+                    let _ = input.send(Msg::Sort(SortMsg::SectionGalleryDesc(b.is_active())));
+                });
+            }
+            bx.append(&desc);
         }
 
         let popover = gtk::Popover::new();

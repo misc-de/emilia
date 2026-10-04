@@ -159,6 +159,10 @@ pub(crate) struct LibView {
     /// section with an entry uses it instead of the global [`Self::gallery_view`];
     /// a missing entry follows the global flag. Keyed like [`Self::sort`].
     pub(crate) section_gallery: std::collections::HashMap<&'static str, bool>,
+    /// Per-section "Show description" (sort popover, beneath "Gallery view"):
+    /// gallery tiles framed with their title instead of the bare cover. A
+    /// missing entry means shown. Keyed like [`Self::sort`].
+    pub(crate) gallery_desc: std::collections::HashMap<&'static str, bool>,
     /// Number of tiles per row in the gallery view (2–8).
     pub(crate) gallery_columns: u32,
     pub(crate) loading: bool,
@@ -216,6 +220,12 @@ impl LibView {
             .get(section)
             .copied()
             .unwrap_or(self.gallery_view)
+    }
+
+    /// Whether `section`'s gallery tiles show their title (card + caption)
+    /// rather than the bare cover. Defaults to shown.
+    pub(crate) fn gallery_desc_on(&self, section: &str) -> bool {
+        self.gallery_desc.get(section).copied().unwrap_or(true)
     }
 }
 

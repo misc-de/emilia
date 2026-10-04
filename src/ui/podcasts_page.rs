@@ -23,7 +23,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
-use crate::ui::app_gallery::{gallery_cell_bare, spawn_gallery_decode};
+use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
@@ -207,6 +207,10 @@ pub(crate) struct PodcastsPage {
     /// Per-view gallery override (sort popover); `None` follows the global
     /// `gallery_view`. Persisted as "gallery_podcasts".
     gallery_override: Option<bool>,
+    /// "Show description" (sort popover): gallery tiles framed with their title
+    /// instead of the bare cover. Persisted as "gallery_desc_podcasts";
+    /// default off — podcast artwork already carries the show's name.
+    gallery_desc: bool,
     /// Per-row alphabetical headings of the overview list (name sort).
     overview_headers: Rc<RefCell<Option<Vec<String>>>>,
     /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
@@ -290,6 +294,8 @@ pub(crate) enum PodcastsInput {
     SetNoGroup(bool),
     /// Per-view gallery override for the overview (sort popover toggle).
     SetGallery(bool),
+    /// Toggle the gallery tiles' title ("Show description").
+    SetGalleryDesc(bool),
     Subscribe,
     Search(String),
     SubscribeUrl(String),
@@ -579,6 +585,12 @@ impl Component for PodcastsPage {
             Some("0") => Some(false),
             _ => None,
         };
+        let gallery_desc = library
+            .get_setting("gallery_desc_podcasts")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("1");
         let overview_headers = Rc::new(RefCell::new(None));
         podcasts_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             overview_headers.clone(),
@@ -602,6 +614,7 @@ impl Component for PodcastsPage {
             overview_sort,
             overview_no_group,
             gallery_override,
+            gallery_desc,
             overview_headers,
             sort_slot,
             podcast_search_results: Vec::new(),
@@ -711,6 +724,15 @@ impl Component for PodcastsPage {
                     let _ = self
                         .library
                         .set_setting("gallery_podcasts", if on { "1" } else { "0" });
+                    self.reload_podcasts(&sender);
+                }
+            }
+            PodcastsInput::SetGalleryDesc(on) => {
+                if self.gallery_desc != on {
+                    self.gallery_desc = on;
+                    let _ = self
+                        .library
+                        .set_setting("gallery_desc_podcasts", if on { "1" } else { "0" });
                     self.reload_podcasts(&sender);
                 }
             }
@@ -984,6 +1006,7 @@ impl PodcastsPage {
         let input = sender.input_sender().clone();
         let group_input = input.clone();
         let gallery_input = input.clone();
+        let desc_input = input.clone();
         let toggles = vec![
             SortToggle {
                 label: gettext("Without grouping"),
@@ -991,6 +1014,7 @@ impl PodcastsPage {
                 on_toggle: Box::new(move |off| {
                     let _ = group_input.send(PodcastsInput::SetNoGroup(off));
                 }),
+                sub: false,
             },
             SortToggle {
                 label: gettext("Gallery view"),
@@ -998,6 +1022,15 @@ impl PodcastsPage {
                 on_toggle: Box::new(move |on| {
                     let _ = gallery_input.send(PodcastsInput::SetGallery(on));
                 }),
+                sub: false,
+            },
+            SortToggle {
+                label: gettext("Show description"),
+                active: self.gallery_desc,
+                on_toggle: Box::new(move |on| {
+                    let _ = desc_input.send(PodcastsInput::SetGalleryDesc(on));
+                }),
+                sub: true,
             },
         ];
         let popover = sort_popover(
@@ -1110,7 +1143,12 @@ impl PodcastsPage {
             let cover = image
                 .as_deref()
                 .and_then(crate::core::online::podcast_image_path);
-            let (cell, pic) = gallery_cell_bare(cover.as_deref(), "microphone-symbolic", title);
+            let (cell, pic) = gallery_cell(
+                cover.as_deref(),
+                "microphone-symbolic",
+                title,
+                self.gallery_desc,
+            );
             if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
                 if crate::ui::widgets::cached_thumb(path).is_none() {
                     to_decode.push((path.to_string(), pic));
