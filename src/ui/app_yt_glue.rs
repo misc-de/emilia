@@ -400,6 +400,9 @@ impl App {
                 // `yt_live_ended`, not re-opened as it is.
                 self.player.set_net_reconnect(false);
                 self.youtube.live_started = Some(std::time::Instant::now());
+                // Counted like any YouTube item (a rejoin after the address
+                // expired just starts a new session for the same video).
+                self.start_play_session(PathBuf::from(youtube::yt_path(&video_id)), 0);
                 self.settings.active_output =
                     crate::core::output::default_output().unwrap_or_default();
                 self.apply_current_eq();

@@ -17,6 +17,13 @@ impl Library {
     const COUNTS_AS_PLAY: &'static str =
         "(e.played_ms >= 30000 OR (e.duration_ms > 0 AND e.played_ms * 2 >= e.duration_ms))";
 
+    /// SQL predicate (over `play_event e`) for "music": everything except radio
+    /// stations (`stream:<id>`), YouTube (`yt:<id>`) and podcast episodes (their
+    /// audio URL). Those three have their own rankings, so the track ranking and
+    /// the "Tracks" variety count stay about the music library.
+    const IS_MUSIC: &'static str = "(e.path NOT LIKE 'stream:%' AND e.path NOT LIKE 'yt:%'
+         AND NOT EXISTS (SELECT 1 FROM episode ep WHERE ep.audio_url = e.path))";
+
     /// Writes a listening event and incidentally updates `track.last_played`
     /// (the column has always existed but was unused).
     pub fn log_play(
@@ -70,9 +77,10 @@ impl Library {
             &format!(
                 "SELECT COUNT(*) FROM (
                      SELECT e.path FROM play_event e
-                     WHERE e.started_at >= ?1 AND {p} GROUP BY e.path
+                     WHERE e.started_at >= ?1 AND {p} AND {m} GROUP BY e.path
                  )",
-                p = Self::COUNTS_AS_PLAY
+                p = Self::COUNTS_AS_PLAY,
+                m = Self::IS_MUSIC
             ),
             [since],
             |r| r.get(0),
@@ -88,42 +96,26 @@ impl Library {
         })
     }
 
-    /// Top tracks from `since`, sorted by plays (then time heard).
-    ///
-    /// Besides local tracks (joined from `track`), this also resolves the
-    /// display name of podcast episodes and YouTube videos, which have no
-    /// `track` row: a `yt:<id>` path takes its title from `yt_title` and its
-    /// channel from `yt_recent`; a podcast URL takes title and show name from
-    /// `episode`/`podcast`. Scalar subqueries (not joins) keep the per-path
-    /// SUMs free of fan-out.
+    /// Top tracks from `since`, sorted by plays (then time heard). Music only
+    /// (see [`Self::IS_MUSIC`]): stations, podcasts and YouTube are ranked by
+    /// [`Self::stats_top_stations`], [`Self::stats_top_podcasts`] and
+    /// [`Self::stats_top_youtube`].
     pub fn stats_top_tracks(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT COALESCE(
-                        NULLIF(t.title, ''),
-                        (SELECT y.title FROM yt_title y
-                         WHERE e.path LIKE 'yt:%' AND y.video_id = substr(e.path, 4)),
-                        (SELECT ep.title FROM episode ep WHERE ep.audio_url = e.path LIMIT 1)
-                    ) AS title,
+            "SELECT NULLIF(t.title, '') AS title,
                     e.path,
-                    COALESCE(
-                        NULLIF(t.artist, ''),
-                        (SELECT yr.artist FROM yt_recent yr
-                         WHERE e.path LIKE 'yt:%' AND yr.video_id = substr(e.path, 4)),
-                        (SELECT pc.title FROM podcast pc
-                         JOIN episode ep ON ep.podcast_id = pc.id
-                         WHERE ep.audio_url = e.path LIMIT 1),
-                        ''
-                    ) AS artist,
+                    COALESCE(t.artist, '') AS artist,
                     SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
                     SUM(e.played_ms) AS ms
              FROM play_event e
              LEFT JOIN track t ON t.path = e.path
-             WHERE e.started_at >= ?1
+             WHERE e.started_at >= ?1 AND {m}
              GROUP BY e.path
              HAVING plays > 0
              ORDER BY plays DESC, ms DESC
              LIMIT ?2",
-            p = Self::COUNTS_AS_PLAY
+            p = Self::COUNTS_AS_PLAY,
+            m = Self::IS_MUSIC
         ))?;
         let rows = stmt.query_map(rusqlite::params![since, limit as i64], |r| {
             Ok((
@@ -268,6 +260,129 @@ impl Library {
             .filter_map(|r| r.ok())
             .collect::<Vec<_>>();
         Ok(Self::rank(entries, limit))
+    }
+
+    /// Top radio stations from `since` (`stream:<id>` events), ranked by time
+    /// heard — a station runs for hours, so its play count says little. A
+    /// station deleted since drops out (its name is gone).
+    pub fn stats_top_stations(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT s.name,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             JOIN stream s ON e.path = 'stream:' || s.id
+             WHERE e.started_at >= ?1 AND e.path LIKE 'stream:%'
+             GROUP BY s.id
+             HAVING ms > 0
+             ORDER BY ms DESC, plays DESC
+             LIMIT ?2",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![since, limit as i64], |r| {
+            Ok(StatEntry {
+                name: r.get(0)?,
+                detail: String::new(),
+                plays: r.get(1)?,
+                played_ms: r.get(2)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Top podcasts (shows) from `since`: the episode events folded onto their
+    /// show. Resolved per path with a scalar subquery, so an episode listed twice
+    /// in `episode` can't double its SUMs.
+    pub fn stats_top_podcasts(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT (SELECT pc.title FROM episode ep
+                     JOIN podcast pc ON pc.id = ep.podcast_id
+                     WHERE ep.audio_url = e.path LIMIT 1) AS show,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             WHERE e.started_at >= ?1
+               AND e.path NOT LIKE 'stream:%' AND e.path NOT LIKE 'yt:%'
+             GROUP BY e.path
+             HAVING show IS NOT NULL",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let raw = stmt
+            .query_map([since], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        let mut map: std::collections::HashMap<String, StatEntry> = Default::default();
+        for (show, plays, ms) in raw {
+            let e = map.entry(show.clone()).or_insert_with(|| StatEntry {
+                name: show,
+                detail: String::new(),
+                plays: 0,
+                played_ms: 0,
+            });
+            e.plays += plays;
+            e.played_ms += ms;
+        }
+        Ok(Self::rank(map.into_values().collect(), limit))
+    }
+
+    /// Top YouTube items (`yt:<id>` events: videos, songs and live streams) from
+    /// `since`, with the channel as detail. Title and channel come from whichever
+    /// cache knows the video: the title cache / "Recent" list, the saved live
+    /// streams, or a subscribed channel's video list.
+    pub fn stats_top_youtube(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT COALESCE(
+                        (SELECT y.title FROM yt_title y WHERE y.video_id = substr(e.path, 4)),
+                        (SELECT yr.title FROM yt_recent yr WHERE yr.video_id = substr(e.path, 4)),
+                        (SELECT yl.title FROM yt_live yl WHERE yl.video_id = substr(e.path, 4)),
+                        (SELECT v.title FROM yt_video v WHERE v.video_id = substr(e.path, 4) LIMIT 1)
+                    ) AS title,
+                    e.path,
+                    COALESCE(
+                        NULLIF((SELECT yr.artist FROM yt_recent yr
+                                WHERE yr.video_id = substr(e.path, 4)), ''),
+                        NULLIF((SELECT yl.channel FROM yt_live yl
+                                WHERE yl.video_id = substr(e.path, 4)), ''),
+                        (SELECT c.title FROM yt_video v JOIN yt_channel c ON c.id = v.channel_id
+                         WHERE v.video_id = substr(e.path, 4) LIMIT 1),
+                        ''
+                    ) AS channel,
+                    SUM(CASE WHEN {p} THEN 1 ELSE 0 END) AS plays,
+                    SUM(e.played_ms) AS ms
+             FROM play_event e
+             WHERE e.started_at >= ?1 AND e.path LIKE 'yt:%'
+             GROUP BY e.path
+             HAVING plays > 0
+             ORDER BY plays DESC, ms DESC
+             LIMIT ?2",
+            p = Self::COUNTS_AS_PLAY
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![since, limit as i64], |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?;
+        Ok(rows
+            .filter_map(|r| r.ok())
+            .map(|(title, path, channel, plays, played_ms)| StatEntry {
+                name: title
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| path.trim_start_matches("yt:").to_string()),
+                detail: channel,
+                plays,
+                played_ms,
+            })
+            .collect())
     }
 
     /// Keep only actual plays, sort by plays (then time)

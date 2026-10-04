@@ -62,6 +62,8 @@ impl App {
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
                 *self.transport.close_resume.borrow_mut() = None;
+                // Time on a station counts into the statistics ("Top stations").
+                self.start_play_session(std::path::PathBuf::from(format!("stream:{id}")), 0);
                 self.mpris.set_metadata(
                     0,
                     &st.name,

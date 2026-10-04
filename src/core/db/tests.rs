@@ -151,6 +151,71 @@ fn play_events_aggregate_into_stats() {
 }
 
 #[test]
+fn stations_podcasts_and_youtube_get_their_own_rankings() {
+    let lib = Library::open_in_memory().unwrap();
+    lib.upsert_track(&track("/m/a1.mp3", Some("Alice"), Some("Album X")))
+        .unwrap();
+    lib.conn
+        .execute_batch(
+            "INSERT INTO stream (id, name, url) VALUES (7, 'Lofi FM', 'http://s/lofi'),
+                                                       (8, 'Jazz FM', 'http://s/jazz');
+             INSERT INTO podcast (id, title, feed_url) VALUES (1, 'Show', 'http://p/feed');
+             INSERT INTO episode (podcast_id, position, title, audio_url)
+                    VALUES (1, 0, 'Ep 1', 'http://p/1.mp3'), (1, 1, 'Ep 2', 'http://p/2.mp3');
+             INSERT INTO yt_title (video_id, title) VALUES ('abc', 'Some Video');
+             INSERT INTO yt_recent (video_id, title, artist) VALUES ('abc', 'Some Video', 'Chan');
+             INSERT INTO yt_live (video_id, title, channel) VALUES ('liv', 'Lofi Live', 'Girl');",
+        )
+        .unwrap();
+    let t0: i64 = 1_700_000_000;
+    lib.log_play("/m/a1.mp3", t0, 60_000, 60_000, true, None)
+        .unwrap();
+    // Jazz: two short sessions, Lofi: one long → Lofi ranks first (by time).
+    lib.log_play("stream:8", t0 + 10, 40_000, 0, false, None)
+        .unwrap();
+    lib.log_play("stream:8", t0 + 20, 40_000, 0, false, None)
+        .unwrap();
+    lib.log_play("stream:7", t0 + 30, 3_600_000, 0, false, None)
+        .unwrap();
+    lib.log_play("stream:99", t0 + 40, 60_000, 0, false, None)
+        .unwrap(); // deleted
+    lib.log_play("http://p/1.mp3", t0 + 50, 600_000, 900_000, true, None)
+        .unwrap();
+    lib.log_play("http://p/2.mp3", t0 + 60, 600_000, 900_000, true, None)
+        .unwrap();
+    lib.log_play("yt:abc", t0 + 70, 200_000, 200_000, true, None)
+        .unwrap();
+    lib.log_play("yt:liv", t0 + 80, 120_000, 0, false, None)
+        .unwrap();
+
+    // Tracks stay about the music library.
+    let tracks = lib.stats_top_tracks(0, 10).unwrap();
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].name, "T");
+    assert_eq!(lib.stats_totals(0).unwrap().distinct_tracks, 1);
+
+    let stations = lib.stats_top_stations(0, 10).unwrap();
+    assert_eq!(stations.len(), 2);
+    assert_eq!(stations[0].name, "Lofi FM");
+    assert_eq!(stations[1].name, "Jazz FM");
+    assert_eq!(stations[1].plays, 2);
+    assert_eq!(stations[1].played_ms, 80_000);
+
+    let podcasts = lib.stats_top_podcasts(0, 10).unwrap();
+    assert_eq!(podcasts.len(), 1);
+    assert_eq!(podcasts[0].name, "Show");
+    assert_eq!(podcasts[0].plays, 2);
+    assert_eq!(podcasts[0].played_ms, 1_200_000);
+
+    let yt = lib.stats_top_youtube(0, 10).unwrap();
+    assert_eq!(yt.len(), 2);
+    assert_eq!(yt[0].name, "Some Video");
+    assert_eq!(yt[0].detail, "Chan");
+    assert_eq!(yt[1].name, "Lofi Live");
+    assert_eq!(yt[1].detail, "Girl");
+}
+
+#[test]
 fn meta_attempts_count_failures_and_reset_on_cover() {
     let lib = Library::open_in_memory().unwrap();
     let mut m = AlbumMeta::pending("A", "B");

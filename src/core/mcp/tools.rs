@@ -609,9 +609,12 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
                 "albums" => lib.stats_top_albums(since, limit)?,
                 "artists" => lib.stats_top_artists(since, limit)?,
                 "genres" => lib.stats_top_genres(since, limit)?,
+                "stations" => lib.stats_top_stations(since, limit)?,
+                "podcasts" => lib.stats_top_podcasts(since, limit)?,
+                "youtube" => lib.stats_top_youtube(since, limit)?,
                 other => {
                     return Err(anyhow!(
-                        "unknown top kind '{other}' (use tracks|albums|artists|genres)"
+                        "unknown top kind '{other}' (use tracks|albums|artists|genres|stations|podcasts|youtube)"
                     ))
                 }
             };
@@ -1664,10 +1667,10 @@ fn tool_list_core() -> Value {
         },
         {
             "name": "get_top",
-            "description": "Top-played rankings from the listening history over the last N days (default 30): most-played tracks, albums, artists, or genres.",
+            "description": "Top-played rankings from the listening history over the last N days (default 30): most-played tracks (music library only), albums, artists, genres, radio stations (ranked by time heard), podcasts (by show), or YouTube items.",
             "inputSchema": obj(
                 json!({
-                    "kind": { "type": "string", "enum": ["tracks", "albums", "artists", "genres"] },
+                    "kind": { "type": "string", "enum": ["tracks", "albums", "artists", "genres", "stations", "podcasts", "youtube"] },
                     "days": { "type": "integer", "description": "Look-back window in days (default 30).", "minimum": 1 },
                     "limit": { "type": "integer", "description": "Max entries (default 10).", "minimum": 1, "maximum": 100 },
                 }),

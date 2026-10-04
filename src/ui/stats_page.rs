@@ -53,6 +53,9 @@ pub(crate) struct StatsData {
     albums: Vec<StatEntry>,
     tracks: Vec<StatEntry>,
     genres: Vec<StatEntry>,
+    stations: Vec<StatEntry>,
+    podcasts: Vec<StatEntry>,
+    youtube: Vec<StatEntry>,
     weekday: [i64; 7],
     hour: [i64; 24],
 }
@@ -86,6 +89,9 @@ fn fetch(period: StatsPeriod) -> StatsData {
         albums: albums.into_iter().take(TOP_N).collect(),
         tracks: lib.stats_top_tracks(since, TOP_N).unwrap_or_default(),
         genres: lib.stats_top_genres(since, TOP_N).unwrap_or_default(),
+        stations: lib.stats_top_stations(since, TOP_N).unwrap_or_default(),
+        podcasts: lib.stats_top_podcasts(since, TOP_N).unwrap_or_default(),
+        youtube: lib.stats_top_youtube(since, TOP_N).unwrap_or_default(),
         weekday: lib.stats_by_weekday(since).unwrap_or([0; 7]),
         hour: lib.stats_by_hour(since).unwrap_or([0; 24]),
     }
@@ -195,17 +201,19 @@ impl StatsPage {
         content.append(&summary_group(totals));
         content.append(&diversity_group(totals));
 
-        if !data.artists.is_empty() {
-            content.append(&top_group(&gettext("Top artists"), &data.artists, true));
-        }
-        if !data.albums.is_empty() {
-            content.append(&top_group(&gettext("Top albums"), &data.albums, false));
-        }
-        if !data.tracks.is_empty() {
-            content.append(&top_group(&gettext("Top tracks"), &data.tracks, false));
-        }
-        if !data.genres.is_empty() {
-            content.append(&top_group(&gettext("Top genres"), &data.genres, true));
+        let rankings = [
+            (gettext("Top artists"), &data.artists, Row::TimeSubtitle),
+            (gettext("Top albums"), &data.albums, Row::Detail),
+            (gettext("Top tracks"), &data.tracks, Row::Detail),
+            (gettext("Top genres"), &data.genres, Row::TimeSubtitle),
+            (gettext("Top stations"), &data.stations, Row::TimeOnly),
+            (gettext("Top podcasts"), &data.podcasts, Row::TimeSubtitle),
+            (gettext("Top YouTube"), &data.youtube, Row::Detail),
+        ];
+        for (title, entries, row) in rankings {
+            if !entries.is_empty() {
+                content.append(&top_group(&title, entries, row));
+            }
         }
 
         content.append(&weekday_group(&data.weekday));
@@ -302,18 +310,30 @@ fn stat_row(title: &str, value: &str) -> adw::ActionRow {
     row
 }
 
-/// A ranking (top tracks/albums/artists). `time_subtitle`: the subtitle is the
-/// listening time (artists) instead of the detail (artist for track/album).
-fn top_group(title: &str, entries: &[StatEntry], time_subtitle: bool) -> adw::PreferencesGroup {
+/// What a ranking row shows besides the name.
+#[derive(Clone, Copy)]
+enum Row {
+    /// Subtitle = the detail (artist of a track/album, channel of a video),
+    /// suffix = plays.
+    Detail,
+    /// Subtitle = listening time, suffix = plays (artists, genres, podcasts).
+    TimeSubtitle,
+    /// No subtitle, suffix = listening time (radio stations: a station runs
+    /// for hours, so its play count says little).
+    TimeOnly,
+}
+
+/// A ranking (top tracks/albums/artists/…); `row` picks what each row shows.
+fn top_group(title: &str, entries: &[StatEntry], row_kind: Row) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::builder().title(title).build();
     for (i, e) in entries.iter().enumerate() {
         let name = gtk::glib::markup_escape_text(&e.name);
         let row = adw::ActionRow::builder().title(name.as_str()).build();
 
-        let subtitle = if time_subtitle {
-            fmt_listen(e.played_ms)
-        } else {
-            e.detail.clone()
+        let subtitle = match row_kind {
+            Row::Detail => e.detail.clone(),
+            Row::TimeSubtitle => fmt_listen(e.played_ms),
+            Row::TimeOnly => String::new(),
         };
         if !subtitle.trim().is_empty() {
             let sub = gtk::glib::markup_escape_text(&subtitle);
@@ -324,9 +344,13 @@ fn top_group(title: &str, entries: &[StatEntry], time_subtitle: bool) -> adw::Pr
         rank.add_css_class("dim-label");
         row.add_prefix(&rank);
 
-        let plays = gtk::Label::new(Some(&ngettext_n("{n} play", "{n} plays", e.plays as u32)));
-        plays.add_css_class("dim-label");
-        row.add_suffix(&plays);
+        let suffix = match row_kind {
+            Row::TimeOnly => fmt_listen(e.played_ms),
+            _ => ngettext_n("{n} play", "{n} plays", e.plays as u32),
+        };
+        let suffix = gtk::Label::new(Some(&suffix));
+        suffix.add_css_class("dim-label");
+        row.add_suffix(&suffix);
 
         g.add(&row);
     }
