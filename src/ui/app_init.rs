@@ -1332,6 +1332,9 @@ impl App {
                     the top and bottom. Pin all three to the same value so the \
                     cover sits equally deep on every side. */\
                  row.emilia-flush { padding-top: 3px; padding-bottom: 3px; padding-left: 3px; }\
+                 /* A song listed under its album row (playlist page): no cover, \
+                    indented a little so it reads as part of the album above. */\
+                 row.emilia-flush.emilia-nested { padding-left: 28px; min-height: 40px; }\
                  button.sync-connected { color: @success_color; }\
                  button.sleep-armed { color: @accent_color; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\

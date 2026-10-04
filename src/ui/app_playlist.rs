@@ -320,47 +320,66 @@ impl App {
                     .and_then(|m| m.cover_path.clone())
                     .or_else(|| self.album_cover_for(display_artist, album));
 
-                let exp = adw::ExpanderRow::builder()
-                    .title(gtk::glib::markup_escape_text(album))
-                    .subtitle(crate::ui::app::album_subtitle(year, tracks.len()))
-                    .build();
-                exp.add_prefix(&crate::ui::app::cover_widget(
-                    cover_path.as_deref(),
-                    "media-optical-symbolic",
-                ));
+                // The album is a row of its own — a tap opens its usual album
+                // subpage, a long press its detail view — and the playlist's
+                // songs of it follow directly below, indented and without a
+                // cover, so they read as belonging to it.
+                let total_ms: i64 = tracks.iter().filter_map(|t| t.duration_ms).sum();
+                let mut row = EntryRow::new(album)
+                    .subtitle(&crate::ui::app::album_subtitle(year, tracks.len()))
+                    .cover(cover_path.as_deref(), "media-optical-symbolic")
+                    .duration(total_ms);
                 // Play button: start the playlist at this album's first track.
                 // While this album is the one running it shows a pause icon and
                 // pauses, the same as the album's row in the overviews.
                 if let Some(first) = tracks.first() {
-                    let play = crate::ui::play_mark::button(
-                        &gettext("Play"),
-                        self.entry_is_active("album", album, running_album.as_deref()),
-                        self.mini.playing,
-                    );
-                    self.libview
-                        .page_marks
-                        .add(crate::ui::app_favorites::mark_key("album", album), &play);
                     let sender = sender.clone();
                     let path = first.path.clone();
                     let album_name = album.to_string();
-                    play.connect_clicked(move |_| {
-                        sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
-                            id,
-                            path: path.clone(),
-                            album: Some(album_name.clone()),
-                        }));
-                    });
-                    exp.add_suffix(&play);
+                    row = row
+                        .play_button(
+                            &gettext("Play"),
+                            self.entry_is_active("album", album, running_album.as_deref()),
+                            self.mini.playing,
+                            move || {
+                                sender.input(Msg::Playlist(PlaylistMsg::PlayFrom {
+                                    id,
+                                    path: path.clone(),
+                                    album: Some(album_name.clone()),
+                                }));
+                            },
+                        )
+                        .marked_in(
+                            &self.libview.page_marks,
+                            crate::ui::app_favorites::mark_key("album", album),
+                        );
                 }
+                let row = row
+                    .on_activate({
+                        let sender = sender.clone();
+                        let (artist, album) = (display_artist.clone(), album.to_string());
+                        move || {
+                            sender.input(Msg::OpenAlbumTracks {
+                                artist: artist.clone(),
+                                album: album.clone(),
+                            })
+                        }
+                    })
+                    .on_detail({
+                        let sender = sender.clone();
+                        let (artist, album) = (display_artist.clone(), album.to_string());
+                        move || {
+                            sender.input(Msg::ShowAlbumDetailFor {
+                                artist: artist.clone(),
+                                album: album.clone(),
+                            })
+                        }
+                    })
+                    .build();
+                group.add(&row);
                 for t in tracks {
-                    exp.add_row(&self.playlist_track_row(
-                        sender,
-                        id,
-                        &t.path,
-                        "audio-x-generic-symbolic",
-                    ));
+                    group.add(&self.playlist_track_row(sender, id, &t.path, None));
                 }
-                group.add(&exp);
             }
             content.append(&group);
         }
@@ -375,7 +394,7 @@ impl App {
                     sender,
                     id,
                     &t.path,
-                    "audio-x-generic-symbolic",
+                    Some("audio-x-generic-symbolic"),
                 ));
             }
             content.append(&group);
@@ -474,12 +493,13 @@ impl App {
 
     /// A single track row inside a playlist subpage: tap plays this track; a
     /// long press opens the song's detail view (like the album/artist lists).
+    /// `icon: None` is a song listed under its album row: no cover, indented.
     fn playlist_track_row(
         &self,
         sender: &ComponentSender<Self>,
         id: i64,
         path: &str,
-        icon: &str,
+        icon: Option<&str>,
     ) -> adw::ActionRow {
         let display = self.display_name(std::path::Path::new(path));
         // Not activatable: the track plays via its play button; the detail view
@@ -499,10 +519,11 @@ impl App {
                 }
             }
         };
-        let cover = self.playlist_track_cover(path);
-        EntryRow::new(&display)
-            .subtitle(&self.playlist_source_label(path))
-            .cover(cover.as_deref(), icon)
+        let mut row = EntryRow::new(&display).subtitle(&self.playlist_source_label(path));
+        if let Some(icon) = icon {
+            row = row.cover(self.playlist_track_cover(path).as_deref(), icon);
+        }
+        let row = row
             // Play button: starts the whole playlist at this track (so it keeps
             // playing through the rest of the list), matching this view's
             // "tapping a track plays the playlist from there".
@@ -527,7 +548,11 @@ impl App {
                 crate::ui::app_favorites::mark_key("track", path),
             )
             .on_detail(open)
-            .build()
+            .build();
+        if icon.is_none() {
+            row.add_css_class("emilia-nested");
+        }
+        row
     }
 
     /// Long press on a playlist: a detail view (cover, name, totals and the
