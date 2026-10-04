@@ -2025,31 +2025,12 @@ impl App {
             .collect()
     }
 
-    /// All tracks of an artist in playback order: albums by year
-    /// (oldest or newest first, unknown years to the end), each album from
-    /// track 1 top-down.
+    /// All tracks of an artist in playback order by release (see
+    /// [`release_order`]).
     pub(crate) fn artist_files_ordered(&self, name: &str, newest_first: bool) -> Vec<PathBuf> {
-        let mut albums = self.artist_albums_dated(name);
-        albums.sort_by(|a, b| {
-            use std::cmp::Ordering;
-            let by_year = match (a.0, b.0) {
-                (Some(x), Some(y)) => {
-                    if newest_first {
-                        y.cmp(&x)
-                    } else {
-                        x.cmp(&y)
-                    }
-                }
-                // Known year before unknown (in both directions).
-                (Some(_), None) => Ordering::Less,
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => Ordering::Equal,
-            };
-            by_year.then_with(|| a.1.cmp(&b.1))
-        });
-        albums
+        release_order(self.artist_albums_dated(name), newest_first)
             .into_iter()
-            .flat_map(|(_, _, tracks)| tracks.into_iter().map(|t| PathBuf::from(t.path)))
+            .map(|t| PathBuf::from(t.path))
             .collect()
     }
 
@@ -2648,6 +2629,37 @@ impl App {
     }
 }
 
+/// Orders an artist's tracks by the release of **each song**: its own tag
+/// year, else the year of its album (`albums` as from
+/// [`App::artist_albums_dated`]); songs without any year go to the end in both
+/// directions. Songs of the same year stay grouped by album (name) and keep
+/// their album order, so an album without deviating years still plays in one
+/// piece, while loose singles slot in between the albums by their own year.
+fn release_order(albums: Vec<(Option<i32>, String, Vec<Track>)>, newest_first: bool) -> Vec<Track> {
+    let mut songs: Vec<(Option<i32>, String, usize, Track)> = albums
+        .into_iter()
+        .flat_map(|(album_year, album, tracks)| {
+            tracks
+                .into_iter()
+                .enumerate()
+                .map(move |(i, t)| (t.year.or(album_year), album.clone(), i, t))
+        })
+        .collect();
+    songs.sort_by(|a, b| {
+        use std::cmp::Ordering;
+        let by_year = match (a.0, b.0) {
+            (Some(x), Some(y)) if newest_first => y.cmp(&x),
+            (Some(x), Some(y)) => x.cmp(&y),
+            // Known year before unknown (in both directions).
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        };
+        by_year.then_with(|| a.1.cmp(&b.1)).then(a.2.cmp(&b.2))
+    });
+    songs.into_iter().map(|(_, _, _, t)| t).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2681,6 +2693,52 @@ mod tests {
             resume_ms: 0,
             year: None,
         }
+    }
+
+    #[test]
+    fn release_order_sorts_each_song_by_its_own_year() {
+        let song = |path: &str, year: Option<i32>| Track {
+            year,
+            ..track(path, None, None)
+        };
+        let albums = vec![
+            // Album 1990 with a bonus track tagged 2005.
+            (
+                Some(1990),
+                "Debut".to_string(),
+                vec![
+                    song("d1", Some(1990)),
+                    song("d2", None),
+                    song("d3", Some(2005)),
+                ],
+            ),
+            (
+                Some(2000),
+                "Second".to_string(),
+                vec![song("s1", Some(2000)), song("s2", Some(2000))],
+            ),
+            // Loose singles (no album) from different years, plus one without any year.
+            (
+                Some(1995),
+                String::new(),
+                vec![song("x1995", Some(1995)), song("x2010", Some(2010))],
+            ),
+            (None, "Unknown".to_string(), vec![song("u1", None)]),
+        ];
+        let paths = |newest| -> Vec<String> {
+            release_order(albums.clone(), newest)
+                .into_iter()
+                .map(|t| t.path)
+                .collect()
+        };
+        assert_eq!(
+            paths(false),
+            ["d1", "d2", "x1995", "s1", "s2", "d3", "x2010", "u1"]
+        );
+        assert_eq!(
+            paths(true),
+            ["x2010", "d3", "s1", "s2", "x1995", "d1", "d2", "u1"]
+        );
     }
 
     #[test]

@@ -440,11 +440,10 @@ impl App {
         }
     }
 
-    /// Context menu: play all tracks of the target artist, albums by year
-    /// (newest or oldest first), each album top-down (shuffle off).
+    /// Context menu: play all tracks of the target artist by the release of
+    /// each song (newest or oldest first), shuffle off.
     pub(crate) fn on_ctx_play_artist(&mut self, newest_first: bool) {
-        // Albums by year (oldest/newest first), each album top-down,
-        // without shuffle.
+        // Songs by release year (oldest/newest first), without shuffle.
         if let Some(name) = self.ctx_artist() {
             let files = self.artist_files_ordered(&name, newest_first);
             if !files.is_empty() {
@@ -551,8 +550,8 @@ pub(crate) enum CtxMsg {
     CtxPlay,
     /// Play the album in track order (shuffle off, stop at the end).
     CtxPlayAlbum,
-    /// Play all tracks of the artist: albums by year (newest or
-    /// oldest first), each album from track 1 top-down (shuffle off).
+    /// Play all tracks of the artist by the release of each song (newest or
+    /// oldest first; same year → album order), shuffle off.
     CtxPlayArtist {
         newest_first: bool,
     },
