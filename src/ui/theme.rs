@@ -398,7 +398,12 @@ impl ThemeState {
             css.push_str(&format!(
                 "dialog, .dialog {{ background-color: transparent; background-image: none; }}\
                  sheet {{ background-color: {field}; background-image: none; }}\
-                 window.dialog {{ background-color: @window_bg_color; }}",
+                 window.dialog {{ background-color: @window_bg_color; }}\
+                 /* Text fields on that sheet: the chrome tint above is the \
+                    sheet's own colour, so an entry vanished into it until \
+                    focused. Lift them off the surface like the theme does. */\
+                 sheet entry, sheet spinbutton, sheet .boxed-list > row.entry \
+                 {{ background-color: alpha(currentColor, 0.1); }}",
             ));
             // The tray media popup carries its own blurred background Picture, so
             // make its window transparent to let it show (the content floats over
