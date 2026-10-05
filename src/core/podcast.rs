@@ -267,10 +267,14 @@ pub fn duration_secs(raw: &str) -> Option<i64> {
 /// Converts an HTML description text (shownotes) into readable plain text:
 /// block/break tags become line breaks, remaining tags are removed,
 /// HTML entities are decoded, and superfluous whitespace is collapsed.
+/// A link's target is kept as " (url)" after its text unless the text already
+/// shows it, so the shownotes can still offer it as a clickable link.
 pub(crate) fn html_to_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
     let mut tag = String::new();
+    // Open <a href>: its target and where its link text starts in `out`.
+    let mut link: Option<(String, usize)> = None;
     for c in s.chars() {
         match c {
             '<' => {
@@ -287,6 +291,23 @@ pub(crate) fn html_to_text(s: &str) -> String {
                     .take_while(|c| c.is_ascii_alphanumeric())
                     .collect::<String>()
                     .to_ascii_lowercase();
+                if name == "a" {
+                    if tag.trim_start().starts_with('/') {
+                        if let Some((href, start)) = link.take() {
+                            let text = decode_entities(&out[start..]);
+                            let target = decode_entities(&href);
+                            if !link_text_shows(&text, &target) {
+                                out.push_str(" (");
+                                out.push_str(&href);
+                                out.push(')');
+                            }
+                        }
+                    } else {
+                        link = attr_value(&tag, "href")
+                            .filter(|h| h.starts_with("http://") || h.starts_with("https://"))
+                            .map(|h| (h, out.len()));
+                    }
+                }
                 if matches!(
                     name.as_str(),
                     "br" | "p"
@@ -331,6 +352,48 @@ pub(crate) fn html_to_text(s: &str) -> String {
         lines.pop();
     }
     lines.join("\n")
+}
+
+/// Value of attribute `name` in the inside of an HTML tag (`a href="…"`),
+/// quoted or unquoted, matched case-insensitively.
+fn attr_value(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(pos) = lower[from..].find(name).map(|p| p + from) {
+        from = pos + name.len();
+        // Must be a whole attribute name, followed by '='.
+        if pos > 0 && !lower.as_bytes()[pos - 1].is_ascii_whitespace() {
+            continue;
+        }
+        let rest = tag[from..].trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let value = match rest.chars().next() {
+            Some(q @ ('"' | '\'')) => rest[1..].split(q).next().unwrap_or(""),
+            _ => rest.split(|c: char| c.is_whitespace()).next().unwrap_or(""),
+        };
+        let value = value.trim();
+        return (!value.is_empty()).then(|| value.to_string());
+    }
+    None
+}
+
+/// Whether a link's text already shows its target (ignoring scheme, "www."
+/// and a trailing slash), so repeating the URL would only add noise.
+fn link_text_shows(text: &str, target: &str) -> bool {
+    let bare = |s: &str| -> String {
+        let s = s.trim();
+        let s = s
+            .strip_prefix("https://")
+            .or_else(|| s.strip_prefix("http://"))
+            .unwrap_or(s);
+        let s = s.strip_prefix("www.").unwrap_or(s);
+        s.trim_end_matches('/').to_ascii_lowercase()
+    };
+    let target = bare(target);
+    !target.is_empty() && bare(text).contains(&target)
 }
 
 /// Reads a podcast RSS feed. Only entries with an audio enclosure are taken;
@@ -715,26 +778,32 @@ pub fn parse_chapters(text: &str) -> Vec<(i64, String)> {
 }
 
 /// Converts timestamps in shownotes (e.g. "12:34", "1:02:03") into clickable
-/// Pango links `emilia-seek:<ms>`; the rest of the text is markup-escaped.
+/// Pango links `emilia-seek:<ms>` and web addresses ("https://…", "www.…")
+/// into ordinary links; the rest of the text is markup-escaped.
 /// Returns Pango markup (for `gtk::Label` with `use_markup`).
-pub fn linkify_timestamps(text: &str) -> String {
+pub fn linkify_shownotes(text: &str) -> String {
     let b = text.as_bytes();
     let mut out = String::with_capacity(text.len() + 32);
     let mut run = 0; // start of the current plain-text section
     let mut i = 0;
     while i < b.len() {
-        if b[i].is_ascii_digit() {
-            if let Some((len, ms)) = match_timestamp_at(text, i) {
-                out.push_str(&escape_markup(&text[run..i]));
-                out.push_str("<a href=\"emilia-seek:");
-                out.push_str(&ms.to_string());
-                out.push_str("\">");
-                out.push_str(&escape_markup(&text[i..i + len]));
-                out.push_str("</a>");
-                i += len;
-                run = i;
-                continue;
-            }
+        let hit = if b[i].is_ascii_digit() {
+            match_timestamp_at(text, i).map(|(len, ms)| (len, format!("emilia-seek:{ms}")))
+        } else if matches!(b[i], b'h' | b'H' | b'w' | b'W') {
+            match_url_at(text, i)
+        } else {
+            None
+        };
+        if let Some((len, href)) = hit {
+            out.push_str(&escape_markup(&text[run..i]));
+            out.push_str("<a href=\"");
+            out.push_str(&escape_markup(&href));
+            out.push_str("\">");
+            out.push_str(&escape_markup(&text[i..i + len]));
+            out.push_str("</a>");
+            i += len;
+            run = i;
+            continue;
         }
         i += 1;
     }
@@ -742,9 +811,62 @@ pub fn linkify_timestamps(text: &str) -> String {
     out
 }
 
+/// Tries to detect a web address starting at byte position `i`
+/// ("http://…", "https://…" or "www.…"). Returns `(length in bytes, href)`.
+/// Trailing sentence punctuation and an unbalanced closing bracket are left
+/// out, so "(see https://x.org/a)." links only "https://x.org/a".
+fn match_url_at(text: &str, i: usize) -> Option<(usize, String)> {
+    if i > 0 {
+        let p = text[..i].chars().next_back()?;
+        if p.is_alphanumeric() || matches!(p, '/' | '.' | '@' | '-' | '_') {
+            return None;
+        }
+    }
+    let rest = &text[i..];
+    let lower = rest.get(..8).unwrap_or(rest).to_ascii_lowercase();
+    let www = if lower.starts_with("https://") || lower.starts_with("http://") {
+        false
+    } else if lower.starts_with("www.") {
+        true
+    } else {
+        return None;
+    };
+    let mut len = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"'))
+        .unwrap_or(rest.len());
+    loop {
+        let url = &rest[..len];
+        let last = url.chars().next_back()?;
+        let unbalanced = |open: char, close: char| {
+            last == close && url.matches(open).count() < url.matches(close).count()
+        };
+        if matches!(last, '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '*')
+            || unbalanced('(', ')')
+            || unbalanced('[', ']')
+        {
+            len -= last.len_utf8();
+        } else {
+            break;
+        }
+    }
+    let url = &rest[..len];
+    // Nothing after the scheme / "www." → not an address.
+    let host = url.split_once("//").map_or(url, |(_, h)| h);
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if host.is_empty() || (www && !host.contains('.')) {
+        return None;
+    }
+    let href = if www {
+        format!("https://{url}")
+    } else {
+        url.to_string()
+    };
+    Some((len, href))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_duration, html_to_text, linkify_timestamps, parse_feed, parse_search};
+    use super::{format_duration, html_to_text, linkify_shownotes, parse_feed, parse_search};
 
     const SAMPLE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
@@ -817,7 +939,7 @@ mod tests {
 
     #[test]
     fn linkifies_timestamps_and_escapes_rest() {
-        let md = linkify_timestamps("Intro 0:30, Thema 12:34 & 1:02:03 Ende");
+        let md = linkify_shownotes("Intro 0:30, Thema 12:34 & 1:02:03 Ende");
         assert!(
             md.contains("<a href=\"emilia-seek:30000\">0:30</a>"),
             "{md}"
@@ -832,8 +954,38 @@ mod tests {
         );
         assert!(md.contains("&amp;"), "{md}");
         // No false matches in longer numbers.
-        let none = linkify_timestamps("Jahr 2024:01 und 12:345 sind keine Marke");
+        let none = linkify_shownotes("Jahr 2024:01 und 12:345 sind keine Marke");
         assert!(!none.contains("emilia-seek"), "{none}");
+    }
+
+    #[test]
+    fn linkifies_urls() {
+        let md = linkify_shownotes(
+            "Mehr unter https://example.com/a?b=1&c=2. (Siehe www.test.de/x) und mail@www.no.de",
+        );
+        assert!(
+            md.contains(
+                "<a href=\"https://example.com/a?b=1&amp;c=2\">https://example.com/a?b=1&amp;c=2</a>."
+            ),
+            "{md}"
+        );
+        assert!(
+            md.contains("<a href=\"https://www.test.de/x\">www.test.de/x</a>)"),
+            "{md}"
+        );
+        assert!(!md.contains("www.no.de</a>"), "{md}");
+        // Timestamps inside an address stay part of the link.
+        let md = linkify_shownotes("https://x.org/12:34 und 12:34");
+        assert_eq!(md.matches("emilia-seek").count(), 1, "{md}");
+    }
+
+    #[test]
+    fn html_links_keep_their_target() {
+        let html = r#"<p><a href="https://a.org/x?y=1&amp;z=2">Website</a>, <a href='https://b.org/'>b.org</a></p>"#;
+        assert_eq!(
+            html_to_text(html),
+            "Website (https://a.org/x?y=1&z=2), b.org"
+        );
     }
 
     #[test]

@@ -1692,13 +1692,14 @@ impl PodcastsPage {
         actions.add(&eq);
         content.append(&actions);
 
-        // Shownotes (if present): timestamps become clickable jump markers.
+        // Shownotes (if present): timestamps become clickable jump markers, web
+        // addresses ordinary links (opened by the label's default handler).
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
             let notes_group = adw::PreferencesGroup::new();
             // Always wrap, including inside long unbreakable tokens (URLs), so a
             // shownote can never force the dialog wider than the screen.
             let label = gtk::Label::builder()
-                .label(crate::core::podcast::linkify_timestamps(notes.trim()))
+                .label(crate::core::podcast::linkify_shownotes(notes.trim()))
                 .use_markup(true)
                 .wrap(true)
                 .wrap_mode(gtk::pango::WrapMode::WordChar)
