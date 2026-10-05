@@ -681,13 +681,22 @@ pub fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::Appl
         .child(content)
         .build();
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.add_top_bar(&detail_header());
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
     dialog.set_content_width(600);
     crate::ui::app_helpers::fit_dialog_on_expand(dialog);
     crate::ui::app_helpers::close_on_click_outside(dialog);
     dialog.present(Some(root));
+}
+
+/// Header bar of a detail view: title only, no close button in the corner —
+/// the sheet closes by swiping down, tapping beside it or Escape.
+pub fn detail_header() -> adw::HeaderBar {
+    let header = adw::HeaderBar::new();
+    header.set_show_end_title_buttons(false);
+    header.set_show_start_title_buttons(false);
+    header
 }
 
 /// On a phone a detail dialog is shown as a bottom sheet instead of a floating

@@ -332,7 +332,7 @@ impl App {
             },
             CtxTarget::Fs(_) => gettext("Track"),
         };
-        let header = adw::HeaderBar::new();
+        let header = crate::ui::widgets::detail_header();
         header.set_title_widget(Some(&adw::WindowTitle::new(&entry.heading(), &category)));
         let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
         refresh.set_tooltip_text(Some(&gettext("Refresh")));

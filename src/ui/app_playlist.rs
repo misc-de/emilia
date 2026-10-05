@@ -593,7 +593,7 @@ impl App {
         dialog.set_content_width(600);
         self.adapt_detail_dialog(&dialog);
         let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.add_top_bar(&crate::ui::widgets::detail_header());
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
