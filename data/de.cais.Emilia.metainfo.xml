@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.45" date="2026-10-05">
+      <description>
+        <p>The details of stations, recognized songs, recordings, YouTube videos, channels, playlists and live streams, podcasts and episodes have a refresh button in the title bar, like the music details: it fetches the logo or cover and the details again, such as genre and country of a station or artist and album of a song. A video picture now spans the whole width of the details. Recognized songs, recordings and YouTube videos list their details under a foldable "Info". In an episode's details the podcast name is in the title bar, the episode name below the cover and the shownotes above the date, and the episode can be shared. Names with an "&amp;" now show correctly in detail titles.</p>
+        <p xml:lang="de">Die Details von Sendern, erkannten Songs, Aufnahmen, YouTube-Videos, -Kanälen, -Playlists und -Livestreams, Podcasts und Folgen haben einen Aktualisieren-Knopf in der Titelleiste wie die Musikdetails: Er holt Logo oder Cover und die Angaben neu, etwa Genre und Land eines Senders oder Interpret und Album eines Songs. Ein Videobild nutzt jetzt die ganze Breite der Details. Erkannte Songs, Aufnahmen und YouTube-Videos zeigen ihre Angaben unter einem aufklappbaren „Info“. In den Details einer Folge steht der Podcast-Name in der Titelleiste, der Folgenname unter dem Cover und die Shownotes über dem Datum, und die Folge lässt sich teilen. Namen mit „&amp;“ erscheinen in Detailtiteln jetzt richtig.</p>
+      </description>
+    </release>
     <release version="0.8.44" date="2026-10-05">
       <description>
         <p>Web addresses in podcast shownotes can now be clicked and open in the browser, including links the feed only had behind a word. Sharing and connecting a Nextcloud, SMB or Google Drive source now continue in a centered window, also on the phone, instead of sliding in from the bottom. The search windows are wider and grow with their results to most of the window height. Playing a song from the YouTube "Recently" list no longer moves it to the top, so the list keeps its order.</p>
