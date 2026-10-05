@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.44" date="2026-10-05">
+      <description>
+        <p>Web addresses in podcast shownotes can now be clicked and open in the browser, including links the feed only had behind a word. Sharing and connecting a Nextcloud, SMB or Google Drive source now continue in a centered window, also on the phone, instead of sliding in from the bottom. The search windows are wider and grow with their results to most of the window height.</p>
+        <p xml:lang="de">Webadressen in den Shownotes von Podcasts lassen sich jetzt anklicken und öffnen im Browser, auch Links, die im Feed nur hinter einem Wort lagen. Teilen und das Verbinden einer Nextcloud-, SMB- oder Google-Drive-Quelle laufen jetzt in einem zentrierten Fenster weiter, auch auf dem Handy, statt von unten hereinzugleiten. Die Suchfenster sind breiter und wachsen mit ihren Ergebnissen bis fast zur Fensterhöhe.</p>
+      </description>
+    </release>
     <release version="0.8.43" date="2026-10-05">
       <description>
         <p>The details of stations, recognized songs, recordings, YouTube channels and live streams, podcast episodes and podcasts now show a large cover at the top, like the music details. Detail views no longer have a close button in the corner; they close by swiping down, tapping beside them or pressing Escape. The search and the share button in the title bar open a centered window like the "+" dialogs, and sharing first asks whether to offer a connection or scan a code. Text fields in dialogs stay visible when a background picture is on; before, they only appeared once tapped. In the album details, the "Type" option is now called "Category".</p>
