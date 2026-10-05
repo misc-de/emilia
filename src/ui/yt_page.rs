@@ -1892,7 +1892,10 @@ impl YtPage {
         let cover = thumb
             .as_deref()
             .and_then(crate::core::online::youtube_thumb_path);
-        head.add_prefix(&cover_widget(cover.as_deref(), "avatar-default-symbolic"));
+        content.append(&crate::ui::widgets::detail_cover(
+            cover.as_deref(),
+            "avatar-default-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 

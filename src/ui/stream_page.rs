@@ -1110,7 +1110,10 @@ impl StreamPage {
             .favicon
             .as_deref()
             .and_then(crate::core::online::station_image_path);
-        head.add_prefix(&cover_widget(logo.as_deref(), STREAM_ICON));
+        content.append(&crate::ui::widgets::detail_cover(
+            logo.as_deref(),
+            STREAM_ICON,
+        ));
         info.add(&head);
         content.append(&info);
 
@@ -1610,7 +1613,10 @@ impl StreamPage {
         }
         let cover =
             crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &rec.title);
-        head.add_prefix(&cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
+        content.append(&crate::ui::widgets::detail_cover(
+            cover.as_deref(),
+            "audio-x-generic-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 
@@ -1898,7 +1904,10 @@ impl StreamPage {
         }
         let cover =
             crate::core::online::recording_cover_path(h.artist.as_deref().unwrap_or(""), &h.title);
-        head.add_prefix(&cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
+        content.append(&crate::ui::widgets::detail_cover(
+            cover.as_deref(),
+            "audio-x-generic-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 

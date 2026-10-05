@@ -11,7 +11,6 @@ use relm4::{adw, gtk};
 use crate::core::youtube::YtResult;
 use crate::i18n::gettext;
 use crate::ui::app::YtView;
-use crate::ui::app_helpers::cover_widget;
 use crate::ui::entry_row::EntryRow;
 use crate::ui::widgets::{action_row, detail_box, present_detail};
 use crate::ui::yt_page::{YtInput, YtOutput, YtPage};
@@ -110,7 +109,10 @@ impl YtPage {
             .build();
         head.set_title_lines(3);
         let cover = live_cover(item.thumbnail.as_deref());
-        head.add_prefix(&cover_widget(cover.as_deref(), LIVE_ICON));
+        content.append(&crate::ui::widgets::detail_cover(
+            cover.as_deref(),
+            LIVE_ICON,
+        ));
         info.add(&head);
         content.append(&info);
 

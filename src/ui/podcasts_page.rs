@@ -1577,7 +1577,10 @@ impl PodcastsPage {
             .podcast_image
             .as_deref()
             .and_then(crate::core::online::podcast_image_path);
-        pod.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
+        content.append(&crate::ui::widgets::detail_cover(
+            cover.as_deref(),
+            "microphone-symbolic",
+        ));
         info.add(&pod);
         // Published and duration **side by side**, each about 50 % width.
         let pub_txt = ep
@@ -1801,7 +1804,10 @@ impl PodcastsPage {
         let cover = image
             .as_deref()
             .and_then(crate::core::online::podcast_image_path);
-        head.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
+        content.append(&crate::ui::widgets::detail_cover(
+            cover.as_deref(),
+            "microphone-symbolic",
+        ));
         info.add(&head);
         content.append(&info);
 

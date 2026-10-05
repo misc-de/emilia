@@ -633,6 +633,21 @@ pub(crate) fn carousel_with_arrows(carousel: &adw::Carousel) -> gtk::Box {
 // as byte-identical private copies.
 // ---------------------------------------------------------------------------
 
+/// Large centered cover at the top of a detail dialog — the same 180 px rounded
+/// image the music detail view shows, so stations, recordings, YouTube and
+/// podcast details read alike. `path` is a local image file (or `None`, which
+/// shows `placeholder`).
+pub fn detail_cover(path: Option<&str>, placeholder: &str) -> gtk::Box {
+    // Decode downscaled: logos/thumbnails can be large files, and the cover is
+    // shown at 180 px (360 covers HiDPI).
+    let tex = path
+        .and_then(|p| decode_scaled(p, 360).or_else(|| gtk::gdk::Texture::from_filename(p).ok()));
+    let cover_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    cover_box.set_halign(gtk::Align::Center);
+    cover_box.append(&rounded_image(tex.as_ref(), placeholder, 180));
+    cover_box
+}
+
 /// Content box for the detail dialogs (uniform margins).
 pub fn detail_box() -> gtk::Box {
     gtk::Box::builder()
