@@ -1963,6 +1963,30 @@ impl StreamPage {
     }
 }
 
+/// Second step of the stations "+": the directory search. Registers the dialog
+/// in `slot` so the worker's results land in its list.
+fn open_stream_search_modal(
+    sender: &ComponentSender<StreamPage>,
+    slot: &Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    root: &impl IsA<gtk::Widget>,
+) {
+    let sender = sender.clone();
+    let (dialog, entry, results) = crate::ui::widgets::search_modal(
+        &gettext("Search stations"),
+        &gettext("Station name …"),
+        move |term| sender.input(StreamInput::Search(term)),
+    );
+    *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
+    {
+        let slot = slot.clone();
+        dialog.connect_closed(move |_| {
+            *slot.borrow_mut() = None;
+        });
+    }
+    dialog.present(Some(root));
+    entry.grab_focus();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2016,28 +2040,4 @@ mod tests {
             Some("Germany".into())
         );
     }
-}
-
-/// Second step of the stations "+": the directory search. Registers the dialog
-/// in `slot` so the worker's results land in its list.
-fn open_stream_search_modal(
-    sender: &ComponentSender<StreamPage>,
-    slot: &Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    root: &impl IsA<gtk::Widget>,
-) {
-    let sender = sender.clone();
-    let (dialog, entry, results) = crate::ui::widgets::search_modal(
-        &gettext("Search stations"),
-        &gettext("Station name …"),
-        move |term| sender.input(StreamInput::Search(term)),
-    );
-    *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
-    {
-        let slot = slot.clone();
-        dialog.connect_closed(move |_| {
-            *slot.borrow_mut() = None;
-        });
-    }
-    dialog.present(Some(root));
-    entry.grab_focus();
 }

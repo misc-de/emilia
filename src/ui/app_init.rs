@@ -1398,6 +1398,12 @@ impl App {
                     the bottom — push it down a row and tint it a muted red. */\
                  dialog.emilia-add-source .response-area.compact > button:first-child { margin-top: 18px; background-color: mix(@destructive_bg_color, @window_bg_color, 0.35); color: @destructive_fg_color; }\
                  dialog.emilia-add-source .response-area.compact > button:first-child:hover { background-color: mix(@destructive_bg_color, @window_bg_color, 0.45); }\
+                 /* The '+' modals of Stations, YouTube and Podcasts (and their \
+                    search / address steps): same muted-red Cancel; pushed a \
+                    row down only when the buttons are stacked. */\
+                 dialog.emilia-modal .response-area > button:first-child { background-color: mix(@destructive_bg_color, @window_bg_color, 0.35); color: @destructive_fg_color; }\
+                 dialog.emilia-modal .response-area > button:first-child:hover { background-color: mix(@destructive_bg_color, @window_bg_color, 0.45); }\
+                 dialog.emilia-modal .response-area.compact > button:first-child { margin-top: 18px; }\
                  flowbox.emilia-gallery > flowboxchild { padding: 0px; border-radius: 6px; }\
                  flowbox.emilia-gallery > flowboxchild:selected { background: none; }\
                  label.emilia-lyric-line { font-size: 1.15em; padding: 5px 4px; transition: color 150ms ease, font-size 150ms ease; }\

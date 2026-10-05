@@ -1995,100 +1995,37 @@ impl PodcastsPage {
         let _ = sender.output(PodcastsOutput::PushSubpage);
     }
 
-    /// Dialog for subscribing: a **search** (iTunes directory) at the top and a
-    /// field for the **feed address** (RSS) below as the manual route.
+    /// The "+": a centered choice modal like the Files "+" — search the
+    /// podcast directory, or enter a feed address (RSS) by hand.
     fn open_subscribe_podcast_dialog(&self, sender: &ComponentSender<Self>) {
         let Some(root) = self.window.clone() else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Subscribe to podcast"))
-            .build();
-        // The "+" opens a centered modal like the Files "+", also on the
-        // phone — not the bottom sheet of the detail dialogs.
-        dialog.set_presentation_mode(adw::DialogPresentationMode::Floating);
-        crate::ui::widgets::close_on_outside_click(&dialog);
-        let content = detail_box();
-
-        // --- Search (iTunes directory) ---
-        let search_group = adw::PreferencesGroup::builder()
-            .title(gettext("Search"))
-            .description(gettext("Find a podcast by name"))
-            .build();
-        let search_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(6)
-            .build();
-        let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text(gettext("Podcast name …"))
-            .hexpand(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&search_entry);
-        let search_btn = gtk::Button::builder().label(gettext("Search")).build();
-        search_btn.add_css_class("suggested-action");
-        search_row.append(&search_entry);
-        search_row.append(&search_btn);
-        search_group.add(&search_row);
-        content.append(&search_group);
-
-        {
-            let (sender, entry) = (sender.clone(), search_entry.clone());
-            search_entry.connect_activate(move |_| {
-                let term = entry.text().to_string();
-                if !term.trim().is_empty() {
-                    sender.input(PodcastsInput::Search(term));
+        let slot = self.podcast_search.clone();
+        let (sender, win) = (sender.clone(), root.clone());
+        let dialog = crate::ui::widgets::choice_modal(
+            &gettext("Subscribe to podcast"),
+            &[
+                ("search", gettext("Search podcasts")),
+                ("url", gettext("Enter feed address")),
+            ],
+            "search",
+            move |resp| match resp {
+                "search" => open_podcast_search_modal(&sender, &slot, &win),
+                "url" => {
+                    let sender = sender.clone();
+                    let (dialog, _) = crate::ui::widgets::entry_modal(
+                        &gettext("Enter feed address"),
+                        &gettext("Feed address (RSS)"),
+                        &gettext("Subscribe"),
+                        move |url| sender.input(PodcastsInput::SubscribeUrl(url)),
+                    );
+                    dialog.present(Some(&win));
                 }
-            });
-        }
-        {
-            let (sender, entry) = (sender.clone(), search_entry.clone());
-            search_btn.connect_clicked(move |_| {
-                let term = entry.text().to_string();
-                if !term.trim().is_empty() {
-                    sender.input(PodcastsInput::Search(term));
-                }
-            });
-        }
-
-        // Results list – initially empty/hidden, filled by `rebuild_*`.
-        let results = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .build();
-        results.add_css_class("boxed-list");
-        results.set_visible(false);
-        content.append(&results);
-
-        // --- Manual: feed address (RSS) ---
-        let url_group = adw::PreferencesGroup::builder()
-            .title(gettext("Or enter feed address"))
-            .build();
-        let url_entry = adw::EntryRow::builder()
-            .title(gettext("Feed address (RSS)"))
-            .show_apply_button(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&url_entry);
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            url_entry.connect_apply(move |e| {
-                let url = e.text().to_string();
-                if !url.trim().is_empty() {
-                    sender.input(PodcastsInput::SubscribeUrl(url));
-                    dialog.close();
-                }
-            });
-        }
-        url_group.add(&url_entry);
-        content.append(&url_group);
-
-        *self.podcast_search.borrow_mut() = Some((dialog.clone(), results.clone()));
-        {
-            let slot = self.podcast_search.clone();
-            dialog.connect_closed(move |_| {
-                *slot.borrow_mut() = None;
-            });
-        }
-
-        present_detail(&dialog, &content, &root);
+                _ => {}
+            },
+        );
+        dialog.present(Some(&root));
     }
 
     /// Redraws the results list in the open subscription search dialog.
@@ -2117,12 +2054,8 @@ impl PodcastsPage {
             };
             row.set_sensitive(false);
             list.append(&row);
-            dialog.set_content_height(300);
             return;
         }
-
-        let rows = self.podcast_search_results.len() as i32;
-        dialog.set_content_height((320 + rows * 66).min(760));
 
         for r in &self.podcast_search_results {
             let row = adw::ActionRow::builder()
@@ -2297,6 +2230,30 @@ impl PodcastsPage {
             });
         });
     }
+}
+
+/// Second step of the podcasts "+": the directory search. Registers the dialog
+/// in `slot` so the worker's results land in its list.
+fn open_podcast_search_modal(
+    sender: &ComponentSender<PodcastsPage>,
+    slot: &Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    root: &impl IsA<gtk::Widget>,
+) {
+    let sender = sender.clone();
+    let (dialog, entry, results) = crate::ui::widgets::search_modal(
+        &gettext("Search podcasts"),
+        &gettext("Podcast name …"),
+        move |term| sender.input(PodcastsInput::Search(term)),
+    );
+    *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
+    {
+        let slot = slot.clone();
+        dialog.connect_closed(move |_| {
+            *slot.borrow_mut() = None;
+        });
+    }
+    dialog.present(Some(root));
+    entry.grab_focus();
 }
 
 #[cfg(test)]

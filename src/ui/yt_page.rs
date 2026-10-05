@@ -18,7 +18,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -1588,7 +1588,9 @@ impl YtPage {
         self.refresh_yt_icons();
     }
 
-    /// Dialog for searching YouTube and subscribing/opening a result.
+    /// The "+": a centered choice modal like the Files "+" — what to search
+    /// for (songs, playlists, channels, live streams); the search itself
+    /// opens as the second step.
     fn open_youtube_search_dialog(&self, sender: &ComponentSender<Self>) {
         if !youtube::available() {
             let _ = sender.output(YtOutput::Toast(gettext(
@@ -1599,109 +1601,54 @@ impl YtPage {
         let Some(root) = self.window.clone() else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Search YouTube"))
-            .build();
-        // The "+" opens a centered modal like the Files "+", also on the
-        // phone — not the bottom sheet of the detail dialogs.
-        dialog.set_presentation_mode(adw::DialogPresentationMode::Floating);
-        crate::ui::widgets::close_on_outside_click(&dialog);
-        let content = detail_box();
-
-        let kind = Rc::new(Cell::new(SearchKind::Yt(YtKind::Video)));
-        let kind_box = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .css_classes(["linked", "emilia-tabbar"])
-            .halign(gtk::Align::Center)
-            .margin_bottom(6)
-            .build();
-        let b_video = gtk::ToggleButton::builder()
-            // Labelled "Songs" (de "Lieder"): in this music app the video search
-            // is used to find songs. It still searches YtKind::Video.
-            .label(gettext("Songs"))
-            .active(true)
-            .build();
-        let b_playlist = gtk::ToggleButton::builder()
-            .label(gettext("Playlists"))
-            .build();
-        let b_channel = gtk::ToggleButton::builder()
-            .label(gettext("Channels"))
-            .build();
-        let b_live = gtk::ToggleButton::builder().label(gettext("Live")).build();
-        b_playlist.set_group(Some(&b_video));
-        b_channel.set_group(Some(&b_video));
-        b_live.set_group(Some(&b_video));
-        // Opened from the Live tab → search live streams right away.
-        if self.yt_view == YtView::Live {
-            b_live.set_active(true);
-            kind.set(SearchKind::Live);
-        }
-        for (btn, k) in [
-            (&b_video, SearchKind::Yt(YtKind::Video)),
-            (&b_playlist, SearchKind::Yt(YtKind::Playlist)),
-            (&b_channel, SearchKind::Yt(YtKind::Channel)),
-            (&b_live, SearchKind::Live),
-        ] {
-            let kind = kind.clone();
-            btn.connect_toggled(move |b| {
-                if b.is_active() {
-                    kind.set(k);
-                }
-            });
-            kind_box.append(btn);
-        }
-        content.append(&kind_box);
-
-        let search_group = adw::PreferencesGroup::builder()
-            .title(gettext("Search"))
-            .build();
-        let search_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(6)
-            .build();
-        let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text(gettext("Search term …"))
-            .hexpand(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&search_entry);
-        let search_btn = gtk::Button::builder().label(gettext("Search")).build();
-        search_btn.add_css_class("suggested-action");
-        search_row.append(&search_entry);
-        search_row.append(&search_btn);
-        search_group.add(&search_row);
-        content.append(&search_group);
-
-        let results = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .build();
-        results.add_css_class("boxed-list");
-        results.set_visible(false);
-
-        let trigger = {
-            let (sender, entry, kind) = (sender.clone(), search_entry.clone(), kind.clone());
-            move || {
-                let term = entry.text().to_string();
-                if !term.trim().is_empty() {
-                    sender.input(YtInput::Search(term, kind.get()));
-                }
-            }
+        let slot = self.search.clone();
+        let (sender, win) = (sender.clone(), root.clone());
+        // Opened from the Live tab → live streams are the default pick.
+        let default = if self.yt_view == YtView::Live {
+            "live"
+        } else {
+            "video"
         };
-        {
-            let trigger = trigger.clone();
-            search_entry.connect_activate(move |_| trigger());
-        }
-        search_btn.connect_clicked(move |_| trigger());
-
-        content.append(&results);
-
-        *self.search.borrow_mut() = Some((dialog.clone(), results.clone()));
-        {
-            let slot = self.search.clone();
-            dialog.connect_closed(move |_| {
-                *slot.borrow_mut() = None;
-            });
-        }
-        present_detail(&dialog, &content, &root);
+        let dialog = crate::ui::widgets::choice_modal(
+            &gettext("Search YouTube"),
+            &[
+                // Labelled "Songs" (de "Lieder"): in this music app the video
+                // search is used to find songs. It still searches YtKind::Video.
+                ("video", gettext("Songs")),
+                ("playlist", gettext("Playlists")),
+                ("channel", gettext("Channels")),
+                ("live", gettext("Live")),
+            ],
+            default,
+            move |resp| {
+                let (kind, heading) = match resp {
+                    "video" => (SearchKind::Yt(YtKind::Video), gettext("Search songs")),
+                    "playlist" => (
+                        SearchKind::Yt(YtKind::Playlist),
+                        gettext("Search playlists"),
+                    ),
+                    "channel" => (SearchKind::Yt(YtKind::Channel), gettext("Search channels")),
+                    "live" => (SearchKind::Live, gettext("Search live streams")),
+                    _ => return,
+                };
+                let sender = sender.clone();
+                let (dialog, entry, results) = crate::ui::widgets::search_modal(
+                    &heading,
+                    &gettext("Search term …"),
+                    move |term| sender.input(YtInput::Search(term, kind)),
+                );
+                *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
+                {
+                    let slot = slot.clone();
+                    dialog.connect_closed(move |_| {
+                        *slot.borrow_mut() = None;
+                    });
+                }
+                dialog.present(Some(&win));
+                entry.grab_focus();
+            },
+        );
+        dialog.present(Some(&root));
     }
 
     /// Clears the open search dialog's results list and shows a single spinner
@@ -1709,7 +1656,7 @@ impl YtPage {
     /// "Nothing found" / error row) once the worker reports back.
     fn show_youtube_search_spinner(&self) {
         let guard = self.search.borrow();
-        let Some((dialog, list)) = guard.as_ref() else {
+        let Some((_, list)) = guard.as_ref() else {
             return;
         };
         while let Some(child) = list.first_child() {
@@ -1717,7 +1664,6 @@ impl YtPage {
         }
         list.set_visible(true);
         list.append(&search_spinner_row());
-        dialog.set_content_height(320);
     }
 
     /// Redraws the results list in the open search dialog.
@@ -1748,11 +1694,8 @@ impl YtPage {
             };
             row.set_sensitive(false);
             list.append(&row);
-            dialog.set_content_height(320);
             return;
         }
-        let rows = self.search_results.len() as i32;
-        dialog.set_content_height((340 + rows * 66).min(760));
 
         let live = self.search_kind == SearchKind::Live;
         for (index, r) in self.search_results.iter().enumerate() {

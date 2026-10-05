@@ -707,6 +707,144 @@ pub fn close_on_outside_click(dialog: &impl IsA<adw::Dialog>) {
     dialog.upcast_ref::<adw::Dialog>().add_controller(click);
 }
 
+/// Centered "+" modal in the look of the Files "Add a source" dialog: a
+/// heading, the `choices` as stacked buttons (response id, label) and Cancel
+/// set apart below in a muted red. Picking a choice calls `on_pick` with its id.
+pub fn choice_modal(
+    heading: &str,
+    choices: &[(&str, String)],
+    default: &str,
+    on_pick: impl Fn(&str) + 'static,
+) -> adw::AlertDialog {
+    let dialog = adw::AlertDialog::new(Some(heading), None);
+    dialog.add_css_class("emilia-modal");
+    dialog.add_response("cancel", &crate::i18n::gettext("Cancel"));
+    // Stacked buttons show the last response on top: add them reversed so
+    // `choices` reads top to bottom.
+    for (id, label) in choices.iter().rev() {
+        dialog.add_response(id, label);
+    }
+    dialog.set_default_response(Some(default));
+    dialog.set_close_response("cancel");
+    close_on_outside_click(&dialog);
+    dialog.connect_response(None, move |_, resp| {
+        if resp != "cancel" {
+            on_pick(resp);
+        }
+    });
+    dialog
+}
+
+/// Second step of a "+" modal: a search field with a Search button and a
+/// (hidden until filled) results list, in the same centered look with Cancel
+/// below. `on_search` gets the trimmed, non-empty term.
+pub fn search_modal(
+    heading: &str,
+    placeholder: &str,
+    on_search: impl Fn(String) + 'static,
+) -> (adw::AlertDialog, gtk::SearchEntry, gtk::ListBox) {
+    let dialog = adw::AlertDialog::new(Some(heading), None);
+    dialog.add_css_class("emilia-modal");
+    // Wider on the desktop for the result rows. A libadwaita 1.6 property:
+    // set by name so the v1_5 bindings still build, and skipped on older libs.
+    if dialog.find_property("prefer-wide-layout").is_some() {
+        dialog.set_property("prefer-wide-layout", true);
+    }
+    dialog.add_response("cancel", &crate::i18n::gettext("Cancel"));
+    dialog.set_close_response("cancel");
+    close_on_outside_click(&dialog);
+
+    let body = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .build();
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let entry = gtk::SearchEntry::builder()
+        .placeholder_text(placeholder)
+        .hexpand(true)
+        .build();
+    let btn = gtk::Button::builder()
+        .label(crate::i18n::gettext("Search"))
+        .build();
+    btn.add_css_class("suggested-action");
+    row.append(&entry);
+    row.append(&btn);
+    body.append(&row);
+
+    let results = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    results.add_css_class("boxed-list");
+    results.set_visible(false);
+    body.append(&results);
+    dialog.set_extra_child(Some(&body));
+
+    let on_search = std::rc::Rc::new(on_search);
+    let trigger = {
+        let entry = entry.clone();
+        move || {
+            let term = entry.text().trim().to_string();
+            if !term.is_empty() {
+                on_search(term);
+            }
+        }
+    };
+    {
+        let trigger = trigger.clone();
+        entry.connect_activate(move |_| trigger());
+    }
+    btn.connect_clicked(move |_| trigger());
+    (dialog, entry, results)
+}
+
+/// Second step of a "+" modal for a manual address: one entry row, Cancel and
+/// an `apply_label` button that is enabled once something is typed.
+/// `on_apply` gets the trimmed text.
+pub fn entry_modal(
+    heading: &str,
+    field_title: &str,
+    apply_label: &str,
+    on_apply: impl Fn(String) + 'static,
+) -> (adw::AlertDialog, adw::EntryRow) {
+    let dialog = adw::AlertDialog::new(Some(heading), None);
+    dialog.add_css_class("emilia-modal");
+    dialog.add_response("cancel", &crate::i18n::gettext("Cancel"));
+    dialog.add_response("apply", apply_label);
+    dialog.set_response_appearance("apply", adw::ResponseAppearance::Suggested);
+    dialog.set_response_enabled("apply", false);
+    dialog.set_default_response(Some("apply"));
+    dialog.set_close_response("cancel");
+    close_on_outside_click(&dialog);
+
+    let list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .build();
+    list.add_css_class("boxed-list");
+    let entry = adw::EntryRow::builder().title(field_title).build();
+    entry.set_activates_default(true);
+    list.append(&entry);
+    dialog.set_extra_child(Some(&list));
+    {
+        let dialog = dialog.clone();
+        entry.connect_changed(move |e| {
+            dialog.set_response_enabled("apply", !e.text().trim().is_empty());
+        });
+    }
+    {
+        let entry = entry.clone();
+        dialog.connect_response(Some("apply"), move |_, _| {
+            let text = entry.text().trim().to_string();
+            if !text.is_empty() {
+                on_apply(text);
+            }
+        });
+    }
+    (dialog, entry)
+}
+
 /// Empties a gallery flow box and (re-)applies its fixed grid: exactly
 /// `columns` equally wide tiles per row. No reflow to fewer columns — the user
 /// picks the grid, and each tile is kept square by its `SquareBin`.
