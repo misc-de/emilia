@@ -62,6 +62,16 @@ pub fn thumb_cached(path: &str) -> Option<gtk::gdk::Texture> {
     Some(texture)
 }
 
+/// Drops a picture from the thumbnail cache — after a detail refresh wrote a
+/// new image to the same file, so the lists show the new one.
+pub fn forget_thumb(path: Option<&str>) {
+    if let Some(p) = path {
+        THUMB_CACHE.with(|c| {
+            c.borrow_mut().map.remove(p);
+        });
+    }
+}
+
 /// Stores a decoded thumbnail in the cache, evicting the least-recently-used
 /// entries in one batch once the size cap is exceeded.
 pub fn store_thumb(path: String, texture: gtk::gdk::Texture) {
@@ -638,14 +648,90 @@ pub(crate) fn carousel_with_arrows(carousel: &adw::Carousel) -> gtk::Box {
 /// podcast details read alike. `path` is a local image file (or `None`, which
 /// shows `placeholder`).
 pub fn detail_cover(path: Option<&str>, placeholder: &str) -> gtk::Box {
-    // Decode downscaled: logos/thumbnails can be large files, and the cover is
+    // Decode downscaled: logos/thumbnails can be large files. A wide picture
+    // spans the dialog (up to ~600 px, 1200 covers HiDPI); a square one is
     // shown at 180 px (360 covers HiDPI).
-    let tex = path
-        .and_then(|p| decode_scaled(p, 360).or_else(|| gtk::gdk::Texture::from_filename(p).ok()));
+    let tex = path.and_then(|p| {
+        let full = gtk::gdk::Texture::from_filename(p).ok()?;
+        let edge = if is_wide(&full) { 1200 } else { 360 };
+        decode_scaled(p, edge).or(Some(full))
+    });
     let cover_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    cover_box.set_halign(gtk::Align::Center);
-    cover_box.append(&rounded_image(tex.as_ref(), placeholder, 180));
+    cover_box.append(&detail_image(tex.as_ref(), placeholder, 180));
     cover_box
+}
+
+/// Whether a picture is landscape (a 16:9 or letterboxed 4:3 video thumbnail)
+/// rather than a square cover.
+fn is_wide(texture: &gtk::gdk::Texture) -> bool {
+    texture.height() > 0 && texture.width() as f32 / texture.height() as f32 >= 1.2
+}
+
+/// The cover of a detail view: a square cover/logo as the centered `size` px
+/// image, a landscape picture (video thumbnail) as a 16:9 image across the
+/// whole width — cropped, so a 4:3 thumbnail loses its black bars.
+pub fn detail_image(
+    texture: Option<&gtk::gdk::Texture>,
+    placeholder_icon: &str,
+    size: i32,
+) -> gtk::Widget {
+    match texture.filter(|t| is_wide(t)) {
+        Some(t) => {
+            let frame = gtk::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
+            frame.set_overflow(gtk::Overflow::Hidden);
+            frame.set_hexpand(true);
+            frame.add_css_class("card");
+            let pic = gtk::Picture::for_paintable(t);
+            pic.set_content_fit(gtk::ContentFit::Cover);
+            pic.set_can_shrink(true);
+            frame.set_child(Some(&pic));
+            // A scrolling dialog only guarantees a child its *minimum* height,
+            // which is 0 for a shrinkable picture — once the content outgrows
+            // the dialog (an "Info" unfolded), the image would shrink and leave
+            // empty bars beside it. Pin the height to the 16:9 of the width the
+            // frame got, once it is laid out.
+            frame.connect_map(|frame| {
+                let frame = frame.clone();
+                gtk::glib::idle_add_local_once(move || {
+                    let w = frame.width();
+                    if w > 0 {
+                        frame.set_height_request(w * 9 / 16);
+                    }
+                });
+            });
+            frame.upcast()
+        }
+        None => {
+            // Square: centered in the full-width row the wide image would fill.
+            // The center box expands, not the image — an expanded aspect frame
+            // would ask for a square as tall as the dialog is wide.
+            let center = gtk::CenterBox::new();
+            center.set_hexpand(true);
+            center.set_center_widget(Some(&rounded_image(texture, placeholder_icon, size)));
+            center.upcast()
+        }
+    }
+}
+
+/// The collapsible "Info" block of a detail view, as in the music details:
+/// a group holding a folded expander; add the rows with [`info_row`].
+pub fn info_expander() -> (adw::PreferencesGroup, adw::ExpanderRow) {
+    let group = adw::PreferencesGroup::new();
+    let expander = adw::ExpanderRow::builder()
+        .title(crate::i18n::gettext("Info"))
+        .build();
+    group.add(&expander);
+    (group, expander)
+}
+
+/// One line of an [`info_expander`]: label as title, value as subtitle.
+pub fn info_row(label: &str, value: &str) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(label)
+        .subtitle(gtk::glib::markup_escape_text(value))
+        .build();
+    row.set_subtitle_lines(2);
+    row
 }
 
 /// Content box for the detail dialogs (uniform margins).

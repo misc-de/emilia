@@ -837,6 +837,19 @@ impl Component for PodcastsPage {
                 if !ok {
                     let _ = sender.output(PodcastsOutput::Toast(gettext("Could not load feed")));
                 }
+                let image = self
+                    .library
+                    .podcasts()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|p| p.0 == podcast_id)
+                    .and_then(|p| p.2);
+                crate::ui::widgets::forget_thumb(
+                    image
+                        .as_deref()
+                        .and_then(crate::core::online::podcast_image_path)
+                        .as_deref(),
+                );
                 self.reload_podcasts(&sender);
                 match episode {
                     Some(url) => self.open_episode_detail_by_url(&sender, &url),
@@ -1611,15 +1624,17 @@ impl PodcastsPage {
         let Some(root) = self.window.clone() else {
             return;
         };
-        let dialog = adw::Dialog::builder().title(&ep.title).build();
+        // The podcast in the title bar, the episode on the row below the cover.
+        let dialog = adw::Dialog::builder().title(&ep.podcast_title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
         let info = adw::PreferencesGroup::new();
         let pod = adw::ActionRow::builder()
-            .title(gettext("Podcast"))
+            .title(gtk::glib::markup_escape_text(&ep.title))
             .subtitle(gtk::glib::markup_escape_text(&ep.podcast_title))
             .build();
+        pod.set_title_lines(3);
         let cover = ep
             .podcast_image
             .as_deref()
@@ -1713,7 +1728,7 @@ impl PodcastsPage {
             dl_cell.add_controller(click);
         }
         meta.append(&dl_cell);
-        info.add(&meta);
+        // `meta` joins `info` below the shownotes (added further down).
         content.append(&info);
 
         *self.ctx_episode_download.borrow_mut() = Some((dl_value, dl_bar, ep.audio_url.clone()));
@@ -1737,12 +1752,28 @@ impl PodcastsPage {
             });
         }
         actions.add(&eq);
+        // Share this episode over device sync (its podcast comes along so it
+        // shows up on the other device, with this episode's progress).
+        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
+        {
+            let (sender, dialog, url) = (sender.clone(), dialog.clone(), ep.audio_url.clone());
+            share.connect_activated(move |_| {
+                let _ = sender.output(PodcastsOutput::Share(Box::new(
+                    crate::core::sync::share::Selection {
+                        podcast_episodes: vec![url.clone()],
+                        ..Default::default()
+                    },
+                )));
+                dialog.close();
+            });
+        }
+        actions.add(&share);
         content.append(&actions);
 
         // Shownotes (if present): timestamps become clickable jump markers, web
         // addresses ordinary links (opened by the label's default handler).
+        // They sit right under the episode, above "Published".
         if let Some(notes) = ep.description.as_deref().filter(|s| !s.trim().is_empty()) {
-            let notes_group = adw::PreferencesGroup::new();
             // Always wrap, including inside long unbreakable tokens (URLs), so a
             // shownote can never force the dialog wider than the screen.
             let label = gtk::Label::builder()
@@ -1817,9 +1848,9 @@ impl PodcastsPage {
                     },
                 );
             });
-            notes_group.add(&expander);
-            content.append(&notes_group);
+            info.add(&expander);
         }
+        info.add(&meta);
 
         {
             let (sender, url) = (sender.clone(), ep.audio_url.clone());

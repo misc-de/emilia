@@ -249,6 +249,7 @@ fn selection_from_args(args: &Value) -> Result<Selection> {
         recordings: arg_i64_list(args, "recording_ids"),
         memos: arg_i64_list(args, "memo_ids"),
         podcast_feeds,
+        podcast_episodes: Vec::new(),
         playlist_ids: arg_i64_list(args, "playlist_ids"),
         include_metadata: arg_bool(args, "include_metadata").unwrap_or(true),
         yt_channels: Vec::new(),

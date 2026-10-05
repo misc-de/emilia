@@ -29,7 +29,9 @@ use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover, SortToggle};
 use crate::ui::app_views::natural_key;
 use crate::ui::entry_row::EntryRow;
-use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
+use crate::ui::widgets::{
+    action_row, detail_box, info_expander, info_row, present_detail_refreshable,
+};
 
 /// Placeholder icon when a station has no logo.
 const STREAM_ICON: &str = "audio-x-generic-symbolic";
@@ -274,24 +276,26 @@ pub(crate) enum StreamCmd {
     },
 }
 
-/// What a detail refresh found for a song: artist, album and cover, from the
-/// music database (Deezer) first, otherwise from the recording lookup that also
-/// copes with station noise in the title. **Network** — worker threads only.
+/// What a detail refresh found for a song: artist, album and cover from the
+/// music database (Deezer), checked against the known artist; for a song
+/// without an artist the recording lookup, which also copes with station noise
+/// in the title. **Network** — worker threads only.
 fn lookup_song(
     artist: Option<&str>,
     title: &str,
     station: Option<&str>,
 ) -> Option<(Option<String>, Option<String>, Vec<u8>)> {
-    if let Some(tags) = crate::core::online::track_tags(artist, title) {
+    if let Some(tags) = crate::core::online::track_tags_strict(artist, title) {
         if let Some(cover) = tags.cover {
             return Some((tags.artist, tags.album, cover));
         }
     }
-    let raw = match artist.filter(|a| !a.trim().is_empty()) {
-        Some(a) => format!("{a} - {title}"),
-        None => title.to_string(),
-    };
-    crate::core::online::recording_cover(&raw, station).map(|(cover, album)| (None, album, cover))
+    // The recording lookup also copes with station noise in the title, but it
+    // checks no artist — so only when there is none to check against.
+    if artist.is_some_and(|a| !a.trim().is_empty()) {
+        return None;
+    }
+    crate::core::online::recording_cover(title, station).map(|(cover, album)| (None, album, cover))
 }
 
 /// Fetches the station logos not yet in the cache (worker thread — network).
@@ -901,6 +905,9 @@ impl Component for StreamPage {
                 }
                 if let Some(fav) = favicon.as_deref() {
                     let _ = self.library.set_stream_favicon(id, Some(fav));
+                    crate::ui::widgets::forget_thumb(
+                        crate::core::online::station_image_path(fav).as_deref(),
+                    );
                 }
                 if meta.is_none() && favicon.is_none() {
                     let _ = sender.output(StreamOutput::Toast(gettext("Nothing found")));
@@ -909,6 +916,15 @@ impl Component for StreamPage {
                 self.open_stream(&sender, id);
             }
             StreamCmd::RecordingRefreshed { id, found } => {
+                if let Some(r) = self.recording_items.iter().find(|r| r.id == id) {
+                    crate::ui::widgets::forget_thumb(
+                        crate::core::online::recording_cover_path(
+                            r.artist.as_deref().unwrap_or(""),
+                            &r.title,
+                        )
+                        .as_deref(),
+                    );
+                }
                 if !found {
                     let _ = sender.output(StreamOutput::Toast(gettext("Nothing found")));
                 }
@@ -916,6 +932,12 @@ impl Component for StreamPage {
                 self.open_recording(&sender, id);
             }
             StreamCmd::HeardRefreshed { id, artist, found } => {
+                if let Some(h) = self.heard_items.iter().find(|h| h.id == id) {
+                    let shown = h.artist.as_deref().or(artist.as_deref()).unwrap_or("");
+                    crate::ui::widgets::forget_thumb(
+                        crate::core::online::recording_cover_path(shown, &h.title).as_deref(),
+                    );
+                }
                 if let Some(a) = artist.as_deref() {
                     let _ = self.library.set_heard_artist(id, a);
                 }
@@ -1772,49 +1794,42 @@ impl StreamPage {
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
-        let info = adw::PreferencesGroup::new();
-        let head = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(&rec.title))
-            .build();
-        if let Some(a) = artist.as_deref() {
-            head.set_subtitle(&gtk::glib::markup_escape_text(a));
-        }
         let cover =
             crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &rec.title);
         content.append(&crate::ui::widgets::detail_cover(
             cover.as_deref(),
             "audio-x-generic-symbolic",
         ));
-        info.add(&head);
-        content.append(&info);
 
-        let details = adw::PreferencesGroup::new();
-        let info_row = |label: &str, value: &str| {
-            let r = adw::ActionRow::builder().title(label).build();
-            r.set_subtitle(&gtk::glib::markup_escape_text(value));
-            r.add_css_class("property");
-            r
-        };
+        // The song's details folded under "Info", as in the music details.
+        let (info, details) = info_expander();
+        details.add_row(&info_row(&gettext("Title"), &rec.title));
         if let Some(ar) = artist.as_deref() {
-            details.add(&info_row(&gettext("Artist"), ar));
+            details.add_row(&info_row(&gettext("Artist"), ar));
         }
         if let Some(al) = album.as_deref() {
-            details.add(&info_row(&gettext("Album"), al));
+            details.add_row(&info_row(&gettext("Album"), al));
+        }
+        if rec.duration_ms > 0 {
+            details.add_row(&info_row(
+                &gettext("Duration"),
+                &crate::ui::app_helpers::fmt_duration(rec.duration_ms),
+            ));
         }
         if let Some(st) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
-            details.add(&info_row(&gettext("Station"), st));
+            details.add_row(&info_row(&gettext("Station"), st));
         }
-        details.add(&info_row(
+        details.add_row(&info_row(
             &gettext("Recorded"),
             &format_datetime(rec.recorded_at),
         ));
         if rec.incomplete {
-            details.add(&info_row(
+            details.add_row(&info_row(
                 &gettext("Note"),
                 &gettext("Incomplete (beginning was missing)"),
             ));
         }
-        content.append(&details);
+        content.append(&info);
 
         let actions = adw::PreferencesGroup::new();
         let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
@@ -2066,40 +2081,27 @@ impl StreamPage {
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
-        let info = adw::PreferencesGroup::new();
-        let head = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(&h.title))
-            .build();
-        if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
-            head.set_subtitle(&gtk::glib::markup_escape_text(a));
-        }
         let cover =
             crate::core::online::recording_cover_path(h.artist.as_deref().unwrap_or(""), &h.title);
         content.append(&crate::ui::widgets::detail_cover(
             cover.as_deref(),
             "audio-x-generic-symbolic",
         ));
-        info.add(&head);
-        content.append(&info);
 
-        let details = adw::PreferencesGroup::new();
-        let info_row = |label: &str, value: &str| {
-            let r = adw::ActionRow::builder().title(label).build();
-            r.set_subtitle(&gtk::glib::markup_escape_text(value));
-            r.add_css_class("property");
-            r
-        };
+        // The song's details folded under "Info", as in the music details.
+        let (info, details) = info_expander();
+        details.add_row(&info_row(&gettext("Title"), &h.title));
         if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
-            details.add(&info_row(&gettext("Artist"), a));
+            details.add_row(&info_row(&gettext("Artist"), a));
         }
         if let Some(s) = h.station.as_deref().filter(|s| !s.trim().is_empty()) {
-            details.add(&info_row(&gettext("Station"), s));
+            details.add_row(&info_row(&gettext("Station"), s));
         }
-        details.add(&info_row(&gettext("Heard"), &format_datetime(h.heard_at)));
+        details.add_row(&info_row(&gettext("Heard"), &format_datetime(h.heard_at)));
         if h.count > 1 {
-            details.add(&info_row(&gettext("Times heard"), &h.count.to_string()));
+            details.add_row(&info_row(&gettext("Times heard"), &h.count.to_string()));
         }
-        content.append(&details);
+        content.append(&info);
 
         let actions = adw::PreferencesGroup::new();
         let play = action_row(&gettext("Play"), "media-playback-start-symbolic");

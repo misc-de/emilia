@@ -519,9 +519,16 @@ impl OnlineClient {
                 title.replace('"', " ")
             )
         };
+        self.search_track_query(&q, title)
+    }
+
+    /// The top Deezer track hit for a raw search query (structured
+    /// `artist:"…" track:"…"` or plain free text); `title` stands in when the
+    /// hit carries none.
+    fn search_track_query(&self, q: &str, title: &str) -> Result<Option<TrackTags>> {
         let url = format!(
             "https://api.deezer.com/search/track?q={}&limit=1",
-            percent_encode(&q)
+            percent_encode(q)
         );
         let search: DzTrackSearch = match self.call_get(&url)? {
             Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
@@ -1142,6 +1149,65 @@ pub fn track_tags(artist: Option<&str>, title: &str) -> Option<TrackTags> {
         }
     }
     None
+}
+
+/// Like [`track_tags`], but for a known artist only accepts a hit by that
+/// artist: tried with the full artist, then with the main artist alone
+/// ("Robin Schulz feat. Francesco Yates" → "Robin Schulz"), and never by title
+/// alone — a title-only search happily returns a cover version or a tribute.
+/// Without an artist it falls back to [`track_tags`]. Used by the detail
+/// refresh, where a wrong cover is worse than none. **Network.**
+pub fn track_tags_strict(artist: Option<&str>, title: &str) -> Option<TrackTags> {
+    let title = title.trim();
+    let Some(artist) = artist.map(str::trim).filter(|s| !s.is_empty()) else {
+        return track_tags(None, title);
+    };
+    if title.is_empty() {
+        return None;
+    }
+    let main = main_artist(artist);
+    let client = shared_client();
+    let mut hints = vec![artist];
+    if main != artist && !main.is_empty() {
+        hints.push(main.as_str());
+    }
+    let fits = |tags: &TrackTags| {
+        loose_match(&tags.title, title)
+            && tags
+                .artist
+                .as_deref()
+                .is_some_and(|a| loose_match(&main_artist(a), &main))
+    };
+    // Structured queries first; Deezer's field search misses many tracks, so
+    // then plain text ("Robin Schulz Sugar"), still checked the same way.
+    let free = format!("{main} {title}");
+    let queries = hints
+        .into_iter()
+        .map(|h| client.search_track_tags(h, title))
+        .chain(std::iter::once_with(|| {
+            client.search_track_query(&free, title)
+        }));
+    for result in queries {
+        match result {
+            Ok(Some(tags)) if fits(&tags) => return Some(tags),
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Track lookup failed ({title}): {e}");
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// The leading artist of a credit, without featured guests or partners
+/// ("A feat. B" → "A"), by the same rules the library uses for its
+/// "main artist only" credit mode.
+fn main_artist(credit: &str) -> String {
+    crate::core::artist::split_artists_with(crate::core::artist::CreditMode::Primary, credit)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| credit.trim().to_string())
 }
 
 /// Compares two track/artist names loosely: case- and punctuation-insensitive,
@@ -1898,6 +1964,19 @@ mod tests {
         loader.write(bytes).unwrap();
         loader.close().unwrap();
         loader.pixbuf().unwrap()
+    }
+
+    #[test]
+    fn main_artist_drops_featured_guests() {
+        assert_eq!(
+            super::main_artist("Robin Schulz feat. Francesco Yates"),
+            "Robin Schulz"
+        );
+        assert_eq!(
+            super::main_artist("Calvin Harris & Dua Lipa"),
+            "Calvin Harris"
+        );
+        assert_eq!(super::main_artist("Billie Eilish"), "Billie Eilish");
     }
 
     #[test]

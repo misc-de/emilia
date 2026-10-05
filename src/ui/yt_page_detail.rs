@@ -50,39 +50,40 @@ impl YtPage {
 
         let cover_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .halign(gtk::Align::Center)
             .margin_top(6)
             .margin_bottom(6)
             .build();
         let initial = cover_path
             .as_deref()
             .and_then(|p| gtk::gdk::Texture::from_filename(p).ok());
+        // A video thumbnail spans the width; a song cover stays square.
         let cover =
-            crate::ui::widgets::rounded_image(initial.as_ref(), "audio-x-generic-symbolic", 200);
+            crate::ui::widgets::detail_image(initial.as_ref(), "audio-x-generic-symbolic", 200);
         cover_box.append(&cover);
         content.append(&cover_box);
 
         let (p_artist, p_album, p_title) = youtube::split_title(title, stored_channel.as_deref());
         let artist_from_title = p_artist.is_some();
-        let info = adw::PreferencesGroup::new();
+        // The song's details folded under "Info", as in the music details.
+        let (info, info_rows) = crate::ui::widgets::info_expander();
         let artist_row = adw::ActionRow::builder()
             .title(gettext("Artist"))
             .subtitle(p_artist.as_deref().unwrap_or("…"))
             .build();
-        info.add(&artist_row);
+        info_rows.add_row(&artist_row);
         if let Some(album) = p_album.as_deref() {
             let album_row = adw::ActionRow::builder()
                 .title(gettext("Album"))
                 .subtitle(gtk::glib::markup_escape_text(album))
                 .build();
-            info.add(&album_row);
+            info_rows.add_row(&album_row);
         }
         let title_row = adw::ActionRow::builder()
             .title(gettext("Title"))
             .subtitle(gtk::glib::markup_escape_text(&p_title))
             .build();
         title_row.set_subtitle_lines(3);
-        info.add(&title_row);
+        info_rows.add_row(&title_row);
         let duration_row = adw::ActionRow::builder()
             .title(gettext("Duration"))
             .subtitle(
@@ -91,7 +92,7 @@ impl YtPage {
                     .unwrap_or_else(|| "…".into()),
             )
             .build();
-        info.add(&duration_row);
+        info_rows.add_row(&duration_row);
         content.append(&info);
 
         let actions = adw::PreferencesGroup::new();
@@ -166,10 +167,12 @@ impl YtPage {
         {
             let (sender, dialog, vid) = (sender.clone(), dialog.clone(), video_id.to_string());
             share.connect_activated(move |_| {
-                let _ = sender.output(YtOutput::Share(crate::core::sync::share::Selection {
-                    yt_songs: vec![vid.clone()],
-                    ..Default::default()
-                }));
+                let _ = sender.output(YtOutput::Share(Box::new(
+                    crate::core::sync::share::Selection {
+                        yt_songs: vec![vid.clone()],
+                        ..Default::default()
+                    },
+                )));
                 dialog.close();
             });
         }
@@ -921,7 +924,7 @@ impl YtPage {
             while let Some(ch) = cover_box.first_child() {
                 cover_box.remove(&ch);
             }
-            cover_box.append(&crate::ui::widgets::rounded_image(
+            cover_box.append(&crate::ui::widgets::detail_image(
                 Some(&tex),
                 "audio-x-generic-symbolic",
                 200,

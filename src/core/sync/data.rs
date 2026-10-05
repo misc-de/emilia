@@ -142,6 +142,38 @@ pub(crate) fn export_podcasts_for(lib: &Library, feeds: &[String]) -> Vec<Podcas
         .collect()
 }
 
+/// The podcasts of single shared episodes (audio URLs), with their full
+/// episode list so the episode shows up on the receiver — but the listening
+/// progress only of the shared episodes, so sharing one episode never marks
+/// the receiver's other episodes as heard.
+pub(crate) fn export_podcast_episodes(lib: &Library, urls: &[String]) -> Vec<PodcastRec> {
+    if urls.is_empty() {
+        return Vec::new();
+    }
+    let want: std::collections::HashSet<&str> = urls.iter().map(String::as_str).collect();
+    let mut feeds: Vec<String> = Vec::new();
+    for url in urls {
+        let feed = lib
+            .podcast_id_for_episode_url(url)
+            .ok()
+            .flatten()
+            .and_then(|id| lib.podcast_feed_url(id).ok().flatten());
+        if let Some(f) = feed.filter(|f| !feeds.contains(f)) {
+            feeds.push(f);
+        }
+    }
+    let mut pcs = export_podcasts_for(lib, &feeds);
+    for pc in &mut pcs {
+        for ep in &mut pc.episodes {
+            if !want.contains(ep.audio_url.as_str()) {
+                ep.position_ms = 0;
+                ep.finished = false;
+            }
+        }
+    }
+    pcs
+}
+
 /// Like [`export_playlists_user`] but only the user playlists with the given ids
 /// (for sharing a single playlist from its detail view).
 pub(crate) fn export_playlists_for(lib: &Library, base: &str, ids: &[i64]) -> Vec<PlaylistRec> {
@@ -656,6 +688,38 @@ mod tests {
             dst.get_eq("", "track", "/data/Audio/song.mp3").unwrap(),
             Some([1.0; 10])
         );
+    }
+
+    #[test]
+    fn single_episode_share_keeps_only_its_progress() {
+        let lib = Library::open_in_memory().unwrap();
+        let pid = lib
+            .subscribe_podcast("Mein Podcast", "https://example.com/feed.xml", None)
+            .unwrap();
+        let ep = |n: u32| crate::model::Episode {
+            guid: Some(format!("ep-{n}")),
+            title: format!("Folge {n}"),
+            audio_url: format!("https://example.com/{n}.mp3"),
+            published: None,
+            duration: None,
+            description: None,
+        };
+        lib.set_episodes(pid, &[ep(1), ep(2)]).unwrap();
+        lib.set_episode_progress("https://example.com/1.mp3", 60_000)
+            .unwrap();
+        lib.mark_episode_finished("https://example.com/2.mp3")
+            .unwrap();
+
+        let pcs = export_podcast_episodes(&lib, &["https://example.com/1.mp3".to_string()]);
+        // The podcast comes along with its whole episode list …
+        assert_eq!(pcs.len(), 1);
+        assert_eq!(pcs[0].episodes.len(), 2);
+        // … but only the shared episode carries its progress.
+        let by_url = |u: &str| pcs[0].episodes.iter().find(|e| e.audio_url == u).unwrap();
+        assert_eq!(by_url("https://example.com/1.mp3").position_ms, 60_000);
+        let other = by_url("https://example.com/2.mp3");
+        assert!(!other.finished);
+        assert_eq!(other.position_ms, 0);
     }
 
     #[test]

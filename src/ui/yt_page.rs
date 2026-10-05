@@ -348,7 +348,7 @@ pub(crate) enum YtOutput {
     /// are disabled app-wide, so this is the only feedback channel left.
     RefreshSummary(String),
     /// Share a selection (a YouTube channel or video) over device sync.
-    Share(crate::core::sync::share::Selection),
+    Share(Box<crate::core::sync::share::Selection>),
     /// The sort slot was rebuilt → the parent refreshes the shared title-bar
     /// sort button (if the YouTube section is showing).
     SortChanged,
@@ -1160,10 +1160,27 @@ impl Component for YtPage {
                 self.reload_channels(&sender);
             }
             YtCmd::VideoRefreshed { video_id, title } => {
+                crate::ui::widgets::forget_thumb(
+                    crate::core::online::youtube_cover_path(&video_id).as_deref(),
+                );
+                crate::ui::widgets::forget_thumb(
+                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&video_id))
+                        .as_deref(),
+                );
                 self.reload_yt_recent(&sender);
                 self.show_video_detail(&sender, &video_id, &title);
             }
             YtCmd::ChannelDetailRefreshed(id) => {
+                if let Some(t) = self
+                    .channel_items
+                    .iter()
+                    .find(|c| c.0 == id)
+                    .and_then(|c| c.3.as_deref())
+                {
+                    crate::ui::widgets::forget_thumb(
+                        crate::core::online::youtube_thumb_path(t).as_deref(),
+                    );
+                }
                 self.reload_channels(&sender);
                 self.open_channel_detail(&sender, id);
             }
@@ -1177,6 +1194,11 @@ impl Component for YtPage {
                 details,
                 thumbnail,
             } => {
+                if let Some(t) = thumbnail.as_deref() {
+                    crate::ui::widgets::forget_thumb(
+                        crate::core::online::youtube_thumb_path(t).as_deref(),
+                    );
+                }
                 if let Some(d) = details.as_ref() {
                     let channel = d.uploader.as_deref().map(youtube::clean_channel_name);
                     let _ = self.library.add_live(
@@ -2061,10 +2083,12 @@ impl YtPage {
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
             share.connect_activated(move |_| {
-                let _ = sender.output(YtOutput::Share(crate::core::sync::share::Selection {
-                    yt_channels: vec![id],
-                    ..Default::default()
-                }));
+                let _ = sender.output(YtOutput::Share(Box::new(
+                    crate::core::sync::share::Selection {
+                        yt_channels: vec![id],
+                        ..Default::default()
+                    },
+                )));
                 dialog.close();
             });
         }

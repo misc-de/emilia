@@ -2193,7 +2193,7 @@ impl Component for App {
                         Msg::RefreshProgress { done, total, label }
                     }
                     O::RefreshSummary(s) => Msg::RefreshSummary(s),
-                    O::Share(sel) => Msg::Ctx(CtxMsg::ShareItems(Box::new(sel))),
+                    O::Share(sel) => Msg::Ctx(CtxMsg::ShareItems(sel)),
                     O::SortChanged => Msg::Sort(crate::ui::app_sort::SortMsg::YtChanged),
                 }
             });

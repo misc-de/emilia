@@ -180,6 +180,9 @@ pub struct Selection {
     pub memos: Vec<i64>,
     /// Specific podcast feed URLs to share (incl. feed + episodes).
     pub podcast_feeds: Vec<String>,
+    /// Single podcast episodes (audio URLs) to share: their podcast with its
+    /// episode list, but listening progress only for these episodes.
+    pub podcast_episodes: Vec<String>,
     /// Specific user-playlist ids to share; their local tracks are added to the
     /// file transfer so the playlist resolves on the receiver.
     pub playlist_ids: Vec<i64>,
@@ -213,6 +216,7 @@ impl Selection {
             && self.recordings.is_empty()
             && self.memos.is_empty()
             && self.podcast_feeds.is_empty()
+            && self.podcast_episodes.is_empty()
             && self.playlist_ids.is_empty()
             && self.yt_channels.is_empty()
             && self.yt_playlists.is_empty()
@@ -448,8 +452,14 @@ pub fn build_manifest(
             sel.include_playlists
                 .then(|| data::export_playlists_user(lib, &base).unwrap_or_default())
         },
-        podcasts: if !sel.podcast_feeds.is_empty() {
-            Some(data::export_podcasts_for(lib, &sel.podcast_feeds))
+        podcasts: if !sel.podcast_feeds.is_empty() || !sel.podcast_episodes.is_empty() {
+            let mut pcs = data::export_podcasts_for(lib, &sel.podcast_feeds);
+            for pc in data::export_podcast_episodes(lib, &sel.podcast_episodes) {
+                if !pcs.iter().any(|p| p.feed_url == pc.feed_url) {
+                    pcs.push(pc);
+                }
+            }
+            Some(pcs)
         } else {
             sel.include_podcasts
                 .then(|| data::export_podcasts(lib).unwrap_or_default())
