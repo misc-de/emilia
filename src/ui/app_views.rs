@@ -2208,7 +2208,7 @@ impl App {
         Some(res)
     }
 
-    /// Type switch (Automatic / Album / Single / Compilation) for the album
+    /// Category switch (Automatic / Album / Single / Compilation) for the album
     /// context menu — writes the manual `album_kind` override so the user can
     /// correct the heuristic. Automatic clears the override.
     pub(crate) fn ctx_album_kind_group(
@@ -2221,11 +2221,9 @@ impl App {
             return None;
         };
         let album = m.album.clone();
-        let group = adw::PreferencesGroup::builder()
-            .title(gettext("Category"))
-            .build();
+        let group = adw::PreferencesGroup::new();
         let row = adw::ComboRow::builder()
-            .title(gettext("Type"))
+            .title(gettext("Category"))
             .subtitle(gettext(
                 "Where this album is filed (Singles / Compilations)",
             ))
