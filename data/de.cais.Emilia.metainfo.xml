@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.43" date="2026-10-05">
+      <description>
+        <p>The details of stations, recognized songs, recordings, YouTube channels and live streams, podcast episodes and podcasts now show a large cover at the top, like the music details. Detail views no longer have a close button in the corner; they close by swiping down, tapping beside them or pressing Escape. The search and the share button in the title bar open a centered window like the "+" dialogs, and sharing first asks whether to offer a connection or scan a code. Text fields in dialogs stay visible when a background picture is on; before, they only appeared once tapped. In the album details, the "Type" option is now called "Category".</p>
+        <p xml:lang="de">Die Details von Sendern, erkannten Songs, Aufnahmen, YouTube-Kanälen und -Livestreams, Podcast-Folgen und Podcasts zeigen jetzt oben ein großes Cover wie die Musikdetails. Detailansichten haben keinen Schließen-Knopf mehr in der Ecke; sie schließen per Wischen nach unten, Tippen daneben oder Esc. Die Suche und der Teilen-Knopf in der Titelleiste öffnen ein zentriertes Fenster wie die „+“-Dialoge, und Teilen fragt zuerst, ob du eine Verbindung anbietest oder einen Code einliest. Eingabefelder in Dialogen bleiben bei eingeschaltetem Hintergrundbild sichtbar; vorher erschienen sie erst beim Antippen. In den Albumdetails heißt die Option „Typ“ jetzt „Kategorie“.</p>
+      </description>
+    </release>
     <release version="0.8.42" date="2026-10-05">
       <description>
         <p>Radio stations now find their logo on their own, also when added by address or when the directory only lists a broken one. The station window has a new "Change logo" to search online again, pick an image of your own or enter an address. The "+" in Stations, Podcasts and YouTube first asks what you want to do, such as searching the directory or entering an address, and then opens that step in a centered window. In Files, sorting by name now goes by the song title you see, so an album folder no longer stays in track order under "0–9".</p>
