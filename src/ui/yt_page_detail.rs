@@ -14,7 +14,7 @@ use crate::core::youtube::{self, YtResult};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::YtView;
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
-use crate::ui::widgets::{action_row, detail_box, present_detail};
+use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 use crate::ui::yt_channels::{
     duration_chip, ensure_channel_image, fmt_duration, refresh_channel_videos, WatchRow,
     CHANNEL_REFRESH_THREADS,
@@ -257,7 +257,15 @@ impl YtPage {
                 *desc_slot.borrow_mut() = None;
             });
         }
-        present_detail(&dialog, &content, &root);
+        {
+            let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(YtInput::RefreshVideo {
+                    video_id: vid.clone(),
+                    title: t.clone(),
+                });
+            });
+        }
     }
 
     /// Detail dialog of a playlist.
@@ -344,7 +352,15 @@ impl YtPage {
             actions.add(&remove);
         }
         content.append(&actions);
-        present_detail(&dialog, &content, &root);
+        {
+            let (sender, u, t) = (sender.clone(), url.to_string(), title.to_string());
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(YtInput::RefreshPlaylist {
+                    url: u.clone(),
+                    title: t.clone(),
+                });
+            });
+        }
     }
 
     /// Loads a (not locally mirrored) playlist's videos, then opens them as a
@@ -1205,6 +1221,36 @@ impl YtPage {
                 self.playlist_songs_cache.insert(url, videos);
             }
             Err(e) => tracing::warn!("yt playlist background refresh failed: {e}"),
+        }
+    }
+
+    /// Worker result of a playlist detail refresh: cache the fresh song list and
+    /// update the "Recently" entry's count/cover (without moving it up).
+    pub(super) fn on_cmd_yt_playlist_refreshed(
+        &mut self,
+        url: &str,
+        title: &str,
+        result: Result<Vec<YtResult>, String>,
+    ) {
+        match result {
+            Ok(videos) => {
+                if self.library.is_recent(url).unwrap_or(false) {
+                    let total: i64 = videos.iter().filter_map(|v| v.duration).sum();
+                    let _ = self.library.set_recent_playlist_count(
+                        url,
+                        videos.len() as i64,
+                        (total > 0).then_some(total),
+                    );
+                    if let Some(first) = videos.first() {
+                        let _ = self
+                            .library
+                            .set_recent_thumb(url, &youtube::thumbnail_url(&first.id));
+                    }
+                }
+                self.cache_playlist_songs(url, title, &videos);
+                self.playlist_songs_cache.insert(url.to_string(), videos);
+            }
+            Err(e) => tracing::warn!("yt playlist refresh failed: {e}"),
         }
     }
 

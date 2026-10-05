@@ -864,6 +864,22 @@ pub fn cache_podcast_image(url: &str) -> Option<String> {
     Some(p.to_string_lossy().into_owned())
 }
 
+/// Downloads a podcast image again (detail refresh), replacing the cached copy.
+/// Keeps the cached one when the download fails. **Network.**
+pub fn recache_podcast_image(url: &str) -> Option<String> {
+    if url.trim().is_empty() {
+        return None;
+    }
+    if let Some(bytes) = shared_client().get_image(url).ok().flatten() {
+        let mut p = cover_cache_dir();
+        p.push(format!("podcast_{}.img", name_hash(url)));
+        if std::fs::write(&p, &bytes).is_ok() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    podcast_image_path(url)
+}
+
 /// Prefix of a station "favicon" that points at a logo the user picked from a
 /// local file (copied into [`station_logo_dir`]) instead of an image URL.
 const LOCAL_LOGO_PREFIX: &str = "file://";
@@ -1021,6 +1037,23 @@ pub fn cache_youtube_thumb(url: &str) -> Option<String> {
     p.push(format!("yt_{}.img", name_hash(&url)));
     std::fs::write(&p, &bytes).ok()?;
     Some(p.to_string_lossy().into_owned())
+}
+
+/// Downloads a YouTube thumbnail/avatar again (detail refresh), replacing the
+/// cached copy. Keeps the cached one when the download fails. **Network.**
+pub fn recache_youtube_thumb(url: &str) -> Option<String> {
+    let url = normalize_image_url(url);
+    if url.is_empty() {
+        return None;
+    }
+    if let Some(bytes) = shared_client().get_image(&url).ok().flatten() {
+        let mut p = cover_cache_dir();
+        p.push(format!("yt_{}.img", name_hash(&url)));
+        if std::fs::write(&p, &bytes).is_ok() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    youtube_thumb_path(&url)
 }
 
 /// Picture for a subscribed channel: its own avatar when the listing gave one,
@@ -1272,6 +1305,15 @@ fn recording_cover_file(artist: &str, title: &str) -> PathBuf {
         name_hash(&format!("{artist}\u{1}{title}"))
     ));
     p
+}
+
+/// Stores a cover for (artist, title) where [`recording_cover_path`] finds it —
+/// used when a detail refresh fetched a fresh cover for a recognized song or a
+/// recording.
+pub fn store_recording_cover(artist: &str, title: &str, bytes: &[u8]) -> Option<String> {
+    let p = recording_cover_file(artist, title);
+    std::fs::write(&p, bytes).ok()?;
+    Some(p.to_string_lossy().into_owned())
 }
 
 /// Local cache path of a recording cover, **only if already present** – without

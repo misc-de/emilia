@@ -27,7 +27,7 @@ use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
-use crate::ui::widgets::{action_row, detail_box, present_detail};
+use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 
 /// How many feeds "Refresh all" fetches at once (plain HTTP, cheap).
 const FEED_REFRESH_THREADS: usize = 8;
@@ -299,12 +299,16 @@ pub(crate) enum PodcastsInput {
     Subscribe,
     Search(String),
     SubscribeUrl(String),
-    Refresh(i64),
     OpenPodcast(i64),
     OpenPodcastAt(usize),
     ShowPodcastDetail(i64),
     ShowPodcastDetailAt(usize),
     ShowEpisodeDetail(usize),
+    /// Detail views' refresh: fetch the feed (episodes, shownotes) and the
+    /// cover again, then reopen the podcast's / the episode's (audio URL)
+    /// detail view.
+    RefreshPodcastDetail(i64),
+    RefreshEpisodeDetail(String),
     ShowPodcastEpisodeDetail {
         podcast_id: i64,
         index: usize,
@@ -370,6 +374,13 @@ pub(crate) enum PodcastsOutput {
 
 #[derive(Debug)]
 pub(crate) enum PodcastsCmd {
+    /// A detail refresh finished (`ok` = the feed loaded): reopen the podcast
+    /// detail, or the episode's when `episode` (audio URL) is set.
+    DetailRefreshed {
+        podcast_id: i64,
+        episode: Option<String>,
+        ok: bool,
+    },
     /// Feed fetch finished (subscribe/refresh): `Some(title)` on success.
     Fetched(Option<String>),
     /// Episode download finished.
@@ -771,15 +782,6 @@ impl Component for PodcastsPage {
                     });
                 }
             }
-            PodcastsInput::Refresh(id) => {
-                if let Ok(Some(url)) = self.library.podcast_feed_url(id) {
-                    let _ = sender.output(PodcastsOutput::Toast(gettext("Updating feed …")));
-                    sender.spawn_command(move |out| {
-                        let fetched = fetch_and_store_podcast(&url).map(|(title, _)| title);
-                        let _ = out.send(PodcastsCmd::Fetched(fetched));
-                    });
-                }
-            }
             PodcastsInput::OpenPodcast(id) => {
                 if let Some((_, title, _, _)) = self
                     .podcast_items
@@ -802,6 +804,12 @@ impl Component for PodcastsPage {
                 }
             }
             PodcastsInput::ShowEpisodeDetail(index) => self.open_episode_detail(&sender, index),
+            PodcastsInput::RefreshPodcastDetail(id) => self.refresh_detail(&sender, id, None),
+            PodcastsInput::RefreshEpisodeDetail(url) => {
+                if let Some(id) = self.library.podcast_id_for_episode_url(&url).ok().flatten() {
+                    self.refresh_detail(&sender, id, Some(url));
+                }
+            }
             PodcastsInput::ShowPodcastEpisodeDetail { podcast_id, index } => {
                 self.open_podcast_episode_detail(&sender, podcast_id, index)
             }
@@ -821,6 +829,20 @@ impl Component for PodcastsPage {
 
     fn update_cmd(&mut self, cmd: PodcastsCmd, sender: ComponentSender<Self>, _root: &Self::Root) {
         match cmd {
+            PodcastsCmd::DetailRefreshed {
+                podcast_id,
+                episode,
+                ok,
+            } => {
+                if !ok {
+                    let _ = sender.output(PodcastsOutput::Toast(gettext("Could not load feed")));
+                }
+                self.reload_podcasts(&sender);
+                match episode {
+                    Some(url) => self.open_episode_detail_by_url(&sender, &url),
+                    None => self.open_podcast_detail(&sender, podcast_id),
+                }
+            }
             PodcastsCmd::Fetched(title) => {
                 self.reload_podcasts(&sender);
                 match title {
@@ -1500,6 +1522,33 @@ impl PodcastsPage {
         }
     }
 
+    /// Detail refresh of a podcast (or one of its episodes): fetch the feed
+    /// again, then its cover; the result reopens the detail view.
+    fn refresh_detail(&self, sender: &ComponentSender<Self>, id: i64, episode: Option<String>) {
+        let Ok(Some(feed)) = self.library.podcast_feed_url(id) else {
+            return;
+        };
+        let _ = sender.output(PodcastsOutput::Toast(gettext("Refreshing …")));
+        sender.spawn_command(move |out| {
+            let ok = fetch_and_store_podcast(&feed).is_some();
+            let image = Library::open().ok().and_then(|lib| {
+                lib.podcasts()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|(pid, _, _, _)| *pid == id)
+                    .and_then(|(_, _, image, _)| image)
+            });
+            if let Some(url) = image {
+                let _ = crate::core::online::recache_podcast_image(&url);
+            }
+            let _ = out.send(PodcastsCmd::DetailRefreshed {
+                podcast_id: id,
+                episode,
+                ok,
+            });
+        });
+    }
+
     /// Episode detail (incl. shownotes) of an episode from the episode list of
     /// an opened podcast (index = order in `episodes(id)`).
     fn open_podcast_episode_detail(
@@ -1562,9 +1611,7 @@ impl PodcastsPage {
         let Some(root) = self.window.clone() else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&ep.title))
-            .build();
+        let dialog = adw::Dialog::builder().title(&ep.title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -1774,7 +1821,12 @@ impl PodcastsPage {
             content.append(&notes_group);
         }
 
-        present_detail(&dialog, &content, &root);
+        {
+            let (sender, url) = (sender.clone(), ep.audio_url.clone());
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(PodcastsInput::RefreshEpisodeDetail(url.clone()));
+            });
+        }
     }
 
     /// Detail view/management of a subscription: cover, episode count, and
@@ -1791,9 +1843,7 @@ impl PodcastsPage {
         else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&title))
-            .build();
+        let dialog = adw::Dialog::builder().title(&title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -1822,15 +1872,6 @@ impl PodcastsPage {
             });
         }
         actions.add(&open);
-        let refresh = action_row(&gettext("Refresh feed"), "view-refresh-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            refresh.connect_activated(move |_| {
-                sender.input(PodcastsInput::Refresh(id));
-                dialog.close();
-            });
-        }
-        actions.add(&refresh);
         let eq = action_row(
             &gettext("Equalizer settings"),
             "multimedia-equalizer-symbolic",
@@ -1869,7 +1910,12 @@ impl PodcastsPage {
         actions.add(&remove);
         content.append(&actions);
 
-        present_detail(&dialog, &content, &root);
+        {
+            let sender = sender.clone();
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(PodcastsInput::RefreshPodcastDetail(id));
+            });
+        }
     }
 
     /// Episode subpage of a podcast (play button = stream episode, long press =

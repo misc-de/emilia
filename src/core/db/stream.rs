@@ -73,6 +73,25 @@ impl Library {
         Ok(())
     }
 
+    /// Updates a station's directory details (genre, country, codec, bitrate)
+    /// after a refresh. A value the directory no longer states is kept.
+    pub fn set_stream_meta(
+        &self,
+        id: i64,
+        tags: Option<&str>,
+        country: Option<&str>,
+        codec: Option<&str>,
+        bitrate: Option<i64>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE stream SET tags = COALESCE(?1, tags), country = COALESCE(?2, country),
+                codec = COALESCE(?3, codec), bitrate = COALESCE(?4, bitrate)
+             WHERE id = ?5",
+            rusqlite::params![tags, country, codec, bitrate, id],
+        )?;
+        Ok(())
+    }
+
     /// Removes a station.
     pub fn delete_stream(&self, id: i64) -> Result<()> {
         self.conn

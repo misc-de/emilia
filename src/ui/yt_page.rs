@@ -30,7 +30,7 @@ use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover};
 use crate::ui::app_views::natural_key;
-use crate::ui::widgets::{action_row, detail_box, present_detail};
+use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 use crate::ui::yt_channels::{
     fill_channel_videos, fmt_published, refresh_summary_text, search_spinner_row, store_channel,
     yt_pubdate_key, WatchRow,
@@ -204,6 +204,18 @@ pub(crate) enum YtInput {
     ShowChannelDetail(i64),
     ShowChannelDetailAt(usize),
     RefreshChannel(i64),
+    /// Detail views' refresh: fetch the metadata (artist, cover, description,
+    /// song list, avatar) again, then reopen the detail view.
+    RefreshVideo {
+        video_id: String,
+        title: String,
+    },
+    RefreshChannelDetail(i64),
+    RefreshPlaylist {
+        url: String,
+        title: String,
+    },
+    RefreshLive(String),
     DeleteChannel(i64),
     DeleteChannelConfirmed(i64),
     AddRecent {
@@ -344,6 +356,22 @@ pub(crate) enum YtOutput {
 
 #[derive(Debug)]
 pub(crate) enum YtCmd {
+    /// A detail refresh finished → reopen that detail view with the new data.
+    VideoRefreshed {
+        video_id: String,
+        title: String,
+    },
+    ChannelDetailRefreshed(i64),
+    PlaylistRefreshed {
+        url: String,
+        title: String,
+        result: Result<Vec<YtResult>, String>,
+    },
+    LiveRefreshed {
+        video_id: String,
+        details: Option<youtube::YtResult>,
+        thumbnail: Option<String>,
+    },
     SearchResults(u64, Vec<YtResult>),
     SearchFailed(u64),
     SearchThumbsReady(u64),
@@ -937,6 +965,79 @@ impl Component for YtPage {
                     });
                 }
             }
+            YtInput::RefreshVideo { video_id, title } => {
+                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    refresh_video_meta(&video_id, &title);
+                    let _ = out.send(YtCmd::VideoRefreshed { video_id, title });
+                });
+            }
+            YtInput::RefreshChannelDetail(id) => {
+                let Some((_, title, url, thumb, _)) = self
+                    .channel_items
+                    .iter()
+                    .find(|(cid, _, _, _, _)| *cid == id)
+                    .cloned()
+                else {
+                    return;
+                };
+                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    let _ = refresh_channel_videos(id, &title, &url);
+                    // The avatar again; a channel without one gets the artist
+                    // photo a music database has for its name.
+                    match thumb.as_deref() {
+                        Some(t) => {
+                            let _ = crate::core::online::recache_youtube_thumb(t);
+                        }
+                        None => {
+                            if let Some(u) = crate::core::online::channel_image_url(None, &title) {
+                                if crate::core::online::recache_youtube_thumb(&u).is_some() {
+                                    if let Ok(lib) = Library::open() {
+                                        let _ = lib.set_channel_thumbnail(id, &u);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let _ = out.send(YtCmd::ChannelDetailRefreshed(id));
+                });
+            }
+            YtInput::RefreshPlaylist { url, title } => {
+                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    let result = youtube::list_playlist(&url, PLAYLIST_REFRESH_LIMIT)
+                        .map_err(|e| e.to_string());
+                    if let Some(first) = result.as_ref().ok().and_then(|v| v.first()) {
+                        let _ = crate::core::online::recache_youtube_thumb(
+                            &youtube::thumbnail_url(&first.id),
+                        );
+                    }
+                    let _ = out.send(YtCmd::PlaylistRefreshed { url, title, result });
+                });
+            }
+            YtInput::RefreshLive(video_id) => {
+                let thumb = self
+                    .live_items
+                    .iter()
+                    .find(|l| l.video_id == video_id)
+                    .and_then(|l| l.thumbnail.clone());
+                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    let details = youtube::video_details(&video_id).ok().map(|d| d.meta);
+                    let url = details
+                        .as_ref()
+                        .and_then(|d| d.thumbnail.clone())
+                        .or(thumb)
+                        .unwrap_or_else(|| youtube::thumbnail_url(&video_id));
+                    let thumbnail = crate::core::online::recache_youtube_thumb(&url).map(|_| url);
+                    let _ = out.send(YtCmd::LiveRefreshed {
+                        video_id,
+                        details,
+                        thumbnail,
+                    });
+                });
+            }
             YtInput::DeleteChannel(id) => {
                 let _ = sender.output(YtOutput::DeleteChannelUndo(id));
             }
@@ -1057,6 +1158,38 @@ impl Component for YtPage {
                 )));
                 self.ytdlp_broken = youtube::extraction_broken();
                 self.reload_channels(&sender);
+            }
+            YtCmd::VideoRefreshed { video_id, title } => {
+                self.reload_yt_recent(&sender);
+                self.show_video_detail(&sender, &video_id, &title);
+            }
+            YtCmd::ChannelDetailRefreshed(id) => {
+                self.reload_channels(&sender);
+                self.open_channel_detail(&sender, id);
+            }
+            YtCmd::PlaylistRefreshed { url, title, result } => {
+                self.on_cmd_yt_playlist_refreshed(&url, &title, result);
+                self.reload_yt_recent(&sender);
+                self.show_playlist_detail(&sender, &url, &title);
+            }
+            YtCmd::LiveRefreshed {
+                video_id,
+                details,
+                thumbnail,
+            } => {
+                if let Some(d) = details.as_ref() {
+                    let channel = d.uploader.as_deref().map(youtube::clean_channel_name);
+                    let _ = self.library.add_live(
+                        &video_id,
+                        &d.title,
+                        channel.as_deref().filter(|c| !c.trim().is_empty()),
+                        thumbnail.as_deref(),
+                    );
+                } else if thumbnail.is_none() {
+                    let _ = sender.output(YtOutput::Toast(gettext("Nothing found")));
+                }
+                self.reload_live(&sender);
+                self.show_live_detail(&sender, &video_id);
             }
             YtCmd::RefreshUnavailable => {
                 let _ = sender.output(YtOutput::RefreshFinished);
@@ -1924,15 +2057,6 @@ impl YtPage {
             });
         }
         actions.add(&play);
-        let refresh = action_row(&gettext("Refresh"), "view-refresh-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            refresh.connect_activated(move |_| {
-                sender.input(YtInput::RefreshChannel(id));
-                dialog.close();
-            });
-        }
-        actions.add(&refresh);
         let share = action_row(&gettext("Share"), "emilia-share-symbolic");
         {
             let (sender, dialog) = (sender.clone(), dialog.clone());
@@ -1971,7 +2095,12 @@ impl YtPage {
         actions.add(&remove);
         content.append(&actions);
         let _ = url;
-        present_detail(&dialog, &content, &root);
+        {
+            let sender = sender.clone();
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(YtInput::RefreshChannelDetail(id));
+            });
+        }
     }
 }
 
@@ -1985,4 +2114,47 @@ impl crate::ui::play_mark::PlaybackSink for relm4::Controller<YtPage> {
             playing: state.playing,
         });
     }
+}
+
+/// Song-list length fetched when a playlist detail is refreshed (same cap as
+/// opening its songs).
+const PLAYLIST_REFRESH_LIMIT: usize = 200;
+
+/// Detail refresh of a video: description, jump marks and runtime from
+/// YouTube, then artist and cover from the music database (the cover replaces
+/// the thumbnail when a match is found, else the thumbnail is fetched again).
+/// The "Recently" entry gets the new artist/cover. **Network** — worker only.
+fn refresh_video_meta(video_id: &str, title: &str) {
+    let Ok(lib) = Library::open() else {
+        return;
+    };
+    let details = youtube::video_details(video_id).ok();
+    if let Some(d) = details.as_ref() {
+        let _ = lib.set_yt_detail(video_id, d.description.as_deref(), &d.chapters);
+        if d.meta.duration.is_some() {
+            let _ = lib.set_yt_meta(video_id, title, d.meta.duration);
+        }
+    }
+    let channel = lib
+        .yt_video_info(video_id)
+        .ok()
+        .flatten()
+        .map(|(c, _, _)| c)
+        .or_else(|| details.as_ref().and_then(|d| d.meta.uploader.clone()))
+        .map(|c| youtube::clean_channel_name(&c))
+        .filter(|s| !s.trim().is_empty());
+    let (artist, _, song) = youtube::split_title(title, channel.as_deref());
+    let hit = artist
+        .as_deref()
+        .or(channel.as_deref())
+        .and_then(|a| crate::core::online::track_cover(a, &song))
+        .or_else(|| {
+            channel
+                .as_deref()
+                .and_then(|c| crate::core::online::track_cover(c, title))
+        });
+    let cover = hit
+        .and_then(|(bytes, _album)| crate::core::online::store_youtube_cover(video_id, &bytes))
+        .or_else(|| crate::core::online::recache_youtube_thumb(&youtube::thumbnail_url(video_id)));
+    let _ = lib.set_recent_meta(video_id, channel.as_deref(), cover.as_deref());
 }

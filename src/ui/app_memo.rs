@@ -698,9 +698,7 @@ impl App {
         let Some(m) = self.memo.memo_items.iter().find(|m| m.id == id).cloned() else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&m.title))
-            .build();
+        let dialog = adw::Dialog::builder().title(&m.title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -868,9 +866,7 @@ impl App {
             .filter(|m| m.category_id == Some(id))
             .count();
 
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&c.name))
-            .build();
+        let dialog = adw::Dialog::builder().title(&c.name).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 

@@ -307,6 +307,22 @@ impl Library {
         self.trim_recent()
     }
 
+    /// Updates a recent playlist's song count and runtime (detail refresh)
+    /// without moving it in the list. A `None` total keeps the stored value.
+    pub fn set_recent_playlist_count(
+        &self,
+        url: &str,
+        count: i64,
+        total_duration: Option<i64>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE yt_recent SET count = ?2, total_duration = COALESCE(?3, total_duration)
+             WHERE video_id = ?1",
+            rusqlite::params![url, count, total_duration],
+        )?;
+        Ok(())
+    }
+
     /// Caps the history at the newest `RECENT_CAP` entries.
     fn trim_recent(&self) -> Result<()> {
         self.conn.execute(

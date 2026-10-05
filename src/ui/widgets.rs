@@ -674,14 +674,46 @@ pub fn action_row(title: &str, icon: &str) -> adw::ActionRow {
 /// Uses the full width, but never more than 600 px (on narrow windows the
 /// dialog shrinks to the window width by itself).
 pub fn present_detail(dialog: &adw::Dialog, content: &gtk::Box, root: &adw::ApplicationWindow) {
+    present_detail_with(dialog, content, root, None);
+}
+
+/// [`present_detail`] with a refresh button at the start of the header bar,
+/// like the music detail view: it closes the dialog and runs `on_refresh`,
+/// which fetches the logo/cover and metadata again and reopens the view.
+pub fn present_detail_refreshable(
+    dialog: &adw::Dialog,
+    content: &gtk::Box,
+    root: &adw::ApplicationWindow,
+    on_refresh: impl Fn() + 'static,
+) {
+    present_detail_with(dialog, content, root, Some(Box::new(on_refresh)));
+}
+
+fn present_detail_with(
+    dialog: &adw::Dialog,
+    content: &gtk::Box,
+    root: &adw::ApplicationWindow,
+    on_refresh: Option<Box<dyn Fn()>>,
+) {
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .propagate_natural_height(true)
         .vexpand(true)
         .child(content)
         .build();
+    let header = detail_header();
+    if let Some(on_refresh) = on_refresh {
+        let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
+        refresh.set_tooltip_text(Some(&crate::i18n::gettext("Refresh")));
+        let dialog = dialog.clone();
+        refresh.connect_clicked(move |_| {
+            on_refresh();
+            dialog.close();
+        });
+        header.pack_start(&refresh);
+    }
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&detail_header());
+    toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&scroller));
     dialog.set_child(Some(&toolbar));
     dialog.set_content_width(600);

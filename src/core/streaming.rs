@@ -105,6 +105,42 @@ pub fn logo_hints_by_url(stream_url: &str) -> Result<(Vec<String>, Vec<String>)>
     Ok((favicons, homepages))
 }
 
+/// The Radio-Browser entry for a stream URL (genre, country, codec, bitrate),
+/// used to refresh a saved station's details. `None` if the stream isn't
+/// listed. **Blocking.**
+pub fn station_by_url(stream_url: &str) -> Result<Option<StationResult>> {
+    let query = format!(
+        "/json/stations/byurl?url={}",
+        crate::core::online::percent_encode(stream_url.trim()),
+    );
+    let Some(body) = rb_get(&query)? else {
+        return Ok(None);
+    };
+    // The same stream is often listed more than once, and not every entry
+    // fills every field — take the most complete one (the first on a tie).
+    let completeness = |s: &StationResult| {
+        [
+            s.tags.is_some(),
+            s.country.is_some(),
+            s.codec.is_some(),
+            s.bitrate.is_some(),
+        ]
+        .into_iter()
+        .filter(|b| *b)
+        .count()
+    };
+    let mut best: Option<StationResult> = None;
+    for s in parse_stations(&body)? {
+        if best
+            .as_ref()
+            .is_none_or(|b| completeness(&s) > completeness(b))
+        {
+            best = Some(s);
+        }
+    }
+    Ok(best)
+}
+
 /// Parses the Radio-Browser response. Results without a playable URL are
 /// discarded.
 fn parse_stations(body: &[u8]) -> Result<Vec<StationResult>> {

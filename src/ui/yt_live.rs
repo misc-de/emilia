@@ -12,7 +12,7 @@ use crate::core::youtube::YtResult;
 use crate::i18n::gettext;
 use crate::ui::app::YtView;
 use crate::ui::entry_row::EntryRow;
-use crate::ui::widgets::{action_row, detail_box, present_detail};
+use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 use crate::ui::yt_page::{YtInput, YtOutput, YtPage};
 
 /// Fallback icon of a live stream without a cached thumbnail.
@@ -90,9 +90,7 @@ impl YtPage {
         else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&item.title))
-            .build();
+        let dialog = adw::Dialog::builder().title(&item.title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -183,6 +181,11 @@ impl YtPage {
         actions.add(&remove);
         content.append(&actions);
 
-        present_detail(&dialog, &content, &root);
+        {
+            let (sender, vid) = (sender.clone(), item.video_id.clone());
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(YtInput::RefreshLive(vid.clone()));
+            });
+        }
     }
 }

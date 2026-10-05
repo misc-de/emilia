@@ -29,7 +29,7 @@ use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
 use crate::ui::app_sort::{read_sort, sort_popover, SortToggle};
 use crate::ui::app_views::natural_key;
 use crate::ui::entry_row::EntryRow;
-use crate::ui::widgets::{action_row, detail_box, present_detail};
+use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 
 /// Placeholder icon when a station has no logo.
 const STREAM_ICON: &str = "audio-x-generic-symbolic";
@@ -174,6 +174,15 @@ pub(crate) enum StreamInput {
     SetLogoFile(i64, std::path::PathBuf),
     /// Search the web for a station's logo (`true` = report the outcome).
     FindLogo(i64, bool),
+    /// Detail view's refresh: fetch the station's directory details and search
+    /// its logo again, then reopen the detail view.
+    RefreshStream(i64),
+    /// Detail view's refresh: look up artist, album and cover of a recording
+    /// again (written into the file), then reopen the detail view.
+    RefreshRecording(i64),
+    /// Detail view's refresh: look up artist and cover of a recognized song
+    /// again, then reopen the detail view.
+    RefreshHeard(i64),
     OpenRecording(i64),
     RecordingDelete(i64),
     RecordingDeleteConfirmed(i64),
@@ -245,6 +254,44 @@ pub(crate) enum StreamCmd {
         favicon: Option<String>,
         report: bool,
     },
+    /// A station refresh finished: its directory entry (if listed) and the
+    /// logo found (if any, already cached).
+    StreamRefreshed {
+        id: i64,
+        meta: Option<StationResult>,
+        favicon: Option<String>,
+    },
+    /// A recording refresh finished (`found` = new metadata came in).
+    RecordingRefreshed {
+        id: i64,
+        found: bool,
+    },
+    /// A recognized-song refresh finished; `artist` = artist found online.
+    HeardRefreshed {
+        id: i64,
+        artist: Option<String>,
+        found: bool,
+    },
+}
+
+/// What a detail refresh found for a song: artist, album and cover, from the
+/// music database (Deezer) first, otherwise from the recording lookup that also
+/// copes with station noise in the title. **Network** — worker threads only.
+fn lookup_song(
+    artist: Option<&str>,
+    title: &str,
+    station: Option<&str>,
+) -> Option<(Option<String>, Option<String>, Vec<u8>)> {
+    if let Some(tags) = crate::core::online::track_tags(artist, title) {
+        if let Some(cover) = tags.cover {
+            return Some((tags.artist, tags.album, cover));
+        }
+    }
+    let raw = match artist.filter(|a| !a.trim().is_empty()) {
+        Some(a) => format!("{a} - {title}"),
+        None => title.to_string(),
+    };
+    crate::core::online::recording_cover(&raw, station).map(|(cover, album)| (None, album, cover))
 }
 
 /// Fetches the station logos not yet in the cache (worker thread — network).
@@ -701,6 +748,90 @@ impl Component for StreamPage {
                     });
                 });
             }
+            StreamInput::RefreshStream(id) => {
+                let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
+                    return;
+                };
+                let _ = sender.output(StreamOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    let meta = crate::core::streaming::station_by_url(&st.url)
+                        .ok()
+                        .flatten();
+                    // A logo the user picked from a file stays; otherwise search
+                    // again (the directory's favicon first, then the homepage).
+                    let own = st
+                        .favicon
+                        .as_deref()
+                        .is_some_and(crate::core::online::is_local_station_logo);
+                    let favicon = (!own)
+                        .then(|| crate::core::station_logo::find_logo(&st.url))
+                        .flatten();
+                    let _ = out.send(StreamCmd::StreamRefreshed { id, meta, favicon });
+                });
+            }
+            StreamInput::RefreshRecording(id) => {
+                let Some(rec) = self.recording_items.iter().find(|r| r.id == id).cloned() else {
+                    return;
+                };
+                let _ = sender.output(StreamOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    let path = std::path::PathBuf::from(&rec.path);
+                    let tag = crate::core::scanner::read_track(&path).ok();
+                    let artist = rec
+                        .artist
+                        .clone()
+                        .filter(|a| !a.trim().is_empty())
+                        .or_else(|| tag.and_then(|t| t.artist))
+                        .filter(|a| !a.trim().is_empty());
+                    let hit = lookup_song(artist.as_deref(), &rec.title, rec.station.as_deref());
+                    let found = hit.is_some();
+                    if let Some((found_artist, album, cover)) = hit {
+                        let artist = artist.or(found_artist);
+                        crate::core::recorder::embed_cover(
+                            &path,
+                            artist.as_deref(),
+                            &rec.title,
+                            album.as_deref(),
+                            &cover,
+                        );
+                        let _ = crate::core::online::store_recording_cover(
+                            artist.as_deref().unwrap_or(""),
+                            &rec.title,
+                            &cover,
+                        );
+                    }
+                    let _ = out.send(StreamCmd::RecordingRefreshed { id, found });
+                });
+            }
+            StreamInput::RefreshHeard(id) => {
+                let Some(h) = self.heard_items.iter().find(|x| x.id == id).cloned() else {
+                    return;
+                };
+                let _ = sender.output(StreamOutput::Toast(gettext("Refreshing …")));
+                sender.spawn_command(move |out| {
+                    let artist = h.artist.clone().filter(|a| !a.trim().is_empty());
+                    let hit = lookup_song(artist.as_deref(), &h.title, h.station.as_deref());
+                    let found = hit.is_some();
+                    let mut new_artist = None;
+                    if let Some((found_artist, _, cover)) = hit {
+                        // Stored under the artist the list shows, so it finds it.
+                        let shown = artist.clone().or_else(|| found_artist.clone());
+                        let _ = crate::core::online::store_recording_cover(
+                            shown.as_deref().unwrap_or(""),
+                            &h.title,
+                            &cover,
+                        );
+                        if artist.is_none() {
+                            new_artist = found_artist;
+                        }
+                    }
+                    let _ = out.send(StreamCmd::HeardRefreshed {
+                        id,
+                        artist: new_artist,
+                        found,
+                    });
+                });
+            }
             StreamInput::OpenRecording(id) => self.open_recording(&sender, id),
             StreamInput::RecordingDelete(id) => {
                 let _ = sender.output(StreamOutput::RecordingDeleteUndo(id));
@@ -758,6 +889,42 @@ impl Component for StreamPage {
                 }
                 None => {}
             },
+            StreamCmd::StreamRefreshed { id, meta, favicon } => {
+                if let Some(m) = meta.as_ref() {
+                    let _ = self.library.set_stream_meta(
+                        id,
+                        m.tags.as_deref(),
+                        m.country.as_deref(),
+                        m.codec.as_deref(),
+                        m.bitrate,
+                    );
+                }
+                if let Some(fav) = favicon.as_deref() {
+                    let _ = self.library.set_stream_favicon(id, Some(fav));
+                }
+                if meta.is_none() && favicon.is_none() {
+                    let _ = sender.output(StreamOutput::Toast(gettext("Nothing found")));
+                }
+                self.reload_streams(&sender);
+                self.open_stream(&sender, id);
+            }
+            StreamCmd::RecordingRefreshed { id, found } => {
+                if !found {
+                    let _ = sender.output(StreamOutput::Toast(gettext("Nothing found")));
+                }
+                self.reload_recordings(&sender);
+                self.open_recording(&sender, id);
+            }
+            StreamCmd::HeardRefreshed { id, artist, found } => {
+                if let Some(a) = artist.as_deref() {
+                    let _ = self.library.set_heard_artist(id, a);
+                }
+                if !found {
+                    let _ = sender.output(StreamOutput::Toast(gettext("Nothing found")));
+                }
+                self.reload_heard(&sender);
+                self.open_heard(&sender, id);
+            }
         }
     }
 }
@@ -1093,9 +1260,7 @@ impl StreamPage {
         let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&st.name))
-            .build();
+        let dialog = adw::Dialog::builder().title(&st.name).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -1190,7 +1355,12 @@ impl StreamPage {
         actions.add(&remove);
         content.append(&actions);
 
-        present_detail(&dialog, &content, &root);
+        {
+            let sender = sender.clone();
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(StreamInput::RefreshStream(id));
+            });
+        }
     }
 
     /// Dialog: rename a station (name prefilled).
@@ -1598,9 +1768,7 @@ impl StreamPage {
             .or_else(|| tag.as_ref().and_then(|t| t.artist.clone()))
             .filter(|a| !a.trim().is_empty());
 
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&rec.title))
-            .build();
+        let dialog = adw::Dialog::builder().title(&rec.title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -1707,7 +1875,12 @@ impl StreamPage {
         actions.add(&remove);
         content.append(&actions);
 
-        present_detail(&dialog, &content, &root);
+        {
+            let sender = sender.clone();
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(StreamInput::RefreshRecording(id));
+            });
+        }
     }
 
     /// Copies a recording into the primary music library, then registers it.
@@ -1889,9 +2062,7 @@ impl StreamPage {
         let Some(h) = self.heard_items.iter().find(|x| x.id == id).cloned() else {
             return;
         };
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(&h.title))
-            .build();
+        let dialog = adw::Dialog::builder().title(&h.title).build();
         self.adapt_detail_dialog(&dialog);
         let content = detail_box();
 
@@ -1968,7 +2139,12 @@ impl StreamPage {
         actions.add(&remove);
         content.append(&actions);
 
-        present_detail(&dialog, &content, &root);
+        {
+            let sender = sender.clone();
+            present_detail_refreshable(&dialog, &content, &root, move || {
+                sender.input(StreamInput::RefreshHeard(id));
+            });
+        }
     }
 }
 

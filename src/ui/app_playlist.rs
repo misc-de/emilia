@@ -585,9 +585,7 @@ impl App {
             covers.insert(0, c);
         }
 
-        let dialog = adw::Dialog::builder()
-            .title(gtk::glib::markup_escape_text(name))
-            .build();
+        let dialog = adw::Dialog::builder().title(name).build();
         // Wider detail dialog (was 360) so the cover and actions have room; the
         // height follows the content (scroller uses its natural height below).
         dialog.set_content_width(600);

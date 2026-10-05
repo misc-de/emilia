@@ -89,6 +89,15 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Sets the artist of a recognized song (filled in by a detail refresh).
+    pub fn set_heard_artist(&self, id: i64, artist: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE heard SET artist = ?1 WHERE id = ?2",
+            rusqlite::params![artist, id],
+        )?;
+        Ok(())
+    }
+
     /// Removes one entry from the recognized-songs log.
     pub fn delete_heard(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM heard WHERE id = ?1", [id])?;
