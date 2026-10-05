@@ -139,8 +139,8 @@
   <releases>
     <release version="0.8.44" date="2026-10-05">
       <description>
-        <p>Web addresses in podcast shownotes can now be clicked and open in the browser, including links the feed only had behind a word. Sharing and connecting a Nextcloud, SMB or Google Drive source now continue in a centered window, also on the phone, instead of sliding in from the bottom. The search windows are wider and grow with their results to most of the window height.</p>
-        <p xml:lang="de">Webadressen in den Shownotes von Podcasts lassen sich jetzt anklicken und öffnen im Browser, auch Links, die im Feed nur hinter einem Wort lagen. Teilen und das Verbinden einer Nextcloud-, SMB- oder Google-Drive-Quelle laufen jetzt in einem zentrierten Fenster weiter, auch auf dem Handy, statt von unten hereinzugleiten. Die Suchfenster sind breiter und wachsen mit ihren Ergebnissen bis fast zur Fensterhöhe.</p>
+        <p>Web addresses in podcast shownotes can now be clicked and open in the browser, including links the feed only had behind a word. Sharing and connecting a Nextcloud, SMB or Google Drive source now continue in a centered window, also on the phone, instead of sliding in from the bottom. The search windows are wider and grow with their results to most of the window height. Playing a song from the YouTube "Recently" list no longer moves it to the top, so the list keeps its order.</p>
+        <p xml:lang="de">Webadressen in den Shownotes von Podcasts lassen sich jetzt anklicken und öffnen im Browser, auch Links, die im Feed nur hinter einem Wort lagen. Teilen und das Verbinden einer Nextcloud-, SMB- oder Google-Drive-Quelle laufen jetzt in einem zentrierten Fenster weiter, auch auf dem Handy, statt von unten hereinzugleiten. Die Suchfenster sind breiter und wachsen mit ihren Ergebnissen bis fast zur Fensterhöhe. Ein Lied aus der YouTube-Liste „Zuletzt“ abzuspielen schiebt es nicht mehr nach oben, die Reihenfolge bleibt erhalten.</p>
       </description>
     </release>
     <release version="0.8.43" date="2026-10-05">
