@@ -51,11 +51,10 @@ pub(crate) struct GDrivePage {
 
 #[derive(Debug)]
 pub(crate) enum GDriveInput {
-    /// Open the dialog on `window`; `mobile` → present as a bottom sheet.
+    /// Open the dialog on `window` (a centered modal, also on the phone).
     /// `existing` are already signed-in Drive accounts offered for reuse.
     Open {
         window: adw::ApplicationWindow,
-        mobile: bool,
         existing: Vec<Source>,
     },
     /// Reuse the saved account `existing[idx]` – only the music folder is asked.
@@ -111,11 +110,7 @@ impl Component for GDrivePage {
 
     fn update(&mut self, msg: GDriveInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            GDriveInput::Open {
-                window,
-                mobile,
-                existing,
-            } => self.open_dialog(&window, mobile, existing, &sender),
+            GDriveInput::Open { window, existing } => self.open_dialog(&window, existing, &sender),
             GDriveInput::ReuseAccount(idx) => self.reuse_account(idx),
             GDriveInput::NewSignIn => self.new_sign_in(),
             GDriveInput::SignIn => self.sign_in(&sender),
@@ -176,7 +171,6 @@ impl GDrivePage {
     fn open_dialog(
         &mut self,
         window: &adw::ApplicationWindow,
-        mobile: bool,
         existing: Vec<Source>,
         sender: &ComponentSender<Self>,
     ) {
@@ -186,13 +180,8 @@ impl GDrivePage {
         self.account = None;
         self.client = None;
         self.window = Some(window.clone());
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Connect to Google Drive"))
-            .content_width(420)
-            .build();
-        if mobile {
-            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
-        }
+        // A centered modal like the "+" that opened it, also on the phone.
+        let dialog = crate::ui::widgets::form_modal(&gettext("Connect to Google Drive"), 560);
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());

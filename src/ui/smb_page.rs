@@ -28,10 +28,9 @@ pub(crate) struct SmbPage {
 
 #[derive(Debug)]
 pub(crate) enum SmbInput {
-    /// Open the dialog on `window`; `mobile` → present as a bottom sheet.
+    /// Open the dialog on `window` (a centered modal, also on the phone).
     Open {
         window: adw::ApplicationWindow,
-        mobile: bool,
     },
     Test,
     Save,
@@ -78,7 +77,7 @@ impl Component for SmbPage {
 
     fn update(&mut self, msg: SmbInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            SmbInput::Open { window, mobile } => self.open_dialog(&window, mobile, &sender),
+            SmbInput::Open { window } => self.open_dialog(&window, &sender),
             SmbInput::Test => self.test(&sender),
             SmbInput::Save => self.save(&sender),
             SmbInput::Closed => self.dialog = None,
@@ -102,19 +101,9 @@ impl Component for SmbPage {
 impl SmbPage {
     /// Opens the "Connect to SMB share" dialog: the connection form plus the
     /// music folder, with test and save buttons.
-    fn open_dialog(
-        &mut self,
-        window: &adw::ApplicationWindow,
-        mobile: bool,
-        sender: &ComponentSender<Self>,
-    ) {
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Connect to SMB share"))
-            .content_width(420)
-            .build();
-        if mobile {
-            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
-        }
+    fn open_dialog(&mut self, window: &adw::ApplicationWindow, sender: &ComponentSender<Self>) {
+        // A centered modal like the "+" that opened it, also on the phone.
+        let dialog = crate::ui::widgets::form_modal(&gettext("Connect to SMB share"), 560);
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());

@@ -118,7 +118,6 @@ impl App {
                     .collect();
                 self.cloud_page.emit(CloudInput::Open {
                     window: root.clone(),
-                    mobile: self.is_mobile(),
                     existing,
                 });
             }
@@ -126,7 +125,6 @@ impl App {
                 use crate::ui::smb_page::SmbInput;
                 self.smb_page.emit(SmbInput::Open {
                     window: root.clone(),
-                    mobile: self.is_mobile(),
                 });
             }
             SourceMsg::AddGDrive => {
@@ -141,7 +139,6 @@ impl App {
                     .collect();
                 self.gdrive_page.emit(GDriveInput::Open {
                     window: root.clone(),
-                    mobile: self.is_mobile(),
                     existing,
                 });
             }

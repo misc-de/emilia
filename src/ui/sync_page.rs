@@ -110,6 +110,9 @@ pub(crate) struct SyncPage {
     incoming_reviews: Vec<share::FileReview>,
 }
 
+/// Width of the share flow modal (the camera scan view goes wider).
+const SUB_WIDTH: i32 = 600;
+
 #[derive(Debug)]
 pub(crate) enum SyncInput {
     /// Header sync icon tapped: open the flow window. While connected this lands
@@ -364,15 +367,10 @@ impl SyncPage {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         // No fixed content_height: the dialog follows its content's natural
         // height (mode select is short, QR/camera/review grow as needed).
-        // Bottom sheet everywhere (not just on the phone): the share flow is a
-        // multi-step task with long lists, and a floating box in the middle of a
-        // wide window reads as a cramped popup. Sliding in from the bottom over
-        // the full window width matches the detail views.
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Connect to share"))
-            .presentation_mode(adw::DialogPresentationMode::BottomSheet)
-            .content_width(560)
-            .build();
+        // A centered modal like the "Connect to share" choice that opened it —
+        // also on the phone, never a bottom sheet. Wide enough for the share
+        // lists; the list phases take the full height (`set_sub_content_tall`).
+        let dialog = crate::ui::widgets::form_modal(&gettext("Connect to share"), SUB_WIDTH);
         dialog.set_child(Some(&toolbar));
         {
             let sender = sender.clone();
@@ -412,7 +410,7 @@ impl SyncPage {
 
     fn set_sub_content_h(&self, content: &impl gtk::prelude::IsA<gtk::Widget>, height: i32) {
         if let Some(d) = &self.sub {
-            d.set_content_width(560);
+            d.set_content_width(SUB_WIDTH);
             d.set_content_height(height);
         }
         if let Some(tb) = &self.sub_toolbar {

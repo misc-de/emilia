@@ -707,6 +707,56 @@ pub fn adapt_dialog(dialog: &adw::Dialog, mobile: bool) {
     }
 }
 
+/// A multi-step or multi-field window (connect a source, the share flow) as a
+/// centered modal like the "+" dialogs — also on the phone, where libadwaita
+/// would otherwise turn it into a bottom sheet. On a narrow window the floating
+/// dialog shrinks to the window width by itself.
+pub fn form_modal(title: &str, width: i32) -> adw::Dialog {
+    let dialog = adw::Dialog::builder()
+        .title(title)
+        .content_width(width)
+        .presentation_mode(adw::DialogPresentationMode::Floating)
+        .build();
+    dialog.add_css_class("emilia-modal");
+    dialog
+}
+
+/// Widest a large modal (search with results, multi-field form) gets.
+const LARGE_MODAL_WIDTH: i32 = 680;
+
+/// Makes an alert-style modal with a search or a longer form larger than the
+/// default alert: as wide as [`LARGE_MODAL_WIDTH`] (less on a narrow window),
+/// and `scroller` — the part that holds the results — up to most of the window
+/// height (at least `min_height` px, if given). `AdwAlertDialog` ignores
+/// `content-width`/`-height` and sizes itself to its extra child, so the body's
+/// size request does it; measured from the window once the body is mapped.
+pub fn enlarge_modal(
+    body: &impl IsA<gtk::Widget>,
+    scroller: Option<&gtk::ScrolledWindow>,
+    min_height: Option<i32>,
+) {
+    let scroller = scroller.cloned();
+    body.as_ref().connect_map(move |body| {
+        let Some(win) = body.root().and_downcast::<gtk::Window>() else {
+            return;
+        };
+        let (w, h) = (win.width(), win.height());
+        if w > 0 {
+            body.set_size_request((w - 48).clamp(280, LARGE_MODAL_WIDTH), -1);
+        }
+        if let Some(sc) = &scroller {
+            if h > 0 {
+                // Leave room for the heading, the search field and Cancel.
+                let max = (h - 260).max(160);
+                sc.set_max_content_height(max);
+                if let Some(min) = min_height {
+                    sc.set_min_content_height(min.min(max));
+                }
+            }
+        }
+    });
+}
+
 /// Closes a centered (floating) dialog when the user clicks or taps beside it.
 /// libadwaita does that only for the bottom sheet; a floating dialog ignores
 /// clicks on its dimmed backdrop. The dialog widget spans the whole window
@@ -769,11 +819,6 @@ pub fn search_modal(
 ) -> (adw::AlertDialog, gtk::SearchEntry, gtk::ListBox) {
     let dialog = adw::AlertDialog::new(Some(heading), None);
     dialog.add_css_class("emilia-modal");
-    // Wider on the desktop for the result rows. A libadwaita 1.6 property:
-    // set by name so the v1_5 bindings still build, and skipped on older libs.
-    if dialog.find_property("prefer-wide-layout").is_some() {
-        dialog.set_property("prefer-wide-layout", true);
-    }
     dialog.add_response("cancel", &crate::i18n::gettext("Cancel"));
     dialog.set_close_response("cancel");
     close_on_outside_click(&dialog);
@@ -803,7 +848,22 @@ pub fn search_modal(
         .build();
     results.add_css_class("boxed-list");
     results.set_visible(false);
-    body.append(&results);
+    // The hits scroll below the field (which stays in view) and the dialog
+    // grows with them up to most of the window height.
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .child(&results)
+        .visible(false)
+        .build();
+    // Callers show/hide the list; the scroller follows, so an empty search
+    // leaves no gap under the field.
+    results
+        .bind_property("visible", &scroller, "visible")
+        .sync_create()
+        .build();
+    body.append(&scroller);
+    enlarge_modal(&body, Some(&scroller), None);
     dialog.set_extra_child(Some(&body));
 
     let on_search = std::rc::Rc::new(on_search);

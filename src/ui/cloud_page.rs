@@ -54,11 +54,10 @@ pub(crate) struct CloudPage {
 
 #[derive(Debug)]
 pub(crate) enum CloudInput {
-    /// Open the dialog on `window`; `mobile` → present as a bottom sheet.
+    /// Open the dialog on `window` (a centered modal, also on the phone).
     /// `existing` are already-connected Nextcloud servers offered for reuse.
     Open {
         window: adw::ApplicationWindow,
-        mobile: bool,
         existing: Vec<Source>,
     },
     /// Reuse the saved server `existing[idx]` – only the music folder is asked.
@@ -113,11 +112,7 @@ impl Component for CloudPage {
 
     fn update(&mut self, msg: CloudInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
-            CloudInput::Open {
-                window,
-                mobile,
-                existing,
-            } => self.open_dialog(&window, mobile, existing, &sender),
+            CloudInput::Open { window, existing } => self.open_dialog(&window, existing, &sender),
             CloudInput::ReuseServer(idx) => self.reuse_server(idx),
             CloudInput::NewConnection => self.new_connection(&sender),
             CloudInput::SetManual(manual) => self.set_manual(manual, &sender),
@@ -153,19 +148,13 @@ impl CloudPage {
     fn open_dialog(
         &mut self,
         window: &adw::ApplicationWindow,
-        mobile: bool,
         existing: Vec<Source>,
         sender: &ComponentSender<Self>,
     ) {
         self.existing = existing;
         self.chosen_source = None;
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Connect to Nextcloud"))
-            .content_width(420)
-            .build();
-        if mobile {
-            dialog.set_presentation_mode(adw::DialogPresentationMode::BottomSheet);
-        }
+        // A centered modal like the "+" that opened it, also on the phone.
+        let dialog = crate::ui::widgets::form_modal(&gettext("Connect to Nextcloud"), 560);
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::new());

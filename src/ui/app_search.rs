@@ -23,11 +23,6 @@ impl App {
         // results and Cancel set apart below — also on the phone.
         let dialog = adw::AlertDialog::new(Some(&gettext("Search")), None);
         dialog.add_css_class("emilia-modal");
-        // Wider on the desktop for the result rows. A libadwaita 1.6 property:
-        // set by name so the v1_5 bindings still build, and skipped on older libs.
-        if dialog.find_property("prefer-wide-layout").is_some() {
-            dialog.set_property("prefer-wide-layout", true);
-        }
         dialog.add_response("cancel", &gettext("Cancel"));
         dialog.set_close_response("cancel");
 
@@ -49,13 +44,15 @@ impl App {
         results.append(&search_hint());
 
         // Fixed height: the modal keeps its size while typing, and only the
-        // results scroll — the search field stays in view.
+        // results scroll — the search field stays in view. Wide and tall like
+        // the other search modals.
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .min_content_height(360)
             .child(&results)
             .build();
         outer.append(&scroller);
+        crate::ui::widgets::enlarge_modal(&outer, Some(&scroller), Some(560));
         dialog.set_extra_child(Some(&outer));
 
         // What is running when the dialog opens, so a hit that is the current
