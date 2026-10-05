@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.42" date="2026-10-05">
+      <description>
+        <p>Radio stations now find their logo on their own, also when added by address or when the directory only lists a broken one. The station window has a new "Change logo" to search online again, pick an image of your own or enter an address. The "+" in Stations, Podcasts and YouTube first asks what you want to do, such as searching the directory or entering an address, and then opens that step in a centered window. In Files, sorting by name now goes by the song title you see, so an album folder no longer stays in track order under "0–9".</p>
+        <p xml:lang="de">Radiosender finden ihr Logo jetzt selbst, auch wenn sie per Adresse hinzugefügt wurden oder das Verzeichnis nur ein defektes kennt. Im Senderfenster gibt es neu „Logo ändern“: erneut online suchen, ein eigenes Bild wählen oder eine Adresse eingeben. Das „+“ bei Sendern, Podcasts und YouTube fragt zuerst, was du tun möchtest, etwa im Verzeichnis suchen oder eine Adresse eingeben, und öffnet diesen Schritt dann in einem zentrierten Fenster. Unter Dateien sortiert „Name“ jetzt nach dem angezeigten Titel, ein Albumordner bleibt also nicht mehr in Track-Reihenfolge unter „0–9“ stehen.</p>
+      </description>
+    </release>
     <release version="0.8.41" date="2026-10-04">
       <description>
         <p>The listening statistics now also rank your radio stations, podcasts and YouTube streams; "Top tracks" counts music only. Playing an artist from oldest or newest places every song by its own release year, so loose singles land between the albums where they belong. On a playlist page, an album is a regular row again with the playlist's songs from it listed right below. Wherever the sort menu offers "Gallery view", a new "Show description" option beneath it switches the tiles between a card with the title and just the cover; podcasts show only the cover by default. The "+" windows in Podcasts and YouTube close when you click beside them, and "Add a source" is tidier, with Cancel set apart.</p>
