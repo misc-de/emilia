@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-04 12:53+0000\n"
+"POT-Creation-Date: 2026-10-05 05:04+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -32,7 +32,7 @@ msgstr "Пауза"
 #: src/ui/app_views.rs:1564 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
 #: src/ui/stream_page.rs:1557 src/ui/stream_page.rs:1646
 #: src/ui/stream_page.rs:1844 src/ui/stream_page.rs:1925 src/ui/yt_live.rs:123
-#: src/ui/yt_page.rs:1893 src/ui/yt_page_detail.rs:98
+#: src/ui/yt_page.rs:1900 src/ui/yt_page_detail.rs:98
 #: src/ui/yt_page_detail.rs:425
 msgid "Play"
 msgstr "Воспроизвести"
@@ -53,7 +53,7 @@ msgstr "Выйти из Emilia"
 msgid "Back"
 msgstr "Назад"
 
-#: src/ui/app.rs:565 src/ui/app_search.rs:22 src/ui/app_search.rs:328
+#: src/ui/app.rs:565 src/ui/app_search.rs:24 src/ui/app_search.rs:325
 #: src/ui/widgets.rs:770
 msgid "Search"
 msgstr "Поиск"
@@ -71,13 +71,13 @@ msgstr "Сортировка"
 msgid "Sleep timer"
 msgstr "Таймер сна"
 
-#: src/ui/app.rs:598 src/ui/app_dialogs.rs:338 src/ui/yt_page.rs:1902
+#: src/ui/app.rs:598 src/ui/app_dialogs.rs:338 src/ui/yt_page.rs:1909
 msgid "Refresh"
 msgstr "Обновить"
 
-#: src/ui/app.rs:613 src/ui/sync_page.rs:332 src/ui/sync_page.rs:386
-#: src/ui/sync_page.rs:450 src/ui/sync_page.rs:1012 src/ui/sync_page.rs:1047
-#: src/ui/sync_page.rs:1132
+#: src/ui/app.rs:613 src/ui/sync_page.rs:337 src/ui/sync_page.rs:372
+#: src/ui/sync_page.rs:426 src/ui/sync_page.rs:490 src/ui/sync_page.rs:1052
+#: src/ui/sync_page.rs:1087 src/ui/sync_page.rs:1172
 msgid "Connect to share"
 msgstr "Подключение для обмена"
 
@@ -93,7 +93,7 @@ msgstr "Не удалось загрузить папку"
 msgid "Retry"
 msgstr "Повторить"
 
-#: src/ui/app.rs:768 src/ui/app_search.rs:106 src/ui/app_settings.rs:408
+#: src/ui/app.rs:768 src/ui/app_search.rs:103 src/ui/app_settings.rs:408
 #: src/ui/stats_page.rs:290
 msgid "Artists"
 msgstr "Исполнители"
@@ -106,7 +106,7 @@ msgstr "Нет исполнителей"
 msgid "Scan a music folder and fetch online metadata"
 msgstr "Просканируйте папку с музыкой и получите метаданные из интернета"
 
-#: src/ui/app.rs:818 src/ui/app_playlist.rs:310 src/ui/app_search.rs:133
+#: src/ui/app.rs:818 src/ui/app_playlist.rs:310 src/ui/app_search.rs:130
 #: src/ui/app_views.rs:1148 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr "Альбомы"
@@ -115,7 +115,7 @@ msgstr "Альбомы"
 msgid "No albums"
 msgstr "Нет альбомов"
 
-#: src/ui/app.rs:869 src/ui/app_search.rs:141 src/ui/app_views.rs:1225
+#: src/ui/app.rs:869 src/ui/app_search.rs:138 src/ui/app_views.rs:1225
 msgid "Singles"
 msgstr "Синглы"
 
@@ -127,7 +127,7 @@ msgstr "Нет синглов"
 msgid "Singles are one-artist releases with just a few tracks"
 msgstr "Синглы — это релизы одного исполнителя всего с несколькими треками"
 
-#: src/ui/app.rs:917 src/ui/app_search.rs:149
+#: src/ui/app.rs:917 src/ui/app_search.rs:146
 msgid "Compilations"
 msgstr "Сборники"
 
@@ -139,7 +139,7 @@ msgstr "Нет сборников"
 msgid "Compilations are albums with tracks by several artists"
 msgstr "Сборники — это альбомы с треками разных исполнителей"
 
-#: src/ui/app.rs:965 src/ui/app.rs:1006 src/ui/app_search.rs:157
+#: src/ui/app.rs:965 src/ui/app.rs:1006 src/ui/app_search.rs:154
 msgid "Concerts"
 msgstr "Концерты"
 
@@ -177,7 +177,7 @@ msgstr "Нет концертов"
 msgid "Mark an album or a track as a concert via the options."
 msgstr "Отметьте альбом или трек как концерт через параметры."
 
-#: src/ui/app.rs:1046 src/ui/sync_share_ui.rs:468 src/ui/yt_page.rs:1614
+#: src/ui/app.rs:1046 src/ui/sync_share_ui.rs:468 src/ui/yt_page.rs:1618
 msgid "Playlists"
 msgstr "Плейлисты"
 
@@ -214,7 +214,7 @@ msgstr "Отмечайте треки, альбомы или исполните�
 msgid "YouTube"
 msgstr "YouTube"
 
-#: src/ui/app.rs:1155 src/ui/app_search.rs:165
+#: src/ui/app.rs:1155 src/ui/app_search.rs:162
 msgid "Audiobooks"
 msgstr "Аудиокниги"
 
@@ -271,14 +271,14 @@ msgstr "{done} МБ из {total} МБ"
 #: src/ui/app.rs:1404 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:941 src/ui/app_memo.rs:964 src/ui/app_playlist.rs:879
 #: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
-#: src/ui/app_rec_edit.rs:693 src/ui/app_sections.rs:94
-#: src/ui/app_settings.rs:651 src/ui/app_views_handlers.rs:737
-#: src/ui/app_views_sources.rs:281 src/ui/app_views_sources.rs:477
-#: src/ui/app_views_sources.rs:536 src/ui/podcasts_page.rs:971
-#: src/ui/setup.rs:699 src/ui/stream_page.rs:775 src/ui/stream_page.rs:1212
-#: src/ui/stream_page.rs:1260 src/ui/sync_share_ui.rs:159
-#: src/ui/widgets.rs:721 src/ui/widgets.rs:753 src/ui/widgets.rs:814
-#: src/ui/yt_live.rs:167
+#: src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:31
+#: src/ui/app_sections.rs:94 src/ui/app_settings.rs:651
+#: src/ui/app_views_handlers.rs:737 src/ui/app_views_sources.rs:281
+#: src/ui/app_views_sources.rs:477 src/ui/app_views_sources.rs:536
+#: src/ui/podcasts_page.rs:971 src/ui/setup.rs:699 src/ui/stream_page.rs:775
+#: src/ui/stream_page.rs:1212 src/ui/stream_page.rs:1260
+#: src/ui/sync_share_ui.rs:159 src/ui/widgets.rs:721 src/ui/widgets.rs:753
+#: src/ui/widgets.rs:814 src/ui/yt_live.rs:167
 msgid "Cancel"
 msgstr "Отмена"
 
@@ -419,7 +419,7 @@ msgstr "Загрузить новое изображение или удалит
 #: src/ui/app_favorites.rs:296 src/ui/app_settings.rs:826
 #: src/ui/app_views_sources.rs:102 src/ui/app_views_sources.rs:436
 #: src/ui/podcasts_page.rs:972 src/ui/stream_page.rs:1182
-#: src/ui/yt_live.rs:168 src/ui/yt_page.rs:1937
+#: src/ui/yt_live.rs:168 src/ui/yt_page.rs:1944
 msgid "Remove"
 msgstr "Удалить"
 
@@ -491,7 +491,7 @@ msgstr "Настройки эквалайзера"
 #: src/ui/app_dialogs.rs:287 src/ui/app_memo.rs:817 src/ui/app_playlist.rs:718
 #: src/ui/podcasts_page.rs:1841 src/ui/smb_page.rs:132
 #: src/ui/stream_page.rs:1159 src/ui/stream_page.rs:1673
-#: src/ui/yt_page.rs:1911 src/ui/yt_page_detail.rs:165
+#: src/ui/yt_page.rs:1918 src/ui/yt_page_detail.rs:165
 msgid "Share"
 msgstr "Поделиться"
 
@@ -905,7 +905,7 @@ msgstr "Добавляйте треки через параметры песни
 
 #. Labelled "Songs" (de "Lieder"): in this music app the video
 #. search is used to find songs. It still searches YtKind::Video.
-#: src/ui/app_playlist.rs:391 src/ui/app_search.rs:175 src/ui/yt_page.rs:1613
+#: src/ui/app_playlist.rs:391 src/ui/app_search.rs:172 src/ui/yt_page.rs:1617
 msgid "Songs"
 msgstr "Песни"
 
@@ -1080,23 +1080,23 @@ msgstr "Остановить запись заметки"
 msgid "Record a voice memo"
 msgstr "Записать голосовую заметку"
 
-#: src/ui/app_search.rs:37
+#: src/ui/app_search.rs:40
 msgid "Artist, album, song, station, video, memo …"
 msgstr "Исполнитель, альбом, песня, станция, видео, заметка …"
 
-#: src/ui/app_search.rs:96
+#: src/ui/app_search.rs:92
 msgid "No results"
 msgstr "Нет результатов"
 
-#: src/ui/app_search.rs:214 src/ui/stream_page.rs:302
+#: src/ui/app_search.rs:211 src/ui/stream_page.rs:302
 msgid "Recordings"
 msgstr "Записи"
 
-#: src/ui/app_search.rs:248
+#: src/ui/app_search.rs:245
 msgid "Memos"
 msgstr "Заметки"
 
-#: src/ui/app_search.rs:330
+#: src/ui/app_search.rs:327
 msgid "Find artists, albums, songs, stations, recordings, videos and memos."
 msgstr ""
 "Поиск исполнителей, альбомов, песен, станций, записей, видео и заметок."
@@ -2041,7 +2041,7 @@ msgstr "Подпапка на сервере для индексации, нап
 msgid "This source is not configured correctly (URL/login missing)."
 msgstr "Этот источник настроен неправильно (нет URL или данных входа)."
 
-#: src/ui/app_yt_glue.rs:131 src/ui/yt_page.rs:1816
+#: src/ui/app_yt_glue.rs:131 src/ui/yt_page.rs:1823
 #: src/ui/yt_page_detail.rs:398
 msgid "No videos"
 msgstr "Нет видео"
@@ -2106,7 +2106,8 @@ msgstr "Подключение"
 msgid "New connection"
 msgstr "Новое подключение"
 
-#: src/ui/cloud_page.rs:236 src/ui/sync_page.rs:399 src/ui/sync_page.rs:614
+#: src/ui/cloud_page.rs:236 src/ui/sync_page.rs:340 src/ui/sync_page.rs:439
+#: src/ui/sync_page.rs:654
 msgid "Scan QR code"
 msgstr "Сканировать QR-код"
 
@@ -2428,7 +2429,7 @@ msgstr "Прослушано {position} из {total}"
 msgid "Podcast – {title}"
 msgstr "Подкаст — {title}"
 
-#: src/ui/podcasts_page.rs:2009 src/ui/podcasts_page.rs:2245
+#: src/ui/podcasts_page.rs:2009 src/ui/podcasts_page.rs:2244
 msgid "Search podcasts"
 msgstr "Искать подкасты"
 
@@ -2473,7 +2474,7 @@ msgstr "Загрузка удалена"
 msgid "Downloading “{title}” …"
 msgstr "Загрузка «{title}» …"
 
-#: src/ui/podcasts_page.rs:2246
+#: src/ui/podcasts_page.rs:2245
 msgid "Podcast name …"
 msgstr "Название подкаста …"
 
@@ -2847,7 +2848,7 @@ msgstr "Использовать URL"
 msgid "Choose logo"
 msgstr "Выбрать логотип"
 
-#: src/ui/stream_page.rs:1306 src/ui/stream_page.rs:2030
+#: src/ui/stream_page.rs:1306 src/ui/stream_page.rs:1975
 msgid "Search stations"
 msgstr "Искать станции"
 
@@ -2940,35 +2941,39 @@ msgstr "Загрузить через YouTube"
 msgid "Remove from list"
 msgstr "Удалить из списка"
 
-#: src/ui/stream_page.rs:2031
+#: src/ui/stream_page.rs:1976
 msgid "Station name …"
 msgstr "Название станции …"
 
-#: src/ui/sync_page.rs:388
-msgid "Connect two devices on the same network."
-msgstr "Соедините два устройства в одной сети."
-
-#: src/ui/sync_page.rs:393 src/ui/sync_page.rs:491
-msgid "Offer connection"
-msgstr "Предложить подключение"
-
-#: src/ui/sync_page.rs:394
-msgid "Start a server and show a QR code"
-msgstr "Запустить сервер и показать QR-код"
-
-#: src/ui/sync_page.rs:400
-msgid "Point the camera at the other device's code"
-msgstr "Наведите камеру на код другого устройства"
-
-#: src/ui/sync_page.rs:459
+#: src/ui/sync_page.rs:323 src/ui/sync_page.rs:499
 msgid "Connected with {name}"
 msgstr "Подключено к {name}"
 
-#: src/ui/sync_page.rs:468
+#: src/ui/sync_page.rs:327 src/ui/sync_page.rs:508
 msgid "To share something, open a track or album and choose “Share”."
 msgstr "Чтобы поделиться, откройте трек или альбом и выберите «Поделиться»."
 
-#: src/ui/sync_page.rs:510
+#: src/ui/sync_page.rs:330
+msgid "Close"
+msgstr "Закрыть"
+
+#: src/ui/sync_page.rs:339 src/ui/sync_page.rs:433 src/ui/sync_page.rs:531
+msgid "Offer connection"
+msgstr "Предложить подключение"
+
+#: src/ui/sync_page.rs:349 src/ui/sync_page.rs:428
+msgid "Connect two devices on the same network."
+msgstr "Соедините два устройства в одной сети."
+
+#: src/ui/sync_page.rs:434
+msgid "Start a server and show a QR code"
+msgstr "Запустить сервер и показать QR-код"
+
+#: src/ui/sync_page.rs:440
+msgid "Point the camera at the other device's code"
+msgstr "Наведите камеру на код другого устройства"
+
+#: src/ui/sync_page.rs:550
 msgid ""
 "Scan this code on the other device — or copy the code below and paste it "
 "there."
@@ -2976,116 +2981,116 @@ msgstr ""
 "Отсканируйте этот код на другом устройстве — или скопируйте код ниже и "
 "вставьте его там."
 
-#: src/ui/sync_page.rs:521
+#: src/ui/sync_page.rs:561
 msgid "Pairing code …"
 msgstr "Код сопряжения …"
 
-#: src/ui/sync_page.rs:525
+#: src/ui/sync_page.rs:565
 msgid "Copy code"
 msgstr "Копировать код"
 
-#: src/ui/sync_page.rs:581
+#: src/ui/sync_page.rs:621
 msgid "Cannot start: {err}"
 msgstr "Не удалось запустить: {err}"
 
-#: src/ui/sync_page.rs:630
+#: src/ui/sync_page.rs:670
 msgid "Point the camera at the QR code — or paste a pairing code below."
 msgstr "Наведите камеру на QR-код — или вставьте код сопряжения ниже."
 
-#: src/ui/sync_page.rs:639
+#: src/ui/sync_page.rs:679
 msgid "Paste pairing code …"
 msgstr "Вставьте код сопряжения …"
 
-#: src/ui/sync_page.rs:643
+#: src/ui/sync_page.rs:683
 msgid "Connect"
 msgstr "Подключиться"
 
-#: src/ui/sync_page.rs:712
+#: src/ui/sync_page.rs:752
 msgid "Camera unavailable: {err}"
 msgstr "Камера недоступна: {err}"
 
-#: src/ui/sync_page.rs:735
+#: src/ui/sync_page.rs:775
 msgid "Invalid or expired pairing code."
 msgstr "Неверный или просроченный код сопряжения."
 
-#: src/ui/sync_page.rs:747
+#: src/ui/sync_page.rs:787
 msgid "Connecting …"
 msgstr "Подключение …"
 
-#: src/ui/sync_page.rs:783
+#: src/ui/sync_page.rs:823
 msgid "Waiting for another device … ({addr})"
 msgstr "Ожидание другого устройства … ({addr})"
 
-#: src/ui/sync_page.rs:828 src/ui/sync_share_ui.rs:96
+#: src/ui/sync_page.rs:868 src/ui/sync_share_ui.rs:96
 msgid "{n} favorites"
 msgstr "Избранное: {n}"
 
-#: src/ui/sync_page.rs:834 src/ui/sync_share_ui.rs:88
+#: src/ui/sync_page.rs:874 src/ui/sync_share_ui.rs:88
 msgid "{n} playlists"
 msgstr "Плейлисты: {n}"
 
-#: src/ui/sync_page.rs:840 src/ui/sync_share_ui.rs:80
+#: src/ui/sync_page.rs:880 src/ui/sync_share_ui.rs:80
 msgid "{n} podcasts"
 msgstr "Подкасты: {n}"
 
-#: src/ui/sync_page.rs:846 src/ui/sync_share_ui.rs:104
+#: src/ui/sync_page.rs:886 src/ui/sync_share_ui.rs:104
 msgid "{n} radio stations"
 msgstr "Радиостанции: {n}"
 
-#: src/ui/sync_page.rs:852
+#: src/ui/sync_page.rs:892
 msgid "{n} covers/photos"
 msgstr "Обложки/фото: {n}"
 
-#: src/ui/sync_page.rs:859
+#: src/ui/sync_page.rs:899
 msgid "Received {list}."
 msgstr "Получено ({list})."
 
-#: src/ui/sync_page.rs:869
+#: src/ui/sync_page.rs:909
 msgid "Metadata synced. Transferring files …"
 msgstr "Метаданные синхронизированы. Передача файлов …"
 
-#: src/ui/sync_page.rs:891
+#: src/ui/sync_page.rs:931
 msgid "{n} files transferred."
 msgstr "Передано файлов: {n}."
 
-#: src/ui/sync_page.rs:941
+#: src/ui/sync_page.rs:981
 msgid "The other device accepted. Transferring …"
 msgstr "Другое устройство приняло. Передача …"
 
-#: src/ui/sync_page.rs:948
+#: src/ui/sync_page.rs:988
 msgid "Error: {e}"
 msgstr "Ошибка: {e}"
 
-#: src/ui/sync_page.rs:964
+#: src/ui/sync_page.rs:1004
 msgid "Sync successful"
 msgstr "Синхронизация выполнена"
 
-#: src/ui/sync_page.rs:974
+#: src/ui/sync_page.rs:1014
 msgid "Done"
 msgstr "Готово"
 
-#: src/ui/sync_page.rs:1016
+#: src/ui/sync_page.rs:1056
 msgid "Disconnected."
 msgstr "Отключено."
 
-#: src/ui/sync_page.rs:1021
+#: src/ui/sync_page.rs:1061
 msgid "Connect again"
 msgstr "Подключиться снова"
 
-#: src/ui/sync_page.rs:1052 src/ui/yt_page_detail.rs:759
+#: src/ui/sync_page.rs:1092 src/ui/yt_page_detail.rs:759
 #: src/ui/yt_page_detail.rs:792
 msgid "Preparing …"
 msgstr "Подготовка …"
 
-#: src/ui/sync_page.rs:1115
+#: src/ui/sync_page.rs:1155
 msgid "Waiting for the other device to accept …"
 msgstr "Ожидание подтверждения другого устройства …"
 
-#: src/ui/sync_page.rs:1122
+#: src/ui/sync_page.rs:1162
 msgid "Sending …"
 msgstr "Отправка …"
 
-#: src/ui/sync_page.rs:1183
+#: src/ui/sync_page.rs:1223
 msgid "Receiving …"
 msgstr "Получение …"
 
@@ -3216,8 +3221,8 @@ msgstr[0] "Не удалось загрузить {n} канал"
 msgstr[1] "Не удалось загрузить {n} канала"
 msgstr[2] "Не удалось загрузить {n} каналов"
 
-#: src/ui/yt_live.rs:104 src/ui/yt_page.rs:489 src/ui/yt_page.rs:1616
-#: src/ui/yt_page.rs:1696
+#: src/ui/yt_live.rs:104 src/ui/yt_page.rs:489 src/ui/yt_page.rs:1620
+#: src/ui/yt_page.rs:1703
 msgid "Live"
 msgstr "Эфир"
 
@@ -3243,7 +3248,7 @@ msgstr ""
 msgid "Subscriptions"
 msgstr "Подписки"
 
-#: src/ui/yt_page.rs:497 src/ui/yt_page.rs:1609
+#: src/ui/yt_page.rs:497 src/ui/yt_page.rs:1613
 msgid "Search YouTube"
 msgstr "Поиск на YouTube"
 
@@ -3335,70 +3340,70 @@ msgstr "Запустить плейлист"
 msgid "Download yt-dlp in the settings first"
 msgstr "Сначала загрузите yt-dlp в настройках"
 
-#: src/ui/yt_page.rs:1615
+#: src/ui/yt_page.rs:1619
 msgid "Channels"
 msgstr "Каналы"
 
-#: src/ui/yt_page.rs:1621
+#: src/ui/yt_page.rs:1625
 msgid "Search songs"
 msgstr "Искать песни"
 
-#: src/ui/yt_page.rs:1622
+#: src/ui/yt_page.rs:1628
 msgid "Search playlists"
 msgstr "Искать плейлисты"
 
-#: src/ui/yt_page.rs:1623
+#: src/ui/yt_page.rs:1630
 msgid "Search channels"
 msgstr "Искать каналы"
 
-#: src/ui/yt_page.rs:1624
+#: src/ui/yt_page.rs:1631
 msgid "Search live streams"
 msgstr "Искать трансляции"
 
-#: src/ui/yt_page.rs:1630
+#: src/ui/yt_page.rs:1637
 msgid "Search term …"
 msgstr "Поисковый запрос …"
 
-#: src/ui/yt_page.rs:1676
+#: src/ui/yt_page.rs:1683
 msgid "YouTube unreachable"
 msgstr "YouTube недоступен"
 
-#: src/ui/yt_page.rs:1678
+#: src/ui/yt_page.rs:1685
 msgid "Check your connection, or update yt-dlp in the settings"
 msgstr "Проверьте подключение или обновите yt-dlp в настройках"
 
-#: src/ui/yt_page.rs:1685
+#: src/ui/yt_page.rs:1692
 msgid "Nothing found"
 msgstr "Ничего не найдено"
 
-#: src/ui/yt_page.rs:1697
+#: src/ui/yt_page.rs:1704
 msgid "Video"
 msgstr "Видео"
 
-#: src/ui/yt_page.rs:1698 src/ui/yt_page_detail.rs:280
+#: src/ui/yt_page.rs:1705 src/ui/yt_page_detail.rs:280
 msgid "Playlist"
 msgstr "Плейлист"
 
-#: src/ui/yt_page.rs:1699
+#: src/ui/yt_page.rs:1706
 msgid "Channel"
 msgstr "Канал"
 
-#: src/ui/yt_page.rs:1742
+#: src/ui/yt_page.rs:1749
 msgid "List as newest"
 msgstr "Показывать как новейшее"
 
-#: src/ui/yt_page.rs:1858
+#: src/ui/yt_page.rs:1865
 msgid "Channel – {title}"
 msgstr "Канал — {title}"
 
-#: src/ui/yt_page.rs:1883
+#: src/ui/yt_page.rs:1890
 msgid "{n} video"
 msgid_plural "{n} videos"
 msgstr[0] "{n} видео"
 msgstr[1] "{n} видео"
 msgstr[2] "{n} видео"
 
-#: src/ui/yt_page.rs:1924
+#: src/ui/yt_page.rs:1931
 msgid "Notify of newest publications"
 msgstr "Уведомлять о новейших публикациях"
 

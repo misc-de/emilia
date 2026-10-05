@@ -301,15 +301,55 @@ impl SyncPage {
             == Some("1")
     }
 
-    /// Header sync-icon entry: ensure the flow window exists, then land on the
-    /// connected panel (if a pairing is live) or the mode selection.
+    /// Header sync-icon entry. With the flow window already open ("Connect
+    /// again" after a lost pairing) it swaps to the mode selection there;
+    /// otherwise a centered modal like the "+" dialogs asks how to connect, or
+    /// shows the live pairing. The flow window opens only once a mode is picked.
     fn open_entry(&mut self, sender: &ComponentSender<Self>) {
-        self.ensure_window(sender);
-        if self.connected {
-            self.show_connected_panel(sender);
-        } else {
-            self.show_mode_select(sender);
+        if self.sub.is_some() {
+            if self.connected {
+                self.show_connected_panel(sender);
+            } else {
+                self.show_mode_select(sender);
+            }
+            return;
         }
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let dialog = if self.connected {
+            let dialog = adw::AlertDialog::new(
+                Some(&gettext_f(
+                    "Connected with {name}",
+                    &[("name", &self.peer_name)],
+                )),
+                Some(&gettext(
+                    "To share something, open a track or album and choose \u{201c}Share\u{201d}.",
+                )),
+            );
+            dialog.add_response("close", &gettext("Close"));
+            dialog.set_close_response("close");
+            crate::ui::widgets::close_on_outside_click(&dialog);
+            dialog
+        } else {
+            let sender = sender.clone();
+            let dialog = crate::ui::widgets::choice_modal(
+                &gettext("Connect to share"),
+                &[
+                    ("server", gettext("Offer connection")),
+                    ("scan", gettext("Scan QR code")),
+                ],
+                "server",
+                move |resp| match resp {
+                    "server" => sender.input(SyncInput::StartServer),
+                    "scan" => sender.input(SyncInput::StartScan),
+                    _ => {}
+                },
+            );
+            dialog.set_body(&gettext("Connect two devices on the same network."));
+            dialog
+        };
+        dialog.present(Some(&window));
     }
 
     /// Presents the single flow window (once); later phases only swap its content.

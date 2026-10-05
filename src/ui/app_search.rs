@@ -19,48 +19,44 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) {
-        let dialog = adw::Dialog::builder().title(gettext("Search")).build();
-        // Same fixed width as the other detail dialogs; full-width bottom sheet
-        // on the phone.
-        dialog.set_content_width(600);
-        dialog.set_content_height(560);
-        self.adapt_detail_dialog(&dialog);
-
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
+        // Centered modal in the look of the "+" dialogs: heading, search field,
+        // results and Cancel set apart below — also on the phone.
+        let dialog = adw::AlertDialog::new(Some(&gettext("Search")), None);
+        dialog.add_css_class("emilia-modal");
+        // Wider on the desktop for the result rows. A libadwaita 1.6 property:
+        // set by name so the v1_5 bindings still build, and skipped on older libs.
+        if dialog.find_property("prefer-wide-layout").is_some() {
+            dialog.set_property("prefer-wide-layout", true);
+        }
+        dialog.add_response("cancel", &gettext("Cancel"));
+        dialog.set_close_response("cancel");
 
         let outer = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
             .build();
 
         let entry = gtk::SearchEntry::builder()
             .placeholder_text(gettext("Artist, album, song, station, video, memo …"))
             .hexpand(true)
-            .margin_top(6)
-            .margin_bottom(6)
-            .margin_start(12)
-            .margin_end(12)
             .build();
         outer.append(&entry);
 
         let results = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(18)
-            .margin_top(6)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
             .build();
         results.append(&search_hint());
 
+        // Fixed height: the modal keeps its size while typing, and only the
+        // results scroll — the search field stays in view.
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
+            .min_content_height(360)
             .child(&results)
             .build();
         outer.append(&scroller);
-        toolbar.set_content(Some(&outer));
-        dialog.set_child(Some(&toolbar));
+        dialog.set_extra_child(Some(&outer));
 
         // What is running when the dialog opens, so a hit that is the current
         // track shows a pause icon like it does in every other list. A snapshot
@@ -76,7 +72,7 @@ impl App {
         // Live search: SQLite is local and the result count is capped, so we can
         // re-query on each (already debounced) change of the search entry.
         let sender = sender.clone();
-        let dlg = dialog.clone();
+        let dlg: adw::Dialog = dialog.clone().upcast();
         entry.connect_search_changed(move |e| {
             while let Some(c) = results.first_child() {
                 results.remove(&c);
@@ -94,6 +90,7 @@ impl App {
                     &adw::StatusPage::builder()
                         .icon_name("system-search-symbolic")
                         .title(gettext("No results"))
+                        .css_classes(["compact"])
                         .vexpand(true)
                         .build(),
                 );
@@ -269,7 +266,7 @@ impl App {
             }
         });
 
-        crate::ui::app_helpers::close_on_click_outside(&dialog);
+        crate::ui::widgets::close_on_outside_click(&dialog);
         dialog.present(Some(root));
         entry.grab_focus();
     }
@@ -329,6 +326,7 @@ fn search_hint() -> adw::StatusPage {
         .description(gettext(
             "Find artists, albums, songs, stations, recordings, videos and memos.",
         ))
+        .css_classes(["compact"])
         .vexpand(true)
         .build()
 }
