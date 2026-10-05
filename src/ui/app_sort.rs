@@ -53,8 +53,10 @@ fn fs_entry_cmp(a: &FsEntry, b: &FsEntry, crit: SortCrit, desc: bool) -> std::cm
     }
     let ord = match crit {
         SortCrit::Length => a.runtime_ms().cmp(&b.runtime_ms()),
-        // Name is the only other criterion offered for files.
-        _ => natural_key(a.name()).cmp(&natural_key(b.name())),
+        // Name is the only other criterion offered for files. Sorts by the shown
+        // title (tag title for files), not the raw file name: "01 - Foo.flac"
+        // would otherwise order by track number and land under "0–9".
+        _ => natural_key(&a.display_title()).cmp(&natural_key(&b.display_title())),
     };
     if desc {
         ord.reverse()
@@ -854,7 +856,12 @@ impl App {
             return None;
         }
         match self.libview.sort_for("files").0 {
-            SortCrit::Name => Some(entries.iter().map(|e| alpha_header(e.name())).collect()),
+            SortCrit::Name => Some(
+                entries
+                    .iter()
+                    .map(|e| alpha_header(&e.display_title()))
+                    .collect(),
+            ),
             _ => None,
         }
     }
