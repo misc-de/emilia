@@ -31,7 +31,11 @@ impl App {
     /// for every `yt:` track.
     pub(crate) fn note_youtube_play(&self, video_id: &str, title: &str) {
         let _ = self.library.set_yt_title(video_id, title);
-        if !self.youtube.playing_playlist {
+        // A replay from the "Recently" list keeps the list's order; anything
+        // else (and a video not in the list yet) goes to the top.
+        let keep =
+            self.youtube.keep_recent_order && self.library.is_recent(video_id).unwrap_or(false);
+        if !self.youtube.playing_playlist && !keep {
             let _ = self.library.add_recent_video(video_id, title, None);
         }
         let input = self.input.clone();
@@ -132,6 +136,7 @@ impl App {
             return;
         }
         self.youtube.playing_playlist = false;
+        self.youtube.keep_recent_order = false;
         self.youtube.video_titles.clear();
         let mut queue = Vec::with_capacity(videos.len());
         for v in videos {
@@ -148,10 +153,22 @@ impl App {
 
     /// Play a single video (toggles if it is already the running one).
     pub(crate) fn yt_play_video(&mut self, video_id: String, title: String) {
+        self.yt_play_video_from(video_id, title, false);
+    }
+
+    /// [`Self::yt_play_video`], with `keep_recent_order` set when the video was
+    /// tapped in the "Recently" list (its place there then stays the same).
+    pub(crate) fn yt_play_video_from(
+        &mut self,
+        video_id: String,
+        title: String,
+        keep_recent_order: bool,
+    ) {
         if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
             self.flip_playing();
         } else {
             self.youtube.playing_playlist = false;
+            self.youtube.keep_recent_order = keep_recent_order;
             self.youtube.video_titles.clear();
             self.youtube
                 .video_titles
@@ -229,6 +246,7 @@ impl App {
             queue.push(PathBuf::from(youtube::yt_path(id)));
         }
         self.youtube.playing_playlist = true;
+        self.youtube.keep_recent_order = false;
         let total: i64 = videos.iter().filter_map(|(_, _, d)| *d).sum();
         let _ = self.library.add_recent_playlist(
             &url,
@@ -305,6 +323,7 @@ impl App {
                 queue.push(PathBuf::from(p));
             }
             self.youtube.playing_playlist = true;
+            self.youtube.keep_recent_order = false;
             let _ =
                 self.library
                     .add_recent_playlist(&url, &title, items.len() as i64, total_duration);
@@ -616,6 +635,8 @@ pub(crate) enum YtMsg {
     YtPlayVideo {
         video_id: String,
         title: String,
+        /// Tapped in the "Recently" list: keep its place there.
+        keep_recent_order: bool,
     },
     /// Internal: a video's stream URL was resolved (or failed) in a worker →
     /// start streaming. Dispatched from `play_current` for `yt:` tracks.
@@ -712,7 +733,11 @@ impl App {
                 close,
                 videos,
             } => self.yt_start_playlist_at(url, title, index, close, videos),
-            YtMsg::YtPlayVideo { video_id, title } => self.yt_play_video(video_id, title),
+            YtMsg::YtPlayVideo {
+                video_id,
+                title,
+                keep_recent_order,
+            } => self.yt_play_video_from(video_id, title, keep_recent_order),
             YtMsg::YtPlayLive { video_id, title } => self.yt_toggle_live(video_id, title),
             YtMsg::YtLiveResolved { video_id, result } => self.yt_live_resolved(video_id, result),
             YtMsg::YtPlayVideoAt {

@@ -554,6 +554,9 @@ pub(crate) struct YoutubeState {
     /// Whether the current play context is a YouTube playlist – then individual
     /// videos are not logged to "Recent" (the playlist is logged as one entry).
     pub(crate) playing_playlist: bool,
+    /// The current video was started from the "Recently" list: a replay then
+    /// leaves its place in that list alone instead of moving it to the top.
+    pub(crate) keep_recent_order: bool,
     /// Position the next start of this video should begin at (video id, ms) —
     /// set when a jump mark in the description was tapped, and preferred over
     /// the stored resume position for that one start.

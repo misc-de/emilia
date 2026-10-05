@@ -148,6 +148,12 @@ pub(crate) enum SearchKind {
 
 #[derive(Debug)]
 pub(crate) enum YtInput {
+    /// A video's play button / "Play" was tapped: forwarded to the transport,
+    /// noting whether it came from the "Recently" list.
+    PlayVideo {
+        video_id: String,
+        title: String,
+    },
     // --- driven by the parent ---
     Reload,
     RefreshAll,
@@ -252,6 +258,8 @@ pub(crate) enum YtOutput {
     PlayVideo {
         video_id: String,
         title: String,
+        /// Tapped in the "Recently" list: keep its place there.
+        keep_recent_order: bool,
     },
     /// Play a video from one of its jump marks (chapter list / a timestamp in
     /// the description), like tapping a timestamp in podcast shownotes.
@@ -720,6 +728,13 @@ impl Component for YtPage {
             }
             YtInput::RefreshAll => self.refresh_all_channels(&sender),
             YtInput::ReloadRecent => self.reload_yt_recent(&sender),
+            YtInput::PlayVideo { video_id, title } => {
+                let _ = sender.output(YtOutput::PlayVideo {
+                    video_id,
+                    title,
+                    keep_recent_order: self.yt_view == YtView::Recent,
+                });
+            }
             YtInput::PlaybackStateChanged {
                 playing_video_id,
                 playing,

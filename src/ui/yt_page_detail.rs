@@ -104,7 +104,7 @@ impl YtPage {
                 title.to_string(),
             );
             play.connect_activated(move |_| {
-                let _ = sender.output(YtOutput::PlayVideo {
+                sender.input(YtInput::PlayVideo {
                     video_id: vid.clone(),
                     title: t.clone(),
                 });
@@ -501,7 +501,7 @@ impl YtPage {
         {
             let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
             btn.connect_clicked(move |_| {
-                let _ = sender.output(YtOutput::PlayVideo {
+                sender.input(YtInput::PlayVideo {
                     video_id: vid.clone(),
                     title: t.clone(),
                 });

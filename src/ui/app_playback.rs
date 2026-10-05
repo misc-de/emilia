@@ -1624,6 +1624,7 @@ impl App {
         // play button for the whole thing. A single play is logged to
         // "Recent" like any other standalone track.
         self.youtube.playing_playlist = false;
+        self.youtube.keep_recent_order = false;
         self.transport.queue = vec![PathBuf::from(&path)];
         self.transport.queue_pos = 0;
         // A single tapped song is not an album play (see `PlaySession::source`).

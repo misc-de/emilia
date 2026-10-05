@@ -2137,9 +2137,15 @@ impl Component for App {
             .forward(sender.input_sender(), |out| {
                 use crate::ui::yt_page::YtOutput as O;
                 match out {
-                    O::PlayVideo { video_id, title } => {
-                        Msg::Yt(YtMsg::YtPlayVideo { video_id, title })
-                    }
+                    O::PlayVideo {
+                        video_id,
+                        title,
+                        keep_recent_order,
+                    } => Msg::Yt(YtMsg::YtPlayVideo {
+                        video_id,
+                        title,
+                        keep_recent_order,
+                    }),
                     O::PlayLive { video_id, title } => {
                         Msg::Yt(YtMsg::YtPlayLive { video_id, title })
                     }
@@ -2437,6 +2443,7 @@ impl Component for App {
                 live_started: None,
                 video_titles: std::collections::HashMap::new(),
                 playing_playlist: false,
+                keep_recent_order: false,
                 pending_seek: None,
                 progress_toast: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
