@@ -30,28 +30,38 @@ pub fn output_timeout(cmd: &mut Command, timeout: Duration) -> Result<Output> {
     let mut child = cmd.spawn()?;
     // Drain both pipes concurrently: a child that fills one pipe's buffer blocks
     // on write while we'd be waiting on the other — a classic deadlock.
-    let mut out_pipe = child.stdout.take().expect("stdout was set to piped");
-    let mut err_pipe = child.stderr.take().expect("stderr was set to piped");
-    let out_reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = out_pipe.read_to_end(&mut buf);
-        buf
-    });
-    let err_reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = err_pipe.read_to_end(&mut buf);
-        buf
-    });
+    let deadline = Instant::now() + timeout;
+    let out_reader = drain(child.stdout.take().expect("stdout was set to piped"));
+    let err_reader = drain(child.stderr.take().expect("stderr was set to piped"));
 
     let status = wait_or_kill(&mut child, timeout)?;
-    // The child has exited, so both pipes are closed and the readers return.
-    let stdout = out_reader.join().unwrap_or_default();
-    let stderr = err_reader.join().unwrap_or_default();
+    // The child has exited, but a grandchild it spawned (yt-dlp → ffmpeg) may
+    // have inherited the pipes and keep them open, so the readers are waited for
+    // only until the original deadline (plus a short grace) – never forever. A
+    // reader that is still blocked then is left detached; it ends with the pipe.
+    let grace = deadline.max(Instant::now()) + Duration::from_secs(2);
+    let collect = |rx: std::sync::mpsc::Receiver<Vec<u8>>| {
+        rx.recv_timeout(grace.saturating_duration_since(Instant::now()))
+    };
+    let (Ok(stdout), Ok(stderr)) = (collect(out_reader), collect(err_reader)) else {
+        bail!("the process exited, but its output pipe was held open");
+    };
     Ok(Output {
         status,
         stdout,
         stderr,
     })
+}
+
+/// Reads `pipe` to EOF on a helper thread; the result arrives on the channel.
+fn drain(mut pipe: impl Read + Send + 'static) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = pipe.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    rx
 }
 
 /// Like [`Command::status`], but kills the child and errors if it does not
@@ -136,7 +146,7 @@ pub fn status_timeout_lines(
 
 /// Polls `child` until it exits or `timeout` elapses; on expiry kills it and
 /// reaps it (so it never lingers as a zombie), then errors.
-fn wait_or_kill(child: &mut Child, timeout: Duration) -> Result<ExitStatus> {
+pub fn wait_or_kill(child: &mut Child, timeout: Duration) -> Result<ExitStatus> {
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
@@ -174,6 +184,19 @@ mod tests {
         assert!(res.is_err(), "expected a timeout error");
         // Returned promptly rather than waiting out the full sleep.
         assert!(start.elapsed() < Duration::from_secs(5));
+    }
+
+    /// The shell exits at once, but its backgrounded `sleep` inherits stdout and
+    /// keeps the pipe open; the call must still return around its deadline.
+    #[test]
+    fn grandchild_holding_the_pipe_does_not_hang() {
+        let start = Instant::now();
+        let r = output_timeout(
+            Command::new("sh").args(["-c", "sleep 30 & echo hi"]),
+            Duration::from_millis(300),
+        );
+        assert!(r.is_err());
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

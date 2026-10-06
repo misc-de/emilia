@@ -78,7 +78,7 @@ impl Scanner {
         let camera_fd = if std::env::var_os("EMILIA_CAMERA_SRC").is_some() {
             None
         } else {
-            portal_camera_fd()
+            portal_camera_fd_bounded()
         };
         let src = match &camera_fd {
             Some(fd) => format!("pipewiresrc fd={}", fd.as_raw_fd()),
@@ -175,6 +175,31 @@ impl Drop for Scanner {
             id.remove();
         }
         self.stop();
+    }
+}
+
+/// How long [`Scanner::start`] waits for the camera portal (including the time
+/// the user needs to answer a first-use permission prompt) before falling back
+/// to the direct source.
+const PORTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// [`portal_camera_fd`] on a helper thread, waited for at most
+/// [`PORTAL_TIMEOUT`]: a portal that never answers must not freeze the UI thread
+/// for good. A late answer is dropped with the detached thread.
+fn portal_camera_fd_bounded() -> Option<zbus::zvariant::OwnedFd> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("camera-portal".into())
+        .spawn(move || {
+            let _ = tx.send(portal_camera_fd());
+        })
+        .ok()?;
+    match rx.recv_timeout(PORTAL_TIMEOUT) {
+        Ok(fd) => fd,
+        Err(_) => {
+            tracing::warn!("camera portal did not answer; using the direct source");
+            None
+        }
     }
 }
 

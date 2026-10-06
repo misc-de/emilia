@@ -9,6 +9,14 @@
 
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use crate::core::proc;
+
+/// Upper bound for one `secret-tool` call. Generous, because a locked keyring
+/// shows an unlock prompt the user has to answer; but a wedged Secret Service
+/// must not block the caller (sometimes the UI thread) forever.
+const SECRET_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Marks a DB column/setting whose real value lives in the Secret Service. For
 /// per-source items the source id is appended (`secret-tool:7`); for named
@@ -39,7 +47,9 @@ fn store(attrs: &[(&str, &str)], label: &str, value: &str) -> bool {
         return false;
     }
     drop(stdin);
-    child.wait().map(|s| s.success()).unwrap_or(false)
+    proc::wait_or_kill(&mut child, SECRET_TOOL_TIMEOUT)
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Looks up a secret by its attributes. `None` if absent, empty or `secret-tool`
@@ -50,7 +60,7 @@ fn lookup(attrs: &[(&str, &str)]) -> Option<String> {
     for (k, v) in attrs {
         cmd.args([*k, *v]);
     }
-    let out = cmd.stderr(Stdio::null()).output().ok()?;
+    let out = proc::output_timeout(&mut cmd, SECRET_TOOL_TIMEOUT).ok()?;
     if !out.status.success() {
         return None;
     }
@@ -65,7 +75,10 @@ fn clear(attrs: &[(&str, &str)]) {
     for (k, v) in attrs {
         cmd.args([*k, *v]);
     }
-    let _ = cmd.stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let _ = proc::status_timeout(
+        cmd.stdout(Stdio::null()).stderr(Stdio::null()),
+        SECRET_TOOL_TIMEOUT,
+    );
 }
 
 // --- Per-source credentials (Nextcloud/WebDAV) -----------------------------

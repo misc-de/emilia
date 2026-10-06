@@ -23,6 +23,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -244,14 +245,22 @@ fn code_from_redirect(query: &str, expected_state: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("sign-in response carried no code"))
 }
 
-/// Waits (blocking, up to `timeout`) for the browser redirect, answers it with
-/// a small "you can close this window" page and exchanges the code for tokens.
-/// Run on a worker thread.
-pub fn oauth_finish(flow: OAuthFlow, client: &OAuthClient, timeout: Duration) -> Result<TokenSet> {
+/// Waits (blocking, up to `timeout` or until `cancel` is set) for the browser
+/// redirect, answers it with a small "you can close this window" page and
+/// exchanges the code for tokens. Run on a worker thread.
+pub fn oauth_finish(
+    flow: OAuthFlow,
+    client: &OAuthClient,
+    timeout: Duration,
+    cancel: &AtomicBool,
+) -> Result<TokenSet> {
     let deadline = Instant::now() + timeout;
     let code = loop {
         if Instant::now() > deadline {
             return Err(anyhow!("timed out waiting for the browser sign-in"));
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return Err(anyhow!("sign-in cancelled"));
         }
         match flow.listener.accept() {
             Ok((mut sock, _)) => {

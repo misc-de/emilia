@@ -15,11 +15,12 @@ pub struct Output {
 
 /// Runs `pactl` with a neutral locale (stable, English field names).
 fn pactl(args: &[&str]) -> Option<String> {
-    let out = Command::new("pactl")
-        .env("LC_ALL", "C")
-        .args(args)
-        .output()
-        .ok()?;
+    // A wedged sound server must not hang the caller.
+    let out = crate::core::proc::output_timeout(
+        Command::new("pactl").env("LC_ALL", "C").args(args),
+        std::time::Duration::from_secs(5),
+    )
+    .ok()?;
     if !out.status.success() {
         return None;
     }

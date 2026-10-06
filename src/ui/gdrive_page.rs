@@ -47,6 +47,11 @@ pub(crate) struct GDrivePage {
     account: Option<String>,
     /// The client used for the running/finished sign-in.
     client: Option<OAuthClient>,
+    /// Bumped per sign-in attempt; a result from an older one is ignored.
+    sign_in_gen: u64,
+    /// Stops the running sign-in's loopback listener (dialog closed or a new
+    /// attempt started), so it does not keep waiting for minutes.
+    sign_in_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[derive(Debug)]
@@ -79,8 +84,9 @@ pub(crate) enum GDriveOutput {
 
 #[derive(Debug)]
 pub(crate) enum GDriveCmd {
-    /// The browser sign-in finished: tokens + account e-mail, or the reason.
-    SignedIn(Result<(TokenSet, String), String>),
+    /// The browser sign-in attempt `.0` finished: tokens + account e-mail, or
+    /// the reason.
+    SignedIn(u64, Result<(TokenSet, String), String>),
     Tested(Result<(), String>),
     Indexed,
 }
@@ -117,6 +123,7 @@ impl Component for GDrivePage {
             GDriveInput::Test => self.test(&sender),
             GDriveInput::Save => self.save(&sender),
             GDriveInput::Closed => {
+                self.cancel_sign_in();
                 self.dialog = None;
                 self.window = None;
             }
@@ -125,7 +132,8 @@ impl Component for GDrivePage {
 
     fn update_cmd(&mut self, cmd: GDriveCmd, sender: ComponentSender<Self>, _root: &Self::Root) {
         match cmd {
-            GDriveCmd::SignedIn(Ok((tokens, email))) => {
+            GDriveCmd::SignedIn(sign_in_gen, _) if sign_in_gen != self.sign_in_gen => {}
+            GDriveCmd::SignedIn(_, Ok((tokens, email))) => {
                 self.tokens = Some(tokens);
                 self.account = Some(email.clone());
                 if let Some(b) = &self.signin_btn {
@@ -142,7 +150,7 @@ impl Component for GDrivePage {
                     &[("account", &email)],
                 ));
             }
-            GDriveCmd::SignedIn(Err(e)) => {
+            GDriveCmd::SignedIn(_, Err(e)) => {
                 tracing::info!("Google sign-in failed: {e}");
                 if let Some(b) = &self.signin_btn {
                     b.set_sensitive(true);
@@ -445,6 +453,11 @@ impl GDrivePage {
             }
         };
         self.client = Some(client.clone());
+        self.cancel_sign_in();
+        self.sign_in_gen += 1;
+        let sign_in_gen = self.sign_in_gen;
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.sign_in_cancel = Some(cancel.clone());
         if let Some(b) = &self.signin_btn {
             b.set_sensitive(false);
         }
@@ -466,14 +479,21 @@ impl GDrivePage {
         }
         self.status(&gettext("Waiting for the sign-in in the browser …"));
         sender.spawn_oneshot_command(move || {
-            let result = gdrive::oauth_finish(flow, &client, gdrive::SIGN_IN_TIMEOUT)
+            let result = gdrive::oauth_finish(flow, &client, gdrive::SIGN_IN_TIMEOUT, &cancel)
                 .and_then(|tokens| {
                     let email = gdrive::account_email(&tokens.access_token)?;
                     Ok((tokens, email))
                 })
                 .map_err(|e| e.to_string());
-            GDriveCmd::SignedIn(result)
+            GDriveCmd::SignedIn(sign_in_gen, result)
         });
+    }
+
+    /// Stops a sign-in still waiting for the browser redirect.
+    fn cancel_sign_in(&mut self) {
+        if let Some(cancel) = self.sign_in_cancel.take() {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Credentials for the chosen account + the music folder from the form.

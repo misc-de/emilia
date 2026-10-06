@@ -158,7 +158,10 @@ pub(crate) fn gallery_cell(
 }
 
 /// Decodes covers (path -> target `Picture`) in a background thread and
-/// delivers textures progressively on the UI thread.
+/// delivers textures progressively on the UI thread. The targets must already
+/// sit in their `FlowBox`; once a refill removed them, delivery stops, which
+/// also ends the decode thread (its next send fails) instead of letting it
+/// finish a list nobody sees anymore.
 pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     if items.is_empty() {
         return;
@@ -178,9 +181,11 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     gtk::glib::spawn_future_local(async move {
         while let Ok((i, path, tex)) = rx.recv().await {
             crate::ui::widgets::store_thumb(path, tex.clone());
-            if let Some(pic) = targets.get(i) {
-                pic.set_paintable(Some(&tex));
+            let Some(pic) = targets.get(i) else { continue };
+            if pic.ancestor(gtk::FlowBox::static_type()).is_none() {
+                break; // the gallery was refilled
             }
+            pic.set_paintable(Some(&tex));
         }
     });
 }
