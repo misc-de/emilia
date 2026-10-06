@@ -126,6 +126,9 @@ pub enum Msg {
     /// Periodic, quiet background backfill: fetch missing artist photos (first)
     /// and online covers, without the user having to trigger it.
     AutoEnrichTick,
+    /// The network is available for the first time since launch: run the
+    /// startup work that needs it (see `when_online`).
+    StartupOnline,
     /// On-demand fingerprint track recognition for the **just started**
     /// track without usable metadata (AcoustID), triggered on play.
     FingerprintCurrent(PathBuf),

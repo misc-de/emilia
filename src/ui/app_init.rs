@@ -461,57 +461,76 @@ impl App {
         // (Statistics build themselves in the StatsPage component's init; the
         // podcast feed-image cache runs in the PodcastsPage component's init; the
         // station-logo cache runs in the StreamPage component's init.)
-        // YouTube (optional, opt-in): load subscribed channels, and – on a
-        // connection – verify/refresh yt-dlp and the newest videos in the
-        // background. yt-dlp is re-fetched once per new app version (YouTube
-        // changes frequently break older versions).
+        // YouTube (optional, opt-in): load the subscribed channels; yt-dlp and
+        // the newest videos are refreshed in `on_startup_online`.
         if self.youtube.enabled {
             self.yt_page.emit(crate::ui::yt_page::YtInput::Reload);
-            let online = online_available();
-            sender.spawn_oneshot_command(move || {
-                let Ok(lib) = Library::open() else {
-                    return Cmd::YtReload;
-                };
-                let prev = lib.get_setting("yt_dlp_app_version").ok().flatten();
-                let cur = env!("CARGO_PKG_VERSION");
-                if online && crate::core::youtube::available() && prev.as_deref() != Some(cur) {
-                    let _ = crate::core::youtube::update_ytdlp();
-                    // Mark the version as refreshed only once the refresh could
-                    // actually run. Marking it unconditionally burnt the single
-                    // per-version attempt on an offline first start, and with no
-                    // managed copy on disk the weekly auto-update never takes
-                    // over — leaving the install stuck on the bundled baseline
-                    // until the next app version.
-                    let _ = lib.set_setting("yt_dlp_app_version", cur);
-                }
-                if online && crate::core::youtube::available() {
-                    crate::core::pool::for_each(
-                        &lib.channels().unwrap_or_default(),
-                        crate::ui::yt_channels::CHANNEL_REFRESH_THREADS,
-                        |_, (id, title, url, thumb, _)| {
-                            if let Ok(lib) = Library::open() {
-                                crate::ui::yt_page::ensure_channel_image(
-                                    &lib,
-                                    *id,
-                                    title,
-                                    thumb.as_deref(),
-                                );
-                            }
-                            let _ = crate::ui::yt_page::refresh_channel_videos(*id, title, url);
-                        },
-                    );
-                }
-                Cmd::YtReload
-            });
         }
         // Automatically read the library at startup and – on Wi-Fi/LAN and
         // with the switch enabled – fetch missing covers/metadata in the background.
         self.start_scan(sender, true, false);
-        // Also check the remote sources for new content in the background (silent,
-        // non-manual: respects the auto-enrich setting). Skipped when offline so a
-        // launch without a connection does not spin up a pointless re-index worker.
-        if online_available() {
-            self.reindex_cloud_sources(sender, false);
+        // The network-dependent part (yt-dlp/channel refresh, remote re-index)
+        // runs once a connection is reported — at once, or as soon as the
+        // Flatpak's network portal has answered. Never while offline, so a launch
+        // without a connection spins up no pointless workers.
+        let input = sender.input_sender().clone();
+        crate::ui::app_helpers::when_online(move || {
+            let _ = input.send(Msg::StartupOnline);
+        });
+    }
+
+    /// First network availability after launch (see [`Self::startup_configure`]).
+    pub(crate) fn on_startup_online(&mut self, sender: &ComponentSender<Self>) {
+        // YouTube (optional, opt-in): verify/refresh yt-dlp and the newest videos
+        // in the background. yt-dlp is re-fetched once per new app version
+        // (YouTube changes frequently break older versions).
+        if self.youtube.enabled {
+            sender.spawn_oneshot_command(move || {
+                let Ok(lib) = Library::open() else {
+                    return Cmd::YtReload;
+                };
+                if !crate::core::youtube::available() {
+                    return Cmd::YtReload;
+                }
+                let prev = lib.get_setting("yt_dlp_app_version").ok().flatten();
+                let cur = env!("CARGO_PKG_VERSION");
+                if prev.as_deref() != Some(cur) {
+                    let _ = crate::core::youtube::update_ytdlp();
+                    // Marked only once the refresh could actually run: with no
+                    // managed copy on disk the weekly auto-update never takes
+                    // over, so a burnt attempt would leave the install stuck on
+                    // the bundled baseline until the next app version.
+                    let _ = lib.set_setting("yt_dlp_app_version", cur);
+                }
+                crate::core::pool::for_each(
+                    &lib.channels().unwrap_or_default(),
+                    crate::ui::yt_channels::CHANNEL_REFRESH_THREADS,
+                    |_, (id, title, url, thumb, _)| {
+                        if let Ok(lib) = Library::open() {
+                            crate::ui::yt_page::ensure_channel_image(
+                                &lib,
+                                *id,
+                                title,
+                                thumb.as_deref(),
+                            );
+                        }
+                        let _ = crate::ui::yt_page::refresh_channel_videos(*id, title, url);
+                    },
+                );
+                Cmd::YtReload
+            });
+        }
+        // Check the remote sources for new content (silent, non-manual: respects
+        // the auto-enrich setting).
+        self.reindex_cloud_sources(sender, false);
+        // A startup scan that finished before the connection was known skipped
+        // its online enrichment; catch up on it now.
+        if !self.scanning
+            && self.enrich_state.auto_enrich
+            && !self.enrich_state.enriching
+            && self.files.music_dir.is_some()
+        {
+            self.run_enrich(sender, false, false);
         }
     }
 

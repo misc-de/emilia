@@ -589,6 +589,41 @@ pub(crate) fn online_available() -> bool {
     gtk::gio::NetworkMonitor::default().is_network_available()
 }
 
+/// Runs `f` once the network is reported available — right away if it already
+/// is. Inside the Flatpak, GLib's portal-backed monitor learns the real state
+/// only asynchronously on the main loop and reports "offline" until then, so a
+/// check made while the app starts up must not decide on its own: startup work
+/// that needs the network waits for the first "available" here instead.
+pub(crate) fn when_online(f: impl FnOnce() + 'static) {
+    use gtk::gio::prelude::NetworkMonitorExt;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let monitor = gtk::gio::NetworkMonitor::default();
+    if monitor.is_network_available() {
+        f();
+        return;
+    }
+    let pending: Rc<RefCell<Option<Box<dyn FnOnce()>>>> = Rc::new(RefCell::new(Some(Box::new(f))));
+    let handler: Rc<RefCell<Option<gtk::glib::SignalHandlerId>>> = Rc::default();
+    let id = monitor.connect_network_changed({
+        let handler = handler.clone();
+        move |m, available| {
+            if !available {
+                return;
+            }
+            if let Some(id) = handler.borrow_mut().take() {
+                m.disconnect(id);
+            }
+            let f = pending.borrow_mut().take();
+            if let Some(f) = f {
+                f();
+            }
+        }
+    });
+    *handler.borrow_mut() = Some(id);
+}
+
 /// Most common artist designation (raw tag string) of a set of tracks.
 pub(crate) fn most_common_artist(tracks: &[Track]) -> String {
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();

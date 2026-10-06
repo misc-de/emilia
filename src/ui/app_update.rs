@@ -146,6 +146,7 @@ impl App {
                 self.reload_library_overviews();
             }
             Msg::AutoEnrichTick => self.on_auto_enrich_tick(&sender),
+            Msg::StartupOnline => self.on_startup_online(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
             Msg::Mcp(cmd) => self.handle_mcp(cmd, root, &sender),
