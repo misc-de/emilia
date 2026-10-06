@@ -577,21 +577,22 @@ impl App {
 
     /// Shows or updates the persistent "adding to library" progress toast.
     pub(crate) fn yt_progress(&self, msg: &str) {
-        let mut slot = self.youtube.progress_toast.borrow_mut();
-        match slot.as_ref() {
+        let existing = self.youtube.progress_toast.borrow().clone();
+        match existing {
             Some(t) => t.set_title(msg),
             None => {
                 let t = adw::Toast::new(msg);
                 t.set_timeout(0);
                 self.toast_overlay.add_toast(t.clone());
-                *slot = Some(t);
+                *self.youtube.progress_toast.borrow_mut() = Some(t);
             }
         }
     }
 
     /// Finishes the progress toast with a short final message.
     pub(crate) fn yt_progress_done(&self, msg: &str) {
-        if let Some(t) = self.youtube.progress_toast.borrow_mut().take() {
+        let prev = self.youtube.progress_toast.borrow_mut().take();
+        if let Some(t) = prev {
             t.dismiss();
         }
         let t = adw::Toast::new(msg);
@@ -778,7 +779,8 @@ impl App {
             YtMsg::YtLibraryChanged => self.reload_library_overviews(),
             YtMsg::YtPlaylistsChanged => self.reload_playlists(sender),
             YtMsg::PushYtSubpage => {
-                if let Some((title, content)) = self.yt_subpage.borrow_mut().take() {
+                let taken = self.yt_subpage.borrow_mut().take();
+                if let Some((title, content)) = taken {
                     self.push_subpage(&title, &content);
                     // The video rows are now realized → set their play/pause icons.
                     self.yt_page

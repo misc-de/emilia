@@ -357,11 +357,12 @@ impl App {
             let ctx_dialog = self.nav.ctx_dialog.clone();
             let this = dialog.clone();
             dialog.connect_closed(move |_| {
-                *ctx_play.borrow_mut() = None;
-                // Only clear if it's still us (a rebuild may have replaced it).
+                // Only clear if it's still us: a rebuild replaces the dialog and
+                // its play row before this (animated) close fires.
                 let is_current = ctx_dialog.borrow().as_ref() == Some(&this);
                 if is_current {
                     *ctx_dialog.borrow_mut() = None;
+                    *ctx_play.borrow_mut() = None;
                 }
             });
         }

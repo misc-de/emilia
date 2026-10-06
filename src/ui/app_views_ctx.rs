@@ -635,7 +635,9 @@ impl App {
                 }
                 syncing.set(true);
                 for (area, sw) in area_rows.iter() {
-                    sw.set_active(state.borrow().contains(area));
+                    // Read first: `set_active` fires `notify::active` synchronously.
+                    let on = state.borrow().contains(area);
+                    sw.set_active(on);
                 }
                 syncing.set(false);
                 sender.input(Msg::Setting(SettingMsg::SetAreas {

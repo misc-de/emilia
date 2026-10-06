@@ -1082,7 +1082,8 @@ impl Player {
         self.wants_playing.set(true);
         // Waiting to reconnect: try right away instead of starting the broken
         // pipeline as it is (which would also lose the resume position).
-        if let Some(id) = self.net.timer.borrow_mut().take() {
+        let pending = self.net.timer.borrow_mut().take();
+        if let Some(id) = pending {
             id.remove();
             let deck = self.cur_deck();
             reopen_deck(

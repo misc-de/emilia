@@ -462,10 +462,11 @@ impl App {
     /// it. Used for the sections (Podcasts/Streaming/YouTube) that build their
     /// own sort popover off in the component instead of here.
     pub(crate) fn apply_component_sort(&self, slot: &SortSlot) {
-        match &*slot.borrow() {
+        let current = slot.borrow().clone();
+        match current {
             Some((popover, desc)) => {
-                self.nav.sort_btn.set_icon_name(sort_dir_icon(*desc));
-                self.nav.sort_btn.set_popover(Some(popover));
+                self.nav.sort_btn.set_icon_name(sort_dir_icon(desc));
+                self.nav.sort_btn.set_popover(Some(&popover));
                 self.nav.sort_btn.set_visible(true);
             }
             None => self.nav.sort_btn.set_visible(false),

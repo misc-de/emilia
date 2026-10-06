@@ -236,7 +236,8 @@ impl App {
             PodcastMsg::ToggleEpisode { url, title } => self.toggle_episode(url, title),
             PodcastMsg::EpisodeSeekTo { url, title, ms } => self.episode_seek_to(url, title, ms),
             PodcastMsg::PushPodcastSubpage => {
-                if let Some((title, content)) = self.podcast_subpage.borrow_mut().take() {
+                let taken = self.podcast_subpage.borrow_mut().take();
+                if let Some((title, content)) = taken {
                     self.push_subpage(&title, &content);
                     // The episode rows are now realized → let the page set their
                     // play/pause icons to the current state.

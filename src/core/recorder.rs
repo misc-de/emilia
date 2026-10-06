@@ -222,8 +222,11 @@ impl Recorder {
     /// Cuts `[start, end)` into a **temporary** file (for previewing in the
     /// replay) and returns its path.
     pub fn extract_temp(&self, start: u64, end: u64) -> Result<PathBuf> {
-        let cap = self.shared.lock_or_recover().cap;
-        let avail = self.shared.lock_or_recover().total.saturating_sub(cap);
+        let (cap, total) = {
+            let s = self.shared.lock_or_recover();
+            (s.cap, s.total)
+        };
+        let avail = total.saturating_sub(cap);
         let start = start.max(avail);
         if end <= start {
             return Err(anyhow!("nothing buffered for this segment"));
