@@ -106,10 +106,14 @@ fn main_artist(credit: &str) -> String {
 
 /// Compares two track/artist names loosely: case- and punctuation-insensitive,
 /// and tolerant of one carrying a suffix the other lacks ("Song" vs
-/// "Song (Radio Edit)").
+/// "Song (Radio Edit)"). The suffix must start at a word boundary, so "Help"
+/// does not match "Helpless".
 fn loose_match(a: &str, b: &str) -> bool {
     let (a, b) = (normalize_name(a), normalize_name(b));
-    !a.is_empty() && !b.is_empty() && (a.starts_with(&b) || b.starts_with(&a))
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    !short.is_empty()
+        && long.starts_with(&short)
+        && (long.len() == short.len() || long[short.len()..].starts_with(' '))
 }
 
 /// Lowercases, drops everything but letters/digits and collapses whitespace.
@@ -244,17 +248,22 @@ fn split_title_parts(s: &str, station: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-/// Case-insensitive (ASCII) removal of every occurrence of `needle` from `haystack`.
+/// Case-insensitive (ASCII) removal of every whole-word occurrence of `needle`
+/// from `haystack`; occurrences inside a longer word ("Bob" in "Bobby") stay.
 fn remove_ci(haystack: &str, needle: &str) -> String {
     if needle.is_empty() {
         return haystack.to_string();
     }
     let (hl, nl) = (haystack.to_ascii_lowercase(), needle.to_ascii_lowercase());
+    let is_word = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
     let mut result = String::new();
     let mut i = 0;
     while let Some(pos) = hl[i..].find(&nl) {
-        result.push_str(&haystack[i..i + pos]);
-        i += pos + nl.len();
+        let (start, end) = (i + pos, i + pos + nl.len());
+        let bounded = !is_word(haystack[..start].chars().next_back())
+            && !is_word(haystack[end..].chars().next());
+        result.push_str(&haystack[i..if bounded { start } else { end }]);
+        i = end;
     }
     result.push_str(&haystack[i..]);
     result
@@ -297,12 +306,13 @@ mod tests {
         assert!(!loose_match("Yesterday", "   "));
     }
 
-    /// Documents current behaviour: the match is a plain string prefix, not a
-    /// word prefix, so a different, longer title starting with the same letters
-    /// is accepted ("Help" ↔ "Helpless").
+    /// The prefix must end at a word boundary: a longer title merely starting
+    /// with the same letters is a different song.
     #[test]
-    fn loose_match_accepts_a_mere_string_prefix() {
-        assert!(loose_match("Help", "Helpless"));
+    fn loose_match_rejects_a_mere_string_prefix() {
+        assert!(!loose_match("Help", "Helpless"));
+        assert!(!loose_match("Rockstar", "Rock"));
+        assert!(loose_match("Help!", "Help (Remastered)"));
     }
 
     #[test]
@@ -351,18 +361,21 @@ mod tests {
         );
     }
 
-    /// Documents current behaviour: the station name is removed as a plain
-    /// substring, without word boundaries, so it also cuts into artist or title
-    /// words that merely contain it.
+    /// The station name is only removed as a whole word, never cut out of an
+    /// artist or title that merely contains it.
     #[test]
-    fn clean_stream_title_cuts_the_station_out_of_longer_words() {
+    fn clean_stream_title_keeps_longer_words_containing_the_station() {
         assert_eq!(
-            clean_stream_title("Bob Marley - Jamming", Some("Bob")),
-            "Marley - Jamming"
+            clean_stream_title("Bobby Brown - Every Little Step", Some("Bob")),
+            "Bobby Brown - Every Little Step"
         );
         assert_eq!(
             clean_stream_title("Rocky - Theme", Some("Rock")),
-            "y - Theme"
+            "Rocky - Theme"
+        );
+        assert_eq!(
+            clean_stream_title("Rock | Rocky - Theme", Some("Rock")),
+            "Rocky - Theme"
         );
     }
 
@@ -387,7 +400,9 @@ mod tests {
         assert_eq!(remove_ci("abc", "xyz"), "abc");
         // Non-ASCII text around the needle survives intact.
         assert_eq!(remove_ci("ÄBC abc", "ABC"), "ÄBC ");
-        assert_eq!(remove_ci("aaaa", "aa"), "");
+        // Only whole words go.
+        assert_eq!(remove_ci("aaaa", "aa"), "aaaa");
+        assert_eq!(remove_ci("Bobby Bob", "bob"), "Bobby ");
     }
 
     #[test]

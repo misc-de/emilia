@@ -86,7 +86,7 @@ pub(super) fn live_entry_title(
     station: Option<&str>,
     fallback: &str,
 ) -> (Option<String>, String) {
-    match current_title {
+    match current_title.filter(|t| !t.trim().is_empty()) {
         Some(t) => crate::core::online::recording_query_candidates(t, station)
             .into_iter()
             .next()
@@ -392,13 +392,10 @@ mod tests {
     }
 
     #[test]
-    fn live_entry_title_of_a_blank_icy_title_is_empty() {
-        // Current behaviour: a whitespace-only ICY title yields no candidate
-        // and falls back to the trimmed raw title — an empty row title rather
-        // than the "Current recording" fallback.
+    fn live_entry_title_treats_a_blank_icy_title_as_unknown() {
         assert_eq!(
             live_entry_title(Some("   "), None, "Current recording"),
-            (None, String::new())
+            (None, "Current recording".to_string())
         );
     }
 

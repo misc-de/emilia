@@ -54,11 +54,17 @@ impl YtPage {
                     &gettext("Search term …"),
                     move |term| sender.input(YtInput::Search(term, kind)),
                 );
-                *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
+                let dialog: adw::Dialog = dialog.upcast();
+                *slot.borrow_mut() = Some((dialog.clone(), results));
                 {
                     let slot = slot.clone();
-                    dialog.connect_closed(move |_| {
-                        *slot.borrow_mut() = None;
+                    dialog.connect_closed(move |this| {
+                        // A dialog reopened during this one's close animation
+                        // already owns the slot; leave it alone.
+                        let is_current = slot.borrow().as_ref().is_some_and(|(d, _)| d == this);
+                        if is_current {
+                            *slot.borrow_mut() = None;
+                        }
                     });
                 }
                 dialog.present(Some(&win));

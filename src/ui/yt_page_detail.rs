@@ -282,11 +282,38 @@ impl YtPage {
             let dl_slot = self.ctx_video_download.clone();
             let meta_slot = self.ctx_video_meta.clone();
             let desc_slot = self.ctx_video_desc.clone();
-            dialog.connect_closed(move |_| {
-                *play_slot.borrow_mut() = None;
-                *dl_slot.borrow_mut() = None;
-                *meta_slot.borrow_mut() = None;
-                *desc_slot.borrow_mut() = None;
+            // Only forget widgets that belong to this dialog: one reopened during
+            // its close animation has already registered its own.
+            dialog.connect_closed(move |this| {
+                let mine = |w: &gtk::Widget| w.is_ancestor(this);
+                let play = play_slot
+                    .borrow()
+                    .as_ref()
+                    .map(|(r, _)| mine(r.upcast_ref()));
+                if play == Some(true) {
+                    *play_slot.borrow_mut() = None;
+                }
+                let dl = dl_slot
+                    .borrow()
+                    .as_ref()
+                    .map(|(r, _, _)| mine(r.upcast_ref()));
+                if dl == Some(true) {
+                    *dl_slot.borrow_mut() = None;
+                }
+                let meta = meta_slot
+                    .borrow()
+                    .as_ref()
+                    .map(|(_, b, ..)| mine(b.upcast_ref()));
+                if meta == Some(true) {
+                    *meta_slot.borrow_mut() = None;
+                }
+                let desc = desc_slot
+                    .borrow()
+                    .as_ref()
+                    .map(|(_, _, b)| mine(b.upcast_ref()));
+                if desc == Some(true) {
+                    *desc_slot.borrow_mut() = None;
+                }
             });
         }
         {
@@ -553,7 +580,8 @@ impl YtPage {
         let Some(root) = self.window.clone() else {
             return;
         };
-        if let Some(prev) = self.progress_popup.borrow_mut().take() {
+        let prev = self.progress_popup.borrow_mut().take();
+        if let Some(prev) = prev {
             prev.dialog.close();
         }
         let dialog = adw::Dialog::builder().title(title).build();
@@ -620,16 +648,22 @@ impl YtPage {
     /// Closes the progress popup when it tracks `video_id` (or unconditionally
     /// when `video_id` is `None`). A no-op if none is open.
     pub(super) fn close_progress_popup(&self, video_id: Option<&str>) {
-        let mut guard = self.progress_popup.borrow_mut();
-        let close = match (guard.as_ref(), video_id) {
-            (Some(_), None) => true,
-            (Some(popup), Some(v)) => popup.video_id == v,
-            (None, _) => false,
-        };
-        if close {
-            if let Some(popup) = guard.take() {
-                popup.dialog.close();
+        let popup = {
+            let mut guard = self.progress_popup.borrow_mut();
+            let close = match (guard.as_ref(), video_id) {
+                (Some(_), None) => true,
+                (Some(popup), Some(v)) => popup.video_id == v,
+                (None, _) => false,
+            };
+            if close {
+                guard.take()
+            } else {
+                None
             }
+        };
+        // Close outside the borrow: `close()` may emit `closed` synchronously.
+        if let Some(popup) = popup {
+            popup.dialog.close();
         }
     }
 
