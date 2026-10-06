@@ -11,6 +11,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::db::Library;
+use crate::core::panic_guard::catch_or;
 use crate::core::scanner;
 use crate::i18n::gettext;
 use crate::ui::app::{App, Cmd, Msg, artist_count_subtitle, find_scroller, read_entries};
@@ -332,27 +333,33 @@ impl App {
         self.scan_cancel.store(false, Ordering::Relaxed);
         let cancel = self.scan_cancel.clone();
         sender.spawn_command(move |out| {
-            match Library::open() {
-                Ok(lib) => {
-                    let r = scanner::scan_into_progress(
-                        &lib,
-                        &root,
-                        &cancel,
-                        |done, total, bytes, total_bytes| {
-                            let _ = out.send(Cmd::ScanProgress {
-                                done,
-                                total,
-                                bytes,
-                                total_bytes,
-                            });
-                        },
-                    );
-                    if let Err(e) = r {
-                        tracing::warn!("Library scan failed: {e}");
+            // A panicking scan must still send `ScanDone`, or `scanning` would
+            // stay set and every later refresh only shows the overlay.
+            catch_or(
+                "library scan",
+                || match Library::open() {
+                    Ok(lib) => {
+                        let r = scanner::scan_into_progress(
+                            &lib,
+                            &root,
+                            &cancel,
+                            |done, total, bytes, total_bytes| {
+                                let _ = out.send(Cmd::ScanProgress {
+                                    done,
+                                    total,
+                                    bytes,
+                                    total_bytes,
+                                });
+                            },
+                        );
+                        if let Err(e) = r {
+                            tracing::warn!("Library scan failed: {e}");
+                        }
                     }
-                }
-                Err(e) => tracing::error!("Database unavailable for scan: {e}"),
-            }
+                    Err(e) => tracing::error!("Database unavailable for scan: {e}"),
+                },
+                || (),
+            );
             let _ = out.send(Cmd::ScanDone {
                 then_enrich,
                 manual,
@@ -393,7 +400,17 @@ impl App {
             .store(false, Ordering::Relaxed);
         let cancel = self.enrich_state.enrich_cancel.clone();
         self.enrich_state.enriching = true;
-        sender.spawn_command(move |out| enrich_worker(root, cancel, scan_first, light, &out));
+        sender.spawn_command(move |out| {
+            // `enrich_worker` sends `EnrichDone` itself; on a panic send it here,
+            // or `enriching` would block every later run.
+            catch_or(
+                "online enrichment",
+                || enrich_worker(root, cancel, scan_first, light, &out),
+                || {
+                    let _ = out.send(Cmd::EnrichDone { changed: false });
+                },
+            );
+        });
     }
 
     /// Re-indexes all Nextcloud/WebDAV sources in the background. Existing
@@ -420,14 +437,21 @@ impl App {
             return false;
         }
         sender.spawn_oneshot_command(move || {
-            if let Ok(lib) = crate::core::db::Library::open() {
-                for s in &sources {
-                    match crate::core::remote::index_into(&lib, s) {
-                        Ok(n) => tracing::info!("Re-indexed {n} tracks from '{}'", s.name),
-                        Err(e) => tracing::warn!("Re-index of '{}' failed: {e}", s.name),
+            // `CloudReindexed` ends the refresh spinner – send it even on a panic.
+            catch_or(
+                "cloud re-index",
+                || {
+                    if let Ok(lib) = crate::core::db::Library::open() {
+                        for s in &sources {
+                            match crate::core::remote::index_into(&lib, s) {
+                                Ok(n) => tracing::info!("Re-indexed {n} tracks from '{}'", s.name),
+                                Err(e) => tracing::warn!("Re-index of '{}' failed: {e}", s.name),
+                            }
+                        }
                     }
-                }
-            }
+                },
+                || (),
+            );
             Cmd::CloudReindexed { manual }
         });
         true

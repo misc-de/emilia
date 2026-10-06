@@ -797,8 +797,11 @@ impl PodcastsPage {
                     });
                 }
             };
-            let result =
-                match crate::core::podcast::download_episode_progress(&dl_url, &dest, progress) {
+            // On a panic still report back, or the episode stays in
+            // `downloading_episodes` and can never be downloaded again.
+            let result = crate::core::panic_guard::catch_or(
+                "episode download",
+                || match crate::core::podcast::download_episode_progress(&dl_url, &dest, progress) {
                     Ok(_) => {
                         let path = dest.to_string_lossy().into_owned();
                         if let Ok(lib) = Library::open() {
@@ -807,7 +810,9 @@ impl PodcastsPage {
                         Ok(path)
                     }
                     Err(e) => Err(e.to_string()),
-                };
+                },
+                || Err("internal error".to_string()),
+            );
             let _ = out.send(PodcastsCmd::Downloaded {
                 url: dl_url.clone(),
                 result,

@@ -14,6 +14,7 @@ use adw::prelude::*;
 use relm4::{ComponentController, ComponentSender, adw};
 
 use crate::core::db::Library;
+use crate::core::panic_guard::catch_or;
 use crate::core::youtube;
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{App, Msg};
@@ -506,12 +507,19 @@ impl App {
         self.toast(&msg);
         self.refresh_ytdlp_status_label();
         sender.spawn_command(move |out| {
-            let result = if update {
-                youtube::update_ytdlp()
-            } else {
-                youtube::download_ytdlp()
-            }
-            .map_err(|e| e.to_string());
+            // A panic must still clear `ytdlp_busy` via `YtDlpReady`.
+            let result = catch_or(
+                "yt-dlp fetch",
+                || {
+                    if update {
+                        youtube::update_ytdlp()
+                    } else {
+                        youtube::download_ytdlp()
+                    }
+                    .map_err(|e| e.to_string())
+                },
+                || Err("internal error".to_string()),
+            );
             let _ = out.send(crate::ui::app::Cmd::YtDlpReady(result));
         });
     }
@@ -528,7 +536,11 @@ impl App {
         self.youtube.ytdlp_busy = true;
         self.refresh_ytdlp_status_label();
         sender.spawn_command(move |out| {
-            let result = youtube::update_ytdlp().map_err(|e| e.to_string());
+            let result = catch_or(
+                "yt-dlp auto-update",
+                || youtube::update_ytdlp().map_err(|e| e.to_string()),
+                || Err("internal error".to_string()),
+            );
             let _ = out.send(crate::ui::app::Cmd::YtDlpAutoUpdated(result));
         });
     }

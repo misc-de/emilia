@@ -832,11 +832,17 @@ impl App {
         // closed again in `on_heard_resolved` once the search returns.
         self.show_resolve_busy(root, &gettext("Looking online …"));
         sender.spawn_command(move |out| {
-            let video_id =
-                crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 1)
-                    .ok()
-                    .and_then(|mut v| v.drain(..).next())
-                    .map(|r| r.id);
+            // A panic yields "not found", which still closes the spinner.
+            let video_id = crate::core::panic_guard::catch_or(
+                "heard-song lookup",
+                || {
+                    crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 1)
+                        .ok()
+                        .and_then(|mut v| v.drain(..).next())
+                        .map(|r| r.id)
+                },
+                || None,
+            );
             let _ = out.send(crate::ui::app::Cmd::HeardResolved {
                 video_id,
                 title,

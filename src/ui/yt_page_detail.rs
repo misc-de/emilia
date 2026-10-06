@@ -12,6 +12,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::db::Library;
+use crate::core::panic_guard::catch_or;
 use crate::core::youtube;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::YtView;
@@ -539,30 +540,37 @@ impl YtPage {
             // (RSS feed, yt-dlp listing), so a serial loop took minutes.
             use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
             let [done, updated, failed, new_videos] = [(); 4].map(|_| AtomicUsize::new(0));
-            crate::core::pool::for_each(
-                &channels,
-                CHANNEL_REFRESH_THREADS,
-                |_, (id, title, url, thumb, _)| {
-                    let _ = out.send(YtCmd::RefreshProgress {
-                        done: done.load(Relaxed),
-                        total,
-                        title: title.clone(),
-                    });
-                    if let Ok(lib) = Library::open() {
-                        ensure_channel_image(&lib, *id, title, thumb.as_deref());
-                    }
-                    match refresh_channel_videos(*id, title, url) {
-                        Some((_, fresh)) => {
-                            updated.fetch_add(1, Relaxed);
-                            new_videos.fetch_add(fresh, Relaxed);
-                        }
-                        None => {
-                            tracing::warn!("YouTube refresh returned no videos for {url}");
-                            failed.fetch_add(1, Relaxed);
-                        }
-                    }
-                    done.fetch_add(1, Relaxed);
+            // A panic must not swallow `ChannelsRefreshed` (it ends the spinner).
+            catch_or(
+                "YouTube channel refresh",
+                || {
+                    crate::core::pool::for_each(
+                        &channels,
+                        CHANNEL_REFRESH_THREADS,
+                        |_, (id, title, url, thumb, _)| {
+                            let _ = out.send(YtCmd::RefreshProgress {
+                                done: done.load(Relaxed),
+                                total,
+                                title: title.clone(),
+                            });
+                            if let Ok(lib) = Library::open() {
+                                ensure_channel_image(&lib, *id, title, thumb.as_deref());
+                            }
+                            match refresh_channel_videos(*id, title, url) {
+                                Some((_, fresh)) => {
+                                    updated.fetch_add(1, Relaxed);
+                                    new_videos.fetch_add(fresh, Relaxed);
+                                }
+                                None => {
+                                    tracing::warn!("YouTube refresh returned no videos for {url}");
+                                    failed.fetch_add(1, Relaxed);
+                                }
+                            }
+                            done.fetch_add(1, Relaxed);
+                        },
+                    )
                 },
+                || (),
             );
             let _ = out.send(YtCmd::ChannelsRefreshed {
                 updated: updated.into_inner(),
@@ -807,30 +815,40 @@ impl YtPage {
                     progress,
                 });
             };
-            let cmd = match youtube::add_to_library_progress(
-                &vid,
-                &title,
-                artist.as_deref(),
-                &music,
-                cover.as_deref(),
-                overwrite,
-                on_progress,
-            ) {
-                Ok(youtube::AddOutcome::Added) => YtCmd::LibraryAdded {
-                    video_id: Some(vid),
-                    result: Ok(1),
+            // On a panic still report back, or the video stays in
+            // `downloading_videos` and can never be added again.
+            let failed_vid = vid.clone();
+            let cmd = catch_or(
+                "YouTube library add",
+                || match youtube::add_to_library_progress(
+                    &vid,
+                    &title,
+                    artist.as_deref(),
+                    &music,
+                    cover.as_deref(),
+                    overwrite,
+                    on_progress,
+                ) {
+                    Ok(youtube::AddOutcome::Added) => YtCmd::LibraryAdded {
+                        video_id: Some(vid),
+                        result: Ok(1),
+                    },
+                    Ok(youtube::AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
+                        video_id: vid,
+                        title,
+                        artist,
+                        dest: dest.to_string_lossy().into_owned(),
+                    },
+                    Err(e) => YtCmd::LibraryAdded {
+                        video_id: Some(vid),
+                        result: Err(e),
+                    },
                 },
-                Ok(youtube::AddOutcome::Exists(dest)) => YtCmd::LibraryExists {
-                    video_id: vid,
-                    title,
-                    artist,
-                    dest: dest.to_string_lossy().into_owned(),
+                || YtCmd::LibraryAdded {
+                    video_id: Some(failed_vid),
+                    result: Err("internal error".to_string()),
                 },
-                Err(e) => YtCmd::LibraryAdded {
-                    video_id: Some(vid),
-                    result: Err(e),
-                },
-            };
+            );
             let _ = out.send(cmd);
         });
     }

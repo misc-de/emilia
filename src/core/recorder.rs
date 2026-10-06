@@ -133,15 +133,24 @@ impl Recorder {
                 ext.clone(),
             );
             std::thread::spawn(move || {
-                if let Err(e) = run(
-                    &url,
-                    cap_minutes,
-                    station.as_deref(),
-                    &buffer_path,
-                    &shared,
-                    &stop,
-                    &ext,
-                ) {
+                // A panic must still set `ended`, or the live recording would
+                // keep showing as active.
+                let result = crate::core::panic_guard::catch_or(
+                    "stream recorder",
+                    || {
+                        run(
+                            &url,
+                            cap_minutes,
+                            station.as_deref(),
+                            &buffer_path,
+                            &shared,
+                            &stop,
+                            &ext,
+                        )
+                    },
+                    || Err(anyhow!("recorder worker panicked")),
+                );
+                if let Err(e) = result {
                     tracing::info!("Stream recorder ended: {e}");
                 }
                 shared.lock_or_recover().ended = true;

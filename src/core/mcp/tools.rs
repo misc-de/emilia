@@ -1109,39 +1109,32 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
                 .get_setting("music_dir")?
                 .filter(|s| !s.trim().is_empty())
                 .ok_or_else(|| anyhow!("no music folder configured"))?;
-            let jobs = ctx.jobs.clone();
-            let job_id = jobs.start("youtube_download", &video_id);
+            let job = ctx.jobs.try_start("youtube_download", &video_id)?;
+            let job_id = job.id();
             let vid = video_id.clone();
-            std::thread::spawn(move || {
-                let res =
-                    youtube::add_to_library(&vid, &vid, None, &music, None, false).map(
-                        |o| match o {
-                            youtube::AddOutcome::Added => "added to library".to_string(),
-                            youtube::AddOutcome::Exists(p) => {
-                                format!("already present: {}", p.display())
-                            }
-                        },
-                    );
-                jobs.finish(job_id, res);
-            });
+            job.spawn(move || {
+                youtube::add_to_library(&vid, &vid, None, &music, None, false).map(|o| match o {
+                    youtube::AddOutcome::Added => "added to library".to_string(),
+                    youtube::AddOutcome::Exists(p) => format!("already present: {}", p.display()),
+                })
+            })?;
             Ok(json!({ "ok": true, "job_id": job_id, "video_id": video_id }))
         }
 
         "download_episode" => {
             let url = req_str(args, "url")?.to_string();
-            let jobs = ctx.jobs.clone();
-            let job_id = jobs.start("episode_download", &url);
-            std::thread::spawn(move || {
-                let res = (|| -> Result<String> {
+            let job = ctx.jobs.try_start("episode_download", &url)?;
+            let job_id = job.id();
+            job.spawn(move || {
+                (|| -> Result<String> {
                     let dest = crate::core::online::episode_download_dest(&url);
                     crate::core::podcast::download_episode(&url, &dest)?;
                     let path = dest.to_string_lossy().into_owned();
                     Library::open()?.set_episode_download(&url, &path)?;
                     Ok(path)
                 })()
-                .map_err(|e| e.to_string());
-                jobs.finish(job_id, res);
-            });
+                .map_err(|e| e.to_string())
+            })?;
             Ok(json!({ "ok": true, "job_id": job_id }))
         }
 

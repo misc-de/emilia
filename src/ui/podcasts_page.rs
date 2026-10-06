@@ -958,24 +958,31 @@ impl PodcastsPage {
             // serial loop over many subscriptions took ages.
             use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
             let [done, updated, failed, new_episodes] = [(); 4].map(|_| AtomicUsize::new(0));
-            crate::core::pool::for_each(&feeds, FEED_REFRESH_THREADS, |_, (title, url)| {
-                let _ = out.send(PodcastsCmd::RefreshProgress {
-                    done: done.load(Relaxed),
-                    total,
-                    title: title.clone(),
-                });
-                match fetch_and_store_podcast(url) {
-                    Some((_, fresh)) => {
-                        updated.fetch_add(1, Relaxed);
-                        new_episodes.fetch_add(fresh, Relaxed);
-                    }
-                    None => {
-                        tracing::warn!("Podcast refresh failed for {url}");
-                        failed.fetch_add(1, Relaxed);
-                    }
-                }
-                done.fetch_add(1, Relaxed);
-            });
+            // A panic must not swallow `Refreshed` (it ends the refresh spinner).
+            crate::core::panic_guard::catch_or(
+                "podcast refresh",
+                || {
+                    crate::core::pool::for_each(&feeds, FEED_REFRESH_THREADS, |_, (title, url)| {
+                        let _ = out.send(PodcastsCmd::RefreshProgress {
+                            done: done.load(Relaxed),
+                            total,
+                            title: title.clone(),
+                        });
+                        match fetch_and_store_podcast(url) {
+                            Some((_, fresh)) => {
+                                updated.fetch_add(1, Relaxed);
+                                new_episodes.fetch_add(fresh, Relaxed);
+                            }
+                            None => {
+                                tracing::warn!("Podcast refresh failed for {url}");
+                                failed.fetch_add(1, Relaxed);
+                            }
+                        }
+                        done.fetch_add(1, Relaxed);
+                    })
+                },
+                || (),
+            );
             let _ = out.send(PodcastsCmd::Refreshed {
                 updated: updated.into_inner(),
                 failed: failed.into_inner(),

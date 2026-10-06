@@ -6,6 +6,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
+use crate::core::panic_guard::catch_or;
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{ActiveSource, App, Cmd, CtxTarget, Msg, online_available};
 use crate::ui::app_views::natural_key;
@@ -795,9 +796,15 @@ impl App {
         self.show_missing_busy(root, &gettext("Searching online …"));
 
         sender.spawn_command(move |out| {
-            let results =
-                crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 10)
-                    .unwrap_or_default();
+            // A panic yields "no results", which still closes the spinner.
+            let results = catch_or(
+                "missing-track search",
+                || {
+                    crate::core::youtube::search(&query, crate::core::youtube::YtKind::Video, 10)
+                        .unwrap_or_default()
+                },
+                Vec::new,
+            );
             let _ = out.send(Cmd::MissingTrackCandidates {
                 artist,
                 album,
@@ -957,20 +964,25 @@ impl App {
         self.show_missing_busy(root, &gettext("Downloading …"));
 
         sender.spawn_command(move |out| {
-            let (ok, message) = match crate::core::youtube::add_video_to_album(
-                &video_id,
-                &dest_dir,
-                &artist,
-                &album,
-                &title,
-                position,
-                Some(disc),
-                year,
-                cover.as_deref(),
-            ) {
-                Ok(_) => (true, gettext("Track added")),
-                Err(e) => (false, e),
-            };
+            // A panic still reports back so the spinner is closed.
+            let (ok, message) = catch_or(
+                "missing-track download",
+                || match crate::core::youtube::add_video_to_album(
+                    &video_id,
+                    &dest_dir,
+                    &artist,
+                    &album,
+                    &title,
+                    position,
+                    Some(disc),
+                    year,
+                    cover.as_deref(),
+                ) {
+                    Ok(_) => (true, gettext("Track added")),
+                    Err(e) => (false, e),
+                },
+                || (false, gettext("Download failed")),
+            );
             let _ = out.send(Cmd::MissingTrackDone {
                 artist,
                 album,

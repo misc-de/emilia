@@ -240,23 +240,28 @@ pub fn dispatch_ext(ctx: &McpContext, name: &str, args: &Value) -> Option<Result
             let title = arg_str(args, "title")
                 .map(str::to_string)
                 .unwrap_or_else(|| channel_id.clone());
-            let db_id = crate::ui::yt_channels::store_channel(&channel_id, &title, &url, None)
-                .ok_or_else(|| anyhow!("could not store the subscription"))?;
+            // Filling the video cache is a yt-dlp run → background job. Claim
+            // the job slot first, so a full queue rejects before storing.
+            let job = ctx.jobs.try_start("youtube_channel", &title)?;
+            let job_id = job.id();
+            let Some(db_id) =
+                crate::ui::yt_channels::store_channel(&channel_id, &title, &url, None)
+            else {
+                job.finish(Err("could not store the subscription".to_string()));
+                return Err(anyhow!("could not store the subscription"));
+            };
             (ctx.control)(McpCommand::ReloadYoutube);
-            // Filling the video cache is a yt-dlp run → background job.
-            let jobs = ctx.jobs.clone();
-            let job_id = jobs.start("youtube_channel", &title);
             let control = ctx.control.clone();
             let t = title.clone();
-            std::thread::spawn(move || {
+            job.spawn(move || {
                 crate::ui::yt_channels::fill_channel_videos(db_id, &channel_id, &t, &url, None);
                 let n = Library::open()
                     .and_then(|l| l.channel_videos(db_id))
                     .map(|v| v.len())
                     .unwrap_or(0);
                 control(McpCommand::ReloadYoutube);
-                jobs.finish(job_id, Ok(format!("{n} videos cached")));
-            });
+                Ok(format!("{n} videos cached"))
+            })?;
             Ok(json!({ "ok": true, "id": db_id, "title": title, "job_id": job_id }))
         })(),
         "unsubscribe_youtube_channel" => (|| {
