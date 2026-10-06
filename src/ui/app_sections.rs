@@ -308,6 +308,8 @@ pub(crate) enum SortCrit {
     /// Keep the user's own drag order (favorites). No sort is applied; the
     /// reorder handles stay active. Only offered where a manual order exists.
     Manual,
+    /// By when the item was added to the library (favorites: when starred).
+    Added,
 }
 
 impl SortCrit {
@@ -319,6 +321,7 @@ impl SortCrit {
             SortCrit::Release => "release",
             SortCrit::Songs => "songs",
             SortCrit::Manual => "manual",
+            SortCrit::Added => "added",
         }
     }
 
@@ -329,6 +332,7 @@ impl SortCrit {
             "release" => SortCrit::Release,
             "songs" => SortCrit::Songs,
             "manual" => SortCrit::Manual,
+            "added" => SortCrit::Added,
             _ => SortCrit::Name,
         }
     }
@@ -342,6 +346,7 @@ impl SortCrit {
             SortCrit::Release => gettext("Date"),
             SortCrit::Songs => gettext("Number of songs"),
             SortCrit::Manual => gettext("Custom order"),
+            SortCrit::Added => gettext("Date added"),
         }
     }
 }
@@ -379,8 +384,9 @@ pub(crate) fn section_sort_criteria(section: &str) -> &'static [SortCrit] {
         "playlists" => &[Name, Songs, Length],
         // For memos `Release` is the recording date (label "Date"); no song count.
         "memo" => &[Name, Release, Length],
-        // Favorites keep a manual drag order (the default); name is the alternative.
-        "favorites" => &[Manual, Name],
+        // Favorites keep a manual drag order (the default); name and the time
+        // they were starred are the alternatives.
+        "favorites" => &[Manual, Name, Added],
         _ => &[],
     }
 }

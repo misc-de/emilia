@@ -49,6 +49,17 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// (podcast id, raw publication date) of every stored episode — the input of
+    /// the "Latest episode" sort. The dates are RSS strings, so the newest one
+    /// per podcast is picked by the caller (see [`crate::core::podcast::pubdate_key`]).
+    pub fn episode_pubdates(&self) -> Result<Vec<(i64, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT podcast_id, published FROM episode")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Title + feed URL of every subscribed podcast, alphabetically — the input
     /// of a "refresh all" run, which names each feed while it fetches it.
     pub fn podcast_feeds(&self) -> Result<Vec<(String, String)>> {

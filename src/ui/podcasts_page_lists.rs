@@ -20,7 +20,7 @@ use crate::ui::podcasts_page::{EpisodeRow, PodcastsInput, PodcastsOutput, Podcas
 
 impl PodcastsPage {
     /// (Re)builds the header sort button: its direction icon and the criteria
-    /// popover (name / episode count) plus the grouping + gallery toggles. Called
+    /// popover (name / episode count / latest episode) plus the grouping + gallery toggles. Called
     /// on init and whenever the sort/grouping/gallery changes.
     pub(super) fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
         use crate::ui::app_sort::SortToggle;
@@ -28,6 +28,7 @@ impl PodcastsPage {
         let crits = [
             (SortCrit::Name, gettext("Name")),
             (SortCrit::Songs, gettext("Number of episodes")),
+            (SortCrit::Release, gettext("Latest episode")),
         ];
         let input = sender.input_sender().clone();
         let group_input = input.clone();
@@ -98,7 +99,18 @@ impl PodcastsPage {
         let (crit, desc) = self.overview_sort;
         match crit {
             SortCrit::Songs => self.podcast_items.sort_by_key(|(_, _, _, count)| *count),
-            // Name is the only other criterion offered for podcasts.
+            // By the publication date of each podcast's newest episode.
+            SortCrit::Release => {
+                let mut latest: HashMap<i64, i64> = HashMap::new();
+                for (id, published) in self.library.episode_pubdates().unwrap_or_default() {
+                    let key = crate::core::podcast::pubdate_key(published.as_deref());
+                    let e = latest.entry(id).or_insert(0);
+                    *e = (*e).max(key);
+                }
+                self.podcast_items
+                    .sort_by_key(|(id, _, _, _)| latest.get(id).copied().unwrap_or(0));
+            }
+            // Name is the remaining criterion.
             _ => self
                 .podcast_items
                 .sort_by_cached_key(|(_, title, _, _)| natural_key(title)),

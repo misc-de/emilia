@@ -712,7 +712,7 @@ impl App {
             SortCrit::Release => albums.sort_by_key(|a| a.year.unwrap_or(0)),
             SortCrit::Songs => albums.sort_by_key(|a| a.track_count),
             // Not offered for albums – leave the order untouched.
-            SortCrit::Manual => {}
+            SortCrit::Manual | SortCrit::Added => {}
         }
         if desc {
             albums.reverse();
@@ -735,7 +735,7 @@ impl App {
             // Artists carry no single release year – criterion not offered.
             SortCrit::Release => {}
             // Not offered for artists – leave the order untouched.
-            SortCrit::Manual => {}
+            SortCrit::Manual | SortCrit::Added => {}
         }
         if desc {
             artists.reverse();
@@ -754,7 +754,7 @@ impl App {
                 items.sort_by_cached_key(|e| self.entry_year(&e.0, &e.1).unwrap_or(0))
             }
             // Not offered for concert/audiobook entries – leave the order untouched.
-            SortCrit::Manual => {}
+            SortCrit::Manual | SortCrit::Added => {}
         }
         if desc {
             items.reverse();
@@ -795,17 +795,23 @@ impl App {
         self.refresh_queue_icons();
     }
 
-    /// Orders the favorites list in place by the section's chosen sort. Only
-    /// `Name` reorders (natural by title); `Manual` keeps the user's drag order
-    /// and is handled by the caller (which then skips this). No other criteria.
+    /// Orders the favorites list in place by the section's chosen sort: `Name`
+    /// (natural by title) or `Added` (when starred); `Manual` keeps the user's
+    /// drag order and is handled by the caller (which then skips this).
     pub(crate) fn sort_favorites(&mut self) {
         let (crit, desc) = self.libview.sort_for("favorites");
-        if matches!(crit, SortCrit::Name) {
-            let items = &mut self.favorites.favorite_items;
-            items.sort_by_cached_key(|e| natural_key(&e.2));
-            if desc {
-                items.reverse();
+        let items = &mut self.favorites.favorite_items;
+        match crit {
+            SortCrit::Name => items.sort_by_cached_key(|e| natural_key(&e.2)),
+            SortCrit::Added => {
+                let added = self.library.favorite_added_at().unwrap_or_default();
+                // Stable sort: equal timestamps keep the manual order.
+                items.sort_by_key(|e| added.get(&(e.0.clone(), e.1.clone())).copied().unwrap_or(0));
             }
+            _ => return,
+        }
+        if desc {
+            items.reverse();
         }
     }
 
@@ -878,7 +884,7 @@ impl App {
                 items.sort_by_key(|(id, _, _)| durations.get(id).copied().unwrap_or(0))
             }
             // Neither a release year nor a manual order for playlists.
-            SortCrit::Release | SortCrit::Manual => {}
+            SortCrit::Release | SortCrit::Manual | SortCrit::Added => {}
         }
         if desc {
             items.reverse();
@@ -896,7 +902,7 @@ impl App {
             SortCrit::Release => items.sort_by_key(|m| m.recorded_at),
             SortCrit::Length => items.sort_by_key(|m| m.duration_ms),
             // Memos have neither a song count nor a manual order.
-            SortCrit::Songs | SortCrit::Manual => {}
+            SortCrit::Songs | SortCrit::Manual | SortCrit::Added => {}
         }
         if desc {
             items.reverse();

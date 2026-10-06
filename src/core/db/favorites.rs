@@ -70,6 +70,16 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// When each favorite was starred (unix seconds), keyed by (scope, key) —
+    /// for the "Date added" sort of the favorites overview.
+    pub fn favorite_added_at(&self) -> Result<std::collections::HashMap<(String, String), i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT scope, key, COALESCE(added_at, 0) FROM favorite")?;
+        let rows = stmt.query_map([], |r| Ok(((r.get(0)?, r.get(1)?), r.get(2)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Stores the order of the favorites (pos = index in `ordered`).
     pub fn set_favorite_order(&self, ordered: &[(String, String)]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;

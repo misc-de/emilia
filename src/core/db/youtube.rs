@@ -135,6 +135,16 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// (channel id, ISO-8601 publication date) of every cached video — the input
+    /// of the "Latest video" sort; the caller picks the newest per channel.
+    pub fn video_pubdates(&self) -> Result<Vec<(i64, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT channel_id, published FROM yt_video")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Removes a channel subscription along with its cached videos (and the
     /// feed fingerprint the refresh keeps for it).
     pub fn delete_channel(&self, id: i64) -> Result<()> {
