@@ -53,6 +53,17 @@ pub struct App {
     /// (rescan/cloud/podcasts/YouTube). While > 0 the loading overlay shows a
     /// spinner; each worker's completion decrements it back toward zero.
     pub(crate) refresh_pending: u32,
+    /// The user tapped next to the loading overlay while a refresh/scan was
+    /// still running: the overlay stays hidden (the work continues, signalled
+    /// by the green spinning refresh button) until that button reopens it or
+    /// the work ends.
+    pub(crate) overlay_dismissed: bool,
+    /// Mirrors "the overlay is up for a refresh/scan and may be tapped away",
+    /// for the click-outside gesture on the content (see
+    /// [`App::sync_overlay_dismissable`]).
+    pub(crate) overlay_dismissable: std::rc::Rc<std::cell::Cell<bool>>,
+    /// [`App::background_busy`] as of the previous message, to spot a run starting.
+    pub(crate) overlay_was_busy: bool,
     /// Progress of a running podcast/YouTube "refresh all": items done, items
     /// total, and the feed/channel currently being fetched. Drives a progress
     /// bar in the loading overlay, so a refresh is no longer a mute spinner.
@@ -114,9 +125,12 @@ pub struct App {
     pub(crate) stats_page: relm4::Controller<crate::ui::stats_page::StatsPage>,
     /// Device sync, extracted into its own relm4 component (dialog + worker).
     pub(crate) sync_page: relm4::Controller<crate::ui::sync_page::SyncPage>,
-    /// Whether a device is currently paired – controls the green sync icon at the
-    /// top. Kept here (parent chrome); set via the component's `ConnectedChanged`.
+    /// Whether a device is currently paired (routes "Share"). Kept here (parent
+    /// chrome); set via the component's `ConnectedChanged`.
     pub(crate) sync_connected: bool,
+    /// A device-sync share is running → the header sync icon is green and spins
+    /// (set via the component's `BusyChanged`).
+    pub(crate) sync_busy: bool,
     /// Nextcloud setup dialog, extracted into its own relm4 component.
     pub(crate) cloud_page: relm4::Controller<crate::ui::cloud_page::CloudPage>,
     /// SMB share setup dialog (own relm4 component).
@@ -272,20 +286,31 @@ impl Component for App {
                             set_icon_name: "emilia-sleep-symbolic",
                             set_tooltip_text: Some(&gettext("Sleep timer")),
                         },
+                        // While a refresh/scan runs the icon turns green and
+                        // spins; a click then only brings the progress overlay
+                        // back instead of starting a second run (see `on_refresh`).
                         pack_start = &gtk::Button {
                             set_icon_name: "view-refresh-symbolic",
-                            set_tooltip_text: Some(&gettext("Refresh")),
                             connect_clicked => Msg::Refresh,
-                            // Disabled while a manual refresh is still running, so
-                            // a second click can't reset the spinner counter.
                             #[watch]
-                            set_sensitive: model.refresh_pending == 0,
+                            set_tooltip_text: Some(&if model.background_busy() {
+                                gettext("Show progress")
+                            } else {
+                                gettext("Refresh")
+                            }),
+                            // Keep `flat` in both states (see the sync button).
+                            #[watch]
+                            set_css_classes: if model.background_busy() {
+                                &["flat", "emilia-busy"]
+                            } else {
+                                &["flat"]
+                            },
                         },
                         // Device sync: opens the pairing / connection-status dialog
                         // (QR offer / scan, or "Connected with X"). Sharing itself
                         // is always started per item from a detail view, not here.
-                        // With an existing pairing the icon is rendered green
-                        // (CSS class, see below).
+                        // While a share runs the icon pulses green; a tap
+                        // then brings the transfer progress back.
                         #[name = "sync_btn"]
                         pack_start = &gtk::Button {
                             set_icon_name: "emilia-share-symbolic",
@@ -295,8 +320,8 @@ impl Component for App {
                             // the whole list, so dropping it would re-add the button
                             // background that header buttons are flattened out of.
                             #[watch]
-                            set_css_classes: if model.sync_connected {
-                                &["flat", "sync-connected"]
+                            set_css_classes: if model.sync_busy {
+                                &["flat", "emilia-sync-busy"]
                             } else {
                                 &["flat"]
                             },
@@ -954,6 +979,7 @@ impl Component for App {
                         // Centered spinner while reading – on a
                         // semi-transparent surface, so that the text over the
                         // content stays readable (CSS class, see `init`).
+                        #[name = "loading_box"]
                         add_overlay = &gtk::Box {
                             set_orientation: gtk::Orientation::Vertical,
                             set_halign: gtk::Align::Center,
@@ -995,7 +1021,7 @@ impl Component for App {
                                 set_halign: gtk::Align::Center,
                                 set_spacing: 4,
                                 #[watch]
-                                set_visible: model.refresh_progress.is_some(),
+                                set_visible: model.refresh_progress.is_some() && !model.overlay_dismissed,
 
                                 gtk::ProgressBar {
                                     set_width_request: 260,
@@ -1040,7 +1066,9 @@ impl Component for App {
                                 set_halign: gtk::Align::Center,
                                 set_spacing: 4,
                                 #[watch]
-                                set_visible: model.scanning && model.scan_total > 0,
+                                set_visible: model.scanning
+                                    && model.scan_total > 0
+                                    && !model.overlay_dismissed,
 
                                 gtk::ProgressBar {
                                     set_width_request: 260,
@@ -1733,6 +1761,9 @@ impl Component for App {
                 page_marks: Default::default(),
             },
             refresh_pending: 0,
+            overlay_dismissed: false,
+            overlay_dismissable: std::rc::Rc::new(std::cell::Cell::new(false)),
+            overlay_was_busy: false,
             refresh_progress: None,
             refresh_summary: None,
             scanning: false,
@@ -1898,6 +1929,7 @@ impl Component for App {
             },
             sync_page,
             sync_connected: false,
+            sync_busy: false,
             cloud_page,
             smb_page,
             gdrive_page,
@@ -1942,6 +1974,12 @@ impl Component for App {
         let favorites_gallery_box = model.favorites.favorites_gallery_box.clone();
         let playlists_gallery_box = model.playlists.playlists_gallery_box.clone();
         let widgets = view_output!();
+        Self::connect_overlay_click_away(
+            &widgets.content_overlay,
+            &widgets.loading_box,
+            &model,
+            &sender,
+        );
         model.finish_init(
             &widgets,
             &root,

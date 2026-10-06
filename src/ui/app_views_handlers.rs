@@ -343,6 +343,13 @@ impl App {
     /// Pull-to-refresh: reload the current dir, rescan the library, re-index
     /// cloud sources and refresh podcast/YouTube subscriptions.
     pub(crate) fn on_refresh(&mut self, sender: &ComponentSender<Self>) {
+        // A run is still going (its overlay possibly tapped away): bring the
+        // progress back instead of starting another one, which would also reset
+        // the pending counter.
+        if self.background_busy() {
+            self.overlay_dismissed = false;
+            return;
+        }
         // The header "refresh" button is context-aware: a full library re-scan
         // (local files + cloud sources) only belongs to the library views. Every
         // other section refreshes just its own content, so e.g. a podcast refresh

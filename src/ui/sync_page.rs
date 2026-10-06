@@ -108,6 +108,14 @@ pub(crate) struct SyncPage {
     /// Receiver classification of the pending incoming offer, kept so an
     /// MCP-driven accept takes exactly what the review page would pre-select.
     incoming_reviews: Vec<share::FileReview>,
+    /// A share is under way (sent and waiting/transferring, or accepted and
+    /// receiving). Drives the green spinning header icon; the flow window may be
+    /// tapped away meanwhile and reopened from that icon.
+    busy: bool,
+    /// Last status line and file progress of the running share, so a reopened
+    /// window shows where it stands instead of an empty progress panel.
+    busy_status: String,
+    busy_progress: Option<(u64, u64)>,
 }
 
 /// Width of the share flow modal (the camera scan view goes wider).
@@ -166,8 +174,10 @@ pub(crate) enum SyncInput {
 
 #[derive(Debug)]
 pub(crate) enum SyncOutput {
-    /// Paired/disconnected → the parent tints the header sync icon.
+    /// Paired/disconnected (the parent routes "Share" by it).
     ConnectedChanged(bool),
+    /// A share started/ended → the parent animates the header sync icon.
+    BusyChanged(bool),
     /// Metadata was imported → the parent reloads favorites/playlists/podcasts.
     Imported,
 }
@@ -212,6 +222,9 @@ impl Component for SyncPage {
             mcp,
             auto_send: false,
             incoming_reviews: Vec::new(),
+            busy: false,
+            busy_status: String::new(),
+            busy_progress: None,
             peer_name: String::new(),
             is_server: false,
             sub_toolbar: None,
@@ -249,7 +262,7 @@ impl Component for SyncPage {
                 self.share_selection(*selection, &sender);
             }
             SyncInput::RespondHeadless { accept } => self.respond_headless(accept, &sender),
-            SyncInput::ConfirmSend => self.confirm_send(),
+            SyncInput::ConfirmSend => self.confirm_send(&sender),
             SyncInput::CancelShare => self.show_connected_panel(&sender),
             SyncInput::AcceptOffer => self.accept_offer(&sender),
             SyncInput::RejectOffer => self.reject_offer(&sender),
@@ -309,6 +322,23 @@ impl SyncPage {
     /// otherwise a centered modal like the "+" dialogs asks how to connect, or
     /// shows the live pairing. The flow window opens only once a mode is picked.
     fn open_entry(&mut self, sender: &ComponentSender<Self>) {
+        // A share is running (its window possibly tapped away): bring its
+        // progress back instead of the pairing/status entry.
+        if self.busy {
+            if self.sub.is_none() {
+                self.ensure_window(sender);
+                self.set_title(&gettext("Connect to share"));
+                let panel = self.progress_panel();
+                self.set_sub_content(&panel);
+                if let Some(st) = &self.status {
+                    st.set_text(&self.busy_status);
+                }
+                if let (Some(p), Some((done, total))) = (&self.progress, self.busy_progress) {
+                    show_file_progress(p, done, total);
+                }
+            }
+            return;
+        }
         if self.sub.is_some() {
             if self.connected {
                 self.show_connected_panel(sender);
@@ -909,10 +939,10 @@ impl SyncPage {
             }
             SyncEvent::FileProgress { done, total, name } => {
                 if let Some(p) = &self.progress {
-                    p.set_visible(true);
-                    p.set_fraction(done as f64 / total.max(1) as f64);
-                    p.set_text(Some(&format!("{done}/{total}")));
+                    show_file_progress(p, done, total);
                 }
+                self.busy_progress = Some((done, total));
+                self.busy_status = name.clone();
                 self.sync_state(|s| {
                     s.progress = Some((done, total, name.clone()));
                     s.phase = "transferring".into();
@@ -922,6 +952,7 @@ impl SyncPage {
                 }
             }
             SyncEvent::TransferDone { files } => {
+                self.set_busy(false, sender);
                 // A share finished (this side, or the peer told us via
                 // /share/complete) → the transfer-success screen with a "Done"
                 // button back to the connected panel. The pairing stays alive.
@@ -975,12 +1006,20 @@ impl SyncPage {
             SyncEvent::ManifestReady { manifest } => self.on_manifest_ready(manifest, sender),
             SyncEvent::OfferAccepted { .. } => {
                 self.sync_state(|s| s.phase = "sending".into());
+                self.set_busy_status(gettext("The other device accepted. Transferring …"));
+            }
+            SyncEvent::OfferDeclined => {
+                self.set_busy(false, sender);
+                self.prepared_manifest = None;
+                self.sync_state(|s| s.phase = "idle".into());
                 if let Some(st) = &self.status {
-                    st.set_text(&gettext("The other device accepted. Transferring …"));
+                    st.set_text(&gettext("The other device declined."));
                 }
             }
             SyncEvent::Error(msg) => {
                 tracing::warn!("Sync error: {msg}");
+                // An error ends the running share; the icon must not keep spinning.
+                self.set_busy(false, sender);
                 self.sync_state(|s| s.last_error = Some(msg.clone()));
                 if let Some(st) = &self.status {
                     st.set_text(&gettext_f("Error: {e}", &[("e", &msg)]));
@@ -1032,6 +1071,7 @@ impl SyncPage {
     /// the header icon, drop the connection resources, and — if a window is open —
     /// show a short notice with a way to reconnect.
     fn on_connection_lost(&mut self, sender: &ComponentSender<Self>) {
+        self.set_busy(false, sender);
         let was_connected = self.connected;
         self.connected = false;
         self.client_cmd = None;
@@ -1121,7 +1161,7 @@ impl SyncPage {
                 return;
             }
             self.prepared_manifest = Some(manifest);
-            self.confirm_send();
+            self.confirm_send(sender);
             return;
         }
         let page = build_confirm(&manifest, sender);
@@ -1131,7 +1171,8 @@ impl SyncPage {
     }
 
     /// Confirmation "Send" → park (server) or send (client) the prepared offer.
-    fn confirm_send(&mut self) {
+    fn confirm_send(&mut self, sender: &ComponentSender<Self>) {
+        self.set_busy(true, sender);
         let phase = if self.is_server {
             "waiting_for_peer"
         } else {
@@ -1149,16 +1190,12 @@ impl SyncPage {
                     c.decision = None;
                 }
             }
-            if let Some(st) = &self.status {
-                st.set_text(&gettext("Waiting for the other device to accept …"));
-            }
+            self.set_busy_status(gettext("Waiting for the other device to accept …"));
         } else {
             if let Some(cmd) = &self.client_cmd {
                 let _ = cmd.send(ClientCmd::Send);
             }
-            if let Some(st) = &self.status {
-                st.set_text(&gettext("Sending …"));
-            }
+            self.set_busy_status(gettext("Sending …"));
         }
     }
 
@@ -1211,15 +1248,14 @@ impl SyncPage {
     /// Applies `decision` to the pending offer (shared by the review page's
     /// "Accept" and the MCP-driven accept).
     fn accept_with(&mut self, decision: ShareDecision, sender: &ComponentSender<Self>) {
+        self.set_busy(true, sender);
         self.sync_state(|s| {
             s.incoming_offer = None;
             s.phase = "receiving".into();
         });
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
-        if let Some(st) = &self.status {
-            st.set_text(&gettext("Receiving …"));
-        }
+        self.set_busy_status(gettext("Receiving …"));
         if self.is_server {
             // Park the decision (client uploads files) + apply blobs/YT and
             // register accepted files locally off the UI thread. Drop any stale
@@ -1279,6 +1315,7 @@ impl SyncPage {
         }
         self.connected = false;
         self.auto_send = false;
+        self.set_busy(false, sender);
         self.sync_state_reset();
         let _ = sender.output(SyncOutput::ConnectedChanged(false));
         if let Some(sub) = self.sub.take() {
@@ -1292,7 +1329,12 @@ impl SyncPage {
     /// disconnect) the server/scanner are stopped.
     fn close_sub(&mut self, sender: &ComponentSender<Self>) {
         self.sub = None;
-        if self.connected {
+        if self.busy {
+            // Tapped away mid-share: the transfer goes on in the background and
+            // still needs its manifests and summary when it completes, so only
+            // the widget handles go.
+            self.drop_widget_handles();
+        } else if self.connected {
             self.clear_window_widgets();
         } else {
             self.stop_connection();
@@ -1319,20 +1361,54 @@ impl SyncPage {
     /// Drops the per-window widget handles (after the flow window is gone). Does
     /// **not** touch the live connection (stop flag / share channel / worker).
     fn clear_window_widgets(&mut self) {
-        self.qr = None;
-        self.cam = None;
-        self.status = None;
-        self.server_status = None;
-        self.progress = None;
+        self.drop_widget_handles();
         self.synced_ok = false;
         self.sync_summary.clear();
-        self.sub_toolbar = None;
-        self.review = None;
         self.prepared_manifest = None;
         self.incoming_manifest = None;
         // `is_server` / `share_chan` / `client_cmd` / `connected` are connection
         // state and are kept here (cleared by `stop_connection` on disconnect).
     }
+}
+
+impl SyncPage {
+    /// Drops only the handles into the (closed) flow window's widgets.
+    fn drop_widget_handles(&mut self) {
+        self.qr = None;
+        self.cam = None;
+        self.status = None;
+        self.server_status = None;
+        self.progress = None;
+        self.sub_toolbar = None;
+        self.review = None;
+    }
+
+    /// Marks a share as started/ended and tells the parent (header icon).
+    fn set_busy(&mut self, busy: bool, sender: &ComponentSender<Self>) {
+        if busy {
+            self.busy_status.clear();
+            self.busy_progress = None;
+        }
+        if self.busy != busy {
+            self.busy = busy;
+            let _ = sender.output(SyncOutput::BusyChanged(busy));
+        }
+    }
+
+    /// Shows a status line of the running share and remembers it for a reopen.
+    fn set_busy_status(&mut self, text: String) {
+        if let Some(st) = &self.status {
+            st.set_text(&text);
+        }
+        self.busy_status = text;
+    }
+}
+
+/// Fills a transfer progress bar with `done/total` files.
+fn show_file_progress(p: &gtk::ProgressBar, done: u64, total: u64) {
+    p.set_visible(true);
+    p.set_fraction(done as f64 / total.max(1) as f64);
+    p.set_text(Some(&format!("{done}/{total}")));
 }
 
 /// A vertical box with the standard dialog padding.
@@ -1505,6 +1581,8 @@ fn run_client_session(
                     let files = client_upload(&client, &m, &decision, out);
                     let _ = client.notify_complete(files);
                     let _ = out.send(SyncEvent::TransferDone { files });
+                } else {
+                    let _ = out.send(SyncEvent::OfferDeclined);
                 }
                 offered = false;
                 // Stay connected: back to idle for the next share.

@@ -427,7 +427,11 @@ impl SyncServer {
                         if let Ok(mut c) = self.share.lock() {
                             c.outgoing = None;
                         }
-                        emit(SyncEvent::OfferAccepted { decision: d });
+                        emit(if d.accept {
+                            SyncEvent::OfferAccepted { decision: d }
+                        } else {
+                            SyncEvent::OfferDeclined
+                        });
                         write_json(out, 200, &serde_json::json!({ "ok": true }));
                     }
                     Err(e) => write_json(out, 400, &serde_json::json!({ "error": e.to_string() })),

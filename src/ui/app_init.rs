@@ -1352,7 +1352,12 @@ impl App {
                  /* A song listed under its album row (playlist page): no cover, \
                     indented a little so it reads as part of the album above. */\
                  row.emilia-flush.emilia-nested { padding-left: 28px; min-height: 40px; }\
-                 button.sync-connected { color: @success_color; }\
+                 /* Still running in the background (its modal possibly tapped \
+                    away): the refresh icon spins green, the sync icon pulses green. */\
+                 @keyframes emilia-spin { from { -gtk-icon-transform: rotate(0turn); } to { -gtk-icon-transform: rotate(1turn); } }\
+                 button.emilia-busy, button.emilia-sync-busy { color: @success_color; }\
+                 button.emilia-busy image { animation: emilia-spin 1.2s linear infinite; }\
+                 button.emilia-sync-busy image { animation: emilia-blink 1.4s ease-in-out infinite; }\
                  button.sleep-armed { color: @accent_color; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
                  button.emilia-songline { min-height: 0px; padding-top: 6px; padding-bottom: 6px; }\

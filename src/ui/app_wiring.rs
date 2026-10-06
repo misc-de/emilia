@@ -133,6 +133,7 @@ pub(crate) fn launch_sync_page(
         .forward(sender.input_sender(), |out| match out {
             crate::ui::sync_page::SyncOutput::ConnectedChanged(b) => Msg::SyncConnected(b),
             crate::ui::sync_page::SyncOutput::Imported => Msg::SyncImported,
+            crate::ui::sync_page::SyncOutput::BusyChanged(b) => Msg::SyncBusy(b),
         })
 }
 

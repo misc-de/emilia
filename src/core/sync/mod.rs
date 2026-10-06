@@ -71,6 +71,9 @@ pub enum SyncEvent {
         #[allow(dead_code)]
         decision: ShareDecision,
     },
+    /// The peer declined our offer (rejected everything) — nothing will be
+    /// transferred (sender).
+    OfferDeclined,
     /// Our selection was resolved to a manifest → show the size confirmation.
     /// Carries the full manifest so the sender side can park/send it on confirm.
     ManifestReady { manifest: ShareManifest },

@@ -129,11 +129,13 @@ impl App {
                 );
             }
             Msg::ClearRefreshSummary => self.refresh_summary = None,
+            Msg::DismissOverlay => self.overlay_dismissed = true,
             Msg::OpenSync => {
                 use crate::ui::sync_page::SyncInput;
                 self.sync_page.emit(SyncInput::Open(root.clone()));
             }
             Msg::SyncConnected(connected) => self.sync_connected = connected,
+            Msg::SyncBusy(busy) => self.sync_busy = busy,
             Msg::SyncImported => {
                 self.load_favorites(&sender);
                 self.reload_playlists(&sender);
@@ -192,6 +194,7 @@ impl App {
         // Suppress the per-second tick the moment the app goes idle (and resume
         // it when playback/recording starts) — see `tick_active`.
         self.sync_tick_active();
+        self.sync_overlay_dismissable();
     }
 
     /// Body of [`Component::update_cmd`]: processes the results of the
@@ -341,5 +344,6 @@ impl App {
             }
         }
         self.sync_tick_active();
+        self.sync_overlay_dismissable();
     }
 }

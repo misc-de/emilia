@@ -111,6 +111,8 @@ pub enum Msg {
     OpenSync,
     // --- Device synchronization (handled by the SyncPage component) ---
     /// The sync component paired/disconnected → tint the header icon.
+    /// A device-sync share started/ended (green spinning header icon).
+    SyncBusy(bool),
     SyncConnected(bool),
     /// The sync component imported metadata → reload the affected views.
     SyncImported,
@@ -186,6 +188,9 @@ pub enum Msg {
     RefreshSummary(String),
     /// The summary's display time elapsed → clear the overlay.
     ClearRefreshSummary,
+    /// Tap/click next to the loading overlay during a refresh/scan → hide it
+    /// (the work continues; the refresh button reopens it).
+    DismissOverlay,
 
     // ---- Voice memos ----
     /// Voice memos + categories (see [`crate::ui::app_memo`]).
