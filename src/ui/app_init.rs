@@ -520,6 +520,11 @@ impl App {
                 Cmd::YtReload
             });
         }
+        // Podcasts: pull new episodes of every subscription in the background,
+        // like the YouTube channels above — otherwise they only ever arrived
+        // via the refresh button, and "Newest" (the last month) ran dry.
+        self.podcasts_page
+            .emit(crate::ui::podcasts_page::PodcastsInput::RefreshInBackground);
         // Check the remote sources for new content (silent, non-manual: respects
         // the auto-enrich setting).
         self.reindex_cloud_sources(sender, false);

@@ -255,6 +255,9 @@ pub(crate) enum PodcastsInput {
     Reload,
     /// Global "refresh all" button: re-fetch every subscribed feed.
     RefreshAll,
+    /// The same fetch without progress overlay or summary — run once the network
+    /// is known at startup, so new episodes arrive without a button press.
+    RefreshInBackground,
     /// Playback state changed: update the icon mirrors + refresh row icons.
     PlaybackStateChanged {
         playing_url: Option<String>,
@@ -402,11 +405,13 @@ pub(crate) enum PodcastsCmd {
         total: usize,
         title: String,
     },
-    /// All feeds (refresh-all) re-fetched, with what it brought in.
+    /// All feeds (refresh-all) re-fetched, with what it brought in. A
+    /// `silent` (background) refresh only reloads the lists.
     Refreshed {
         updated: usize,
         failed: usize,
         new_episodes: usize,
+        silent: bool,
     },
     /// Startup feed-image cache finished; `true` if it brought in an image
     /// that was missing → redraw the overview (it was built from the cache).
@@ -648,7 +653,8 @@ impl Component for PodcastsPage {
     fn update(&mut self, msg: PodcastsInput, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             PodcastsInput::Reload => self.reload_podcasts(&sender),
-            PodcastsInput::RefreshAll => self.refresh_all_feeds(&sender),
+            PodcastsInput::RefreshAll => self.refresh_all_feeds(&sender, false),
+            PodcastsInput::RefreshInBackground => self.refresh_all_feeds(&sender, true),
             PodcastsInput::PlaybackStateChanged {
                 playing_url,
                 playing,
@@ -904,10 +910,12 @@ impl Component for PodcastsPage {
                     label: title,
                 });
             }
+            PodcastsCmd::Refreshed { silent: true, .. } => self.reload_podcasts(&sender),
             PodcastsCmd::Refreshed {
                 updated,
                 failed,
                 new_episodes,
+                silent: false,
             } => {
                 let _ = sender.output(PodcastsOutput::RefreshFinished);
                 let _ = sender.output(PodcastsOutput::RefreshSummary(refresh_summary_text(
@@ -931,28 +939,32 @@ impl PodcastsPage {
     /// several at once. Each step reports back so the loading overlay can show
     /// a progress bar with the feed being fetched — a bare spinner left the user
     /// unable to tell whether anything was happening at all. The cases that used
-    /// to end in silence (no subscriptions, no network) now say so.
-    fn refresh_all_feeds(&mut self, sender: &ComponentSender<Self>) {
+    /// to end in silence (no subscriptions, no network) now say so. A `silent`
+    /// refresh (startup) does the same fetch without any of that feedback.
+    fn refresh_all_feeds(&mut self, sender: &ComponentSender<Self>, silent: bool) {
         let feeds = self.library.podcast_feeds().unwrap_or_default();
-        if feeds.is_empty() {
-            let _ = sender.output(PodcastsOutput::RefreshSummary(gettext(
-                "No podcasts subscribed",
-            )));
-            return;
-        }
-        if !crate::ui::app_helpers::online_available() {
-            let _ = sender.output(PodcastsOutput::RefreshSummary(gettext(
-                "No internet connection",
-            )));
+        let blocker = if feeds.is_empty() {
+            Some(gettext("No podcasts subscribed"))
+        } else if !crate::ui::app_helpers::online_available() {
+            Some(gettext("No internet connection"))
+        } else {
+            None
+        };
+        if let Some(text) = blocker {
+            if !silent {
+                let _ = sender.output(PodcastsOutput::RefreshSummary(text));
+            }
             return;
         }
         let total = feeds.len();
-        let _ = sender.output(PodcastsOutput::RefreshStarted(true));
-        let _ = sender.output(PodcastsOutput::RefreshProgress {
-            done: 0,
-            total,
-            label: feeds[0].0.clone(),
-        });
+        if !silent {
+            let _ = sender.output(PodcastsOutput::RefreshStarted(true));
+            let _ = sender.output(PodcastsOutput::RefreshProgress {
+                done: 0,
+                total,
+                label: feeds[0].0.clone(),
+            });
+        }
         sender.spawn_command(move |out| {
             // Several feeds at once: each one is mostly network wait, so a
             // serial loop over many subscriptions took ages.
@@ -963,11 +975,13 @@ impl PodcastsPage {
                 "podcast refresh",
                 || {
                     crate::core::pool::for_each(&feeds, FEED_REFRESH_THREADS, |_, (title, url)| {
-                        let _ = out.send(PodcastsCmd::RefreshProgress {
-                            done: done.load(Relaxed),
-                            total,
-                            title: title.clone(),
-                        });
+                        if !silent {
+                            let _ = out.send(PodcastsCmd::RefreshProgress {
+                                done: done.load(Relaxed),
+                                total,
+                                title: title.clone(),
+                            });
+                        }
                         match fetch_and_store_podcast(url) {
                             Some((_, fresh)) => {
                                 updated.fetch_add(1, Relaxed);
@@ -987,6 +1001,7 @@ impl PodcastsPage {
                 updated: updated.into_inner(),
                 failed: failed.into_inner(),
                 new_episodes: new_episodes.into_inner(),
+                silent,
             });
         });
     }
