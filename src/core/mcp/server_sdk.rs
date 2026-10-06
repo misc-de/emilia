@@ -174,13 +174,13 @@ fn serve(
         match tls {
             Some(cfg) => {
                 let rustls_cfg = axum_server::tls_rustls::RustlsConfig::from_config(cfg);
-                axum_server::tls_rustls::from_tcp_rustls(listener, rustls_cfg)
+                axum_server::tls_rustls::from_tcp_rustls(listener, rustls_cfg)?
                     .handle(handle)
                     .serve(make)
                     .await?;
             }
             None => {
-                axum_server::from_tcp(listener)
+                axum_server::from_tcp(listener)?
                     .handle(handle)
                     .serve(make)
                     .await?;

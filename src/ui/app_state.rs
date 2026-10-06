@@ -660,7 +660,7 @@ pub(crate) struct TrayState {
     /// Show the tray icon desaturated (grayscale pixmap) instead of colored.
     pub(crate) icon_gray: bool,
     /// Running ksni service handle (for live menu updates); `None` when off.
-    pub(crate) handle: Option<ksni::Handle<crate::core::tray::EmiliaTray>>,
+    pub(crate) handle: Option<ksni::blocking::Handle<crate::core::tray::EmiliaTray>>,
     /// App-hold guard keeping the process alive while only the tray remains.
     pub(crate) hold: Option<gtk::gio::ApplicationHoldGuard>,
 }

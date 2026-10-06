@@ -124,7 +124,10 @@ impl App {
                 Vec::new()
             },
         };
-        self.tray.handle = Some(tray::spawn(tray));
+        self.tray.handle = tray::spawn(tray);
+        if self.tray.handle.is_none() {
+            return;
+        }
         // Keep the GApplication alive while only the tray is left — hiding the
         // last window would otherwise let `run()` return and quit the process.
         if self.tray.hold.is_none() {

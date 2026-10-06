@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.47"
+version = "0.8.48"
 edition = "2021"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -52,7 +52,7 @@ rqrr = { version = "0.11", default-features = false }
 # Optional desktop tray icon (StatusNotifierItem). Pure-Rust over zbus — no C
 # deps, Flatpak-friendly. Runs its own background thread; commands are bridged
 # back to the glib main loop via an `async-channel` (see src/core/tray.rs).
-ksni = "0.2"
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 # X11 backend access for the optional "hide from taskbar" window hint
 # (`_NET_WM_STATE_SKIP_TASKBAR`). GTK4 dropped the high-level setter, so we send
 # the EWMH client message ourselves; no-op on Wayland. See src/ui/app_tray.rs.
@@ -66,7 +66,7 @@ rmcp = { version = "1", default-features = false, features = ["server", "transpo
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"], optional = true }
 # TLS for the "public (LAN)" SDK case, reusing the same rustls 0.23 identity as
 # device sync. Pinned to the matching rustls major.
-axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"], optional = true }
+axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"], optional = true }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "time", "io-util"], optional = true }
 
 [features]

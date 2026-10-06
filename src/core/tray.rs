@@ -6,9 +6,11 @@
 //! [`TrayCmd`] channel back to the app. A `glib::spawn_future_local` receiver on
 //! the GTK thread (see `src/ui/app_tray.rs`) translates each command into a
 //! `Msg`. State *to* the tray (play/pause label, enabled) is pushed via the
-//! returned [`ksni::Handle`], whose `update` is synchronous and main-thread safe.
+//! returned [`ksni::blocking::Handle`], whose `update` is synchronous and
+//! main-thread safe.
 
 use crate::i18n::gettext;
+use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::{MenuItem, Tray};
 
@@ -124,16 +126,23 @@ impl Tray for EmiliaTray {
     }
 }
 
-/// Spawn the tray on its own thread and return a [`ksni::Handle`] for live menu
-/// updates. Inside a Flatpak sandbox, requesting an own bus name is denied, so
-/// the dbus-name-less variant (reusing the connection's unique name) is used.
-pub fn spawn(tray: EmiliaTray) -> ksni::Handle<EmiliaTray> {
-    let service = ksni::TrayService::new(tray);
-    let handle = service.handle();
-    if std::path::Path::new("/.flatpak-info").exists() {
-        service.spawn_without_dbus_name();
-    } else {
-        service.spawn();
+/// Spawn the tray on its own thread and return a [`ksni::blocking::Handle`] for
+/// live menu updates, or `None` when the service cannot start at all (e.g. no
+/// session bus). Inside a Flatpak sandbox, requesting an own bus name is denied,
+/// so the dbus-name-less variant (reusing the connection's unique name) is used.
+/// `assume_sni_available` keeps the 0.2 behaviour of waiting for a
+/// StatusNotifierWatcher that comes up later instead of failing at startup.
+pub fn spawn(tray: EmiliaTray) -> Option<ksni::blocking::Handle<EmiliaTray>> {
+    let sandboxed = std::path::Path::new("/.flatpak-info").exists();
+    match tray
+        .disable_dbus_name(sandboxed)
+        .assume_sni_available(true)
+        .spawn()
+    {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            tracing::warn!("tray icon unavailable: {e}");
+            None
+        }
     }
-    handle
 }
