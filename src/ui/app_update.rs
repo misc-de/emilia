@@ -92,6 +92,7 @@ impl App {
                 self.on_play_artist_track(name, path, close)
             }
             Msg::PlayOneTrack { path, close } => self.on_play_one_track(path, close),
+            Msg::PlayTracks { paths, shuffle } => self.on_play_tracks(paths, shuffle),
             Msg::PlayAlbum { artist, album } => self.on_play_album(artist, album),
             Msg::PlayFsAlbum(idx) => {
                 // The play button on an album folder in the file browser.

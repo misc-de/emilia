@@ -89,6 +89,46 @@ impl App {
         }
     }
 
+    /// Header of an album page: its tracks as the queue, in the order shown
+    /// or shuffled. While one of them is the loaded track, "Play" pauses or
+    /// resumes instead of starting over.
+    pub(crate) fn on_play_tracks(&mut self, paths: Vec<String>, shuffle: bool) {
+        let files: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+        if files.is_empty() {
+            return;
+        }
+        if !shuffle
+            && self
+                .transport
+                .playing_path
+                .as_ref()
+                .is_some_and(|p| files.contains(p))
+        {
+            if self.mini.playing {
+                self.save_resume();
+            }
+            self.flip_playing();
+            return;
+        }
+        self.youtube.playing_playlist = false;
+        self.youtube.keep_recent_order = false;
+        let len = files.len();
+        self.transport.queue = files;
+        self.transport.shuffle = shuffle;
+        // Shuffled: a random first track, then a fresh order over the rest.
+        self.transport.queue_pos = if shuffle {
+            gtk::glib::random_int_range(0, len as i32) as usize
+        } else {
+            0
+        };
+        if shuffle {
+            self.rebuild_shuffle_order();
+        }
+        self.mpris.set_shuffle(shuffle);
+        self.play_current();
+        self.refresh_queue_icons();
+    }
+
     /// Play the whole album in track order (shuffle off).
     pub(crate) fn on_play_album(&mut self, artist: String, album: String) {
         // Whole album from track 1 in track order (shuffle off).

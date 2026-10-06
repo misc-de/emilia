@@ -95,6 +95,12 @@ pub enum Msg {
         path: String,
         close: bool,
     },
+    /// Header of an album page: play its tracks in the order shown, or
+    /// shuffled; "Play" pauses/resumes while one of them is running.
+    PlayTracks {
+        paths: Vec<String>,
+        shuffle: bool,
+    },
     /// Play the whole album in track order (play button of the album row).
     PlayAlbum {
         artist: String,

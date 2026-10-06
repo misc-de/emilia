@@ -192,6 +192,86 @@ fn sort_by_structure(tracks: &mut [Track]) {
     });
 }
 
+/// Folder holding one release of an album: the track's folder, or the one
+/// above it when the track sits in a CD/disc subfolder of that release.
+fn release_dir(t: &Track) -> &std::path::Path {
+    let parent = std::path::Path::new(&t.path)
+        .parent()
+        .unwrap_or(std::path::Path::new(""));
+    let in_disc_folder = parent
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(disc_from_segment)
+        .is_some();
+    match parent.parent() {
+        Some(up) if in_disc_folder => up,
+        _ => parent,
+    }
+}
+
+/// Edge of the cover in an album page's header (logical px).
+const ALBUM_HEADER_COVER: i32 = 128;
+
+/// What an album page's header shows (see [`App::album_header`]).
+struct AlbumHeader<'a> {
+    cover: Option<&'a gtk::gdk::Texture>,
+    album: &'a str,
+    artist: &'a str,
+    year: Option<i32>,
+    /// The page's tracks in the order shown — the order "Play" queues.
+    tracks: Vec<&'a Track>,
+    /// Key of the "Play" icon in the page's play-mark registry.
+    mark: String,
+}
+
+/// One section of an album page: the tracks of one release folder and disc,
+/// by track number.
+pub(crate) struct AlbumSection<'a> {
+    /// The release folder — its name titles the section when an album spans
+    /// several releases (a UK and a US single tagged with the same title).
+    pub(crate) release: &'a std::path::Path,
+    pub(crate) disc: u32,
+    pub(crate) tracks: Vec<&'a Track>,
+}
+
+/// Splits album `tracks` (in [`sort_by_structure`] order) into the sections
+/// the album page shows: per release folder, and within it per disc. The
+/// flattened sections are the order "Play" queues, so the next track is
+/// always the row below. Releases keep their folder order; discs and track
+/// numbers ascend, ties keep the incoming order.
+pub(crate) fn album_sections(tracks: &[Track]) -> Vec<AlbumSection<'_>> {
+    let mut sections: Vec<AlbumSection> = Vec::new();
+    for t in tracks {
+        let (release, disc) = (release_dir(t), track_disc(t));
+        match sections
+            .iter_mut()
+            .find(|s| s.release == release && s.disc == disc)
+        {
+            Some(s) => s.tracks.push(t),
+            None => sections.push(AlbumSection {
+                release,
+                disc,
+                tracks: vec![t],
+            }),
+        }
+    }
+    // Releases in order of first appearance, discs ascending within each.
+    let releases: Vec<&std::path::Path> = sections.iter().fold(Vec::new(), |mut acc, s| {
+        if !acc.contains(&s.release) {
+            acc.push(s.release);
+        }
+        acc
+    });
+    sections.sort_by_key(|s| {
+        let r = releases.iter().position(|r| *r == s.release).unwrap_or(0);
+        (r, s.disc)
+    });
+    for s in &mut sections {
+        s.tracks.sort_by_key(|t| t.track_no.unwrap_or(0));
+    }
+    sections
+}
+
 /// Most common album base title of a set of tracks (for the display title of a
 /// subfolder grouped as an album).
 pub(crate) fn most_common_album_base(tracks: &[&Track]) -> Option<String> {
@@ -843,25 +923,22 @@ impl App {
             .as_ref()
             .and_then(|m| m.cover_path.clone())
             .or_else(|| self.album_cover_for(&display_artist, album));
+        // One cover for the whole page, in the header: decoded at twice its
+        // size so it stays sharp at a scale factor of 2.
         let cover = cover_path
             .as_deref()
-            .and_then(crate::ui::widgets::thumb_cached);
-
-        let is_audiobook = {
-            use crate::core::category::Area;
-            let areas = match play {
-                AlbumPlay::Folder(f) => self.library.folder_areas(f),
-                _ => self.library.album_areas(&display_artist, album),
-            };
-            areas.contains(&Area::Audiobooks)
-        };
+            .and_then(|p| crate::ui::widgets::decode_scaled(p, 2 * ALBUM_HEADER_COVER));
 
         // Missing-track detection: only for real albums whose present tracks are
         // all numbered (so canonical positions can be matched reliably). Gated on
         // YouTube being enabled — adding a missing track needs it, so without it
         // the greyed entries are hidden entirely (not just non-functional).
+        let sections = album_sections(tracks);
+        // Several release folders (e.g. a UK and a US single of the same title):
+        // one section per release; canonical positions can't be matched then.
+        let multi_release = sections.iter().any(|s| s.release != sections[0].release);
         let is_album = !matches!(play, AlbumPlay::Folder(_)) && self.youtube.enabled;
-        let can_detect = is_album && tracks.iter().all(|t| t.track_no.is_some());
+        let can_detect = is_album && !multi_release && tracks.iter().all(|t| t.track_no.is_some());
         let cached = if is_album {
             self.library
                 .album_tracklist(&display_artist, album)
@@ -889,17 +966,32 @@ impl App {
             && !display_artist.is_empty()
             && !self.library.tracklist_fetched(&display_artist, album);
 
-        // Title only for audiobooks; normal albums show the count in the heading.
-        if is_audiobook {
-            let lbl = gtk::Label::builder()
-                .label(gtk::glib::markup_escape_text(album).as_str())
-                .xalign(0.0)
-                .wrap(true)
-                .margin_start(4)
-                .build();
-            lbl.add_css_class("title-4");
-            content.append(&lbl);
-        }
+        // Header: cover, title, facts and the buttons that play the whole page.
+        let year = tracks
+            .iter()
+            .filter_map(|t| t.year)
+            .min()
+            .or_else(|| album_meta.as_ref().and_then(|m| m.year));
+        let mark = match play {
+            AlbumPlay::Folder(f) => crate::ui::app_favorites::mark_key("folder", f),
+            _ => crate::ui::app_favorites::mark_key("album", album),
+        };
+        content.append(
+            &self.album_header(
+                sender,
+                AlbumHeader {
+                    cover: cover.as_ref(),
+                    album,
+                    artist: &display_artist,
+                    year,
+                    tracks: sections
+                        .iter()
+                        .flat_map(|s| s.tracks.iter().copied())
+                        .collect(),
+                    mark,
+                },
+            ),
+        );
 
         // Discs: union of present tracks and any (whole-disc) missing entries.
         let mut discs: Vec<u32> = tracks.iter().map(track_disc).collect();
@@ -922,14 +1014,8 @@ impl App {
                     },
                 }
             };
+            // No cover per row: the header shows it once for the whole page.
             let mut row = EntryRow::new(&t.title)
-                // The cover is already decoded for the whole page here, so the
-                // image goes in ready-made instead of by path.
-                .prefix(&crate::ui::widgets::rounded_image(
-                    cover.as_ref(),
-                    "media-optical-symbolic",
-                    48,
-                ))
                 .duration(t.duration_ms.unwrap_or(0))
                 .offline(self.is_offline_path(&t.path));
             if let Some(no) = t.track_no {
@@ -1021,7 +1107,32 @@ impl App {
             }
         };
 
-        if multi_disc {
+        if multi_release {
+            for section in &sections {
+                // The disc only needs naming when this release has several.
+                let release_discs = sections
+                    .iter()
+                    .filter(|s| s.release == section.release)
+                    .count();
+                let folder = section
+                    .release
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let title = if release_discs > 1 {
+                    format!("{folder} · CD {} ({})", section.disc, section.tracks.len())
+                } else {
+                    format!("{folder} ({})", section.tracks.len())
+                };
+                let group = adw::PreferencesGroup::builder()
+                    .title(gtk::glib::markup_escape_text(&title).as_str())
+                    .build();
+                for t in &section.tracks {
+                    group.add(&make_row(t));
+                }
+                content.append(&group);
+            }
+        } else if multi_disc {
             for disc in &discs {
                 let present = tracks.iter().filter(|t| track_disc(t) == *disc).count();
                 let group = adw::PreferencesGroup::builder()
@@ -1031,20 +1142,8 @@ impl App {
                 content.append(&group);
             }
         } else {
-            let group = if is_audiobook {
-                adw::PreferencesGroup::new()
-            } else {
-                adw::PreferencesGroup::builder()
-                    .title(
-                        format!(
-                            "{} ({})",
-                            gtk::glib::markup_escape_text(album),
-                            tracks.len()
-                        )
-                        .as_str(),
-                    )
-                    .build()
-            };
+            // Title and count are in the header already.
+            let group = adw::PreferencesGroup::new();
             let disc = discs.first().copied().unwrap_or(1);
             render_disc(&group, disc);
             content.append(&group);
@@ -1059,6 +1158,137 @@ impl App {
             lbl.add_css_class("dim-label");
             content.append(&lbl);
         }
+    }
+
+    /// The head of an album page: cover, title, "artist · year · N songs ·
+    /// length", and the buttons that play the whole page — in the order shown,
+    /// or shuffled. Next to each other on the desktop, stacked on the phone.
+    fn album_header(&self, sender: &ComponentSender<Self>, h: AlbumHeader) -> gtk::Widget {
+        let narrow = self.nav.narrow.get();
+        let header = gtk::Box::builder()
+            .orientation(if narrow {
+                gtk::Orientation::Vertical
+            } else {
+                gtk::Orientation::Horizontal
+            })
+            .spacing(18)
+            .margin_bottom(6)
+            .build();
+        // The clamp holds the cover at its size: the frame would otherwise
+        // follow the (twice as large) texture's natural width.
+        let cover = adw::Clamp::builder()
+            .maximum_size(ALBUM_HEADER_COVER)
+            .tightening_threshold(ALBUM_HEADER_COVER)
+            .child(&crate::ui::widgets::rounded_image(
+                h.cover,
+                "media-optical-symbolic",
+                ALBUM_HEADER_COVER,
+            ))
+            .halign(if narrow {
+                gtk::Align::Center
+            } else {
+                gtk::Align::Start
+            })
+            .valign(gtk::Align::Start)
+            .build();
+        header.append(&cover);
+
+        let text = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(6)
+            .valign(gtk::Align::Center)
+            .hexpand(true)
+            .build();
+        let xalign = if narrow { 0.5 } else { 0.0 };
+        let title = gtk::Label::builder()
+            .label(h.album)
+            .wrap(true)
+            .xalign(xalign)
+            .justify(if narrow {
+                gtk::Justification::Center
+            } else {
+                gtk::Justification::Left
+            })
+            .css_classes(["title-2"])
+            .build();
+        text.append(&title);
+        let total_ms: i64 = h.tracks.iter().filter_map(|t| t.duration_ms).sum();
+        let mut facts: Vec<String> = Vec::new();
+        if !h.artist.is_empty() {
+            facts.push(h.artist.to_string());
+        }
+        facts.push(album_subtitle(h.year, h.tracks.len()));
+        if total_ms > 0 {
+            facts.push(crate::ui::app_helpers::fmt_duration(total_ms));
+        }
+        let facts = gtk::Label::builder()
+            .label(facts.join(" · "))
+            .wrap(true)
+            .xalign(xalign)
+            .css_classes(["dim-label"])
+            .build();
+        text.append(&facts);
+
+        let paths: Vec<String> = h.tracks.iter().map(|t| t.path.clone()).collect();
+        let buttons = gtk::Box::builder()
+            .spacing(12)
+            .margin_top(6)
+            .halign(if narrow {
+                gtk::Align::Center
+            } else {
+                gtk::Align::Start
+            })
+            .build();
+        // "Play": its icon is a play mark like the rows' (registered under the
+        // page's own key), so it shows a pause while this page is playing.
+        let active = self.entry_is_active_key(&h.mark);
+        let play_icon = crate::ui::play_mark::marker(active, self.mini.playing);
+        self.libview.page_marks.add(h.mark.clone(), &play_icon);
+        let play_box = gtk::Box::builder().spacing(6).build();
+        play_box.append(&play_icon);
+        play_box.append(&gtk::Label::new(Some(&gettext("Play"))));
+        let play_btn = gtk::Button::builder()
+            .child(&play_box)
+            .css_classes(["pill", "suggested-action", "emilia-album-play"])
+            .build();
+        {
+            let (sender, paths) = (sender.clone(), paths.clone());
+            play_btn.connect_clicked(move |_| {
+                sender.input(Msg::PlayTracks {
+                    paths: paths.clone(),
+                    shuffle: false,
+                })
+            });
+        }
+        let shuffle_btn = gtk::Button::builder()
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name("media-playlist-shuffle-symbolic")
+                    .label(gettext("Shuffle"))
+                    .build(),
+            )
+            .css_classes(["pill"])
+            .build();
+        {
+            let sender = sender.clone();
+            shuffle_btn.connect_clicked(move |_| {
+                sender.input(Msg::PlayTracks {
+                    paths: paths.clone(),
+                    shuffle: true,
+                })
+            });
+        }
+        buttons.append(&play_btn);
+        buttons.append(&shuffle_btn);
+        text.append(&buttons);
+        header.append(&text);
+        header.upcast()
+    }
+
+    /// [`Self::entry_is_active`] for a [`crate::ui::app_favorites::mark_key`].
+    fn entry_is_active_key(&self, mark: &str) -> bool {
+        let (scope, key) = mark.split_once('\u{1}').unwrap_or(("", mark));
+        self.entry_is_active(scope, key, self.playing_album().as_deref())
     }
 
     /// Albums of an artist with (where known) release year from the
@@ -1181,6 +1411,84 @@ mod tests {
             resume_ms: 0,
             year: None,
         }
+    }
+
+    /// (release folder name, disc, track paths) of each section.
+    fn sections_of(tracks: &[Track]) -> Vec<(String, u32, Vec<&str>)> {
+        album_sections(tracks)
+            .into_iter()
+            .map(|s| {
+                let name = s
+                    .release
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                (
+                    name,
+                    s.disc,
+                    s.tracks.iter().map(|t| t.path.as_str()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn two_releases_of_one_album_stay_apart_instead_of_interleaving() {
+        // Structure order: the UK folder, then the US folder.
+        let tracks = [
+            track("/m/19-2000 (UK)/01.mp3", Some(1), Some(1)),
+            track("/m/19-2000 (UK)/02.mp3", Some(1), Some(2)),
+            track("/m/19-2000 (US)/01.mp3", Some(1), Some(1)),
+            track("/m/19-2000 (US)/02.mp3", Some(1), Some(2)),
+        ];
+        assert_eq!(
+            sections_of(&tracks),
+            [
+                (
+                    "19-2000 (UK)".to_string(),
+                    1,
+                    vec!["/m/19-2000 (UK)/01.mp3", "/m/19-2000 (UK)/02.mp3"]
+                ),
+                (
+                    "19-2000 (US)".to_string(),
+                    1,
+                    vec!["/m/19-2000 (US)/01.mp3", "/m/19-2000 (US)/02.mp3"]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn cd_subfolders_are_discs_of_one_release() {
+        let tracks = [
+            track("/m/Album/CD1/01.mp3", None, Some(1)),
+            track("/m/Album/CD2/01.mp3", None, Some(1)),
+        ];
+        let s = sections_of(&tracks);
+        assert_eq!(s.len(), 2);
+        assert_eq!((s[0].0.as_str(), s[0].1), ("Album", 1));
+        assert_eq!((s[1].0.as_str(), s[1].1), ("Album", 2));
+    }
+
+    #[test]
+    fn disc_tags_split_one_folder_and_track_numbers_order_it() {
+        let tracks = [
+            track("/m/Album/b.mp3", Some(2), Some(1)),
+            track("/m/Album/c.mp3", Some(1), Some(2)),
+            track("/m/Album/a.mp3", Some(1), Some(1)),
+        ];
+        assert_eq!(
+            sections_of(&tracks),
+            [
+                (
+                    "Album".to_string(),
+                    1,
+                    vec!["/m/Album/a.mp3", "/m/Album/c.mp3"]
+                ),
+                ("Album".to_string(), 2, vec!["/m/Album/b.mp3"]),
+            ]
+        );
     }
 
     #[test]
