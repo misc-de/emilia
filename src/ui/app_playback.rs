@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use relm4::{adw, ComponentController, ComponentSender};
+use relm4::{ComponentController, ComponentSender, adw};
 
 use crate::core::remote::{self, Backend};
 use crate::core::scanner;
@@ -176,10 +176,10 @@ impl App {
     pub(crate) fn display_name(&self, path: &std::path::Path) -> String {
         let path_str = path.to_string_lossy();
         // YouTube tracks have no library row; use the cached title.
-        if let Some(vid) = crate::core::youtube::parse_yt_path(&path_str) {
-            if let Ok(Some(t)) = self.library.yt_title(&vid) {
-                return t;
-            }
+        if let Some(vid) = crate::core::youtube::parse_yt_path(&path_str)
+            && let Ok(Some(t)) = self.library.yt_title(&vid)
+        {
+            return t;
         }
         // Voice memos aren't in the music library — show their list title
         // ("Memo <date>" or the user's name), not the file name.
@@ -365,26 +365,26 @@ impl App {
         // queue, push the old context (queue + position) onto the back
         // stack – this allows "keep listening to the previous song **including
         // its playlist**". When jumping back itself, don't stack again.
-        if !self.transport.skip_history_push {
-            if let Some((pq, pp)) = self.transport.prev_ctx.clone() {
-                if !pq.is_empty() && pq != self.transport.queue {
-                    self.transport.nav_stack.push((pq, pp));
-                    if self.transport.nav_stack.len() > 50 {
-                        self.transport.nav_stack.remove(0);
-                    }
-                }
+        if !self.transport.skip_history_push
+            && let Some((pq, pp)) = self.transport.prev_ctx.clone()
+            && !pq.is_empty()
+            && pq != self.transport.queue
+        {
+            self.transport.nav_stack.push((pq, pp));
+            if self.transport.nav_stack.len() > 50 {
+                self.transport.nav_stack.remove(0);
             }
         }
         // Maintain history: remember the previously running track (for "previous song").
         // When jumping back from the history itself, don't add it again.
         if self.transport.skip_history_push {
             self.transport.skip_history_push = false;
-        } else if let Some(prev) = self.transport.playing_path.clone() {
-            if prev != path {
-                self.transport.play_history.push(prev);
-                if self.transport.play_history.len() > 200 {
-                    self.transport.play_history.remove(0);
-                }
+        } else if let Some(prev) = self.transport.playing_path.clone()
+            && prev != path
+        {
+            self.transport.play_history.push(prev);
+            if self.transport.play_history.len() > 200 {
+                self.transport.play_history.remove(0);
             }
         }
         let path_str = path.to_string_lossy().to_string();
@@ -1080,7 +1080,7 @@ mod tests {
         assert_eq!(chapter_target(&marks, 31_000, -1, None), Some(0));
     }
 
-    use super::{absolute_seek, relative_seek, start_position, SeekTarget};
+    use super::{SeekTarget, absolute_seek, relative_seek, start_position};
 
     #[test]
     fn relative_seek_past_the_end_skips_instead_of_running_on() {

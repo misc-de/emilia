@@ -16,7 +16,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
@@ -24,16 +24,16 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::db::Library;
-use crate::core::mcp::state::{OfferSummary, SyncSnapshot};
 use crate::core::mcp::SyncStateHandle;
+use crate::core::mcp::state::{OfferSummary, SyncSnapshot};
 use crate::core::sync::client::SyncClient;
 use crate::core::sync::protocol::{self, Capabilities, PairingInfo};
 use crate::core::sync::scanner::Scanner;
 use crate::core::sync::server::{ShareChannel, SyncServer};
 use crate::core::sync::share::{self, ShareDecision, ShareManifest};
-use crate::core::sync::{self, crypto, data, SyncEvent};
+use crate::core::sync::{self, SyncEvent, crypto, data};
 use crate::i18n::{gettext, gettext_f};
-use crate::ui::sync_share_ui::{build_confirm, build_review, ReviewHandles};
+use crate::ui::sync_share_ui::{ReviewHandles, build_confirm, build_review};
 
 /// Commands from the UI to the persistent client-session worker.
 enum ClientCmd {
@@ -838,10 +838,10 @@ impl SyncPage {
                 host,
                 port,
             } => {
-                if let Some(qr) = &self.qr {
-                    if let Ok(tex) = sync::qr::render_qr(&pair_url) {
-                        qr.set_paintable(Some(&tex));
-                    }
+                if let Some(qr) = &self.qr
+                    && let Ok(tex) = sync::qr::render_qr(&pair_url)
+                {
+                    qr.set_paintable(Some(&tex));
                 }
                 if let Some(field) = &self.code_field {
                     field.set_text(&pair_url);
@@ -966,18 +966,18 @@ impl SyncPage {
                 // Server-as-receiver: the client's uploaded files only landed now,
                 // so register the file-dependent content (recordings/memos) here —
                 // at accept time the audio wasn't there yet, so it was skipped.
-                if self.is_server {
-                    if let Some(manifest) = &self.incoming_manifest {
-                        let _ = share::apply_files(&self.library, manifest);
-                        let _ = sender.output(SyncOutput::Imported);
-                    }
+                if self.is_server
+                    && let Some(manifest) = &self.incoming_manifest
+                {
+                    let _ = share::apply_files(&self.library, manifest);
+                    let _ = sender.output(SyncOutput::Imported);
                 }
                 // Reset the parked offer/decision so the next share starts fresh.
-                if let Some(chan) = &self.share_chan {
-                    if let Ok(mut c) = chan.lock() {
-                        c.outgoing = None;
-                        c.decision = None;
-                    }
+                if let Some(chan) = &self.share_chan
+                    && let Ok(mut c) = chan.lock()
+                {
+                    c.outgoing = None;
+                    c.decision = None;
                 }
                 self.prepared_manifest = None;
                 self.incoming_manifest = None;
@@ -1182,13 +1182,13 @@ impl SyncPage {
         let panel = self.progress_panel();
         self.set_sub_content(&panel);
         if self.is_server {
-            if let (Some(chan), Some(m)) = (&self.share_chan, self.prepared_manifest.clone()) {
-                if let Ok(mut c) = chan.lock() {
-                    // Fresh share: park the new offer, drop any stale decision from
-                    // a previous one (timing-independent).
-                    c.outgoing = Some(m);
-                    c.decision = None;
-                }
+            if let (Some(chan), Some(m)) = (&self.share_chan, self.prepared_manifest.clone())
+                && let Ok(mut c) = chan.lock()
+            {
+                // Fresh share: park the new offer, drop any stale decision from
+                // a previous one (timing-independent).
+                c.outgoing = Some(m);
+                c.decision = None;
             }
             self.set_busy_status(gettext("Waiting for the other device to accept …"));
         } else {
@@ -1260,11 +1260,11 @@ impl SyncPage {
             // Park the decision (client uploads files) + apply blobs/YT and
             // register accepted files locally off the UI thread. Drop any stale
             // parked offer so the next cycle starts clean.
-            if let Some(chan) = &self.share_chan {
-                if let Ok(mut c) = chan.lock() {
-                    c.decision = Some(decision.clone());
-                    c.outgoing = None;
-                }
+            if let Some(chan) = &self.share_chan
+                && let Ok(mut c) = chan.lock()
+            {
+                c.decision = Some(decision.clone());
+                c.outgoing = None;
             }
             self.synced_ok = true;
             if let Some(manifest) = self.incoming_manifest.clone() {
@@ -1291,10 +1291,10 @@ impl SyncPage {
             s.phase = "idle".into();
         });
         if self.is_server {
-            if let Some(chan) = &self.share_chan {
-                if let Ok(mut c) = chan.lock() {
-                    c.decision = Some(ShareDecision::default()); // accept = false
-                }
+            if let Some(chan) = &self.share_chan
+                && let Ok(mut c) = chan.lock()
+            {
+                c.decision = Some(ShareDecision::default()); // accept = false
             }
         } else if let Some(cmd) = &self.client_cmd {
             let _ = cmd.send(ClientCmd::Reject);
@@ -1571,7 +1571,7 @@ fn run_client_session(
                     }
                     match cmd_rx.try_recv() {
                         Ok(ClientCmd::Disconnect) | Err(mpsc::TryRecvError::Disconnected) => {
-                            break 'session
+                            break 'session;
                         }
                         _ => {}
                     }
@@ -1684,15 +1684,14 @@ fn client_receive(
             total,
             name: transfer_label(f),
         });
-        if let Some(dest) = crate::core::sync::resolve_new(&base, &f.rel_path) {
-            if client.download_file(&f.rel_path, &dest).is_ok()
-                && !f.rel_path.starts_with(crate::core::sync::MEMO_PREFIX)
-            {
-                // Re-read the file we just received so it is indexed and sorted in
-                // from its own tags (not the sender's second-hand metadata). Memos
-                // are not music — they are registered by `apply_received` instead.
-                crate::core::scanner::ingest_file(&lib, &dest);
-            }
+        if let Some(dest) = crate::core::sync::resolve_new(&base, &f.rel_path)
+            && client.download_file(&f.rel_path, &dest).is_ok()
+            && !f.rel_path.starts_with(crate::core::sync::MEMO_PREFIX)
+        {
+            // Re-read the file we just received so it is indexed and sorted in
+            // from its own tags (not the sender's second-hand metadata). Memos
+            // are not music — they are registered by `apply_received` instead.
+            crate::core::scanner::ingest_file(&lib, &dest);
         }
     }
     let stats = apply_received(&lib, manifest, decision);

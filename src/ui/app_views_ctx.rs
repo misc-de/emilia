@@ -13,7 +13,7 @@ use crate::core::category;
 use crate::core::scanner;
 use crate::i18n::{gettext, gettext_noop, ngettext_n, npgettext_n};
 use crate::model::Track;
-use crate::ui::app::{fmt_duration, most_common_artist, App, CtxTarget, FsKind, Msg};
+use crate::ui::app::{App, CtxTarget, FsKind, Msg, fmt_duration, most_common_artist};
 use crate::ui::app_settings::SettingMsg;
 use crate::ui::app_views_album::{album_base, disc_from_segment, most_common_album_base};
 use crate::ui::fs_row::FsEntry;
@@ -421,7 +421,7 @@ impl App {
         &self,
         target: &CtxTarget,
     ) -> Option<(&'static str, String, Vec<crate::core::category::Area>)> {
-        use crate::core::category::{album_key, Area};
+        use crate::core::category::{Area, album_key};
         let res: (&'static str, String, Vec<Area>) = match target {
             CtxTarget::Artist(m) => ("artist", m.name.clone(), self.library.artist_areas(&m.name)),
             CtxTarget::Album(m) => (
@@ -544,7 +544,7 @@ impl App {
         effective: &[crate::core::category::Area],
         sender: &ComponentSender<Self>,
     ) -> adw::PreferencesGroup {
-        use crate::core::category::{areas_value, Area};
+        use crate::core::category::{Area, areas_value};
         use std::cell::RefCell;
         use std::rc::Rc;
 
@@ -738,15 +738,13 @@ impl App {
         } else {
             ngettext_n("{n} song", "{n} songs", songs as u32)
         });
-        if with_year {
-            if let (Some(a), Some(b)) = (min_year, max_year) {
-                let span = if a == b {
-                    a.to_string()
-                } else {
-                    format!("{a}\u{2013}{b}")
-                };
-                value.push_str(&format!(" - {span}"));
-            }
+        if with_year && let (Some(a), Some(b)) = (min_year, max_year) {
+            let span = if a == b {
+                a.to_string()
+            } else {
+                format!("{a}\u{2013}{b}")
+            };
+            value.push_str(&format!(" - {span}"));
         }
         (value, genre)
     }
@@ -797,10 +795,8 @@ impl App {
             }
             // One tag parse per file: collection summary + (for albums) the genre.
             let (summary, genre) = Self::folder_summary(&files, !year_shown, ab);
-            if is_album {
-                if let Some(g) = genre {
-                    lines.push((gettext("Genre"), g));
-                }
+            if is_album && let Some(g) = genre {
+                lines.push((gettext("Genre"), g));
             }
             lines.push((gettext("Collection"), summary));
         } else if let Some(p) = entry.path() {
@@ -836,32 +832,31 @@ impl App {
                     lines.push((gettext("Duration"), fmt_duration(d)));
                 }
                 // Year (from the album metadata) directly under the duration.
-                if let (Some(artist), Some(album)) = (artist, album) {
-                    if let Some(y) = self
+                if let (Some(artist), Some(album)) = (artist, album)
+                    && let Some(y) = self
                         .library
                         .get_album_meta(&artist, &album)
                         .ok()
                         .flatten()
                         .and_then(|m| m.year)
-                    {
-                        lines.push((gettext("Year"), y.to_string()));
-                    }
+                {
+                    lines.push((gettext("Year"), y.to_string()));
                 }
             }
 
             // Suggestions detected via fingerprint (AcoustID) – display only,
             // not written into the file.
-            if let Ok(Some(m)) = self.library.get_track_meta(&p.to_string_lossy()) {
-                if m.status == "matched" {
-                    if let Some(t) = m.title {
-                        lines.push((gettext("Detected (title)"), t));
-                    }
-                    if let Some(a) = m.artist {
-                        lines.push((gettext("Detected (artist)"), a));
-                    }
-                    if let Some(al) = m.album {
-                        lines.push((gettext("Detected (album)"), al));
-                    }
+            if let Ok(Some(m)) = self.library.get_track_meta(&p.to_string_lossy())
+                && m.status == "matched"
+            {
+                if let Some(t) = m.title {
+                    lines.push((gettext("Detected (title)"), t));
+                }
+                if let Some(a) = m.artist {
+                    lines.push((gettext("Detected (artist)"), a));
+                }
+                if let Some(al) = m.album {
+                    lines.push((gettext("Detected (album)"), al));
                 }
             }
         } else {

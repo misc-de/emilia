@@ -153,11 +153,11 @@ impl EditState {
         cs.sort_by(|x, y| x.0.total_cmp(&y.0));
         let mut merged: Vec<(f64, f64)> = Vec::new();
         for (a, b) in cs {
-            if let Some(last) = merged.last_mut() {
-                if a <= last.1 {
-                    last.1 = last.1.max(b);
-                    continue;
-                }
+            if let Some(last) = merged.last_mut()
+                && a <= last.1
+            {
+                last.1 = last.1.max(b);
+                continue;
             }
             merged.push((a, b));
         }
@@ -661,10 +661,10 @@ impl App {
                 dlg.set_close_response("cancel");
                 let apply = RefCell::new(Some(apply));
                 dlg.connect_response(None, move |_, resp| {
-                    if resp == "ok" {
-                        if let Some(f) = apply.borrow_mut().take() {
-                            f();
-                        }
+                    if resp == "ok"
+                        && let Some(f) = apply.borrow_mut().take()
+                    {
+                        f();
                     }
                 });
                 dlg.present(Some(btn));

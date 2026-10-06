@@ -398,21 +398,21 @@ impl YtPage {
         }
         // Persisted from an earlier session → show instantly from the DB cache,
         // and refresh in the background if it has gone stale.
-        if let Ok(Some((json, fetched_at))) = self.library.yt_playlist_cache(&url) {
-            if let Ok(videos) = serde_json::from_str::<Vec<YtResult>>(&json) {
-                self.playlist_songs_cache
-                    .insert(url.clone(), videos.clone());
-                self.show_yt_playlist_songs(sender, &url, &title, videos);
-                if playlist_cache_stale(crate::ui::app_helpers::unix_now(), fetched_at) {
-                    let (url, title) = (url.clone(), title.clone());
-                    sender.spawn_command(move |out| {
-                        let result = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
-                            .map_err(|e| e.to_string());
-                        let _ = out.send(YtCmd::PlaylistCacheRefreshed { url, title, result });
-                    });
-                }
-                return;
+        if let Ok(Some((json, fetched_at))) = self.library.yt_playlist_cache(&url)
+            && let Ok(videos) = serde_json::from_str::<Vec<YtResult>>(&json)
+        {
+            self.playlist_songs_cache
+                .insert(url.clone(), videos.clone());
+            self.show_yt_playlist_songs(sender, &url, &title, videos);
+            if playlist_cache_stale(crate::ui::app_helpers::unix_now(), fetched_at) {
+                let (url, title) = (url.clone(), title.clone());
+                sender.spawn_command(move |out| {
+                    let result = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
+                        .map_err(|e| e.to_string());
+                    let _ = out.send(YtCmd::PlaylistCacheRefreshed { url, title, result });
+                });
             }
+            return;
         }
         // Never seen → fetch (the result is cached on arrival).
         self.yt_open_playlist_songs(sender, url, title);
@@ -421,10 +421,10 @@ impl YtPage {
     /// Serializes a playlist's song list into the persistent DB cache (best
     /// effort: a serialization/DB error just skips the cache, never blocks).
     fn cache_playlist_songs(&self, url: &str, title: &str, videos: &[YtResult]) {
-        if let Ok(json) = serde_json::to_string(videos) {
-            if let Err(e) = self.library.set_yt_playlist_cache(url, title, &json) {
-                tracing::warn!("caching playlist {url} failed: {e}");
-            }
+        if let Ok(json) = serde_json::to_string(videos)
+            && let Err(e) = self.library.set_yt_playlist_cache(url, title, &json)
+        {
+            tracing::warn!("caching playlist {url} failed: {e}");
         }
     }
 

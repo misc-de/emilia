@@ -11,27 +11,27 @@
 //! always required, enforced by an axum middleware.
 
 use std::net::TcpListener as StdTcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::Router;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::StreamableHttpService;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use super::{tools, McpContext, PORT};
+use super::{McpContext, PORT, tools};
 use crate::core::sync::crypto;
 
 /// Port fallbacks if the preferred one is taken.

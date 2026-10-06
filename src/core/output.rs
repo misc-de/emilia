@@ -38,12 +38,12 @@ pub fn list_outputs() -> Vec<Output> {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("Name:") {
             pending_id = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("Description:") {
-            if let Some(id) = pending_id.take() {
-                let name = rest.trim().to_string();
-                let name = if name.is_empty() { id.clone() } else { name };
-                outputs.push(Output { id, name });
-            }
+        } else if let Some(rest) = line.strip_prefix("Description:")
+            && let Some(id) = pending_id.take()
+        {
+            let name = rest.trim().to_string();
+            let name = if name.is_empty() { id.clone() } else { name };
+            outputs.push(Output { id, name });
         }
     }
     outputs

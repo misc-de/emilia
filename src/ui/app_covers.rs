@@ -70,10 +70,11 @@ impl App {
                     meta.cover_path = None;
                     let _ = self.library.upsert_album_meta(&meta);
                 }
-                if let Some(CtxTarget::Album(m)) = self.nav.context_target.as_mut() {
-                    if m.artist == artist && m.album == album {
-                        m.cover_path = None;
-                    }
+                if let Some(CtxTarget::Album(m)) = self.nav.context_target.as_mut()
+                    && m.artist == artist
+                    && m.album == album
+                {
+                    m.cover_path = None;
                 }
                 self.reload_albums();
                 self.refresh_context_dialog(root, sender);
@@ -83,10 +84,10 @@ impl App {
                     meta.image_path = None;
                     let _ = self.library.upsert_artist_meta(&meta);
                 }
-                if let Some(CtxTarget::Artist(m)) = self.nav.context_target.as_mut() {
-                    if m.name == name {
-                        m.image_path = None;
-                    }
+                if let Some(CtxTarget::Artist(m)) = self.nav.context_target.as_mut()
+                    && m.name == name
+                {
+                    m.image_path = None;
                 }
                 self.reload_artists();
                 self.refresh_context_dialog(root, sender);
@@ -161,21 +162,22 @@ impl App {
             .unwrap_or_else(|| crate::model::AlbumMeta::pending(&artist, &album));
         if meta.cover_path.as_deref() != Some(path.as_str()) {
             // Keep the previous cover as a gallery alternative so it isn't lost.
-            if let Some(old) = meta.cover_path.as_deref() {
-                if std::path::Path::new(old).exists() {
-                    let _ = self
-                        .library
-                        .add_album_image(&artist, &album, old, "cover", "local");
-                }
+            if let Some(old) = meta.cover_path.as_deref()
+                && std::path::Path::new(old).exists()
+            {
+                let _ = self
+                    .library
+                    .add_album_image(&artist, &album, old, "cover", "local");
             }
             meta.cover_path = Some(path.clone());
             let _ = self.library.upsert_album_meta(&meta);
             // Mirror onto the open detail target so the rebuilt dialog (below)
             // shows the new cover; a song target reads it from the DB instead.
-            if let Some(CtxTarget::Album(m)) = self.nav.context_target.as_mut() {
-                if m.artist == artist && m.album == album {
-                    m.cover_path = Some(path);
-                }
+            if let Some(CtxTarget::Album(m)) = self.nav.context_target.as_mut()
+                && m.artist == artist
+                && m.album == album
+            {
+                m.cover_path = Some(path);
             }
             self.reload_albums();
             self.refresh_context_dialog(root, sender);
@@ -200,18 +202,18 @@ impl App {
         if meta.image_path.as_deref() != Some(path.as_str()) {
             // Keep the previous photo (e.g. from metadata) as a gallery
             // alternative so it isn't lost when the upload becomes the primary.
-            if let Some(old) = meta.image_path.as_deref() {
-                if std::path::Path::new(old).exists() {
-                    let _ = self.library.add_artist_image(&name, old, "photo", "local");
-                }
+            if let Some(old) = meta.image_path.as_deref()
+                && std::path::Path::new(old).exists()
+            {
+                let _ = self.library.add_artist_image(&name, old, "photo", "local");
             }
             meta.image_path = Some(path.clone());
             let _ = self.library.upsert_artist_meta(&meta);
             // Mirror onto the open detail target so the rebuilt dialog shows it.
-            if let Some(CtxTarget::Artist(m)) = self.nav.context_target.as_mut() {
-                if m.name == name {
-                    m.image_path = Some(path);
-                }
+            if let Some(CtxTarget::Artist(m)) = self.nav.context_target.as_mut()
+                && m.name == name
+            {
+                m.image_path = Some(path);
             }
             self.reload_artists();
             self.refresh_context_dialog(root, sender);

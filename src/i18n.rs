@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use gettextrs::{bind_textdomain_codeset, bindtextdomain, setlocale, textdomain, LocaleCategory};
+use gettextrs::{LocaleCategory, bind_textdomain_codeset, bindtextdomain, setlocale, textdomain};
 
 pub use gettextrs::{gettext, ngettext, npgettext};
 
@@ -83,7 +83,9 @@ pub fn init(lang: Option<&str>) {
     if let Some(code) = lang {
         // gettext evaluates LANGUAGE before LC_MESSAGES (as long as the locale is
         // not C/POSIX) – this way the language can be chosen independently of the system.
-        std::env::set_var("LANGUAGE", code);
+        // SAFETY: `init` runs exactly once, from `main` on the main thread,
+        // before any UI or worker thread exists (see the `setlocale` block below).
+        unsafe { std::env::set_var("LANGUAGE", code) };
     }
 
     // Apply the locale from the environment. This can FAIL: when the environment
@@ -148,14 +150,20 @@ static STARTUP_LANG: OnceLock<&'static str> = OnceLock::new();
 pub fn switch_language(code: &str) {
     // gettext only honors `LANGUAGE` when the LC_MESSAGES locale isn't C/POSIX;
     // `init` already pinned a real UTF-8 locale at startup, so this is enough.
-    std::env::set_var("LANGUAGE", code);
+    // SAFETY: called on the main thread from the first-run setup only. GTK,
+    // GStreamer or glib helper threads may exist by then, and a concurrent C
+    // `getenv` there could race with this write; no code path reads the
+    // environment while the setup page is shown, and the only alternative –
+    // a full restart for the wizard's own language switch – was rejected. The
+    // remaining risk is accepted knowingly.
+    unsafe { std::env::set_var("LANGUAGE", code) };
     // glibc caches loaded catalogs and only re-reads them when its internal
     // generation counter changes; bumping it makes the next `gettext()` pick up
     // the new `LANGUAGE`. This is the documented way (GNU gettext manual,
     // "Changing the language at run time") to switch without a restart.
     #[cfg(target_env = "gnu")]
     {
-        extern "C" {
+        unsafe extern "C" {
             static mut _nl_msg_cat_cntr: std::os::raw::c_int;
         }
         // SAFETY: a plain increment of a glibc-owned counter on the main thread.

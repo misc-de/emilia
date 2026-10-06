@@ -8,7 +8,7 @@ use relm4::gtk;
 use relm4::prelude::*;
 
 use crate::core::player::Player;
-use crate::ui::app::{App, McpState, Msg, AUTO_ENRICH_INTERVAL_SECS};
+use crate::ui::app::{AUTO_ENRICH_INTERVAL_SECS, App, McpState, Msg};
 use crate::ui::app_dialogs::CtxMsg;
 use crate::ui::app_episode_playback::PodcastMsg;
 use crate::ui::app_playback::TransportMsg;

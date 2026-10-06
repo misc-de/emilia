@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-use super::file_stem_of;
 use super::Library;
+use super::file_stem_of;
 use crate::model::*;
 
 impl Library {

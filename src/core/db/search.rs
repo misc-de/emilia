@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use super::{like_escape, Library};
+use super::{Library, like_escape};
 use crate::model::{AlbumHit, SearchResults, SongHit};
 
 impl Library {

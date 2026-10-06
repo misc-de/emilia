@@ -9,11 +9,11 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::ui::app::{
-    guarded_resume, initial_gallery_columns, online_available, relaunch_for_language_change,
-    save_window_state, section_meta, ActiveSource, App, AppWidgets, Cmd, Msg, SortCrit, SECTIONS,
-    SORTABLE_SECTIONS,
+    ActiveSource, App, AppWidgets, Cmd, Msg, SECTIONS, SORTABLE_SECTIONS, SortCrit, guarded_resume,
+    initial_gallery_columns, online_available, relaunch_for_language_change, save_window_state,
+    section_meta,
 };
-use crate::ui::app_playback::{TransportMsg, CURRENT_PATH_KEY, CURRENT_POS_KEY};
+use crate::ui::app_playback::{CURRENT_PATH_KEY, CURRENT_POS_KEY, TransportMsg};
 use crate::ui::app_settings::SettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::theme::DesignMsg;
@@ -1063,29 +1063,28 @@ impl App {
             // track, so the running song is picked back up where it stood on the
             // next start; the track's own resume point only for material that
             // keeps one (audiobooks, long-form).
-            if let Some((path, pos, dur)) = close_resume.borrow().clone() {
-                if let Ok(lib) = Library::open() {
-                    let at = guarded_resume(pos, dur);
-                    let _ = lib.set_setting(CURRENT_PATH_KEY, &path);
-                    let _ = lib.set_setting(CURRENT_POS_KEY, &at.to_string());
-                    let keeps_one = lib
-                        .track_by_path(&path)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|t| lib.track_resumable(&t));
-                    if keeps_one {
-                        let _ = lib.set_resume_path(&path, at);
-                    }
+            if let Some((path, pos, dur)) = close_resume.borrow().clone()
+                && let Ok(lib) = Library::open()
+            {
+                let at = guarded_resume(pos, dur);
+                let _ = lib.set_setting(CURRENT_PATH_KEY, &path);
+                let _ = lib.set_setting(CURRENT_POS_KEY, &at.to_string());
+                let keeps_one = lib
+                    .track_by_path(&path)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|t| lib.track_resumable(&t));
+                if keeps_one {
+                    let _ = lib.set_resume_path(&path, at);
                 }
             }
             // Save the running listening session as the last event (otherwise the
             // currently playing track would be lost on a hard exit).
-            if let Some((path, started_at, played_ms, dur)) = close_session.borrow().clone() {
-                if played_ms > 0 {
-                    if let Ok(lib) = Library::open() {
-                        let _ = lib.log_play(&path, started_at, played_ms, dur, false, None);
-                    }
-                }
+            if let Some((path, started_at, played_ms, dur)) = close_session.borrow().clone()
+                && played_ms > 0
+                && let Ok(lib) = Library::open()
+            {
+                let _ = lib.log_play(&path, started_at, played_ms, dur, false, None);
             }
             let section = stack_for_close.visible_child_name();
             save_window_state(
@@ -1232,16 +1231,15 @@ impl App {
             .as_deref()
             .map(|c| self.nav.hidden_sections.contains(c))
             .unwrap_or(true);
-        if on_hidden {
-            if let Some(next) = self
+        if on_hidden
+            && let Some(next) = self
                 .nav
                 .section_order
                 .iter()
                 .copied()
                 .find(|n| !self.nav.hidden_sections.contains(*n))
-            {
-                self.nav.view_stack.set_visible_child_name(next);
-            }
+        {
+            self.nav.view_stack.set_visible_child_name(next);
         }
         // Re-root the file view to the chosen folder and start the scan.
         sender.input(Msg::Setting(SettingMsg::SetMusicDir(music_dir)));

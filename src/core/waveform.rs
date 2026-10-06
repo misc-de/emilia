@@ -6,7 +6,7 @@
 //! across GStreamer installs, so an AAC source is rewritten as MP3 — its
 //! extension (and thus path) then changes. The caller updates the DB row.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app::{AppSink, AppSrc};
@@ -101,7 +101,7 @@ pub fn snap_to_silence(path: &Path, target_secs: f64) -> Option<f64> {
     let best = rms
         .iter()
         .enumerate()
-        .filter(|(_, &r)| r < threshold)
+        .filter(|&(_, &r)| r < threshold)
         .min_by_key(|(i, _)| i.abs_diff(target_hop))?;
     Some(best.0 as f64 * SNAP_HOP_SECS + SNAP_HOP_SECS / 2.0)
 }
@@ -240,26 +240,25 @@ fn decode_pcm(path: &Path, mono: bool) -> Result<(Vec<i16>, u32, u32)> {
     let mut channels = 0u32;
     // `pull_sample` blocks until the next buffer and returns Err on EOS/error.
     while let Ok(sample) = appsink.pull_sample() {
-        if rate == 0 {
-            if let Some(s) = sample
+        if rate == 0
+            && let Some(s) = sample
                 .caps()
                 .and_then(|c| c.structure(0).map(|s| s.to_owned()))
-            {
-                rate = s.get::<i32>("rate").unwrap_or(0).max(0) as u32;
-                channels = s.get::<i32>("channels").unwrap_or(0).max(0) as u32;
-            }
+        {
+            rate = s.get::<i32>("rate").unwrap_or(0).max(0) as u32;
+            channels = s.get::<i32>("channels").unwrap_or(0).max(0) as u32;
         }
-        if let Some(buf) = sample.buffer() {
-            if let Ok(map) = buf.map_readable() {
-                let data = map.as_slice();
-                if samples.len() + data.len() / 2 > MAX_PCM_SAMPLES {
-                    let _ = pipeline.set_state(gst::State::Null);
-                    bail!("recording is too long to edit (over {MAX_PCM_SAMPLES} samples)");
-                }
-                samples.reserve(data.len() / 2);
-                for c in data.as_chunks::<2>().0 {
-                    samples.push(i16::from_le_bytes(*c));
-                }
+        if let Some(buf) = sample.buffer()
+            && let Ok(map) = buf.map_readable()
+        {
+            let data = map.as_slice();
+            if samples.len() + data.len() / 2 > MAX_PCM_SAMPLES {
+                let _ = pipeline.set_state(gst::State::Null);
+                bail!("recording is too long to edit (over {MAX_PCM_SAMPLES} samples)");
+            }
+            samples.reserve(data.len() / 2);
+            for c in data.as_chunks::<2>().0 {
+                samples.push(i16::from_le_bytes(*c));
             }
         }
     }
@@ -338,11 +337,11 @@ fn encode_pcm(samples: &[i16], rate: u32, channels: u32, enc: &str, out: &Path) 
 fn merge_ranges(sorted: &[(usize, usize)]) -> Vec<(usize, usize)> {
     let mut out: Vec<(usize, usize)> = Vec::new();
     for &(a, b) in sorted {
-        if let Some(last) = out.last_mut() {
-            if a <= last.1 {
-                last.1 = last.1.max(b);
-                continue;
-            }
+        if let Some(last) = out.last_mut()
+            && a <= last.1
+        {
+            last.1 = last.1.max(b);
+            continue;
         }
         out.push((a, b));
     }

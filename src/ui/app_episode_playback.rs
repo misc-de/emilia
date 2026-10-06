@@ -7,7 +7,7 @@
 //! canonical "an episode is playing" flag remains `self.podcasts.playing_episode_url`.
 
 use adw::prelude::*;
-use relm4::{adw, gtk, ComponentController, ComponentSender};
+use relm4::{ComponentController, ComponentSender, adw, gtk};
 
 use crate::i18n::gettext;
 

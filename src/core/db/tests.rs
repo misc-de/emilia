@@ -101,9 +101,9 @@ fn play_events_aggregate_into_stats() {
     assert_eq!(tot.skips, 1);
     assert_eq!(tot.total_played_ms, 45_000 + 50_000 + 40_000 + 5_000);
     assert_eq!(tot.distinct_tracks, 2); // a1, a2 (c1 only a skip)
-                                        // stats_totals leaves distinct_artists/albums at 0 — the caller fills
-                                        // them from the full top lists, whose lengths (1 and 1) are asserted
-                                        // below: 1 artist (Alice, a2 folds onto her) and 1 album (Album X).
+    // stats_totals leaves distinct_artists/albums at 0 — the caller fills
+    // them from the full top lists, whose lengths (1 and 1) are asserted
+    // below: 1 artist (Alice, a2 folds onto her) and 1 album (Album X).
     assert_eq!(tot.distinct_artists, 0);
     assert_eq!(tot.distinct_albums, 0);
 
@@ -545,7 +545,7 @@ fn yt_playlist_cache_roundtrips_and_upserts() {
 
 #[test]
 fn area_filtering_hides_from_listings() {
-    use crate::core::category::{album_key, areas_value, Area};
+    use crate::core::category::{Area, album_key, areas_value};
     let lib = Library::open_in_memory().unwrap();
     lib.upsert_track(&track("/x/1.mp3", Some("X"), Some("Y")))
         .unwrap();
@@ -867,9 +867,10 @@ fn area_cascade_resolution() {
 
     // Track level wins: empty list = hidden.
     lib.set_category("track", "/a/1.mp3", Some("")).unwrap();
-    assert!(lib
-        .resolve_areas(Some("X"), Some("Y"), "/a/1.mp3")
-        .is_empty());
+    assert!(
+        lib.resolve_areas(Some("X"), Some("Y"), "/a/1.mp3")
+            .is_empty()
+    );
     // album_areas/artist_areas ignore the track level.
     assert_eq!(lib.album_areas("X", "Y"), vec![Area::Audiobooks]);
 }
@@ -1339,18 +1340,22 @@ fn album_classification_uses_primary_artist() {
     // compilation are not.
     let singles = lib.albums_classified(AlbumKind::Single).unwrap();
     assert!(singles.iter().any(|a| a.album == "Wildberry Lillet"));
-    assert!(singles
-        .iter()
-        .all(|a| a.album != "Bambule" && a.album != "Kill Bill"));
+    assert!(
+        singles
+            .iter()
+            .all(|a| a.album != "Bambule" && a.album != "Kill Bill")
+    );
 
     // "Bambule" is a regular album; the compilation is excluded; and the
     // dominated best-of is the main artist's album, not a compilation.
     let albums = lib.albums_classified(AlbumKind::Album).unwrap();
     assert!(albums.iter().any(|a| a.album == "Bambule" && a.tracks == 4));
     assert!(albums.iter().all(|a| a.album != "Kill Bill"));
-    assert!(albums
-        .iter()
-        .any(|a| a.album == "Bäst of" && a.artist == "Die Ärzte"));
+    assert!(
+        albums
+            .iter()
+            .any(|a| a.album == "Bäst of" && a.artist == "Die Ärzte")
+    );
 
     // Manual override wins over the heuristic: force "Kill Bill" to album,
     // and "Wildberry Lillet" (a single) to compilation.
@@ -1426,7 +1431,7 @@ fn search_excludes_hidden_items() {
 
 #[test]
 fn search_files_album_hits_by_category() {
-    use crate::core::category::{album_key, Area};
+    use crate::core::category::{Area, album_key};
     let lib = Library::open_in_memory().unwrap();
     lib.upsert_tracks(&[
         // A 4-track album → stays a plain Album.
@@ -1455,14 +1460,15 @@ fn search_files_album_hits_by_category() {
     // The concert must not also leak into the generic Albums list.
     assert!(r.albums.iter().all(|a| a.album != "Record Live"));
     // Sanity on the override semantics used above.
-    assert!(lib
-        .album_areas("Band", "Record Live")
-        .contains(&Area::Concerts));
+    assert!(
+        lib.album_areas("Band", "Record Live")
+            .contains(&Area::Concerts)
+    );
 }
 
 #[test]
 fn singles_area_reflects_kind_and_override() {
-    use crate::core::category::{album_key, Area};
+    use crate::core::category::{Area, album_key};
     let lib = Library::open_in_memory().unwrap();
     // A 1-track album → classified Single by the heuristic.
     lib.upsert_tracks(&[track("/s/1.mp3", Some("Solo"), Some("My Single"))])

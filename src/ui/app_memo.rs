@@ -20,7 +20,7 @@ use relm4::{adw, gtk};
 use crate::core::mic::MicRecorder;
 use crate::i18n::{gettext, ngettext_n};
 use crate::model::{MemoCategory, MemoItem};
-use crate::ui::app::{fmt_duration, App, MemoView, Msg};
+use crate::ui::app::{App, MemoView, Msg, fmt_duration};
 use crate::ui::app_dialogs::CtxMsg;
 use crate::ui::app_rec_edit::EditMsg;
 use crate::ui::app_streaming::StreamMsg;
@@ -490,13 +490,12 @@ impl App {
         // clips whose headers make lofty report 0 (which is what left these rows
         // at 0 in the first place).
         for m in &mut self.memo.memo_items {
-            if m.duration_ms <= 0 {
-                if let Some(ms) =
+            if m.duration_ms <= 0
+                && let Some(ms) =
                     crate::core::scanner::probe_duration_ms(std::path::Path::new(&m.path))
-                {
-                    let _ = self.library.set_memo_duration(m.id, ms);
-                    m.duration_ms = ms;
-                }
+            {
+                let _ = self.library.set_memo_duration(m.id, ms);
+                m.duration_ms = ms;
             }
         }
         // Apply the section's chosen sort (drives the Recent list and the order
@@ -603,16 +602,16 @@ impl App {
         // Note: no "emilia-flush" here on purpose — the default row padding gives
         // the prefix icon the same gap from the frame as the suffixes on the right.
         let mut sub: Vec<String> = vec![fmt_datetime(m.recorded_at)];
-        if show_category {
-            if let Some(name) = m.category_id.and_then(|cid| {
+        if show_category
+            && let Some(name) = m.category_id.and_then(|cid| {
                 self.memo
                     .categories
                     .iter()
                     .find(|c| c.id == cid)
                     .map(|c| c.name.clone())
-            }) {
-                sub.push(name);
-            }
+            })
+        {
+            sub.push(name);
         }
         row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
         row.add_prefix(&gtk::Image::from_icon_name(

@@ -9,8 +9,8 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use super::{
-    escape_lucene, percent_encode, shrink_image, AcoustIdMatch, CanonicalTrack, ReleaseMatch,
-    TrackTags, IMAGE_RETRY_MAX, USER_AGENT,
+    AcoustIdMatch, CanonicalTrack, IMAGE_RETRY_MAX, ReleaseMatch, TrackTags, USER_AGENT,
+    escape_lucene, percent_encode, shrink_image,
 };
 use crate::core::fingerprint;
 use crate::core::net;

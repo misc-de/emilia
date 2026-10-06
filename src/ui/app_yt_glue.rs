@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use adw::prelude::*;
-use relm4::{adw, ComponentController, ComponentSender};
+use relm4::{ComponentController, ComponentSender, adw};
 
 use crate::core::db::Library;
 use crate::core::youtube;
@@ -117,11 +117,11 @@ impl App {
         let _ = self
             .library
             .set_recent_meta(&video_id, artist.as_deref(), cover.as_deref());
-        if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str()) {
-            if let Some(now) = self.mini.now_playing.clone() {
-                self.mpris
-                    .set_metadata(0, &now, artist.as_deref(), None, None, cover.as_deref());
-            }
+        if self.youtube.playing_video_id.as_deref() == Some(video_id.as_str())
+            && let Some(now) = self.mini.now_playing.clone()
+        {
+            self.mpris
+                .set_metadata(0, &now, artist.as_deref(), None, None, cover.as_deref());
         }
         self.yt_page.emit(YtInput::ReloadRecent);
     }

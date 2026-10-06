@@ -7,7 +7,7 @@ use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::i18n::{gettext, gettext_f};
-use crate::ui::app::{online_available, ActiveSource, App, Cmd, CtxTarget, Msg};
+use crate::ui::app::{ActiveSource, App, Cmd, CtxTarget, Msg, online_available};
 use crate::ui::app_views::natural_key;
 use crate::ui::fs_row::{FsEntry, FsInput, RowOpts};
 use crate::ui::play_mark::PlaybackSink;
@@ -317,11 +317,11 @@ impl App {
             }
             return;
         }
-        if self.can_go_up() {
-            if let Some(parent) = self.files.browse_dir.as_ref().and_then(|d| d.parent()) {
-                self.files.browse_dir = Some(parent.to_path_buf());
-                self.load_dir(sender);
-            }
+        if self.can_go_up()
+            && let Some(parent) = self.files.browse_dir.as_ref().and_then(|d| d.parent())
+        {
+            self.files.browse_dir = Some(parent.to_path_buf());
+            self.load_dir(sender);
         }
     }
 
@@ -335,11 +335,11 @@ impl App {
             }
             return;
         }
-        if let Some(root) = self.files.root_dir.clone() {
-            if self.files.browse_dir.as_ref() != Some(&root) {
-                self.files.browse_dir = Some(root);
-                self.load_dir(sender);
-            }
+        if let Some(root) = self.files.root_dir.clone()
+            && self.files.browse_dir.as_ref() != Some(&root)
+        {
+            self.files.browse_dir = Some(root);
+            self.load_dir(sender);
         }
     }
 
@@ -588,15 +588,15 @@ impl App {
         // This folder is now shown; restore the remembered scroll position (from
         // the last visit) after the layout.
         self.files.shown_dir = self.files.browse_dir.clone();
-        if let (Some(dir), Some(sc)) = (self.files.browse_dir.clone(), self.fs_scroller()) {
-            if let Some(&value) = self.files.fs_scroll.borrow().get(&dir) {
-                for delay in [50u64, 250] {
-                    let sc = sc.clone();
-                    gtk::glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(delay),
-                        move || sc.vadjustment().set_value(value),
-                    );
-                }
+        if let (Some(dir), Some(sc)) = (self.files.browse_dir.clone(), self.fs_scroller())
+            && let Some(&value) = self.files.fs_scroll.borrow().get(&dir)
+        {
+            for delay in [50u64, 250] {
+                let sc = sc.clone();
+                gtk::glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(delay),
+                    move || sc.vadjustment().set_value(value),
+                );
             }
         }
     }
@@ -759,10 +759,10 @@ impl App {
         }));
         let sender = sender.clone();
         dialog.connect_response(None, move |_, resp| {
-            if resp == "add" {
-                if let Some(m) = msg.borrow_mut().take() {
-                    sender.input(m);
-                }
+            if resp == "add"
+                && let Some(m) = msg.borrow_mut().take()
+            {
+                sender.input(m);
             }
         });
         dialog.present(Some(root));

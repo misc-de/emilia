@@ -201,7 +201,7 @@ impl Library {
         key: &str,
         area: crate::core::category::Area,
     ) -> Result<()> {
-        use crate::core::category::{areas_value, parse_areas, Area};
+        use crate::core::category::{Area, areas_value, parse_areas};
         let mut areas = match self.get_category(scope, key)? {
             Some(v) => parse_areas(&v),
             None => Area::DEFAULT.to_vec(),

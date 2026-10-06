@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
@@ -49,14 +49,14 @@ fn is_allowed_remote_uri(uri: &str) -> bool {
 fn toc_chapters(toc: &gst::Toc) -> Vec<(i64, String)> {
     fn collect(entries: Vec<gst::TocEntry>, out: &mut Vec<(i64, String)>) {
         for entry in entries {
-            if entry.entry_type() == gst::TocEntryType::Chapter {
-                if let Some((start, _)) = entry.start_stop_times() {
-                    let title = entry
-                        .tags()
-                        .and_then(|t| t.get::<gst::tags::Title>().map(|v| v.get().to_string()))
-                        .unwrap_or_default();
-                    out.push((start.max(0) / 1_000_000, title));
-                }
+            if entry.entry_type() == gst::TocEntryType::Chapter
+                && let Some((start, _)) = entry.start_stop_times()
+            {
+                let title = entry
+                    .tags()
+                    .and_then(|t| t.get::<gst::tags::Title>().map(|v| v.get().to_string()))
+                    .unwrap_or_default();
+                out.push((start.max(0) / 1_000_000, title));
             }
             collect(entry.sub_entries(), out);
         }
@@ -160,10 +160,10 @@ fn reopen_deck(
     };
     // A live source (radio) does not preroll, so no `AsyncDone` would come to
     // start it.
-    if let Ok(gst::StateChangeSuccess::NoPreroll) = bin.set_state(target) {
-        if play {
-            let _ = bin.set_state(gst::State::Playing);
-        }
+    if let Ok(gst::StateChangeSuccess::NoPreroll) = bin.set_state(target)
+        && play
+    {
+        let _ = bin.set_state(gst::State::Playing);
     }
 }
 
@@ -789,12 +789,10 @@ impl Player {
                     if gapless.load(Ordering::Relaxed)
                         && crossfade_ms.load(Ordering::Relaxed) == 0
                         && active.load(Ordering::Relaxed) == idx
+                        && let Some(uri) = next_uri.lock().ok().and_then(|mut g| g.take())
+                        && let Ok(bin) = vals[0].get::<gst::Element>()
                     {
-                        if let Some(uri) = next_uri.lock().ok().and_then(|mut g| g.take()) {
-                            if let Ok(bin) = vals[0].get::<gst::Element>() {
-                                bin.set_property("uri", uri);
-                            }
-                        }
+                        bin.set_property("uri", uri);
                     }
                     None
                 });
@@ -1028,10 +1026,12 @@ impl Player {
                 .map(|t| t.mseconds() as i64);
             // Keep the resume point current on our own (not only when the app
             // asks), but never with the 0 of a deck still seeking back.
-            if watch && !net.reconnecting.get() && pending_seek.get() == 0 {
-                if let Some(ms) = pos.filter(|&ms| ms > 0) {
-                    last_pos.set(ms);
-                }
+            if watch
+                && !net.reconnecting.get()
+                && pending_seek.get() == 0
+                && let Some(ms) = pos.filter(|&ms| ms > 0)
+            {
+                last_pos.set(ms);
             }
             if !watch || pos != seen {
                 seen = pos;

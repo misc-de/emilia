@@ -1,7 +1,7 @@
 //! Unit tests of the core MCP tool layer ([`super`]).
 
 use super::*;
-use crate::core::mcp::{state, McpContext};
+use crate::core::mcp::{McpContext, state};
 use std::sync::{Arc, Mutex};
 
 /// Build a context whose control sink records the commands it receives, so
@@ -179,12 +179,14 @@ fn ctx_memo(mic_ok: bool) -> McpContext {
 fn record_memo_starts_stops_and_reports_the_saved_memo() {
     let ctx = ctx_memo(true);
     assert!(dispatch(&ctx, "record_memo", &json!({ "action": "stop" })).is_err());
-    assert!(dispatch(
-        &ctx,
-        "record_memo",
-        &json!({ "action": "start", "duration_s": 0 })
-    )
-    .is_err());
+    assert!(
+        dispatch(
+            &ctx,
+            "record_memo",
+            &json!({ "action": "start", "duration_s": 0 })
+        )
+        .is_err()
+    );
     let started = dispatch(&ctx, "record_memo", &json!({ "action": "start" })).unwrap();
     assert_eq!(started["recording"], json!(true));
     // A second start is refused while one runs.
@@ -263,24 +265,30 @@ fn get_queue_shows_the_upcoming_part() {
 fn set_equalizer_validates_and_builds_keys() {
     let (ctx, log) = ctx_recording();
     // Wrong band count / unknown scope / missing key are refused.
-    assert!(dispatch(
-        &ctx,
-        "set_equalizer",
-        &json!({ "scope": "global", "bands": [1, 2] })
-    )
-    .is_err());
-    assert!(dispatch(
-        &ctx,
-        "set_equalizer",
-        &json!({ "scope": "room", "reset": true })
-    )
-    .is_err());
-    assert!(dispatch(
-        &ctx,
-        "set_equalizer",
-        &json!({ "scope": "artist", "reset": true })
-    )
-    .is_err());
+    assert!(
+        dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "global", "bands": [1, 2] })
+        )
+        .is_err()
+    );
+    assert!(
+        dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "room", "reset": true })
+        )
+        .is_err()
+    );
+    assert!(
+        dispatch(
+            &ctx,
+            "set_equalizer",
+            &json!({ "scope": "artist", "reset": true })
+        )
+        .is_err()
+    );
     assert!(log.lock().unwrap().is_empty());
     let bands = json!([20, 0, 0, 0, 0, 0, 0, 0, 0, -3]);
     dispatch(

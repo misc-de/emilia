@@ -13,7 +13,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::model::{StatEntry, StatTotals};
-use crate::ui::app::{unix_now, StatsPeriod};
+use crate::ui::app::{StatsPeriod, unix_now};
 
 /// How many entries are shown per ranking at most.
 const TOP_N: usize = 10;

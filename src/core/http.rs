@@ -11,7 +11,7 @@
 
 use std::io::{Read, Write};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::Serialize;
 
 /// Cap for the request head (request line + headers).

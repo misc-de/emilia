@@ -3,7 +3,7 @@
 //! Used on both the server and client sides; deliberately free of GTK
 //! and network details so it can be tested standalone.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 /// Protocol version of the QR/pairing URL. **Kept at 2** so devices with a newer

@@ -33,7 +33,7 @@ use crate::core::youtube::{self, YtKind, YtResult};
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{SortCrit, YtView};
 use crate::ui::app_sort::read_sort;
-use crate::ui::yt_channels::{refresh_summary_text, WatchRow};
+use crate::ui::yt_channels::{WatchRow, refresh_summary_text};
 use crate::ui::yt_page_channels::cache_missing_channel_thumbs;
 use crate::ui::yt_page_lists::read_channel_view_prefs;
 // Still reached as `crate::ui::yt_page::…` from `app_init.rs` / `app_views_handlers.rs`.

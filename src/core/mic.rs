@@ -13,10 +13,10 @@
 //! new codec work.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
@@ -138,20 +138,19 @@ impl MicRecorder {
         if let Some(bus) = pipeline.bus() {
             let level_w = level.clone();
             bus.set_sync_handler(move |_, msg| {
-                if let gst::MessageView::Element(el) = msg.view() {
-                    if let Some(s) = el.structure() {
-                        if s.name() == "level" {
-                            if let Ok(peaks) = s.get::<gst::glib::ValueArray>("peak") {
-                                let p: &[gst::glib::Value] = &peaks;
-                                let channels = p.len().max(1) as u32;
-                                let left = p.first().map(norm_db).unwrap_or(0.0);
-                                // Mono: mirror the single channel onto the right.
-                                let right = p.get(1).map(norm_db).unwrap_or(left);
-                                level_w.store(left, right, channels);
-                            }
-                            return gst::BusSyncReply::Drop;
-                        }
+                if let gst::MessageView::Element(el) = msg.view()
+                    && let Some(s) = el.structure()
+                    && s.name() == "level"
+                {
+                    if let Ok(peaks) = s.get::<gst::glib::ValueArray>("peak") {
+                        let p: &[gst::glib::Value] = &peaks;
+                        let channels = p.len().max(1) as u32;
+                        let left = p.first().map(norm_db).unwrap_or(0.0);
+                        // Mono: mirror the single channel onto the right.
+                        let right = p.get(1).map(norm_db).unwrap_or(left);
+                        level_w.store(left, right, channels);
                     }
+                    return gst::BusSyncReply::Drop;
                 }
                 gst::BusSyncReply::Pass
             });

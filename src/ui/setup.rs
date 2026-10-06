@@ -20,7 +20,7 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::i18n::{gettext, switch_language, system_language_code, LANGUAGES};
+use crate::i18n::{LANGUAGES, gettext, switch_language, system_language_code};
 use crate::ui::app::SECTIONS;
 
 /// Number of wizard steps (0..STEPS-1).
@@ -674,10 +674,10 @@ impl SetupPage {
         }
         let sender = sender.clone();
         chooser.select_folder(Some(&window), gtk::gio::Cancellable::NONE, move |res| {
-            if let Ok(folder) = res {
-                if let Some(path) = folder.path() {
-                    sender.input(SetupInput::FolderChosen(path));
-                }
+            if let Ok(folder) = res
+                && let Some(path) = folder.path()
+            {
+                sender.input(SetupInput::FolderChosen(path));
             }
         });
     }

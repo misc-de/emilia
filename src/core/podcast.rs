@@ -5,7 +5,7 @@
 use std::io::Read;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use crate::core::net;
 use crate::model::Episode;
@@ -760,14 +760,14 @@ pub fn parse_chapters(text: &str) -> Vec<(i64, String)> {
         let b = line.as_bytes();
         let mut i = 0;
         while i < b.len() {
-            if b[i].is_ascii_digit() {
-                if let Some((len, ms)) = match_timestamp_at(line, i) {
-                    let after = strip(&line[i + len..]);
-                    let before = strip(&line[..i]);
-                    let label = if !after.is_empty() { after } else { before };
-                    out.push((ms, label.to_string()));
-                    break;
-                }
+            if b[i].is_ascii_digit()
+                && let Some((len, ms)) = match_timestamp_at(line, i)
+            {
+                let after = strip(&line[i + len..]);
+                let before = strip(&line[..i]);
+                let label = if !after.is_empty() { after } else { before };
+                out.push((ms, label.to_string()));
+                break;
             }
             i += 1;
         }

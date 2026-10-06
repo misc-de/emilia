@@ -258,8 +258,8 @@ impl App {
             // A folder recognized as an album: its stored cover (custom upload
             // first, keyed by the resolved artist+album) wins over scanning the
             // folder/embedded art — so a just-set cover actually shows.
-            if let Some(FsKind::Album { artist, album }) = self.fs_music_kind(entry) {
-                if let Some(tex) = self
+            if let Some(FsKind::Album { artist, album }) = self.fs_music_kind(entry)
+                && let Some(tex) = self
                     .library
                     .get_album_meta(&artist, &album)
                     .ok()
@@ -267,14 +267,13 @@ impl App {
                     .and_then(|m| m.cover_path)
                     .filter(|p| std::path::Path::new(p).exists())
                     .and_then(|p| gtk::gdk::Texture::from_filename(&p).ok())
-                {
-                    return Some(tex);
-                }
+            {
+                return Some(tex);
             }
-            if let Some(path) = cover::find_cover_file(epath) {
-                if let Ok(texture) = gtk::gdk::Texture::from_filename(&path) {
-                    return Some(texture);
-                }
+            if let Some(path) = cover::find_cover_file(epath)
+                && let Ok(texture) = gtk::gdk::Texture::from_filename(&path)
+            {
+                return Some(texture);
             }
         }
 
@@ -291,14 +290,12 @@ impl App {
             Some(epath.clone())
         };
 
-        if let Some(audio) = &audio {
-            if let Some(bytes) = cover::embedded_cover(audio) {
-                if let Ok(tex) =
-                    gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from(bytes.as_slice()))
-                {
-                    return Some(tex);
-                }
-            }
+        if let Some(audio) = &audio
+            && let Some(bytes) = cover::embedded_cover(audio)
+            && let Ok(tex) =
+                gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from(bytes.as_slice()))
+        {
+            return Some(tex);
         }
 
         // Last: online-loaded cover from the cache (assigned via the tags).

@@ -13,12 +13,12 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::core::scanner;
 use crate::i18n::gettext;
-use crate::ui::app::{artist_count_subtitle, find_scroller, read_entries, App, Cmd, Msg};
+use crate::ui::app::{App, Cmd, Msg, artist_count_subtitle, find_scroller, read_entries};
 use crate::ui::card_list::CardItem;
 use crate::ui::enrich::enrich_worker;
 
 pub(crate) use crate::ui::app_views_album::{
-    most_common_album_base, natural_key, track_disc, AlbumPageRef,
+    AlbumPageRef, most_common_album_base, natural_key, track_disc,
 };
 
 /// Maps an album overview to the rows of a virtualised [`CardList`]: the same
@@ -459,10 +459,10 @@ impl App {
                 }
             }
             for a in &mut artists {
-                if a.image_path.as_deref().is_none_or(|p| p.trim().is_empty()) {
-                    if let Some(album) = first_album.get(&norm_key(&a.name)) {
-                        a.image_path = self.album_cover_for(&a.name, album);
-                    }
+                if a.image_path.as_deref().is_none_or(|p| p.trim().is_empty())
+                    && let Some(album) = first_album.get(&norm_key(&a.name))
+                {
+                    a.image_path = self.album_cover_for(&a.name, album);
                 }
             }
         }
@@ -564,16 +564,15 @@ impl App {
             .visible_page()
             .and_then(|p| p.tag())
             .is_some_and(|t| t == "main");
-        if leaving_root {
-            if let Some(sc) = self
+        if leaving_root
+            && let Some(sc) = self
                 .nav
                 .view_stack
                 .visible_child()
                 .and_then(|c| find_scroller(&c))
-            {
-                let value = sc.vadjustment().value();
-                *self.nav.overview_scroll.borrow_mut() = Some((sc, value));
-            }
+        {
+            let value = sc.vadjustment().value();
+            *self.nav.overview_scroll.borrow_mut() = Some((sc, value));
         }
     }
 
@@ -634,10 +633,10 @@ impl App {
             let action = std::cell::RefCell::new(Some(action));
             // Fires on timeout, on Undo, or when superseded by a newer toast.
             toast.connect_dismissed(move |_| {
-                if !undone.get() {
-                    if let Some(m) = action.borrow_mut().take() {
-                        sender.input(m);
-                    }
+                if !undone.get()
+                    && let Some(m) = action.borrow_mut().take()
+                {
+                    sender.input(m);
                 }
             });
         }

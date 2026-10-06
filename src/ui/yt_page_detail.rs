@@ -18,8 +18,8 @@ use crate::ui::app::YtView;
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 use crate::ui::yt_channels::{
-    duration_chip, ensure_channel_image, fmt_duration, refresh_channel_videos, WatchRow,
-    CHANNEL_REFRESH_THREADS,
+    CHANNEL_REFRESH_THREADS, WatchRow, duration_chip, ensure_channel_image, fmt_duration,
+    refresh_channel_videos,
 };
 use crate::ui::yt_page::{ProgressPopup, YtCmd, YtInput, YtOutput, YtPage};
 
@@ -655,11 +655,7 @@ impl YtPage {
                 (Some(popup), Some(v)) => popup.video_id == v,
                 (None, _) => false,
             };
-            if close {
-                guard.take()
-            } else {
-                None
-            }
+            if close { guard.take() } else { None }
         };
         // Close outside the borrow: `close()` may emit `closed` synchronously.
         if let Some(popup) = popup {

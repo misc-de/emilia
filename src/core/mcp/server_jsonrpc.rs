@@ -14,14 +14,14 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
-use super::protocol::{RpcResponse, PARSE_ERROR};
-use super::{tools, McpContext, PORT};
+use super::protocol::{PARSE_ERROR, RpcResponse};
+use super::{McpContext, PORT, tools};
 use crate::core::http::{self, HttpReq};
 use crate::core::sync::crypto;
 
@@ -277,7 +277,7 @@ impl ConnHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::mcp::{command::McpCommand, state, McpContext};
+    use crate::core::mcp::{McpContext, command::McpCommand, state};
     use std::sync::Mutex;
 
     fn test_ctx() -> (Arc<McpContext>, Arc<Mutex<Vec<McpCommand>>>) {

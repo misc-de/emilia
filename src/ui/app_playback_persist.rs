@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use crate::model::Track;
-use crate::ui::app::{guarded_resume, App, PlaySession};
+use crate::ui::app::{App, PlaySession, guarded_resume};
 use crate::ui::app_playback::{CURRENT_PATH_KEY, CURRENT_POS_KEY};
 
 impl App {

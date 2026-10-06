@@ -6,7 +6,7 @@ use std::path::Path;
 
 #[cfg(doc)]
 use super::RATE_LIMIT;
-use super::{save_artist_image, save_cover, save_gallery_image, OnlineClient};
+use super::{OnlineClient, save_artist_image, save_cover, save_gallery_image};
 use crate::core::db::Library;
 use crate::core::fingerprint;
 use crate::model::{AlbumMeta, ArtistMeta, TrackMeta};
@@ -155,10 +155,9 @@ pub fn store_album_gallery(
         .ok()
         .flatten()
         .and_then(|m| m.cover_path)
+        && std::path::Path::new(&local).exists()
     {
-        if std::path::Path::new(&local).exists() {
-            stored.push((local, "front".to_string(), "local".to_string()));
-        }
+        stored.push((local, "front".to_string(), "local".to_string()));
     }
     for (i, (bytes, kind)) in imgs.iter().enumerate() {
         match save_gallery_image("albimg", &key, i, bytes) {

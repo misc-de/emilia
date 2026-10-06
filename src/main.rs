@@ -7,7 +7,7 @@ mod i18n;
 mod model;
 mod ui;
 
-use relm4::{adw, RelmApp};
+use relm4::{RelmApp, adw};
 
 const APP_ID: &str = "de.cais.Emilia";
 

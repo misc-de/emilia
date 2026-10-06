@@ -5,7 +5,7 @@
 use std::io::Read;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// A station search result (Radio-Browser): enough to display it and –
 /// when selected – save it as a station.

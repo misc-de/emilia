@@ -61,20 +61,19 @@ impl Library {
         album: Option<&str>,
         path: &str,
     ) -> Vec<crate::core::category::Area> {
-        use crate::core::category::{album_key, parse_areas, Area};
+        use crate::core::category::{Area, album_key, parse_areas};
         if let Ok(Some(v)) = self.get_category("track", path) {
             return parse_areas(&v);
         }
-        if let Some(album) = album {
-            if let Ok(Some(v)) = self.get_category("album", &album_key(artist.unwrap_or(""), album))
-            {
-                return parse_areas(&v);
-            }
+        if let Some(album) = album
+            && let Ok(Some(v)) = self.get_category("album", &album_key(artist.unwrap_or(""), album))
+        {
+            return parse_areas(&v);
         }
-        if let Some(artist) = artist {
-            if let Ok(Some(v)) = self.get_category("artist", artist) {
-                return parse_areas(&v);
-            }
+        if let Some(artist) = artist
+            && let Ok(Some(v)) = self.get_category("artist", artist)
+        {
+            return parse_areas(&v);
         }
         // Folder chain: from the file's directory upwards (deepest setting wins).
         let mut dir = std::path::Path::new(path).parent();
@@ -89,7 +88,7 @@ impl Library {
 
     /// Effective areas of a folder (this folder upwards → default).
     pub fn folder_areas(&self, folder: &str) -> Vec<crate::core::category::Area> {
-        use crate::core::category::{parse_areas, Area};
+        use crate::core::category::{Area, parse_areas};
         let mut dir = Some(std::path::Path::new(folder));
         while let Some(d) = dir {
             if let Ok(Some(v)) = self.get_category("folder", &d.to_string_lossy()) {
@@ -162,7 +161,7 @@ impl Library {
 
     /// Effective areas of an artist (artist → default).
     pub fn artist_areas(&self, name: &str) -> Vec<crate::core::category::Area> {
-        use crate::core::category::{parse_areas, Area};
+        use crate::core::category::{Area, parse_areas};
         if let Ok(Some(v)) = self.get_category("artist", name) {
             return parse_areas(&v);
         }

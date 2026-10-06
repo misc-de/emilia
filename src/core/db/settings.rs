@@ -69,14 +69,13 @@ impl Library {
         use crate::core::secrets;
         // API keys/tokens stored as settings.
         for key in ["acoustid_key", "fanart_key"] {
-            if let Ok(Some(v)) = self.get_setting(key) {
-                if !v.is_empty()
-                    && v != secrets::SECRET_PREFIX
-                    && secrets::store_named(key, &format!("Emilia {key}"), &v)
-                    && secrets::lookup_named(key).as_deref() == Some(v.as_str())
-                {
-                    let _ = self.set_setting(key, secrets::SECRET_PREFIX);
-                }
+            if let Ok(Some(v)) = self.get_setting(key)
+                && !v.is_empty()
+                && v != secrets::SECRET_PREFIX
+                && secrets::store_named(key, &format!("Emilia {key}"), &v)
+                && secrets::lookup_named(key).as_deref() == Some(v.as_str())
+            {
+                let _ = self.set_setting(key, secrets::SECRET_PREFIX);
             }
         }
         // Remote-source credentials (username/account + app password/token).
@@ -85,25 +84,21 @@ impl Library {
                 continue;
             }
             let label = crate::core::source::secret_label(&s.kind, &s.name);
-            if let Some(pw) = s.password.as_deref() {
-                if !pw.is_empty()
-                    && !pw.starts_with(secrets::SECRET_PREFIX)
-                    && secrets::store_source_password(s.id, &label, pw)
-                    && secrets::lookup_source_password(s.id).as_deref() == Some(pw)
-                {
-                    let _ =
-                        self.set_source_password(s.id, Some(&secrets::source_password_ref(s.id)));
-                }
+            if let Some(pw) = s.password.as_deref()
+                && !pw.is_empty()
+                && !pw.starts_with(secrets::SECRET_PREFIX)
+                && secrets::store_source_password(s.id, &label, pw)
+                && secrets::lookup_source_password(s.id).as_deref() == Some(pw)
+            {
+                let _ = self.set_source_password(s.id, Some(&secrets::source_password_ref(s.id)));
             }
-            if let Some(user) = s.username.as_deref() {
-                if !user.is_empty()
-                    && !user.starts_with(secrets::SECRET_PREFIX)
-                    && secrets::store_source_username(s.id, &label, user)
-                    && secrets::lookup_source_username(s.id).as_deref() == Some(user)
-                {
-                    let _ =
-                        self.set_source_username(s.id, Some(&secrets::source_username_ref(s.id)));
-                }
+            if let Some(user) = s.username.as_deref()
+                && !user.is_empty()
+                && !user.starts_with(secrets::SECRET_PREFIX)
+                && secrets::store_source_username(s.id, &label, user)
+                && secrets::lookup_source_username(s.id).as_deref() == Some(user)
+            {
+                let _ = self.set_source_username(s.id, Some(&secrets::source_username_ref(s.id)));
             }
         }
     }

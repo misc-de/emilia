@@ -175,14 +175,14 @@ impl App {
             }
             // A long-form YouTube item that ran out counts as watched: keep the
             // mark (instead of a resume point) and show it in its rows at once.
-            if let Some(vid) = self.youtube.playing_video_id.clone() {
-                if crate::core::youtube::is_longform(
+            if let Some(vid) = self.youtube.playing_video_id.clone()
+                && crate::core::youtube::is_longform(
                     (self.mini.track_duration_ms > 0).then_some(self.mini.track_duration_ms / 1000),
-                ) {
-                    let _ = self.library.mark_yt_finished(&vid);
-                    self.yt_page
-                        .emit(crate::ui::yt_page::YtInput::VideoFinished { video_id: vid });
-                }
+                )
+            {
+                let _ = self.library.mark_yt_finished(&vid);
+                self.yt_page
+                    .emit(crate::ui::yt_page::YtInput::VideoFinished { video_id: vid });
             }
             *self.transport.close_resume.borrow_mut() = None;
             // If a single song was slipped in between, now resume the interrupted
@@ -224,15 +224,15 @@ impl App {
             );
         }
         // YouTube only for long-form items — a song's row stays plain.
-        if let Some(video_id) = self.youtube.playing_video_id.clone() {
-            if crate::core::youtube::is_longform((dur > 0).then_some(dur / 1000)) {
-                self.yt_page
-                    .emit(crate::ui::yt_page::YtInput::VideoProgressTick {
-                        video_id,
-                        position_ms: pos,
-                        duration_ms: dur,
-                    });
-            }
+        if let Some(video_id) = self.youtube.playing_video_id.clone()
+            && crate::core::youtube::is_longform((dur > 0).then_some(dur / 1000))
+        {
+            self.yt_page
+                .emit(crate::ui::yt_page::YtInput::VideoProgressTick {
+                    video_id,
+                    position_ms: pos,
+                    duration_ms: dur,
+                });
         }
     }
 
@@ -321,11 +321,11 @@ impl App {
                     s.duration_ms = dur;
                 }
             }
-            if let Some(cs) = self.transport.close_session.borrow_mut().as_mut() {
-                if let Some(s) = self.transport.play_session.as_ref() {
-                    cs.2 = s.played_ms;
-                    cs.3 = s.duration_ms;
-                }
+            if let Some(cs) = self.transport.close_session.borrow_mut().as_mut()
+                && let Some(s) = self.transport.play_session.as_ref()
+            {
+                cs.2 = s.played_ms;
+                cs.3 = s.duration_ms;
             }
             // Crossfade into the next track once we're inside the fade window
             // (no-op when crossfade is off or the next entry isn't eligible).

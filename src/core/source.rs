@@ -38,25 +38,25 @@ fn add_remote_source(lib: &Library, mut src: Source) -> Result<Source> {
     src.id = id;
 
     let label = secret_label(&src.kind, &src.name);
-    if let Some(password) = password.as_deref().filter(|p| !p.is_empty()) {
-        if crate::core::secrets::store_source_password(id, &label, password) {
-            let password_ref = crate::core::secrets::source_password_ref(id);
-            match lib.set_source_password(id, Some(&password_ref)) {
-                Ok(()) => src.password = Some(password_ref),
-                Err(e) => {
-                    tracing::warn!("Secret stored, but source password reference failed: {e}")
-                }
+    if let Some(password) = password.as_deref().filter(|p| !p.is_empty())
+        && crate::core::secrets::store_source_password(id, &label, password)
+    {
+        let password_ref = crate::core::secrets::source_password_ref(id);
+        match lib.set_source_password(id, Some(&password_ref)) {
+            Ok(()) => src.password = Some(password_ref),
+            Err(e) => {
+                tracing::warn!("Secret stored, but source password reference failed: {e}")
             }
         }
     }
-    if let Some(username) = username.as_deref().filter(|u| !u.is_empty()) {
-        if crate::core::secrets::store_source_username(id, &label, username) {
-            let username_ref = crate::core::secrets::source_username_ref(id);
-            match lib.set_source_username(id, Some(&username_ref)) {
-                Ok(()) => src.username = Some(username_ref),
-                Err(e) => {
-                    tracing::warn!("Secret stored, but source username reference failed: {e}")
-                }
+    if let Some(username) = username.as_deref().filter(|u| !u.is_empty())
+        && crate::core::secrets::store_source_username(id, &label, username)
+    {
+        let username_ref = crate::core::secrets::source_username_ref(id);
+        match lib.set_source_username(id, Some(&username_ref)) {
+            Ok(()) => src.username = Some(username_ref),
+            Err(e) => {
+                tracing::warn!("Secret stored, but source username reference failed: {e}")
             }
         }
     }

@@ -21,14 +21,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use crate::core::db::Library;
-use crate::core::http::{read_head, write_json, write_status, HttpReq};
+use crate::core::http::{HttpReq, read_head, write_json, write_status};
 use crate::core::sync::protocol::{self, Capabilities, PairRequest, PairResponse};
 use crate::core::sync::share::{ShareDecision, ShareManifest};
-use crate::core::sync::{crypto, data, SyncEvent};
 use crate::core::sync::{ACCEPT_POLL, PORT, PORT_ATTEMPTS, QR_TTL, SESSION_TIMEOUT};
+use crate::core::sync::{SyncEvent, crypto, data};
 
 /// Shared UI→server channel for the selective-share handshake. The server-side
 /// UI parks an outgoing offer (server-as-sender) or its decision on an incoming
@@ -207,11 +207,11 @@ impl SyncServer {
             if !paired && Instant::now() > deadline {
                 break; // nobody paired
             }
-            if let Some(dl) = session_deadline {
-                if Instant::now() > dl {
-                    emit(SyncEvent::PeerDisconnected);
-                    break;
-                }
+            if let Some(dl) = session_deadline
+                && Instant::now() > dl
+            {
+                emit(SyncEvent::PeerDisconnected);
+                break;
             }
 
             match self.listener.accept() {
@@ -525,10 +525,10 @@ impl SyncServer {
                 // its own tags (same as the client-as-receiver path), so it is
                 // indexed exactly like a normal scan. Memos are not music — they
                 // land in the memo store and are registered by the metadata apply.
-                if let Some(lib) = &lib {
-                    if !rel.starts_with(crate::core::sync::MEMO_PREFIX) {
-                        crate::core::scanner::ingest_file(lib, &dest);
-                    }
+                if let Some(lib) = &lib
+                    && !rel.starts_with(crate::core::sync::MEMO_PREFIX)
+                {
+                    crate::core::scanner::ingest_file(lib, &dest);
                 }
                 write_json(
                     stream,

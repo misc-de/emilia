@@ -168,10 +168,10 @@ pub(crate) fn spawn_gallery_decode(items: Vec<(String, gtk::Picture)>) {
     let targets: Vec<gtk::Picture> = items.into_iter().map(|(_, pic)| pic).collect();
     std::thread::spawn(move || {
         for (i, path) in paths.into_iter().enumerate() {
-            if let Some(tex) = crate::ui::widgets::decode_thumb(&path) {
-                if tx.send_blocking((i, path, tex)).is_err() {
-                    break;
-                }
+            if let Some(tex) = crate::ui::widgets::decode_thumb(&path)
+                && tx.send_blocking((i, path, tex)).is_err()
+            {
+                break;
             }
         }
     });
@@ -332,10 +332,10 @@ impl App {
         let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
         for (i, (cover, icon, title)) in items.iter().enumerate() {
             let (cell, pic) = gallery_cell(cover.as_deref(), icon, title, described);
-            if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
-                if crate::ui::widgets::cached_thumb(path).is_none() {
-                    to_decode.push((path.to_string(), pic));
-                }
+            if let (Some(path), Some(pic)) = (cover.as_deref(), pic)
+                && crate::ui::widgets::cached_thumb(path).is_none()
+            {
+                to_decode.push((path.to_string(), pic));
             }
 
             let idx = base + i;

@@ -11,7 +11,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::model::Source;
-use crate::ui::app::{confirm_destructive, ActiveSource, App, Cmd, Msg};
+use crate::ui::app::{ActiveSource, App, Cmd, Msg, confirm_destructive};
 use crate::ui::app_settings::SettingMsg;
 use crate::ui::fs_row::FsEntry;
 
@@ -309,36 +309,36 @@ impl App {
             .build();
         let sender = sender.clone();
         chooser.select_folder(Some(root), gtk::gio::Cancellable::NONE, move |res| {
-            if let Ok(folder) = res {
-                if let Some(path) = folder.path() {
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("Folder")
-                        .to_string();
-                    let src = Source {
-                        id: 0,
-                        kind: "local".into(),
-                        name,
-                        position: 0,
-                        path: Some(path.to_string_lossy().into_owned()),
-                        base_url: None,
-                        username: None,
-                        password: None,
-                        music_path: None,
-                    };
-                    if let Ok(lib) = Library::open() {
-                        match lib.add_source(&src) {
-                            // Switch to the freshly added tab and show its folder.
-                            Ok(id) => {
-                                sender.input(Msg::Source(SourceMsg::Added(id)));
-                                return;
-                            }
-                            Err(e) => tracing::warn!("add local source failed: {e}"),
+            if let Ok(folder) = res
+                && let Some(path) = folder.path()
+            {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Folder")
+                    .to_string();
+                let src = Source {
+                    id: 0,
+                    kind: "local".into(),
+                    name,
+                    position: 0,
+                    path: Some(path.to_string_lossy().into_owned()),
+                    base_url: None,
+                    username: None,
+                    password: None,
+                    music_path: None,
+                };
+                if let Ok(lib) = Library::open() {
+                    match lib.add_source(&src) {
+                        // Switch to the freshly added tab and show its folder.
+                        Ok(id) => {
+                            sender.input(Msg::Source(SourceMsg::Added(id)));
+                            return;
                         }
+                        Err(e) => tracing::warn!("add local source failed: {e}"),
                     }
-                    sender.input(Msg::Source(SourceMsg::Changed));
                 }
+                sender.input(Msg::Source(SourceMsg::Changed));
             }
         });
     }
@@ -373,10 +373,10 @@ impl App {
             if destructive {
                 b.add_css_class("destructive-action");
             }
-            if let Some(w) = b.child() {
-                if let Ok(lbl) = w.downcast::<gtk::Label>() {
-                    lbl.set_xalign(0.0);
-                }
+            if let Some(w) = b.child()
+                && let Ok(lbl) = w.downcast::<gtk::Label>()
+            {
+                lbl.set_xalign(0.0);
             }
             b
         };
@@ -507,10 +507,10 @@ impl App {
                     .build();
                 let sender = sender.clone();
                 chooser.select_folder(Some(root), gtk::gio::Cancellable::NONE, move |res| {
-                    if let Ok(f) = res {
-                        if let Some(p) = f.path() {
-                            sender.input(Msg::Setting(SettingMsg::SetMusicDir(p)));
-                        }
+                    if let Ok(f) = res
+                        && let Some(p) = f.path()
+                    {
+                        sender.input(Msg::Setting(SettingMsg::SetMusicDir(p)));
                     }
                 });
             }
@@ -552,10 +552,10 @@ impl App {
                         .build();
                     let sender = sender.clone();
                     chooser.select_folder(Some(root), gtk::gio::Cancellable::NONE, move |res| {
-                        if let Ok(f) = res {
-                            if let Some(p) = f.path() {
-                                sender.input(Msg::Source(SourceMsg::SetPath { id, path: p }));
-                            }
+                        if let Ok(f) = res
+                            && let Some(p) = f.path()
+                        {
+                            sender.input(Msg::Source(SourceMsg::SetPath { id, path: p }));
                         }
                     });
                 }

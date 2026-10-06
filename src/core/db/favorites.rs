@@ -3,7 +3,7 @@
 use anyhow::Result;
 use rusqlite::OptionalExtension;
 
-use super::{file_name_of, file_stem_of, Library};
+use super::{Library, file_name_of, file_stem_of};
 
 impl Library {
     // ---- Favorites ----
@@ -193,10 +193,10 @@ impl Library {
                 "artist" if include_artists => Some(("artist", key.clone(), false)),
                 _ => None,
             };
-            if let Some((scope, title, is_dir)) = entry {
-                if seen.insert((scope, key.clone())) {
-                    out.push((scope.to_string(), key, title, is_dir));
-                }
+            if let Some((scope, title, is_dir)) = entry
+                && seen.insert((scope, key.clone()))
+            {
+                out.push((scope.to_string(), key, title, is_dir));
             }
         }
         out.sort_by_cached_key(|a| a.2.to_lowercase());

@@ -8,7 +8,7 @@ use relm4::{adw, gtk};
 
 use crate::model::Track;
 use crate::ui::app::App;
-use crate::ui::app_playback::{absolute_seek, relative_seek, SeekTarget};
+use crate::ui::app_playback::{SeekTarget, absolute_seek, relative_seek};
 
 impl App {
     /// Sends the metadata of the running track to the MPRIS service

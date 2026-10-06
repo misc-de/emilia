@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use anyhow::{Result, anyhow};
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 
 /// Freshly generated TLS identity of the server (only for the duration of a session).

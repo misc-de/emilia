@@ -6,8 +6,8 @@
 //! handler below then runs on the UI thread with full access to the player,
 //! queue and library — the same entry points the buttons use.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use relm4::{ComponentController, ComponentSender};
 
@@ -514,10 +514,10 @@ impl App {
     /// The persisted bearer token, generated and stored on first use (Secret
     /// Service when available, like the other credentials).
     fn mcp_token(&self) -> String {
-        if let Ok(Some(t)) = self.library.get_secret_setting("mcp_token") {
-            if !t.is_empty() {
-                return t;
-            }
+        if let Ok(Some(t)) = self.library.get_secret_setting("mcp_token")
+            && !t.is_empty()
+        {
+            return t;
         }
         let token = crate::core::sync::crypto::generate_token(32);
         let _ = self.library.set_secret_setting("mcp_token", &token);

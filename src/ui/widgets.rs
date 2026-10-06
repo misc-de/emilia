@@ -133,12 +133,12 @@ fn decode_scaled_pixbuf(path: &str, px: i32) -> Option<(gtk::gdk_pixbuf::Pixbuf,
 pub fn decode_thumb(path: &str) -> Option<gtk::gdk::Texture> {
     let stamp = source_stamp(path)?;
     let file = crate::core::online::thumb_cache_path(path, &stamp);
-    if file.exists() {
-        if let Ok(pixbuf) = gtk::gdk_pixbuf::Pixbuf::from_file(&file) {
-            return Some(gtk::gdk::Texture::for_pixbuf(&pixbuf));
-        }
-        // Unreadable thumbnail: fall through and rewrite it.
+    if file.exists()
+        && let Ok(pixbuf) = gtk::gdk_pixbuf::Pixbuf::from_file(&file)
+    {
+        return Some(gtk::gdk::Texture::for_pixbuf(&pixbuf));
     }
+    // Unreadable thumbnail: fall through and rewrite it.
     let (pixbuf, edge) = decode_scaled_pixbuf(path, THUMB_PX)?;
     if edge > THUMB_PX {
         write_thumb_file(&file, &pixbuf);
@@ -505,28 +505,30 @@ fn start_decoder() -> CoverDecoder {
         let out_tx = out_tx.clone();
         // Worker thread: decode off the UI thread (path + texture are Send;
         // the Bin weak refs stay on the UI thread in `pending`).
-        std::thread::spawn(move || loop {
-            let path = {
-                let (queue, cvar) = &*queue;
-                let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
-                loop {
-                    if let Some(path) = q.pop() {
-                        break path;
+        std::thread::spawn(move || {
+            loop {
+                let path = {
+                    let (queue, cvar) = &*queue;
+                    let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+                    loop {
+                        if let Some(path) = q.pop() {
+                            break path;
+                        }
+                        q = cvar.wait(q).unwrap_or_else(|e| e.into_inner());
                     }
-                    q = cvar.wait(q).unwrap_or_else(|e| e.into_inner());
+                };
+                // Report the failure too, instead of dropping it silently: the UI
+                // side keys `pending` by path and only ever removes an entry when
+                // a result arrives. Staying quiet on an undecodable file would pin
+                // that entry (and its weak refs) for the process lifetime *and*
+                // make the `is_new` dedup swallow every later request for the
+                // same path.
+                let started = std::time::Instant::now();
+                let tex = decode_thumb(&path);
+                tracing::trace!("thumbnail decoded in {:?}: {path}", started.elapsed());
+                if out_tx.send_blocking((path, tex)).is_err() {
+                    break;
                 }
-            };
-            // Report the failure too, instead of dropping it silently: the UI
-            // side keys `pending` by path and only ever removes an entry when
-            // a result arrives. Staying quiet on an undecodable file would pin
-            // that entry (and its weak refs) for the process lifetime *and*
-            // make the `is_new` dedup swallow every later request for the
-            // same path.
-            let started = std::time::Instant::now();
-            let tex = decode_thumb(&path);
-            tracing::trace!("thumbnail decoded in {:?}: {path}", started.elapsed());
-            if out_tx.send_blocking((path, tex)).is_err() {
-                break;
             }
         });
     }
@@ -544,10 +546,10 @@ fn start_decoder() -> CoverDecoder {
                 };
                 store_thumb(path.clone(), tex.clone());
                 for target in targets {
-                    if target.still_wanted.as_ref().is_none_or(|f| f(&path)) {
-                        if let Some(bin) = target.bin.upgrade() {
-                            set_cover_thumb(&bin, &tex);
-                        }
+                    if target.still_wanted.as_ref().is_none_or(|f| f(&path))
+                        && let Some(bin) = target.bin.upgrade()
+                    {
+                        set_cover_thumb(&bin, &tex);
                     }
                 }
             }
@@ -862,14 +864,14 @@ pub fn enlarge_modal(
         if w > 0 {
             body.set_size_request((w - 48).clamp(280, LARGE_MODAL_WIDTH), -1);
         }
-        if let Some(sc) = &scroller {
-            if h > 0 {
-                // Leave room for the heading, the search field and Cancel.
-                let max = (h - 260).max(160);
-                sc.set_max_content_height(max);
-                if let Some(min) = min_height {
-                    sc.set_min_content_height(min.min(max));
-                }
+        if let Some(sc) = &scroller
+            && h > 0
+        {
+            // Leave room for the heading, the search field and Cancel.
+            let max = (h - 260).max(160);
+            sc.set_max_content_height(max);
+            if let Some(min) = min_height {
+                sc.set_min_content_height(min.min(max));
             }
         }
     });
@@ -1115,7 +1117,7 @@ pub fn busy_dialog(text: &str, width: i32) -> (adw::Dialog, gtk::Label) {
 
 #[cfg(test)]
 mod tests {
-    use super::{esc, source_stamp, write_thumb_file, DecodeQueue};
+    use super::{DecodeQueue, esc, source_stamp, write_thumb_file};
 
     fn queue_with(bursts: &[(u64, &[&str])]) -> DecodeQueue {
         let mut q = DecodeQueue { bursts: Vec::new() };

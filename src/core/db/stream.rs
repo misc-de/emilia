@@ -143,13 +143,13 @@ impl Library {
 
         if let Some((id, old_path, old_artist, old_incomplete)) = existing {
             // Fill in the artist if it was missing before.
-            if old_artist.as_deref().unwrap_or("").trim().is_empty() {
-                if let Some(a) = artist.filter(|a| !a.trim().is_empty()) {
-                    self.conn.execute(
-                        "UPDATE recording SET artist = ?1 WHERE id = ?2",
-                        rusqlite::params![a, id],
-                    )?;
-                }
+            if old_artist.as_deref().unwrap_or("").trim().is_empty()
+                && let Some(a) = artist.filter(|a| !a.trim().is_empty())
+            {
+                self.conn.execute(
+                    "UPDATE recording SET artist = ?1 WHERE id = ?2",
+                    rusqlite::params![a, id],
+                )?;
             }
             // Upgrade an incomplete copy to a complete one: repoint to the new
             // file and let the caller delete the old (truncated) file.

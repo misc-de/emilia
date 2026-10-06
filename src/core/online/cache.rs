@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{name_hash, shared_client, MAX_IMAGE_EDGE, THUMB_FETCH_THREADS};
+use super::{MAX_IMAGE_EDGE, THUMB_FETCH_THREADS, name_hash, shared_client};
 use crate::core::cover;
 #[cfg(doc)]
 use crate::core::db::Library;
@@ -179,16 +179,16 @@ pub fn local_album_cover(
     let p = Path::new(sample_path);
 
     // 1) Embedded tag image → write to the cache.
-    if let Some(bytes) = cover::embedded_cover(p) {
-        if let Ok(path) = save_local_cover(artist, album, &bytes) {
-            return Some(path.to_string_lossy().into_owned());
-        }
+    if let Some(bytes) = cover::embedded_cover(p)
+        && let Ok(path) = save_local_cover(artist, album, &bytes)
+    {
+        return Some(path.to_string_lossy().into_owned());
     }
     // 2) Folder image → use its path directly (no copying needed).
-    if let Some(dir) = p.parent().filter(|_| folder_ok) {
-        if let Some(img) = cover::find_cover_file(dir) {
-            return Some(img.to_string_lossy().into_owned());
-        }
+    if let Some(dir) = p.parent().filter(|_| folder_ok)
+        && let Some(img) = cover::find_cover_file(dir)
+    {
+        return Some(img.to_string_lossy().into_owned());
     }
     None
 }
@@ -490,11 +490,14 @@ pub fn cache_youtube_thumbs(urls: &[String]) {
     let jobs = Mutex::new(missing);
     std::thread::scope(|s| {
         for _ in 0..n_threads {
-            s.spawn(|| loop {
-                let Some(url) = jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
-                    break;
-                };
-                cache_youtube_thumb(&url);
+            s.spawn(|| {
+                loop {
+                    let Some(url) = jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front()
+                    else {
+                        break;
+                    };
+                    cache_youtube_thumb(&url);
+                }
             });
         }
     });

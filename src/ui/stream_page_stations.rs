@@ -16,9 +16,9 @@ use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{SortCrit, StreamView};
 use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
 use crate::ui::app_helpers::{cover_widget, on_secondary_click};
-use crate::ui::app_sort::{sort_popover, SortToggle};
+use crate::ui::app_sort::{SortToggle, sort_popover};
 use crate::ui::entry_row::EntryRow;
-use crate::ui::stream_page::{StreamCmd, StreamInput, StreamOutput, StreamPage, STREAM_ICON};
+use crate::ui::stream_page::{STREAM_ICON, StreamCmd, StreamInput, StreamOutput, StreamPage};
 use crate::ui::stream_page_logic::{
     search_result_subtitle, sort_stations, station_headers, stream_subtitle,
 };
@@ -58,10 +58,10 @@ pub(super) fn confirm_delete(
     let sender = sender.clone();
     let then = std::cell::RefCell::new(Some(then));
     confirm.connect_response(None, move |_, resp| {
-        if resp == "ok" {
-            if let Some(t) = then.borrow_mut().take() {
-                sender.input(t);
-            }
+        if resp == "ok"
+            && let Some(t) = then.borrow_mut().take()
+        {
+            sender.input(t);
         }
     });
     confirm.present(Some(root));
@@ -171,10 +171,10 @@ impl StreamPage {
                 &st.name,
                 self.stations_gallery_desc,
             );
-            if let (Some(path), Some(pic)) = (logo.as_deref(), pic) {
-                if crate::ui::widgets::cached_thumb(path).is_none() {
-                    to_decode.push((path.to_string(), pic));
-                }
+            if let (Some(path), Some(pic)) = (logo.as_deref(), pic)
+                && crate::ui::widgets::cached_thumb(path).is_none()
+            {
+                to_decode.push((path.to_string(), pic));
             }
             let id = st.id;
             let click = gtk::GestureClick::new();

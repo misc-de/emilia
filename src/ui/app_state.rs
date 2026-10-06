@@ -6,8 +6,8 @@
 //! keep working.
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use relm4::factory::FactoryVecDeque;
 use relm4::{adw, gtk};

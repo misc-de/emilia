@@ -4,8 +4,8 @@
 //! a detached thread; `list_jobs` reports progress. The registry lives in the
 //! [`McpContext`](super::McpContext) (held by the UI across server restarts).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// State of one background job.
 #[derive(Clone, Copy, PartialEq, Eq)]

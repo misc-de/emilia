@@ -8,13 +8,13 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use crate::core::sync::protocol::{
     self, Capabilities, LibraryExport, PairRequest, PairResponse, PairingInfo,
 };
 use crate::core::sync::share::{ShareDecision, ShareManifest};
-use crate::core::sync::{crypto, ImportStats};
+use crate::core::sync::{ImportStats, crypto};
 
 /// Upper bound for a JSON response body from the peer. The peer is pinned and
 /// authenticated, but a bug or a compromised peer must not be able to OOM us

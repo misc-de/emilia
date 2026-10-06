@@ -45,13 +45,13 @@ impl Library {
 
         if let Some((id, old_artist)) = existing {
             // Fill in the artist if it was missing before.
-            if old_artist.as_deref().unwrap_or("").trim().is_empty() {
-                if let Some(a) = artist {
-                    self.conn.execute(
-                        "UPDATE heard SET artist = ?1 WHERE id = ?2",
-                        rusqlite::params![a, id],
-                    )?;
-                }
+            if old_artist.as_deref().unwrap_or("").trim().is_empty()
+                && let Some(a) = artist
+            {
+                self.conn.execute(
+                    "UPDATE heard SET artist = ?1 WHERE id = ?2",
+                    rusqlite::params![a, id],
+                )?;
             }
             self.conn.execute(
                 "UPDATE heard

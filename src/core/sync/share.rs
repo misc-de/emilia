@@ -11,14 +11,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::category::Area;
 use crate::core::db::Library;
+use crate::core::sync::ImportStats;
+use crate::core::sync::MEMO_PREFIX;
 use crate::core::sync::data;
 use crate::core::sync::hash::quick_hash;
 use crate::core::sync::protocol::{
     CategoryRec, EqRec, FavoriteRec, MemoRec, MetaAlbumRec, MetaArtistRec, PlaylistRec, PodcastRec,
-    RecordingRec, StationRec, SCHEMA_VERSION,
+    RecordingRec, SCHEMA_VERSION, StationRec,
 };
-use crate::core::sync::ImportStats;
-use crate::core::sync::MEMO_PREFIX;
 use crate::core::youtube;
 use crate::model::YtVideo;
 
@@ -710,30 +710,30 @@ pub fn apply_manifest(
     let base = data::music_dir(lib);
     let mut stats = ImportStats::default();
 
-    if decision.favorites {
-        if let Some(favs) = &manifest.library.favorites {
-            stats.favorites = data::import_favorites(lib, &base, favs);
-        }
+    if decision.favorites
+        && let Some(favs) = &manifest.library.favorites
+    {
+        stats.favorites = data::import_favorites(lib, &base, favs);
     }
-    if decision.playlists {
-        if let Some(pls) = &manifest.library.playlists {
-            stats.playlists = data::import_playlists(lib, &base, pls);
-        }
+    if decision.playlists
+        && let Some(pls) = &manifest.library.playlists
+    {
+        stats.playlists = data::import_playlists(lib, &base, pls);
     }
-    if decision.podcasts {
-        if let Some(pcs) = &manifest.library.podcasts {
-            stats.podcasts = data::import_podcasts(lib, pcs);
-        }
+    if decision.podcasts
+        && let Some(pcs) = &manifest.library.podcasts
+    {
+        stats.podcasts = data::import_podcasts(lib, pcs);
     }
-    if decision.categories {
-        if let Some(cats) = &manifest.library.categories {
-            stats.categories = data::import_categories(lib, &base, cats);
-        }
+    if decision.categories
+        && let Some(cats) = &manifest.library.categories
+    {
+        stats.categories = data::import_categories(lib, &base, cats);
     }
-    if decision.eq {
-        if let Some(eqs) = &manifest.library.eq {
-            stats.eq = data::import_eq(lib, &base, eqs);
-        }
+    if decision.eq
+        && let Some(eqs) = &manifest.library.eq
+    {
+        stats.eq = data::import_eq(lib, &base, eqs);
     }
 
     // Metadata (artist photos, album covers + year) — applied automatically: it
@@ -1035,10 +1035,11 @@ mod tests {
         assert_eq!(m.memos[0].name, "voice.opus");
         assert_eq!(m.memos[0].category.as_deref(), Some("Notes"));
         // The audio rides along, marked with the memo prefix.
-        assert!(m
-            .files
-            .iter()
-            .any(|f| f.rel_path == ".emilia-memo/voice.opus"));
+        assert!(
+            m.files
+                .iter()
+                .any(|f| f.rel_path == ".emilia-memo/voice.opus")
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -10,12 +10,12 @@
 //! go through [`McpCommand`] so the running UI stays in sync, destructive
 //! actions need `"confirm": true`.
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 
+use super::McpContext;
 use super::command::McpCommand;
 use super::tools::{arg_bool, arg_i64, arg_str, fmt_hms, req_i64, req_str, require_confirm};
-use super::McpContext;
 use crate::core::category::Area;
 use crate::core::db::Library;
 
@@ -109,11 +109,13 @@ fn eq_key(args: &Value, scope: &str) -> Result<String> {
 }
 
 fn bands_json(bands: &[f64; 10]) -> Value {
-    json!(EQ_BANDS
-        .iter()
-        .zip(bands)
-        .map(|(f, g)| json!({ "band": f, "gain_db": g }))
-        .collect::<Vec<_>>())
+    json!(
+        EQ_BANDS
+            .iter()
+            .zip(bands)
+            .map(|(f, g)| json!({ "band": f, "gain_db": g }))
+            .collect::<Vec<_>>()
+    )
 }
 
 fn memo_status_json(np: &super::state::NowPlaying) -> Value {
@@ -459,14 +461,13 @@ pub fn dispatch_ext(ctx: &McpContext, name: &str, args: &Value) -> Option<Result
             let np = ctx.now.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let title = arg_str(args, "title").map(|t| t.trim().to_string());
             let category_id = arg_i64(args, "category_id");
-            if let Some(id) = category_id {
-                if !Library::open()?
+            if let Some(id) = category_id
+                && !Library::open()?
                     .memo_categories()?
                     .iter()
                     .any(|c| c.id == id)
-                {
-                    return Err(anyhow!("no memo category {id} (see list_memo_categories)"));
-                }
+            {
+                return Err(anyhow!("no memo category {id} (see list_memo_categories)"));
             }
             match req_str(args, "action")? {
                 "status" => {
@@ -482,7 +483,7 @@ pub fn dispatch_ext(ctx: &McpContext, name: &str, args: &Value) -> Option<Result
                     }
                     let stop_after_s = match arg_i64(args, "duration_s") {
                         Some(s) if !(1..=3600).contains(&s) => {
-                            return Err(anyhow!("duration_s must be 1…3600"))
+                            return Err(anyhow!("duration_s must be 1…3600"));
                         }
                         s => s.map(|s| s as u32),
                     };
@@ -677,110 +678,299 @@ pub fn tool_list_ext() -> Vec<Value> {
     let id_arg = |d: &str| json!({ "type": "string", "description": d });
     vec![
         // YouTube: subscriptions
-        tool("list_youtube_channels", "List the subscribed YouTube channels (id, title, url, cached video count).", empty()),
-        tool("list_channel_videos", "List the cached videos of a subscribed channel, newest first.", obj(json!({
-            "channel_id": { "type": "integer", "description": "Channel id from list_youtube_channels." },
-            "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
-        }), json!(["channel_id"]))),
-        tool("list_youtube_newest", "The newest videos across all subscribed channels (the YouTube page's \"Newest\" tab).", obj(json!({
-            "limit": { "type": "integer", "minimum": 1, "maximum": 150 },
-        }), json!([]))),
-        tool("subscribe_youtube_channel", "Subscribe to a YouTube channel. Take `url`, `channel_id` and `title` from a search_youtube result with kind=channel. The channel's videos are fetched as a background job (list_jobs).", obj(json!({
-            "url": { "type": "string", "description": "Channel URL." },
-            "channel_id": { "type": "string", "description": "Channel id (UC…) or handle, from the search result." },
-            "title": { "type": "string", "description": "Channel name." },
-        }), json!(["url"]))),
-        tool("unsubscribe_youtube_channel", "Remove a channel subscription (and its cached video list).", obj(json!({
-            "channel_id": { "type": "integer" },
-            "confirm": confirm(),
-        }), json!(["channel_id", "confirm"]))),
-        tool("refresh_youtube_channels", "Re-fetch the video lists of all subscribed channels, or of one (`channel_id`). Runs in the background.", obj(json!({
-            "channel_id": { "type": "integer" },
-        }), json!([]))),
-        tool("play_youtube_channel", "Play a subscribed channel's cached videos as the queue.", obj(json!({
-            "channel_id": { "type": "integer" },
-        }), json!(["channel_id"]))),
+        tool(
+            "list_youtube_channels",
+            "List the subscribed YouTube channels (id, title, url, cached video count).",
+            empty(),
+        ),
+        tool(
+            "list_channel_videos",
+            "List the cached videos of a subscribed channel, newest first.",
+            obj(
+                json!({
+                    "channel_id": { "type": "integer", "description": "Channel id from list_youtube_channels." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+                }),
+                json!(["channel_id"]),
+            ),
+        ),
+        tool(
+            "list_youtube_newest",
+            "The newest videos across all subscribed channels (the YouTube page's \"Newest\" tab).",
+            obj(
+                json!({
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 150 },
+                }),
+                json!([]),
+            ),
+        ),
+        tool(
+            "subscribe_youtube_channel",
+            "Subscribe to a YouTube channel. Take `url`, `channel_id` and `title` from a search_youtube result with kind=channel. The channel's videos are fetched as a background job (list_jobs).",
+            obj(
+                json!({
+                    "url": { "type": "string", "description": "Channel URL." },
+                    "channel_id": { "type": "string", "description": "Channel id (UC…) or handle, from the search result." },
+                    "title": { "type": "string", "description": "Channel name." },
+                }),
+                json!(["url"]),
+            ),
+        ),
+        tool(
+            "unsubscribe_youtube_channel",
+            "Remove a channel subscription (and its cached video list).",
+            obj(
+                json!({
+                    "channel_id": { "type": "integer" },
+                    "confirm": confirm(),
+                }),
+                json!(["channel_id", "confirm"]),
+            ),
+        ),
+        tool(
+            "refresh_youtube_channels",
+            "Re-fetch the video lists of all subscribed channels, or of one (`channel_id`). Runs in the background.",
+            obj(
+                json!({
+                    "channel_id": { "type": "integer" },
+                }),
+                json!([]),
+            ),
+        ),
+        tool(
+            "play_youtube_channel",
+            "Play a subscribed channel's cached videos as the queue.",
+            obj(
+                json!({
+                    "channel_id": { "type": "integer" },
+                }),
+                json!(["channel_id"]),
+            ),
+        ),
         // YouTube: live streams
-        tool("list_live_streams", "List the saved YouTube live streams (24/7 radio channels, the YouTube page's \"Live\" tab). They are only ever streamed, never downloaded.", empty()),
-        tool("add_live_stream", "Save a YouTube live stream to the \"Live\" tab. Find streams with search_youtube kind=live.", obj(json!({
-            "id": id_arg("Video id or watch URL of the live stream."),
-            "title": { "type": "string", "description": "Optional; looked up on YouTube when missing." },
-            "channel": { "type": "string" },
-        }), json!(["id"]))),
-        tool("remove_live_stream", "Remove a saved live stream from the \"Live\" tab.", obj(json!({
-            "id": id_arg("Video id from list_live_streams."),
-            "confirm": confirm(),
-        }), json!(["id", "confirm"]))),
-        tool("play_live_stream", "Play a YouTube live stream like a radio station (no queue, not seekable). Next/previous then step through the saved live streams.", obj(json!({
-            "id": id_arg("Video id or watch URL (saved or not)."),
-            "title": { "type": "string", "description": "Display title for a stream that is not saved." },
-        }), json!(["id"]))),
+        tool(
+            "list_live_streams",
+            "List the saved YouTube live streams (24/7 radio channels, the YouTube page's \"Live\" tab). They are only ever streamed, never downloaded.",
+            empty(),
+        ),
+        tool(
+            "add_live_stream",
+            "Save a YouTube live stream to the \"Live\" tab. Find streams with search_youtube kind=live.",
+            obj(
+                json!({
+                    "id": id_arg("Video id or watch URL of the live stream."),
+                    "title": { "type": "string", "description": "Optional; looked up on YouTube when missing." },
+                    "channel": { "type": "string" },
+                }),
+                json!(["id"]),
+            ),
+        ),
+        tool(
+            "remove_live_stream",
+            "Remove a saved live stream from the \"Live\" tab.",
+            obj(
+                json!({
+                    "id": id_arg("Video id from list_live_streams."),
+                    "confirm": confirm(),
+                }),
+                json!(["id", "confirm"]),
+            ),
+        ),
+        tool(
+            "play_live_stream",
+            "Play a YouTube live stream like a radio station (no queue, not seekable). Next/previous then step through the saved live streams.",
+            obj(
+                json!({
+                    "id": id_arg("Video id or watch URL (saved or not)."),
+                    "title": { "type": "string", "description": "Display title for a stream that is not saved." },
+                }),
+                json!(["id"]),
+            ),
+        ),
         // Collections
-        tool("list_favorites", "List the favorites in their manual order. Each has `scope` (track/folder/album/artist) and `key`; play one with play_entry.", empty()),
-        tool("list_audiobooks", "List the entries of the Audiobooks section (albums, folders or tracks marked as audiobooks). Play one with play_entry.", empty()),
-        tool("list_concerts", "List the entries of the Concerts section. Play one with play_entry.", empty()),
-        tool("play_entry", "Play a favorite / audiobook / concert entry exactly as its row does (toggles pause if it is already the running one). For albums pass `key` from the list or `artist` + `album`.", obj(json!({
-            "scope": { "type": "string", "enum": ["track", "folder", "album", "artist"] },
-            "key": { "type": "string", "description": "Entry key from list_favorites / list_audiobooks / list_concerts (a path for track/folder, the name for artist)." },
-            "artist": { "type": "string" },
-            "album": { "type": "string" },
-        }), json!(["scope"]))),
+        tool(
+            "list_favorites",
+            "List the favorites in their manual order. Each has `scope` (track/folder/album/artist) and `key`; play one with play_entry.",
+            empty(),
+        ),
+        tool(
+            "list_audiobooks",
+            "List the entries of the Audiobooks section (albums, folders or tracks marked as audiobooks). Play one with play_entry.",
+            empty(),
+        ),
+        tool(
+            "list_concerts",
+            "List the entries of the Concerts section. Play one with play_entry.",
+            empty(),
+        ),
+        tool(
+            "play_entry",
+            "Play a favorite / audiobook / concert entry exactly as its row does (toggles pause if it is already the running one). For albums pass `key` from the list or `artist` + `album`.",
+            obj(
+                json!({
+                    "scope": { "type": "string", "enum": ["track", "folder", "album", "artist"] },
+                    "key": { "type": "string", "description": "Entry key from list_favorites / list_audiobooks / list_concerts (a path for track/folder, the name for artist)." },
+                    "artist": { "type": "string" },
+                    "album": { "type": "string" },
+                }),
+                json!(["scope"]),
+            ),
+        ),
         // Streaming extras
-        tool("list_recordings", "List the saved radio recordings (id for delete_recording, path for play_memo).", empty()),
-        tool("list_heard", "The \"Recently heard\" list of songs recognized on radio stations, newest first.", obj(json!({
-            "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
-        }), json!([]))),
+        tool(
+            "list_recordings",
+            "List the saved radio recordings (id for delete_recording, path for play_memo).",
+            empty(),
+        ),
+        tool(
+            "list_heard",
+            "The \"Recently heard\" list of songs recognized on radio stations, newest first.",
+            obj(
+                json!({
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+                }),
+                json!([]),
+            ),
+        ),
         // Memo categories
-        tool("record_memo", "Record a voice memo from the microphone. `start` begins recording (optionally stopping by itself after `duration_s`), `stop` ends it and returns the saved memo (id, path, duration), `status` tells whether one is running and shows the last saved memo. `title` / `category_id` name and file the memo when it is saved. The app shows the recording while it runs.", obj(json!({
-            "action": { "type": "string", "enum": ["start", "stop", "status"] },
-            "duration_s": { "type": "integer", "minimum": 1, "maximum": 3600, "description": "start only: stop and save automatically after this many seconds." },
-            "title": { "type": "string", "description": "Memo title (default: date and time)." },
-            "category_id": { "type": "integer", "description": "Category from list_memo_categories (default: General)." },
-        }), json!(["action"]))),
-        tool("list_memo_categories", "List the voice-memo categories with their memo counts. \"General\" (id null) holds memos without a category.", empty()),
-        tool("create_memo_category", "Create a voice-memo category.", obj(json!({
-            "name": { "type": "string" },
-        }), json!(["name"]))),
-        tool("rename_memo_category", "Rename a voice-memo category.", obj(json!({
-            "category_id": { "type": "integer" },
-            "name": { "type": "string" },
-        }), json!(["category_id", "name"]))),
-        tool("delete_memo_category", "Remove a voice-memo category. Its memos move to \"General\", or are deleted too with `with_memos`.", obj(json!({
-            "category_id": { "type": "integer" },
-            "with_memos": { "type": "boolean", "description": "Also delete the memos (files included)." },
-            "confirm": confirm(),
-        }), json!(["category_id", "confirm"]))),
-        tool("rename_memo", "Rename a voice memo.", obj(json!({
-            "memo_id": { "type": "integer" },
-            "title": { "type": "string" },
-        }), json!(["memo_id", "title"]))),
-        tool("set_memo_category", "Move a voice memo to a category (omit `category_id` or pass null for \"General\").", obj(json!({
-            "memo_id": { "type": "integer" },
-            "category_id": { "type": ["integer", "null"] },
-        }), json!(["memo_id"]))),
+        tool(
+            "record_memo",
+            "Record a voice memo from the microphone. `start` begins recording (optionally stopping by itself after `duration_s`), `stop` ends it and returns the saved memo (id, path, duration), `status` tells whether one is running and shows the last saved memo. `title` / `category_id` name and file the memo when it is saved. The app shows the recording while it runs.",
+            obj(
+                json!({
+                    "action": { "type": "string", "enum": ["start", "stop", "status"] },
+                    "duration_s": { "type": "integer", "minimum": 1, "maximum": 3600, "description": "start only: stop and save automatically after this many seconds." },
+                    "title": { "type": "string", "description": "Memo title (default: date and time)." },
+                    "category_id": { "type": "integer", "description": "Category from list_memo_categories (default: General)." },
+                }),
+                json!(["action"]),
+            ),
+        ),
+        tool(
+            "list_memo_categories",
+            "List the voice-memo categories with their memo counts. \"General\" (id null) holds memos without a category.",
+            empty(),
+        ),
+        tool(
+            "create_memo_category",
+            "Create a voice-memo category.",
+            obj(
+                json!({
+                    "name": { "type": "string" },
+                }),
+                json!(["name"]),
+            ),
+        ),
+        tool(
+            "rename_memo_category",
+            "Rename a voice-memo category.",
+            obj(
+                json!({
+                    "category_id": { "type": "integer" },
+                    "name": { "type": "string" },
+                }),
+                json!(["category_id", "name"]),
+            ),
+        ),
+        tool(
+            "delete_memo_category",
+            "Remove a voice-memo category. Its memos move to \"General\", or are deleted too with `with_memos`.",
+            obj(
+                json!({
+                    "category_id": { "type": "integer" },
+                    "with_memos": { "type": "boolean", "description": "Also delete the memos (files included)." },
+                    "confirm": confirm(),
+                }),
+                json!(["category_id", "confirm"]),
+            ),
+        ),
+        tool(
+            "rename_memo",
+            "Rename a voice memo.",
+            obj(
+                json!({
+                    "memo_id": { "type": "integer" },
+                    "title": { "type": "string" },
+                }),
+                json!(["memo_id", "title"]),
+            ),
+        ),
+        tool(
+            "set_memo_category",
+            "Move a voice memo to a category (omit `category_id` or pass null for \"General\").",
+            obj(
+                json!({
+                    "memo_id": { "type": "integer" },
+                    "category_id": { "type": ["integer", "null"] },
+                }),
+                json!(["memo_id"]),
+            ),
+        ),
         // Queue + modes
-        tool("get_queue", "The play queue from the running entry on, the explicitly enqueued tracks, and shuffle / repeat / playback speed.", obj(json!({
-            "limit": { "type": "integer", "minimum": 1, "maximum": 2000 },
-        }), json!([]))),
+        tool(
+            "get_queue",
+            "The play queue from the running entry on, the explicitly enqueued tracks, and shuffle / repeat / playback speed.",
+            obj(
+                json!({
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 2000 },
+                }),
+                json!([]),
+            ),
+        ),
         tool("clear_queue", "Empty the play queue.", empty()),
-        tool("set_shuffle", "Turn shuffle on or off.", obj(json!({ "on": { "type": "boolean" } }), json!(["on"]))),
-        tool("set_repeat", "Turn repeat on or off.", obj(json!({ "on": { "type": "boolean" } }), json!(["on"]))),
-        tool("set_playback_speed", "Set the playback speed (0.25–2.0, in steps of 0.25). Not for live streams.", obj(json!({
-            "rate": { "type": "number", "minimum": 0.25, "maximum": 2.0 },
-        }), json!(["rate"]))),
+        tool(
+            "set_shuffle",
+            "Turn shuffle on or off.",
+            obj(json!({ "on": { "type": "boolean" } }), json!(["on"])),
+        ),
+        tool(
+            "set_repeat",
+            "Turn repeat on or off.",
+            obj(json!({ "on": { "type": "boolean" } }), json!(["on"])),
+        ),
+        tool(
+            "set_playback_speed",
+            "Set the playback speed (0.25–2.0, in steps of 0.25). Not for live streams.",
+            obj(
+                json!({
+                    "rate": { "type": "number", "minimum": 0.25, "maximum": 2.0 },
+                }),
+                json!(["rate"]),
+            ),
+        ),
         // Equalizer
-        tool("get_equalizer", "List every stored equalizer level (10 bands in dB, 29 Hz…15 kHz). Playback resolves track → album → artist → global (stations: stream → global; episodes: episode → podcast → global).", empty()),
-        tool("set_equalizer", &format!("Save and apply an equalizer level for all outputs, or reset it with `reset` (it then inherits again). Levels: {EQ_SCOPES}."), obj(json!({
-            "scope": { "type": "string", "enum": ["global", "artist", "album", "track", "stream", "podcast", "episode"] },
-            "key": { "type": ["string", "integer"] },
-            "artist": { "type": "string" },
-            "album": { "type": "string" },
-            "bands": { "type": "array", "items": { "type": "number" }, "minItems": 10, "maxItems": 10, "description": "Gains in dB (−12…12), low to high." },
-            "reset": { "type": "boolean" },
-        }), json!(["scope"]))),
+        tool(
+            "get_equalizer",
+            "List every stored equalizer level (10 bands in dB, 29 Hz…15 kHz). Playback resolves track → album → artist → global (stations: stream → global; episodes: episode → podcast → global).",
+            empty(),
+        ),
+        tool(
+            "set_equalizer",
+            &format!(
+                "Save and apply an equalizer level for all outputs, or reset it with `reset` (it then inherits again). Levels: {EQ_SCOPES}."
+            ),
+            obj(
+                json!({
+                    "scope": { "type": "string", "enum": ["global", "artist", "album", "track", "stream", "podcast", "episode"] },
+                    "key": { "type": ["string", "integer"] },
+                    "artist": { "type": "string" },
+                    "album": { "type": "string" },
+                    "bands": { "type": "array", "items": { "type": "number" }, "minItems": 10, "maxItems": 10, "description": "Gains in dB (−12…12), low to high." },
+                    "reset": { "type": "boolean" },
+                }),
+                json!(["scope"]),
+            ),
+        ),
         // Lyrics
-        tool("get_lyrics", "Lyrics of a library track (default: the one playing), from the cache or the file's tags. Includes timed lines when synced lyrics exist.", obj(json!({
-            "path": { "type": "string" },
-        }), json!([]))),
+        tool(
+            "get_lyrics",
+            "Lyrics of a library track (default: the one playing), from the cache or the file's tags. Includes timed lines when synced lyrics exist.",
+            obj(
+                json!({
+                    "path": { "type": "string" },
+                }),
+                json!([]),
+            ),
+        ),
     ]
 }

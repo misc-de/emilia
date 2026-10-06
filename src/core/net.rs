@@ -18,7 +18,7 @@
 use std::io::{Read, Write};
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::de::DeserializeOwned;
 
 /// Max attempts before a transient-failure retry gives up (see [`get_with_retry`]).

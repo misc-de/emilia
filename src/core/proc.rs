@@ -12,7 +12,7 @@ use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// How often the child is polled for completion while waiting. `std` has no
 /// blocking "wait with timeout", so we poll; 50 ms keeps the worst-case kill

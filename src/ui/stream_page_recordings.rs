@@ -38,10 +38,10 @@ pub(super) fn lookup_song(
     title: &str,
     station: Option<&str>,
 ) -> Option<(Option<String>, Option<String>, Vec<u8>)> {
-    if let Some(tags) = crate::core::online::track_tags_strict(artist, title) {
-        if let Some(cover) = tags.cover {
-            return Some((tags.artist, tags.album, cover));
-        }
+    if let Some(tags) = crate::core::online::track_tags_strict(artist, title)
+        && let Some(cover) = tags.cover
+    {
+        return Some((tags.artist, tags.album, cover));
     }
     // The recording lookup also copes with station noise in the title, but it
     // checks no artist — so only when there is none to check against.
@@ -351,10 +351,9 @@ impl StreamPage {
         let dest_str = dest.to_string_lossy().into_owned();
         if let Some(cover) =
             crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &title)
+            && let Ok(bytes) = std::fs::read(&cover)
         {
-            if let Ok(bytes) = std::fs::read(&cover) {
-                crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
-            }
+            crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
         }
 
         track.id = 0;

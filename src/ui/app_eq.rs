@@ -787,7 +787,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{match_preset, GENRE_PRESETS};
+    use super::{GENRE_PRESETS, match_preset};
 
     #[test]
     fn every_preset_matches_its_own_one_based_index() {

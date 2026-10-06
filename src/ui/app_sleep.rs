@@ -2,7 +2,7 @@
 //! once-per-second countdown and the volume fade-out toward the deadline.
 //! Kept separate from `app_playback` so the transport logic stays focused.
 
-use relm4::{gtk, ComponentSender};
+use relm4::{ComponentSender, gtk};
 
 use gtk::prelude::*;
 

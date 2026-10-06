@@ -53,25 +53,31 @@ pub(crate) fn section_description(name: &str) -> String {
     match name {
         "favorites" => gettext("Quick access to the tracks, albums and artists you starred."),
         "files" => gettext("Browse your music folder — and any extra sources — as a file tree."),
-        "artists" => gettext("Every artist in your library, each opening to their albums and tracks."),
-        "singles" => {
-            gettext("Releases by a single artist with just a few tracks, kept apart from full albums.")
+        "artists" => {
+            gettext("Every artist in your library, each opening to their albums and tracks.")
         }
-        "albums" => gettext("Every album in your library, sortable and grouped by initial or year."),
+        "singles" => gettext(
+            "Releases by a single artist with just a few tracks, kept apart from full albums.",
+        ),
+        "albums" => {
+            gettext("Every album in your library, sortable and grouped by initial or year.")
+        }
         "compilations" => {
             gettext("Albums with tracks by several artists, such as samplers and soundtracks.")
         }
-        "concerts" => gettext("Live and concert recordings you marked, kept apart from your albums."),
+        "concerts" => {
+            gettext("Live and concert recordings you marked, kept apart from your albums.")
+        }
         "podcasts" => gettext("Subscribe to podcast feeds and play or download their episodes."),
         "streaming" => {
             gettext("Internet radio stations, with an optional buffer to record what just played.")
         }
-        "youtube" => {
-            gettext("Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.")
-        }
-        "audiobooks" => {
-            gettext("Albums, folders or tracks you marked as audiobooks, resuming where you left off.")
-        }
+        "youtube" => gettext(
+            "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.",
+        ),
+        "audiobooks" => gettext(
+            "Albums, folders or tracks you marked as audiobooks, resuming where you left off.",
+        ),
         "playlists" => gettext("Your own playlists, arranged in any order you like."),
         "memo" => gettext("Quick voice notes recorded with the microphone."),
         "stats" => gettext("Listening statistics and your most-played artists and tracks."),
@@ -99,10 +105,10 @@ pub(crate) fn confirm_destructive(
     // `connect_response` is `Fn`; so take the message only once.
     let msg = std::cell::RefCell::new(Some(msg));
     confirm.connect_response(None, move |_, resp| {
-        if resp == "ok" {
-            if let Some(m) = msg.borrow_mut().take() {
-                sender.input(m);
-            }
+        if resp == "ok"
+            && let Some(m) = msg.borrow_mut().take()
+        {
+            sender.input(m);
         }
     });
     confirm.present(Some(parent));
@@ -429,7 +435,7 @@ pub(crate) fn section_has_gallery(section: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{section_description, SECTIONS};
+    use super::{SECTIONS, section_description};
 
     /// Every menu section needs a subtitle for the setup assistant and
     /// Settings → Menu. A missing arm used to fall through to the empty

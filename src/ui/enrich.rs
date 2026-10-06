@@ -3,8 +3,8 @@
 //! progress via [`Cmd`] back to the root component.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::db::Library;
 use crate::core::{online, scanner};
@@ -211,10 +211,8 @@ pub(crate) fn enrich_worker(
 
     // Read the tags into the library (does not modify the files). During the
     // automatic run this is skipped – the local scan already ran.
-    if scan_first {
-        if let Err(e) = scanner::scan_into(&lib, &root) {
-            tracing::warn!("Scan before online fetch failed: {e}");
-        }
+    if scan_first && let Err(e) = scanner::scan_into(&lib, &root) {
+        tracing::warn!("Scan before online fetch failed: {e}");
     }
 
     let client = online::OnlineClient::new();
@@ -342,10 +340,9 @@ pub(crate) fn enrich_worker(
                     if album_less {
                         if let Some((bytes, _)) =
                             online::track_cover(t.artist.as_deref().unwrap_or(""), &t.title)
+                            && online::store_track_cover_bytes(&key, &bytes).is_some()
                         {
-                            if online::store_track_cover_bytes(&key, &bytes).is_some() {
-                                any_change = true;
-                            }
+                            any_change = true;
                         }
                         std::thread::sleep(online::RATE_LIMIT);
                     }
@@ -443,8 +440,8 @@ fn fetch_artists_parallel(
     out: &relm4::Sender<Cmd>,
 ) -> (usize, usize) {
     use std::collections::VecDeque;
-    use std::sync::mpsc;
     use std::sync::Mutex;
+    use std::sync::mpsc;
 
     let total = names.len();
     if total == 0 {
@@ -465,24 +462,26 @@ fn fetch_artists_parallel(
         let cancel = cancel.clone();
         let give_up = give_up.clone();
         let tx = tx.clone();
-        handles.push(std::thread::spawn(move || loop {
-            if cancel.load(Ordering::Relaxed) || give_up.load(Ordering::Relaxed) {
-                break;
-            }
-            let Some(name) = jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
-                break;
-            };
-            // In the "exactly as tagged" credit mode an entry can be a whole
-            // credit ("A feat. B"), which no photo service knows – ask for the
-            // main artist and file the result under the entry's own name. For
-            // every other name this is a no-op.
-            let query = crate::core::artist::primary_artist(&name);
-            let (image, errored) = match client.fetch_artist_image(&query) {
-                Ok(img) => (img, false),
-                Err(_) => (None, true),
-            };
-            if tx.send((name, image, errored)).is_err() {
-                break;
+        handles.push(std::thread::spawn(move || {
+            loop {
+                if cancel.load(Ordering::Relaxed) || give_up.load(Ordering::Relaxed) {
+                    break;
+                }
+                let Some(name) = jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
+                    break;
+                };
+                // In the "exactly as tagged" credit mode an entry can be a whole
+                // credit ("A feat. B"), which no photo service knows – ask for the
+                // main artist and file the result under the entry's own name. For
+                // every other name this is a no-op.
+                let query = crate::core::artist::primary_artist(&name);
+                let (image, errored) = match client.fetch_artist_image(&query) {
+                    Ok(img) => (img, false),
+                    Err(_) => (None, true),
+                };
+                if tx.send((name, image, errored)).is_err() {
+                    break;
+                }
             }
         }));
     }

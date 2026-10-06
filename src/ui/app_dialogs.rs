@@ -75,35 +75,35 @@ impl App {
         // Source priority: embedded tags → DB cache (filled while playing). When
         // nothing is available yet, the pulldown starts hidden and an LRCLIB
         // lookup reveals it once it returns (see `on_file_lyrics_fetched`).
-        if let CtxTarget::Fs(e) = entry {
-            if let Some(epath) = e.path().filter(|_| !e.is_dir()) {
-                let path_str = epath.to_string_lossy().to_string();
-                let text = crate::core::scanner::read_lyrics(epath).or_else(|| {
-                    self.library
-                        .get_cached_lyrics(&path_str)
-                        .and_then(|l| l.display_text())
-                });
-                let group = adw::PreferencesGroup::new();
-                let exp = adw::ExpanderRow::builder().title(gettext("Lyrics")).build();
-                let label = gtk::Label::builder()
-                    .label(text.as_deref().unwrap_or_default())
-                    .wrap(true)
-                    .xalign(0.0)
-                    .selectable(true)
-                    .margin_top(8)
-                    .margin_bottom(8)
-                    .margin_start(12)
-                    .margin_end(12)
-                    .build();
-                exp.add_row(&label);
-                group.add(&exp);
-                content.append(&group);
-                if text.is_none() {
-                    // Nothing local: hide the pulldown and try to fetch it online.
-                    group.set_visible(false);
-                    *self.lyrics.file_pending.borrow_mut() = Some((path_str.clone(), label, group));
-                    self.fetch_file_lyrics(&path_str);
-                }
+        if let CtxTarget::Fs(e) = entry
+            && let Some(epath) = e.path().filter(|_| !e.is_dir())
+        {
+            let path_str = epath.to_string_lossy().to_string();
+            let text = crate::core::scanner::read_lyrics(epath).or_else(|| {
+                self.library
+                    .get_cached_lyrics(&path_str)
+                    .and_then(|l| l.display_text())
+            });
+            let group = adw::PreferencesGroup::new();
+            let exp = adw::ExpanderRow::builder().title(gettext("Lyrics")).build();
+            let label = gtk::Label::builder()
+                .label(text.as_deref().unwrap_or_default())
+                .wrap(true)
+                .xalign(0.0)
+                .selectable(true)
+                .margin_top(8)
+                .margin_bottom(8)
+                .margin_start(12)
+                .margin_end(12)
+                .build();
+            exp.add_row(&label);
+            group.add(&exp);
+            content.append(&group);
+            if text.is_none() {
+                // Nothing local: hide the pulldown and try to fetch it online.
+                group.set_visible(false);
+                *self.lyrics.file_pending.borrow_mut() = Some((path_str.clone(), label, group));
+                self.fetch_file_lyrics(&path_str);
             }
         }
 

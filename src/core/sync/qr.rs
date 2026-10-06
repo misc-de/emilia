@@ -2,7 +2,7 @@
 //!
 //! **Call only on the main thread** – creates GDK objects.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;

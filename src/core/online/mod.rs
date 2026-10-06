@@ -162,9 +162,10 @@ mod tests {
         let a = name_hash("https://example.com/cover.jpg");
         assert_eq!(a, name_hash("https://example.com/cover.jpg"));
         assert_eq!(a.len(), 16);
-        assert!(a
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(
+            a.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        );
         // Short hashes are zero-padded to the same width.
         assert_eq!(name_hash("").len(), 16);
     }

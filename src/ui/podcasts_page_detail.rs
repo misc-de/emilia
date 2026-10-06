@@ -17,8 +17,8 @@ use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::podcasts_page::{
-    fetch_and_store_podcast, EpisodeDownload, PodcastsCmd, PodcastsInput, PodcastsOutput,
-    PodcastsPage,
+    EpisodeDownload, PodcastsCmd, PodcastsInput, PodcastsOutput, PodcastsPage,
+    fetch_and_store_podcast,
 };
 use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 

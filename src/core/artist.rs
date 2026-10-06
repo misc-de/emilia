@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn credit_mode_primary_keeps_only_the_main_artist() {
-        use super::{split_artists_with, CreditMode as M};
+        use super::{CreditMode as M, split_artists_with};
         assert_eq!(
             split_artists_with(M::Primary, "Drake feat. Rihanna & Future"),
             vec!["Drake"]
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn credit_mode_raw_keeps_the_credit_as_tagged() {
-        use super::{split_artists_with, CreditMode as M};
+        use super::{CreditMode as M, split_artists_with};
         assert_eq!(
             split_artists_with(M::Raw, "Drake feat. Rihanna & Future"),
             vec!["Drake feat. Rihanna & Future"]
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn album_grouping_ignores_the_credit_mode() {
-        use super::{credit_mode, primary_artist, primary_credit_matches, CreditMode};
+        use super::{CreditMode, credit_mode, primary_artist, primary_credit_matches};
         // These two drive the album cards and must never follow the setting –
         // whatever the mode, "Beginner feat. X" stays on Beginner's album.
         assert_eq!(credit_mode(), CreditMode::Split, "default mode");

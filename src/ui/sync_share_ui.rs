@@ -13,13 +13,13 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use relm4::{adw, gtk, ComponentSender};
+use relm4::{ComponentSender, adw, gtk};
 
-use crate::core::sync::share::{
-    group_files, human_size, ArtistGroup, FileReview, FileStatus, ManifestFile, ShareDecision,
-    ShareManifest,
-};
 use crate::core::sync::MEMO_PREFIX;
+use crate::core::sync::share::{
+    ArtistGroup, FileReview, FileStatus, ManifestFile, ShareDecision, ShareManifest, group_files,
+    human_size,
+};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app_helpers::artist_count_subtitle;
 use crate::ui::sync_page::{SyncInput, SyncPage};

@@ -29,7 +29,7 @@ pub mod tools_ext;
 mod tools_schema;
 
 pub use command::{ControlFn, McpCommand};
-pub use state::{new_handle, new_sync_handle, NowPlayingHandle, SyncStateHandle};
+pub use state::{NowPlayingHandle, SyncStateHandle, new_handle, new_sync_handle};
 
 /// Preferred TCP port (next to the sync server's 8765).
 pub const PORT: u16 = 8770;

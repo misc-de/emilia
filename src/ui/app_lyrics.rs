@@ -484,16 +484,16 @@ impl App {
             None => self.library.store_lyrics(&path, None, None, "none"),
         }
         // Mirror into the running track's state too, if it's the same file.
-        if self.lyrics.for_path.as_deref() == Some(path.as_str()) {
-            if let Some(l) = &lyrics {
-                let keep = self
-                    .lyrics
-                    .current
-                    .as_ref()
-                    .is_some_and(|c| c.has_synced() && !l.has_synced());
-                if !keep {
-                    self.lyrics.current = Some(l.clone());
-                }
+        if self.lyrics.for_path.as_deref() == Some(path.as_str())
+            && let Some(l) = &lyrics
+        {
+            let keep = self
+                .lyrics
+                .current
+                .as_ref()
+                .is_some_and(|c| c.has_synced() && !l.has_synced());
+            if !keep {
+                self.lyrics.current = Some(l.clone());
             }
         }
         // Fill the pending file-info pulldown (if still showing this file).

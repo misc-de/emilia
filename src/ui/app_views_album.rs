@@ -13,7 +13,7 @@ use crate::core::db::Library;
 use crate::core::scanner;
 use crate::i18n::{gettext, gettext_noop};
 use crate::model::{ArtistMeta, Track};
-use crate::ui::app::{album_subtitle, most_common_artist, ActiveSource, App, Cmd, Msg};
+use crate::ui::app::{ActiveSource, App, Cmd, Msg, album_subtitle, most_common_artist};
 use crate::ui::entry_row::EntryRow;
 use crate::ui::fs_row::FsEntry;
 

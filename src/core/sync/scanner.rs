@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
@@ -143,12 +143,11 @@ impl Scanner {
         // Poll + decode the newest frame on the main thread.
         let mut on_decode = on_decode;
         let decode_source = gst::glib::timeout_add_local(POLL_INTERVAL, move || {
-            if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::ZERO) {
-                if let Some(text) = decode_sample(&sample) {
-                    if !text.is_empty() {
-                        on_decode(text);
-                    }
-                }
+            if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::ZERO)
+                && let Some(text) = decode_sample(&sample)
+                && !text.is_empty()
+            {
+                on_decode(text);
             }
             gst::glib::ControlFlow::Continue
         });
@@ -288,10 +287,10 @@ fn decode_sample(sample: &gst::Sample) -> Option<String> {
     let mut img =
         rqrr::PreparedImage::prepare_from_greyscale(width, height, |x, y| data[y * stride + x]);
     for grid in img.detect_grids() {
-        if let Ok((_meta, content)) = grid.decode() {
-            if !content.is_empty() {
-                return Some(content);
-            }
+        if let Ok((_meta, content)) = grid.decode()
+            && !content.is_empty()
+        {
+            return Some(content);
         }
     }
     None
@@ -317,11 +316,7 @@ mod tests {
                 && mx < quiet + modules
                 && my < quiet + modules
                 && colors[(my - quiet) * modules + (mx - quiet)] == qrcode::Color::Dark;
-            if dark {
-                0
-            } else {
-                255
-            }
+            if dark { 0 } else { 255 }
         };
         let mut img = rqrr::PreparedImage::prepare_from_greyscale(side, side, pixel);
         let grids = img.detect_grids();

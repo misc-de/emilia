@@ -255,10 +255,10 @@ impl YtPage {
                 title,
                 self.gallery_desc,
             );
-            if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
-                if crate::ui::widgets::cached_thumb(path).is_none() {
-                    to_decode.push((path.to_string(), pic));
-                }
+            if let (Some(path), Some(pic)) = (cover.as_deref(), pic)
+                && crate::ui::widgets::cached_thumb(path).is_none()
+            {
+                to_decode.push((path.to_string(), pic));
             }
             let click = gtk::GestureClick::new();
             {
@@ -468,11 +468,7 @@ pub(super) fn read_channel_view_prefs(library: &Library) -> (bool, Option<bool>,
 
 /// Settings value of a boolean preference (`"1"` / `"0"`).
 fn setting_flag(on: bool) -> &'static str {
-    if on {
-        "1"
-    } else {
-        "0"
-    }
+    if on { "1" } else { "0" }
 }
 
 /// "nogroup_channels": grouping is only off when explicitly stored as `"1"`.

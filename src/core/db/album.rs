@@ -602,8 +602,8 @@ impl Library {
             };
             let mut artists: Vec<(&String, &ArtistInfo)> = per.iter().collect();
             artists.sort_by(|a, b| {
-                b.1 .0
-                    .cmp(&a.1 .0)
+                b.1.0
+                    .cmp(&a.1.0)
                     .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
             });
             // Display artist = the most frequent; MBID: first available.

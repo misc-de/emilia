@@ -17,11 +17,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
-use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
+use anyhow::{Result, anyhow};
+use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 use crate::core::db::Library;
-use crate::core::http::{read_head, write_status, HttpReq};
+use crate::core::http::{HttpReq, read_head, write_status};
 use crate::core::remote::Backend;
 
 /// Simultaneous connections served (a seeking player opens a few in a row).

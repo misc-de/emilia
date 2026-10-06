@@ -22,7 +22,7 @@ use adw::prelude::*;
 use relm4::{adw, gtk};
 use std::path::PathBuf;
 
-use crate::ui::app::{read_design_settings, set_design, App};
+use crate::ui::app::{App, read_design_settings, set_design};
 use crate::ui::app_helpers::apply_color_scheme;
 use crate::ui::widgets::decode_scaled;
 use relm4::ComponentSender;

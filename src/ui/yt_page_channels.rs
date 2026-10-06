@@ -16,7 +16,7 @@ use crate::ui::yt_channels::{
     fill_channel_videos, fmt_published, refresh_channel_videos, store_channel,
 };
 use crate::ui::yt_page::{YtCmd, YtInput, YtOutput, YtPage};
-use crate::ui::yt_page_lists::{count_title, ChannelItem};
+use crate::ui::yt_page_lists::{ChannelItem, count_title};
 
 /// Fetches the channel thumbnails not yet in the cache (worker thread —
 /// network). Returns whether any came in, i.e. whether a redraw would show
@@ -105,12 +105,11 @@ impl YtPage {
                     let _ = crate::core::online::recache_youtube_thumb(t);
                 }
                 None => {
-                    if let Some(u) = crate::core::online::channel_image_url(None, &title) {
-                        if crate::core::online::recache_youtube_thumb(&u).is_some() {
-                            if let Ok(lib) = Library::open() {
-                                let _ = lib.set_channel_thumbnail(id, &u);
-                            }
-                        }
+                    if let Some(u) = crate::core::online::channel_image_url(None, &title)
+                        && crate::core::online::recache_youtube_thumb(&u).is_some()
+                        && let Ok(lib) = Library::open()
+                    {
+                        let _ = lib.set_channel_thumbnail(id, &u);
                     }
                 }
             }

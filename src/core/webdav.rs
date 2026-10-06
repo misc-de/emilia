@@ -11,12 +11,12 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use base64::Engine;
-use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 
 use crate::core::net;
-use crate::core::remote::{clamp_range, RangeBody};
+use crate::core::remote::{RangeBody, clamp_range};
 use crate::core::scanner;
 use crate::core::xml;
 use crate::model::Source;
@@ -409,10 +409,10 @@ fn parse_propfind(xml: &str) -> Vec<RawEntry> {
                         }
                     }
                 }
-                if name == "response" {
-                    if let Some(c) = cur.take() {
-                        out.push(c);
-                    }
+                if name == "response"
+                    && let Some(c) = cur.take()
+                {
+                    out.push(c);
                 }
                 field = None;
                 text.clear();

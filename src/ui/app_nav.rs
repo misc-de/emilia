@@ -46,16 +46,15 @@ impl App {
         // visible menu item (in the chosen order).
         if !visible {
             let cur = self.nav.view_stack.visible_child_name();
-            if cur.as_deref() == Some(section) {
-                if let Some(next) = self
+            if cur.as_deref() == Some(section)
+                && let Some(next) = self
                     .nav
                     .section_order
                     .iter()
                     .copied()
                     .find(|n| !self.nav.hidden_sections.contains(*n))
-                {
-                    self.nav.view_stack.set_visible_child_name(next);
-                }
+            {
+                self.nav.view_stack.set_visible_child_name(next);
             }
         }
     }

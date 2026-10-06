@@ -14,8 +14,8 @@ use crate::core::db::Library;
 use crate::i18n::gettext;
 use crate::model::{AlbumMeta, ArtistMeta};
 use crate::ui::app::{
-    section_has_gallery, section_has_grouping, section_sort_criteria, App, Msg, SortCrit,
-    SORTABLE_SECTIONS,
+    App, Msg, SORTABLE_SECTIONS, SortCrit, section_has_gallery, section_has_grouping,
+    section_sort_criteria,
 };
 use crate::ui::app_views::natural_key;
 use crate::ui::fs_row::FsEntry;
@@ -58,11 +58,7 @@ fn fs_entry_cmp(a: &FsEntry, b: &FsEntry, crit: SortCrit, desc: bool) -> std::cm
         // would otherwise order by track number and land under "0–9".
         _ => natural_key(&a.display_title()).cmp(&natural_key(&b.display_title())),
     };
-    if desc {
-        ord.reverse()
-    } else {
-        ord
-    }
+    if desc { ord.reverse() } else { ord }
 }
 
 /// Reads a component's persisted sort (`sort_<key>` / `sort_<key>_desc`) from the

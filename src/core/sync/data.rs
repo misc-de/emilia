@@ -10,8 +10,8 @@ use anyhow::Result;
 use base64::Engine;
 
 use crate::core::db::Library;
-use crate::core::sync::protocol::*;
 use crate::core::sync::ImportStats;
+use crate::core::sync::protocol::*;
 
 /// Base64 engine for inline image bytes in the manifest.
 fn b64() -> base64::engine::GeneralPurpose {

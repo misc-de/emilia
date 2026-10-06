@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// Locking that recovers from poisoning instead of panicking. The worker thread
 /// and the GTK main thread share these mutexes; the main loop calls `snapshot()`

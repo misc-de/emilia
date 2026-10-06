@@ -9,7 +9,7 @@ use relm4::gtk;
 
 use crate::core::remote::{self, Backend};
 use crate::ui::app::{ActiveSource, App, Msg, RemoteTrack};
-use crate::ui::app_playback::{chapter_target, TransportMsg, PREV_RESTART_MS};
+use crate::ui::app_playback::{PREV_RESTART_MS, TransportMsg, chapter_target};
 use crate::ui::fs_row::FsEntry;
 
 impl App {
@@ -56,16 +56,16 @@ impl App {
         {
             let guard = self.libview.entries.guard();
             for i in 0..guard.len() {
-                if let Some(row) = guard.get(i) {
-                    if let FsEntry::RemoteFile { rel_path, .. } = &row.entry {
-                        if rel_path == rel {
-                            start = queue.len();
-                        }
-                        queue.push(RemoteTrack {
-                            rel_path: rel_path.clone(),
-                            title: row.entry.display_title(),
-                        });
+                if let Some(row) = guard.get(i)
+                    && let FsEntry::RemoteFile { rel_path, .. } = &row.entry
+                {
+                    if rel_path == rel {
+                        start = queue.len();
                     }
+                    queue.push(RemoteTrack {
+                        rel_path: rel_path.clone(),
+                        title: row.entry.display_title(),
+                    });
                 }
             }
         }
@@ -430,19 +430,19 @@ impl App {
         // Playback ran out and stopped: "previous" means "that one again". The
         // track just heard is the one the press is about — stepping back into
         // the album it interrupted would be a jump the user did not ask for.
-        if self.transport.playing_path.is_none() {
-            if let Some(path) = self.transport.last_finished.clone() {
-                match self.transport.queue.iter().position(|p| *p == path) {
-                    Some(pos) => self.transport.queue_pos = pos,
-                    None => {
-                        self.transport.queue = vec![path];
-                        self.transport.queue_pos = 0;
-                    }
+        if self.transport.playing_path.is_none()
+            && let Some(path) = self.transport.last_finished.clone()
+        {
+            match self.transport.queue.iter().position(|p| *p == path) {
+                Some(pos) => self.transport.queue_pos = pos,
+                None => {
+                    self.transport.queue = vec![path];
+                    self.transport.queue_pos = 0;
                 }
-                self.transport.skip_history_push = true;
-                self.play_current_fresh();
-                return;
             }
+            self.transport.skip_history_push = true;
+            self.play_current_fresh();
+            return;
         }
 
         // Past the first few seconds, "previous" first sends the running track

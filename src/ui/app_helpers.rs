@@ -540,11 +540,7 @@ pub(crate) fn initial_gallery_columns() -> u32 {
             g.width().min(g.height()) <= 550
         })
         .unwrap_or(false);
-    if mobile {
-        3
-    } else {
-        4
-    }
+    if mobile { 3 } else { 4 }
 }
 
 /// Resume position with guards: near start or end it is set to 0,
@@ -552,11 +548,7 @@ pub(crate) fn initial_gallery_columns() -> u32 {
 pub(crate) fn guarded_resume(pos_ms: i64, dur_ms: i64) -> i64 {
     let too_early = pos_ms < RESUME_MIN_POS_MS;
     let too_late = dur_ms > 0 && pos_ms > dur_ms - RESUME_END_GUARD_MS;
-    if too_early || too_late {
-        0
-    } else {
-        pos_ms
-    }
+    if too_early || too_late { 0 } else { pos_ms }
 }
 
 /// Saves the window size/maximization and the most recently open navigation item

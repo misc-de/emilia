@@ -3,7 +3,7 @@
 //! the schema list live in files of manageable size; the order of entries is
 //! the order clients see.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The core tool descriptors. Schemas are kept hand-written rather than derived.
 pub(super) fn tool_list_core() -> Value {

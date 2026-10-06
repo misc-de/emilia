@@ -85,10 +85,10 @@ impl App {
         match msg {
             PlaylistMsg::CreateAddTo(name) => {
                 let name = name.trim();
-                if !name.is_empty() {
-                    if let Ok(id) = self.library.create_playlist(name) {
-                        self.add_context_to_playlist(id, sender);
-                    }
+                if !name.is_empty()
+                    && let Ok(id) = self.library.create_playlist(name)
+                {
+                    self.add_context_to_playlist(id, sender);
                 }
             }
             PlaylistMsg::AddTo(id) => self.add_context_to_playlist(id, sender),
@@ -447,10 +447,10 @@ impl App {
                 continue;
             }
             // Skip a cover whose bytes we have already seen under another path.
-            if let Some(h) = cover_content_hash(&c) {
-                if !seen_content.insert(h) {
-                    continue;
-                }
+            if let Some(h) = cover_content_hash(&c)
+                && !seen_content.insert(h)
+            {
+                continue;
             }
             out.push(c);
         }
@@ -461,10 +461,10 @@ impl App {
     /// exists), otherwise the first song cover available – `None` if the songs
     /// carry no covers at all.
     pub(crate) fn playlist_display_cover(&self, id: i64, paths: &[String]) -> Option<String> {
-        if let Some(c) = self.library.playlist_cover(id).ok().flatten() {
-            if std::path::Path::new(&c).exists() {
-                return Some(c);
-            }
+        if let Some(c) = self.library.playlist_cover(id).ok().flatten()
+            && std::path::Path::new(&c).exists()
+        {
+            return Some(c);
         }
         paths.iter().find_map(|p| {
             self.playlist_track_cover(p)

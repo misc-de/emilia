@@ -12,12 +12,14 @@ pub fn for_each<T: Sync>(items: &[T], threads: usize, f: impl Fn(usize, &T) + Sy
     let workers = threads.clamp(1, items.len().max(1));
     std::thread::scope(|s| {
         for _ in 0..workers {
-            s.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                let Some(item) = items.get(i) else {
-                    break;
-                };
-                f(i, item);
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(i) else {
+                        break;
+                    };
+                    f(i, item);
+                }
             });
         }
     });

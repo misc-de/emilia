@@ -201,11 +201,11 @@ fn backfill_published(
 ) -> bool {
     let mut changed = false;
     for v in videos.iter_mut() {
-        if v.published.is_none() {
-            if let Some(p) = dates.get(&v.video_id) {
-                v.published = Some(p.clone());
-                changed = true;
-            }
+        if v.published.is_none()
+            && let Some(p) = dates.get(&v.video_id)
+        {
+            v.published = Some(p.clone());
+            changed = true;
         }
     }
     changed
@@ -241,31 +241,31 @@ pub(crate) fn refresh_channel_videos(
     let stored = lib.channel_videos(channel_db_id).unwrap_or_default();
     let sig_key = feed_sig_key(channel_db_id);
     let (mut feed_dates, mut feed_sig) = (None, None);
-    if !stored.is_empty() {
-        if let Some(cid) = cid.as_deref() {
-            let dates = youtube::channel_rss_published(cid);
-            if !dates.is_empty() {
-                let sig = feed_signature(&dates);
-                let seen_sig = lib.get_setting(&sig_key).ok().flatten();
-                // Nothing new — either the feed has not moved since the last
-                // listing, or everything it carries is already cached.
-                if seen_sig.as_deref() == Some(sig.as_str()) || !feed_has_unknown(&dates, &stored) {
-                    // Skip yt-dlp entirely; only backfill dates we are missing.
-                    let mut videos = stored;
-                    if backfill_published(&mut videos, &dates) {
-                        let _ = lib.set_channel_videos(channel_db_id, &videos);
-                    }
-                    if seen_sig.as_deref() != Some(sig.as_str()) {
-                        let _ = lib.set_setting(&sig_key, &sig);
-                    }
-                    return Some((title.to_string(), 0));
+    if !stored.is_empty()
+        && let Some(cid) = cid.as_deref()
+    {
+        let dates = youtube::channel_rss_published(cid);
+        if !dates.is_empty() {
+            let sig = feed_signature(&dates);
+            let seen_sig = lib.get_setting(&sig_key).ok().flatten();
+            // Nothing new — either the feed has not moved since the last
+            // listing, or everything it carries is already cached.
+            if seen_sig.as_deref() == Some(sig.as_str()) || !feed_has_unknown(&dates, &stored) {
+                // Skip yt-dlp entirely; only backfill dates we are missing.
+                let mut videos = stored;
+                if backfill_published(&mut videos, &dates) {
+                    let _ = lib.set_channel_videos(channel_db_id, &videos);
                 }
-                // There *is* something new: hand the dates to the listing so it
-                // needn't fetch the same feed again, and remember the
-                // fingerprint once that listing has actually run.
-                feed_sig = Some(sig);
-                feed_dates = Some(dates);
+                if seen_sig.as_deref() != Some(sig.as_str()) {
+                    let _ = lib.set_setting(&sig_key, &sig);
+                }
+                return Some((title.to_string(), 0));
             }
+            // There *is* something new: hand the dates to the listing so it
+            // needn't fetch the same feed again, and remember the
+            // fingerprint once that listing has actually run.
+            feed_sig = Some(sig);
+            feed_dates = Some(dates);
         }
     }
     let mut videos = list_channel_videos(url, cid.as_deref(), feed_dates);

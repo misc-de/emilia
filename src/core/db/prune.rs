@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use super::{like_escape, Library};
+use super::{Library, like_escape};
 
 impl Library {
     /// Removes tracks under `root` whose files no longer exist on disk (orphans

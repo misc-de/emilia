@@ -2,7 +2,7 @@
 //! decides whether a hit is plausible, plus the parsing of raw ICY stream
 //! titles into search candidates for recordings.
 
-use super::{recording_cover_file, shared_client, TrackTags};
+use super::{TrackTags, recording_cover_file, shared_client};
 
 /// Fetches a cover (+ album name) for a **clean** artist/title pair (no station
 /// noise) – e.g. for an album-less single track. Network – background only.
@@ -444,8 +444,9 @@ mod tests {
         );
         let c = recording_query_candidates("Radio X | Artist - Song", Some("Radio X"));
         assert_eq!(c[0], (Some("Artist".to_string()), "Song".to_string()));
-        assert!(c
-            .iter()
-            .all(|(a, t)| a.as_deref() != Some("Radio X") && t != "Radio X"));
+        assert!(
+            c.iter()
+                .all(|(a, t)| a.as_deref() != Some("Radio X") && t != "Radio X")
+        );
     }
 }

@@ -4,8 +4,8 @@
 //! title/artist + transport controls) and position it near the icon via x11rb.
 
 use adw::prelude::*;
-use relm4::gtk;
 use relm4::ComponentSender;
+use relm4::gtk;
 
 use crate::i18n::gettext;
 use crate::ui::app::{App, Msg};

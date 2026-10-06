@@ -17,13 +17,13 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use smb::{
     Client, ClientConfig, FileAccessMask, FileCreateArgs, FileDirectoryInformation, GetLen, ReadAt,
     Resource, UncPath,
 };
 
-use crate::core::remote::{clamp_range, normalize_music_path, RangeBody, RemoteEntry};
+use crate::core::remote::{RangeBody, RemoteEntry, clamp_range, normalize_music_path};
 use crate::core::scanner;
 use crate::model::Source;
 

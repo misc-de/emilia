@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use crate::i18n::{gettext, gettext_f};
-use crate::ui::app::{cover_widget, App, Msg};
+use crate::ui::app::{App, Msg, cover_widget};
 use crate::ui::app_mcp::McpSettingMsg;
 use crate::ui::app_sort::SortMsg;
 use crate::ui::app_tray::TrayMsg;
@@ -979,17 +979,17 @@ impl App {
                 let nav_row = nav_row.clone();
                 let titlebar_row = titlebar_row.clone();
                 chooser.open(Some(&win), gtk::gio::Cancellable::NONE, move |res| {
-                    if let Ok(file) = res {
-                        if let Some(path) = file.path() {
-                            row.set_subtitle(&gettext("Image selected"));
-                            clear.set_visible(true);
-                            filter_row.set_visible(true);
-                            strength_row.set_visible(true);
-                            strength_row.set_sensitive(filter_row.selected() != 0);
-                            nav_row.set_visible(chrome_rows);
-                            titlebar_row.set_visible(chrome_rows);
-                            sender.input(Msg::Design(DesignMsg::CustomBg(Some(path))));
-                        }
+                    if let Ok(file) = res
+                        && let Some(path) = file.path()
+                    {
+                        row.set_subtitle(&gettext("Image selected"));
+                        clear.set_visible(true);
+                        filter_row.set_visible(true);
+                        strength_row.set_visible(true);
+                        strength_row.set_sensitive(filter_row.selected() != 0);
+                        nav_row.set_visible(chrome_rows);
+                        titlebar_row.set_visible(chrome_rows);
+                        sender.input(Msg::Design(DesignMsg::CustomBg(Some(path))));
                     }
                 });
             });

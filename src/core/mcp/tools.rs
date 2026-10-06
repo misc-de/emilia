@@ -9,15 +9,15 @@
 //! Library model structs are intentionally not `serde::Serialize` (they are pure
 //! domain types); tool results are therefore assembled here with `json!`.
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 
+use super::McpContext;
 use super::command::McpCommand;
 use super::protocol::{
-    RpcRequest, RpcResponse, INVALID_REQUEST, JSONRPC_VERSION, MCP_PROTOCOL_VERSION,
-    METHOD_NOT_FOUND,
+    INVALID_REQUEST, JSONRPC_VERSION, MCP_PROTOCOL_VERSION, METHOD_NOT_FOUND, RpcRequest,
+    RpcResponse,
 };
-use super::McpContext;
 use crate::core::db::Library;
 use crate::core::mcp::state::SyncSnapshot;
 use crate::core::sync::share::Selection;
@@ -616,7 +616,7 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
                 other => {
                     return Err(anyhow!(
                         "unknown top kind '{other}' (use tracks|albums|artists|genres|stations|podcasts|youtube)"
-                    ))
+                    ));
                 }
             };
             let items: Vec<Value> = entries
@@ -1553,14 +1553,14 @@ pub fn dispatch(ctx: &McpContext, name: &str, args: &Value) -> Result<Value> {
 /// this (not [`tool_list`]) everywhere a list is returned to a client.
 pub fn tool_list_enabled() -> Value {
     let mut list = tool_list();
-    if !youtube_enabled() {
-        if let Some(arr) = list.as_array_mut() {
-            arr.retain(|t| {
-                t.get("name")
-                    .and_then(|n| n.as_str())
-                    .is_none_or(|n| !is_youtube_tool(n))
-            });
-        }
+    if !youtube_enabled()
+        && let Some(arr) = list.as_array_mut()
+    {
+        arr.retain(|t| {
+            t.get("name")
+                .and_then(|n| n.as_str())
+                .is_none_or(|n| !is_youtube_tool(n))
+        });
     }
     list
 }

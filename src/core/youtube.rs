@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 
 use crate::core::net;
@@ -125,10 +125,10 @@ const AVAILABLE_MISS_TTL: Duration = Duration::from_secs(60);
 /// cached (see [`AVAILABLE`]); [`fetch_ytdlp`] drops the cache after installing.
 pub fn available() -> bool {
     let mut slot = AVAILABLE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((yes, probed_at)) = *slot {
-        if yes || probed_at.elapsed() < AVAILABLE_MISS_TTL {
-            return yes;
-        }
+    if let Some((yes, probed_at)) = *slot
+        && (yes || probed_at.elapsed() < AVAILABLE_MISS_TTL)
+    {
+        return yes;
     }
     // Held across the probe on purpose: concurrent callers wait for this answer
     // instead of each spawning their own `--version` process.
@@ -669,11 +669,11 @@ pub fn download_audio_progress(video_id: &str, mut on_pct: impl FnMut(u8)) -> Re
     .arg(watch_url(video_id));
     let mut last = 101u8; // impossible value → first real reading always fires
     let status = proc::status_timeout_lines(&mut cmd, DOWNLOAD_TIMEOUT, |line| {
-        if let Some(pct) = parse_progress_pct(line) {
-            if pct != last {
-                last = pct;
-                on_pct(pct);
-            }
+        if let Some(pct) = parse_progress_pct(line)
+            && pct != last
+        {
+            last = pct;
+            on_pct(pct);
         }
     })?;
     if !status.success() {

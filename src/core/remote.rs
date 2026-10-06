@@ -17,14 +17,14 @@
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 
 use crate::core::{gdrive, media_proxy, net, smb, webdav};
 use crate::model::Source;
 
-pub use crate::core::webdav::{cache_path, nc_path, parse_nc_path, DavEntry as RemoteEntry};
+pub use crate::core::webdav::{DavEntry as RemoteEntry, cache_path, nc_path, parse_nc_path};
 
 pub const KIND_LOCAL: &str = "local";
 pub const KIND_WEBDAV: &str = "webdav";

@@ -26,14 +26,14 @@ use std::net::TcpListener;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use base64::Engine;
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use sha2::{Digest, Sha256};
 
 use crate::core::db::Library;
 use crate::core::net;
-use crate::core::remote::{clamp_range, normalize_music_path, RangeBody, RemoteEntry};
+use crate::core::remote::{RangeBody, RemoteEntry, clamp_range, normalize_music_path};
 use crate::core::scanner;
 use crate::model::Source;
 
@@ -83,10 +83,10 @@ static OAUTH_CLIENT: Mutex<Option<OAuthClient>> = Mutex::new(None);
 /// The OAuth client to use: the user-supplied one from the settings, else the
 /// built-in one. Cached after the first successful load.
 pub fn oauth_client() -> Option<OAuthClient> {
-    if let Ok(g) = OAUTH_CLIENT.lock() {
-        if let Some(c) = g.as_ref() {
-            return Some(c.clone());
-        }
+    if let Ok(g) = OAUTH_CLIENT.lock()
+        && let Some(c) = g.as_ref()
+    {
+        return Some(c.clone());
     }
     let loaded = Library::open()
         .ok()
@@ -476,14 +476,12 @@ pub fn forget_source(source_id: i64) {
 }
 
 fn access_token(c: &GdCreds, force: bool) -> Result<String> {
-    if !force {
-        if let Ok(g) = tokens().lock() {
-            if let Some((tok, exp)) = g.get(&c.source_id) {
-                if Instant::now() + TOKEN_SLACK < *exp {
-                    return Ok(tok.clone());
-                }
-            }
-        }
+    if !force
+        && let Ok(g) = tokens().lock()
+        && let Some((tok, exp)) = g.get(&c.source_id)
+        && Instant::now() + TOKEN_SLACK < *exp
+    {
+        return Ok(tok.clone());
     }
     let (tok, exp) = refresh(&c.client, &c.refresh_token)?;
     seed_token(c.source_id, &tok, exp);
@@ -744,14 +742,13 @@ pub fn fetch_prefix(c: &GdCreds, rel: &str, len: u64) -> Result<Vec<u8>> {
 /// else `Content-Length` of a full response, else the size Drive listed.
 fn total_from(resp: &ureq::Response, listed: Option<u64>) -> Option<u64> {
     if resp.status() == 206 {
-        if let Some(cr) = resp.header("Content-Range") {
-            if let Some(total) = cr
+        if let Some(cr) = resp.header("Content-Range")
+            && let Some(total) = cr
                 .rsplit('/')
                 .next()
                 .and_then(|t| t.trim().parse::<u64>().ok())
-            {
-                return Some(total);
-            }
+        {
+            return Some(total);
         }
     } else if let Some(len) = resp
         .header("Content-Length")
@@ -766,10 +763,10 @@ fn total_from(resp: &ureq::Response, listed: Option<u64>) -> Option<u64> {
 pub fn open_range(c: &GdCreds, rel: &str, start: u64, end: Option<u64>) -> Result<RangeBody> {
     let node = resolve_file(c, rel)?;
     // Refuse ranges past the end up front when the size is known (HTTP 416).
-    if let Some(total) = node.size {
-        if clamp_range(total, start, end).is_none() {
-            return Err(anyhow!("range not satisfiable"));
-        }
+    if let Some(total) = node.size
+        && clamp_range(total, start, end).is_none()
+    {
+        return Err(anyhow!("range not satisfiable"));
     }
     let resp = match media_get(c, &node.id, start, end) {
         Ok(r) => r,

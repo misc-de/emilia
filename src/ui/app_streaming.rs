@@ -224,10 +224,9 @@ impl App {
         // Already cached (under the best-guess key) → the pending reload shows it.
         if let Some((a, t)) =
             crate::core::online::recording_query_candidates(&raw, station.as_deref()).first()
+            && crate::core::online::recording_cover_path(a.as_deref().unwrap_or(""), t).is_some()
         {
-            if crate::core::online::recording_cover_path(a.as_deref().unwrap_or(""), t).is_some() {
-                return;
-            }
+            return;
         }
         let input = self.input.clone();
         std::thread::spawn(move || {
@@ -635,25 +634,26 @@ impl App {
     /// and (for real songs) the "Recently heard" history.
     pub(crate) fn stream_title(&mut self, title: String) {
         let title = title.trim().to_string();
-        if let Some(id) = self.streaming.playing_stream {
-            if !title.is_empty() && self.streaming.stream_title.as_deref() != Some(title.as_str()) {
-                self.streaming.stream_title = Some(title.clone());
-                let station = self.stream_name(id);
-                self.mini.now_playing = Some(match &station {
-                    Some(name) => format!("{name} — {title}"),
-                    None => title.clone(),
-                });
-                let art = self.stream_item(id).and_then(|st| self.station_art(&st));
-                self.mpris.set_metadata(
-                    0,
-                    &title,
-                    station.as_deref(),
-                    station.as_deref(),
-                    None,
-                    art.as_deref(),
-                );
-                self.note_heard_song(&title, station.as_deref());
-            }
+        if let Some(id) = self.streaming.playing_stream
+            && !title.is_empty()
+            && self.streaming.stream_title.as_deref() != Some(title.as_str())
+        {
+            self.streaming.stream_title = Some(title.clone());
+            let station = self.stream_name(id);
+            self.mini.now_playing = Some(match &station {
+                Some(name) => format!("{name} — {title}"),
+                None => title.clone(),
+            });
+            let art = self.stream_item(id).and_then(|st| self.station_art(&st));
+            self.mpris.set_metadata(
+                0,
+                &title,
+                station.as_deref(),
+                station.as_deref(),
+                None,
+                art.as_deref(),
+            );
+            self.note_heard_song(&title, station.as_deref());
         }
     }
 
@@ -788,11 +788,11 @@ impl App {
             self.library.find_recording(artist.as_deref(), &title),
             self.library.find_track(artist.as_deref(), &title),
         ] {
-            if let Ok(Some(path)) = found {
-                if std::path::Path::new(&path).exists() {
-                    self.play_recording(path);
-                    return;
-                }
+            if let Ok(Some(path)) = found
+                && std::path::Path::new(&path).exists()
+            {
+                self.play_recording(path);
+                return;
             }
         }
         // 3) Nothing saved → resolve and stream it via YouTube.
@@ -1097,7 +1097,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_finalize, FinalizePlan};
+    use super::{FinalizePlan, plan_finalize};
     use crate::core::recorder::{BufferedSong, Snapshot};
 
     fn running_song(start: u64, title: &str, complete: bool, lead_pad: u64) -> BufferedSong {

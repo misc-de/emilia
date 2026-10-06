@@ -4,8 +4,8 @@
 //! "hide from taskbar" hint.
 
 use adw::prelude::*;
-use relm4::gtk;
 use relm4::ComponentSender;
+use relm4::gtk;
 
 use gtk::glib;
 

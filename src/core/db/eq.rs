@@ -121,15 +121,15 @@ impl Library {
             if let Some(b) = self.resolve_eq_setting(out, "track", path) {
                 return Some(b);
             }
-            if let Some(key) = &album_key {
-                if let Some(b) = self.resolve_eq_setting(out, "album", key) {
-                    return Some(b);
-                }
+            if let Some(key) = &album_key
+                && let Some(b) = self.resolve_eq_setting(out, "album", key)
+            {
+                return Some(b);
             }
-            if let Some(artist) = artist {
-                if let Some(b) = self.resolve_eq_setting(out, "artist", artist) {
-                    return Some(b);
-                }
+            if let Some(artist) = artist
+                && let Some(b) = self.resolve_eq_setting(out, "artist", artist)
+            {
+                return Some(b);
             }
             if let Some(b) = self.resolve_eq_setting(out, "global", "") {
                 return Some(b);
@@ -181,10 +181,10 @@ impl Library {
             if let Some(b) = self.resolve_eq_setting(out, "episode", episode_url) {
                 return Some(b);
             }
-            if let Some(id) = podcast_id {
-                if let Some(b) = self.resolve_eq_setting(out, "podcast", id) {
-                    return Some(b);
-                }
+            if let Some(id) = podcast_id
+                && let Some(b) = self.resolve_eq_setting(out, "podcast", id)
+            {
+                return Some(b);
             }
             if let Some(b) = self.resolve_eq_setting(out, "global", "") {
                 return Some(b);
