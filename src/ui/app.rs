@@ -1375,8 +1375,6 @@ impl Component for App {
                                     // source (Nextcloud/YouTube) resolves/buffers.
                                     #[wrap(Some)]
                                     set_child = &gtk::Stack {
-                                        #[watch]
-                                        set_visible_child_name: if model.mini.loading { "spinner" } else { "icon" },
                                         add_named[Some("icon")] = &gtk::Image {
                                             #[watch]
                                             set_icon_name: Some(if model.mini.playing {
@@ -1389,6 +1387,10 @@ impl Component for App {
                                             #[watch]
                                             set_spinning: model.mini.loading,
                                         },
+                                        // After the children: naming a page before it
+                                        // exists logs a GtkStack warning at startup.
+                                        #[watch]
+                                        set_visible_child_name: if model.mini.loading { "spinner" } else { "icon" },
                                     },
                                     set_tooltip_text: Some(&gettext("Play/Pause")),
                                     add_css_class: "circular",
