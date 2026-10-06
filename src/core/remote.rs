@@ -327,9 +327,16 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
     // per file — a large share can hold tens of thousands of tracks. The
     // per-file metadata read over the network stays the dominant cost.
     const BATCH: usize = 256;
+    // The source may be removed while this runs (it can take minutes); stop
+    // then instead of re-adding tracks `delete_source` just cleared.
+    const EXISTS_CHECK_EVERY: usize = 32;
+    let removed = || !lib.source_exists(source.id).unwrap_or(true);
     let mut batch: Vec<crate::model::Track> = Vec::with_capacity(BATCH.min(files.len()));
     let mut n = 0;
-    for rel in files {
+    for (i, rel) in files.into_iter().enumerate() {
+        if i % EXISTS_CHECK_EVERY == 0 && removed() {
+            return Err(anyhow!("source was removed during indexing"));
+        }
         // A network failure must not produce a degraded entry (filename as
         // title, no tags) that then sticks in the DB; skip the track so a later
         // re-index picks it up once the source is reachable again. A reachable
@@ -368,6 +375,11 @@ pub fn index_into(lib: &crate::core::db::Library, source: &Source) -> Result<usi
         }
     }
     n += lib.upsert_tracks_resilient(&batch);
+    // Close the race with a removal between the last check and an upsert.
+    if removed() {
+        let _ = lib.clear_source_tracks(source.id);
+        return Err(anyhow!("source was removed during indexing"));
+    }
     Ok(n)
 }
 

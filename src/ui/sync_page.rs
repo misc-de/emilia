@@ -92,6 +92,9 @@ pub(crate) struct SyncPage {
     share_chan: Option<Arc<Mutex<ShareChannel>>>,
     /// Client role: command channel to the session worker.
     client_cmd: Option<mpsc::Sender<ClientCmd>>,
+    /// Bumped for every started server/client session; their end events carry
+    /// it (see [`SyncEvent::SessionEnded`]).
+    session: u64,
     /// Receiver review widget handles (read into a `ShareDecision` on accept).
     review: Option<ReviewHandles>,
     /// The offer we are about to send (server role parks it; client role sends).
@@ -230,6 +233,7 @@ impl Component for SyncPage {
             sub_toolbar: None,
             share_chan: None,
             client_cmd: None,
+            session: 0,
             review: None,
             prepared_manifest: None,
             incoming_manifest: None,
@@ -663,6 +667,8 @@ impl SyncPage {
             s.last_error = None;
         });
         let (pair_url, host, port) = (server.pair_url(), server.host().to_string(), server.port());
+        self.session += 1;
+        let session = self.session;
         sender.spawn_command(move |out| {
             let _ = out.send(SyncEvent::ServerReady {
                 pair_url,
@@ -670,9 +676,19 @@ impl SyncPage {
                 port,
             });
             server.run(|ev| {
+                let ev = match ev {
+                    SyncEvent::PeerDisconnected => SyncEvent::SessionEnded {
+                        session,
+                        server: false,
+                    },
+                    ev => ev,
+                };
                 let _ = out.send(ev);
             });
-            let _ = out.send(SyncEvent::ServerStopped);
+            let _ = out.send(SyncEvent::SessionEnded {
+                session,
+                server: true,
+            });
         });
     }
 
@@ -825,8 +841,14 @@ impl SyncPage {
             s.phase = "pairing".into();
             s.last_error = None;
         });
+        self.session += 1;
+        let session = self.session;
         sender.spawn_command(move |out| {
             run_client_session(info, device_id, device_name, yt_enabled, cmd_rx, &out);
+            let _ = out.send(SyncEvent::SessionEnded {
+                session,
+                server: false,
+            });
         });
     }
 
@@ -997,9 +1019,14 @@ impl SyncPage {
             SyncEvent::PeerDisconnected => {
                 self.on_connection_lost(sender);
             }
-            SyncEvent::ServerStopped => {
-                self.stop = None;
-                self.share_chan = None;
+            // A worker of an older session (stopped, then a new one started
+            // before it noticed) must not clear the current session's handles.
+            SyncEvent::SessionEnded { session, .. } if session != self.session => {}
+            SyncEvent::SessionEnded { server, .. } => {
+                if server {
+                    self.stop = None;
+                    self.share_chan = None;
+                }
                 self.on_connection_lost(sender);
             }
             SyncEvent::ShareOffered { manifest } => self.on_share_offered(manifest, sender),
@@ -1304,7 +1331,7 @@ impl SyncPage {
 
     /// "Disconnect" tapped → end the live pairing and close the window. The
     /// background server/worker tears itself down and reports back via
-    /// `PeerDisconnected`/`ServerStopped`.
+    /// `SessionEnded`.
     fn disconnect_peer(&mut self, sender: &ComponentSender<Self>) {
         if self.is_server {
             if let Some(stop) = &self.stop {
@@ -1510,7 +1537,6 @@ fn run_client_session(
     let mut client = SyncClient::new(&info, device_id, device_name, caps);
     if let Err(e) = client.pair(&info.token) {
         let _ = out.send(SyncEvent::Error(e.to_string()));
-        let _ = out.send(SyncEvent::PeerDisconnected);
         return;
     }
     let _ = out.send(SyncEvent::PeerPaired {
@@ -1608,7 +1634,6 @@ fn run_client_session(
         }
     }
     client.disconnect();
-    let _ = out.send(SyncEvent::PeerDisconnected);
 }
 
 /// Uploads the accepted files from our library to the peer (client-as-sender).

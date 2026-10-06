@@ -21,8 +21,8 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 
 use super::protocol::{PARSE_ERROR, RpcResponse};
-use super::{McpContext, PORT, tools};
-use crate::core::http::{self, HttpReq};
+use super::{McpContext, tools};
+use crate::core::http::{self, ConnPermit, HttpReq};
 use crate::core::sync::crypto;
 
 /// Accept loop: maximum blocking time, after which the stop flag is re-checked.
@@ -31,8 +31,6 @@ const ACCEPT_POLL: Duration = Duration::from_millis(500);
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// Hard cap for request bodies (JSON-RPC requests are small).
 const MAX_BODY: usize = 8 * 1024 * 1024;
-/// Port fallbacks if the preferred one is taken.
-const PORT_ATTEMPTS: u16 = 10;
 /// Maximum connections served at once.
 ///
 /// Each connection gets its own thread, and the bearer check runs *inside* it —
@@ -55,32 +53,6 @@ pub struct JsonRpcServer {
     live: Arc<AtomicUsize>,
 }
 
-/// One slot in the connection budget, released on drop — including when the
-/// connection thread panics, so a slot can never leak.
-struct ConnPermit(Arc<AtomicUsize>);
-
-impl ConnPermit {
-    /// Claims a slot, or `None` when [`MAX_CONNECTIONS`] are already in flight.
-    fn acquire(live: &Arc<AtomicUsize>) -> Option<Self> {
-        let mut cur = live.load(Ordering::Relaxed);
-        loop {
-            if cur >= MAX_CONNECTIONS {
-                return None;
-            }
-            match live.compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Relaxed) {
-                Ok(_) => return Some(Self(Arc::clone(live))),
-                Err(actual) => cur = actual,
-            }
-        }
-    }
-}
-
-impl Drop for ConnPermit {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
 /// Everything needed to serve one connection, independent of the accept loop.
 struct ConnHandler {
     /// `Some` in public (LAN) mode — every connection is TLS-wrapped.
@@ -97,20 +69,10 @@ impl JsonRpcServer {
         token: String,
         public: bool,
         stop: Arc<AtomicBool>,
+        wait_for_port: Duration,
     ) -> Result<Self> {
         let bind_ip = if public { "0.0.0.0" } else { "127.0.0.1" };
-        let mut bound: Option<(TcpListener, u16)> = None;
-        let mut port = PORT;
-        for _ in 0..PORT_ATTEMPTS {
-            match super::bind_reuse(bind_ip, port) {
-                Ok(listener) => {
-                    bound = Some((listener, port));
-                    break;
-                }
-                Err(_) => port = port.wrapping_add(1),
-            }
-        }
-        let (listener, port) = bound.ok_or_else(|| anyhow!("no free port for the MCP server"))?;
+        let (listener, port) = super::bind_server(bind_ip, wait_for_port)?;
         listener
             .set_nonblocking(true)
             .map_err(|e| anyhow!("listener setup failed: {e}"))?;
@@ -171,7 +133,7 @@ impl JsonRpcServer {
                     // Claim the slot *before* spawning: authentication happens
                     // inside the connection, so the budget has to be enforced
                     // while the peer is still unauthenticated.
-                    let Some(permit) = ConnPermit::acquire(&self.live) else {
+                    let Some(permit) = ConnPermit::acquire(&self.live, MAX_CONNECTIONS) else {
                         Self::refuse(sock, self.handler.tls.is_some());
                         continue;
                     };

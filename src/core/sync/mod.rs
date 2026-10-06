@@ -47,8 +47,6 @@ pub enum SyncEvent {
         host: String,
         port: u16,
     },
-    /// Server was stopped (timeout, stop or error after start).
-    ServerStopped,
     /// Another device paired successfully (with its advertised capabilities).
     PeerPaired {
         peer_name: String,
@@ -56,6 +54,11 @@ pub enum SyncEvent {
     },
     /// Connection was dropped (by the peer or by timeout).
     PeerDisconnected,
+    /// A connection worker ended (`server`: the server thread returned after a
+    /// timeout, stop or error; else the peer/client session closed). Stamped by
+    /// the UI with the session it started, so a late event from an older
+    /// session cannot tear down a newer one.
+    SessionEnded { session: u64, server: bool },
     /// An incoming metadata import was applied (server side).
     ImportReceived { stats: ImportStats },
     /// Metadata was sent to the peer.

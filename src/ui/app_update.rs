@@ -154,6 +154,8 @@ impl App {
             Msg::FilesGoStart => self.on_files_go_start(&sender),
             Msg::Refresh => self.on_refresh(&sender),
             Msg::ScanCancel => {
+                // The user's cancel also drops a queued follow-up scan.
+                self.scan_restart = None;
                 self.scan_cancel
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }

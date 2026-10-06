@@ -1650,3 +1650,23 @@ fn stale_resume_positions_are_cleared() {
     assert_eq!(pos("/m/talk.mp3"), 30_000, "long-form keeps its position");
     assert_eq!(pos("/b/ch1.mp3"), 30_000, "an audiobook keeps its position");
 }
+
+#[test]
+fn source_exists_tracks_added_sources() {
+    let lib = Library::open_in_memory().unwrap();
+    let id = lib
+        .add_source(&crate::model::Source {
+            id: 0,
+            kind: "local".into(),
+            name: "Second folder".into(),
+            position: 0,
+            path: Some("/m2".into()),
+            base_url: None,
+            username: None,
+            password: None,
+            music_path: None,
+        })
+        .unwrap();
+    assert!(lib.source_exists(id).unwrap());
+    assert!(!lib.source_exists(id + 1).unwrap());
+}

@@ -543,7 +543,8 @@ fn playlist_cache_stale(now: i64, fetched_at: i64) -> bool {
 /// one thread per chunk (aimed at [`COVER_FETCH_THREADS`] threads).
 fn cover_fetch_chunk(urls: usize) -> usize {
     let threads = COVER_FETCH_THREADS.min(urls.max(1));
-    (urls / threads).max(1)
+    // Round up, so the chunks never outnumber the threads.
+    urls.div_ceil(threads).max(1)
 }
 
 #[cfg(test)]
@@ -603,10 +604,12 @@ mod tests {
         assert_eq!(cover_fetch_chunk(3), 1);
         assert_eq!(cover_fetch_chunk(16), 2);
         assert_eq!(cover_fetch_chunk(200), 25);
-        // Current behaviour (not a hard cap): the integer division rounds the chunk size down, so a
-        // list that doesn't divide evenly spawns more than COVER_FETCH_THREADS
-        // threads (12 URLs → chunk 1 → 12 threads; 17 → chunk 2 → 9 threads).
-        assert_eq!(12_usize.div_ceil(cover_fetch_chunk(12)), 12);
-        assert_eq!(17_usize.div_ceil(cover_fetch_chunk(17)), 9);
+        // Uneven lists never spawn more than COVER_FETCH_THREADS threads.
+        for n in 1..=300_usize {
+            assert!(
+                n.div_ceil(cover_fetch_chunk(n)) <= COVER_FETCH_THREADS,
+                "{n} URLs"
+            );
+        }
     }
 }

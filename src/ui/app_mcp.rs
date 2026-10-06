@@ -432,7 +432,13 @@ impl App {
     /// Starts the configured MCP backend if `mcp_mode` is not `off`. Stops any
     /// server already running first, so it doubles as "restart with new settings".
     pub(crate) fn start_mcp_if_enabled(&mut self) {
-        self.stop_mcp_server();
+        // A just-stopped server still holds the port for up to ~1.5 s; wait for
+        // it rather than drifting to the next port (see `mcp::bind_server`).
+        let wait_for_port = if self.stop_mcp_server() {
+            std::time::Duration::from_millis(2500)
+        } else {
+            std::time::Duration::ZERO
+        };
 
         let mode = self
             .library
@@ -472,7 +478,13 @@ impl App {
 
         match mode {
             McpMode::JsonRpc => {
-                match mcp::server_jsonrpc::JsonRpcServer::start(ctx, token, public, stop.clone()) {
+                match mcp::server_jsonrpc::JsonRpcServer::start(
+                    ctx,
+                    token,
+                    public,
+                    stop.clone(),
+                    wait_for_port,
+                ) {
                     Ok(server) => {
                         let port = server.port();
                         std::thread::spawn(move || server.run());
@@ -485,15 +497,17 @@ impl App {
                 }
             }
             #[cfg(feature = "mcp-sdk")]
-            McpMode::Sdk => match mcp::server_sdk::start(ctx, token, public, stop.clone()) {
-                Ok(port) => {
-                    self.mcp.stop = Some(stop);
-                    // Publish the actual port so it can be checked/matched.
-                    let _ = self.library.set_setting("mcp_port", &port.to_string());
-                    tracing::info!("MCP SDK (rmcp) server listening on {bind}:{port}");
+            McpMode::Sdk => {
+                match mcp::server_sdk::start(ctx, token, public, stop.clone(), wait_for_port) {
+                    Ok(port) => {
+                        self.mcp.stop = Some(stop);
+                        // Publish the actual port so it can be checked/matched.
+                        let _ = self.library.set_setting("mcp_port", &port.to_string());
+                        tracing::info!("MCP SDK (rmcp) server listening on {bind}:{port}");
+                    }
+                    Err(e) => tracing::error!("MCP SDK server failed to start: {e}"),
                 }
-                Err(e) => tracing::error!("MCP SDK server failed to start: {e}"),
-            },
+            }
             // `from_setting` never yields `Sdk` in a build without the backend;
             // the arm only keeps the match exhaustive.
             #[cfg(not(feature = "mcp-sdk"))]
@@ -504,10 +518,15 @@ impl App {
         }
     }
 
-    /// Stops a running MCP server (best effort; the thread exits on its next poll).
-    pub(crate) fn stop_mcp_server(&mut self) {
-        if let Some(stop) = self.mcp.stop.take() {
-            stop.store(true, Ordering::Relaxed);
+    /// Stops a running MCP server (best effort; the thread exits on its next
+    /// poll). Returns whether one was running.
+    pub(crate) fn stop_mcp_server(&mut self) -> bool {
+        match self.mcp.stop.take() {
+            Some(stop) => {
+                stop.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
         }
     }
 

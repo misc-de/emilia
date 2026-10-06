@@ -2,6 +2,7 @@
 //! (split out of db.rs).
 
 use anyhow::Result;
+use rusqlite::OptionalExtension;
 
 use super::Library;
 use crate::model::Source;
@@ -104,6 +105,16 @@ impl Library {
             rusqlite::params![music_path, id],
         )?;
         Ok(())
+    }
+
+    /// Whether a source with this ID still exists (a running index checks it so
+    /// it stops writing tracks for a source the user removed meanwhile).
+    pub fn source_exists(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM source WHERE id = ?1", [id], |_| Ok(()))
+            .optional()?
+            .is_some())
     }
 
     /// Removes the indexed cloud tracks (`nc:<id>:…`) of a source **without**

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
@@ -31,11 +31,8 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
-use super::{McpContext, PORT, tools};
+use super::{McpContext, tools};
 use crate::core::sync::crypto;
-
-/// Port fallbacks if the preferred one is taken.
-const PORT_ATTEMPTS: u16 = 10;
 
 /// One MCP session's server. Cheap to clone (just an `Arc`); the session manager
 /// builds a fresh one per connection via the factory in [`start`].
@@ -104,18 +101,10 @@ pub fn start(
     token: String,
     public: bool,
     stop: Arc<AtomicBool>,
+    wait_for_port: Duration,
 ) -> Result<u16> {
     let bind_ip = if public { "0.0.0.0" } else { "127.0.0.1" };
-    let mut bound: Option<(StdTcpListener, u16)> = None;
-    let mut port = PORT;
-    for _ in 0..PORT_ATTEMPTS {
-        if let Ok(listener) = super::bind_reuse(bind_ip, port) {
-            bound = Some((listener, port));
-            break;
-        }
-        port = port.wrapping_add(1);
-    }
-    let (listener, port) = bound.ok_or_else(|| anyhow!("no free port for the MCP server"))?;
+    let (listener, port) = super::bind_server(bind_ip, wait_for_port)?;
     // tokio's listener adoption requires a non-blocking socket.
     listener.set_nonblocking(true)?;
 

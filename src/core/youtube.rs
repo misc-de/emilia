@@ -161,6 +161,21 @@ pub fn version() -> Option<String> {
 /// broken extractor (see [`STABLE_MAX_AGE_DAYS`]). Returns the installed
 /// version. **Network – worker threads only.**
 pub fn download_ytdlp() -> Result<String> {
+    // Several triggers can fire at once (new-app-version refresh, the 12-h
+    // auto-update, the settings button); they would all write the same `.part`
+    // file. Whoever comes second just waits and reports what the first one
+    // installed.
+    static FETCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match FETCH.try_lock() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            drop(FETCH.lock());
+            return version().ok_or_else(|| anyhow!("yt-dlp is not installed"));
+        }
+        // A panicked fetch left nothing half-done behind (`fetch_ytdlp` only
+        // renames a complete download), so the lock is safe to reuse.
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+    };
     let stable = fetch_ytdlp(YTDLP_URL);
     if let Ok(v) = &stable {
         // An unparseable version is not evidence of staleness – keep stable.
@@ -199,8 +214,12 @@ fn fetch_ytdlp(url: &str) -> Result<String> {
 
 /// Streams `url` into `tmp`, treating an empty response as a failure.
 fn download_to(url: &str, tmp: &Path) -> Result<()> {
+    // A stalled connection (e.g. a Wi-Fi switch on the phone) must not hang the
+    // worker forever – that would leave the "updating" state stuck.
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(60))
+        .timeout(Duration::from_secs(10 * 60))
         .build();
     let resp = agent.get(url).call()?;
     // generous cap; the zipapp is only a few MB

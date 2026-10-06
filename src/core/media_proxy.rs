@@ -13,7 +13,7 @@
 
 use std::io::Write;
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -21,7 +21,7 @@ use anyhow::{Result, anyhow};
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 use crate::core::db::Library;
-use crate::core::http::{HttpReq, read_head, write_status};
+use crate::core::http::{ConnPermit, HttpReq, read_head, write_status};
 use crate::core::remote::Backend;
 
 /// Simultaneous connections served (a seeking player opens a few in a row).
@@ -71,19 +71,19 @@ fn serve(listener: TcpListener, secret: String) {
     let secret = Arc::new(secret);
     for sock in listener.incoming() {
         let Ok(sock) = sock else { continue };
-        if active.load(Ordering::Relaxed) >= MAX_CONNECTIONS {
+        // RAII slot: a panicking backend (SMB/Drive) must not leak it, or the
+        // proxy would end up answering every stream with 503.
+        let Some(permit) = ConnPermit::acquire(&active, MAX_CONNECTIONS) else {
             let mut sock = sock;
             write_status(&mut sock, 503);
             continue;
-        }
-        active.fetch_add(1, Ordering::Relaxed);
-        let active = active.clone();
+        };
         let secret = secret.clone();
         let _ = std::thread::Builder::new()
             .name("media-proxy-conn".into())
             .spawn(move || {
+                let _permit = permit;
                 handle(sock, &secret);
-                active.fetch_sub(1, Ordering::Relaxed);
             });
     }
 }

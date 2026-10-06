@@ -1452,6 +1452,14 @@ impl App {
         }
         // The (initial) scan finished → hide the explanatory loading overlay.
         self.scanning = false;
+        // It was cancelled only to make room for a newer request: run that one
+        // (its own `ScanDone` does the rest).
+        if let Some((then_enrich, restart_manual)) = self.scan_restart.take() {
+            self.scan_cancel
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            self.start_scan(sender, then_enrich, restart_manual && !manual);
+            return;
+        }
         // If the user cancelled, say so once and clear the flag for the next run.
         if self
             .scan_cancel

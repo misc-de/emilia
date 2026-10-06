@@ -10,6 +10,8 @@
 //! different limits.
 
 use std::io::{Read, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Result, anyhow};
 use serde::Serialize;
@@ -146,6 +148,32 @@ pub fn write_status(out: &mut impl Write, status: u16) {
 
 /// Full read of a request (head + body) — for tests and any caller that wants
 /// the whole body in memory in one call.
+/// One slot in a server's connection budget, released on drop — including when
+/// the connection thread panics, so a slot can never leak.
+pub struct ConnPermit(Arc<AtomicUsize>);
+
+impl ConnPermit {
+    /// Claims a slot, or `None` when `max` connections are already in flight.
+    pub fn acquire(live: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
+        let mut cur = live.load(Ordering::Relaxed);
+        loop {
+            if cur >= max {
+                return None;
+            }
+            match live.compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Relaxed) {
+                Ok(_) => return Some(Self(Arc::clone(live))),
+                Err(actual) => cur = actual,
+            }
+        }
+    }
+}
+
+impl Drop for ConnPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 #[cfg(test)]
 pub fn read_request(stream: &mut impl Read, max_body: usize) -> Result<HttpReq> {
     let mut req = read_head(stream)?;

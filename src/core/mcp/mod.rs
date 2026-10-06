@@ -61,6 +61,40 @@ pub fn bind_reuse(ip: &str, port: u16) -> std::io::Result<std::net::TcpListener>
     Ok(sock.into())
 }
 
+/// How many consecutive ports [`bind_server`] tries before giving up.
+const PORT_ATTEMPTS: u16 = 10;
+
+/// Binds the MCP listener on [`PORT`], falling back to the next free ports.
+///
+/// `wait_for_preferred` covers a restart: the previous server only notices its
+/// stop flag on its next accept poll (up to ~0.5 s, plus a graceful shutdown for
+/// the SDK backend) and keeps listening until then. `SO_REUSEADDR` does not allow
+/// binding a port someone still listens on, so without waiting the restarted
+/// server would drift to 8771 and break the configured MCP client. Pass zero at
+/// app start, where a busy port belongs to someone else.
+pub fn bind_server(
+    ip: &str,
+    wait_for_preferred: std::time::Duration,
+) -> anyhow::Result<(std::net::TcpListener, u16)> {
+    let deadline = std::time::Instant::now() + wait_for_preferred;
+    loop {
+        match bind_reuse(ip, PORT) {
+            Ok(listener) => return Ok((listener, PORT)),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::AddrInUse
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(_) => break,
+        }
+    }
+    (1..PORT_ATTEMPTS)
+        .map(|i| PORT.wrapping_add(i))
+        .find_map(|port| bind_reuse(ip, port).ok().map(|l| (l, port)))
+        .ok_or_else(|| anyhow::anyhow!("no free port for the MCP server"))
+}
+
 /// Which MCP backend (if any) serves requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum McpMode {

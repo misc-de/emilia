@@ -310,6 +310,15 @@ impl App {
         let Some(root) = self.files.music_dir.as_ref().map(PathBuf::from) else {
             return false;
         };
+        // A scan is already running (e.g. the music folder changed during the
+        // first import): a second worker would race it over the shared cancel
+        // flag and `scanning` state. Cancel it and run this one once it ends.
+        if self.scanning {
+            self.scan_cancel.store(true, Ordering::Relaxed);
+            let (prev_enrich, prev_manual) = self.scan_restart.unwrap_or((false, false));
+            self.scan_restart = Some((then_enrich || prev_enrich, manual || prev_manual));
+            return true;
+        }
         // Show the import progress overlay (spinner + progress bar + "Cancel")
         // while the potentially slow tag scan runs — for the automatic first
         // import *and* a manual rescan, so the user always sees how far along it

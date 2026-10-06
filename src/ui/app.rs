@@ -87,6 +87,9 @@ pub struct App {
     /// Cancel flag for the running scan; the "Cancel" button sets it and the
     /// scan worker stops at the next file (shared with the worker thread).
     pub(crate) scan_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// A scan requested while one was running: `(then_enrich, manual)` of the
+    /// follow-up run, started once the cancelled one reports `ScanDone`.
+    pub(crate) scan_restart: Option<(bool, bool)>,
     /// Online-enrichment state (covers/artist photos/fingerprint fetching).
     pub(crate) enrich_state: EnrichState,
     /// App-wide preferences (display language, active audio output).
@@ -1772,6 +1775,7 @@ impl Component for App {
             scan_bytes: 0,
             scan_total_bytes: 0,
             scan_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            scan_restart: None,
             enrich_state: EnrichState {
                 enriching: false,
                 auto_enrich,
