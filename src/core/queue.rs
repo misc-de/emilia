@@ -27,6 +27,36 @@ pub fn push_capped<T>(stack: &mut Vec<T>, item: T, cap: usize) {
     }
 }
 
+/// Updates the back stacks "previous" draws on when `starting` begins to
+/// play: a queue that replaced the previously played context pushes that
+/// context onto `nav_stack`, and the track that was playing goes into
+/// `history`. A start that is itself a step back (`stepping_back`) records
+/// neither, so returning never stacks the same place again.
+pub fn record_start<T: Clone + PartialEq>(
+    nav_stack: &mut Vec<(Vec<T>, usize)>,
+    history: &mut Vec<T>,
+    prev_ctx: Option<&(Vec<T>, usize)>,
+    queue: &[T],
+    playing: Option<&T>,
+    starting: &T,
+    stepping_back: bool,
+) {
+    if stepping_back {
+        return;
+    }
+    if let Some((pq, pp)) = prev_ctx
+        && !pq.is_empty()
+        && pq.as_slice() != queue
+    {
+        push_capped(nav_stack, (pq.clone(), *pp), NAV_STACK_CAP);
+    }
+    if let Some(prev) = playing
+        && prev != starting
+    {
+        push_capped(history, prev.clone(), HISTORY_CAP);
+    }
+}
+
 /// Random order of the queue indices for shuffle, and how far it has got.
 /// Every track of the queue plays exactly once per round.
 #[derive(Debug, Default, Clone)]
@@ -345,6 +375,58 @@ mod tests {
         assert_eq!(prev_action(&s), Prev::Restart);
         s.playing = false;
         assert_eq!(prev_action(&s), Prev::Nothing);
+    }
+
+    fn record(
+        prev_ctx: Option<&(Vec<u32>, usize)>,
+        queue: &[u32],
+        playing: Option<&u32>,
+        starting: u32,
+        stepping_back: bool,
+    ) -> (Vec<(Vec<u32>, usize)>, Vec<u32>) {
+        let (mut nav, mut hist) = (Vec::new(), Vec::new());
+        record_start(
+            &mut nav,
+            &mut hist,
+            prev_ctx,
+            queue,
+            playing,
+            &starting,
+            stepping_back,
+        );
+        (nav, hist)
+    }
+
+    #[test]
+    fn a_replaced_context_goes_onto_the_back_stack() {
+        let album = (vec![1, 2, 3], 1);
+        // A single song replaces the album: the album is kept to return to,
+        // and the song that was playing goes into the history.
+        let (nav, hist) = record(Some(&album), &[9], Some(&2), 9, false);
+        assert_eq!(nav, [(vec![1, 2, 3], 1)]);
+        assert_eq!(hist, [2]);
+    }
+
+    #[test]
+    fn moving_within_the_same_queue_only_records_history() {
+        let album = (vec![1, 2, 3], 0);
+        let (nav, hist) = record(Some(&album), &[1, 2, 3], Some(&1), 2, false);
+        assert!(nav.is_empty());
+        assert_eq!(hist, [1]);
+        // Restarting the same track adds nothing.
+        let (_, hist) = record(Some(&album), &[1, 2, 3], Some(&1), 1, false);
+        assert!(hist.is_empty());
+        // Nor does an empty previous context.
+        let (nav, _) = record(Some(&(vec![], 0)), &[1], None, 1, false);
+        assert!(nav.is_empty());
+    }
+
+    #[test]
+    fn stepping_back_records_nothing() {
+        let album = (vec![1, 2, 3], 1);
+        let (nav, hist) = record(Some(&album), &[9], Some(&2), 9, true);
+        assert!(nav.is_empty());
+        assert!(hist.is_empty());
     }
 
     #[test]

@@ -13,8 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::core::queue;
-use crate::ui::app::{App, Msg};
-use crate::ui::app_lyrics::LyricsMsg;
+use crate::ui::app::App;
 
 /// The pure half of [`App::next_seq_local`]: the queue entry after `queue_pos`
 /// when the context allows a sequential hand-over — no shuffle, no pending
@@ -89,7 +88,8 @@ impl App {
 
     /// Advances the **logical** playback state to queue index `next` without
     /// loading audio (the deck already moved there gaplessly, or is crossfading).
-    /// Mirrors the success branch of [`App::play_current`] minus the load.
+    /// Shares the now-playing bookkeeping with [`App::play_current`] via
+    /// [`App::note_track_started`].
     fn advance_logical_to(&mut self, next: usize) {
         // The just-finished track counts as fully listened.
         self.finalize_play_session(true);
@@ -107,58 +107,15 @@ impl App {
         let Some(path) = self.transport.queue.get(next).cloned() else {
             return;
         };
-        let path_str = path.to_string_lossy().to_string();
-        let track = self.library.track_by_path(&path_str).ok().flatten();
-        self.transport.playing_path = Some(path.clone());
-        self.podcasts.playing_episode_url = None;
-        self.streaming.playing_stream = None;
-        self.youtube.playing_live = None;
-        self.youtube.playing_video_id = None;
-        self.files.playing_remote = false;
-        self.mini.now_playing = Some(self.display_name(&path));
-        let album = track
-            .as_ref()
-            .and_then(|t| t.album.clone())
-            .filter(|a| !a.trim().is_empty());
-        self.mini.current_album = album
-            .map(|a| {
-                let artist = track
-                    .as_ref()
-                    .and_then(|t| t.artist.clone())
-                    .unwrap_or_default();
-                (artist, a)
-            })
-            .filter(|(artist, a)| {
-                self.library
-                    .album_card_tracks(artist, a)
-                    .map(|t| t.len() > 1)
-                    .unwrap_or(false)
-            });
-        self.mini.playing = true;
+        let track = self
+            .library
+            .track_by_path(&path.to_string_lossy())
+            .ok()
+            .flatten();
+        // The deck already plays it — no spinner, and it starts at 0.
         self.mini.loading = false;
-        self.settings.active_output = crate::core::output::default_output().unwrap_or_default();
-        self.apply_current_eq();
-        self.update_mpris_metadata(&path, track.as_ref());
-        self.mpris.set_playing(true);
-        // Refresh the blurred cover background + tray menu for the new track.
-        self.refresh_cover_background();
-        self.refresh_tray_state();
-        self.mini.position_ms = 0;
-        self.mini.track_duration_ms = self
-            .player
-            .duration_ms()
-            .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
-            .unwrap_or(0);
-        // Kept for every track (see the same snapshot in `play_current`): the
-        // close handler decides what of it is worth persisting.
-        *self.transport.close_resume.borrow_mut() =
-            Some((path_str.clone(), 0, self.mini.track_duration_ms));
-        self.start_play_session(path.clone(), self.mini.track_duration_ms);
-        self.refresh_queue_icons();
-        self.save_queue();
-        self.transport.prev_ctx = Some((self.transport.queue.clone(), self.transport.queue_pos));
-        self.set_chapters(self.local_yt_chapters(&path_str));
-        let _ = self.input.send(Msg::Lyrics(LyricsMsg::LoadLyrics(path)));
+        let name = self.display_name(&path);
+        self.note_track_started(&path, track.as_ref(), None, name, 0);
     }
 
     /// `STREAM_START` arrived: the active deck continued gaplessly into the next

@@ -9,6 +9,7 @@ use relm4::{ComponentController, ComponentSender, adw};
 use crate::core::queue;
 use crate::core::remote::{self, Backend};
 use crate::core::scanner;
+use crate::model::Track;
 use crate::ui::app::{App, Msg};
 use crate::ui::app_favorites::EntryMarks;
 use crate::ui::app_lyrics::LyricsMsg;
@@ -338,12 +339,14 @@ impl App {
     }
 
     pub(crate) fn play_current(&mut self) {
-        // Consume the one-shot start markers first, so neither can leak into a
+        // Consume the one-shot start markers first, so none can leak into a
         // later start — not even when this call returns early below. The
         // restored session position is taken here and matched against the path
         // further down: whatever starts now, it is spent either way.
         let fresh_start = std::mem::take(&mut self.transport.fresh_start);
         let restored_session = self.transport.resume_current.take();
+        let forced_ms = self.transport.forced_start_ms.take();
+        let stepping_back = std::mem::take(&mut self.transport.skip_history_push);
         // Something is starting, so there is no finished track waiting to be
         // replayed any more (see `play_prev`).
         self.transport.last_finished = None;
@@ -357,43 +360,50 @@ impl App {
         let Some(path) = self.transport.queue.get(self.transport.queue_pos).cloned() else {
             return;
         };
-        // Detect context switch: if a new selection replaces the running
-        // queue, push the old context (queue + position) onto the back
-        // stack – this allows "keep listening to the previous song **including
-        // its playlist**". When jumping back itself, don't stack again.
-        if !self.transport.skip_history_push
-            && let Some((pq, pp)) = self.transport.prev_ctx.clone()
-            && !pq.is_empty()
-            && pq != self.transport.queue
-        {
-            queue::push_capped(
-                &mut self.transport.nav_stack,
-                (pq, pp),
-                queue::NAV_STACK_CAP,
-            );
-        }
-        // Maintain history: remember the previously running track (for "previous song").
-        // When jumping back from the history itself, don't add it again.
-        if self.transport.skip_history_push {
-            self.transport.skip_history_push = false;
-        } else if let Some(prev) = self.transport.playing_path.clone()
-            && prev != path
-        {
-            queue::push_capped(&mut self.transport.play_history, prev, queue::HISTORY_CAP);
-        }
+        // Keep the previous context and track reachable for "previous".
+        let t = &mut self.transport;
+        queue::record_start(
+            &mut t.nav_stack,
+            &mut t.play_history,
+            t.prev_ctx.as_ref(),
+            &t.queue,
+            t.playing_path.as_ref(),
+            &path,
+            stepping_back,
+        );
         let path_str = path.to_string_lossy().to_string();
-        // YouTube tracks resolve asynchronously (yt-dlp -g takes seconds). A
-        // local offline copy plays synchronously below; otherwise resolve in a
-        // worker thread and start streaming when `YtStreamResolved` arrives.
         let yt_video = crate::core::youtube::parse_yt_path(&path_str);
-        // Title from the current play context (single video or playlist queue),
-        // so a `yt:` track shows a name rather than its id.
-        let yt_name = yt_video
+        let track = self.library.track_by_path(&path_str).ok().flatten();
+        // A `yt:` track shows its title from the play context (single video or
+        // playlist queue) rather than its id.
+        let name = yt_video
             .as_ref()
             .and_then(|vid| self.youtube.video_titles.get(vid).cloned())
-            .filter(|t| !t.trim().is_empty());
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| self.display_name(&path));
+        // A tapped jump mark of this very video (see `yt_play_video_at`) —
+        // honoured for a downloaded copy just as for a stream.
+        let mark_ms = yt_video.as_ref().and_then(|vid| {
+            self.youtube
+                .pending_seek
+                .take()
+                .filter(|(v, _)| v == vid)
+                .map(|(_, ms)| ms)
+        });
+        // The restored session position counts for its own track only.
+        let restored = restored_session
+            .filter(|(p, _)| *p == path)
+            .map(|(_, ms)| ms);
+        // A YouTube item has no library row — its resume point lives in
+        // `yt_progress`; of local tracks only long-form material and audiobooks
+        // keep one (see `should_resume`).
+        let stored_ms = match (&track, &yt_video) {
+            (_, Some(vid)) => self.library.yt_progress(vid).unwrap_or(0).max(0),
+            (Some(t), None) if self.should_resume(t) => t.resume_ms,
+            _ => 0,
+        };
+        let start_ms = start_position(mark_ms, forced_ms, fresh_start, restored, stored_ms);
         if let Some(video_id) = &yt_video {
-            let name = yt_name.clone().unwrap_or_else(|| self.display_name(&path));
             // Log to the "Recent" history and enrich (cover/artist) in the background.
             self.note_youtube_play(video_id, &name);
             let has_local = self
@@ -401,204 +411,21 @@ impl App {
                 .yt_download(video_id)
                 .ok()
                 .flatten()
-                .map(|p| std::path::Path::new(&p).exists())
-                .unwrap_or(false);
+                .is_some_and(|p| Path::new(&p).exists());
             if !has_local {
-                // Long-form items (talks/streams/podcasts) continue where they
-                // were left off; songs have no stored position and start at 0.
-                // Advancing within the queue always starts at 0 as well. A
-                // tapped jump mark wins over all of that for this one start.
-                let resume = self
-                    .youtube
-                    .pending_seek
-                    .take()
-                    .filter(|(v, _)| v == video_id)
-                    .map(|(_, ms)| ms)
-                    .unwrap_or_else(|| match fresh_start {
-                        true => 0,
-                        false => self.library.yt_progress(video_id).unwrap_or(0).max(0),
-                    });
-                // Optimistic now-playing state; the worker resolves the stream.
-                self.transport.skip_count = 0;
-                self.transport.playing_path = Some(path.clone());
-                self.podcasts.playing_episode_url = None;
-                self.streaming.playing_stream = None;
-                self.youtube.playing_live = None;
-                self.files.playing_remote = false;
-                self.youtube.playing_video_id = Some(video_id.clone());
-                self.stop_recorder();
-                self.mini.now_playing = Some(name.clone());
-                self.mini.current_album = None; // YouTube — no local album page
-                self.mini.playing = true;
-                // Resolving the stream URL (yt-dlp) and buffering takes a moment
-                // → spinner until `YtStreamResolved` plays and the player is ready.
-                self.mini.loading = true;
-                self.mini.position_ms = resume.max(0);
-                self.mini.track_duration_ms = 0;
-                *self.transport.close_resume.borrow_mut() = None;
-                self.set_chapters(Vec::new());
-                // No lyrics for a (just-resolving) stream; drop the old track's.
-                self.close_lyrics_view();
-                self.lyrics.current = None;
-                self.lyrics.for_path = None;
-                self.mpris.set_metadata(0, &name, None, None, None, None);
-                self.mpris.set_playing(true);
-                self.refresh_queue_icons();
-                let input = self.input.clone();
-                let vid = video_id.clone();
-                let ticket = crate::core::youtube::PLAY_RESOLVE.ticket();
-                std::thread::spawn(move || {
-                    // A newer play superseded this one; its own resolve follows.
-                    if !crate::core::youtube::PLAY_RESOLVE
-                        .settled(ticket, crate::core::youtube::RESOLVE_SETTLE)
-                    {
-                        return;
-                    }
-                    let result =
-                        crate::core::youtube::resolve_audio_url(&vid).map_err(|e| e.to_string());
-                    let _ = input.send(crate::ui::app::Msg::Yt(
-                        crate::ui::app_yt_glue::YtMsg::YtStreamResolved {
-                            video_id: vid,
-                            resume,
-                            result,
-                        },
-                    ));
-                });
+                self.start_yt_stream(path, video_id.clone(), name, start_ms);
                 return;
             }
         }
-        // Where to start. A one-shot forced start (recording editor preview, or
-        // picking an interrupted queue back up) wins; moving on within the queue
-        // always starts at 0; otherwise the track continues where the playback
-        // session left it, and failing that at its own resume point — which
-        // only long-form material and audiobooks have (see `should_resume`).
-        let track = self.library.track_by_path(&path_str).ok().flatten();
-        // The restored session position counts for its own track only.
-        let restored = restored_session
-            .filter(|(p, _)| *p == path)
-            .map(|(_, ms)| ms);
-        // An offline copy of a long-form YouTube item has no library row — its
-        // resume point lives in `yt_progress`, like the streamed case.
-        let stored_ms = match (&track, &yt_video) {
-            (_, Some(vid)) => self.library.yt_progress(vid).unwrap_or(0).max(0),
-            (Some(t), None) if self.should_resume(t) => t.resume_ms,
-            _ => 0,
-        };
-        let resume_ms = start_position(
-            self.transport.forced_start_ms.take(),
-            fresh_start,
-            restored,
-            stored_ms,
-        );
-        match self.start_track_playback(&path_str, resume_ms) {
+        match self.start_track_playback(&path_str, start_ms) {
             Ok(is_network_stream) => {
                 // A track started → reset the unplayable-skip guard.
                 self.transport.skip_count = 0;
                 // Network streams (Nextcloud) buffer before playing → spinner
                 // until ready; local/cached files start instantly (no spinner).
                 self.mini.loading = is_network_stream;
-                self.transport.playing_path = Some(path.clone());
-                // Music is playing again – no podcast episode/station/
-                // remote file active anymore.
-                self.podcasts.playing_episode_url = None;
-                self.streaming.playing_stream = None;
-                self.youtube.playing_live = None;
-                self.files.playing_remote = false;
-                // For a YouTube track this is its id (marks the row); None resets it.
-                self.youtube.playing_video_id = yt_video.clone();
-                self.stop_recorder();
-                self.mini.now_playing = Some(match &yt_video {
-                    Some(_) => yt_name.clone().unwrap_or_else(|| self.display_name(&path)),
-                    None => self.display_name(&path),
-                });
-                // Album shortcut in the player bar: only for a local track with an
-                // album (not for YouTube tracks) …
-                let album = match &yt_video {
-                    Some(_) => None,
-                    None => track
-                        .as_ref()
-                        .and_then(|t| t.album.clone())
-                        .filter(|a| !a.trim().is_empty()),
-                };
-                // … and only when the album actually has more than this one track
-                // (a single-track album has no meaningful song page to open).
-                self.mini.current_album = album
-                    .map(|a| {
-                        let artist = track
-                            .as_ref()
-                            .and_then(|t| t.artist.clone())
-                            .unwrap_or_default();
-                        (artist, a)
-                    })
-                    .filter(|(artist, a)| {
-                        self.library
-                            .album_card_tracks(artist, a)
-                            .map(|t| t.len() > 1)
-                            .unwrap_or(false)
-                    });
-                self.mini.playing = true;
-                // Refresh the active output (may have changed).
-                self.settings.active_output =
-                    crate::core::output::default_output().unwrap_or_default();
-                self.apply_current_eq();
-                // Inform the lock screen/media keys about the new track.
-                self.update_mpris_metadata(&path, track.as_ref());
-                self.mpris.set_playing(true);
-                // Refresh the blurred cover background + tray menu for the new track.
-                self.refresh_cover_background();
-                self.refresh_tray_state();
-                let start = self.player.position_ms().unwrap_or(resume_ms.max(0));
-                self.mpris.set_position(start);
-                self.mpris.seeked(start);
-                // Set the seek bar to the new track (the tick refines the duration).
-                self.mini.position_ms = start;
-                self.mini.track_duration_ms = self
-                    .player
-                    .duration_ms()
-                    .or_else(|| track.as_ref().and_then(|t| t.duration_ms))
-                    .unwrap_or(0);
-                // Snapshot for saving on close — kept for every track: the
-                // close handler writes the playback state from it always and
-                // the track's own resume point only where one is wanted.
-                *self.transport.close_resume.borrow_mut() =
-                    Some((path_str.clone(), start, self.mini.track_duration_ms));
-                // Start a new listening session for the statistics.
-                self.start_play_session(path.clone(), self.mini.track_duration_ms);
-                // Adjust the play/queue markers in the list to the new track.
-                self.refresh_queue_icons();
-                // Save the queue + position for the next start.
-                self.save_queue();
-                // Remember the current context (detection of future queue switches).
-                self.transport.prev_ctx =
-                    Some((self.transport.queue.clone(), self.transport.queue_pos));
-                // Tracks have no chapters — except a downloaded YouTube video,
-                // whose description carries the same jump marks the streamed
-                // version shows.
-                self.set_chapters(self.local_yt_chapters(&path_str));
-                self.update_current_chapter();
-                // Load lyrics for the new track (embedded/cache instantly, then
-                // LRCLIB in the background) – shows the karaoke button when synced
-                // lyrics exist.
-                let _ = self
-                    .input
-                    .send(Msg::Lyrics(LyricsMsg::LoadLyrics(path.clone())));
-                // If usable tags are missing (artist/album), let the track be
-                // identified in the background via fingerprint – instead of a bulk
-                // run, only what is actually played. The actual gating checks (key,
-                // fpcalc, network, attempt limit) are done by fetch_focus_track.
-                let needs_id = track.as_ref().is_none_or(|t| {
-                    t.artist.as_deref().unwrap_or("").trim().is_empty()
-                        || t.album.as_deref().unwrap_or("").trim().is_empty()
-                });
-                if needs_id
-                    && self
-                        .enrich_state
-                        .acoustid_key
-                        .as_deref()
-                        .is_some_and(|k| !k.is_empty())
-                {
-                    let _ = self.input.send(Msg::FingerprintCurrent(path.clone()));
-                }
+                let start = self.player.position_ms().unwrap_or(start_ms);
+                self.note_track_started(&path, track.as_ref(), yt_video, name, start);
                 // Arm the next track for gapless continuation (no-op when the
                 // next entry isn't a sequential local file or gapless is off).
                 self.arm_gapless();
@@ -610,6 +437,160 @@ impl App {
                 let _ = self.input.send(Msg::Transport(TransportMsg::PlaybackError));
             }
         }
+    }
+
+    /// Starts a YouTube queue track that has no offline copy. Resolving its
+    /// stream (`yt-dlp -g`) takes seconds, so the now-playing state is set
+    /// optimistically and a worker resolves the URL; playback begins when
+    /// `YtStreamResolved` arrives.
+    fn start_yt_stream(&mut self, path: PathBuf, video_id: String, name: String, resume: i64) {
+        self.transport.skip_count = 0;
+        self.transport.playing_path = Some(path);
+        self.podcasts.playing_episode_url = None;
+        self.streaming.playing_stream = None;
+        self.youtube.playing_live = None;
+        self.files.playing_remote = false;
+        self.youtube.playing_video_id = Some(video_id.clone());
+        self.stop_recorder();
+        self.mpris.set_metadata(0, &name, None, None, None, None);
+        self.mini.now_playing = Some(name);
+        self.mini.current_album = None; // YouTube — no local album page
+        self.mini.playing = true;
+        // Resolving the stream URL (yt-dlp) and buffering takes a moment
+        // → spinner until `YtStreamResolved` plays and the player is ready.
+        self.mini.loading = true;
+        self.mini.position_ms = resume;
+        self.mini.track_duration_ms = 0;
+        *self.transport.close_resume.borrow_mut() = None;
+        self.set_chapters(Vec::new());
+        // No lyrics for a (just-resolving) stream; drop the old track's.
+        self.close_lyrics_view();
+        self.lyrics.current = None;
+        self.lyrics.for_path = None;
+        self.mpris.set_playing(true);
+        self.refresh_queue_icons();
+        let input = self.input.clone();
+        let ticket = crate::core::youtube::PLAY_RESOLVE.ticket();
+        std::thread::spawn(move || {
+            // A newer play superseded this one; its own resolve follows.
+            if !crate::core::youtube::PLAY_RESOLVE
+                .settled(ticket, crate::core::youtube::RESOLVE_SETTLE)
+            {
+                return;
+            }
+            let result =
+                crate::core::youtube::resolve_audio_url(&video_id).map_err(|e| e.to_string());
+            let _ = input.send(Msg::Yt(crate::ui::app_yt_glue::YtMsg::YtStreamResolved {
+                video_id,
+                resume,
+                result,
+            }));
+        });
+    }
+
+    /// Everything that hangs off "this queue track plays now": which source is
+    /// active, the player bar, MPRIS, cover background, statistics session,
+    /// saved queue, chapters, lyrics and tag identification. Shared by
+    /// [`Self::play_current`] and the gapless/crossfade hand-over, so the two
+    /// cannot drift apart. Loading the audio and the spinner stay with the
+    /// caller; `start` is where playback begins (ms).
+    pub(crate) fn note_track_started(
+        &mut self,
+        path: &Path,
+        track: Option<&Track>,
+        yt_video: Option<String>,
+        name: String,
+        start: i64,
+    ) {
+        self.transport.playing_path = Some(path.to_path_buf());
+        // Music is playing again – no podcast episode/station/
+        // remote file active anymore.
+        self.podcasts.playing_episode_url = None;
+        self.streaming.playing_stream = None;
+        self.youtube.playing_live = None;
+        self.files.playing_remote = false;
+        // Album shortcut in the player bar: only for a local track (not for a
+        // YouTube one). For a YouTube track `yt_video` is its id (marks the
+        // row); None resets it.
+        self.mini.current_album = match yt_video {
+            Some(_) => None,
+            None => self.album_shortcut(track),
+        };
+        self.youtube.playing_video_id = yt_video;
+        self.stop_recorder();
+        self.mini.now_playing = Some(name);
+        self.mini.playing = true;
+        // Refresh the active output (may have changed).
+        self.settings.active_output = crate::core::output::default_output().unwrap_or_default();
+        self.apply_current_eq();
+        // Inform the lock screen/media keys about the new track.
+        self.update_mpris_metadata(path, track);
+        self.mpris.set_playing(true);
+        // Refresh the blurred cover background + tray menu for the new track.
+        self.refresh_cover_background();
+        self.refresh_tray_state();
+        self.mpris.set_position(start);
+        self.mpris.seeked(start);
+        // Set the seek bar to the new track (the tick refines the duration).
+        self.mini.position_ms = start;
+        self.mini.track_duration_ms = self
+            .player
+            .duration_ms()
+            .or_else(|| track.and_then(|t| t.duration_ms))
+            .unwrap_or(0);
+        let path_str = path.to_string_lossy().to_string();
+        // Snapshot for saving on close — kept for every track: the close
+        // handler writes the playback state from it always and the track's own
+        // resume point only where one is wanted.
+        *self.transport.close_resume.borrow_mut() =
+            Some((path_str.clone(), start, self.mini.track_duration_ms));
+        // Start a new listening session for the statistics.
+        self.start_play_session(path.to_path_buf(), self.mini.track_duration_ms);
+        // Adjust the play/queue markers in the list to the new track.
+        self.refresh_queue_icons();
+        // Save the queue + position for the next start.
+        self.save_queue();
+        // Remember the current context (detection of future queue switches).
+        self.transport.prev_ctx = Some((self.transport.queue.clone(), self.transport.queue_pos));
+        // Tracks have no chapters — except a downloaded YouTube video, whose
+        // description carries the same jump marks the streamed version shows.
+        self.set_chapters(self.local_yt_chapters(&path_str));
+        self.update_current_chapter();
+        // Load lyrics for the new track (embedded/cache instantly, then LRCLIB
+        // in the background) – shows the karaoke button when synced lyrics exist.
+        let _ = self
+            .input
+            .send(Msg::Lyrics(LyricsMsg::LoadLyrics(path.to_path_buf())));
+        // If usable tags are missing (artist/album), let the track be identified
+        // in the background via fingerprint – instead of a bulk run, only what is
+        // actually played. The actual gating checks (key, fpcalc, network,
+        // attempt limit) are done by fetch_focus_track.
+        let needs_id = track.is_none_or(|t| {
+            t.artist.as_deref().unwrap_or("").trim().is_empty()
+                || t.album.as_deref().unwrap_or("").trim().is_empty()
+        });
+        if needs_id
+            && self
+                .enrich_state
+                .acoustid_key
+                .as_deref()
+                .is_some_and(|k| !k.is_empty())
+        {
+            let _ = self.input.send(Msg::FingerprintCurrent(path.to_path_buf()));
+        }
+    }
+
+    /// The player bar's album shortcut for `track`: its (artist, album), but
+    /// only when that album has more than this one track — a single-track album
+    /// has no meaningful song page to open.
+    fn album_shortcut(&self, track: Option<&Track>) -> Option<(String, String)> {
+        let t = track?;
+        let album = t.album.clone().filter(|a| !a.trim().is_empty())?;
+        let artist = t.artist.clone().unwrap_or_default();
+        self.library
+            .album_card_tracks(&artist, &album)
+            .is_ok_and(|tracks| tracks.len() > 1)
+            .then_some((artist, album))
     }
 
     /// Skips the current (unplayable) track and advances to the next queue
@@ -1023,21 +1004,23 @@ pub(crate) fn absolute_seek(pos_ms: i64, length_ms: Option<i64>) -> SeekTarget {
 /// Where a start of a track begins, in ms — the pure half of the decision in
 /// [`App::play_current`]. In order of precedence:
 ///
-/// 1. `forced_ms`: a one-shot start demanded by the caller (the recording
+/// 1. `mark_ms`: a tapped jump mark of the YouTube video being started.
+/// 2. `forced_ms`: a one-shot start demanded by the caller (the recording
 ///    editor's "play from the playhead", an interrupted queue picked back up).
-/// 2. `fresh_start`: moving on **within** the running queue always begins at
+/// 3. `fresh_start`: moving on **within** the running queue always begins at
 ///    the beginning — an album's next song, an audiobook's next chapter.
-/// 3. `restored_ms`: where this very track stood when listening stopped, from
+/// 4. `restored_ms`: where this very track stood when listening stopped, from
 ///    the playback state restored at startup. A song has one of these too.
-/// 4. `stored_ms`: the track's own resume point, which only long-form material
+/// 5. `stored_ms`: the track's own resume point, which only long-form material
 ///    and audiobooks carry (see [`App::should_resume`]); 0 for everything else.
 pub(crate) fn start_position(
+    mark_ms: Option<i64>,
     forced_ms: Option<i64>,
     fresh_start: bool,
     restored_ms: Option<i64>,
     stored_ms: i64,
 ) -> i64 {
-    match forced_ms {
+    match mark_ms.or(forced_ms) {
         Some(ms) => ms.max(0),
         None if fresh_start => 0,
         None => restored_ms.unwrap_or(stored_ms).max(0),
@@ -1119,36 +1102,45 @@ mod tests {
     #[test]
     fn start_position_follows_its_order_of_precedence() {
         // Nothing to go on: the beginning.
-        assert_eq!(start_position(None, false, None, 0), 0);
+        assert_eq!(start_position(None, None, false, None, 0), 0);
 
         // The track's own resume point (audiobook, long-form) is used…
-        assert_eq!(start_position(None, false, None, 42_000), 42_000);
+        assert_eq!(start_position(None, None, false, None, 42_000), 42_000);
         // …but never when moving on within the queue: the next chapter of an
         // audiobook begins at its beginning.
-        assert_eq!(start_position(None, true, None, 42_000), 0);
+        assert_eq!(start_position(None, None, true, None, 42_000), 0);
 
         // A paused album carries on mid-song, even though a song keeps no
         // resume point of its own (stored_ms = 0).
-        assert_eq!(start_position(None, false, Some(75_000), 0), 75_000);
+        assert_eq!(start_position(None, None, false, Some(75_000), 0), 75_000);
         // Advancing wins over that too — it is the *next* song starting.
-        assert_eq!(start_position(None, true, Some(75_000), 0), 0);
+        assert_eq!(start_position(None, None, true, Some(75_000), 0), 0);
         // And it takes precedence over a stored point for the same track.
-        assert_eq!(start_position(None, false, Some(75_000), 42_000), 75_000);
+        assert_eq!(
+            start_position(None, None, false, Some(75_000), 42_000),
+            75_000
+        );
 
         // A forced start beats everything, advance included.
         assert_eq!(
-            start_position(Some(9_000), false, Some(75_000), 42_000),
+            start_position(None, Some(9_000), false, Some(75_000), 42_000),
             9_000
         );
         assert_eq!(
-            start_position(Some(9_000), true, Some(75_000), 42_000),
+            start_position(None, Some(9_000), true, Some(75_000), 42_000),
             9_000
         );
         // Even a forced start of 0 is honoured as "from the top".
-        assert_eq!(start_position(Some(0), false, Some(75_000), 0), 0);
+        assert_eq!(start_position(None, Some(0), false, Some(75_000), 0), 0);
 
         // Negatives can't reach the player.
-        assert_eq!(start_position(Some(-5), false, None, 0), 0);
-        assert_eq!(start_position(None, false, Some(-5), 0), 0);
+        // A tapped jump mark wins over all of it, forced start included.
+        assert_eq!(
+            start_position(Some(30_000), Some(9_000), true, Some(75_000), 42_000),
+            30_000
+        );
+
+        assert_eq!(start_position(None, Some(-5), false, None, 0), 0);
+        assert_eq!(start_position(None, None, false, Some(-5), 0), 0);
     }
 }
