@@ -26,6 +26,7 @@ pub mod server_sdk;
 pub mod state;
 pub mod tools;
 pub mod tools_ext;
+mod tools_schema;
 
 pub use command::{ControlFn, McpCommand};
 pub use state::{new_handle, new_sync_handle, NowPlayingHandle, SyncStateHandle};
