@@ -506,11 +506,11 @@ fn section_edges(position: usize, total: usize, headers: Option<&[String]>) -> (
     }
 }
 
-/// The overviews mark the album that is running; which artist it is filed under
-/// plays no role, exactly as when opening a row (they group by album name).
+/// The overviews mark the album card that is running (album name plus the
+/// card's display artist, see [`crate::core::album_group::card_key`]).
 impl crate::ui::play_mark::PlaybackSink for CardList {
     fn apply_playback(&self, state: &crate::ui::play_mark::PlaybackState) {
-        self.set_playback(state.album.clone(), state.playing);
+        self.set_playback(state.album_card.clone(), state.playing);
     }
 }
 

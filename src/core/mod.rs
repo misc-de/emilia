@@ -1,3 +1,4 @@
+pub mod album_group;
 pub mod artist;
 pub mod category;
 pub mod concert;

@@ -357,7 +357,7 @@ impl App {
         };
         np.playing = self.mini.playing;
         np.title = self.mini.now_playing.clone();
-        np.album = self.mini.current_album.clone();
+        np.album = self.mini.current_album.clone().map(|(_, album)| album);
         np.position_ms = self.mini.position_ms;
         np.duration_ms = self.mini.track_duration_ms;
         // The artist is a DB read — only when the item changed, not every tick.

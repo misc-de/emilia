@@ -139,8 +139,9 @@ impl Library {
             .collect())
     }
 
-    /// Top albums from `since`. Folded over the album name like
-    /// [`Self::albums_overview`]; display artist = primary artist with the most plays.
+    /// Top albums from `since`, folded over the album name; display artist =
+    /// primary artist with the most plays. (The overview additionally splits a
+    /// title shared by unrelated artists, see [`crate::core::album_group`].)
     pub fn stats_top_albums(&self, since: i64, limit: usize) -> Result<Vec<StatEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT COALESCE(t.artist, '') AS artist, t.album,

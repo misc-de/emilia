@@ -142,7 +142,7 @@ impl App {
                 // from the top — asking the same question the icon was drawn
                 // from (the album for an album block, the file for a track).
                 let running = match album.as_deref() {
-                    Some(album) => self.toggle_if_active_album(album),
+                    Some(album) => self.toggle_if_active_album_name(album),
                     None => self.toggle_if_active_file(std::path::Path::new(&path)),
                 };
                 if running {

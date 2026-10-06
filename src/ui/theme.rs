@@ -746,8 +746,7 @@ impl App {
             .track_by_path(&path.to_string_lossy())
             .ok()
             .flatten()?;
-        let album = track.album.filter(|a| !a.trim().is_empty())?;
-        self.library.album_cover(&album).ok().flatten()
+        self.playing_cover_path(&track)
     }
 }
 

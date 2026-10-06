@@ -122,12 +122,20 @@ impl App {
             .as_ref()
             .and_then(|t| t.album.clone())
             .filter(|a| !a.trim().is_empty());
-        self.mini.current_album = album.filter(|a| {
-            self.library
-                .album_track_paths_by_name(a)
-                .map(|p| p.len() > 1)
-                .unwrap_or(false)
-        });
+        self.mini.current_album = album
+            .map(|a| {
+                let artist = track
+                    .as_ref()
+                    .and_then(|t| t.artist.clone())
+                    .unwrap_or_default();
+                (artist, a)
+            })
+            .filter(|(artist, a)| {
+                self.library
+                    .album_card_tracks(artist, a)
+                    .map(|t| t.len() > 1)
+                    .unwrap_or(false)
+            });
         self.mini.playing = true;
         self.mini.loading = false;
         self.settings.active_output = crate::core::output::default_output().unwrap_or_default();

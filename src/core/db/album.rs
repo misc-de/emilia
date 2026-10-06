@@ -279,34 +279,73 @@ impl Library {
         Ok(out)
     }
 
-    pub fn album_cover(&self, album: &str) -> Result<Option<String>> {
-        let cover = self
-            .conn
-            .query_row(
-                "SELECT cover_path FROM album_meta
-                 WHERE album = ?1 AND cover_path IS NOT NULL AND cover_path <> ''
-                 LIMIT 1",
-                [album],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()?;
-        Ok(cover)
+    /// A stored cover of a same-named album by the **same primary artist** —
+    /// covers the "feat." credit variants ("Gorillaz featuring De La Soul" on
+    /// "Demon Days" shares "Gorillaz"'s cover). A same-named album by another
+    /// artist ("Greatest Hits", "[non-album tracks]") never lends its cover:
+    /// matching on the name alone put foreign covers on albums, artists and the
+    /// now-playing views.
+    pub fn album_cover_related(&self, artist: &str, album: &str) -> Result<Option<String>> {
+        let primary = crate::core::artist::primary_artist(artist).to_lowercase();
+        let mut stmt = self.conn.prepare(
+            "SELECT artist, cover_path FROM album_meta
+             WHERE album = ?1 AND cover_path IS NOT NULL AND cover_path <> ''
+             ORDER BY artist",
+        )?;
+        let rows = stmt.query_map([album], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (a, cover) = row?;
+            if crate::core::artist::primary_artist(&a).to_lowercase() == primary {
+                return Ok(Some(cover));
+            }
+        }
+        Ok(None)
     }
 
-    /// Map of lowercased album name -> a stored cover path (any artist credit),
-    /// fetched in one query. Lets the album overview resolve every album's cover
-    /// from one scan instead of an `album_cover` lookup per coverless album.
-    pub fn album_meta_covers(&self) -> Result<std::collections::HashMap<String, String>> {
+    /// Track paths of a same-named album by the same primary artist (see
+    /// [`Self::album_cover_related`]) — the local-cover fallback of a track or
+    /// artist, which must not borrow embedded art from a foreign artist's album.
+    pub fn album_track_paths_related(&self, artist: &str, album: &str) -> Result<Vec<String>> {
+        let primary = crate::core::artist::primary_artist(artist).to_lowercase();
         let mut stmt = self.conn.prepare(
-            "SELECT LOWER(album), cover_path FROM album_meta
+            "SELECT COALESCE(artist, ''), path FROM track
+             WHERE album = ?1
+             ORDER BY path",
+        )?;
+        let rows = stmt.query_map([album], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (a, path) = row?;
+            if crate::core::artist::primary_artist(&a).to_lowercase() == primary {
+                out.push(path);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Every stored album cover pointer, for the folder-image repair in the
+    /// enrichment sweep.
+    pub fn album_cover_paths(&self) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT artist, album, cover_path FROM album_meta
              WHERE cover_path IS NOT NULL AND cover_path <> ''",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        let mut map = std::collections::HashMap::new();
-        for (album, cover) in rows.flatten() {
-            map.entry(album).or_insert(cover);
-        }
-        Ok(map)
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Drops an album's cover pointer (keeps mbid/year/attempts), so the next
+    /// sweep looks for a cover again.
+    pub fn clear_album_cover(&self, artist: &str, album: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE album_meta SET cover_path = NULL WHERE artist = ?1 AND album = ?2",
+            [artist, album],
+        )?;
+        Ok(())
     }
 
     /// Stores/updates the online metadata of an album.
@@ -489,12 +528,14 @@ impl Library {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
-        // Albums are merged **by album name alone** -- the
-        // artist plays no role. Same-named tracks by different
-        // artists (including "feat." variants) thus form exactly one card.
-        // Display artist + cover come from the artist with the most
-        // tracks on the album (gaps are filled from the rest).
+        // Same-named albums form one card when their artists share a primary
+        // artist ("feat." variants) or an album folder (soundtracks, samplers)
+        // — see [`crate::core::album_group`]. Unrelated albums that merely share
+        // a title ("Greatest Hits") stay separate cards. Display artist + cover
+        // come from the artist with the most tracks on the card (gaps are
+        // filled from the rest).
         use std::collections::HashMap;
+        let cards = self.album_cards_by_name()?;
         // Per album key: statistics per primary artist (track count, cover,
         // year, MBID) for choosing the display artist/cover.
         type ArtistInfo = (i64, Option<String>, Option<i32>, Option<String>);
@@ -507,7 +548,11 @@ impl Library {
         // return a reissue/remaster year (e.g. a 1996 album coming back as 2015).
         let mut tag_years: HashMap<String, Option<i32>> = HashMap::new();
         for (artist, album, mbid, cover, year, status, count, duration, tag_year) in raw {
-            let key = album.to_lowercase();
+            let key = cards
+                .get(&album.to_lowercase())
+                .and_then(|c| c.iter().find(|c| c.contains(&artist)))
+                .map(|c| crate::core::album_group::card_key(&album, &c.display))
+                .unwrap_or_else(|| album.to_lowercase());
             if let Some(ty) = tag_year {
                 let slot = tag_years.entry(key.clone()).or_insert(None);
                 *slot = Some(slot.map_or(ty, |e| e.min(ty)));
@@ -588,8 +633,95 @@ impl Library {
             meta.cover_path = artists.iter().find_map(|(_, i)| i.1.clone());
         }
         let mut out: Vec<AlbumMeta> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
-        out.sort_by_key(|a| a.album.to_lowercase());
+        out.sort_by(|a, b| {
+            a.album
+                .to_lowercase()
+                .cmp(&b.album.to_lowercase())
+                .then_with(|| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+        });
         Ok(out)
+    }
+
+    /// The album cards of every album name (lower-cased name → its cards),
+    /// from one pass over all tracks.
+    fn album_cards_by_name(
+        &self,
+    ) -> Result<std::collections::HashMap<String, Vec<crate::core::album_group::Card>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(artist, ''), album, path FROM track
+             WHERE album IS NOT NULL AND album <> ''",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut by_name: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let (artist, album, path) = row?;
+            by_name
+                .entry(album.to_lowercase())
+                .or_default()
+                .push((artist, path));
+        }
+        Ok(by_name
+            .into_iter()
+            .map(|(name, tracks)| {
+                let cards = crate::core::album_group::cards(
+                    tracks.iter().map(|(a, p)| (a.as_str(), p.as_str())),
+                );
+                (name, cards)
+            })
+            .collect())
+    }
+
+    /// The card a track credited to `artist` on `album` belongs to (see
+    /// [`crate::core::album_group`]), with the tracks of that album name.
+    fn album_card_of(
+        &self,
+        artist: &str,
+        album: &str,
+    ) -> Result<(
+        Option<crate::core::album_group::Card>,
+        Vec<crate::model::Track>,
+    )> {
+        let tracks = self.tracks_by_album_name(album)?;
+        let card = crate::core::album_group::cards(
+            tracks
+                .iter()
+                .map(|t| (t.artist.as_deref().unwrap_or(""), t.path.as_str())),
+        )
+        .into_iter()
+        .find(|c| c.contains(artist));
+        Ok((card, tracks))
+    }
+
+    /// The tracks of an album **card**: the same-named tracks grouped with
+    /// `artist` (any credit on the card works — display artist or a member).
+    /// Unknown artist → every track of the name, as before the split.
+    pub fn album_card_tracks(&self, artist: &str, album: &str) -> Result<Vec<crate::model::Track>> {
+        let (card, tracks) = self.album_card_of(artist, album)?;
+        Ok(match card {
+            Some(card) => tracks
+                .into_iter()
+                .filter(|t| card.contains(t.artist.as_deref().unwrap_or("")))
+                .collect(),
+            None => tracks,
+        })
+    }
+
+    /// Key of the card a track credited to `artist` on `album` shows up under
+    /// (see [`crate::core::album_group::card_key`]).
+    pub fn album_card_key(&self, artist: &str, album: &str) -> Result<String> {
+        let (card, _) = self.album_card_of(artist, album)?;
+        let display = card.map_or_else(
+            || crate::core::artist::primary_artist(artist),
+            |c| c.display,
+        );
+        Ok(crate::core::album_group::card_key(album, &display))
     }
 
     fn map_album_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumMeta> {
@@ -684,9 +816,8 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// All track paths of an album name, regardless of artist credit. Used as a
-    /// UI cover fallback for the merged album overview, where same-named albums
-    /// appear as one card.
+    /// All track paths of an album name, regardless of artist credit (device
+    /// sync shares keyed by album name alone).
     pub fn album_track_paths_by_name(&self, album: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT path FROM track
@@ -695,35 +826,5 @@ impl Library {
         )?;
         let rows = stmt.query_map([album], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
-
-    /// Batched [`Self::album_track_paths_by_name`]: track paths for many album
-    /// names at once, keyed by lowercased album name. Lets the album overview's
-    /// local-cover fallback resolve every coverless album in one query instead
-    /// of one per album.
-    pub fn album_track_paths_by_names(
-        &self,
-        albums: &[String],
-    ) -> Result<std::collections::HashMap<String, Vec<String>>> {
-        let mut out: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        // SQLite caps the number of bound parameters; chunk well under the limit.
-        for chunk in albums.chunks(900) {
-            let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!(
-                "SELECT album, path FROM track
-                 WHERE album IN ({placeholders})
-                 ORDER BY album, path"
-            );
-            let mut stmt = self.conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })?;
-            for row in rows {
-                let (album, path) = row?;
-                out.entry(album.to_lowercase()).or_default().push(path);
-            }
-        }
-        Ok(out)
     }
 }

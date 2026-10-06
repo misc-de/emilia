@@ -36,6 +36,7 @@ impl App {
             playing: self.mini.playing,
             path: self.transport.queue.get(self.transport.queue_pos).cloned(),
             album: self.playing_album(),
+            album_card: self.playing_album_card(),
             // Remote playback runs its own queue, separate from the local one.
             rel_path: self
                 .files
@@ -289,14 +290,48 @@ impl App {
             .filter(|a| !a.trim().is_empty())
     }
 
-    /// Like [`Self::toggle_if_active_file`], but for a whole album: the play
-    /// button of an overview row shows a pause icon while that album runs, so
-    /// pressing it must toggle pause/resume instead of restarting from track 1.
-    pub(crate) fn toggle_if_active_album(&mut self, album: &str) -> bool {
+    /// Card key (see [`crate::core::album_group::card_key`]) of the album card
+    /// the loaded track belongs to — what the overview rows mark on, so of two
+    /// same-titled albums by different artists only the running one lights up.
+    pub(crate) fn playing_album_card(&self) -> Option<String> {
+        let path = self.transport.playing_path.as_ref()?;
+        let t = self
+            .library
+            .track_by_path(&path.to_string_lossy())
+            .ok()
+            .flatten()?;
+        let album = t.album.filter(|a| !a.trim().is_empty())?;
+        self.library
+            .album_card_key(t.artist.as_deref().unwrap_or(""), &album)
+            .ok()
+    }
+
+    /// Name-based [`Self::toggle_if_active_album`] for the lists that mark album
+    /// blocks by album name (queue, playlists), so the toggle asks the same
+    /// question their icon was drawn from.
+    pub(crate) fn toggle_if_active_album_name(&mut self, album: &str) -> bool {
         if !self
             .playing_album()
             .is_some_and(|a| a.eq_ignore_ascii_case(album))
         {
+            return false;
+        }
+        if self.mini.playing {
+            self.save_resume();
+        }
+        self.flip_playing();
+        true
+    }
+
+    /// Like [`Self::toggle_if_active_file`], but for a whole album card: the
+    /// play button of an overview row shows a pause icon while that album runs,
+    /// so pressing it must toggle pause/resume instead of restarting from track 1.
+    pub(crate) fn toggle_if_active_album(&mut self, artist: &str, album: &str) -> bool {
+        let key = self
+            .library
+            .album_card_key(artist, album)
+            .unwrap_or_default();
+        if self.playing_album_card().as_deref() != Some(key.as_str()) {
             return false;
         }
         if self.mini.playing {
@@ -486,12 +521,20 @@ impl App {
                 };
                 // … and only when the album actually has more than this one track
                 // (a single-track album has no meaningful song page to open).
-                self.mini.current_album = album.filter(|a| {
-                    self.library
-                        .album_track_paths_by_name(a)
-                        .map(|p| p.len() > 1)
-                        .unwrap_or(false)
-                });
+                self.mini.current_album = album
+                    .map(|a| {
+                        let artist = track
+                            .as_ref()
+                            .and_then(|t| t.artist.clone())
+                            .unwrap_or_default();
+                        (artist, a)
+                    })
+                    .filter(|(artist, a)| {
+                        self.library
+                            .album_card_tracks(artist, a)
+                            .map(|t| t.len() > 1)
+                            .unwrap_or(false)
+                    });
                 self.mini.playing = true;
                 // Refresh the active output (may have changed).
                 self.settings.active_output =
@@ -830,8 +873,8 @@ impl App {
             }
             TransportMsg::ShowQueue => self.open_queue_dialog(root, sender),
             TransportMsg::ShowCurrentAlbum => {
-                if let Some(album) = self.mini.current_album.clone() {
-                    self.open_album_by_name(sender, &album);
+                if let Some((artist, album)) = self.mini.current_album.clone() {
+                    self.open_album_card(sender, &artist, &album);
                 }
             }
             TransportMsg::PlayQueueAt { start, len } => self.on_play_queue_at(start, len),

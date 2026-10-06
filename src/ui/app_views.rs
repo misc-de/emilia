@@ -36,10 +36,9 @@ fn album_cards(
             image: a.cover_path.clone(),
             offline: offline_keys.contains(&(a.artist.clone(), a.album.clone())),
             // Runtime + play button on the right, as in the file list. The
-            // overview groups by album *name*, so that is also what marks the
-            // running album on its row.
+            // running album is marked by its card key (name + display artist).
             duration_ms: a.total_duration_ms.unwrap_or(0),
-            play_key: Some(a.album.clone()),
+            play_key: Some(crate::core::album_group::card_key(&a.album, &a.artist)),
         })
         .collect()
 }
@@ -148,49 +147,33 @@ impl App {
         );
     }
 
-    /// Fills in the album covers the overview query left empty. Pulls every
-    /// stored `album_meta` cover in one query (instead of an `album_cover`
-    /// lookup per album), and only for the albums still without one falls back
-    /// to the local per-track cover — those track paths come from a single
-    /// batched query too, instead of an `album_track_paths` query per album.
-    /// (The covers themselves are still read per album — that's file I/O on the
-    /// first track with embedded/folder art.)
+    /// Fills in the album covers the overview query left empty (no artist on
+    /// the card has a stored cover): a stored cover of the same title by the
+    /// card's primary artist, otherwise the first embedded/cached track cover
+    /// among the card's own tracks. Never a same-titled album of a foreign
+    /// artist — keyed by name alone, that put e.g. Gorillaz' "Greatest Hits"
+    /// cover on Queen's. Only the coverless cards pay these lookups.
     fn resolve_album_covers(&self, albums: &mut [crate::model::AlbumMeta]) {
-        let meta_covers = self.library.album_meta_covers().unwrap_or_default();
-        let coverless: Vec<String> = albums
-            .iter()
-            .filter(|a| {
-                a.cover_path.as_deref().is_none_or(|p| p.trim().is_empty())
-                    && !meta_covers.contains_key(&a.album.to_lowercase())
-            })
-            .map(|a| a.album.clone())
-            .collect();
-        let local_paths = if coverless.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            self.library
-                .album_track_paths_by_names(&coverless)
-                .unwrap_or_default()
-        };
         for album in albums.iter_mut() {
             if album
                 .cover_path
                 .as_deref()
-                .is_none_or(|p| p.trim().is_empty())
+                .is_some_and(|p| !p.trim().is_empty())
             {
-                album.cover_path = meta_covers
-                    .get(&album.album.to_lowercase())
-                    .cloned()
-                    .or_else(|| {
-                        local_paths
-                            .get(&album.album.to_lowercase())
-                            .and_then(|paths| {
-                                paths
-                                    .iter()
-                                    .find_map(|p| crate::core::online::local_track_cover(p))
-                            })
-                    });
+                continue;
             }
+            album.cover_path = self
+                .library
+                .album_cover_related(&album.artist, &album.album)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    self.library
+                        .album_card_tracks(&album.artist, &album.album)
+                        .unwrap_or_default()
+                        .iter()
+                        .find_map(|t| crate::core::online::local_track_cover(&t.path))
+                });
         }
     }
 

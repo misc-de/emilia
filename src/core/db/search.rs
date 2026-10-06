@@ -65,6 +65,38 @@ impl Library {
                 albums.push(a?);
             }
         }
+        // One hit per album **card**, like the overviews: a title shared by
+        // unrelated artists ("Greatest Hits") yields one hit each, and the
+        // shown artist is the card's display artist (which also keys the area
+        // lookup below and the page the hit opens).
+        let mut albums: Vec<AlbumHit> = albums
+            .into_iter()
+            .flat_map(|hit| {
+                let tracks = self.tracks_by_album_name(&hit.album).unwrap_or_default();
+                let cards = crate::core::album_group::cards(
+                    tracks
+                        .iter()
+                        .map(|t| (t.artist.as_deref().unwrap_or(""), t.path.as_str())),
+                );
+                if cards.len() <= 1 {
+                    let artist = cards.into_iter().next().map_or(hit.artist, |c| c.display);
+                    return vec![AlbumHit { artist, ..hit }];
+                }
+                cards
+                    .into_iter()
+                    .map(|c| AlbumHit {
+                        year: self
+                            .get_album_meta(&c.display, &hit.album)
+                            .ok()
+                            .flatten()
+                            .and_then(|m| m.year)
+                            .or(hit.year),
+                        album: hit.album.clone(),
+                        artist: c.display,
+                    })
+                    .collect()
+            })
+            .collect();
 
         // --- Songs (title match) ---
         let mut songs = Vec::new();

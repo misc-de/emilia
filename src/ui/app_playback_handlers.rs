@@ -348,7 +348,7 @@ impl App {
                     .flatten()
                     .and_then(|t| t.album)
                     .filter(|a| !a.trim().is_empty())
-                    .is_some_and(|album| self.toggle_if_active_album(&album))
+                    .is_some_and(|album| self.toggle_if_active_album_name(&album))
             } else {
                 self.toggle_if_active_file(&first)
             };

@@ -186,14 +186,14 @@ impl App {
 
     /// Open the songs subpage of an album from the album overview (short tap).
     pub(crate) fn on_show_album_tracks(&mut self, index: usize, sender: &ComponentSender<Self>) {
-        // Album overview: open by album name (artist irrelevant).
-        let album = self
+        // Album overview: open the card (album name across its artists).
+        let card = self
             .libview
             .albums_overview
             .get(index)
-            .map(|m| m.album.clone());
-        if let Some(album) = album {
-            self.open_album_by_name(sender, &album);
+            .map(|m| (m.artist.clone(), m.album.clone()));
+        if let Some((artist, album)) = card {
+            self.open_album_card(sender, &artist, &album);
         }
     }
 
@@ -202,9 +202,9 @@ impl App {
             .libview
             .singles_overview
             .get(index)
-            .map(|m| m.album.clone());
-        if let Some(album) = album {
-            self.open_album_by_name(sender, &album);
+            .map(|m| (m.artist.clone(), m.album.clone()));
+        if let Some((artist, album)) = album {
+            self.open_album_card(sender, &artist, &album);
         }
     }
 
@@ -217,9 +217,9 @@ impl App {
             .libview
             .compilations_overview
             .get(index)
-            .map(|m| m.album.clone());
-        if let Some(album) = album {
-            self.open_album_by_name(sender, &album);
+            .map(|m| (m.artist.clone(), m.album.clone()));
+        if let Some((artist, album)) = album {
+            self.open_album_card(sender, &artist, &album);
         }
     }
 
@@ -232,16 +232,19 @@ impl App {
             "compilations" => &self.libview.compilations_overview,
             _ => &self.libview.albums_overview,
         };
-        let Some(album) = overview.get(index).map(|m| m.album.clone()) else {
+        let Some((artist, album)) = overview
+            .get(index)
+            .map(|m| (m.artist.clone(), m.album.clone()))
+        else {
             return;
         };
-        if self.toggle_if_active_album(&album) {
+        if self.toggle_if_active_album(&artist, &album) {
             return;
         }
-        // The overview groups purely by album name, so play exactly the set of
-        // tracks the row stands for — across artists, like opening it does.
+        // Play exactly the set of tracks the row stands for — the card's
+        // artists, like opening it does.
         let files: Vec<std::path::PathBuf> = self
-            .album_tracks_by_name(&album)
+            .album_card_tracks(&artist, &album)
             .into_iter()
             .map(|t| std::path::PathBuf::from(t.path))
             .collect();
@@ -431,15 +434,15 @@ impl App {
         // be played as a file, so fall back to opening their album.
         if std::path::Path::new(&path).is_file() {
             self.play_path(&path, false);
-        } else if let Some(album) = self
+        } else if let Some((artist, album)) = self
             .library
             .track_by_path(&path)
             .ok()
             .flatten()
-            .and_then(|t| t.album)
-            .filter(|a| !a.trim().is_empty())
+            .and_then(|t| Some((t.artist.unwrap_or_default(), t.album?)))
+            .filter(|(_, a)| !a.trim().is_empty())
         {
-            self.open_album_by_name(sender, &album);
+            self.open_album_card(sender, &artist, &album);
         }
     }
 

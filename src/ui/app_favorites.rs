@@ -477,14 +477,21 @@ impl App {
             .find_map(|album| self.album_cover_for(name, &album))
     }
 
-    /// Album cover: first an exact match (artist, album), otherwise any of the album.
+    /// Album cover: first an exact match (artist, album), otherwise one of the
+    /// same-named album by the same primary artist ("feat." variants) — never a
+    /// same-named album of a foreign artist.
     pub(crate) fn album_cover_for(&self, artist: &str, album: &str) -> Option<String> {
         self.library
             .get_album_meta(artist, album)
             .ok()
             .flatten()
             .and_then(|m| m.cover_path)
-            .or_else(|| self.library.album_cover(album).ok().flatten())
+            .or_else(|| {
+                self.library
+                    .album_cover_related(artist, album)
+                    .ok()
+                    .flatten()
+            })
             .or_else(|| {
                 self.library
                     .album_track_paths(artist, album)
@@ -494,11 +501,37 @@ impl App {
             })
             .or_else(|| {
                 self.library
-                    .album_track_paths_by_name(album)
+                    .album_track_paths_related(artist, album)
                     .unwrap_or_default()
                     .into_iter()
                     .find_map(|p| crate::core::online::local_track_cover(&p))
             })
+    }
+
+    /// Cover of the playing track for the now-playing views (blurred
+    /// background, tray popup, lock screen): its album's cover by the same
+    /// artist, otherwise the track's own embedded image. Cheap on purpose — DB
+    /// lookups plus at most one tag read — since it runs on every track change.
+    pub(crate) fn playing_cover_path(&self, track: &Track) -> Option<String> {
+        let artist = track.artist.as_deref().unwrap_or("");
+        track
+            .album
+            .as_deref()
+            .filter(|a| !a.trim().is_empty())
+            .and_then(|album| {
+                self.library
+                    .get_album_meta(artist, album)
+                    .ok()
+                    .flatten()
+                    .and_then(|m| m.cover_path)
+                    .or_else(|| {
+                        self.library
+                            .album_cover_related(artist, album)
+                            .ok()
+                            .flatten()
+                    })
+            })
+            .or_else(|| crate::core::online::local_track_cover(&track.path))
     }
 
     /// Cover of a folder: cover of any track within it.

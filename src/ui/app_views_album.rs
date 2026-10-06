@@ -24,7 +24,8 @@ use crate::ui::fs_row::FsEntry;
 pub(crate) enum AlbumPlay {
     /// Artist context (artist → album).
     Artist,
-    /// Albums overview (album name across artists).
+    /// Album card of the overviews (album name across the card's artists;
+    /// the page's `name` holds the card's artist).
     Name,
     /// Folder content (audiobook/concert): exactly the files in this folder.
     Folder(String),
@@ -113,37 +114,7 @@ pub(crate) fn album_base(name: &str) -> String {
     }
 }
 
-/// Disc number from a folder segment like "CD2", "CD 2", "Disc 03", "Part 2".
-/// Only if the segment **begins** with a disc keyword followed by
-/// digits (possibly after a separator) – so "Greatest Hits" and the like
-/// trigger nothing. Otherwise `None`.
-pub(crate) fn disc_from_segment(seg: &str) -> Option<u32> {
-    let s = seg.trim().to_ascii_lowercase();
-    let bytes = s.as_bytes();
-    const MARKERS: [&str; 6] = ["cd", "disc", "disk", "teil", "part", "folge"];
-    for kw in MARKERS {
-        // Look for the marker **anywhere** in the segment (e.g. "Wie Google tickt CD1"),
-        // but only at a word boundary (no match in the middle of a word like
-        // "abcd"), followed by digits.
-        let mut from = 0;
-        while let Some(rel) = s[from..].find(kw) {
-            let pos = from + rel;
-            let boundary = pos == 0 || !bytes[pos - 1].is_ascii_alphabetic();
-            if boundary {
-                let digits: String = s[pos + kw.len()..]
-                    .trim_start_matches([' ', '_', '.', '#', '-'])
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect();
-                if let Ok(n) = digits.parse::<u32>() {
-                    return Some(n);
-                }
-            }
-            from = pos + kw.len();
-        }
-    }
-    None
-}
+pub(crate) use crate::core::album_group::disc_from_segment;
 
 /// Effective disc number of a track. **File structure takes precedence:** a
 /// CD/disc/part **subfolder** of the path is more reliable than a disc tag
@@ -488,11 +459,15 @@ impl App {
         tracks
     }
 
-    /// All tracks with this album name – **across artists** (matching
-    /// the albums overview, which groups purely by album name). Sorted by
-    /// disc/track number, then path.
-    pub(crate) fn album_tracks_by_name(&self, album: &str) -> Vec<Track> {
-        let mut tracks: Vec<Track> = self.library.tracks_by_album_name(album).unwrap_or_default();
+    /// The tracks of an album **card** of the overviews: the same-named tracks
+    /// grouped with `artist` — across "feat." credits and the artists of a
+    /// soundtrack, but not a foreign artist's album of the same title (see
+    /// [`crate::core::album_group`]). Sorted by disc/track number, then path.
+    pub(crate) fn album_card_tracks(&self, artist: &str, album: &str) -> Vec<Track> {
+        let mut tracks: Vec<Track> = self
+            .library
+            .album_card_tracks(artist, album)
+            .unwrap_or_default();
         sort_by_structure(&mut tracks);
         tracks
     }
@@ -621,13 +596,19 @@ impl App {
                     .or_else(|| {
                         let album = t.album.as_deref().filter(|a| !a.trim().is_empty())?;
                         let artist = t.artist.as_deref().unwrap_or("");
-                        // First exact (artist, album), otherwise any cover of the album.
+                        // First exact (artist, album), otherwise the same-named
+                        // album of the same primary artist ("feat." variants).
                         self.library
                             .get_album_meta(artist, album)
                             .ok()
                             .flatten()
                             .and_then(|m| m.cover_path)
-                            .or_else(|| self.library.album_cover(album).ok().flatten())
+                            .or_else(|| {
+                                self.library
+                                    .album_cover_related(artist, album)
+                                    .ok()
+                                    .flatten()
+                            })
                     })
                     .or_else(|| {
                         let artist = t.artist.as_deref().filter(|a| !a.trim().is_empty())?;
@@ -697,11 +678,17 @@ impl App {
         self.render_album_tracks(sender, tracks, name, album, AlbumPlay::Artist);
     }
 
-    /// Album from the albums overview: **all** tracks of this album name
-    /// (artist irrelevant). Tapping a track plays the whole album from here.
-    pub(crate) fn open_album_by_name(&self, sender: &ComponentSender<Self>, album: &str) {
-        let tracks = self.album_tracks_by_name(album);
-        self.render_album_tracks(sender, tracks, "", album, AlbumPlay::Name);
+    /// Album card from the overviews (or search / player bar): the tracks of
+    /// that card (see [`Self::album_card_tracks`]). Tapping a track plays the
+    /// whole album from here.
+    pub(crate) fn open_album_card(
+        &self,
+        sender: &ComponentSender<Self>,
+        artist: &str,
+        album: &str,
+    ) {
+        let tracks = self.album_card_tracks(artist, album);
+        self.render_album_tracks(sender, tracks, artist, album, AlbumPlay::Name);
     }
 
     /// Tracks of a folder in playback order (CD/disc, track number, path).
@@ -822,7 +809,7 @@ impl App {
             return;
         }
         let tracks = match &page.play {
-            AlbumPlay::Name => self.album_tracks_by_name(album),
+            AlbumPlay::Name => self.album_card_tracks(&page.name, album),
             AlbumPlay::Artist => self.album_tracks_for_artist(&page.name, album),
             AlbumPlay::Folder(f) => self.folder_tracks_ordered(f),
         };

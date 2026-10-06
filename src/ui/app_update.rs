@@ -161,7 +161,7 @@ impl App {
             Msg::SetSleepTimer(choice) => self.on_set_sleep_timer(choice),
             Msg::OpenSearch => self.open_search_dialog(root, &sender),
             Msg::SearchPlayTrack(path) => self.on_search_play_track(path, &sender),
-            Msg::SearchOpenAlbum(album) => self.open_album_by_name(&sender, &album),
+            Msg::SearchOpenAlbum(artist, album) => self.open_album_card(&sender, &artist, &album),
             Msg::SearchOpenArtist(name) => self.on_search_open_artist(name, &sender),
             Msg::OpenGlobalEq => self.open_global_eq(root, &sender),
             Msg::OpenCurrentEq => self.on_open_current_eq(root, &sender),

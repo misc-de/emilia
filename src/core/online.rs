@@ -764,9 +764,16 @@ pub fn shrink_image(bytes: Vec<u8>) -> Vec<u8> {
 
 /// Determines a **local** album cover entirely without the network: prefers the
 /// image embedded in the sample track's tags, otherwise a folder image
-/// (`cover.jpg`, `folder.png`, …). Returns the path to the displayable cover
+/// (`cover.jpg`, `folder.png`, …) — but only with `folder_ok`, i.e. when the
+/// caller made sure the folder belongs to this album: in a mixed folder the
+/// image shows some other album. Returns the path to the displayable cover
 /// file. The audio file is only read in the process.
-pub fn local_album_cover(artist: &str, album: &str, sample_path: &str) -> Option<String> {
+pub fn local_album_cover(
+    artist: &str,
+    album: &str,
+    sample_path: &str,
+    folder_ok: bool,
+) -> Option<String> {
     let p = Path::new(sample_path);
 
     // 1) Embedded tag image → write to the cache.
@@ -776,7 +783,7 @@ pub fn local_album_cover(artist: &str, album: &str, sample_path: &str) -> Option
         }
     }
     // 2) Folder image → use its path directly (no copying needed).
-    if let Some(dir) = p.parent() {
+    if let Some(dir) = p.parent().filter(|_| folder_ok) {
         if let Some(img) = cover::find_cover_file(dir) {
             return Some(img.to_string_lossy().into_owned());
         }

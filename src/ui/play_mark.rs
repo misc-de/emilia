@@ -129,8 +129,12 @@ pub(crate) struct PlaybackState {
     pub(crate) playing: bool,
     /// Local file currently loaded into the player.
     pub(crate) path: Option<PathBuf>,
-    /// Its album — what the library overviews mark on.
+    /// Its album name — what the entry lists mark album rows on.
     pub(crate) album: Option<String>,
+    /// Key of its album **card** ([`crate::core::album_group::card_key`]) —
+    /// what the album overviews mark on, so a same-titled album of another
+    /// artist doesn't light up too.
+    pub(crate) album_card: Option<String>,
     /// Remote (WebDAV) entry playing, by path relative to its source.
     pub(crate) rel_path: Option<String>,
     /// Podcast episode currently loaded (by audio URL).

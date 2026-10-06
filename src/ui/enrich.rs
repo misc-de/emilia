@@ -50,18 +50,108 @@ fn local_album_cover_scan(
     album: &str,
     sample: &str,
 ) -> Option<String> {
-    if let Some(c) = online::local_album_cover(artist, album, sample) {
+    if let Some(c) =
+        online::local_album_cover(artist, album, sample, folder_is_album(lib, album, sample))
+    {
         return Some(c);
     }
     for p in lib.album_track_paths(artist, album).unwrap_or_default() {
         if p == sample || crate::core::webdav::parse_nc_path(&p).is_some() {
             continue;
         }
-        if let Some(c) = online::local_album_cover(artist, album, &p) {
+        if let Some(c) =
+            online::local_album_cover(artist, album, &p, folder_is_album(lib, album, &p))
+        {
             return Some(c);
         }
     }
     None
+}
+
+/// Whether the folder holding `track_path` belongs to `album`, so its folder
+/// image (`cover.jpg`, …) may stand for the album (see [`folder_belongs_to`]).
+/// A folder of loose rarities mixing several albums otherwise lent its one
+/// image to every album in it.
+fn folder_is_album(lib: &Library, album: &str, track_path: &str) -> bool {
+    std::path::Path::new(track_path)
+        .parent()
+        .is_some_and(|dir| folder_belongs_to(lib, album, dir).unwrap_or(true))
+}
+
+/// Whether `dir` is `album`'s folder: the album is the folder's dominant one
+/// (most tracks directly inside carry it, CD/disc suffixes collapsed — "… CD 2",
+/// "… Disc 3"), **or** the folder's name (or, for a "disk 2of2"-style
+/// subfolder, its parent's) names the album — that keeps the image of an
+/// inconsistently tagged release (a single whose B-side carries the box-set
+/// name). `None` when the DB knows no track directly inside `dir` (e.g. an
+/// unmounted library): nothing to judge by.
+fn folder_belongs_to(lib: &Library, album: &str, dir: &std::path::Path) -> Option<bool> {
+    use crate::ui::app_views_album::album_base;
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for t in lib
+        .tracks_under_path(&dir.to_string_lossy())
+        .unwrap_or_default()
+    {
+        if std::path::Path::new(&t.path).parent() != Some(dir) {
+            continue;
+        }
+        if let Some(al) = t.album.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+            *counts.entry(album_base(al).to_lowercase()).or_default() += 1;
+        }
+    }
+    let max = counts.values().copied().max()?;
+    let base = album_base(album).to_lowercase();
+    if counts.get(&base) == Some(&max) {
+        return Some(true);
+    }
+    let named = [Some(dir), dir.parent()]
+        .into_iter()
+        .flatten()
+        .filter_map(|d| d.file_name())
+        .any(|name| name_mentions(&name.to_string_lossy(), &base));
+    Some(named)
+}
+
+/// Whether a folder name mentions an album title: at least half of the title's
+/// words (3+ characters, so "at"/"of" and disc numbers don't count) appear in it.
+fn name_mentions(folder: &str, album: &str) -> bool {
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.chars().count() >= 3)
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let have = words(folder);
+    let want = words(album);
+    let hits = want.iter().filter(|w| have.contains(w)).count();
+    !want.is_empty() && hits * 2 >= want.len()
+}
+
+/// Repairs covers an earlier sweep took from a **mixed** folder: a stored folder
+/// image (any cover outside the app's own image caches) whose folder belongs to
+/// another album is dropped, so the album is looked up again —
+/// embedded art, its own folder, or online. Returns whether anything changed.
+fn drop_foreign_folder_covers(lib: &Library) -> bool {
+    let caches = [online::cover_cache_dir(), online::artist_cache_dir()];
+    let mut any = false;
+    for (artist, album, cover) in lib.album_cover_paths().unwrap_or_default() {
+        let path = std::path::Path::new(&cover);
+        if caches.iter().any(|c| path.starts_with(c)) {
+            continue;
+        }
+        let Some(dir) = path.parent() else {
+            continue;
+        };
+        // Keep it when the folder is the album's — or unknown to the DB.
+        if folder_belongs_to(lib, &album, dir) != Some(false) {
+            continue;
+        }
+        tracing::info!("Dropping foreign folder cover of {artist} – {album}: {cover}");
+        if lib.clear_album_cover(&artist, &album).is_ok() {
+            any = true;
+        }
+    }
+    any
 }
 
 /// Fills album covers from the **embedded** tag image (or a folder image) for
@@ -73,7 +163,7 @@ fn local_album_cover_scan(
 /// covers need a WebDAV fetch handled by the online sweep. Returns whether any
 /// cover was added.
 pub(crate) fn populate_local_covers(lib: &Library) -> bool {
-    let mut any = false;
+    let mut any = drop_foreign_folder_covers(lib);
     for (artist, album, path) in lib.albums_missing_cover().unwrap_or_default() {
         // Synthetic `nc:<id>:…` paths have no local file → leave to the online sweep.
         if crate::core::webdav::parse_nc_path(&path).is_some() {
@@ -193,6 +283,9 @@ pub(crate) fn enrich_worker(
                 Some((backend, rel))
             };
 
+            if drop_foreign_folder_covers(&lib) {
+                any_change = true;
+            }
             let missing = lib.albums_missing_cover().unwrap_or_default();
             for (artist, album, path) in missing.iter() {
                 if stopped() {
@@ -424,4 +517,29 @@ fn fetch_artists_parallel(
         let _ = h.join();
     }
     (matched, failed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::name_mentions;
+
+    #[test]
+    fn folder_name_mentions_album() {
+        assert!(name_mentions(
+            "1975 - Bohemian Rhapsody",
+            "bohemian rhapsody"
+        ));
+        assert!(name_mentions(
+            "1992.05.26 - Live At Wembley '86 (1986.06.12)",
+            "live at wembley stadium"
+        ));
+        assert!(!name_mentions("Real Rarities", "dirty harry"));
+        assert!(!name_mentions("Real Rarities", "demon days (instrumental)"));
+        assert!(!name_mentions(
+            "1991 - Headlond (1991. Japan CD5 EMI TOCP-6801)",
+            "i'm going slightly mad"
+        ));
+        // Nothing to compare (only short words) → no claim either way.
+        assert!(!name_mentions("U2", "u2"));
+    }
 }

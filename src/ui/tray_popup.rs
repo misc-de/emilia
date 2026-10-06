@@ -192,9 +192,7 @@ impl App {
                     .as_ref()
                     .and_then(|t| t.artist.clone())
                     .unwrap_or_default();
-                let cover = track
-                    .and_then(|t| t.album)
-                    .and_then(|a| self.library.album_cover(&a).ok().flatten());
+                let cover = track.and_then(|t| self.playing_cover_path(&t));
                 (artist, cover)
             }
             None => (String::new(), None),

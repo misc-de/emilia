@@ -613,6 +613,45 @@ fn albums_overview_merges_feat_variants() {
 }
 
 #[test]
+fn related_album_cover_never_crosses_artists() {
+    let lib = Library::open_in_memory().unwrap();
+    for (path, artist, album) in [
+        ("/g/1.mp3", "Gorillaz", "Greatest Hits"),
+        ("/q/1.mp3", "Queen", "Greatest Hits"),
+        ("/g/2.mp3", "Gorillaz featuring De La Soul", "Demon Days"),
+    ] {
+        lib.upsert_track(&track(path, Some(artist), Some(album)))
+            .unwrap();
+    }
+    for (artist, album, cover) in [
+        ("Gorillaz", "Greatest Hits", "/covers/gorillaz-gh.jpg"),
+        ("Gorillaz", "Demon Days", "/covers/demon-days.jpg"),
+    ] {
+        let mut m = AlbumMeta::pending(artist, album);
+        m.cover_path = Some(cover.to_string());
+        m.status = "local".to_string();
+        lib.upsert_album_meta(&m).unwrap();
+    }
+    // A same-named album by a foreign artist never lends its cover …
+    assert_eq!(
+        lib.album_cover_related("Queen", "Greatest Hits").unwrap(),
+        None
+    );
+    assert_eq!(
+        lib.album_track_paths_related("Queen", "Greatest Hits")
+            .unwrap(),
+        vec!["/q/1.mp3".to_string()]
+    );
+    // … while a "feat." credit of the same primary artist shares it.
+    assert_eq!(
+        lib.album_cover_related("Gorillaz featuring De La Soul", "Demon Days")
+            .unwrap()
+            .as_deref(),
+        Some("/covers/demon-days.jpg")
+    );
+}
+
+#[test]
 fn albums_overview_uses_representative_cover_for_compilations() {
     let lib = Library::open_in_memory().unwrap();
     // Compilation: several artists with different covers. The card shows the
@@ -620,9 +659,9 @@ fn albums_overview_uses_representative_cover_for_compilations() {
     // representative image beats an empty placeholder and matches the cover
     // shown on the album detail page.
     for (path, artist, cover) in [
-        ("/c1.mp3", "DJ A", "/covers/a.jpg"),
-        ("/c2.mp3", "DJ A", "/covers/a.jpg"),
-        ("/c3.mp3", "DJ B", "/covers/b.jpg"),
+        ("/m/Dancemix/c1.mp3", "DJ A", "/covers/a.jpg"),
+        ("/m/Dancemix/c2.mp3", "DJ A", "/covers/a.jpg"),
+        ("/m/Dancemix/c3.mp3", "DJ B", "/covers/b.jpg"),
     ] {
         lib.upsert_track(&track(path, Some(artist), Some("Dancemix 2009")))
             .unwrap();
@@ -658,27 +697,52 @@ fn albums_overview_uses_representative_cover_for_compilations() {
 }
 
 #[test]
-fn albums_overview_groups_by_name_ignoring_artist() {
+fn albums_overview_groups_same_title_by_folder_or_artist() {
     let lib = Library::open_in_memory().unwrap();
-    // Same album name, different artists → exactly ONE card.
+    // Same album name, different artists, one folder (a sampler) → ONE card.
     for (path, artist) in [
-        ("/a1.mp3", "Artist A"),
-        ("/a2.mp3", "Artist A"),
-        ("/b1.mp3", "Artist B"),
+        ("/m/Live/a1.mp3", "Artist A"),
+        ("/m/Live/a2.mp3", "Artist A"),
+        ("/m/Live/b1.mp3", "Artist B"),
     ] {
         lib.upsert_track(&track(path, Some(artist), Some("Live")))
             .unwrap();
     }
-    let live: Vec<_> = lib
-        .albums_overview_with(None)
-        .unwrap()
-        .into_iter()
-        .filter(|a| a.album == "Live")
-        .collect();
+    // Same title by two unrelated artists in their own folders → TWO cards.
+    for (path, artist) in [
+        ("/m/Queen/Greatest Hits/1.mp3", "Queen"),
+        ("/m/Queen/Greatest Hits/2.mp3", "Queen & David Bowie"),
+        ("/m/Gorillaz/Greatest Hits/1.mp3", "Gorillaz"),
+    ] {
+        lib.upsert_track(&track(path, Some(artist), Some("Greatest Hits")))
+            .unwrap();
+    }
+    let overview = lib.albums_overview_with(None).unwrap();
+    let live: Vec<_> = overview.iter().filter(|a| a.album == "Live").collect();
     assert_eq!(live.len(), 1);
     assert_eq!(live[0].track_count, 3);
     // Display artist = the one with the most tracks (A: 2 > B: 1).
     assert_eq!(live[0].artist, "Artist A");
+
+    let gh: Vec<_> = overview
+        .iter()
+        .filter(|a| a.album == "Greatest Hits")
+        .map(|a| (a.artist.as_str(), a.track_count))
+        .collect();
+    assert_eq!(gh, vec![("Gorillaz", 1), ("Queen", 2)]);
+    // Opening a card loads only its own tracks — via any credit on it.
+    let queen: Vec<String> = lib
+        .album_card_tracks("Queen & David Bowie", "Greatest Hits")
+        .unwrap()
+        .into_iter()
+        .map(|t| t.path)
+        .collect();
+    assert_eq!(queen.len(), 2);
+    assert!(queen.iter().all(|p| p.starts_with("/m/Queen/")));
+    assert_ne!(
+        lib.album_card_key("Queen", "Greatest Hits").unwrap(),
+        lib.album_card_key("Gorillaz", "Greatest Hits").unwrap()
+    );
 }
 
 #[test]

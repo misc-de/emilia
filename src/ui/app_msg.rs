@@ -141,8 +141,9 @@ pub enum Msg {
     OpenSearch,
     /// A song hit of the search was activated → play it (close the dialog).
     SearchPlayTrack(String),
-    /// An album hit of the search was activated → open its track list.
-    SearchOpenAlbum(String),
+    /// An album hit of the search was activated → open its track list
+    /// (`artist`, `album` — the card the hit stands for).
+    SearchOpenAlbum(String, String),
     /// An artist hit of the search was activated → open the artist subpage.
     SearchOpenArtist(String),
     OpenGlobalEq,

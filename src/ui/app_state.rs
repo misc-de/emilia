@@ -315,9 +315,10 @@ pub(crate) struct TransportState {
 pub(crate) struct MiniState {
     /// Title shown in the player bar; `None` when nothing is loaded.
     pub(crate) now_playing: Option<String>,
-    /// Album of the running **local** track, if it has one — drives the album
-    /// shortcut in the player bar. `None` for streams/podcasts/YouTube/cloud.
-    pub(crate) current_album: Option<String>,
+    /// `(artist, album)` of the running **local** track, if it has one — drives
+    /// the album shortcut in the player bar, which opens that album card.
+    /// `None` for streams/podcasts/YouTube/cloud.
+    pub(crate) current_album: Option<(String, String)>,
     pub(crate) playing: bool,
     /// A slow source (Nextcloud/YouTube) is resolving/buffering: show a spinner
     /// in the play button until the pipeline is ready. Local files start fast

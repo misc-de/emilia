@@ -23,9 +23,7 @@ impl App {
             ),
             None => (Self::track_display_name(path), None, None, None),
         };
-        let art = album
-            .as_deref()
-            .and_then(|al| self.library.album_cover(al).ok().flatten());
+        let art = track.and_then(|t| self.playing_cover_path(t));
         self.mpris.set_metadata(
             self.transport.queue_pos,
             &title,

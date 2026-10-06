@@ -118,7 +118,7 @@ impl App {
             }
 
             // Album-like categories — same row layout, one heading each, in the
-            // navigation's order. Every hit opens by album name
+            // navigation's order. Every hit opens its album card
             // (`SearchOpenAlbum`), which renders the right track list for each
             // kind: singles/compilations open exactly like albums, concerts/
             // audiobooks open their album's tracks. Icons match the nav sections.
@@ -305,9 +305,9 @@ fn add_album_group(
         row.add_prefix(&gtk::Image::from_icon_name(icon));
         let sender = sender.clone();
         let dlg = dlg.clone();
-        let album = a.album.clone();
+        let (artist, album) = (a.artist.clone(), a.album.clone());
         row.connect_activated(move |_| {
-            sender.input(Msg::SearchOpenAlbum(album.clone()));
+            sender.input(Msg::SearchOpenAlbum(artist.clone(), album.clone()));
             dlg.close();
         });
         group.add(&row);

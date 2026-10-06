@@ -75,7 +75,7 @@ impl Library {
                 attempts   INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (artist, album)
             );
-            -- `album_cover()` looks an album cover up by album name alone (the
+            -- `album_cover_related()` looks covers up by album name first (the
             -- composite primary key can't serve that), called once per single track.
             CREATE INDEX IF NOT EXISTS idx_album_meta_album ON album_meta(album);
 
