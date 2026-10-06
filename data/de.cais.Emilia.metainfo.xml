@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.48" date="2026-10-06">
+      <description>
+        <p>The Flatpak now does its online work at startup again: it had always thought it was offline at launch, so yt-dlp was never refreshed (YouTube could break with an outdated version), and YouTube channels and network sources were not checked for new content. Many fixes for stability: background tasks that hit an error no longer leave a spinner or "Working …" stuck, a scan started while one is running, a source removed while indexing, a restarted MCP server, a renewed device pairing and the Google Drive sign-in no longer get in each other's way, and skipping quickly through YouTube videos no longer starts a yt-dlp process for every skipped video. Recording covers are found more reliably — a station name no longer cuts into artist names, and "Help" no longer counts as "Helpless".</p>
+        <p xml:lang="de">Das Flatpak erledigt beim Start wieder seine Online-Aufgaben: Es hielt sich beim Start immer für offline, deshalb wurde yt-dlp nie aktualisiert (YouTube konnte mit einer veralteten Version ausfallen), und YouTube-Kanäle und Netzwerkquellen wurden nicht auf Neues geprüft. Viele Stabilitätsverbesserungen: Hintergrundaufgaben, die auf einen Fehler stoßen, lassen keinen Ladekreis und kein „Arbeite …“ mehr hängen; ein Scan während eines laufenden Scans, eine während der Indexierung entfernte Quelle, ein neu gestarteter MCP-Server, eine erneute Gerätekopplung und die Google-Drive-Anmeldung kommen sich nicht mehr in die Quere, und schnelles Weiterspringen durch YouTube-Videos startet nicht mehr für jedes übersprungene Video einen yt-dlp-Prozess. Cover für Aufnahmen werden zuverlässiger gefunden – ein Sendername schneidet nicht mehr in Künstlernamen, und „Help“ gilt nicht mehr als „Helpless“.</p>
+      </description>
+    </release>
     <release version="0.8.47" date="2026-10-06">
       <description>
         <p>Covers are assigned reliably: an album, artist or song no longer borrows the cover of a same-named album by another artist, the blurred background, tray and lock screen show the cover of the playing album, and a folder image only counts for the album the folder belongs to — covers wrongly taken from mixed folders are looked up again. Albums with the same title by different artists, like two "Greatest Hits", are now separate entries with their own cover and songs; soundtracks and samplers with many artists in one folder stay one album.</p>
