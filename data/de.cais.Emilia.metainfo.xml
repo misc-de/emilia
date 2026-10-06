@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.47" date="2026-10-06">
+      <description>
+        <p>Covers are assigned reliably: an album, artist or song no longer borrows the cover of a same-named album by another artist, the blurred background, tray and lock screen show the cover of the playing album, and a folder image only counts for the album the folder belongs to — covers wrongly taken from mixed folders are looked up again. Albums with the same title by different artists, like two "Greatest Hits", are now separate entries with their own cover and songs; soundtracks and samplers with many artists in one folder stay one album.</p>
+        <p xml:lang="de">Cover werden zuverlässig zugeordnet: Ein Album, Künstler oder Song übernimmt nicht mehr das Cover eines gleichnamigen Albums eines anderen Künstlers, der unscharfe Hintergrund, das Tray und der Sperrbildschirm zeigen das Cover des laufenden Albums, und ein Ordnerbild gilt nur noch für das Album, dem der Ordner gehört — fälschlich aus gemischten Ordnern übernommene Cover werden neu gesucht. Gleichnamige Alben verschiedener Künstler, etwa zwei „Greatest Hits“, sind jetzt getrennte Einträge mit eigenem Cover und eigenen Songs; Soundtracks und Sampler mit vielen Künstlern in einem Ordner bleiben ein Album.</p>
+      </description>
+    </release>
     <release version="0.8.46" date="2026-10-06">
       <description>
         <p>New sort options: favorites by "Date added", podcasts by "Latest episode" and YouTube channels by "Latest video", so subscriptions with something new come first. The progress window of a library scan or a podcast and YouTube refresh can be tapped away while the work continues; the refresh button then spins green and brings it back. The share window can be tapped away during a transfer too, the share icon pulses while sharing runs, and a declined offer now reaches the sender instead of leaving it waiting. Albums matched online now get the year of their first release instead of a later reissue.</p>
