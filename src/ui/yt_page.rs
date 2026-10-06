@@ -10,9 +10,15 @@
 //! play/pause icons are kept in sync via [`YtInput::PlaybackStateChanged`].
 //! Toasts, the loading overlay, sub-page navigation, the equalizer dialog, the
 //! settings dialog and library/playlist reloads all live on the parent chrome,
-//! so they too travel through `YtOutput`. The free channel/feed helpers live in
-//! [`crate::ui::yt_channels`], the detail-dialog / card / library-add half of
-//! the inherent impl in [`crate::ui::yt_page_detail`].
+//! so they too travel through `YtOutput`.
+//!
+//! This file keeps the struct and the `Component` impl; the rest is split by
+//! topic: the messages in [`crate::ui::yt_page_msg`], the free channel/feed
+//! helpers in [`crate::ui::yt_channels`], and the inherent impl in
+//! [`crate::ui::yt_page_lists`] (sort + lists), [`crate::ui::yt_page_search`]
+//! (search dialog), [`crate::ui::yt_page_channels`] (subscriptions),
+//! [`crate::ui::yt_playlists`] (playlists), [`crate::ui::yt_live`] (Live tab)
+//! and [`crate::ui::yt_page_detail`] (video detail / cards / library add).
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -24,21 +30,18 @@ use std::rc::Rc;
 
 use crate::core::db::Library;
 use crate::core::youtube::{self, YtKind, YtResult};
-use crate::i18n::{gettext, gettext_f, ngettext_n};
+use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{SortCrit, YtView};
-use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
-use crate::ui::app_sort::{read_sort, sort_popover};
-use crate::ui::app_views::natural_key;
-use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
-use crate::ui::yt_channels::{
-    fill_channel_videos, fmt_published, refresh_summary_text, search_spinner_row, store_channel,
-    yt_pubdate_key, WatchRow,
-};
+use crate::ui::app_sort::read_sort;
+use crate::ui::yt_channels::{refresh_summary_text, WatchRow};
+use crate::ui::yt_page_channels::cache_missing_channel_thumbs;
+use crate::ui::yt_page_lists::read_channel_view_prefs;
 // Still reached as `crate::ui::yt_page::…` from `app_init.rs` / `app_views_handlers.rs`.
 pub(crate) use crate::ui::yt_channels::{
     ensure_channel_image, fmt_duration, refresh_channel_videos,
 };
+// The messages, reached as `crate::ui::yt_page::…` all over the app.
+pub(crate) use crate::ui::yt_page_msg::{SearchKind, YtCmd, YtInput, YtOutput};
 
 /// The YouTube page component.
 pub(crate) struct YtPage {
@@ -51,8 +54,8 @@ pub(crate) struct YtPage {
     /// Mirror of the transport play/pause state.
     pub(super) playing: bool,
     /// Mirror of the global gallery setting.
-    gallery_view: bool,
-    gallery_columns: u32,
+    pub(super) gallery_view: bool,
+    pub(super) gallery_columns: u32,
     /// Narrow (mobile) layout → detail dialogs as bottom sheets.
     mobile: bool,
     /// yt-dlp can no longer parse YouTube → show the warning banner. Mirror of
@@ -63,49 +66,49 @@ pub(crate) struct YtPage {
     /// Sort of the subscriptions (channels) overview (criterion + descending).
     /// Persisted as "sort_channels" / "sort_channels_desc". The date-ordered
     /// Recent/Newest views are not affected.
-    channels_sort: (SortCrit, bool),
+    pub(super) channels_sort: (SortCrit, bool),
     /// "Without grouping" for the channels list (no alphabetical headings).
     /// Persisted as "nogroup_channels".
-    channels_no_group: bool,
+    pub(super) channels_no_group: bool,
     /// Sort of the "Recent" (recently played) list (criterion + descending).
     /// Persisted as "sort_yt_recent" / "sort_yt_recent_desc". Default: by date
     /// (most recent first), i.e. the natural `played_at` order from the DB.
-    recent_sort: (SortCrit, bool),
+    pub(super) recent_sort: (SortCrit, bool),
     /// Per-view gallery override (sort popover); `None` follows the global
     /// `gallery_view`. Persisted as "gallery_channels".
-    gallery_override: Option<bool>,
+    pub(super) gallery_override: Option<bool>,
     /// "Show description" (sort popover): gallery tiles framed with their title
     /// instead of the bare cover. Persisted as "gallery_desc_channels".
-    gallery_desc: bool,
+    pub(super) gallery_desc: bool,
     /// Per-row alphabetical headings of the channels list (name sort).
-    channel_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
+    pub(super) channel_headers: std::rc::Rc<std::cell::RefCell<Option<Vec<String>>>>,
     /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
     /// writes the popover + direction here (or `None` to hide it) for the active
     /// view, then signals the parent via [`YtOutput::SortChanged`].
-    sort_slot: crate::ui::app_sort::SortSlot,
+    pub(super) sort_slot: crate::ui::app_sort::SortSlot,
     /// (id, title, url, thumbnail, video count) per subscribed channel.
-    channel_items: Vec<(i64, String, String, Option<String>, i64)>,
-    channels_list: gtk::ListBox,
-    channels_gallery: gtk::FlowBox,
-    newest_items: Vec<crate::model::YtVideoRef>,
-    newest_list: gtk::Box,
-    recent_items: Vec<crate::model::YtRecent>,
-    recent_list: gtk::Box,
+    pub(super) channel_items: Vec<(i64, String, String, Option<String>, i64)>,
+    pub(super) channels_list: gtk::ListBox,
+    pub(super) channels_gallery: gtk::FlowBox,
+    pub(super) newest_items: Vec<crate::model::YtVideoRef>,
+    pub(super) newest_list: gtk::Box,
+    pub(super) recent_items: Vec<crate::model::YtRecent>,
+    pub(super) recent_list: gtk::Box,
     /// Saved live streams (Live tab).
     pub(super) live_items: Vec<crate::model::YtLive>,
     pub(super) live_list: gtk::ListBox,
-    search_results: Vec<YtResult>,
+    pub(super) search_results: Vec<YtResult>,
     /// What the shown search results were searched as (live hits are saved to
     /// the Live tab instead of opening the video dialog).
-    search_kind: SearchKind,
-    search_failed: bool,
+    pub(super) search_kind: SearchKind,
+    pub(super) search_failed: bool,
     /// Monotonic search counter. Every new search bumps it; command results
     /// carrying an older value are ignored. This keeps the "Searching …"
     /// spinner up until the *current* search returns — a still-running worker
     /// from a previous search (e.g. after switching Songs→Playlists→Channels)
     /// can no longer clear the spinner early or flash stale results.
-    search_seq: u64,
-    search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    pub(super) search_seq: u64,
+    pub(super) search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// Play/pause controls of the video rows, keyed by video id.
     pub(super) video_marks: crate::ui::play_mark::Marks,
     /// Watch-progress widgets of the visible rows (long-form items only), so the
@@ -136,331 +139,6 @@ pub(super) struct ProgressPopup {
     /// Which download this popup tracks, so stray progress/finish commands for a
     /// different video don't retarget or close it.
     pub(super) video_id: String,
-}
-
-/// What the search dialog looks for: one of the regular result kinds, or
-/// streams that are live right now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchKind {
-    Yt(YtKind),
-    Live,
-}
-
-#[derive(Debug)]
-pub(crate) enum YtInput {
-    /// A video's play button / "Play" was tapped: forwarded to the transport,
-    /// noting whether it came from the "Recently" list.
-    PlayVideo {
-        video_id: String,
-        title: String,
-    },
-    // --- driven by the parent ---
-    Reload,
-    RefreshAll,
-    ReloadRecent,
-    PlaybackStateChanged {
-        playing_video_id: Option<String>,
-        playing: bool,
-    },
-    /// Per-second position of the running long-form video (from the transport):
-    /// update its rows' progress widgets in place.
-    VideoProgressTick {
-        video_id: String,
-        position_ms: i64,
-        duration_ms: i64,
-    },
-    /// The video played to its end → show its rows as "Listened" right away.
-    VideoFinished {
-        video_id: String,
-    },
-    RefreshBroken,
-    SetView(YtView),
-    /// Change the subscriptions sort (criterion + descending), from the header.
-    SetSort(SortCrit, bool),
-    /// Change the "Recent" list sort (criterion + descending), from the header.
-    SetRecentSort(SortCrit, bool),
-    /// Toggle alphabetical grouping of the channels list (`true` = no grouping).
-    SetNoGroup(bool),
-    /// Per-view gallery override for the channels (sort popover toggle).
-    SetGallery(bool),
-    /// Toggle the gallery tiles' title ("Show description").
-    SetGalleryDesc(bool),
-    SetGalleryView(bool),
-    SetGalleryColumns(u32),
-    SetMobile(bool),
-    SetWindow(adw::ApplicationWindow),
-    // --- view-internal ---
-    /// Banner button → ask the parent to open the settings (yt-dlp update).
-    OpenSettings,
-    Subscribe,
-    Search(String, SearchKind),
-    /// Save the live search hit at this index to the Live tab.
-    AddLive(usize),
-    ShowLiveDetail(String),
-    RemoveLive(String),
-    SubscribeChannel(String),
-    OpenChannel(i64),
-    OpenChannelAt(usize),
-    ShowChannelDetail(i64),
-    ShowChannelDetailAt(usize),
-    RefreshChannel(i64),
-    /// Detail views' refresh: fetch the metadata (artist, cover, description,
-    /// song list, avatar) again, then reopen the detail view.
-    RefreshVideo {
-        video_id: String,
-        title: String,
-    },
-    RefreshChannelDetail(i64),
-    RefreshPlaylist {
-        url: String,
-        title: String,
-    },
-    RefreshLive(String),
-    DeleteChannel(i64),
-    DeleteChannelConfirmed(i64),
-    AddRecent {
-        video_id: String,
-        title: String,
-    },
-    RemoveRecent(String),
-    ShowVideoDetail {
-        video_id: String,
-        title: String,
-    },
-    ShowNewestDetail(usize),
-    ShowPlaylistDetail {
-        url: String,
-        title: String,
-    },
-    OpenRecentPlaylist {
-        url: String,
-        title: String,
-    },
-    PlayPlaylistAt {
-        url: String,
-        title: String,
-        index: usize,
-        close: bool,
-    },
-    AddToLibrary {
-        video_id: String,
-        title: String,
-        /// Artist from a better source than YouTube (e.g. a radio stream's song
-        /// recognition), used as the hint for the online metadata lookup.
-        artist: Option<String>,
-    },
-    AddToLibraryConfirmed {
-        video_id: String,
-        title: String,
-        artist: Option<String>,
-    },
-    PlaylistToLibrary {
-        url: String,
-        title: String,
-    },
-    SavePlaylist {
-        url: String,
-        title: String,
-    },
-}
-
-#[derive(Debug)]
-pub(crate) enum YtOutput {
-    /// Transport: play/pause this single video.
-    PlayVideo {
-        video_id: String,
-        title: String,
-        /// Tapped in the "Recently" list: keep its place there.
-        keep_recent_order: bool,
-    },
-    /// Play a video from one of its jump marks (chapter list / a timestamp in
-    /// the description), like tapping a timestamp in podcast shownotes.
-    PlayVideoAt {
-        video_id: String,
-        title: String,
-        ms: i64,
-    },
-    /// Transport: play/pause a saved live stream (streamed only, like a station).
-    PlayLive {
-        video_id: String,
-        title: String,
-    },
-    /// Transport: play a subscribed channel's videos as the queue.
-    PlayChannel(i64),
-    /// Transport: resolve a playlist URL and start playing it.
-    StartPlaylist {
-        url: String,
-        title: String,
-    },
-    /// Transport: play the (already-resolved) playlist videos starting at `index`.
-    StartPlaylistAt {
-        url: String,
-        title: String,
-        index: usize,
-        close: bool,
-        videos: Vec<(String, String, Option<i64>)>,
-    },
-    /// Open the equalizer dialog of a live stream (Live tab detail).
-    OpenLiveEq {
-        video_id: String,
-        title: String,
-    },
-    /// Open the equalizer dialog for a `yt:<id>` track.
-    OpenTrackEq {
-        path: String,
-        title: String,
-    },
-    /// Open a mirrored playlist in the Playlists section.
-    OpenPlaylist {
-        id: i64,
-        name: String,
-    },
-    /// Open the settings dialog (yt-dlp banner button).
-    OpenSettings,
-    /// Informational toast.
-    Toast(String),
-    /// Show/update the persistent add-to-library progress toast.
-    Progress(String),
-    /// Finish the progress toast with a short final message.
-    ProgressDone(String),
-    /// Set/clear the central loading overlay (`Some(label)` = show, `None` = clear).
-    SetLoading(Option<String>),
-    /// A track/playlist was added → reload artist/album overviews.
-    LibraryChanged,
-    /// A playlist was saved → reload the Playlists section.
-    PlaylistsChanged,
-    /// A built subpage is parked in `subpage_slot` → push it onto the shared nav.
-    PushSubpage,
-    /// Show the "channel removed" undo toast; deferred deletion comes back as
-    /// `DeleteChannelConfirmed`.
-    DeleteChannelUndo(i64),
-    /// A "refresh all" worker was started / finished → drive the spinner.
-    RefreshStarted(bool),
-    RefreshFinished,
-    /// Live progress of the running "refresh all" (channel `done` of `total`,
-    /// name of the channel being fetched) for the overlay's progress bar.
-    RefreshProgress {
-        done: usize,
-        total: usize,
-        label: String,
-    },
-    /// Outcome of a refresh, shown briefly in the overlay — informational toasts
-    /// are disabled app-wide, so this is the only feedback channel left.
-    RefreshSummary(String),
-    /// Share a selection (a YouTube channel or video) over device sync.
-    Share(Box<crate::core::sync::share::Selection>),
-    /// The sort slot was rebuilt → the parent refreshes the shared title-bar
-    /// sort button (if the YouTube section is showing).
-    SortChanged,
-}
-
-#[derive(Debug)]
-pub(crate) enum YtCmd {
-    /// A detail refresh finished → reopen that detail view with the new data.
-    VideoRefreshed {
-        video_id: String,
-        title: String,
-    },
-    ChannelDetailRefreshed(i64),
-    PlaylistRefreshed {
-        url: String,
-        title: String,
-        result: Result<Vec<YtResult>, String>,
-    },
-    LiveRefreshed {
-        video_id: String,
-        details: Option<youtube::YtResult>,
-        thumbnail: Option<String>,
-    },
-    SearchResults(u64, Vec<YtResult>),
-    SearchFailed(u64),
-    SearchThumbsReady(u64),
-    ChannelFetched(Option<String>),
-    /// A newly subscribed channel's video cache finished filling in the
-    /// background — the lists can show its videos now.
-    ChannelVideosReady,
-    /// One channel of a "refresh all" is about to be fetched.
-    RefreshProgress {
-        done: usize,
-        total: usize,
-        title: String,
-    },
-    /// All channels re-fetched, with what the run brought in.
-    ChannelsRefreshed {
-        updated: usize,
-        failed: usize,
-        new_videos: usize,
-    },
-    /// The refresh worker found no usable yt-dlp — nothing was fetched.
-    RefreshUnavailable,
-    VideoMeta {
-        video_id: String,
-        uploader: Option<String>,
-        duration: Option<i64>,
-        cover: Option<String>,
-        /// Jump marks from the description (empty when the video has none).
-        chapters: Vec<(i64, String)>,
-    },
-    LibraryProgress {
-        done: usize,
-        total: usize,
-    },
-    /// Live phase/percentage of a single-video library add, for the popup.
-    AddLibProgress {
-        video_id: String,
-        progress: youtube::AddProgress,
-    },
-    LibraryAdded {
-        video_id: Option<String>,
-        result: Result<usize, String>,
-    },
-    LibraryExists {
-        video_id: String,
-        title: String,
-        /// Carried through so "Overwrite" reruns the import with the same
-        /// artist hint the first attempt had.
-        artist: Option<String>,
-        dest: String,
-    },
-    PlaylistSongs {
-        url: String,
-        title: String,
-        result: Result<Vec<YtResult>, String>,
-    },
-    /// A stale cached playlist was re-fetched in the background: refresh the DB
-    /// cache silently (no UI), so the *next* open shows fresh songs.
-    PlaylistCacheRefreshed {
-        url: String,
-        title: String,
-        result: Result<Vec<YtResult>, String>,
-    },
-    PlaylistCoversReady,
-    PlaylistSaved(Result<usize, String>),
-    /// Cover for a `yt_add_recent` entry finished caching.
-    RecentEnriched {
-        video_id: String,
-        cover: Option<String>,
-    },
-    /// Startup channel-thumbnail cache finished; `true` if it brought in a
-    /// thumbnail that was missing → redraw.
-    CoversCached(bool),
-}
-
-/// Fetches the channel thumbnails not yet in the cache (worker thread —
-/// network). Returns whether any came in, i.e. whether a redraw would show
-/// something new.
-fn cache_missing_channel_thumbs() -> bool {
-    let Ok(lib) = Library::open() else {
-        return false;
-    };
-    lib.channels()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|(_, _, _, thumb, _)| thumb)
-        .filter(|url| crate::core::online::youtube_thumb_path(url).is_none())
-        .filter(|url| crate::core::online::cache_youtube_thumb(url).is_some())
-        .count()
-        > 0
 }
 
 #[relm4::component(pub(crate))]
@@ -667,30 +345,7 @@ impl Component for YtPage {
         let channels_sort = read_sort(&library, "channels", SortCrit::Name, false);
         // Recent list sort (default: by date, most recent first).
         let recent_sort = read_sort(&library, "yt_recent", SortCrit::Release, true);
-        let channels_no_group = matches!(
-            library
-                .get_setting("nogroup_channels")
-                .ok()
-                .flatten()
-                .as_deref(),
-            Some("1")
-        );
-        let gallery_override = match library
-            .get_setting("gallery_channels")
-            .ok()
-            .flatten()
-            .as_deref()
-        {
-            Some("1") => Some(true),
-            Some("0") => Some(false),
-            _ => None,
-        };
-        let gallery_desc = library
-            .get_setting("gallery_desc_channels")
-            .ok()
-            .flatten()
-            .as_deref()
-            != Some("0");
+        let (channels_no_group, gallery_override, gallery_desc) = read_channel_view_prefs(&library);
         let channel_headers = std::rc::Rc::new(std::cell::RefCell::new(None));
         yt_channels_list.set_header_func(crate::ui::app_gallery::list_section_header_func(
             channel_headers.clone(),
@@ -800,53 +455,11 @@ impl Component for YtPage {
                 // Each view has its own sort control (Newest: none).
                 self.rebuild_sort(&sender);
             }
-            YtInput::SetSort(crit, desc) => {
-                if self.channels_sort != (crit, desc) {
-                    self.channels_sort = (crit, desc);
-                    let _ = self.library.set_setting("sort_channels", crit.as_key());
-                    let _ = self
-                        .library
-                        .set_setting("sort_channels_desc", if desc { "1" } else { "0" });
-                    self.reload_channels(&sender);
-                }
-            }
-            YtInput::SetRecentSort(crit, desc) => {
-                if self.recent_sort != (crit, desc) {
-                    self.recent_sort = (crit, desc);
-                    let _ = self.library.set_setting("sort_yt_recent", crit.as_key());
-                    let _ = self
-                        .library
-                        .set_setting("sort_yt_recent_desc", if desc { "1" } else { "0" });
-                    self.reload_yt_recent(&sender);
-                }
-            }
-            YtInput::SetNoGroup(off) => {
-                if self.channels_no_group != off {
-                    self.channels_no_group = off;
-                    let _ = self
-                        .library
-                        .set_setting("nogroup_channels", if off { "1" } else { "0" });
-                    self.reload_channels(&sender);
-                }
-            }
-            YtInput::SetGallery(on) => {
-                if self.gallery_override != Some(on) {
-                    self.gallery_override = Some(on);
-                    let _ = self
-                        .library
-                        .set_setting("gallery_channels", if on { "1" } else { "0" });
-                    self.reload_channels(&sender);
-                }
-            }
-            YtInput::SetGalleryDesc(on) => {
-                if self.gallery_desc != on {
-                    self.gallery_desc = on;
-                    let _ = self
-                        .library
-                        .set_setting("gallery_desc_channels", if on { "1" } else { "0" });
-                    self.reload_channels(&sender);
-                }
-            }
+            YtInput::SetSort(crit, desc) => self.on_set_channels_sort(&sender, crit, desc),
+            YtInput::SetRecentSort(crit, desc) => self.on_set_recent_sort(&sender, crit, desc),
+            YtInput::SetNoGroup(off) => self.on_set_no_group(&sender, off),
+            YtInput::SetGallery(on) => self.on_set_gallery(&sender, on),
+            YtInput::SetGalleryDesc(on) => self.on_set_gallery_desc(&sender, on),
             YtInput::SetGalleryView(on) => {
                 self.gallery_view = on;
                 self.reload_channels(&sender);
@@ -863,35 +476,7 @@ impl Component for YtPage {
                 let _ = sender.output(YtOutput::OpenSettings);
             }
             YtInput::Subscribe => self.open_youtube_search_dialog(&sender),
-            YtInput::Search(term, kind) => {
-                let term = term.trim().to_string();
-                if !term.is_empty() {
-                    self.search_seq = self.search_seq.wrapping_add(1);
-                    let seq = self.search_seq;
-                    self.search_kind = kind;
-                    self.show_youtube_search_spinner();
-                    sender.spawn_command(move |out| {
-                        let found = match kind {
-                            SearchKind::Yt(kind) => youtube::search(&term, kind, 25),
-                            SearchKind::Live => youtube::search_live(&term, 25),
-                        };
-                        let results = match found {
-                            Ok(r) => r,
-                            Err(_) => {
-                                let _ = out.send(YtCmd::SearchFailed(seq));
-                                return;
-                            }
-                        };
-                        let _ = out.send(YtCmd::SearchResults(seq, results.clone()));
-                        for r in &results {
-                            if let Some(t) = r.thumbnail.as_deref() {
-                                crate::core::online::cache_youtube_thumb(t);
-                            }
-                        }
-                        let _ = out.send(YtCmd::SearchThumbsReady(seq));
-                    });
-                }
-            }
+            YtInput::Search(term, kind) => self.on_search(&sender, &term, kind),
             YtInput::AddLive(index) => {
                 if let Some(hit) = self.search_results.get(index).cloned() {
                     self.add_live(&sender, hit);
@@ -903,42 +488,8 @@ impl Component for YtPage {
                 self.reload_live(&sender);
                 self.rebuild_sort(&sender);
             }
-            YtInput::SubscribeChannel(url) => {
-                if let Some(r) = self
-                    .search_results
-                    .iter()
-                    .find(|r| r.url == url && r.kind == YtKind::Channel)
-                    .cloned()
-                {
-                    let _ = sender.output(YtOutput::SetLoading(Some(gettext_f(
-                        "Subscribing to {t} …",
-                        &[("t", &r.title)],
-                    ))));
-                    sender.spawn_command(move |out| {
-                        let Some(db_id) =
-                            store_channel(&r.id, &r.title, &r.url, r.thumbnail.as_deref())
-                        else {
-                            let _ = out.send(YtCmd::ChannelFetched(None));
-                            return;
-                        };
-                        // The subscription exists — show it now; its videos and
-                        // thumbnails keep loading in this worker.
-                        let _ = out.send(YtCmd::ChannelFetched(Some(r.title.clone())));
-                        fill_channel_videos(db_id, &r.id, &r.title, &r.url, r.thumbnail.as_deref());
-                        let _ = out.send(YtCmd::ChannelVideosReady);
-                    });
-                }
-            }
-            YtInput::OpenChannel(id) => {
-                if let Some((_, title, _, _, _)) = self
-                    .channel_items
-                    .iter()
-                    .find(|(cid, _, _, _, _)| *cid == id)
-                    .cloned()
-                {
-                    self.open_channel(&sender, id, &title);
-                }
-            }
+            YtInput::SubscribeChannel(url) => self.on_subscribe_channel(&sender, &url),
+            YtInput::OpenChannel(id) => self.on_open_channel(&sender, id),
             YtInput::OpenChannelAt(index) => {
                 if let Some(id) = self.channel_items.get(index).map(|c| c.0) {
                     sender.input(YtInput::OpenChannel(id));
@@ -950,94 +501,15 @@ impl Component for YtPage {
                     sender.input(YtInput::ShowChannelDetail(id));
                 }
             }
-            YtInput::RefreshChannel(id) => {
-                if let Some((_, title, url, _, _)) = self
-                    .channel_items
-                    .iter()
-                    .find(|(cid, _, _, _, _)| *cid == id)
-                    .cloned()
-                {
-                    let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
-                    sender.spawn_command(move |out| {
-                        let fetched =
-                            refresh_channel_videos(id, &title, &url).map(|(title, _)| title);
-                        let _ = out.send(YtCmd::ChannelFetched(fetched));
-                    });
-                }
-            }
+            YtInput::RefreshChannel(id) => self.on_refresh_channel(&sender, id),
             YtInput::RefreshVideo { video_id, title } => {
-                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
-                sender.spawn_command(move |out| {
-                    refresh_video_meta(&video_id, &title);
-                    let _ = out.send(YtCmd::VideoRefreshed { video_id, title });
-                });
+                self.on_refresh_video(&sender, video_id, title)
             }
-            YtInput::RefreshChannelDetail(id) => {
-                let Some((_, title, url, thumb, _)) = self
-                    .channel_items
-                    .iter()
-                    .find(|(cid, _, _, _, _)| *cid == id)
-                    .cloned()
-                else {
-                    return;
-                };
-                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
-                sender.spawn_command(move |out| {
-                    let _ = refresh_channel_videos(id, &title, &url);
-                    // The avatar again; a channel without one gets the artist
-                    // photo a music database has for its name.
-                    match thumb.as_deref() {
-                        Some(t) => {
-                            let _ = crate::core::online::recache_youtube_thumb(t);
-                        }
-                        None => {
-                            if let Some(u) = crate::core::online::channel_image_url(None, &title) {
-                                if crate::core::online::recache_youtube_thumb(&u).is_some() {
-                                    if let Ok(lib) = Library::open() {
-                                        let _ = lib.set_channel_thumbnail(id, &u);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    let _ = out.send(YtCmd::ChannelDetailRefreshed(id));
-                });
-            }
+            YtInput::RefreshChannelDetail(id) => self.on_refresh_channel_detail(&sender, id),
             YtInput::RefreshPlaylist { url, title } => {
-                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
-                sender.spawn_command(move |out| {
-                    let result = youtube::list_playlist(&url, PLAYLIST_REFRESH_LIMIT)
-                        .map_err(|e| e.to_string());
-                    if let Some(first) = result.as_ref().ok().and_then(|v| v.first()) {
-                        let _ = crate::core::online::recache_youtube_thumb(
-                            &youtube::thumbnail_url(&first.id),
-                        );
-                    }
-                    let _ = out.send(YtCmd::PlaylistRefreshed { url, title, result });
-                });
+                self.on_refresh_playlist(&sender, url, title)
             }
-            YtInput::RefreshLive(video_id) => {
-                let thumb = self
-                    .live_items
-                    .iter()
-                    .find(|l| l.video_id == video_id)
-                    .and_then(|l| l.thumbnail.clone());
-                let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
-                sender.spawn_command(move |out| {
-                    let details = youtube::video_details(&video_id).ok().map(|d| d.meta);
-                    let url = details
-                        .as_ref()
-                        .and_then(|d| d.thumbnail.clone())
-                        .or(thumb)
-                        .unwrap_or_else(|| youtube::thumbnail_url(&video_id));
-                    let thumbnail = crate::core::online::recache_youtube_thumb(&url).map(|_| url);
-                    let _ = out.send(YtCmd::LiveRefreshed {
-                        video_id,
-                        details,
-                        thumbnail,
-                    });
-                });
-            }
+            YtInput::RefreshLive(video_id) => self.on_refresh_live(&sender, video_id),
             YtInput::DeleteChannel(id) => {
                 let _ = sender.output(YtOutput::DeleteChannelUndo(id));
             }
@@ -1070,21 +542,7 @@ impl Component for YtPage {
                 title,
                 index,
                 close,
-            } => {
-                if let Some(videos) = self.playlist_songs_cache.get(&url) {
-                    let videos: Vec<(String, String, Option<i64>)> = videos
-                        .iter()
-                        .map(|v| (v.id.clone(), v.title.clone(), v.duration))
-                        .collect();
-                    let _ = sender.output(YtOutput::StartPlaylistAt {
-                        url,
-                        title,
-                        index,
-                        close,
-                        videos,
-                    });
-                }
-            }
+            } => self.on_play_playlist_at(&sender, url, title, index, close),
             YtInput::AddToLibrary {
                 video_id,
                 title,
@@ -1104,41 +562,19 @@ impl Component for YtPage {
 
     fn update_cmd(&mut self, cmd: YtCmd, sender: ComponentSender<Self>, _root: &Self::Root) {
         match cmd {
-            YtCmd::SearchResults(seq, results) => {
-                if seq != self.search_seq {
-                    return; // a newer search is already in flight
-                }
-                self.search_failed = false;
-                self.search_results = results;
-                self.rebuild_youtube_search_results(&sender);
+            // Results of an outdated search (a newer one is already in flight)
+            // are dropped — returning before the banner sync below.
+            YtCmd::SearchResults(seq, _) | YtCmd::SearchFailed(seq) if seq != self.search_seq => {
+                return;
             }
-            YtCmd::SearchFailed(seq) => {
-                if seq != self.search_seq {
-                    return;
-                }
-                self.search_failed = true;
-                self.search_results.clear();
-                self.rebuild_youtube_search_results(&sender);
-            }
+            YtCmd::SearchResults(_, results) => self.on_cmd_search_results(&sender, Some(results)),
+            YtCmd::SearchFailed(_) => self.on_cmd_search_results(&sender, None),
             YtCmd::SearchThumbsReady(seq) => {
                 if seq == self.search_seq {
                     self.rebuild_youtube_search_results(&sender);
                 }
             }
-            YtCmd::ChannelFetched(title) => {
-                let _ = sender.output(YtOutput::SetLoading(None));
-                self.reload_channels(&sender);
-                match title {
-                    Some(t) => {
-                        self.yt_view = YtView::Channels;
-                        let _ = sender
-                            .output(YtOutput::Toast(gettext_f("Subscribed: {t}", &[("t", &t)])));
-                    }
-                    None => {
-                        let _ = sender.output(YtOutput::Toast(gettext("Could not load channel")));
-                    }
-                }
-            }
+            YtCmd::ChannelFetched(title) => self.on_cmd_channel_fetched(&sender, title),
             YtCmd::ChannelVideosReady => self.reload_channels(&sender),
             YtCmd::RefreshProgress { done, total, title } => {
                 let _ = sender.output(YtOutput::RefreshProgress {
@@ -1160,30 +596,9 @@ impl Component for YtPage {
                 self.reload_channels(&sender);
             }
             YtCmd::VideoRefreshed { video_id, title } => {
-                crate::ui::widgets::forget_thumb(
-                    crate::core::online::youtube_cover_path(&video_id).as_deref(),
-                );
-                crate::ui::widgets::forget_thumb(
-                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&video_id))
-                        .as_deref(),
-                );
-                self.reload_yt_recent(&sender);
-                self.show_video_detail(&sender, &video_id, &title);
+                self.on_cmd_video_refreshed(&sender, &video_id, &title)
             }
-            YtCmd::ChannelDetailRefreshed(id) => {
-                if let Some(t) = self
-                    .channel_items
-                    .iter()
-                    .find(|c| c.0 == id)
-                    .and_then(|c| c.3.as_deref())
-                {
-                    crate::ui::widgets::forget_thumb(
-                        crate::core::online::youtube_thumb_path(t).as_deref(),
-                    );
-                }
-                self.reload_channels(&sender);
-                self.open_channel_detail(&sender, id);
-            }
+            YtCmd::ChannelDetailRefreshed(id) => self.on_cmd_channel_detail_refreshed(&sender, id),
             YtCmd::PlaylistRefreshed { url, title, result } => {
                 self.on_cmd_yt_playlist_refreshed(&url, &title, result);
                 self.reload_yt_recent(&sender);
@@ -1193,26 +608,7 @@ impl Component for YtPage {
                 video_id,
                 details,
                 thumbnail,
-            } => {
-                if let Some(t) = thumbnail.as_deref() {
-                    crate::ui::widgets::forget_thumb(
-                        crate::core::online::youtube_thumb_path(t).as_deref(),
-                    );
-                }
-                if let Some(d) = details.as_ref() {
-                    let channel = d.uploader.as_deref().map(youtube::clean_channel_name);
-                    let _ = self.library.add_live(
-                        &video_id,
-                        &d.title,
-                        channel.as_deref().filter(|c| !c.trim().is_empty()),
-                        thumbnail.as_deref(),
-                    );
-                } else if thumbnail.is_none() {
-                    let _ = sender.output(YtOutput::Toast(gettext("Nothing found")));
-                }
-                self.reload_live(&sender);
-                self.show_live_detail(&sender, &video_id);
-            }
+            } => self.on_cmd_live_refreshed(&sender, video_id, details, thumbnail),
             YtCmd::RefreshUnavailable => {
                 let _ = sender.output(YtOutput::RefreshFinished);
                 let _ = sender.output(YtOutput::RefreshSummary(gettext(
@@ -1321,823 +717,6 @@ impl YtPage {
         *self.subpage_slot.borrow_mut() = Some((title, content));
         let _ = sender.output(YtOutput::PushSubpage);
     }
-
-    /// Rebuilds the channel overview (+ "Newest"/"Recent" lists).
-    /// Effective gallery mode for the channels overview: the per-view override if
-    /// set, else the global `gallery_view`.
-    fn gallery_on(&self) -> bool {
-        self.gallery_override.unwrap_or(self.gallery_view)
-    }
-
-    /// (Re)builds the header sort button: direction icon + criteria popover
-    /// (name / video count / latest video) plus the grouping + gallery toggles. Called on init
-    /// and whenever the sort/grouping/gallery changes.
-    pub(super) fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
-        use crate::ui::app_sort::SortToggle;
-        let input = sender.input_sender().clone();
-        // Subscriptions and Recent both sort; Newest stays date-grouped (no sort).
-        let slot = match self.yt_view {
-            YtView::Channels => {
-                let (crit, desc) = self.channels_sort;
-                let crits = [
-                    (SortCrit::Name, gettext("Name")),
-                    (SortCrit::Songs, gettext("Number of videos")),
-                    (SortCrit::Release, gettext("Latest video")),
-                ];
-                let group_input = input.clone();
-                let gallery_input = input.clone();
-                let desc_input = input.clone();
-                let toggles = vec![
-                    SortToggle {
-                        label: gettext("Without grouping"),
-                        active: self.channels_no_group,
-                        on_toggle: Box::new(move |off| {
-                            let _ = group_input.send(YtInput::SetNoGroup(off));
-                        }),
-                        sub: false,
-                    },
-                    SortToggle {
-                        label: gettext("Gallery view"),
-                        active: self.gallery_on(),
-                        on_toggle: Box::new(move |on| {
-                            let _ = gallery_input.send(YtInput::SetGallery(on));
-                        }),
-                        sub: false,
-                    },
-                    SortToggle {
-                        label: gettext("Show description"),
-                        active: self.gallery_desc,
-                        on_toggle: Box::new(move |on| {
-                            let _ = desc_input.send(YtInput::SetGalleryDesc(on));
-                        }),
-                        sub: true,
-                    },
-                ];
-                let popover = sort_popover(
-                    &crits,
-                    crit,
-                    desc,
-                    move |crit, desc| {
-                        let _ = input.send(YtInput::SetSort(crit, desc));
-                    },
-                    toggles,
-                );
-                (!self.channel_items.is_empty()).then_some((popover, desc))
-            }
-            YtView::Recent => {
-                let (crit, desc) = self.recent_sort;
-                // Recent is a flat list (no grouping / gallery): name, date, length.
-                let crits = [
-                    (SortCrit::Name, gettext("Name")),
-                    (SortCrit::Release, gettext("Date")),
-                    (SortCrit::Length, gettext("Length")),
-                ];
-                let popover = sort_popover(
-                    &crits,
-                    crit,
-                    desc,
-                    move |crit, desc| {
-                        let _ = input.send(YtInput::SetRecentSort(crit, desc));
-                    },
-                    vec![],
-                );
-                (!self.recent_items.is_empty()).then_some((popover, desc))
-            }
-            YtView::Newest | YtView::Live => None,
-        };
-        *self.sort_slot.borrow_mut() = slot;
-        let _ = sender.output(YtOutput::SortChanged);
-    }
-
-    /// Orders the "Recent" list by the chosen sort. "Date" keeps the DB order
-    /// (recently played first), reversing it for ascending; the others sort by
-    /// title or runtime (videos use `duration`, playlists `total_duration`).
-    fn sort_recent_items(&mut self) {
-        let (crit, desc) = self.recent_sort;
-        match crit {
-            SortCrit::Name => self
-                .recent_items
-                .sort_by_cached_key(|r| natural_key(&r.title)),
-            SortCrit::Length => self
-                .recent_items
-                .sort_by_key(|r| r.duration.or(r.total_duration).unwrap_or(0)),
-            // Date (Release): the query already returns `played_at` descending.
-            _ => {
-                if !desc {
-                    self.recent_items.reverse();
-                }
-                return;
-            }
-        }
-        if desc {
-            self.recent_items.reverse();
-        }
-    }
-
-    /// Per-row alphabetical headings (by name) for the channels list; none for the
-    /// video-count sort or when grouping is off.
-    fn channels_section_headers(&self) -> Option<Vec<String>> {
-        if self.channels_no_group {
-            return None;
-        }
-        match self.channels_sort.0 {
-            SortCrit::Name => Some(
-                self.channel_items
-                    .iter()
-                    .map(|(_, title, _, _, _)| crate::ui::app_sort::alpha_header(title))
-                    .collect(),
-            ),
-            _ => None,
-        }
-    }
-
-    /// Orders the subscriptions overview by the chosen sort (shared by list +
-    /// gallery, which both read `channel_items`).
-    fn sort_channels(&mut self) {
-        let (crit, desc) = self.channels_sort;
-        match crit {
-            SortCrit::Songs => self.channel_items.sort_by_key(|(_, _, _, _, count)| *count),
-            // By the publication date of each channel's newest video.
-            SortCrit::Release => {
-                let mut latest: HashMap<i64, i64> = HashMap::new();
-                for (id, published) in self.library.video_pubdates().unwrap_or_default() {
-                    let key = yt_pubdate_key(published.as_deref());
-                    let e = latest.entry(id).or_insert(0);
-                    *e = (*e).max(key);
-                }
-                self.channel_items
-                    .sort_by_key(|(id, _, _, _, _)| latest.get(id).copied().unwrap_or(0));
-            }
-            // Name is the remaining criterion.
-            _ => self
-                .channel_items
-                .sort_by_cached_key(|(_, title, _, _, _)| natural_key(title)),
-        }
-        if desc {
-            self.channel_items.reverse();
-        }
-    }
-
-    fn reload_channels(&mut self, sender: &ComponentSender<Self>) {
-        self.channel_items = self.library.channels().unwrap_or_default();
-        self.sort_channels();
-        // Refresh the title-bar sort control (visibility depends on emptiness).
-        self.rebuild_sort(sender);
-        *self.channel_headers.borrow_mut() = self.channels_section_headers();
-        if self.gallery_on() {
-            self.fill_yt_gallery(sender);
-        } else {
-            while let Some(child) = self.channels_list.first_child() {
-                self.channels_list.remove(&child);
-            }
-            for (id, title, _url, thumb, count) in self.channel_items.clone() {
-                let row = adw::ActionRow::builder()
-                    .title(format!("{} ({count})", gtk::glib::markup_escape_text(&title)).as_str())
-                    .activatable(true)
-                    .build();
-                row.add_css_class("emilia-flush");
-                let cover = thumb
-                    .as_deref()
-                    .and_then(crate::core::online::youtube_thumb_path);
-                row.add_prefix(&cover_widget(cover.as_deref(), "avatar-default-symbolic"));
-                {
-                    let sender = sender.clone();
-                    row.connect_activated(move |_| sender.input(YtInput::OpenChannel(id)));
-                }
-                on_secondary_click(&row, {
-                    let sender = sender.clone();
-                    move || sender.input(YtInput::ShowChannelDetail(id))
-                });
-                let lp = gtk::GestureLongPress::new();
-                {
-                    let sender = sender.clone();
-                    lp.connect_pressed(move |g, _, _| {
-                        g.set_state(gtk::EventSequenceState::Claimed);
-                        sender.input(YtInput::ShowChannelDetail(id));
-                    });
-                }
-                row.add_controller(lp);
-                self.channels_list.append(&row);
-            }
-            self.channels_list.invalidate_headers();
-        }
-        self.reload_yt_newest(sender);
-        self.reload_yt_recent(sender);
-    }
-
-    /// Gallery variant of the channel overview (thumbnail grid).
-    fn fill_yt_gallery(&self, sender: &ComponentSender<Self>) {
-        let fb = &self.channels_gallery;
-        crate::ui::widgets::reset_gallery_grid(fb, self.gallery_columns);
-        let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
-        for (i, (_, title, _, thumb, _)) in self.channel_items.iter().enumerate() {
-            let cover = thumb
-                .as_deref()
-                .and_then(crate::core::online::youtube_thumb_path);
-            let (cell, pic) = gallery_cell(
-                cover.as_deref(),
-                "avatar-default-symbolic",
-                title,
-                self.gallery_desc,
-            );
-            if let (Some(path), Some(pic)) = (cover.as_deref(), pic) {
-                if crate::ui::widgets::cached_thumb(path).is_none() {
-                    to_decode.push((path.to_string(), pic));
-                }
-            }
-            let click = gtk::GestureClick::new();
-            {
-                let sender = sender.clone();
-                click.connect_released(move |g, n, _, _| {
-                    if n == 1 {
-                        g.set_state(gtk::EventSequenceState::Claimed);
-                        sender.input(YtInput::OpenChannelAt(i));
-                    }
-                });
-            }
-            cell.add_controller(click);
-            on_secondary_click(&cell, {
-                let sender = sender.clone();
-                move || sender.input(YtInput::ShowChannelDetailAt(i))
-            });
-            let long_press = gtk::GestureLongPress::new();
-            {
-                let sender = sender.clone();
-                long_press.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(YtInput::ShowChannelDetailAt(i));
-                });
-            }
-            cell.add_controller(long_press);
-            fb.append(&cell);
-        }
-        spawn_gallery_decode(to_decode);
-    }
-
-    /// Builds the "Newest videos" list across all subscribed channels.
-    fn reload_yt_newest(&mut self, sender: &ComponentSender<Self>) {
-        let mut videos = self.library.all_videos().unwrap_or_default();
-        videos.sort_by(|a, b| {
-            yt_pubdate_key(b.published.as_deref()).cmp(&yt_pubdate_key(a.published.as_deref()))
-        });
-        videos.truncate(150);
-        self.newest_items = videos;
-        while let Some(child) = self.newest_list.first_child() {
-            self.newest_list.remove(&child);
-        }
-        if self.newest_items.is_empty() {
-            return;
-        }
-        let (today, yesterday, week_start) = crate::core::podcast::recent_day_buckets();
-        let month_start = crate::core::podcast::recent_cutoff_key();
-        let bucket_of = |k: i64| -> usize {
-            if k >= today {
-                0
-            } else if k >= yesterday {
-                1
-            } else if k >= week_start {
-                2
-            } else if k >= month_start {
-                3
-            } else {
-                4
-            }
-        };
-        let bucket_title = |b: usize| match b {
-            0 => gettext("Today"),
-            1 => gettext("Yesterday"),
-            2 => gettext("This week"),
-            3 => gettext("This month"),
-            _ => gettext("Older"),
-        };
-        // Stored watch positions in one query, instead of one per row.
-        let watched = self.library.all_yt_progress().unwrap_or_default();
-        let mut cur_bucket: Option<usize> = None;
-        let mut group: Option<adw::PreferencesGroup> = None;
-        for (i, v) in self.newest_items.iter().enumerate() {
-            let b = bucket_of(yt_pubdate_key(v.published.as_deref()));
-            if cur_bucket != Some(b) {
-                cur_bucket = Some(b);
-                let g = adw::PreferencesGroup::builder()
-                    .title(bucket_title(b))
-                    .build();
-                self.newest_list.append(&g);
-                group = Some(g);
-            }
-            let mut subtitle = v.channel_title.clone();
-            if let Some(p) = v.published.as_deref().filter(|s| !s.trim().is_empty()) {
-                subtitle.push_str(" · ");
-                subtitle.push_str(&fmt_published(p));
-            }
-            let cover = crate::core::online::youtube_cover_path(&v.video_id)
-                .or_else(|| {
-                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
-                })
-                .or_else(|| {
-                    v.channel_thumb
-                        .as_deref()
-                        .and_then(crate::core::online::youtube_thumb_path)
-                });
-            let row = self.video_card(
-                sender,
-                &v.video_id,
-                &v.title,
-                &subtitle,
-                cover.as_deref(),
-                v.duration,
-                watched.get(&v.video_id),
-                {
-                    let sender = sender.clone();
-                    move || sender.input(YtInput::ShowNewestDetail(i))
-                },
-            );
-            if let Some(g) = &group {
-                g.add(&row);
-            }
-        }
-        self.refresh_yt_icons();
-    }
-
-    /// Builds the "Recent" list (recently played videos/playlists, newest first).
-    pub(super) fn reload_yt_recent(&mut self, sender: &ComponentSender<Self>) {
-        self.recent_items = self.library.recent_videos(150).unwrap_or_default();
-        self.sort_recent_items();
-        // Refresh the title-bar sort control (visibility depends on emptiness);
-        // before the early-return below so the empty case hides it too.
-        self.rebuild_sort(sender);
-        while let Some(child) = self.recent_list.first_child() {
-            self.recent_list.remove(&child);
-        }
-        if self.recent_items.is_empty() {
-            return;
-        }
-        let watched = self.library.all_yt_progress().unwrap_or_default();
-        let group = adw::PreferencesGroup::new();
-        for r in &self.recent_items {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&r.title))
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
-            if r.kind == "playlist" {
-                let mut subtitle = gettext_f(
-                    "Playlist · {n}",
-                    &[("n", &ngettext_n("{n} song", "{n} songs", r.count as u32))],
-                );
-                if let Some(total) = r.total_duration.filter(|d| *d > 0) {
-                    subtitle.push_str(" · ");
-                    subtitle.push_str(&fmt_duration(total));
-                }
-                row.set_subtitle(&subtitle);
-                let cover = r.thumbnail.as_deref().and_then(|t| {
-                    if std::path::Path::new(t).exists() {
-                        Some(t.to_string())
-                    } else {
-                        crate::core::online::youtube_thumb_path(t)
-                    }
-                });
-                row.add_prefix(&cover_widget(cover.as_deref(), "view-list-symbolic"));
-                let btn = gtk::Button::builder()
-                    .icon_name("media-playback-start-symbolic")
-                    .valign(gtk::Align::Center)
-                    .tooltip_text(gettext("Start Playlist"))
-                    .build();
-                btn.add_css_class("flat");
-                {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    btn.connect_clicked(move |_| {
-                        let _ = sender.output(YtOutput::StartPlaylist {
-                            url: url.clone(),
-                            title: t.clone(),
-                        });
-                    });
-                }
-                row.add_suffix(&btn);
-                {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    row.connect_activated(move |_| {
-                        sender.input(YtInput::OpenRecentPlaylist {
-                            url: url.clone(),
-                            title: t.clone(),
-                        });
-                    });
-                }
-                on_secondary_click(&row, {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowPlaylistDetail {
-                            url: url.clone(),
-                            title: t.clone(),
-                        });
-                    }
-                });
-                on_long_press(&row, {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowPlaylistDetail {
-                            url: url.clone(),
-                            title: t.clone(),
-                        })
-                    }
-                });
-                group.add(&row);
-                continue;
-            }
-            let cover = crate::core::online::youtube_cover_path(&r.video_id).or_else(|| {
-                crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&r.video_id))
-            });
-            let card = self.video_card(
-                sender,
-                &r.video_id,
-                &r.title,
-                r.artist.as_deref().unwrap_or_default(),
-                cover.as_deref(),
-                r.duration,
-                watched.get(&r.video_id),
-                {
-                    let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowVideoDetail {
-                            video_id: vid.clone(),
-                            title: t.clone(),
-                        });
-                    }
-                },
-            );
-            group.add(&card);
-        }
-        self.recent_list.append(&group);
-        self.refresh_yt_icons();
-    }
-
-    /// The "+": a centered choice modal like the Files "+" — what to search
-    /// for (songs, playlists, channels, live streams); the search itself
-    /// opens as the second step.
-    fn open_youtube_search_dialog(&self, sender: &ComponentSender<Self>) {
-        if !youtube::available() {
-            let _ = sender.output(YtOutput::Toast(gettext(
-                "Download yt-dlp in the settings first",
-            )));
-            return;
-        }
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let slot = self.search.clone();
-        let (sender, win) = (sender.clone(), root.clone());
-        // Opened from the Live tab → live streams are the default pick.
-        let default = if self.yt_view == YtView::Live {
-            "live"
-        } else {
-            "video"
-        };
-        let dialog = crate::ui::widgets::choice_modal(
-            &gettext("Search YouTube"),
-            &[
-                // Labelled "Songs" (de "Lieder"): in this music app the video
-                // search is used to find songs. It still searches YtKind::Video.
-                ("video", gettext("Songs")),
-                ("playlist", gettext("Playlists")),
-                ("channel", gettext("Channels")),
-                ("live", gettext("Live")),
-            ],
-            default,
-            move |resp| {
-                let (kind, heading) = match resp {
-                    "video" => (SearchKind::Yt(YtKind::Video), gettext("Search songs")),
-                    "playlist" => (
-                        SearchKind::Yt(YtKind::Playlist),
-                        gettext("Search playlists"),
-                    ),
-                    "channel" => (SearchKind::Yt(YtKind::Channel), gettext("Search channels")),
-                    "live" => (SearchKind::Live, gettext("Search live streams")),
-                    _ => return,
-                };
-                let sender = sender.clone();
-                let (dialog, entry, results) = crate::ui::widgets::search_modal(
-                    &heading,
-                    &gettext("Search term …"),
-                    move |term| sender.input(YtInput::Search(term, kind)),
-                );
-                *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
-                {
-                    let slot = slot.clone();
-                    dialog.connect_closed(move |_| {
-                        *slot.borrow_mut() = None;
-                    });
-                }
-                dialog.present(Some(&win));
-                entry.grab_focus();
-            },
-        );
-        dialog.present(Some(&root));
-    }
-
-    /// Clears the open search dialog's results list and shows a single spinner
-    /// row while the current search runs. Replaced by the real hits (or the
-    /// "Nothing found" / error row) once the worker reports back.
-    fn show_youtube_search_spinner(&self) {
-        let guard = self.search.borrow();
-        let Some((_, list)) = guard.as_ref() else {
-            return;
-        };
-        while let Some(child) = list.first_child() {
-            list.remove(&child);
-        }
-        list.set_visible(true);
-        list.append(&search_spinner_row());
-    }
-
-    /// Redraws the results list in the open search dialog.
-    fn rebuild_youtube_search_results(&self, sender: &ComponentSender<Self>) {
-        let guard = self.search.borrow();
-        let Some((dialog, list)) = guard.as_ref() else {
-            return;
-        };
-        while let Some(child) = list.first_child() {
-            list.remove(&child);
-        }
-        list.set_visible(true);
-
-        if self.search_results.is_empty() {
-            let row = if self.search_failed {
-                let r = adw::ActionRow::builder()
-                    .title(gettext("YouTube unreachable"))
-                    .subtitle(gettext(
-                        "Check your connection, or update yt-dlp in the settings",
-                    ))
-                    .build();
-                r.set_subtitle_lines(2);
-                r
-            } else {
-                adw::ActionRow::builder()
-                    .title(gettext("Nothing found"))
-                    .build()
-            };
-            row.set_sensitive(false);
-            list.append(&row);
-            return;
-        }
-
-        let live = self.search_kind == SearchKind::Live;
-        for (index, r) in self.search_results.iter().enumerate() {
-            let mut subtitle = match r.kind {
-                _ if live => gettext("Live"),
-                YtKind::Video => gettext("Video"),
-                YtKind::Playlist => gettext("Playlist"),
-                YtKind::Channel => gettext("Channel"),
-            };
-            if let Some(u) = r.uploader.as_deref().filter(|s| !s.trim().is_empty()) {
-                subtitle.push_str(" · ");
-                subtitle.push_str(u);
-            }
-            if let Some(d) = r.duration {
-                subtitle.push_str(" · ");
-                subtitle.push_str(&fmt_duration(d));
-            }
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&r.title))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .activatable(true)
-                .build();
-            let cover = r
-                .thumbnail
-                .as_deref()
-                .and_then(crate::core::online::youtube_thumb_path);
-            let icon = match r.kind {
-                YtKind::Channel => "avatar-default-symbolic",
-                _ if live => "internet-radio-symbolic",
-                _ => "audio-x-generic-symbolic",
-            };
-            row.add_prefix(&cover_widget(cover.as_deref(), icon));
-            if live {
-                // Tapping a live hit saves it to the Live tab (like subscribing
-                // to a channel); it is played from there, never downloaded.
-                row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
-                let (sender, dialog) = (sender.clone(), dialog.clone());
-                row.connect_activated(move |_| {
-                    sender.input(YtInput::AddLive(index));
-                    dialog.close();
-                });
-                list.append(&row);
-                continue;
-            }
-            match r.kind {
-                YtKind::Video => {
-                    let btn = gtk::Button::builder()
-                        .icon_name("list-add-symbolic")
-                        .valign(gtk::Align::Center)
-                        .css_classes(["flat"])
-                        .tooltip_text(gettext("List as newest"))
-                        .build();
-                    let (sender, vid, title) = (sender.clone(), r.id.clone(), r.title.clone());
-                    btn.connect_clicked(move |b| {
-                        sender.input(YtInput::AddRecent {
-                            video_id: vid.clone(),
-                            title: title.clone(),
-                        });
-                        b.set_icon_name("object-select-symbolic");
-                        b.set_sensitive(false);
-                    });
-                    row.add_suffix(&btn);
-                }
-                YtKind::Channel => {
-                    row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
-                }
-                YtKind::Playlist => {
-                    row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
-                }
-            }
-            {
-                let (sender, dialog) = (sender.clone(), dialog.clone());
-                let (kind, url, vid, title) =
-                    (r.kind, r.url.clone(), r.id.clone(), r.title.clone());
-                row.connect_activated(move |_| {
-                    match kind {
-                        YtKind::Channel => sender.input(YtInput::SubscribeChannel(url.clone())),
-                        YtKind::Playlist => sender.input(YtInput::ShowPlaylistDetail {
-                            url: url.clone(),
-                            title: title.clone(),
-                        }),
-                        YtKind::Video => sender.input(YtInput::ShowVideoDetail {
-                            video_id: vid.clone(),
-                            title: title.clone(),
-                        }),
-                    }
-                    dialog.close();
-                });
-            }
-            list.append(&row);
-        }
-    }
-
-    /// Videos subpage of a subscribed channel.
-    fn open_channel(&self, sender: &ComponentSender<Self>, id: i64, title: &str) {
-        let videos = self.library.channel_videos(id).unwrap_or_default();
-        let channel_thumb = self
-            .channel_items
-            .iter()
-            .find(|(cid, _, _, _, _)| *cid == id)
-            .and_then(|(_, _, _, t, _)| t.as_deref())
-            .and_then(crate::core::online::youtube_thumb_path);
-
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        let group = adw::PreferencesGroup::builder()
-            .title(
-                format!(
-                    "{} ({})",
-                    gtk::glib::markup_escape_text(title),
-                    videos.len()
-                )
-                .as_str(),
-            )
-            .build();
-        if videos.is_empty() {
-            group.add(
-                &adw::ActionRow::builder()
-                    .title(gettext("No videos"))
-                    .build(),
-            );
-        }
-        let watched = self.library.all_yt_progress().unwrap_or_default();
-        for v in &videos {
-            // Subtitle: upload date (the runtime sits on the right, like the
-            // podcast lists; repeating it here would be noise).
-            let subtitle = v
-                .published
-                .as_deref()
-                .filter(|p| !p.trim().is_empty())
-                .map(fmt_published)
-                .unwrap_or_default();
-            let cover = crate::core::online::youtube_cover_path(&v.video_id)
-                .or_else(|| {
-                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
-                })
-                .or_else(|| channel_thumb.clone());
-            let card = self.video_card(
-                sender,
-                &v.video_id,
-                &v.title,
-                &subtitle,
-                cover.as_deref(),
-                v.duration,
-                watched.get(&v.video_id),
-                {
-                    let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowVideoDetail {
-                            video_id: vid.clone(),
-                            title: t.clone(),
-                        });
-                    }
-                },
-            );
-            group.add(&card);
-        }
-        content.append(&group);
-        self.push_subpage(
-            sender,
-            gettext_f("Channel – {title}", &[("title", title)]),
-            content,
-        );
-    }
-
-    /// Subscription detail of a channel.
-    fn open_channel_detail(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let Some((_, title, url, thumb, count)) = self
-            .channel_items
-            .iter()
-            .find(|(cid, _, _, _, _)| *cid == id)
-            .cloned()
-        else {
-            return;
-        };
-        let dialog = adw::Dialog::builder().title(&title).build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-
-        let info = adw::PreferencesGroup::new();
-        let head = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(&title))
-            .subtitle(ngettext_n("{n} video", "{n} videos", count as u32))
-            .build();
-        let cover = thumb
-            .as_deref()
-            .and_then(crate::core::online::youtube_thumb_path);
-        content.append(&crate::ui::widgets::detail_cover(
-            cover.as_deref(),
-            "avatar-default-symbolic",
-        ));
-        info.add(&head);
-        content.append(&info);
-
-        let actions = adw::PreferencesGroup::new();
-        let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            play.connect_activated(move |_| {
-                let _ = sender.output(YtOutput::PlayChannel(id));
-                dialog.close();
-            });
-        }
-        actions.add(&play);
-        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            share.connect_activated(move |_| {
-                let _ = sender.output(YtOutput::Share(Box::new(
-                    crate::core::sync::share::Selection {
-                        yt_channels: vec![id],
-                        ..Default::default()
-                    },
-                )));
-                dialog.close();
-            });
-        }
-        actions.add(&share);
-        let bell = adw::SwitchRow::builder()
-            .title(gettext("Notify of newest publications"))
-            .active(true)
-            .build();
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            bell.connect_active_notify(move |s| {
-                if !s.is_active() {
-                    sender.input(YtInput::DeleteChannel(id));
-                    dialog.close();
-                }
-            });
-        }
-        actions.add(&bell);
-        let remove = action_row(&gettext("Remove"), "user-trash-symbolic");
-        remove.add_css_class("error");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            remove.connect_activated(move |_| {
-                sender.input(YtInput::DeleteChannel(id));
-                dialog.close();
-            });
-        }
-        actions.add(&remove);
-        content.append(&actions);
-        let _ = url;
-        {
-            let sender = sender.clone();
-            present_detail_refreshable(&dialog, &content, &root, move || {
-                sender.input(YtInput::RefreshChannelDetail(id));
-            });
-        }
-    }
 }
 
 /// Same for the video rows: the component owns them, so the shared state is
@@ -2150,47 +729,4 @@ impl crate::ui::play_mark::PlaybackSink for relm4::Controller<YtPage> {
             playing: state.playing,
         });
     }
-}
-
-/// Song-list length fetched when a playlist detail is refreshed (same cap as
-/// opening its songs).
-const PLAYLIST_REFRESH_LIMIT: usize = 200;
-
-/// Detail refresh of a video: description, jump marks and runtime from
-/// YouTube, then artist and cover from the music database (the cover replaces
-/// the thumbnail when a match is found, else the thumbnail is fetched again).
-/// The "Recently" entry gets the new artist/cover. **Network** — worker only.
-fn refresh_video_meta(video_id: &str, title: &str) {
-    let Ok(lib) = Library::open() else {
-        return;
-    };
-    let details = youtube::video_details(video_id).ok();
-    if let Some(d) = details.as_ref() {
-        let _ = lib.set_yt_detail(video_id, d.description.as_deref(), &d.chapters);
-        if d.meta.duration.is_some() {
-            let _ = lib.set_yt_meta(video_id, title, d.meta.duration);
-        }
-    }
-    let channel = lib
-        .yt_video_info(video_id)
-        .ok()
-        .flatten()
-        .map(|(c, _, _)| c)
-        .or_else(|| details.as_ref().and_then(|d| d.meta.uploader.clone()))
-        .map(|c| youtube::clean_channel_name(&c))
-        .filter(|s| !s.trim().is_empty());
-    let (artist, _, song) = youtube::split_title(title, channel.as_deref());
-    let hit = artist
-        .as_deref()
-        .or(channel.as_deref())
-        .and_then(|a| crate::core::online::track_cover(a, &song))
-        .or_else(|| {
-            channel
-                .as_deref()
-                .and_then(|c| crate::core::online::track_cover(c, title))
-        });
-    let cover = hit
-        .and_then(|(bytes, _album)| crate::core::online::store_youtube_cover(video_id, &bytes))
-        .or_else(|| crate::core::online::recache_youtube_thumb(&youtube::thumbnail_url(video_id)));
-    let _ = lib.set_recent_meta(video_id, channel.as_deref(), cover.as_deref());
 }

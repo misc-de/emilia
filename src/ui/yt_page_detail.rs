@@ -1,16 +1,18 @@
-//! Second half of [`YtPage`]'s inherent impl: the video/playlist detail
-//! dialogs, the playlist-songs subpage, the video cards with their play button
-//! and watch progress, the "refresh all" worker, the library-add progress
-//! popup, the add-to-library / save-playlist flows and their `on_cmd_*`
-//! worker-result handlers. The struct, its messages, the `Component` impl and
-//! the list/search/channel half stay in [`crate::ui::yt_page`].
+//! The video half of [`YtPage`]'s inherent impl: the video detail dialog and
+//! its refresh, the video cards with their play button and watch progress,
+//! the "refresh all" worker, the library-add progress popup and the
+//! single-video add-to-library flow with its `on_cmd_*` worker-result handler.
+//! The struct and the `Component` impl stay in [`crate::ui::yt_page`]; the
+//! lists, search, channels and playlists live in [`crate::ui::yt_page_lists`],
+//! [`crate::ui::yt_page_search`], [`crate::ui::yt_page_channels`] and
+//! [`crate::ui::yt_playlists`].
 
 use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
 use crate::core::db::Library;
-use crate::core::youtube::{self, YtResult};
+use crate::core::youtube;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::YtView;
 use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
@@ -21,13 +23,40 @@ use crate::ui::yt_channels::{
 };
 use crate::ui::yt_page::{ProgressPopup, YtCmd, YtInput, YtOutput, YtPage};
 
-/// Upper bound of videos indexed when adding a whole playlist to the collection.
-const PLAYLIST_INDEX_LIMIT: usize = 200;
-/// How long a cached browsed-playlist song list is served as-is before a
-/// background refresh is kicked off on the next open (6 hours).
-const PLAYLIST_CACHE_TTL_SECS: i64 = 6 * 60 * 60;
-
 impl YtPage {
+    /// Video detail refresh: metadata, artist and cover again (worker), then
+    /// reopen the detail.
+    pub(super) fn on_refresh_video(
+        &self,
+        sender: &ComponentSender<Self>,
+        video_id: String,
+        title: String,
+    ) {
+        let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
+        sender.spawn_command(move |out| {
+            refresh_video_meta(&video_id, &title);
+            let _ = out.send(YtCmd::VideoRefreshed { video_id, title });
+        });
+    }
+
+    /// Worker result of a video detail refresh: drop the stale cover/thumbnail
+    /// from the thumbnail cache, rebuild "Recent", reopen the detail.
+    pub(super) fn on_cmd_video_refreshed(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        video_id: &str,
+        title: &str,
+    ) {
+        crate::ui::widgets::forget_thumb(
+            crate::core::online::youtube_cover_path(video_id).as_deref(),
+        );
+        crate::ui::widgets::forget_thumb(
+            crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(video_id)).as_deref(),
+        );
+        self.reload_yt_recent(sender);
+        self.show_video_detail(sender, video_id, title);
+    }
+
     /// Rich detail page of a video (cover, info, play, add-to-library, EQ).
     pub(super) fn show_video_detail(
         &self,
@@ -267,243 +296,6 @@ impl YtPage {
                     video_id: vid.clone(),
                     title: t.clone(),
                 });
-            });
-        }
-    }
-
-    /// Detail dialog of a playlist.
-    pub(super) fn show_playlist_detail(
-        &self,
-        sender: &ComponentSender<Self>,
-        url: &str,
-        title: &str,
-    ) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let dialog = adw::Dialog::builder().title(title).build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-        let info = adw::PreferencesGroup::new();
-        info.add(
-            &adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(title))
-                .subtitle(gettext("Playlist"))
-                .build(),
-        );
-        content.append(&info);
-        let actions = adw::PreferencesGroup::new();
-        let start = action_row(&gettext("Start Playlist"), "media-playback-start-symbolic");
-        {
-            let (sender, dialog, u, t) = (
-                sender.clone(),
-                dialog.clone(),
-                url.to_string(),
-                title.to_string(),
-            );
-            start.connect_activated(move |_| {
-                let _ = sender.output(YtOutput::StartPlaylist {
-                    url: u.clone(),
-                    title: t.clone(),
-                });
-                dialog.close();
-            });
-        }
-        actions.add(&start);
-        let save = action_row(&gettext("Add to Playlists"), "view-list-symbolic");
-        {
-            let (sender, dialog, u, t) = (
-                sender.clone(),
-                dialog.clone(),
-                url.to_string(),
-                title.to_string(),
-            );
-            save.connect_activated(move |_| {
-                sender.input(YtInput::SavePlaylist {
-                    url: u.clone(),
-                    title: t.clone(),
-                });
-                dialog.close();
-            });
-        }
-        actions.add(&save);
-        let add = action_row(&gettext("Add to library"), "list-add-symbolic");
-        {
-            let (sender, dialog, u, t) = (
-                sender.clone(),
-                dialog.clone(),
-                url.to_string(),
-                title.to_string(),
-            );
-            add.connect_activated(move |_| {
-                sender.input(YtInput::PlaylistToLibrary {
-                    url: u.clone(),
-                    title: t.clone(),
-                });
-                dialog.close();
-            });
-        }
-        actions.add(&add);
-        if self.library.is_recent(url).unwrap_or(false) {
-            let remove = action_row(&gettext("Remove from recent"), "user-trash-symbolic");
-            remove.add_css_class("error");
-            let (sender, dialog, u) = (sender.clone(), dialog.clone(), url.to_string());
-            remove.connect_activated(move |_| {
-                sender.input(YtInput::RemoveRecent(u.clone()));
-                dialog.close();
-            });
-            actions.add(&remove);
-        }
-        content.append(&actions);
-        {
-            let (sender, u, t) = (sender.clone(), url.to_string(), title.to_string());
-            present_detail_refreshable(&dialog, &content, &root, move || {
-                sender.input(YtInput::RefreshPlaylist {
-                    url: u.clone(),
-                    title: t.clone(),
-                });
-            });
-        }
-    }
-
-    /// Loads a (not locally mirrored) playlist's videos, then opens them as a
-    /// song-list subpage.
-    fn yt_open_playlist_songs(
-        &mut self,
-        sender: &ComponentSender<Self>,
-        url: String,
-        title: String,
-    ) {
-        let _ = sender.output(YtOutput::SetLoading(Some(gettext_f(
-            "Loading “{title}” …",
-            &[("title", &title)],
-        ))));
-        sender.spawn_command(move |out| {
-            let result =
-                youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT).map_err(|e| e.to_string());
-            let _ = out.send(YtCmd::PlaylistSongs { url, title, result });
-        });
-    }
-
-    /// Subpage listing a YouTube playlist's songs.
-    fn show_yt_playlist_songs(
-        &mut self,
-        sender: &ComponentSender<Self>,
-        url: &str,
-        title: &str,
-        videos: Vec<YtResult>,
-    ) {
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        let group = adw::PreferencesGroup::builder()
-            .title(
-                format!(
-                    "{} ({})",
-                    gtk::glib::markup_escape_text(title),
-                    videos.len()
-                )
-                .as_str(),
-            )
-            .build();
-        if videos.is_empty() {
-            group.add(
-                &adw::ActionRow::builder()
-                    .title(gettext("No videos"))
-                    .build(),
-            );
-        }
-        let mut pending: Vec<(String, adw::Bin)> = Vec::new();
-        for (index, v) in videos.iter().enumerate() {
-            let subtitle = v.duration.map(fmt_duration).unwrap_or_default();
-            // Not activatable: the video plays from its play button, the detail
-            // view opens on long press / right click.
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&v.title))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .build();
-            row.add_css_class("emilia-flush");
-            let thumb_url = youtube::thumbnail_url(&v.id);
-            let cover = crate::core::online::youtube_cover_path(&v.id)
-                .or_else(|| crate::core::online::youtube_thumb_path(&thumb_url));
-            let frame = crate::ui::widgets::thumb_frame("audio-x-generic-symbolic", 48);
-            match cover.as_deref().and_then(crate::ui::widgets::thumb_cached) {
-                Some(tex) => crate::ui::widgets::set_cover_thumb(&frame, &tex),
-                None => pending.push((thumb_url, frame.clone())),
-            }
-            row.add_prefix(&frame);
-
-            let play = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .valign(gtk::Align::Center)
-                .tooltip_text(gettext("Play"))
-                .css_classes(["flat"])
-                .build();
-            {
-                let (sender, u, t) = (sender.clone(), url.to_string(), title.to_string());
-                play.connect_clicked(move |_| {
-                    sender.input(YtInput::PlayPlaylistAt {
-                        url: u.clone(),
-                        title: t.clone(),
-                        index,
-                        close: false,
-                    });
-                });
-            }
-            row.add_suffix(&play);
-            on_secondary_click(&row, {
-                let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
-                move || {
-                    sender.input(YtInput::ShowVideoDetail {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    });
-                }
-            });
-            on_long_press(&row, {
-                let (sender, vid, t) = (sender.clone(), v.id.clone(), v.title.clone());
-                move || {
-                    sender.input(YtInput::ShowVideoDetail {
-                        video_id: vid.clone(),
-                        title: t.clone(),
-                    })
-                }
-            });
-            group.add(&row);
-        }
-        content.append(&group);
-        if let Some(first) = videos.first() {
-            let _ = self
-                .library
-                .set_recent_thumb(url, &youtube::thumbnail_url(&first.id));
-        }
-        self.push_subpage(
-            sender,
-            gettext_f("Playlist – {title}", &[("title", title)]),
-            content,
-        );
-
-        self.pl_cover_slots = pending;
-        if !self.pl_cover_slots.is_empty() {
-            let urls: Vec<String> = self.pl_cover_slots.iter().map(|(u, _)| u.clone()).collect();
-            sender.spawn_command(move |out| {
-                let threads = 8.min(urls.len().max(1));
-                let chunk = (urls.len() / threads).max(1);
-                std::thread::scope(|s| {
-                    for part in urls.chunks(chunk) {
-                        s.spawn(move || {
-                            for u in part {
-                                let _ = crate::core::online::cache_youtube_thumb(u);
-                            }
-                        });
-                    }
-                });
-                let _ = out.send(YtCmd::PlaylistCoversReady);
             });
         }
     }
@@ -1013,136 +805,6 @@ impl YtPage {
         });
     }
 
-    /// Adds all videos of a playlist to the on-disk music library (background).
-    pub(super) fn yt_playlist_to_library(
-        &self,
-        sender: &ComponentSender<Self>,
-        url: String,
-        title: String,
-    ) {
-        let Some(music) = self.library.get_setting("music_dir").ok().flatten() else {
-            let _ = sender.output(YtOutput::Toast(gettext(
-                "Set a music folder in settings first",
-            )));
-            return;
-        };
-        let _ = sender.output(YtOutput::Progress(gettext_f(
-            "Adding playlist “{title}” to library …",
-            &[("title", &title)],
-        )));
-        sender.spawn_command(move |out| {
-            let r = (|| -> Result<usize, String> {
-                let videos = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
-                    .map_err(|e| e.to_string())?;
-                let total = videos.len();
-                let mut n = 0;
-                let _ = out.send(YtCmd::LibraryProgress { done: 0, total });
-                for (i, v) in videos.into_iter().enumerate() {
-                    let cover = crate::core::online::youtube_cover_path(&v.id);
-                    if let Ok(youtube::AddOutcome::Added) = youtube::add_to_library(
-                        &v.id,
-                        &v.title,
-                        None,
-                        &music,
-                        cover.as_deref(),
-                        false,
-                    ) {
-                        n += 1;
-                    }
-                    let _ = out.send(YtCmd::LibraryProgress { done: i + 1, total });
-                }
-                Ok(n)
-            })();
-            let _ = out.send(YtCmd::LibraryAdded {
-                video_id: None,
-                result: r,
-            });
-        });
-    }
-
-    /// Saves a found playlist into the Playlists section (background).
-    pub(super) fn yt_save_playlist(
-        &self,
-        sender: &ComponentSender<Self>,
-        url: String,
-        title: String,
-    ) {
-        let _ = sender.output(YtOutput::Progress(gettext_f(
-            "Saving “{title}” to Playlists …",
-            &[("title", &title)],
-        )));
-        sender.spawn_command(move |out| {
-            let r = (|| -> Result<usize, String> {
-                let videos = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
-                    .map_err(|e| e.to_string())?;
-                let lib = Library::open().map_err(|e| e.to_string())?;
-                let mut paths = Vec::with_capacity(videos.len());
-                for v in &videos {
-                    let _ = lib.set_yt_meta(&v.id, &v.title, v.duration);
-                    paths.push(youtube::yt_path(&v.id));
-                }
-                lib.replace_yt_playlist(&url, &title, &paths)
-                    .map_err(|e| e.to_string())?;
-                Ok(paths.len())
-            })();
-            let _ = out.send(YtCmd::PlaylistSaved(r));
-        });
-    }
-
-    /// Open a recent playlist's song list:
-    /// saved DB mirror → session cache → **persistent DB cache** → fetch.
-    /// Serving from the DB cache is instant (no YouTube round-trip); if that
-    /// cache is stale it is refreshed in the background for the next open.
-    pub(super) fn yt_open_recent_playlist(
-        &mut self,
-        sender: &ComponentSender<Self>,
-        url: String,
-        title: String,
-    ) {
-        // A "saved" playlist (Add to Playlists) opens its local mirror directly.
-        if let Ok(Some(id)) = self.library.yt_playlist_id(&url) {
-            let _ = sender.output(YtOutput::OpenPlaylist { id, name: title });
-            return;
-        }
-        // Already fetched this session → show immediately.
-        if let Some(videos) = self.playlist_songs_cache.get(&url).cloned() {
-            self.show_yt_playlist_songs(sender, &url, &title, videos);
-            return;
-        }
-        // Persisted from an earlier session → show instantly from the DB cache,
-        // and refresh in the background if it has gone stale.
-        if let Ok(Some((json, fetched_at))) = self.library.yt_playlist_cache(&url) {
-            if let Ok(videos) = serde_json::from_str::<Vec<YtResult>>(&json) {
-                self.playlist_songs_cache
-                    .insert(url.clone(), videos.clone());
-                self.show_yt_playlist_songs(sender, &url, &title, videos);
-                if crate::ui::app_helpers::unix_now().saturating_sub(fetched_at)
-                    > PLAYLIST_CACHE_TTL_SECS
-                {
-                    let (url, title) = (url.clone(), title.clone());
-                    sender.spawn_command(move |out| {
-                        let result = youtube::list_playlist(&url, PLAYLIST_INDEX_LIMIT)
-                            .map_err(|e| e.to_string());
-                        let _ = out.send(YtCmd::PlaylistCacheRefreshed { url, title, result });
-                    });
-                }
-                return;
-            }
-        }
-        // Never seen → fetch (the result is cached on arrival).
-        self.yt_open_playlist_songs(sender, url, title);
-    }
-
-    /// Serializes a playlist's song list into the persistent DB cache (best
-    /// effort: a serialization/DB error just skips the cache, never blocks).
-    fn cache_playlist_songs(&self, url: &str, title: &str, videos: &[YtResult]) {
-        if let Ok(json) = serde_json::to_string(videos) {
-            if let Err(e) = self.library.set_yt_playlist_cache(url, title, &json) {
-                tracing::warn!("caching playlist {url} failed: {e}");
-            }
-        }
-    }
-
     /// Worker result: a library-add hit an existing file → ask before overwriting.
     pub(super) fn on_cmd_yt_library_exists(
         &mut self,
@@ -1185,94 +847,43 @@ impl YtPage {
         }
         confirm.present(Some(&root));
     }
+}
 
-    /// Worker result: a playlist's song list resolved → cache + show subpage.
-    pub(super) fn on_cmd_yt_playlist_songs(
-        &mut self,
-        sender: &ComponentSender<Self>,
-        url: String,
-        title: String,
-        result: Result<Vec<YtResult>, String>,
-    ) {
-        let _ = sender.output(YtOutput::SetLoading(None));
-        match result {
-            Ok(videos) => {
-                self.cache_playlist_songs(&url, &title, &videos);
-                self.playlist_songs_cache
-                    .insert(url.clone(), videos.clone());
-                self.show_yt_playlist_songs(sender, &url, &title, videos);
-            }
-            Err(e) => {
-                tracing::warn!("yt playlist load failed: {e}");
-                let _ = sender.output(YtOutput::Toast(gettext("Could not load playlist")));
-            }
+/// Detail refresh of a video: description, jump marks and runtime from
+/// YouTube, then artist and cover from the music database (the cover replaces
+/// the thumbnail when a match is found, else the thumbnail is fetched again).
+/// The "Recently" entry gets the new artist/cover. **Network** — worker only.
+fn refresh_video_meta(video_id: &str, title: &str) {
+    let Ok(lib) = Library::open() else {
+        return;
+    };
+    let details = youtube::video_details(video_id).ok();
+    if let Some(d) = details.as_ref() {
+        let _ = lib.set_yt_detail(video_id, d.description.as_deref(), &d.chapters);
+        if d.meta.duration.is_some() {
+            let _ = lib.set_yt_meta(video_id, title, d.meta.duration);
         }
     }
-
-    /// Worker result: a stale cached playlist's background refresh finished →
-    /// update the persistent + session caches silently (no UI change; the fresh
-    /// list shows on the next open).
-    pub(super) fn on_cmd_yt_playlist_cache_refreshed(
-        &mut self,
-        url: String,
-        title: String,
-        result: Result<Vec<YtResult>, String>,
-    ) {
-        match result {
-            Ok(videos) => {
-                self.cache_playlist_songs(&url, &title, &videos);
-                self.playlist_songs_cache.insert(url, videos);
-            }
-            Err(e) => tracing::warn!("yt playlist background refresh failed: {e}"),
-        }
-    }
-
-    /// Worker result of a playlist detail refresh: cache the fresh song list and
-    /// update the "Recently" entry's count/cover (without moving it up).
-    pub(super) fn on_cmd_yt_playlist_refreshed(
-        &mut self,
-        url: &str,
-        title: &str,
-        result: Result<Vec<YtResult>, String>,
-    ) {
-        match result {
-            Ok(videos) => {
-                if self.library.is_recent(url).unwrap_or(false) {
-                    let total: i64 = videos.iter().filter_map(|v| v.duration).sum();
-                    let _ = self.library.set_recent_playlist_count(
-                        url,
-                        videos.len() as i64,
-                        (total > 0).then_some(total),
-                    );
-                    if let Some(first) = videos.first() {
-                        let _ = self
-                            .library
-                            .set_recent_thumb(url, &youtube::thumbnail_url(&first.id));
-                    }
-                }
-                self.cache_playlist_songs(url, title, &videos);
-                self.playlist_songs_cache.insert(url.to_string(), videos);
-            }
-            Err(e) => tracing::warn!("yt playlist refresh failed: {e}"),
-        }
-    }
-
-    /// Worker result: pending playlist-songs cover thumbnails finished caching.
-    pub(super) fn on_cmd_yt_playlist_covers_ready(&mut self) {
-        self.pl_cover_slots.retain(|(thumb_url, frame)| {
-            if frame.root().is_none() {
-                return false;
-            }
-            match crate::core::online::youtube_thumb_path(thumb_url)
+    let channel = lib
+        .yt_video_info(video_id)
+        .ok()
+        .flatten()
+        .map(|(c, _, _)| c)
+        .or_else(|| details.as_ref().and_then(|d| d.meta.uploader.clone()))
+        .map(|c| youtube::clean_channel_name(&c))
+        .filter(|s| !s.trim().is_empty());
+    let (artist, _, song) = youtube::split_title(title, channel.as_deref());
+    let hit = artist
+        .as_deref()
+        .or(channel.as_deref())
+        .and_then(|a| crate::core::online::track_cover(a, &song))
+        .or_else(|| {
+            channel
                 .as_deref()
-                .and_then(crate::ui::widgets::thumb_cached)
-            {
-                Some(tex) => {
-                    crate::ui::widgets::set_cover_thumb(frame, &tex);
-                    false
-                }
-                None => true,
-            }
+                .and_then(|c| crate::core::online::track_cover(c, title))
         });
-    }
+    let cover = hit
+        .and_then(|(bytes, _album)| crate::core::online::store_youtube_cover(video_id, &bytes))
+        .or_else(|| crate::core::online::recache_youtube_thumb(&youtube::thumbnail_url(video_id)));
+    let _ = lib.set_recent_meta(video_id, channel.as_deref(), cover.as_deref());
 }

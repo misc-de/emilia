@@ -1,6 +1,6 @@
 //! The YouTube page's "Live" tab: saved live streams (24/7 radio channels such
-//! as lofi beats), their detail dialog and the search-result rows that save
-//! them. Live streams are only ever streamed — there is no download, no resume
+//! as lofi beats), their detail dialog (and its refresh) and the search-result
+//! rows that save them. Live streams are only ever streamed — there is no download, no resume
 //! position and no watch progress; the transport plays them like a radio
 //! station (see `App::play_yt_live`).
 
@@ -8,12 +8,12 @@ use adw::prelude::*;
 use relm4::prelude::*;
 use relm4::{adw, gtk};
 
-use crate::core::youtube::YtResult;
+use crate::core::youtube::{self, YtResult};
 use crate::i18n::gettext;
 use crate::ui::app::YtView;
 use crate::ui::entry_row::EntryRow;
 use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
-use crate::ui::yt_page::{YtInput, YtOutput, YtPage};
+use crate::ui::yt_page::{YtCmd, YtInput, YtOutput, YtPage};
 
 /// Fallback icon of a live stream without a cached thumbnail.
 const LIVE_ICON: &str = "internet-radio-symbolic";
@@ -187,5 +187,81 @@ impl YtPage {
                 sender.input(YtInput::RefreshLive(vid.clone()));
             });
         }
+    }
+
+    /// Live detail refresh: title/channel and the thumbnail again (worker),
+    /// then reopen the detail.
+    pub(super) fn on_refresh_live(&self, sender: &ComponentSender<Self>, video_id: String) {
+        let thumb = self
+            .live_items
+            .iter()
+            .find(|l| l.video_id == video_id)
+            .and_then(|l| l.thumbnail.clone());
+        let _ = sender.output(YtOutput::Toast(gettext("Refreshing …")));
+        sender.spawn_command(move |out| {
+            let details = youtube::video_details(&video_id).ok().map(|d| d.meta);
+            let url = live_refresh_thumb_url(
+                details.as_ref().and_then(|d| d.thumbnail.clone()),
+                thumb,
+                &video_id,
+            );
+            let thumbnail = crate::core::online::recache_youtube_thumb(&url).map(|_| url);
+            let _ = out.send(YtCmd::LiveRefreshed {
+                video_id,
+                details,
+                thumbnail,
+            });
+        });
+    }
+
+    /// Worker result of a live detail refresh: store the fresh metadata, drop
+    /// the stale thumbnail, reload the tab and reopen the detail.
+    pub(super) fn on_cmd_live_refreshed(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        video_id: String,
+        details: Option<YtResult>,
+        thumbnail: Option<String>,
+    ) {
+        if let Some(t) = thumbnail.as_deref() {
+            crate::ui::widgets::forget_thumb(crate::core::online::youtube_thumb_path(t).as_deref());
+        }
+        if let Some(d) = details.as_ref() {
+            let channel = d.uploader.as_deref().map(youtube::clean_channel_name);
+            let _ = self.library.add_live(
+                &video_id,
+                &d.title,
+                channel.as_deref().filter(|c| !c.trim().is_empty()),
+                thumbnail.as_deref(),
+            );
+        } else if thumbnail.is_none() {
+            let _ = sender.output(YtOutput::Toast(gettext("Nothing found")));
+        }
+        self.reload_live(sender);
+        self.show_live_detail(sender, &video_id);
+    }
+}
+
+/// Thumbnail URL a live refresh re-caches: the freshly fetched one, else the
+/// saved one, else YouTube's standard thumbnail of the video id.
+fn live_refresh_thumb_url(fresh: Option<String>, saved: Option<String>, video_id: &str) -> String {
+    fresh
+        .or(saved)
+        .unwrap_or_else(|| youtube::thumbnail_url(video_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_refresh_prefers_fresh_then_saved_thumbnail() {
+        let (fresh, saved) = (Some("fresh".to_string()), Some("saved".to_string()));
+        assert_eq!(live_refresh_thumb_url(fresh, saved.clone(), "v"), "fresh");
+        assert_eq!(live_refresh_thumb_url(None, saved, "v"), "saved");
+        assert_eq!(
+            live_refresh_thumb_url(None, None, "abc"),
+            youtube::thumbnail_url("abc")
+        );
     }
 }

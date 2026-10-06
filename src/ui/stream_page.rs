@@ -11,6 +11,12 @@
 //! transport via [`StreamOutput`] (`ToggleStream`/`PlayRecording`/`OpenReplay`/
 //! `EditRecording`) and is told the playback + live-recording state back via
 //! [`StreamInput::PlaybackStateChanged`]/[`StreamInput::SetLiveRecording`].
+//!
+//! The inherent impl is split by topic: the station list, its dialogs and the
+//! add/search flow live in [`crate::ui::stream_page_stations`], the
+//! recordings and "Recently heard" lists with their dialogs in
+//! [`crate::ui::stream_page_recordings`], and the GTK-free display/sort logic
+//! in [`crate::ui::stream_page_logic`].
 
 use adw::prelude::*;
 use relm4::prelude::*;
@@ -21,116 +27,82 @@ use std::rc::Rc;
 
 use crate::core::db::Library;
 use crate::core::streaming::StationResult;
-use crate::i18n::{gettext, gettext_f};
+use crate::i18n::gettext;
 use crate::model::{HeardItem, RecordingItem, StreamItem};
 use crate::ui::app::{SortCrit, StreamView};
-use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
-use crate::ui::app_sort::{read_sort, sort_popover, SortToggle};
-use crate::ui::app_views::natural_key;
-use crate::ui::entry_row::EntryRow;
-use crate::ui::widgets::{
-    action_row, detail_box, info_expander, info_row, present_detail_refreshable,
+use crate::ui::app_sort::read_sort;
+use crate::ui::stream_page_logic::{
+    first_nonblank, normalize_logo_url, parse_gallery_columns, view_setting_key,
 };
+use crate::ui::stream_page_recordings::lookup_song;
+use crate::ui::stream_page_stations::cache_missing_station_logos;
 
 /// Placeholder icon when a station has no logo.
-const STREAM_ICON: &str = "audio-x-generic-symbolic";
-
-/// Formats Unix seconds as "DD.MM.YYYY HH:MM" in local time.
-fn format_datetime(secs: i64) -> String {
-    gtk::glib::DateTime::from_unix_local(secs)
-        .and_then(|d| d.format("%d.%m.%Y %H:%M"))
-        .map(|s| s.to_string())
-        .unwrap_or_default()
-}
-
-/// Subtitle of a station: genre/country, as far as available.
-fn stream_subtitle(st: &StreamItem) -> Option<String> {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(t) = st.tags.as_deref().filter(|s| !s.trim().is_empty()) {
-        let tags: Vec<&str> = t
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .take(3)
-            .collect();
-        if !tags.is_empty() {
-            parts.push(tags.join(" · "));
-        }
-    }
-    if let Some(c) = st.country.as_deref().filter(|s| !s.trim().is_empty()) {
-        parts.push(c.to_string());
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" — "))
-    }
-}
+pub(super) const STREAM_ICON: &str = "audio-x-generic-symbolic";
 
 /// The internet-radio page component.
 pub(crate) struct StreamPage {
-    library: Library,
-    window: Option<adw::ApplicationWindow>,
-    mobile: bool,
+    pub(super) library: Library,
+    pub(super) window: Option<adw::ApplicationWindow>,
+    pub(super) mobile: bool,
     /// Mirror of the transport's `playing_stream` (for the station row icons).
-    playing_stream: Option<i64>,
+    pub(super) playing_stream: Option<i64>,
     /// Mirror of the transport's current local-file path (for recording rows).
-    playing_path: Option<String>,
+    pub(super) playing_path: Option<String>,
     /// Mirror of the transport play/pause state.
-    playing: bool,
+    pub(super) playing: bool,
     /// Mirror of the running recording (`stream_id`, current ICY title) for the
     /// live entry at the top of the recordings list. `None` when not recording.
-    live_recording: Option<(i64, Option<String>)>,
+    pub(super) live_recording: Option<(i64, Option<String>)>,
     /// Mirror of the timeshift buffer size (for the "Replay (buffer)" action).
-    buffer_minutes: u32,
-    stream_view: StreamView,
-    stream_items: Vec<StreamItem>,
-    streams_list: gtk::ListBox,
-    stream_search_results: Vec<StationResult>,
-    stream_search_failed: bool,
-    stream_search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    recording_items: Vec<RecordingItem>,
-    recordings_list: gtk::ListBox,
+    pub(super) buffer_minutes: u32,
+    pub(super) stream_view: StreamView,
+    pub(super) stream_items: Vec<StreamItem>,
+    pub(super) streams_list: gtk::ListBox,
+    pub(super) stream_search_results: Vec<StationResult>,
+    pub(super) stream_search_failed: bool,
+    pub(super) stream_search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
+    pub(super) recording_items: Vec<RecordingItem>,
+    pub(super) recordings_list: gtk::ListBox,
     /// "Recently heard": songs recognized from a station's ICY title while
     /// streaming (no audio captured — pure history).
-    heard_items: Vec<HeardItem>,
-    heard_list: gtk::ListBox,
+    pub(super) heard_items: Vec<HeardItem>,
+    pub(super) heard_list: gtk::ListBox,
     /// Play/pause controls of the station rows, keyed by station id.
-    stream_marks: crate::ui::play_mark::Marks,
+    pub(super) stream_marks: crate::ui::play_mark::Marks,
     /// Play/pause controls of the recording rows, keyed by file path.
-    rec_marks: crate::ui::play_mark::Marks,
+    pub(super) rec_marks: crate::ui::play_mark::Marks,
     /// Per-sub-view sort (criterion + descending): stations by name; recordings by
     /// name / recording date / length. Persisted as "sort_stations[_desc]" /
     /// "sort_recordings[_desc]".
-    stations_sort: (SortCrit, bool),
-    recordings_sort: (SortCrit, bool),
-    heard_sort: (SortCrit, bool),
+    pub(super) stations_sort: (SortCrit, bool),
+    pub(super) recordings_sort: (SortCrit, bool),
+    pub(super) heard_sort: (SortCrit, bool),
     /// "Without grouping" per sub-view (no alphabetical headings). Persisted as
     /// "nogroup_stations" / "nogroup_recordings" / "nogroup_heard".
-    stations_no_group: bool,
-    recordings_no_group: bool,
-    heard_no_group: bool,
+    pub(super) stations_no_group: bool,
+    pub(super) recordings_no_group: bool,
+    pub(super) heard_no_group: bool,
     /// Stations gallery on/off (cover grid of station logos). Persisted as
     /// "gallery_stations". Recordings carry no covers, so they have no gallery.
-    stations_gallery: bool,
+    pub(super) stations_gallery: bool,
     /// "Show description" (sort popover): station gallery tiles framed with
     /// their name instead of the bare logo. Persisted as
     /// "gallery_desc_stations".
-    stations_gallery_desc: bool,
+    pub(super) stations_gallery_desc: bool,
     /// Tiles per row in the stations gallery (mirrors the global setting).
-    gallery_columns: u32,
+    pub(super) gallery_columns: u32,
     /// Per-row alphabetical headings of the stations / recordings / heard lists.
-    station_headers: Rc<RefCell<Option<Vec<String>>>>,
-    recording_headers: Rc<RefCell<Option<Vec<String>>>>,
-    heard_headers: Rc<RefCell<Option<Vec<String>>>>,
+    pub(super) station_headers: Rc<RefCell<Option<Vec<String>>>>,
+    pub(super) recording_headers: Rc<RefCell<Option<Vec<String>>>>,
+    pub(super) heard_headers: Rc<RefCell<Option<Vec<String>>>>,
     /// Gallery variant of the stations (logo grid). Its container box lives only
     /// in the view tree (a `#[local_ref]`); the flow box is filled imperatively.
-    streams_gallery: gtk::FlowBox,
+    pub(super) streams_gallery: gtk::FlowBox,
     /// Hand-off for the shared title-bar sort button: [`Self::rebuild_sort`]
     /// writes the popover + direction here (or `None` to hide it) for the active
     /// sub-view, then signals the parent via [`StreamOutput::SortChanged`].
-    sort_slot: crate::ui::app_sort::SortSlot,
+    pub(super) sort_slot: crate::ui::app_sort::SortSlot,
 }
 
 #[derive(Debug)]
@@ -274,44 +246,6 @@ pub(crate) enum StreamCmd {
         artist: Option<String>,
         found: bool,
     },
-}
-
-/// What a detail refresh found for a song: artist, album and cover from the
-/// music database (Deezer), checked against the known artist; for a song
-/// without an artist the recording lookup, which also copes with station noise
-/// in the title. **Network** — worker threads only.
-fn lookup_song(
-    artist: Option<&str>,
-    title: &str,
-    station: Option<&str>,
-) -> Option<(Option<String>, Option<String>, Vec<u8>)> {
-    if let Some(tags) = crate::core::online::track_tags_strict(artist, title) {
-        if let Some(cover) = tags.cover {
-            return Some((tags.artist, tags.album, cover));
-        }
-    }
-    // The recording lookup also copes with station noise in the title, but it
-    // checks no artist — so only when there is none to check against.
-    if artist.is_some_and(|a| !a.trim().is_empty()) {
-        return None;
-    }
-    crate::core::online::recording_cover(title, station).map(|(cover, album)| (None, album, cover))
-}
-
-/// Fetches the station logos not yet in the cache (worker thread — network).
-/// Returns whether any came in, i.e. whether a redraw would show something new.
-fn cache_missing_station_logos() -> bool {
-    let Ok(lib) = Library::open() else {
-        return false;
-    };
-    lib.streams()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|st| st.favicon)
-        .filter(|url| crate::core::online::station_image_path(url).is_none())
-        .filter(|url| crate::core::online::cache_station_image(url).is_some())
-        .count()
-        > 0
 }
 
 #[relm4::component(pub(crate))]
@@ -510,13 +444,13 @@ impl Component for StreamPage {
             .flatten()
             .as_deref()
             != Some("0");
-        let gallery_columns = library
-            .get_setting("gallery_columns")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(4)
-            .clamp(2, 8);
+        let gallery_columns = parse_gallery_columns(
+            library
+                .get_setting("gallery_columns")
+                .ok()
+                .flatten()
+                .as_deref(),
+        );
         let station_headers = Rc::new(RefCell::new(None));
         let recording_headers = Rc::new(RefCell::new(None));
         let heard_headers = Rc::new(RefCell::new(None));
@@ -606,10 +540,11 @@ impl Component for StreamPage {
             }
             StreamInput::SetSort(crit, desc) => {
                 // Apply to the sort of the currently visible sub-view.
-                let (key, slot) = match self.stream_view {
-                    StreamView::Channels => ("stations", &mut self.stations_sort),
-                    StreamView::Recordings => ("recordings", &mut self.recordings_sort),
-                    StreamView::Heard => ("heard", &mut self.heard_sort),
+                let key = view_setting_key(self.stream_view);
+                let slot = match self.stream_view {
+                    StreamView::Channels => &mut self.stations_sort,
+                    StreamView::Recordings => &mut self.recordings_sort,
+                    StreamView::Heard => &mut self.heard_sort,
                 };
                 if *slot != (crit, desc) {
                     *slot = (crit, desc);
@@ -627,10 +562,11 @@ impl Component for StreamPage {
                 }
             }
             StreamInput::SetNoGroup(off) => {
-                let (key, slot) = match self.stream_view {
-                    StreamView::Channels => ("stations", &mut self.stations_no_group),
-                    StreamView::Recordings => ("recordings", &mut self.recordings_no_group),
-                    StreamView::Heard => ("heard", &mut self.heard_no_group),
+                let key = view_setting_key(self.stream_view);
+                let slot = match self.stream_view {
+                    StreamView::Channels => &mut self.stations_no_group,
+                    StreamView::Recordings => &mut self.recordings_no_group,
+                    StreamView::Heard => &mut self.heard_no_group,
                 };
                 if *slot != off {
                     *slot = off;
@@ -701,7 +637,7 @@ impl Component for StreamPage {
             }
             StreamInput::LogoDialog(id) => self.open_logo_dialog(&sender, id),
             StreamInput::SetLogoUrl(id, url) => {
-                let url = url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+                let url = normalize_logo_url(url);
                 let _ = self.library.set_stream_favicon(id, url.as_deref());
                 self.reload_streams(&sender);
                 if let Some(url) = url {
@@ -781,12 +717,7 @@ impl Component for StreamPage {
                 sender.spawn_command(move |out| {
                     let path = std::path::PathBuf::from(&rec.path);
                     let tag = crate::core::scanner::read_track(&path).ok();
-                    let artist = rec
-                        .artist
-                        .clone()
-                        .filter(|a| !a.trim().is_empty())
-                        .or_else(|| tag.and_then(|t| t.artist))
-                        .filter(|a| !a.trim().is_empty());
+                    let artist = first_nonblank(rec.artist.clone(), tag.and_then(|t| t.artist));
                     let hit = lookup_song(artist.as_deref(), &rec.title, rec.station.as_deref());
                     let found = hit.is_some();
                     if let Some((found_artist, album, cover)) = hit {
@@ -948,1283 +879,5 @@ impl Component for StreamPage {
                 self.open_heard(&sender, id);
             }
         }
-    }
-}
-
-/// Safety prompt before a destructive page action; sends `then` to ourselves on
-/// confirm (the actual deletion is still deferred via an undo toast afterwards).
-fn confirm_delete(
-    root: &adw::ApplicationWindow,
-    sender: &ComponentSender<StreamPage>,
-    heading: &str,
-    label: &str,
-    then: StreamInput,
-) {
-    let confirm = adw::AlertDialog::new(Some(heading), None);
-    confirm.add_response("cancel", &gettext("Cancel"));
-    confirm.add_response("ok", label);
-    confirm.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
-    confirm.set_default_response(Some("cancel"));
-    confirm.set_close_response("cancel");
-    let sender = sender.clone();
-    let then = std::cell::RefCell::new(Some(then));
-    confirm.connect_response(None, move |_, resp| {
-        if resp == "ok" {
-            if let Some(t) = then.borrow_mut().take() {
-                sender.input(t);
-            }
-        }
-    });
-    confirm.present(Some(root));
-}
-
-impl StreamPage {
-    /// Show detail dialogs as bottom sheets on the phone.
-    fn adapt_detail_dialog(&self, dialog: &adw::Dialog) {
-        crate::ui::widgets::adapt_dialog(dialog, self.mobile);
-    }
-
-    /// Rebuilds the station list.
-    /// (Re)builds the header sort button (direction icon + criteria popover) for
-    /// the currently visible sub-view. Stations sort by name; recordings by name /
-    /// recording date / length.
-    fn rebuild_sort(&self, sender: &ComponentSender<Self>) {
-        let (state, crits, no_group) = match self.stream_view {
-            StreamView::Channels => (
-                self.stations_sort,
-                vec![(SortCrit::Name, gettext("Name"))],
-                self.stations_no_group,
-            ),
-            StreamView::Recordings => (
-                self.recordings_sort,
-                vec![
-                    (SortCrit::Name, gettext("Name")),
-                    (SortCrit::Release, gettext("Date")),
-                    (SortCrit::Length, gettext("Length")),
-                ],
-                self.recordings_no_group,
-            ),
-            StreamView::Heard => (
-                self.heard_sort,
-                vec![
-                    (SortCrit::Name, gettext("Name")),
-                    (SortCrit::Release, gettext("Date")),
-                ],
-                self.heard_no_group,
-            ),
-        };
-        let (crit, desc) = state;
-        let input = sender.input_sender().clone();
-        let group_input = input.clone();
-        let mut toggles = vec![SortToggle {
-            label: gettext("Without grouping"),
-            active: no_group,
-            on_toggle: Box::new(move |off| {
-                let _ = group_input.send(StreamInput::SetNoGroup(off));
-            }),
-            sub: false,
-        }];
-        // The stations sub-view additionally offers a logo gallery (recordings
-        // carry no covers, so they group but never gallery).
-        if matches!(self.stream_view, StreamView::Channels) {
-            let gallery_input = input.clone();
-            toggles.push(SortToggle {
-                label: gettext("Gallery view"),
-                active: self.stations_gallery,
-                on_toggle: Box::new(move |on| {
-                    let _ = gallery_input.send(StreamInput::SetGallery(on));
-                }),
-                sub: false,
-            });
-            let desc_input = input.clone();
-            toggles.push(SortToggle {
-                label: gettext("Show description"),
-                active: self.stations_gallery_desc,
-                on_toggle: Box::new(move |on| {
-                    let _ = desc_input.send(StreamInput::SetGalleryDesc(on));
-                }),
-                sub: true,
-            });
-        }
-        let popover = sort_popover(
-            &crits,
-            crit,
-            desc,
-            move |crit, desc| {
-                let _ = input.send(StreamInput::SetSort(crit, desc));
-            },
-            toggles,
-        );
-        // Both sub-views sort (stations by name; recordings by name/date/length);
-        // show the button only when the visible sub-view has entries.
-        let visible = match self.stream_view {
-            StreamView::Channels => !self.stream_items.is_empty(),
-            StreamView::Recordings => !self.recording_items.is_empty(),
-            StreamView::Heard => !self.heard_items.is_empty(),
-        };
-        *self.sort_slot.borrow_mut() = visible.then_some((popover, desc));
-        let _ = sender.output(StreamOutput::SortChanged);
-    }
-
-    /// Per-row alphabetical headings (by name) for the stations list; none when
-    /// grouping is off (stations only ever sort by name).
-    fn station_section_headers(&self) -> Option<Vec<String>> {
-        if self.stations_no_group {
-            return None;
-        }
-        Some(
-            self.stream_items
-                .iter()
-                .map(|s| crate::ui::app_sort::alpha_header(&s.name))
-                .collect(),
-        )
-    }
-
-    /// Per-row alphabetical headings (by name) for the recordings list; none for
-    /// the date/length sorts or when grouping is off. The live entry has no row
-    /// here (it is prepended separately), so the labels align with the saved rows
-    /// only — which is why grouping is cleared while a live recording shows.
-    fn recording_section_headers(&self) -> Option<Vec<String>> {
-        if self.recordings_no_group || self.live_recording.is_some() {
-            return None;
-        }
-        match self.recordings_sort.0 {
-            SortCrit::Name => Some(
-                self.recording_items
-                    .iter()
-                    .map(|r| crate::ui::app_sort::alpha_header(&r.title))
-                    .collect(),
-            ),
-            _ => None,
-        }
-    }
-
-    /// Per-row alphabetical headings (by title) for the "Recently heard" list;
-    /// none for the date sort or when grouping is off.
-    fn heard_section_headers(&self) -> Option<Vec<String>> {
-        if self.heard_no_group {
-            return None;
-        }
-        match self.heard_sort.0 {
-            SortCrit::Name => Some(
-                self.heard_items
-                    .iter()
-                    .map(|h| crate::ui::app_sort::alpha_header(&h.title))
-                    .collect(),
-            ),
-            _ => None,
-        }
-    }
-
-    /// Gallery variant of the stations: a grid of station logos. Tap opens the
-    /// station's detail/replay; long press the detail dialog — same as the rows.
-    fn fill_streams_gallery(&self, sender: &ComponentSender<Self>) {
-        let fb = &self.streams_gallery;
-        crate::ui::widgets::reset_gallery_grid(fb, self.gallery_columns);
-        let mut to_decode: Vec<(String, gtk::Picture)> = Vec::new();
-        for st in self.stream_items.clone() {
-            let logo = st
-                .favicon
-                .as_deref()
-                .and_then(crate::core::online::station_image_path);
-            let (cell, pic) = gallery_cell(
-                logo.as_deref(),
-                STREAM_ICON,
-                &st.name,
-                self.stations_gallery_desc,
-            );
-            if let (Some(path), Some(pic)) = (logo.as_deref(), pic) {
-                if crate::ui::widgets::cached_thumb(path).is_none() {
-                    to_decode.push((path.to_string(), pic));
-                }
-            }
-            let id = st.id;
-            let click = gtk::GestureClick::new();
-            {
-                let sender = sender.clone();
-                click.connect_released(move |g, n, _, _| {
-                    if n == 1 {
-                        g.set_state(gtk::EventSequenceState::Claimed);
-                        sender.input(StreamInput::OpenStream(id));
-                    }
-                });
-            }
-            cell.add_controller(click);
-            on_secondary_click(&cell, {
-                let sender = sender.clone();
-                move || sender.input(StreamInput::OpenStream(id))
-            });
-            let long_press = gtk::GestureLongPress::new();
-            {
-                let sender = sender.clone();
-                long_press.connect_pressed(move |g, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    sender.input(StreamInput::OpenStream(id));
-                });
-            }
-            cell.add_controller(long_press);
-            fb.append(&cell);
-        }
-        spawn_gallery_decode(to_decode);
-    }
-
-    /// Orders the stations list by the chosen sort (by name; direction applies).
-    fn sort_streams(&mut self) {
-        let (_crit, desc) = self.stations_sort;
-        self.stream_items
-            .sort_by_cached_key(|s| natural_key(&s.name));
-        if desc {
-            self.stream_items.reverse();
-        }
-    }
-
-    /// Orders the recordings list by the chosen sort (the live entry is rendered
-    /// separately and always stays on top).
-    fn sort_recording_items(&mut self) {
-        let (crit, desc) = self.recordings_sort;
-        match crit {
-            SortCrit::Length => self.recording_items.sort_by_key(|r| r.duration_ms),
-            SortCrit::Release => self.recording_items.sort_by_key(|r| r.recorded_at),
-            // Name is the remaining criterion.
-            _ => self
-                .recording_items
-                .sort_by_cached_key(|r| natural_key(&r.title)),
-        }
-        if desc {
-            self.recording_items.reverse();
-        }
-    }
-
-    /// Orders the "Recently heard" list by the chosen sort (title or last-heard).
-    fn sort_heard_items(&mut self) {
-        let (crit, desc) = self.heard_sort;
-        match crit {
-            SortCrit::Release => self.heard_items.sort_by_key(|h| h.heard_at),
-            // Name is the remaining criterion.
-            _ => self
-                .heard_items
-                .sort_by_cached_key(|h| natural_key(&h.title)),
-        }
-        if desc {
-            self.heard_items.reverse();
-        }
-    }
-
-    fn reload_streams(&mut self, sender: &ComponentSender<Self>) {
-        self.stream_items = self.library.streams().unwrap_or_default();
-        self.sort_streams();
-        // Refresh the title-bar sort control (visibility depends on emptiness);
-        // done before the gallery early-return below so both paths cover it.
-        self.rebuild_sort(sender);
-        // Alphabetical headings (by name) for the list; none in gallery mode.
-        *self.station_headers.borrow_mut() = self.station_section_headers();
-        if self.stations_gallery {
-            self.fill_streams_gallery(sender);
-            return;
-        }
-        self.stream_marks.clear();
-        while let Some(child) = self.streams_list.first_child() {
-            self.streams_list.remove(&child);
-        }
-        for st in self.stream_items.clone() {
-            // Not activatable: like a library track, the station plays via its
-            // play button; long press / right click opens the detail view.
-            let id = st.id;
-            let logo = st
-                .favicon
-                .as_deref()
-                .and_then(crate::core::online::station_image_path);
-            let row = EntryRow::new(&st.name)
-                .subtitle(&stream_subtitle(&st).unwrap_or_default())
-                .cover(logo.as_deref(), STREAM_ICON)
-                .play_button(
-                    &gettext("Play/Pause"),
-                    self.playing_stream == Some(id),
-                    self.playing,
-                    {
-                        let sender = sender.clone();
-                        move || {
-                            let _ = sender.output(StreamOutput::ToggleStream(id));
-                        }
-                    },
-                )
-                .marked_in(&self.stream_marks, id.to_string())
-                .on_detail({
-                    let sender = sender.clone();
-                    move || sender.input(StreamInput::OpenStream(id))
-                })
-                .build();
-            self.streams_list.append(&row);
-        }
-        self.streams_list.invalidate_headers();
-        self.refresh_stream_icons();
-    }
-
-    /// Refreshes the Play/Pause icons of the station rows.
-    fn refresh_stream_icons(&self) {
-        let cur = self.playing_stream.map(|id| id.to_string());
-        self.stream_marks
-            .apply_all(self.playing, |key| cur.as_deref() == Some(key));
-    }
-
-    /// Keeps the play/pause icon of each recording row in sync.
-    fn refresh_recording_icons(&self) {
-        let cur = self.playing_path.clone();
-        self.rec_marks
-            .apply_all(self.playing, |key| cur.as_deref() == Some(key));
-    }
-
-    /// Station detail dialog: replay (buffer), rename, remove.
-    fn open_stream(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let Some(st) = self.stream_items.iter().find(|s| s.id == id).cloned() else {
-            return;
-        };
-        let dialog = adw::Dialog::builder().title(&st.name).build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-
-        let info = adw::PreferencesGroup::new();
-        let head = adw::ActionRow::builder()
-            .title(gtk::glib::markup_escape_text(&st.name))
-            .build();
-        if let Some(sub) = stream_subtitle(&st) {
-            head.set_subtitle(&gtk::glib::markup_escape_text(&sub));
-        }
-        let logo = st
-            .favicon
-            .as_deref()
-            .and_then(crate::core::online::station_image_path);
-        content.append(&crate::ui::widgets::detail_cover(
-            logo.as_deref(),
-            STREAM_ICON,
-        ));
-        info.add(&head);
-        content.append(&info);
-
-        let actions = adw::PreferencesGroup::new();
-        if self.buffer_minutes > 5 {
-            let replay = action_row(&gettext("Replay (buffer)"), "media-seek-backward-symbolic");
-            {
-                let (sender, dialog) = (sender.clone(), dialog.clone());
-                replay.connect_activated(move |_| {
-                    let _ = sender.output(StreamOutput::OpenReplay(id));
-                    dialog.close();
-                });
-            }
-            actions.add(&replay);
-        }
-        let rename = action_row(&gettext("Rename station"), "document-edit-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            rename.connect_activated(move |_| {
-                sender.input(StreamInput::RenameDialog(id));
-                dialog.close();
-            });
-        }
-        actions.add(&rename);
-        let logo_row = action_row(&gettext("Change logo"), "image-x-generic-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            logo_row.connect_activated(move |_| {
-                sender.input(StreamInput::LogoDialog(id));
-                dialog.close();
-            });
-        }
-        actions.add(&logo_row);
-        let eq = action_row(
-            &gettext("Equalizer settings"),
-            "multimedia-equalizer-symbolic",
-        );
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            eq.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::OpenEqualizer(id));
-                dialog.close();
-            });
-        }
-        actions.add(&eq);
-        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            share.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::Share(Box::new(
-                    crate::core::sync::share::Selection {
-                        stations: vec![id],
-                        ..Default::default()
-                    },
-                )));
-                dialog.close();
-            });
-        }
-        actions.add(&share);
-        let remove = action_row(&gettext("Remove station"), "user-trash-symbolic");
-        {
-            let (sender, dialog, root) = (sender.clone(), dialog.clone(), root.clone());
-            remove.connect_activated(move |_| {
-                dialog.close();
-                confirm_delete(
-                    &root,
-                    &sender,
-                    &gettext("Remove this station?"),
-                    &gettext("Remove"),
-                    StreamInput::Delete(id),
-                );
-            });
-        }
-        actions.add(&remove);
-        content.append(&actions);
-
-        {
-            let sender = sender.clone();
-            present_detail_refreshable(&dialog, &content, &root, move || {
-                sender.input(StreamInput::RefreshStream(id));
-            });
-        }
-    }
-
-    /// Dialog: rename a station (name prefilled).
-    fn open_rename_stream_dialog(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let current = self
-            .stream_items
-            .iter()
-            .find(|s| s.id == id)
-            .map(|s| s.name.clone())
-            .unwrap_or_default();
-        let dialog = adw::AlertDialog::new(Some(&gettext("Rename station")), None);
-        let entry = gtk::Entry::builder()
-            .text(&current)
-            .activates_default(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&entry);
-        dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[
-            ("cancel", &gettext("Cancel")),
-            ("rename", &gettext("Rename")),
-        ]);
-        dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("rename"));
-        {
-            let sender = sender.clone();
-            dialog.connect_response(None, move |_, resp| {
-                if resp == "rename" {
-                    sender.input(StreamInput::Rename {
-                        id,
-                        name: entry.text().to_string(),
-                    });
-                }
-            });
-        }
-        dialog.present(Some(&root));
-    }
-
-    /// Dialog: change a station's logo — search it online, pick an image file,
-    /// or enter an image URL (an empty URL removes the logo).
-    fn open_logo_dialog(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let current = self
-            .stream_items
-            .iter()
-            .find(|s| s.id == id)
-            .and_then(|s| s.favicon.clone())
-            .filter(|f| !crate::core::online::is_local_station_logo(f))
-            .unwrap_or_default();
-        let dialog = adw::AlertDialog::new(
-            Some(&gettext("Change logo")),
-            Some(&gettext(
-                "Search the station's website for its logo, choose an image file, \
-                 or enter the address of an image.",
-            )),
-        );
-        let entry = gtk::Entry::builder()
-            .text(&current)
-            .placeholder_text(gettext("Image URL (https://…)"))
-            .input_purpose(gtk::InputPurpose::Url)
-            .activates_default(true)
-            .build();
-        crate::ui::widgets::no_autofocus(&entry);
-        dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[
-            ("cancel", &gettext("Cancel")),
-            ("search", &gettext("Search online")),
-            ("file", &gettext("Choose image…")),
-            ("apply", &gettext("Use URL")),
-        ]);
-        dialog.set_response_appearance("apply", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("apply"));
-        {
-            let (sender, root) = (sender.clone(), root.clone());
-            dialog.connect_response(None, move |_, resp| match resp {
-                "search" => sender.input(StreamInput::FindLogo(id, true)),
-                "apply" => sender.input(StreamInput::SetLogoUrl(id, Some(entry.text().into()))),
-                "file" => {
-                    let filter = gtk::FileFilter::new();
-                    filter.add_pixbuf_formats();
-                    filter.set_name(Some(&gettext("Images")));
-                    let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
-                    filters.append(&filter);
-                    let chooser = gtk::FileDialog::builder()
-                        .title(gettext("Choose logo"))
-                        .filters(&filters)
-                        .build();
-                    let sender = sender.clone();
-                    chooser.open(Some(&root), gtk::gio::Cancellable::NONE, move |res| {
-                        if let Some(path) = res.ok().and_then(|f| f.path()) {
-                            sender.input(StreamInput::SetLogoFile(id, path));
-                        }
-                    });
-                }
-                _ => {}
-            });
-        }
-        dialog.present(Some(&root));
-    }
-
-    /// The "+": a centered choice modal like the Files "+" — search the
-    /// worldwide station directory, or enter a stream address by hand.
-    fn open_add_stream_dialog(&self, sender: &ComponentSender<Self>) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let slot = self.stream_search.clone();
-        let (sender, win) = (sender.clone(), root.clone());
-        let dialog = crate::ui::widgets::choice_modal(
-            &gettext("Add station"),
-            &[
-                ("search", gettext("Search stations")),
-                ("url", gettext("Enter stream address")),
-            ],
-            "search",
-            move |resp| match resp {
-                "search" => open_stream_search_modal(&sender, &slot, &win),
-                "url" => {
-                    let sender = sender.clone();
-                    let (dialog, _) = crate::ui::widgets::entry_modal(
-                        &gettext("Enter stream address"),
-                        &gettext("Stream address (URL)"),
-                        &gettext("Add"),
-                        move |url| sender.input(StreamInput::AddUrl(url)),
-                    );
-                    dialog.present(Some(&win));
-                }
-                _ => {}
-            },
-        );
-        dialog.present(Some(&root));
-    }
-
-    /// Redraws the results list in the open add dialog.
-    fn rebuild_stream_search_results(&self, sender: &ComponentSender<Self>) {
-        let guard = self.stream_search.borrow();
-        let Some((dialog, list)) = guard.as_ref() else {
-            return;
-        };
-        while let Some(child) = list.first_child() {
-            list.remove(&child);
-        }
-        list.set_visible(true);
-
-        if self.stream_search_results.is_empty() {
-            let row = if self.stream_search_failed {
-                let r = adw::ActionRow::builder()
-                    .title(gettext("Station service unreachable"))
-                    .subtitle(gettext("Check your connection and try again"))
-                    .build();
-                r.set_subtitle_lines(2);
-                r
-            } else {
-                adw::ActionRow::builder()
-                    .title(gettext("No stations found"))
-                    .build()
-            };
-            row.set_sensitive(false);
-            list.append(&row);
-            return;
-        }
-
-        for (i, r) in self.stream_search_results.iter().enumerate() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&r.name))
-                .activatable(true)
-                .build();
-            let mut sub: Vec<String> = Vec::new();
-            if let Some(c) = r.country.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(c.to_string());
-            }
-            if let Some(t) = r.tags.as_deref().filter(|s| !s.trim().is_empty()) {
-                let tags: Vec<&str> = t
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .take(2)
-                    .collect();
-                if !tags.is_empty() {
-                    sub.push(tags.join(" · "));
-                }
-            }
-            if !sub.is_empty() {
-                row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" — ")));
-            }
-            let logo = r
-                .favicon
-                .as_deref()
-                .and_then(crate::core::online::station_image_path);
-            row.add_prefix(&cover_widget(logo.as_deref(), STREAM_ICON));
-            row.add_suffix(&gtk::Image::from_icon_name("list-add-symbolic"));
-            {
-                let (sender, dialog) = (sender.clone(), dialog.clone());
-                row.connect_activated(move |_| {
-                    sender.input(StreamInput::AddResult(i));
-                    dialog.close();
-                });
-            }
-            list.append(&row);
-        }
-    }
-
-    /// Adds a search result as a station and loads its logo in the background.
-    fn add_stream_result(&mut self, sender: &ComponentSender<Self>, index: usize) {
-        let Some(r) = self.stream_search_results.get(index).cloned() else {
-            return;
-        };
-        match self.library.add_stream(
-            &r.name,
-            &r.url,
-            r.favicon.as_deref(),
-            r.tags.as_deref(),
-            r.country.as_deref(),
-            r.codec.as_deref(),
-            r.bitrate,
-        ) {
-            Ok(id) => {
-                self.reload_streams(sender);
-                let _ = sender.output(StreamOutput::Toast(gettext_f(
-                    "Added: {n}",
-                    &[("n", &r.name)],
-                )));
-                // Radio-Browser's favicon is often missing or dead (404) —
-                // then search the station's website for a logo instead.
-                let fav = r.favicon.clone();
-                let url = r.url.clone();
-                sender.spawn_command(move |out| {
-                    let cached = fav
-                        .as_deref()
-                        .and_then(crate::core::online::cache_station_image)
-                        .is_some();
-                    let _ = out.send(if cached {
-                        StreamCmd::ReloadStreams
-                    } else {
-                        StreamCmd::LogoFound {
-                            id,
-                            favicon: crate::core::station_logo::find_logo(&url),
-                            report: false,
-                        }
-                    });
-                });
-            }
-            Err(_) => {
-                let _ = sender.output(StreamOutput::Toast(gettext("Could not add station")));
-            }
-        }
-    }
-
-    /// Add a station directly from a URL.
-    fn stream_add_url(&mut self, sender: &ComponentSender<Self>, url: String) {
-        let url = url.trim().to_string();
-        if !url.is_empty() {
-            let name = crate::core::streaming::name_from_url(&url);
-            match self
-                .library
-                .add_stream(&name, &url, None, None, None, None, None)
-            {
-                Ok(id) => {
-                    self.reload_streams(sender);
-                    let _ = sender.output(StreamOutput::Toast(gettext("Station added")));
-                    // A station added by URL brings no logo — look one up.
-                    sender.input(StreamInput::FindLogo(id, false));
-                }
-                Err(_) => {
-                    let _ = sender.output(StreamOutput::Toast(gettext("Could not add station")));
-                }
-            }
-        }
-    }
-
-    /// Rebuilds the "Recordings" list (live entry + saved recordings).
-    fn reload_recordings(&mut self, sender: &ComponentSender<Self>) {
-        self.recording_items = self.library.recordings().unwrap_or_default();
-        for rec in &mut self.recording_items {
-            if rec.duration_ms <= 0 {
-                let ms = crate::core::scanner::duration_secs(std::path::Path::new(&rec.path))
-                    as i64
-                    * 1000;
-                if ms > 0 {
-                    let _ = self.library.set_recording_duration(rec.id, ms);
-                    rec.duration_ms = ms;
-                }
-            }
-        }
-        self.sort_recording_items();
-        // Refresh the title-bar sort control (visibility depends on emptiness).
-        self.rebuild_sort(sender);
-        // Alphabetical headings (by name) for the saved rows; none while a live
-        // entry is prepended (it would offset the labels) or for date/length sorts.
-        *self.recording_headers.borrow_mut() = self.recording_section_headers();
-        self.rec_marks.clear();
-        while let Some(child) = self.recordings_list.first_child() {
-            self.recordings_list.remove(&child);
-        }
-
-        // Live entry for the song currently being recorded.
-        if let Some((stream_id, current_title)) = self.live_recording.clone() {
-            let station = self
-                .stream_items
-                .iter()
-                .find(|s| s.id == stream_id)
-                .map(|s| s.name.clone());
-            let (artist, title) = match current_title.as_deref() {
-                Some(t) => crate::core::online::recording_query_candidates(t, station.as_deref())
-                    .into_iter()
-                    .next()
-                    .unwrap_or((None, t.trim().to_string())),
-                None => (None, gettext("Current recording")),
-            };
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&title))
-                .build();
-            row.add_css_class("emilia-flush");
-            let mut sub: Vec<String> = Vec::new();
-            if let Some(a) = artist.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(a.to_string());
-            }
-            if let Some(s) = station.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(s.to_string());
-            }
-            sub.push(gettext("Recording …"));
-            row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
-            let cover =
-                crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &title);
-            row.add_prefix(&cover_widget(cover.as_deref(), "media-record-symbolic"));
-            let dot = gtk::Image::from_icon_name("media-record-symbolic");
-            dot.set_valign(gtk::Align::Center);
-            dot.set_css_classes(&["emilia-record-dot", "emilia-recording"]);
-            row.add_suffix(&dot);
-            self.recordings_list.append(&row);
-        }
-
-        for rec in self.recording_items.clone() {
-            let mut sub: Vec<String> = Vec::new();
-            if let Some(a) = rec.artist.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(a.to_string());
-            }
-            if let Some(s) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(s.to_string());
-            }
-            sub.push(format_datetime(rec.recorded_at));
-            let placeholder = if rec.incomplete {
-                "media-playlist-consecutive-symbolic"
-            } else {
-                "audio-x-generic-symbolic"
-            };
-            let cover = crate::core::online::recording_cover_path(
-                rec.artist.as_deref().unwrap_or(""),
-                &rec.title,
-            );
-            let play = {
-                let sender = sender.clone();
-                let path = rec.path.clone();
-                move || {
-                    let _ = sender.output(StreamOutput::PlayRecording(path.clone()));
-                }
-            };
-            let row = EntryRow::new(&rec.title)
-                .subtitle(&sub.join(" · "))
-                .cover(cover.as_deref(), placeholder)
-                .duration(rec.duration_ms)
-                .play_button(
-                    &gettext("Play"),
-                    self.playing_path.as_deref() == Some(rec.path.as_str()),
-                    self.playing,
-                    play.clone(),
-                )
-                .marked_in(&self.rec_marks, rec.path.clone())
-                .on_activate(play)
-                .on_detail({
-                    let sender = sender.clone();
-                    let id = rec.id;
-                    move || sender.input(StreamInput::OpenRecording(id))
-                })
-                .build();
-            if rec.incomplete {
-                row.set_tooltip_text(Some(&gettext("Incomplete (beginning was missing)")));
-            }
-            self.recordings_list.append(&row);
-        }
-        self.recordings_list.invalidate_headers();
-    }
-
-    /// Detail dialog of a saved recording.
-    fn open_recording(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let Some(rec) = self.recording_items.iter().find(|r| r.id == id).cloned() else {
-            return;
-        };
-        let tag = crate::core::scanner::read_track(std::path::Path::new(&rec.path)).ok();
-        let album = tag
-            .as_ref()
-            .and_then(|t| t.album.clone())
-            .filter(|a| !a.trim().is_empty());
-        let artist = rec
-            .artist
-            .clone()
-            .filter(|a| !a.trim().is_empty())
-            .or_else(|| tag.as_ref().and_then(|t| t.artist.clone()))
-            .filter(|a| !a.trim().is_empty());
-
-        let dialog = adw::Dialog::builder().title(&rec.title).build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-
-        let cover =
-            crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &rec.title);
-        content.append(&crate::ui::widgets::detail_cover(
-            cover.as_deref(),
-            "audio-x-generic-symbolic",
-        ));
-
-        // The song's details folded under "Info", as in the music details.
-        let (info, details) = info_expander();
-        details.add_row(&info_row(&gettext("Title"), &rec.title));
-        if let Some(ar) = artist.as_deref() {
-            details.add_row(&info_row(&gettext("Artist"), ar));
-        }
-        if let Some(al) = album.as_deref() {
-            details.add_row(&info_row(&gettext("Album"), al));
-        }
-        if rec.duration_ms > 0 {
-            details.add_row(&info_row(
-                &gettext("Duration"),
-                &crate::ui::app_helpers::fmt_duration(rec.duration_ms),
-            ));
-        }
-        if let Some(st) = rec.station.as_deref().filter(|s| !s.trim().is_empty()) {
-            details.add_row(&info_row(&gettext("Station"), st));
-        }
-        details.add_row(&info_row(
-            &gettext("Recorded"),
-            &format_datetime(rec.recorded_at),
-        ));
-        if rec.incomplete {
-            details.add_row(&info_row(
-                &gettext("Note"),
-                &gettext("Incomplete (beginning was missing)"),
-            ));
-        }
-        content.append(&info);
-
-        let actions = adw::PreferencesGroup::new();
-        let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
-        {
-            let (sender, dialog, path) = (sender.clone(), dialog.clone(), rec.path.clone());
-            play.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::PlayRecording(path.clone()));
-                dialog.close();
-            });
-        }
-        actions.add(&play);
-        let add_lib = action_row(&gettext("Add to library"), "list-add-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            add_lib.connect_activated(move |_| {
-                sender.input(StreamInput::AddRecordingToLibrary(id));
-                dialog.close();
-            });
-        }
-        actions.add(&add_lib);
-        let edit = action_row(&gettext("Edit"), "document-edit-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            edit.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::EditRecording(id));
-                dialog.close();
-            });
-        }
-        actions.add(&edit);
-        let share = action_row(&gettext("Share"), "emilia-share-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            share.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::Share(Box::new(
-                    crate::core::sync::share::Selection {
-                        recordings: vec![id],
-                        ..Default::default()
-                    },
-                )));
-                dialog.close();
-            });
-        }
-        actions.add(&share);
-        let remove = action_row(&gettext("Delete recording"), "user-trash-symbolic");
-        {
-            let (sender, dialog, root) = (sender.clone(), dialog.clone(), root.clone());
-            remove.connect_activated(move |_| {
-                dialog.close();
-                confirm_delete(
-                    &root,
-                    &sender,
-                    &gettext("Delete this recording?"),
-                    &gettext("Delete"),
-                    StreamInput::RecordingDelete(id),
-                );
-            });
-        }
-        actions.add(&remove);
-        content.append(&actions);
-
-        {
-            let sender = sender.clone();
-            present_detail_refreshable(&dialog, &content, &root, move || {
-                sender.input(StreamInput::RefreshRecording(id));
-            });
-        }
-    }
-
-    /// Copies a recording into the primary music library, then registers it.
-    fn add_recording_to_library(&mut self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(rec) = self.recording_items.iter().find(|r| r.id == id).cloned() else {
-            return;
-        };
-        let Some(music_dir) = self
-            .library
-            .get_setting("music_dir")
-            .ok()
-            .flatten()
-            .filter(|s| !s.trim().is_empty())
-        else {
-            let _ = sender.output(StreamOutput::Toast(gettext("Set a music folder first")));
-            return;
-        };
-        let src = std::path::PathBuf::from(&rec.path);
-        if !src.exists() {
-            let _ = sender.output(StreamOutput::Toast(gettext("File not found")));
-            return;
-        }
-
-        let mut track = crate::core::scanner::read_track(&src).unwrap_or(crate::model::Track {
-            id: 0,
-            path: rec.path.clone(),
-            title: rec.title.clone(),
-            artist: rec.artist.clone(),
-            album: None,
-            genre: None,
-            track_no: None,
-            disc_no: None,
-            duration_ms: None,
-            resume_ms: 0,
-            year: None,
-        });
-        let artist = track
-            .artist
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| rec.artist.clone())
-            .filter(|s| !s.trim().is_empty());
-        let title = if track.title.trim().is_empty() {
-            rec.title.clone()
-        } else {
-            track.title.clone()
-        };
-
-        use crate::core::youtube::sanitize_filename;
-        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("mp3");
-        let mut dest = std::path::PathBuf::from(&music_dir);
-        match artist.as_deref().filter(|s| !s.trim().is_empty()) {
-            Some(a) => dest.push(sanitize_filename(a)),
-            None => dest.push("Recordings"),
-        }
-        if let Some(al) = track.album.as_deref().filter(|s| !s.trim().is_empty()) {
-            dest.push(sanitize_filename(al));
-        }
-        dest.push(format!("{}.{ext}", sanitize_filename(&title)));
-
-        if dest.exists() {
-            let _ = sender.output(StreamOutput::Toast(gettext("Already in the library")));
-            return;
-        }
-        if dest
-            .parent()
-            .is_some_and(|p| std::fs::create_dir_all(p).is_err())
-            || std::fs::copy(&src, &dest).is_err()
-        {
-            let _ = sender.output(StreamOutput::Toast(gettext("Could not add to the library")));
-            return;
-        }
-
-        let dest_str = dest.to_string_lossy().into_owned();
-        if let Some(cover) =
-            crate::core::online::recording_cover_path(artist.as_deref().unwrap_or(""), &title)
-        {
-            if let Ok(bytes) = std::fs::read(&cover) {
-                crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
-            }
-        }
-
-        track.id = 0;
-        track.path = dest_str;
-        track.title = title;
-        track.artist = artist;
-        track.resume_ms = 0;
-        if self.library.upsert_track(&track).is_ok() {
-            let _ = sender.output(StreamOutput::LibraryChanged);
-            let _ = sender.output(StreamOutput::Toast(gettext("Added to the library")));
-        } else {
-            let _ = std::fs::remove_file(&dest);
-            let _ = sender.output(StreamOutput::Toast(gettext("Could not add to the library")));
-        }
-    }
-
-    /// Rebuilds the "Recently heard" list (recognized songs). No live entry,
-    /// no audio files — each row just opens the detail dialog (tap or long press).
-    fn reload_heard(&mut self, sender: &ComponentSender<Self>) {
-        self.heard_items = self.library.heard_songs().unwrap_or_default();
-        self.sort_heard_items();
-        // Refresh the title-bar sort control (visibility depends on emptiness).
-        self.rebuild_sort(sender);
-        *self.heard_headers.borrow_mut() = self.heard_section_headers();
-        while let Some(child) = self.heard_list.first_child() {
-            self.heard_list.remove(&child);
-        }
-        for h in self.heard_items.clone() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&h.title))
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
-            let mut sub: Vec<String> = Vec::new();
-            if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(a.to_string());
-            }
-            if let Some(s) = h.station.as_deref().filter(|s| !s.trim().is_empty()) {
-                sub.push(s.to_string());
-            }
-            sub.push(format_datetime(h.heard_at));
-            row.set_subtitle(&gtk::glib::markup_escape_text(&sub.join(" · ")));
-            let cover = crate::core::online::recording_cover_path(
-                h.artist.as_deref().unwrap_or(""),
-                &h.title,
-            );
-            row.add_prefix(&cover_widget(cover.as_deref(), "audio-x-generic-symbolic"));
-            if h.count > 1 {
-                let badge =
-                    gtk::Label::new(Some(&gettext_f("{n}×", &[("n", &h.count.to_string())])));
-                badge.set_valign(gtk::Align::Center);
-                badge.set_css_classes(&["dim-label", "numeric"]);
-                row.add_suffix(&badge);
-            }
-            // Direct play button on the right: plays the recognized song right
-            // away — a local copy (timeshift recording or library track) first,
-            // and only via YouTube when nothing local matches (see `play_heard`).
-            let play_btn = gtk::Button::builder()
-                .icon_name("media-playback-start-symbolic")
-                .tooltip_text(gettext("Play"))
-                .valign(gtk::Align::Center)
-                .css_classes(["flat"])
-                .build();
-            {
-                let sender = sender.clone();
-                let (artist, title) = (h.artist.clone(), h.title.clone());
-                play_btn.connect_clicked(move |_| {
-                    let _ = sender.output(StreamOutput::PlayHeard {
-                        artist: artist.clone(),
-                        title: title.clone(),
-                    });
-                });
-            }
-            row.add_suffix(&play_btn);
-            let id = h.id;
-            {
-                let sender = sender.clone();
-                row.connect_activated(move |_| sender.input(StreamInput::OpenHeard(id)));
-            }
-            on_secondary_click(&row, {
-                let sender = sender.clone();
-                move || sender.input(StreamInput::OpenHeard(id))
-            });
-            on_long_press(&row, {
-                let sender = sender.clone();
-                move || sender.input(StreamInput::OpenHeard(id))
-            });
-            self.heard_list.append(&row);
-        }
-        self.heard_list.invalidate_headers();
-    }
-
-    /// Detail dialog of a recognized song: which station it was heard on, when,
-    /// info about the song, and the Play / Download / Remove actions.
-    fn open_heard(&self, sender: &ComponentSender<Self>, id: i64) {
-        let Some(root) = self.window.clone() else {
-            return;
-        };
-        let Some(h) = self.heard_items.iter().find(|x| x.id == id).cloned() else {
-            return;
-        };
-        let dialog = adw::Dialog::builder().title(&h.title).build();
-        self.adapt_detail_dialog(&dialog);
-        let content = detail_box();
-
-        let cover =
-            crate::core::online::recording_cover_path(h.artist.as_deref().unwrap_or(""), &h.title);
-        content.append(&crate::ui::widgets::detail_cover(
-            cover.as_deref(),
-            "audio-x-generic-symbolic",
-        ));
-
-        // The song's details folded under "Info", as in the music details.
-        let (info, details) = info_expander();
-        details.add_row(&info_row(&gettext("Title"), &h.title));
-        if let Some(a) = h.artist.as_deref().filter(|s| !s.trim().is_empty()) {
-            details.add_row(&info_row(&gettext("Artist"), a));
-        }
-        if let Some(s) = h.station.as_deref().filter(|s| !s.trim().is_empty()) {
-            details.add_row(&info_row(&gettext("Station"), s));
-        }
-        details.add_row(&info_row(&gettext("Heard"), &format_datetime(h.heard_at)));
-        if h.count > 1 {
-            details.add_row(&info_row(&gettext("Times heard"), &h.count.to_string()));
-        }
-        content.append(&info);
-
-        let actions = adw::PreferencesGroup::new();
-        let play = action_row(&gettext("Play"), "media-playback-start-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            let (artist, title) = (h.artist.clone(), h.title.clone());
-            play.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::PlayHeard {
-                    artist: artist.clone(),
-                    title: title.clone(),
-                });
-                dialog.close();
-            });
-        }
-        actions.add(&play);
-        let dl = action_row(&gettext("Download via YouTube"), "folder-download-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            let (artist, title) = (h.artist.clone(), h.title.clone());
-            dl.connect_activated(move |_| {
-                let _ = sender.output(StreamOutput::DownloadHeard {
-                    artist: artist.clone(),
-                    title: title.clone(),
-                });
-                dialog.close();
-            });
-        }
-        actions.add(&dl);
-        let remove = action_row(&gettext("Remove from list"), "user-trash-symbolic");
-        {
-            let (sender, dialog) = (sender.clone(), dialog.clone());
-            remove.connect_activated(move |_| {
-                sender.input(StreamInput::HeardDelete(id));
-                dialog.close();
-            });
-        }
-        actions.add(&remove);
-        content.append(&actions);
-
-        {
-            let sender = sender.clone();
-            present_detail_refreshable(&dialog, &content, &root, move || {
-                sender.input(StreamInput::RefreshHeard(id));
-            });
-        }
-    }
-}
-
-/// Second step of the stations "+": the directory search. Registers the dialog
-/// in `slot` so the worker's results land in its list.
-fn open_stream_search_modal(
-    sender: &ComponentSender<StreamPage>,
-    slot: &Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    root: &impl IsA<gtk::Widget>,
-) {
-    let sender = sender.clone();
-    let (dialog, entry, results) = crate::ui::widgets::search_modal(
-        &gettext("Search stations"),
-        &gettext("Station name …"),
-        move |term| sender.input(StreamInput::Search(term)),
-    );
-    *slot.borrow_mut() = Some((dialog.clone().upcast(), results));
-    {
-        let slot = slot.clone();
-        dialog.connect_closed(move |_| {
-            *slot.borrow_mut() = None;
-        });
-    }
-    dialog.present(Some(root));
-    entry.grab_focus();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn station(tags: Option<&str>, country: Option<&str>) -> StreamItem {
-        StreamItem {
-            id: 1,
-            name: "Radio".into(),
-            url: "http://example.invalid/stream".into(),
-            favicon: None,
-            tags: tags.map(str::to_string),
-            country: country.map(str::to_string),
-        }
-    }
-
-    #[test]
-    fn no_tags_and_no_country_means_no_subtitle() {
-        assert_eq!(stream_subtitle(&station(None, None)), None);
-        assert_eq!(stream_subtitle(&station(Some("  "), Some(""))), None);
-        assert_eq!(stream_subtitle(&station(Some(", ,"), None)), None);
-    }
-
-    #[test]
-    fn tags_are_trimmed_and_capped_at_three() {
-        assert_eq!(
-            stream_subtitle(&station(Some("rock, pop"), None)),
-            Some("rock · pop".into())
-        );
-        assert_eq!(
-            stream_subtitle(&station(Some("a,b,c,d,e"), None)),
-            Some("a · b · c".into())
-        );
-        assert_eq!(
-            stream_subtitle(&station(Some(", ,rock,"), None)),
-            Some("rock".into())
-        );
-    }
-
-    #[test]
-    fn country_is_appended_after_a_dash() {
-        assert_eq!(
-            stream_subtitle(&station(Some("rock, pop"), Some("Germany"))),
-            Some("rock · pop — Germany".into())
-        );
-        assert_eq!(
-            stream_subtitle(&station(None, Some("Germany"))),
-            Some("Germany".into())
-        );
-        assert_eq!(
-            stream_subtitle(&station(Some("  "), Some("Germany"))),
-            Some("Germany".into())
-        );
     }
 }
