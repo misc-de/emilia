@@ -75,12 +75,7 @@ impl App {
         mcp_group.add(&mcp_public_row);
 
         // Bearer token (read-only) with a copy button — generated on first enable.
-        let token = self
-            .library
-            .get_secret_setting("mcp_token")
-            .ok()
-            .flatten()
-            .unwrap_or_default();
+        let token = self.stored_mcp_token();
         let token_sub = if token.is_empty() {
             gettext("Generated when the server is first enabled")
         } else {

@@ -674,4 +674,9 @@ pub(crate) struct McpState {
     /// Device-sync status snapshot, written by the sync component and read by
     /// the `sync_*` tools; created before the component so it can be handed in.
     pub(crate) sync: crate::core::mcp::SyncStateHandle,
+    /// The bearer token as last read from or written to the keyring, `Some("")`
+    /// once it is known to be unset. Saves a keyring round-trip — a
+    /// `secret-tool` call that blocks the UI for up to a minute on a locked or
+    /// missing keyring — every time the settings open.
+    pub(crate) token: std::cell::RefCell<Option<String>>,
 }

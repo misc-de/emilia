@@ -55,7 +55,7 @@ impl App {
                 self.start_mcp_if_enabled();
             }
             McpSettingMsg::SetToken(token) => {
-                let _ = self.library.set_secret_setting("mcp_token", &token);
+                self.store_mcp_token(&token);
                 // Restart so the new token takes effect and existing connections drop.
                 self.start_mcp_if_enabled();
             }
@@ -530,16 +530,37 @@ impl App {
         }
     }
 
-    /// The persisted bearer token, generated and stored on first use (Secret
-    /// Service when available, like the other credentials).
+    /// The stored bearer token, or "" while none exists yet. Read from the
+    /// keyring once, then kept in [`McpState::token`].
+    pub(crate) fn stored_mcp_token(&self) -> String {
+        if let Some(t) = self.mcp.token.borrow().as_ref() {
+            return t.clone();
+        }
+        let token = self
+            .library
+            .get_secret_setting("mcp_token")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        *self.mcp.token.borrow_mut() = Some(token.clone());
+        token
+    }
+
+    /// Persists `token` (Secret Service when available, like the other
+    /// credentials) and keeps it as the in-memory copy.
+    fn store_mcp_token(&self, token: &str) {
+        let _ = self.library.set_secret_setting("mcp_token", token);
+        *self.mcp.token.borrow_mut() = Some(token.to_string());
+    }
+
+    /// The bearer token for the server, generated and stored on first use.
     fn mcp_token(&self) -> String {
-        if let Ok(Some(t)) = self.library.get_secret_setting("mcp_token")
-            && !t.is_empty()
-        {
-            return t;
+        let token = self.stored_mcp_token();
+        if !token.is_empty() {
+            return token;
         }
         let token = crate::core::sync::crypto::generate_token(32);
-        let _ = self.library.set_secret_setting("mcp_token", &token);
+        self.store_mcp_token(&token);
         token
     }
 }
@@ -559,6 +580,7 @@ impl McpState {
             jobs: std::sync::Arc::new(mcp::jobs::Jobs::default()),
             stop: None,
             sync: mcp::new_sync_handle(),
+            token: std::cell::RefCell::new(None),
         }
     }
 }
