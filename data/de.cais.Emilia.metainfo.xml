@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.46" date="2026-10-06">
+      <description>
+        <p>New sort options: favorites by "Date added", podcasts by "Latest episode" and YouTube channels by "Latest video", so subscriptions with something new come first. The progress window of a library scan or a podcast and YouTube refresh can be tapped away while the work continues; the refresh button then spins green and brings it back. The share window can be tapped away during a transfer too, the share icon pulses while sharing runs, and a declined offer now reaches the sender instead of leaving it waiting. Albums matched online now get the year of their first release instead of a later reissue.</p>
+        <p xml:lang="de">Neue Sortierungen: Favoriten nach „Hinzugefügt“, Podcasts nach „Neueste Folge“ und YouTube-Kanäle nach „Neuestes Video“, sodass Abos mit Neuem oben stehen. Das Fortschrittsfenster beim Einlesen der Bibliothek oder beim Aktualisieren von Podcasts und YouTube lässt sich wegtippen, die Arbeit läuft weiter; der Aktualisieren-Knopf dreht sich dann grün und holt es zurück. Auch das Teilen-Fenster lässt sich während einer Übertragung wegtippen, das Teilen-Symbol pulsiert, solange geteilt wird, und ein abgelehntes Angebot erreicht jetzt den Absender, statt ihn warten zu lassen. Online erkannte Alben bekommen jetzt das Jahr ihrer Erstveröffentlichung statt das einer späteren Neuauflage.</p>
+      </description>
+    </release>
     <release version="0.8.45" date="2026-10-05">
       <description>
         <p>The details of stations, recognized songs, recordings, YouTube videos, channels, playlists and live streams, podcasts and episodes have a refresh button in the title bar, like the music details: it fetches the logo or cover and the details again, such as genre and country of a station or artist and album of a song. A video picture now spans the whole width of the details. Recognized songs, recordings and YouTube videos list their details under a foldable "Info". In an episode's details the podcast name is in the title bar, the episode name below the cover and the shownotes above the date, and the episode can be shared. Names with an "&amp;" now show correctly in detail titles.</p>
