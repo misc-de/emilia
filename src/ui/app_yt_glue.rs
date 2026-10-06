@@ -41,7 +41,12 @@ impl App {
         }
         let input = self.input.clone();
         let (vid, t) = (video_id.to_string(), title.to_string());
+        let ticket = youtube::PLAY_DETAILS.ticket();
         std::thread::spawn(move || {
+            // Skipped on to another video meanwhile: its own lookup follows.
+            if !youtube::PLAY_DETAILS.settled(ticket, youtube::DETAILS_SETTLE) {
+                return;
+            }
             let lib = Library::open().ok();
             let stored = lib
                 .as_ref()
@@ -400,7 +405,12 @@ impl App {
         self.mpris.set_playing(true);
         self.refresh_queue_icons();
         let input = self.input.clone();
+        let ticket = youtube::PLAY_RESOLVE.ticket();
         std::thread::spawn(move || {
+            // A newer play superseded this one; its own resolve follows.
+            if !youtube::PLAY_RESOLVE.settled(ticket, youtube::RESOLVE_SETTLE) {
+                return;
+            }
             let result = youtube::resolve_audio_url(&video_id).map_err(|e| e.to_string());
             let _ = input.send(Msg::Yt(YtMsg::YtLiveResolved { video_id, result }));
         });

@@ -124,6 +124,9 @@ pub struct App {
     /// Source ids that are currently **not reachable** (Nextcloud offline) –
     /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
+    /// A reachability check of the remote sources is running (one per 45-s
+    /// tick at most: hanging sources can take longer than the interval).
+    pub(crate) checking_sources: bool,
     /// Statistics page, extracted into its own relm4 component.
     pub(crate) stats_page: relm4::Controller<crate::ui::stats_page::StatsPage>,
     /// Device sync, extracted into its own relm4 component (dialog + worker).
@@ -1909,6 +1912,7 @@ impl Component for App {
                 progress_toast: std::rc::Rc::new(std::cell::RefCell::new(None)),
             },
             offline_sources: std::collections::HashSet::new(),
+            checking_sources: false,
             stats_page,
             nav: NavState {
                 split: adw::OverlaySplitView::new(),

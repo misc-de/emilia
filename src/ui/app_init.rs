@@ -1269,17 +1269,24 @@ impl App {
             .filter(|s| s.is_remote())
             .cloned()
             .collect();
-        if !remotes.is_empty() {
+        if !remotes.is_empty() && !self.checking_sources {
+            self.checking_sources = true;
             sender.spawn_command(move |out| {
-                let status: Vec<(i64, bool)> = remotes
-                    .iter()
-                    .map(|s| {
-                        let ok = crate::core::remote::Backend::from_source(s)
-                            .map(|b| b.test_connection().is_ok())
-                            .unwrap_or(false);
-                        (s.id, ok)
-                    })
-                    .collect();
+                let status: Vec<(i64, bool)> = crate::core::panic_guard::catch_or(
+                    "source check",
+                    || {
+                        remotes
+                            .iter()
+                            .map(|s| {
+                                let ok = crate::core::remote::Backend::from_source(s)
+                                    .map(|b| b.test_connection().is_ok())
+                                    .unwrap_or(false);
+                                (s.id, ok)
+                            })
+                            .collect()
+                    },
+                    Vec::new,
+                );
                 let _ = out.send(Cmd::SourceStatus(status));
             });
         }

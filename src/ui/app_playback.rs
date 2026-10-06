@@ -452,7 +452,14 @@ impl App {
                 self.refresh_queue_icons();
                 let input = self.input.clone();
                 let vid = video_id.clone();
+                let ticket = crate::core::youtube::PLAY_RESOLVE.ticket();
                 std::thread::spawn(move || {
+                    // A newer play superseded this one; its own resolve follows.
+                    if !crate::core::youtube::PLAY_RESOLVE
+                        .settled(ticket, crate::core::youtube::RESOLVE_SETTLE)
+                    {
+                        return;
+                    }
                     let result =
                         crate::core::youtube::resolve_audio_url(&vid).map_err(|e| e.to_string());
                     let _ = input.send(crate::ui::app::Msg::Yt(

@@ -330,6 +330,7 @@ impl App {
                 message,
             } => self.on_missing_track_done(&sender, artist, album, ok, message),
             Cmd::SourceStatus(status) => {
+                self.checking_sources = false;
                 let mut changed = false;
                 for (id, ok) in status {
                     if ok {

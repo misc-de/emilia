@@ -611,6 +611,43 @@ pub fn list_entries(url: &str, limit: usize) -> Result<Vec<YtResult>> {
         .collect())
 }
 
+/// Coalesces the yt-dlp lookups started per play: skipping quickly through a
+/// playlist must not start one yt-dlp process per skipped video. Take a
+/// [`ticket`](Self::ticket) on the UI thread when the play starts; the worker
+/// then asks [`settled`](Self::settled) before running yt-dlp and skips the
+/// lookup when a newer play came in meanwhile.
+pub struct LatestOnly(std::sync::atomic::AtomicU64);
+
+impl LatestOnly {
+    pub const fn new() -> Self {
+        Self(std::sync::atomic::AtomicU64::new(0))
+    }
+
+    /// Registers a new request and returns its ticket.
+    pub fn ticket(&self) -> u64 {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+
+    /// Waits `settle` (worker threads only), then reports whether `ticket` is
+    /// still the newest request.
+    pub fn settled(&self, ticket: u64, settle: Duration) -> bool {
+        if !settle.is_zero() {
+            std::thread::sleep(settle);
+        }
+        self.0.load(std::sync::atomic::Ordering::SeqCst) == ticket
+    }
+}
+
+/// Gate for resolving the stream address of the video (or live stream) that is
+/// about to play.
+pub static PLAY_RESOLVE: LatestOnly = LatestOnly::new();
+/// Gate for the per-play detail lookup (description, chapters, metadata).
+pub static PLAY_DETAILS: LatestOnly = LatestOnly::new();
+/// Short pause before resolving, so a burst of skips settles on its last video.
+pub const RESOLVE_SETTLE: Duration = Duration::from_millis(250);
+/// The detail lookup is not urgent; wait until playback has clearly settled.
+pub const DETAILS_SETTLE: Duration = Duration::from_millis(1500);
+
 /// Resolves a direct, playable `https` audio stream URL for a video (best audio
 /// only – no ffmpeg muxing needed). The URL is short-lived (it expires), so it
 /// is resolved fresh on every play and never cached. **Network – worker only.**
@@ -904,6 +941,16 @@ fn parse_atom_published(body: &str) -> std::collections::HashMap<String, String>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn latest_only_lets_just_the_newest_request_through() {
+        let gate = super::LatestOnly::new();
+        let first = gate.ticket();
+        assert!(gate.settled(first, super::Duration::ZERO));
+        let second = gate.ticket();
+        assert!(!gate.settled(first, super::Duration::ZERO));
+        assert!(gate.settled(second, super::Duration::ZERO));
+    }
+
     #[test]
     fn longform_starts_above_ten_minutes() {
         // Songs: no watch position, no progress line.
