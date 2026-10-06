@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "emilia"
-version = "0.8.46"
+version = "0.8.47"
 dependencies = [
  "anyhow",
  "async-channel",

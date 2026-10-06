@@ -9,6 +9,8 @@ on:
   # audit below has to run on a clock, not only when something is pushed.
   schedule:
     - cron: '0 6 * * 1'
+  # Lets the live smoke tests below be run by hand.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -72,6 +74,36 @@ jobs:
 
       - name: Audit (RustSec advisory database)
         run: cargo audit
+
+  # Live checks against the external services (MusicBrainz, Deezer, LRCLIB,
+  # iTunes, Radio-Browser, YouTube via yt-dlp). They are `#[ignore]`d unit tests
+  # in src/core/smoke_tests.rs, run only on the weekly clock or by hand: they
+  # catch a service changing under us, which no push to this repo would.
+  smoke:
+    name: External services (smoke)
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      # The newest yt-dlp, as the app's in-app updater would fetch it.
+      - name: Install yt-dlp
+        run: pipx install yt-dlp
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Smoke tests
+        run: cargo test --locked smoke_ -- --ignored --test-threads=1
 
   metadata:
     name: AppStream, desktop & translations

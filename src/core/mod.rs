@@ -24,6 +24,8 @@ pub mod remote;
 pub mod scanner;
 pub mod secrets;
 pub mod smb;
+#[cfg(test)]
+mod smoke_tests;
 pub mod source;
 pub mod station_logo;
 pub mod streaming;

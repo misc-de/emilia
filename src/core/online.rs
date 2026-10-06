@@ -242,7 +242,7 @@ impl OnlineClient {
             escape_lucene(album)
         );
         let url = format!(
-            "https://musicbrainz.org/ws/2/release?query={}&fmt=json&limit=5",
+            "https://musicbrainz.org/ws/2/release?query={}&fmt=json&limit=25",
             percent_encode(&query)
         );
 
@@ -253,26 +253,18 @@ impl OnlineClient {
 
         // MusicBrainz sorts by score; we take the best match, but require a
         // minimum quality to avoid mismatches.
-        let best = search
+        let Some(best) = search
             .releases
-            .into_iter()
+            .iter()
             .max_by_key(|r| r.score)
-            .filter(|r| r.score >= 70);
-
-        Ok(best.map(|r| {
-            // Prefer the release GROUP's first-release-date (the original year)
-            // over this specific release's date, which may be a reissue/remaster.
-            let rg_year = r
-                .release_group
-                .as_ref()
-                .and_then(|g| g.first_release_date.as_deref())
-                .and_then(parse_year);
-            let year = rg_year.or_else(|| r.date.as_deref().and_then(parse_year));
-            ReleaseMatch {
-                mbid: r.id,
-                release_group: r.release_group.map(|g| g.id),
-                year,
-            }
+            .filter(|r| r.score >= 70)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ReleaseMatch {
+            mbid: best.id.clone(),
+            release_group: best.release_group.as_ref().map(|g| g.id.clone()),
+            year: original_year(best, &search.releases),
         }))
     }
 
@@ -1917,6 +1909,29 @@ struct AcoustIdReleaseGroup {
 // ---- Helper functions ----
 
 /// Reads the year from a MusicBrainz date (`2015`, `2015-11`, `2015-11-20`).
+/// The original year of a matched release. Prefers the release group's
+/// `first-release-date` – but the search endpoint doesn't return that field,
+/// and the best-scored hit is often a reissue/remaster (all editions score the
+/// same), so otherwise the earliest date among the hits of the same release
+/// group is taken.
+fn original_year(best: &MbRelease, releases: &[MbRelease]) -> Option<i32> {
+    let group = best.release_group.as_ref();
+    if let Some(y) = group
+        .and_then(|g| g.first_release_date.as_deref())
+        .and_then(parse_year)
+    {
+        return Some(y);
+    }
+    let Some(gid) = group.map(|g| g.id.as_str()) else {
+        return best.date.as_deref().and_then(parse_year);
+    };
+    releases
+        .iter()
+        .filter(|r| r.release_group.as_ref().is_some_and(|g| g.id == gid))
+        .filter_map(|r| r.date.as_deref().and_then(parse_year))
+        .min()
+}
+
 fn parse_year(date: &str) -> Option<i32> {
     date.get(0..4).and_then(|y| y.parse().ok())
 }
@@ -1964,6 +1979,43 @@ mod tests {
         loader.write(bytes).unwrap();
         loader.close().unwrap();
         loader.pixbuf().unwrap()
+    }
+
+    /// Shape of a real `/ws/2/release?query=` answer (Daft Punk – Discovery):
+    /// all editions score 100, the release group carries no
+    /// `first-release-date`, and the top hit is a reissue.
+    #[test]
+    fn original_year_is_the_earliest_edition_of_the_group() {
+        let search: MbSearch = serde_json::from_str(
+            r#"{"releases": [
+                {"id": "a", "score": 100, "date": "2022",
+                 "release-group": {"id": "rg1"}},
+                {"id": "b", "score": 100, "date": "2001-03-12",
+                 "release-group": {"id": "rg1"}},
+                {"id": "c", "score": 100, "date": "2024-10-08",
+                 "release-group": {"id": "rg1"}},
+                {"id": "d", "score": 90, "date": "1990",
+                 "release-group": {"id": "other"}}
+            ]}"#,
+        )
+        .unwrap();
+        let best = &search.releases[0];
+        assert_eq!(original_year(best, &search.releases), Some(2001));
+    }
+
+    #[test]
+    fn original_year_prefers_the_group_first_release_date() {
+        let search: MbSearch = serde_json::from_str(
+            r#"{"releases": [
+                {"id": "a", "score": 100, "date": "2014",
+                 "release-group": {"id": "rg1", "first-release-date": "2001-02-26"}}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            original_year(&search.releases[0], &search.releases),
+            Some(2001)
+        );
     }
 
     #[test]

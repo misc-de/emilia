@@ -376,7 +376,7 @@ fn fetch_artists_parallel(
             if cancel.load(Ordering::Relaxed) || give_up.load(Ordering::Relaxed) {
                 break;
             }
-            let Some(name) = jobs.lock().unwrap().pop_front() else {
+            let Some(name) = jobs.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
                 break;
             };
             // In the "exactly as tagged" credit mode an entry can be a whole
