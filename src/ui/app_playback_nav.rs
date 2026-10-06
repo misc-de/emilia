@@ -7,9 +7,10 @@ use std::path::PathBuf;
 
 use relm4::gtk;
 
+use crate::core::queue::{self, Prev};
 use crate::core::remote::{self, Backend};
 use crate::ui::app::{ActiveSource, App, Msg, RemoteTrack};
-use crate::ui::app_playback::{PREV_RESTART_MS, TransportMsg, chapter_target};
+use crate::ui::app_playback::{TransportMsg, chapter_target};
 use crate::ui::fs_row::FsEntry;
 
 impl App {
@@ -293,22 +294,15 @@ impl App {
         self.play_stream(list[next].id);
     }
 
-    /// Rebuilds the shuffle order (Fisher-Yates), with the currently
-    /// running track in first place. This way every track of the queue plays
-    /// exactly once, in random order.
+    /// Rebuilds the shuffle order with the currently running track in first
+    /// place. This way every track of the queue plays exactly once, in random
+    /// order.
     pub(crate) fn rebuild_shuffle_order(&mut self) {
         let len = self.transport.queue.len();
-        let mut order: Vec<usize> = (0..len).collect();
-        for i in (1..len).rev() {
-            let j = gtk::glib::random_int_range(0, (i + 1) as i32) as usize;
-            order.swap(i, j);
-        }
-        // Move the running track to the front so it isn't skipped immediately.
-        if let Some(p) = order.iter().position(|&x| x == self.transport.queue_pos) {
-            order.swap(0, p);
-        }
-        self.transport.shuffle_order = order;
-        self.transport.shuffle_idx = 0;
+        let pos = self.transport.queue_pos;
+        self.transport
+            .shuffle_order
+            .rebuild(len, pos, &mut glib_rand);
     }
 
     /// [`Self::play_current`] for a move **within** the running queue: the piece
@@ -332,13 +326,8 @@ impl App {
         // consumed as it starts playing.
         if !self.transport.user_queue.is_empty() {
             let path = self.transport.user_queue.remove(0);
-            let at = if self.transport.queue.is_empty() {
-                0
-            } else {
-                (self.transport.queue_pos + 1).min(self.transport.queue.len())
-            };
-            self.transport.queue.insert(at, path);
-            self.transport.queue_pos = at;
+            let pos = self.transport.queue_pos;
+            self.transport.queue_pos = queue::splice_after(&mut self.transport.queue, pos, path);
             // The context length changed → let the shuffle order rebuild.
             self.transport.shuffle_order.clear();
             self.play_current_fresh();
@@ -350,44 +339,18 @@ impl App {
         if self.transport.queue.is_empty() {
             return;
         }
-        let len = self.transport.queue.len();
-        let next = if self.transport.shuffle {
-            // Reshuffle if the queue has changed or the running
-            // track is no longer the expected one of the order (e.g. after
-            // manual selection) – then keep shuffling from the current track.
-            if self.transport.shuffle_order.len() != len
-                || self.transport.shuffle_order.get(self.transport.shuffle_idx)
-                    != Some(&self.transport.queue_pos)
-            {
-                self.rebuild_shuffle_order();
-            }
-            if self.transport.shuffle_idx + 1 < self.transport.shuffle_order.len() {
-                self.transport.shuffle_idx += 1;
-                Some(self.transport.shuffle_order[self.transport.shuffle_idx])
-            } else {
-                None
-            }
-        } else if self.transport.queue_pos + 1 < len {
-            Some(self.transport.queue_pos + 1)
-        } else {
-            None
-        };
-        match next {
+        // Repeat or an explicit "next" at the end starts over from the top.
+        let t = &mut self.transport;
+        let shuffle = t.shuffle.then_some(&mut t.shuffle_order);
+        match queue::next_index(
+            t.queue.len(),
+            t.queue_pos,
+            shuffle,
+            t.repeat || wrap,
+            &mut glib_rand,
+        ) {
             Some(n) => {
                 self.transport.queue_pos = n;
-                self.play_current_fresh();
-            }
-            None if (self.transport.repeat || wrap) && !self.transport.queue.is_empty() => {
-                // Repeat or an explicit "next" at the end: start over from the
-                // top (single track likewise, since the queue then has only one
-                // entry). Reshuffle when shuffling.
-                if self.transport.shuffle {
-                    self.rebuild_shuffle_order();
-                    self.transport.queue_pos =
-                        self.transport.shuffle_order.first().copied().unwrap_or(0);
-                } else {
-                    self.transport.queue_pos = 0;
-                }
                 self.play_current_fresh();
             }
             None => {
@@ -405,7 +368,6 @@ impl App {
                 self.mini.position_ms = 0;
                 self.mini.track_duration_ms = 0;
                 self.transport.shuffle_order.clear();
-                self.transport.shuffle_idx = 0;
                 self.transport.skip_count = 0;
                 *self.transport.close_resume.borrow_mut() = None;
                 self.mpris.set_stopped();
@@ -415,85 +377,74 @@ impl App {
         }
     }
 
-    /// Back button, in the order the presses are meant:
-    ///
-    /// 1. Playback ran out and stopped → play that track again.
-    /// 2. The running track is past [`PREV_RESTART_MS`] → send it back to its
-    ///    start. A second press then falls through to the step below, which is
-    ///    how "back, back" reaches the previous track.
-    /// 3. Step to the **previous track** of the running queue.
-    /// 4. At the very start of the queue (or a lone single-song context):
-    ///    restore a context that a single-song tap displaced, then the most
-    ///    recently played track, and finally — with nothing before it — a
-    ///    restart of the current track.
+    /// Back button: carries out what [`queue::prev_action`] decides (see there
+    /// for the order the presses are meant in).
     pub(crate) fn play_prev(&mut self) {
-        // Playback ran out and stopped: "previous" means "that one again". The
-        // track just heard is the one the press is about — stepping back into
-        // the album it interrupted would be a jump the user did not ask for.
-        if self.transport.playing_path.is_none()
-            && let Some(path) = self.transport.last_finished.clone()
-        {
-            match self.transport.queue.iter().position(|p| *p == path) {
-                Some(pos) => self.transport.queue_pos = pos,
-                None => {
-                    self.transport.queue = vec![path];
-                    self.transport.queue_pos = 0;
-                }
+        let t = &self.transport;
+        let action = queue::prev_action(&queue::PrevInput {
+            queue: &t.queue,
+            pos: t.queue_pos,
+            playing: t.playing_path.is_some(),
+            // The position shown in the bar, so a source that is still loading
+            // (a YouTube stream resolves in a worker) counts as being at its
+            // start and steps back rather than restarting nothing.
+            position_ms: self.mini.position_ms,
+            last_finished: t.last_finished.as_ref(),
+            has_displaced_context: !t.nav_stack.is_empty(),
+            last_history: t.play_history.last(),
+        });
+        match action {
+            Prev::Nothing => return,
+            // Playback ran out and stopped: "previous" means "that one again".
+            // The track just heard is the one the press is about — stepping
+            // back into the album it interrupted would be a jump the user did
+            // not ask for.
+            Prev::ReplayFinished(at) => {
+                let path = self.transport.last_finished.clone();
+                self.jump_to(at, path);
             }
-            self.transport.skip_history_push = true;
-            self.play_current_fresh();
-            return;
+            Prev::Restart => {}
+            Prev::Step(n) => self.transport.queue_pos = n,
+            // Restore a list that a quick single-song tap displaced, keeping the
+            // previously playing song **and** its playlist (resume from the DB).
+            Prev::RestoreContext => {
+                if let Some((q, pos)) = self.transport.nav_stack.pop() {
+                    self.transport.skip_history_push = true;
+                    self.transport.queue_pos = pos.min(q.len().saturating_sub(1));
+                    self.transport.queue = q;
+                }
+                self.play_current();
+                self.refresh_queue_icons();
+                return;
+            }
+            // The most recently played track (crosses contexts).
+            Prev::History(at) => {
+                let path = self.transport.play_history.pop();
+                self.jump_to(at, path);
+                self.transport.skip_history_push = true;
+                self.play_current();
+                return;
+            }
         }
+        self.transport.skip_history_push = true;
+        self.play_current_fresh();
+    }
 
-        // Past the first few seconds, "previous" first sends the running track
-        // back to its start; pressing again gets to the one before it. The
-        // position used is the one shown in the bar, so a source that is still
-        // loading (a YouTube stream resolves in a worker) counts as being at its
-        // start and steps back rather than restarting nothing.
-        if self.transport.playing_path.is_some() && self.mini.position_ms > PREV_RESTART_MS {
-            self.transport.skip_history_push = true;
-            self.play_current_fresh();
-            return;
-        }
-
-        // One track back within the running queue (the common "list" case).
-        if self.transport.queue_pos > 0 && self.transport.queue.len() > 1 {
-            self.transport.skip_history_push = true;
-            self.transport.queue_pos -= 1;
-            self.play_current_fresh();
-            return;
-        }
-
-        // At the start of a single-song context: restore a list that a quick
-        // single-song tap displaced, keeping the previously playing song **and**
-        // its playlist (resume from the DB).
-        if let Some((q, pos)) = self.transport.nav_stack.pop() {
-            self.transport.skip_history_push = true;
-            self.transport.queue = q;
-            self.transport.queue_pos = pos.min(self.transport.queue.len().saturating_sub(1));
-            self.play_current();
-            self.refresh_queue_icons();
-            return;
-        }
-
-        // Else jump to the most recently played track (crosses contexts):
-        // preferably at its queue position, otherwise by path directly.
-        if let Some(prev) = self.transport.play_history.pop() {
-            self.transport.skip_history_push = true;
-            if let Some(pos) = self.transport.queue.iter().position(|p| *p == prev) {
-                self.transport.queue_pos = pos;
-            } else {
-                self.transport.queue = vec![prev];
+    /// Points the queue at `path`: at index `at` when it is in the queue,
+    /// otherwise as a queue of its own.
+    fn jump_to(&mut self, at: Option<usize>, path: Option<PathBuf>) {
+        match (at, path) {
+            (Some(pos), _) => self.transport.queue_pos = pos,
+            (None, Some(path)) => {
+                self.transport.queue = vec![path];
                 self.transport.queue_pos = 0;
             }
-            self.play_current();
-            return;
-        }
-
-        // Nothing before this: restart the current track from the beginning.
-        if self.transport.playing_path.is_some() {
-            self.transport.skip_history_push = true;
-            self.play_current_fresh();
+            (None, None) => {}
         }
     }
+}
+
+/// Uniform random index in `0..n` for the shuffle order.
+fn glib_rand(n: usize) -> usize {
+    gtk::glib::random_int_range(0, n as i32) as usize
 }

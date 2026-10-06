@@ -21,6 +21,7 @@ pub mod player;
 pub mod podcast;
 pub mod pool;
 pub mod proc;
+pub mod queue;
 pub mod recorder;
 pub mod remote;
 pub mod scanner;

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use relm4::{ComponentController, ComponentSender, adw};
 
+use crate::core::queue;
 use crate::core::remote::{self, Backend};
 use crate::core::scanner;
 use crate::ui::app::{App, Msg};
@@ -13,12 +14,7 @@ use crate::ui::app_favorites::EntryMarks;
 use crate::ui::app_lyrics::LyricsMsg;
 use crate::ui::play_mark::{PlaybackSink, PlaybackState};
 
-/// How far into a track "previous" still steps **back** instead of restarting
-/// it. Past this the first press sends the running track to its start and only
-/// a second one steps to the track before it — what music players have taught
-/// everyone to expect, while the first seconds stay usable for paging back
-/// through a list quickly.
-pub(crate) const PREV_RESTART_MS: i64 = 3_000;
+pub(crate) use crate::core::queue::PREV_RESTART_MS;
 
 /// Settings key: path of the track the player currently has loaded. Together
 /// with [`CURRENT_POS_KEY`] it forms the playback state that survives a
@@ -370,10 +366,11 @@ impl App {
             && !pq.is_empty()
             && pq != self.transport.queue
         {
-            self.transport.nav_stack.push((pq, pp));
-            if self.transport.nav_stack.len() > 50 {
-                self.transport.nav_stack.remove(0);
-            }
+            queue::push_capped(
+                &mut self.transport.nav_stack,
+                (pq, pp),
+                queue::NAV_STACK_CAP,
+            );
         }
         // Maintain history: remember the previously running track (for "previous song").
         // When jumping back from the history itself, don't add it again.
@@ -382,10 +379,7 @@ impl App {
         } else if let Some(prev) = self.transport.playing_path.clone()
             && prev != path
         {
-            self.transport.play_history.push(prev);
-            if self.transport.play_history.len() > 200 {
-                self.transport.play_history.remove(0);
-            }
+            queue::push_capped(&mut self.transport.play_history, prev, queue::HISTORY_CAP);
         }
         let path_str = path.to_string_lossy().to_string();
         // YouTube tracks resolve asynchronously (yt-dlp -g takes seconds). A

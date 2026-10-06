@@ -241,10 +241,8 @@ pub(crate) struct TransportState {
     /// (spliced in by `play_next`) and are consumed as they play.
     pub(crate) user_queue: Vec<PathBuf>,
     pub(crate) shuffle: bool,
-    /// Random order of the queue indices (Fisher-Yates) for shuffle.
-    pub(crate) shuffle_order: Vec<usize>,
-    /// Position within `shuffle_order`.
-    pub(crate) shuffle_idx: usize,
+    /// Random order of the queue indices for shuffle, and how far it has got.
+    pub(crate) shuffle_order: crate::core::queue::ShuffleOrder,
     /// Repeat: at the end of the queue / single track, start over.
     pub(crate) repeat: bool,
     /// Recently played tracks (for stepping back across playback contexts).

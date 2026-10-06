@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::core::queue;
 use crate::ui::app::{App, Msg};
 use crate::ui::app_lyrics::LyricsMsg;
 
@@ -96,10 +97,7 @@ impl App {
         if let Some(prev) = self.transport.playing_path.take() {
             let _ = self.library.set_resume_path(&prev.to_string_lossy(), 0);
             if self.transport.queue.get(next) != Some(&prev) {
-                self.transport.play_history.push(prev);
-                if self.transport.play_history.len() > 200 {
-                    self.transport.play_history.remove(0);
-                }
+                queue::push_capped(&mut self.transport.play_history, prev, queue::HISTORY_CAP);
             }
         }
         *self.transport.close_resume.borrow_mut() = None;
