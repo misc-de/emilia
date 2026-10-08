@@ -504,15 +504,14 @@ impl Library {
     fn albums_overview_all(&self) -> Result<Vec<AlbumMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(t.artist, ''), t.album, m.mbid, m.cover_path, m.year,
-                    COALESCE(m.status, 'pending'), COUNT(*), SUM(t.duration_ms), MIN(t.year)
+                    COALESCE(m.status, 'pending'), t.title, t.duration_ms, t.year
              FROM track t
              LEFT JOIN album_meta m
                     ON m.artist = COALESCE(t.artist, '') AND m.album = t.album
              WHERE t.album IS NOT NULL AND t.album <> ''
-             GROUP BY COALESCE(t.artist, ''), t.album
-             ORDER BY t.album COLLATE NOCASE, t.artist COLLATE NOCASE",
+             ORDER BY t.album, COALESCE(t.artist, ''), t.path",
         )?;
-        let raw = stmt
+        let rows = stmt
             .query_map([], |r| {
                 Ok((
                     r.get::<_, Option<String>>(0)?.unwrap_or_default(),
@@ -521,12 +520,45 @@ impl Library {
                     r.get::<_, Option<String>>(3)?,
                     r.get::<_, Option<i32>>(4)?,
                     r.get::<_, String>(5)?,
-                    r.get::<_, i64>(6)?,
+                    r.get::<_, String>(6)?,
                     r.get::<_, Option<i64>>(7)?,
                     r.get::<_, Option<i32>>(8)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        // Per (artist, album): song count + runtime, where further copies of a
+        // song lying several times on disk count once (see
+        // [`crate::core::dupes`]), like the album page lists them.
+        type Group = (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i32>,
+            String,
+            i64,
+            Option<i64>,
+            Option<i32>,
+        );
+        let mut raw: Vec<Group> = Vec::new();
+        let mut songs = crate::core::dupes::SongSet::default();
+        for (artist, album, mbid, cover, year, status, title, duration, tag_year) in rows {
+            let same = raw.last().is_some_and(|g| g.0 == artist && g.1 == album);
+            if !same {
+                songs = crate::core::dupes::SongSet::default();
+                raw.push((artist, album, mbid, cover, year, status, 0, None, None));
+            }
+            let g = raw.last_mut().expect("group pushed above");
+            if let Some(ty) = tag_year {
+                g.8 = Some(g.8.map_or(ty, |e: i32| e.min(ty)));
+            }
+            if songs.is_new(&title, duration) {
+                g.6 += 1;
+                if let Some(ms) = duration {
+                    g.7 = Some(g.7.unwrap_or(0) + ms);
+                }
+            }
+        }
 
         // Same-named albums form one card when their artists share a primary
         // artist ("feat." variants) or an album folder (soundtracks, samplers)

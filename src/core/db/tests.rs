@@ -705,8 +705,10 @@ fn albums_overview_groups_same_title_by_folder_or_artist() {
         ("/m/Live/a2.mp3", "Artist A"),
         ("/m/Live/b1.mp3", "Artist B"),
     ] {
-        lib.upsert_track(&track(path, Some(artist), Some("Live")))
-            .unwrap();
+        // Distinct titles: same-titled tracks would count as one song.
+        let mut t = track(path, Some(artist), Some("Live"));
+        t.title = path.to_string();
+        lib.upsert_track(&t).unwrap();
     }
     // Same title by two unrelated artists in their own folders → TWO cards.
     for (path, artist) in [
@@ -714,8 +716,9 @@ fn albums_overview_groups_same_title_by_folder_or_artist() {
         ("/m/Queen/Greatest Hits/2.mp3", "Queen & David Bowie"),
         ("/m/Gorillaz/Greatest Hits/1.mp3", "Gorillaz"),
     ] {
-        lib.upsert_track(&track(path, Some(artist), Some("Greatest Hits")))
-            .unwrap();
+        let mut t = track(path, Some(artist), Some("Greatest Hits"));
+        t.title = path.to_string();
+        lib.upsert_track(&t).unwrap();
     }
     let overview = lib.albums_overview_with(None).unwrap();
     let live: Vec<_> = overview.iter().filter(|a| a.album == "Live").collect();
@@ -1669,4 +1672,30 @@ fn source_exists_tracks_added_sources() {
         .unwrap();
     assert!(lib.source_exists(id).unwrap());
     assert!(!lib.source_exists(id + 1).unwrap());
+}
+
+#[test]
+fn albums_overview_counts_physical_copies_once() {
+    let lib = Library::open_in_memory().unwrap();
+    // The single's title track also lies in the album folder (same song,
+    // slightly different rip); a remix with the same title stays separate.
+    for (path, title, ms) in [
+        ("/m/Band/Album/01.mp3", "Song", 200_000),
+        ("/m/Band/Album/02.mp3", "Other", 180_000),
+        ("/m/Band/Single/01.mp3", "song", 201_000),
+        ("/m/Band/Single/02.mp3", "Song", 400_000),
+    ] {
+        let mut t = track(path, Some("Band"), Some("Album"));
+        t.title = title.to_string();
+        t.duration_ms = Some(ms);
+        lib.upsert_track(&t).unwrap();
+    }
+    let card = lib
+        .albums_overview_with(None)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.album == "Album")
+        .unwrap();
+    assert_eq!(card.track_count, 3);
+    assert_eq!(card.total_duration_ms, Some(780_000));
 }

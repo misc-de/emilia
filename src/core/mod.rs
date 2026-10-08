@@ -4,6 +4,7 @@ pub mod category;
 pub mod concert;
 pub mod cover;
 pub mod db;
+pub mod dupes;
 pub mod fingerprint;
 pub mod gdrive;
 pub mod http;

@@ -451,6 +451,8 @@ impl App {
                         .is_some_and(|a| crate::core::artist::primary_credit_matches(a, &target))
                 });
             // Album only from two own tracks up; otherwise they count as singles.
+            // A song lying several times on disk is listed once.
+            let own_tracks = crate::core::dupes::dedup_tracks(own_tracks);
             if own_tracks.len() >= 2 {
                 let display_artist = most_common_artist(&own_tracks);
                 albums.push((album, display_artist, own_tracks));
@@ -459,6 +461,7 @@ impl App {
             }
             singles.extend(guest_tracks);
         }
+        let singles = crate::core::dupes::dedup_tracks(singles);
         (albums, singles)
     }
 
@@ -519,7 +522,8 @@ impl App {
 
     /// Tracks that belong to "this album by this artist": all library
     /// tracks with the album name in whose (split) artist credit `name`
-    /// appears. Sorted by file structure (CD folder → disc → track number).
+    /// appears. Sorted by file structure (CD folder → disc → track number);
+    /// further copies of a song (see [`crate::core::dupes`]) are dropped.
     pub(crate) fn album_tracks_for_artist(&self, name: &str, album: &str) -> Vec<Track> {
         let target = crate::core::artist::norm_key(name);
         let mut tracks: Vec<Track> = self
@@ -536,20 +540,21 @@ impl App {
             })
             .collect();
         sort_by_structure(&mut tracks);
-        tracks
+        crate::core::dupes::dedup_tracks(tracks)
     }
 
     /// The tracks of an album **card** of the overviews: the same-named tracks
     /// grouped with `artist` — across "feat." credits and the artists of a
     /// soundtrack, but not a foreign artist's album of the same title (see
-    /// [`crate::core::album_group`]). Sorted by disc/track number, then path.
+    /// [`crate::core::album_group`]). Sorted by disc/track number, then path;
+    /// further copies of a song are dropped.
     pub(crate) fn album_card_tracks(&self, artist: &str, album: &str) -> Vec<Track> {
         let mut tracks: Vec<Track> = self
             .library
             .album_card_tracks(artist, album)
             .unwrap_or_default();
         sort_by_structure(&mut tracks);
-        tracks
+        crate::core::dupes::dedup_tracks(tracks)
     }
 
     /// Short tap on an artist: opens a subpage that first lists
