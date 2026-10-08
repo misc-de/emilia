@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.50" date="2026-10-08">
+      <description>
+        <p>Lists sorted by name get a letter carousel: drag along the right edge and, instead of scrolling row by row, a carousel of initials (0–9, A … Z) appears and the list jumps straight to the chosen letter. A song lying several times in your music folder is listed and played only once on album, single and artist pages, and the song counts and runtimes no longer include the copies. Switching between Bluetooth devices, for example from the car back to the headphones, now pauses the track at its position instead of ending it, and an audio output that disappears for a while no longer skips to the next song.</p>
+        <p xml:lang="de">Nach Namen sortierte Listen bekommen ein Buchstaben-Karussell: Zieht man am rechten Rand entlang, erscheint statt des zeilenweisen Scrollens ein Karussell der Anfangsbuchstaben (0–9, A … Z), und die Liste springt direkt zum gewählten Buchstaben. Ein Lied, das mehrfach im Musikordner liegt, wird auf Album-, Single- und Künstlerseiten nur noch einmal aufgeführt und abgespielt, und Titelzahl und Laufzeit zählen die Kopien nicht mehr mit. Ein Wechsel zwischen Bluetooth-Geräten, etwa vom Auto zurück zum Kopfhörer, pausiert den Titel an seiner Stelle, statt ihn zu beenden, und eine kurzzeitig verschwundene Tonausgabe springt nicht mehr zum nächsten Lied.</p>
+      </description>
+    </release>
     <release version="0.8.49" date="2026-10-06">
       <description>
         <p>The album page has a header with a large cover, the album's facts and buttons to play the whole album or shuffle it; the songs below it no longer repeat the cover in every row. Albums that exist in several releases, such as a UK and a US single with the same title, are listed release by release instead of mixed together, and playback follows exactly the order shown. Podcasts now check for new episodes at startup, so "Newest" no longer stays empty unless you press refresh. Fixes: a jump mark tapped on a downloaded YouTube video starts at that mark, a gapless or crossfaded change of track updates the lock screen position and the chapter, and the settings no longer wait on a locked or missing keyring.</p>
