@@ -1420,6 +1420,12 @@ impl App {
                  image.emilia-offline { color: white; background-color: @error_color; border-radius: 999px; padding: 2px; margin: 2px; }\
                  box.emilia-loading { background-color: alpha(@window_bg_color, 0.97); border-radius: 18px; padding: 22px 30px; }\
                  label.emilia-list-section { background-color: @window_bg_color; padding: 10px 13px 4px 13px; }\
+                 /* Edge fast-scroll letter carousel (`fast_scroll.rs`). */\
+                 box.emilia-fastscroll { background-color: alpha(@window_bg_color, 0.96); border-radius: 22px; padding: 8px 4px; box-shadow: 0 2px 12px alpha(black, 0.35); }\
+                 box.emilia-fastscroll label { min-width: 52px; }\
+                 label.emilia-fs-current { font-size: 26px; font-weight: 800; min-height: 52px; border-radius: 999px; color: @accent_fg_color; background-color: @accent_bg_color; }\
+                 label.emilia-fs-near { font-size: 18px; font-weight: bold; opacity: 0.75; }\
+                 label.emilia-fs-far { font-size: 13px; opacity: 0.45; }\
                  /* Runtimes and other figures (`numeric` + `dim-label` is this \
                     app's spelling for a duration label) keep the plain \
                     foreground colour instead of Adwaita's 55 % dimming: at that \

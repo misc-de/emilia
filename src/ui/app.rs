@@ -1989,6 +1989,8 @@ impl Component for App {
             &model,
             &sender,
         );
+        // Edge drag → letter carousel on the alphabetically grouped lists.
+        crate::ui::fast_scroll::install_all(widgets.content_overlay.upcast_ref());
         model.finish_init(
             &widgets,
             &root,

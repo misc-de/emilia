@@ -430,6 +430,9 @@ impl CardList {
         view.set_valign(gtk::Align::Start);
         view.add_css_class("emilia-card-list");
         view.connect_activate(move |_, position| on_activate(position as usize));
+        // Only a few rows are realised, so the edge fast-scroller reads the
+        // headings from here instead of from the widget tree.
+        crate::ui::fast_scroll::register_list(&view, headers.clone());
 
         Self {
             view,

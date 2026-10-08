@@ -52,6 +52,7 @@ pub mod card_list;
 pub mod cloud_page;
 pub mod enrich;
 pub mod entry_row;
+pub mod fast_scroll;
 pub mod fs_row;
 pub mod gdrive_page;
 pub mod play_mark;

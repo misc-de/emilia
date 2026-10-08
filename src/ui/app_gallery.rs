@@ -197,6 +197,8 @@ pub(crate) fn section_header_label(text: &str) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
     label.set_xalign(0.0);
     label.add_css_class("heading");
+    // Lets the edge fast-scroller find the headings (`crate::ui::fast_scroll`).
+    label.add_css_class(crate::ui::fast_scroll::HEADING_CLASS);
     label.set_margin_top(8);
     label.set_margin_bottom(2);
     label.set_margin_start(4);
