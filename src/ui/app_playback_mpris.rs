@@ -124,6 +124,19 @@ impl App {
             }
             M::Next => self.skip_next(),
             M::Prev => self.skip_prev(),
+            // Car head units send Stop over Bluetooth (AVRCP) when they
+            // disconnect, and that must not throw away the track: anything
+            // with a position just pauses, so it continues on the next output
+            // (headset, speaker) with Play. Only a station or live stream,
+            // which has nothing to keep, is torn down.
+            M::Stop
+                if self.streaming.playing_stream.is_none()
+                    && self.youtube.playing_live.is_none() =>
+            {
+                if self.mini.playing {
+                    self.on_toggle_play();
+                }
+            }
             M::Stop => {
                 self.save_resume();
                 self.finalize_play_session(false);

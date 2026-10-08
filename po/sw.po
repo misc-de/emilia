@@ -3495,6 +3495,10 @@ msgstr "Andika juu"
 msgid "Could not load playlist"
 msgstr "Imeshindwa kupakia orodha ya kucheza"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "Kifaa cha sauti kimepotea – uchezaji umesitishwa"
+
 #~ msgid "Updating feed …"
 #~ msgstr "Inasasisha mlisho …"
 

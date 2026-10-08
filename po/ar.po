@@ -3529,6 +3529,10 @@ msgstr "استبدال"
 msgid "Could not load playlist"
 msgstr "تعذّر تحميل قائمة التشغيل"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "فُقد مخرج الصوت – تم إيقاف التشغيل مؤقتًا"
+
 #~ msgid "Updating feed …"
 #~ msgstr "جارٍ تحديث الخلاصة …"
 

@@ -752,12 +752,17 @@ impl Player {
     /// title tag (ICY "now playing" for stations), `on_stream_start` when the
     /// active deck begins a **gapless** continuation (so the app advances its
     /// state to match), `on_toc` with the chapters a file carries itself (m4b /
-    /// ID3 `CHAP` / Matroska — an audiobook in one file). Runs on the main loop.
-    pub fn connect_bus_events<E, T, R, A, S, C>(
+    /// ID3 `CHAP` / Matroska — an audiobook in one file), `on_output_lost` when
+    /// the audio output stayed gone and the deck was parked paused at its
+    /// position (a later [`Player::resume`] continues there). Runs on the main
+    /// loop.
+    #[allow(clippy::too_many_arguments)]
+    pub fn connect_bus_events<E, T, R, L, A, S, C>(
         &self,
         on_eos: E,
         on_title: T,
         on_error: R,
+        on_output_lost: L,
         on_ready: A,
         on_stream_start: S,
         on_toc: C,
@@ -765,6 +770,7 @@ impl Player {
         E: Fn() + 'static,
         T: Fn(String) + 'static,
         R: Fn() + 'static,
+        L: Fn() + 'static,
         A: Fn() + 'static,
         S: Fn() + 'static,
         C: Fn(Vec<(i64, String)>) + 'static,
@@ -772,6 +778,7 @@ impl Player {
         let on_eos = Rc::new(on_eos);
         let on_title = Rc::new(on_title);
         let on_error = Rc::new(on_error);
+        let on_output_lost = Rc::new(on_output_lost);
         let on_ready = Rc::new(on_ready);
         let on_stream_start = Rc::new(on_stream_start);
         let on_toc = Rc::new(on_toc);
@@ -809,6 +816,7 @@ impl Player {
             let on_eos = on_eos.clone();
             let on_title = on_title.clone();
             let on_error = on_error.clone();
+            let on_output_lost = on_output_lost.clone();
             let on_ready = on_ready.clone();
             let on_stream_start = on_stream_start.clone();
             let on_toc = on_toc.clone();
@@ -942,10 +950,24 @@ impl Player {
                                 };
                                 *recovery.timer.borrow_mut() = Some(timer);
                             } else {
-                                tracing::error!("Audio output did not come back – giving up");
+                                // The track is fine, only the output is gone
+                                // (a Bluetooth device handing over that takes
+                                // longer than the retries): park the deck at
+                                // its position as paused instead of reporting
+                                // the track as broken, which would skip it.
+                                tracing::warn!("Audio output did not come back – pausing");
                                 recovery.attempts.set(0);
+                                let pos = bin
+                                    .query_position::<gst::ClockTime>()
+                                    .map(|t| t.mseconds() as i64)
+                                    .filter(|&ms| ms > 0)
+                                    .unwrap_or_else(|| last_pos.get());
                                 let _ = bin.set_state(gst::State::Null);
-                                on_error();
+                                wants_playing.set(false);
+                                fresh_load.set(true);
+                                pending_seek.set(pos.max(0));
+                                last_pos.set(pos.max(0));
+                                on_output_lost();
                             }
                         } else if is_active && !net_reconnect() {
                             on_error();
@@ -1089,6 +1111,20 @@ impl Player {
             reopen_deck(
                 &deck.bin,
                 self.net.resume_at.get(),
+                true,
+                &deck.fresh_load,
+                &deck.pending_seek_ms,
+            );
+            return true;
+        }
+        // Parked after the audio output stayed gone: start over on whatever
+        // output exists now, at the parked position.
+        let deck = self.cur_deck();
+        if deck.pending_seek_ms.get() > 0 && deck.bin.current_state() == gst::State::Null {
+            self.recovery.cancel();
+            reopen_deck(
+                &deck.bin,
+                deck.pending_seek_ms.get(),
                 true,
                 &deck.fresh_load,
                 &deck.pending_seek_ms,

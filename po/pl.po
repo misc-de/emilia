@@ -3503,6 +3503,10 @@ msgstr "Zastąp"
 msgid "Could not load playlist"
 msgstr "Nie udało się wczytać playlisty"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "Utracono wyjście audio – odtwarzanie wstrzymane"
+
 #~ msgid "Updating feed …"
 #~ msgstr "Aktualizacja kanału …"
 

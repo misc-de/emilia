@@ -3491,6 +3491,10 @@ msgstr "Overschrijven"
 msgid "Could not load playlist"
 msgstr "Kon afspeellijst niet laden"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "Audio-uitvoer verloren – afspelen gepauzeerd"
+
 #~ msgid "Updating feed …"
 #~ msgstr "Feed bijwerken …"
 

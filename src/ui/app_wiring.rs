@@ -45,6 +45,10 @@ impl App {
                 },
                 {
                     let sender = sender.clone();
+                    move || sender.input(Msg::Transport(TransportMsg::OutputLost))
+                },
+                {
+                    let sender = sender.clone();
                     move || sender.input(Msg::Transport(TransportMsg::PlaybackReady))
                 },
                 {

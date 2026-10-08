@@ -790,6 +790,10 @@ pub(crate) enum TransportMsg {
     /// The current track failed to play (missing file/mount, unreachable
     /// Nextcloud, …) → skip to the next entry.
     PlaybackError,
+    /// The audio output stayed gone (a Bluetooth handover that took too long)
+    /// and the player parked the track paused at its position → show it as
+    /// paused; Play continues there on whatever output exists then.
+    OutputLost,
     /// The freshly loaded pipeline prerolled (buffered enough to play) → clear
     /// the loading spinner of a slow source (Nextcloud/YouTube).
     PlaybackReady,
@@ -918,6 +922,20 @@ impl App {
                 if self.files.playing_remote || !self.transport.queue.is_empty() {
                     self.skip_current_track();
                 }
+            }
+            TransportMsg::OutputLost => {
+                if !self.mini.playing {
+                    return;
+                }
+                self.save_resume();
+                self.mini.playing = false;
+                self.mini.loading = false;
+                self.mpris.set_playing(false);
+                self.refresh_queue_icons();
+                self.sync_stream_page_icons();
+                self.refresh_tray_state();
+                self.publish_now_playing();
+                self.toast(&crate::i18n::gettext("Audio output lost – playback paused"));
             }
             TransportMsg::QueueClear => self.on_queue_clear(),
             TransportMsg::QueueMoveRange { from, len, to } => {

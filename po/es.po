@@ -3500,6 +3500,10 @@ msgstr "Sobrescribir"
 msgid "Could not load playlist"
 msgstr "No se pudo cargar la lista de reproducción"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "Salida de audio perdida – reproducción en pausa"
+
 #~ msgid "Updating feed …"
 #~ msgstr "Actualizando fuente …"
 

@@ -3218,3 +3218,7 @@ msgstr ""
 #: src/ui/yt_page_detail.rs:1207
 msgid "Could not load playlist"
 msgstr ""
+
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr ""

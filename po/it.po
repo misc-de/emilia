@@ -3501,6 +3501,10 @@ msgstr "Sovrascrivi"
 msgid "Could not load playlist"
 msgstr "Impossibile caricare la playlist"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "Uscita audio persa – riproduzione in pausa"
+
 #~ msgid "Updating feed …"
 #~ msgstr "Aggiornamento feed …"
 

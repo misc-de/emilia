@@ -3527,6 +3527,10 @@ msgstr "Remplacer"
 msgid "Could not load playlist"
 msgstr "Impossible de charger la liste de lecture"
 
+#: src/ui/app_playback.rs
+msgid "Audio output lost – playback paused"
+msgstr "Sortie audio perdue – lecture en pause"
+
 #~ msgid "Updating feed …"
 #~ msgstr "Mise à jour du flux …"
 
