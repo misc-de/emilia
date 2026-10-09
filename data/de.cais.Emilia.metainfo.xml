@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.51" date="2026-10-09">
+      <description>
+        <p>Artists and albums get "Play hits only" in their detail view: it plays just the songs from your library that are among the artist's most popular ones, for an artist sorted by popularity, for an album in track order. Under "Info", artists now show their fan count, best-known songs and how many of their hits you have; albums list their hits, and a single song shows its popularity and, if it is a hit, its place among the artist's most popular songs. The data comes from Deezer and is kept for a month. Artist photos are also picked more reliably when several artists share a name.</p>
+        <p xml:lang="de">Interpreten und Alben bekommen in der Detailansicht „Nur Hits abspielen“: Es spielt nur die Lieder aus der eigenen Bibliothek, die zu den beliebtesten des Interpreten gehören, beim Interpreten nach Beliebtheit sortiert, beim Album in der Reihenfolge der Titelliste. Unter „Infos“ zeigen Interpreten jetzt ihre Fan-Zahl, die bekanntesten Lieder und wie viele ihrer Hits in der Bibliothek liegen; Alben listen ihre Hits, und ein einzelnes Lied zeigt seine Beliebtheit und, falls es ein Hit ist, seinen Platz unter den beliebtesten Liedern des Interpreten. Die Daten kommen von Deezer und werden einen Monat lang gespeichert. Außerdem werden Künstlerfotos zuverlässiger gewählt, wenn sich mehrere Interpreten einen Namen teilen.</p>
+      </description>
+    </release>
     <release version="0.8.50" date="2026-10-08">
       <description>
         <p>Lists sorted by name get a letter carousel: drag along the right edge and, instead of scrolling row by row, a carousel of initials (0–9, A … Z) appears and the list jumps straight to the chosen letter. A song lying several times in your music folder is listed and played only once on album, single and artist pages, and the song counts and runtimes no longer include the copies. Switching between Bluetooth devices, for example from the car back to the headphones, now pauses the track at its position instead of ending it, and an audio output that disappears for a while no longer skips to the next song.</p>
