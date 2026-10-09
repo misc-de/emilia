@@ -35,6 +35,8 @@ build-commands:
     /app/share/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg
   - install -Dm644 data/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg
     /app/share/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-hits-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-hits-symbolic.svg
   - install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg
     /app/share/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg
   - install -Dm644 data/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg

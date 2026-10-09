@@ -441,6 +441,11 @@ pub(crate) struct NavState {
     /// The open context/detail dialog, so a cover/photo change can rebuild it in
     /// place (close + re-open) and the new image shows immediately.
     pub(crate) ctx_dialog: std::rc::Rc<std::cell::RefCell<Option<adw::Dialog>>>,
+    /// "Info" expander of the open detail dialog waiting for its popularity
+    /// lines (background lookup running).
+    pub(crate) pop_info: std::rc::Rc<std::cell::RefCell<Option<adw::ExpanderRow>>>,
+    /// "Play hits only" row of the open detail dialog (shows lookup status).
+    pub(crate) hits_row: std::rc::Rc<std::cell::RefCell<Option<adw::ActionRow>>>,
     /// Remembered scroll position of the most recently left overview page.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// Narrow/mobile layout active (driven by the width breakpoint). The source

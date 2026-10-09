@@ -1931,6 +1931,8 @@ impl Component for App {
                 context_target: None,
                 ctx_play: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 ctx_dialog: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                pop_info: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                hits_row: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 overview_scroll: std::rc::Rc::new(std::cell::RefCell::new(None)),
                 narrow: std::rc::Rc::new(std::cell::Cell::new(false)),
                 nav_hidden: std::rc::Rc::new(std::cell::Cell::new(false)),

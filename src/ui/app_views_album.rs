@@ -348,6 +348,14 @@ impl App {
     /// Also counts feat. variants of the same main artist – matching the
     /// grouped albums overview.
     pub(crate) fn album_files(&self, artist: &str, album: &str) -> Vec<PathBuf> {
+        self.album_tracks(artist, album)
+            .into_iter()
+            .map(|t| PathBuf::from(t.path))
+            .collect()
+    }
+
+    /// The tracks behind [`Self::album_files`] (with their tags).
+    pub(crate) fn album_tracks(&self, artist: &str, album: &str) -> Vec<Track> {
         let target = crate::core::artist::norm_key(artist);
         // Indexed album query instead of scanning the whole track table; the
         // main-artist refinement stays in Rust (split "feat." credits).
@@ -360,7 +368,6 @@ impl App {
                     .as_deref()
                     .is_some_and(|a| crate::core::artist::primary_credit_matches(a, &target))
             })
-            .map(|t| PathBuf::from(t.path))
             .collect()
     }
 
@@ -1324,10 +1331,15 @@ impl App {
     /// All tracks of an artist in playback order by release (see
     /// [`release_order`]).
     pub(crate) fn artist_files_ordered(&self, name: &str, newest_first: bool) -> Vec<PathBuf> {
-        release_order(self.artist_albums_dated(name), newest_first)
+        self.artist_tracks_ordered(name, newest_first)
             .into_iter()
             .map(|t| PathBuf::from(t.path))
             .collect()
+    }
+
+    /// The tracks behind [`Self::artist_files_ordered`] (with their tags).
+    pub(crate) fn artist_tracks_ordered(&self, name: &str, newest_first: bool) -> Vec<Track> {
+        release_order(self.artist_albums_dated(name), newest_first)
     }
 
     /// Year info of an artist's albums as `(label, value)`: with at least

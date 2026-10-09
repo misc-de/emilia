@@ -31,11 +31,13 @@ mod cache;
 mod client;
 mod enrich;
 mod matching;
+mod popularity;
 
 pub use cache::*;
 pub use client::*;
 pub use enrich::*;
 pub use matching::*;
+pub use popularity::*;
 
 /// MusicBrainz requires a meaningful User-Agent with contact info. The version
 /// is taken from the crate so it never drifts out of date.

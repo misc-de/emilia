@@ -119,7 +119,7 @@ fn loose_match(a: &str, b: &str) -> bool {
 /// Lowercases, drops everything but letters/digits and collapses whitespace.
 /// Apostrophes vanish without leaving a gap, so "Ain't" and "Aint" normalize
 /// to the same string.
-fn normalize_name(s: &str) -> String {
+pub(super) fn normalize_name(s: &str) -> String {
     s.to_lowercase()
         .chars()
         .filter(|c| !"'\u{2019}\u{02BC}`\u{00B4}".contains(*c))

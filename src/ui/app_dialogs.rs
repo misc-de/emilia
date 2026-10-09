@@ -68,6 +68,9 @@ impl App {
             row.set_subtitle_lines(2);
             expander.add_row(&row);
         }
+        // Success data (fans, hits, song popularity) – from the cache or
+        // filled in once the background lookup returns.
+        self.attach_popularity(entry, &expander);
         info_group.add(&expander);
         content.append(&info_group);
 
@@ -216,6 +219,24 @@ impl App {
         }
         action_group.add(&play_row);
         play_row.set_visible(!is_current);
+
+        // "Play hits only" for an artist/album: its most popular songs (by a
+        // music database) that are in the library. The dialog stays open
+        // until they are found, so the row can report a lookup / no hits.
+        *self.nav.hits_row.borrow_mut() = None;
+        if !matches!(play_kind, PlayKind::Other) && self.hits_target(entry).is_some() {
+            let hits_row = adw::ActionRow::builder()
+                .title(gettext("Play hits only"))
+                .activatable(true)
+                .build();
+            hits_row.add_prefix(&gtk::Image::from_icon_name("emilia-hits-symbolic"));
+            let sender = sender.clone();
+            hits_row.connect_activated(move |_| {
+                sender.input(Msg::Ctx(CtxMsg::CtxPlayHits));
+            });
+            action_group.add(&hits_row);
+            *self.nav.hits_row.borrow_mut() = Some(hits_row);
+        }
         // Remember this play row so it reappears after the track ends.
         *self.nav.ctx_play.borrow_mut() = current_path.map(|p| (play_row.clone(), p));
 
@@ -355,6 +376,8 @@ impl App {
         {
             let ctx_play = self.nav.ctx_play.clone();
             let ctx_dialog = self.nav.ctx_dialog.clone();
+            let pop_info = self.nav.pop_info.clone();
+            let hits_row = self.nav.hits_row.clone();
             let this = dialog.clone();
             dialog.connect_closed(move |_| {
                 // Only clear if it's still us: a rebuild replaces the dialog and
@@ -363,6 +386,8 @@ impl App {
                 if is_current {
                     *ctx_dialog.borrow_mut() = None;
                     *ctx_play.borrow_mut() = None;
+                    *pop_info.borrow_mut() = None;
+                    *hits_row.borrow_mut() = None;
                 }
             });
         }
@@ -556,6 +581,10 @@ pub(crate) enum CtxMsg {
     CtxPlayArtist {
         newest_first: bool,
     },
+    /// "Play hits only" for the open artist/album.
+    CtxPlayHits,
+    /// A popularity lookup (Deezer) returned. Boxed: large payload.
+    PopularityFetched(Box<crate::ui::app_popularity::PopFetch>),
     CtxAddQueue,
     CtxAddPlaylist,
     CtxEqualizer,
@@ -582,6 +611,8 @@ impl App {
             CtxMsg::CtxPlay => self.on_ctx_play(),
             CtxMsg::CtxPlayAlbum => self.on_ctx_play_album(),
             CtxMsg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
+            CtxMsg::CtxPlayHits => self.on_ctx_play_hits(),
+            CtxMsg::PopularityFetched(fetch) => self.on_popularity_fetched(*fetch),
             CtxMsg::CtxAddQueue => self.on_ctx_add_queue(),
             CtxMsg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, sender),
             CtxMsg::CtxEqualizer => self.open_eq_dialog(root, sender),

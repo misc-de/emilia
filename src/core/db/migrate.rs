@@ -454,6 +454,18 @@ impl Library {
                 cached_at INTEGER NOT NULL
             );
 
+            -- Popularity data of a music database (Deezer) as JSON, per artist
+            -- ('artist', norm key) or song ('track', artist key + title key).
+            -- `data` NULL records a lookup without a match, so it isn't repeated
+            -- on every detail view; stale rows are refetched (see db/popularity.rs).
+            CREATE TABLE IF NOT EXISTS popularity (
+                kind       TEXT NOT NULL,
+                key        TEXT NOT NULL,
+                data       TEXT,
+                fetched_at INTEGER NOT NULL,
+                PRIMARY KEY (kind, key)
+            );
+
             -- Per-track lyric preferences. Kept separate from `lyrics_cache` so a
             -- lyrics re-fetch (which replaces the cache row) does not reset them:
             -- whether the timed karaoke highlighting is off, and a manual timing

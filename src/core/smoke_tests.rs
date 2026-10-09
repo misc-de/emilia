@@ -66,6 +66,27 @@ fn smoke_deezer_artist_image() {
     assert!(img.len() > 1000, "artist image suspiciously small");
 }
 
+#[test]
+#[ignore]
+fn smoke_deezer_artist_popularity() {
+    let client = OnlineClient::new();
+    // "Queen" has tiny namesakes ranked above the band in the search.
+    let pop = client
+        .artist_popularity("Queen")
+        .expect("Deezer request failed")
+        .expect("no popularity for Queen");
+    assert!(pop.fans > 1_000_000, "picked a namesake: {} fans", pop.fans);
+    let hits = pop.hits();
+    assert!(
+        hits.iter().any(|h| h.key == "bohemian rhapsody"),
+        "Bohemian Rhapsody missing from the hits"
+    );
+    let rank = client
+        .track_rank("Queen", "Dragon Attack")
+        .expect("Deezer track search failed");
+    assert!(rank.is_some_and(|r| r > 0), "no rank for Dragon Attack");
+}
+
 // ---- LRCLIB ---------------------------------------------------------------
 
 #[test]

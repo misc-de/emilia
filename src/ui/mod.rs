@@ -22,6 +22,7 @@ pub mod app_playback_mpris;
 pub mod app_playback_nav;
 pub mod app_playback_persist;
 pub mod app_playlist;
+pub mod app_popularity;
 pub mod app_queue;
 pub mod app_rec_edit;
 pub mod app_record_btn;

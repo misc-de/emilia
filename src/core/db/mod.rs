@@ -20,6 +20,7 @@ mod memo;
 mod migrate;
 mod playlist;
 mod podcast;
+mod popularity;
 mod prune;
 mod search;
 mod settings;

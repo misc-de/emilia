@@ -44,7 +44,7 @@ impl OnlineClient {
     /// GET with defensive retry + backoff (transient transport errors, `5xx`,
     /// and rate limits honouring `Retry-After`); `404` yields `Ok(None)`. See
     /// [`crate::core::net::get_with_retry`]. Always sets our User-Agent.
-    fn call_get(&self, url: &str) -> Result<Option<ureq::Response>> {
+    pub(super) fn call_get(&self, url: &str) -> Result<Option<ureq::Response>> {
         // Log only the part before '?' – the query string can carry an API key
         // (fanart `api_key`, AcoustID `client_key`).
         let safe_url = url.split('?').next().unwrap_or(url);
@@ -177,15 +177,7 @@ impl OnlineClient {
         if crate::core::placeholder::is_placeholder(name) {
             return Ok(None);
         }
-        let url = format!(
-            "https://api.deezer.com/search/artist?q={}&limit=1",
-            percent_encode(name)
-        );
-        let search: DzSearch = match self.call_get(&url)? {
-            Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
-            None => return Ok(None),
-        };
-        let Some(artist) = search.data.into_iter().next() else {
+        let Some(artist) = self.find_deezer_artist(name, false)? else {
             return Ok(None);
         };
         // Smallest usable size first (fast), skip placeholders.
@@ -204,19 +196,32 @@ impl OnlineClient {
         }
     }
 
-    /// URL of the artist photo a music DB (Deezer) has for `name`, without
-    /// downloading it. Used where the URL itself is stored (a channel row's
-    /// thumbnail), so the usual thumbnail cache handles the rest.
-    pub fn artist_image_url(&self, name: &str) -> Result<Option<String>> {
+    /// The Deezer artist meant by `name`. Several artists share a name
+    /// ("Queen" has tiny namesakes ranked above the band), so among the
+    /// results named exactly like that the one with the most fans wins. With
+    /// `exact_only` unset, a search without an exact match falls back to its
+    /// top result (good enough for a photo, e.g. of a YouTube channel name).
+    pub(super) fn find_deezer_artist(
+        &self,
+        name: &str,
+        exact_only: bool,
+    ) -> Result<Option<DzArtist>> {
         let url = format!(
-            "https://api.deezer.com/search/artist?q={}&limit=1",
+            "https://api.deezer.com/search/artist?q={}&limit=10",
             percent_encode(name)
         );
         let search: DzSearch = match self.call_get(&url)? {
             Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
             None => return Ok(None),
         };
-        let Some(artist) = search.data.into_iter().next() else {
+        Ok(pick_artist(search.data, name, exact_only))
+    }
+
+    /// URL of the artist photo a music DB (Deezer) has for `name`, without
+    /// downloading it. Used where the URL itself is stored (a channel row's
+    /// thumbnail), so the usual thumbnail cache handles the rest.
+    pub fn artist_image_url(&self, name: &str) -> Result<Option<String>> {
+        let Some(artist) = self.find_deezer_artist(name, false)? else {
             return Ok(None);
         };
         // Big enough for a channel avatar in a list or the gallery.
@@ -653,6 +658,20 @@ struct MbTrack {
 
 // ---- Deezer JSON (artist photos) ----
 
+/// See [`OnlineClient::find_deezer_artist`]: the exact-name hit with the most
+/// fans, else (unless `exact_only`) the search's top result.
+fn pick_artist(hits: Vec<DzArtist>, name: &str, exact_only: bool) -> Option<DzArtist> {
+    let want = super::matching::normalize_name(name);
+    let (exact, rest): (Vec<_>, Vec<_>) = hits
+        .into_iter()
+        .partition(|a| super::matching::normalize_name(&a.name) == want);
+    match exact.into_iter().max_by_key(|a| a.nb_fan) {
+        Some(a) => Some(a),
+        None if exact_only => None,
+        None => rest.into_iter().next(),
+    }
+}
+
 #[derive(Deserialize)]
 struct DzSearch {
     #[serde(default)]
@@ -672,7 +691,13 @@ struct LrcLibItem {
 }
 
 #[derive(Deserialize)]
-struct DzArtist {
+pub(super) struct DzArtist {
+    #[serde(default)]
+    pub(super) id: u64,
+    #[serde(default)]
+    pub(super) name: String,
+    #[serde(default)]
+    pub(super) nb_fan: u64,
     #[serde(default)]
     picture: Option<String>,
     #[serde(default)]
@@ -787,6 +812,49 @@ fn parse_year(date: &str) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    fn dz(name: &str, fans: u64) -> DzArtist {
+        DzArtist {
+            id: fans,
+            name: name.to_string(),
+            nb_fan: fans,
+            picture: None,
+            picture_medium: None,
+            picture_big: None,
+            picture_xl: None,
+        }
+    }
+
+    #[test]
+    fn pick_artist_prefers_the_exact_name_with_most_fans() {
+        let hits = || {
+            vec![
+                dz("Queen", 168),
+                dz("Queen", 402),
+                dz("Queen(Ares)", 184),
+                dz("Queen", 12_827_971),
+            ]
+        };
+        assert_eq!(
+            pick_artist(hits(), "queen", true).map(|a| a.nb_fan),
+            Some(12_827_971)
+        );
+        assert_eq!(
+            pick_artist(hits(), "Queen", false).map(|a| a.nb_fan),
+            Some(12_827_971)
+        );
+    }
+
+    #[test]
+    fn pick_artist_falls_back_to_the_top_result_unless_exact_only() {
+        let hits = || vec![dz("Alex Glasgow", 50), dz("Alpenglas Band", 9)];
+        assert!(pick_artist(hits(), "Alpenglas", true).is_none());
+        assert_eq!(
+            pick_artist(hits(), "Alpenglas", false).map(|a| a.name),
+            Some("Alex Glasgow".into())
+        );
+        assert!(pick_artist(Vec::new(), "Alpenglas", false).is_none());
+    }
+
     use super::*;
 
     /// Shape of a real `/ws/2/release?query=` answer (Daft Punk – Discovery):

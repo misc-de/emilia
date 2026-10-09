@@ -40,6 +40,7 @@ install: build mo install-mo
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-concert-symbolic.svg $(ICON_ACT)/emilia-concert-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/list-high-priority-symbolic.svg $(ICON_ACT)/list-high-priority-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-favorite-symbolic.svg $(ICON_ACT)/emilia-favorite-symbolic.svg
+	install -Dm644 data/icons/hicolor/scalable/actions/emilia-hits-symbolic.svg $(ICON_ACT)/emilia-hits-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-audiobook-symbolic.svg $(ICON_ACT)/emilia-audiobook-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-stats-symbolic.svg $(ICON_ACT)/emilia-stats-symbolic.svg
 	install -Dm644 data/icons/hicolor/scalable/actions/emilia-share-symbolic.svg $(ICON_ACT)/emilia-share-symbolic.svg
