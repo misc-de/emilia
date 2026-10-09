@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.52"
+version = "0.8.51"
 edition = "2024"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
