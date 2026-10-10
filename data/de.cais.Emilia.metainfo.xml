@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.53" date="2026-10-10">
+      <description>
+        <p>An artist's "Go to the hits" and "Best-known songs" now open as their own page, laid out like an album's track list: the artist photo with "Play" and "Shuffle" on top, then the songs most popular first with their stars and runtime. Playing hits, from these pages or with "Play hits only" on an album, now fills the queue with exactly those songs and replaces what was queued before. The album info no longer lists the album's hits.</p>
+        <p xml:lang="de">„Zu den Hits“ und „Bekannteste Lieder“ eines Interpreten öffnen sich jetzt als eigene Seite, aufgebaut wie die Titelliste eines Albums: oben das Künstlerfoto mit „Abspielen“ und „Zufall“, darunter die Lieder, die erfolgreichsten zuerst, mit Sternen und Laufzeit. Das Abspielen von Hits, von diesen Seiten oder mit „Nur Hits abspielen“ beim Album, füllt jetzt die Warteschlange mit genau diesen Liedern und ersetzt, was vorher darin stand. Die Album-Infos führen die Hits des Albums nicht mehr auf.</p>
+      </description>
+    </release>
     <release version="0.8.52" date="2026-10-10">
       <description>
         <p>An artist's detail view now offers "Go to the hits" and "Best-known songs" right below "Play artist". Each opens a list of songs, most popular first, rated with up to five stars; different versions of a song appear only once. Songs from your library play with a tap, songs you don't have yet are greyed out and can be added via YouTube with "+", just like missing album tracks. A single song's popularity is now also shown as stars, and the fan count in compact form.</p>
