@@ -234,6 +234,11 @@ above is all you need.
 
 ---
 
+## Credits
+
+Emilia builds on many open-source projects, libraries and free data services –
+see **[CREDITS.md](CREDITS.md)** for the full list.
+
 ## License
 
 GPL-3.0-or-later. Online metadata comes from open sources (MusicBrainz/Cover Art
