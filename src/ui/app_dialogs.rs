@@ -598,10 +598,11 @@ pub(crate) enum CtxMsg {
         artist: String,
         list: crate::ui::app_popularity::PopList,
     },
-    /// A song list row in the library was tapped: play the list from there.
-    PlayPopList {
-        queue: Vec<std::path::PathBuf>,
-        start: usize,
+    /// Fill the queue with these tracks (replacing it) and play them – the
+    /// hit lists' "Play"/"Shuffle" and row play buttons.
+    QueueTracks {
+        paths: Vec<String>,
+        shuffle: bool,
     },
     /// "+" on a song of the list missing from the library.
     AddPopSong {
@@ -642,8 +643,10 @@ impl App {
             CtxMsg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
             CtxMsg::CtxPlayHits => self.on_ctx_play_hits(),
             CtxMsg::PopularityFetched(fetch) => self.on_popularity_fetched(*fetch),
-            CtxMsg::OpenPopList { artist, list } => self.open_pop_list(root, artist, list),
-            CtxMsg::PlayPopList { queue, start } => self.play_pop_list(queue, start),
+            CtxMsg::OpenPopList { artist, list } => self.open_pop_page(sender, artist, list),
+            CtxMsg::QueueTracks { paths, shuffle } => {
+                self.queue_and_play(paths.into_iter().map(Into::into).collect(), shuffle)
+            }
             CtxMsg::AddPopSong { artist, title } => self.add_pop_song(root, artist, title),
             CtxMsg::PopSongCandidates {
                 artist,

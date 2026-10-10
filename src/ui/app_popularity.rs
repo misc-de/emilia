@@ -229,33 +229,10 @@ impl App {
             }
             return Some(PopLines::Ready(lines));
         }
-        match self.hits_target(target) {
-            Some(HitsTarget::Artist(_)) => {
-                if pop.fans > 0 {
-                    lines.push(InfoRow::Text(gettext("Fans (Deezer)"), fmt_fans(pop.fans)));
-                }
-            }
-            Some(HitsTarget::Album { artist, album }) if !hits.is_empty() => {
-                // The album's hits in album order, by their local titles.
-                let found: Vec<String> = self
-                    .album_tracks(&artist, &album)
-                    .into_iter()
-                    .filter(|t| {
-                        let key = title_key(&t.title);
-                        hits.iter().any(|h| h.key == key)
-                    })
-                    .map(|t| t.title)
-                    .collect();
-                lines.push(InfoRow::Text(
-                    gettext("Hits on this album"),
-                    if found.is_empty() {
-                        "—".to_string()
-                    } else {
-                        found.join(", ")
-                    },
-                ));
-            }
-            _ => {}
+        if let Some(HitsTarget::Artist(_)) = self.hits_target(target)
+            && pop.fans > 0
+        {
+            lines.push(InfoRow::Text(gettext("Fans (Deezer)"), fmt_fans(pop.fans)));
         }
         Some(PopLines::Ready(lines))
     }
@@ -391,8 +368,8 @@ impl App {
         }
     }
 
-    /// Plays the local hits (shuffle off) and closes the detail view; reports
-    /// on the action row when there are none.
+    /// Plays the local hits through the queue (see [`Self::queue_and_play`]);
+    /// reports on the action row when there are none.
     fn play_hits(&mut self, target: &HitsTarget, pop: Option<ArtistPopularity>) {
         let Some(pop) = pop else {
             self.set_hits_status(&gettext("No popularity data for this artist"));
@@ -403,11 +380,34 @@ impl App {
             self.set_hits_status(&gettext("No hits in the library"));
             return;
         }
-        self.transport.shuffle = false;
-        self.transport.queue = files;
+        self.queue_and_play(files, false);
+    }
+
+    /// Hits are played through the queue: `files` (shuffled on request)
+    /// replace whatever was queued and the running context, so the queue
+    /// shows exactly these songs, and playback starts with the first one.
+    /// Closes the detail view.
+    pub(crate) fn queue_and_play(&mut self, mut files: Vec<PathBuf>, shuffle: bool) {
+        if files.is_empty() {
+            return;
+        }
+        if shuffle {
+            for i in (1..files.len()).rev() {
+                let j = gtk::glib::random_int_range(0, i as i32 + 1) as usize;
+                files.swap(i, j);
+            }
+        }
+        self.youtube.playing_playlist = false;
+        self.youtube.keep_recent_order = false;
+        self.transport.user_queue = files;
+        self.transport.queue.clear();
         self.transport.queue_pos = 0;
-        self.play_current();
-        self.refresh_queue_icons();
+        self.transport.shuffle = false;
+        self.transport.shuffle_order.clear();
+        self.mpris.set_shuffle(false);
+        // Splices the first queued song into the (now empty) context, plays
+        // it and refreshes the queue list.
+        self.play_next(false);
         let dialog = self.nav.ctx_dialog.borrow().clone();
         if let Some(d) = dialog {
             d.close();
@@ -490,16 +490,19 @@ impl App {
         known.set_visible(pop.as_ref().is_some_and(|p| !p.top.is_empty()));
     }
 
-    /// Song list of an artist ("Go to the hits" / "Best-known songs"), most
-    /// popular first. Songs in the library play on tap (the list's local songs
-    /// from there on); missing ones are greyed and – with YouTube enabled –
-    /// can be added like a missing album track.
-    pub(crate) fn open_pop_list(
+    /// Song list of an artist ("Go to the hits" / "Best-known songs") as a
+    /// subpage like an album's track list: a header with the artist photo
+    /// and "Play"/"Shuffle", then the songs most popular first with their
+    /// stars. Songs in the library play from there on (through the queue);
+    /// missing ones are greyed and – with YouTube enabled – added with "+".
+    pub(crate) fn open_pop_page(
         &self,
-        root: &adw::ApplicationWindow,
+        sender: &relm4::ComponentSender<Self>,
         artist: String,
         list: PopList,
     ) {
+        use crate::ui::app_favorites::mark_key;
+        use crate::ui::entry_row::EntryRow;
         let Some(Some(pop)) = self.cached_artist_pop(&artist) else {
             return;
         };
@@ -509,131 +512,155 @@ impl App {
         };
         // Oldest first: among several copies of a song, the original album's
         // comes before a later best-of.
-        let local: Vec<(PathBuf, String)> = self
+        let local: Vec<(crate::model::Track, String)> = self
             .artist_tracks_ordered(&artist, false)
             .into_iter()
-            .map(|t| (PathBuf::from(t.path), t.title))
-            .collect();
-        let entries: Vec<(Hit, Option<PathBuf>)> = songs
-            .into_iter()
-            .map(|h| {
-                let path = find_local(&h.key, &local);
-                (h, path)
+            .map(|t| {
+                let title = t.title.clone();
+                (t, title)
             })
             .collect();
-        let present: Vec<PathBuf> = entries.iter().filter_map(|(_, p)| p.clone()).collect();
-        let can_add = self.youtube.enabled;
-        // With any "+" in the list, every other row gets an invisible one of
-        // the same size, so the stars line up in one column.
-        let any_add = can_add && entries.iter().any(|(_, p)| p.is_none());
-        let add_icon = |visible: bool| {
-            let img = gtk::Image::from_icon_name("list-add-symbolic");
-            img.set_valign(gtk::Align::Center);
-            if !visible {
-                img.set_opacity(0.0);
-            }
-            img
-        };
-
+        let entries: Vec<(Hit, Option<crate::model::Track>)> = songs
+            .into_iter()
+            .map(|h| {
+                let track = find_local(&h.key, &local);
+                (h, track)
+            })
+            .collect();
+        let present: Vec<&crate::model::Track> =
+            entries.iter().filter_map(|(_, t)| t.as_ref()).collect();
+        let paths: Vec<String> = present.iter().map(|t| t.path.clone()).collect();
         let title = match list {
             PopList::Hits => gettext("Hits"),
             PopList::Known => gettext("Best-known songs"),
         };
-        let dialog = adw::Dialog::builder().title(&title).build();
-        dialog.set_content_width(600);
-        self.adapt_detail_dialog(&dialog);
-        let group = adw::PreferencesGroup::new();
-        for (place, (hit, path)) in entries.into_iter().enumerate() {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&hit.title))
-                .build();
-            row.add_prefix(
-                &gtk::Label::builder()
-                    .label((place + 1).to_string())
-                    .width_chars(2)
-                    .xalign(1.0)
-                    .css_classes(["dim-label", "numeric"])
-                    .build(),
-            );
-            row.add_suffix(&stars(score(hit.rank)));
-            let adds = path.is_none() && can_add;
-            match path {
-                Some(path) => {
-                    row.set_activatable(true);
-                    let start = present.iter().position(|p| *p == path).unwrap_or(0);
-                    let (input, queue, dialog) =
-                        (self.input.clone(), present.clone(), dialog.clone());
-                    row.connect_activated(move |_| {
-                        let _ = input.send(Msg::Ctx(CtxMsg::PlayPopList {
-                            queue: queue.clone(),
-                            start,
-                        }));
-                        dialog.close();
-                    });
-                }
-                None => {
-                    // Greyed like a missing album track: "not here yet".
-                    row.set_opacity(0.55);
-                    if can_add {
-                        row.set_subtitle(&gettext("Missing — tap to add"));
-                        row.set_activatable(true);
-                        let (input, artist, title) =
-                            (self.input.clone(), artist.clone(), hit.title.clone());
-                        row.connect_activated(move |_| {
-                            let _ = input.send(Msg::Ctx(CtxMsg::AddPopSong {
-                                artist: artist.clone(),
-                                title: title.clone(),
-                            }));
-                        });
-                    } else {
-                        row.set_subtitle(&gettext("Not in the library"));
-                    }
-                }
-            }
-            if any_add {
-                row.add_suffix(&add_icon(adds));
-            }
-            group.add(&row);
-        }
+        let cover = self
+            .library
+            .get_artist_meta(&artist)
+            .ok()
+            .flatten()
+            .and_then(|m| m.image_path)
+            .and_then(|p| {
+                crate::ui::widgets::decode_scaled(
+                    &p,
+                    2 * crate::ui::app_views_album::ALBUM_HEADER_COVER,
+                )
+            });
+
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .margin_top(6)
+            .spacing(12)
+            .margin_top(12)
             .margin_bottom(12)
             .margin_start(12)
             .margin_end(12)
             .build();
-        content.append(&group);
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .propagate_natural_height(true)
-            .vexpand(true)
-            .child(&content)
-            .build();
-        let header = crate::ui::widgets::detail_header();
-        header.set_title_widget(Some(&adw::WindowTitle::new(&title, &artist)));
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&header);
-        toolbar.set_content(Some(&scroller));
-        dialog.set_child(Some(&toolbar));
-        crate::ui::app_helpers::close_on_click_outside(&dialog);
-        dialog.present(Some(root));
-    }
+        let list_key = match list {
+            PopList::Hits => "hits",
+            PopList::Known => "known",
+        };
+        content.append(&self.album_header(
+            sender,
+            crate::ui::app_views_album::AlbumHeader {
+                cover: cover.as_ref(),
+                icon: "avatar-default-symbolic",
+                album: &title,
+                artist: &artist,
+                year: None,
+                tracks: present.clone(),
+                mark: mark_key(list_key, &artist),
+                as_queue: true,
+            },
+        ));
 
-    /// A song list row in the library was tapped: play the list's local songs
-    /// from there (shuffle off) and close the detail view below.
-    pub(crate) fn play_pop_list(&mut self, queue: Vec<PathBuf>, start: usize) {
-        if queue.is_empty() {
-            return;
+        let can_add = self.youtube.enabled;
+        let group = adw::PreferencesGroup::new();
+        for (place, (hit, track)) in entries.iter().enumerate() {
+            let number = place as u32 + 1;
+            // Same columns in every row – stars, runtime, then the play or
+            // "+" control – so the stars line up.
+            let row = match track {
+                Some(t) => {
+                    let path = t.path.clone();
+                    let from = paths.iter().position(|p| *p == path).unwrap_or(0);
+                    let rest: Vec<String> = paths[from..].to_vec();
+                    EntryRow::new(&t.title)
+                        .number(number)
+                        .suffix(&stars(score(hit.rank)))
+                        .suffix(&runtime(t.duration_ms))
+                        .offline(self.is_offline_path(&t.path))
+                        .play_button(
+                            &gettext("Play"),
+                            self.entry_is_active("track", &path, None),
+                            self.mini.playing,
+                            {
+                                let sender = sender.clone();
+                                move || {
+                                    sender.input(Msg::Ctx(CtxMsg::QueueTracks {
+                                        paths: rest.clone(),
+                                        shuffle: false,
+                                    }))
+                                }
+                            },
+                        )
+                        .marked_in(&self.libview.page_marks, mark_key("track", &path))
+                        .on_detail({
+                            let sender = sender.clone();
+                            move || sender.input(Msg::ShowTrackDetail(path.clone()))
+                        })
+                        .build()
+                }
+                None => {
+                    let add = gtk::Button::builder()
+                        .icon_name("list-add-symbolic")
+                        .valign(gtk::Align::Center)
+                        .css_classes(["flat"])
+                        .build();
+                    let row = EntryRow::new(&hit.title)
+                        .subtitle(&if can_add {
+                            gettext("Missing — tap to add")
+                        } else {
+                            gettext("Not in the library")
+                        })
+                        .number(number)
+                        .suffix(&stars(score(hit.rank)))
+                        .suffix(&runtime(None))
+                        .suffix(&add)
+                        .build();
+                    // Greyed like a missing album track: "not here yet".
+                    row.set_opacity(0.55);
+                    if can_add {
+                        row.set_activatable(true);
+                        let request = {
+                            let (input, artist, title) =
+                                (self.input.clone(), artist.clone(), hit.title.clone());
+                            std::rc::Rc::new(move || {
+                                let _ = input.send(Msg::Ctx(CtxMsg::AddPopSong {
+                                    artist: artist.clone(),
+                                    title: title.clone(),
+                                }));
+                            })
+                        };
+                        let r = request.clone();
+                        row.connect_activated(move |_| r());
+                        add.connect_clicked(move |_| request());
+                    } else {
+                        // Holds the column without offering anything.
+                        add.set_opacity(0.0);
+                        add.set_sensitive(false);
+                    }
+                    row
+                }
+            };
+            group.add(&row);
         }
-        self.transport.shuffle = false;
-        self.transport.queue = queue;
-        self.transport.queue_pos = start;
-        self.play_current();
-        self.refresh_queue_icons();
+        content.append(&group);
+
         let dialog = self.nav.ctx_dialog.borrow().clone();
         if let Some(d) = dialog {
             d.close();
         }
+        self.push_subpage(&format!("{artist} – {title}"), &content);
     }
 
     /// "+" on a missing song: search YouTube for it; the hits come back as
@@ -695,6 +722,21 @@ impl App {
             });
         });
     }
+}
+
+/// A track's runtime in a column of fixed width (empty for a missing song),
+/// so the stars to its left line up across rows.
+fn runtime(ms: Option<i64>) -> gtk::Label {
+    gtk::Label::builder()
+        .label(
+            ms.filter(|ms| *ms > 0)
+                .map(crate::ui::app_helpers::fmt_duration)
+                .unwrap_or_default(),
+        )
+        .width_chars(5)
+        .xalign(1.0)
+        .css_classes(["dim-label", "numeric"])
+        .build()
 }
 
 /// A score 0–100 as five stars in half steps; the exact score as tooltip.

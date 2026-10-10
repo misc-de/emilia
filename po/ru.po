@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-10 06:53+0000\n"
+"POT-Creation-Date: 2026-10-10 07:57+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -15,7 +15,8 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 #: src/core/tray.rs:77
 msgid "Show / Hide"
@@ -27,10 +28,10 @@ msgstr "Пауза"
 
 #: src/core/tray.rs:89 src/ui/app_dialogs.rs:179 src/ui/app_favorites.rs:311
 #: src/ui/app_memo.rs:635 src/ui/app_memo.rs:774 src/ui/app_playlist.rs:342
-#: src/ui/app_playlist.rs:532 src/ui/app_queue.rs:186
-#: src/ui/app_streaming.rs:567 src/ui/app_views_album.rs:726
-#: src/ui/app_views_album.rs:1037 src/ui/app_views_album.rs:1261
-#: src/ui/card_list.rs:151 src/ui/fs_row.rs:407
+#: src/ui/app_playlist.rs:532 src/ui/app_popularity.rs:593
+#: src/ui/app_queue.rs:186 src/ui/app_streaming.rs:567
+#: src/ui/app_views_album.rs:731 src/ui/app_views_album.rs:1044
+#: src/ui/app_views_album.rs:1280 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
 #: src/ui/stream_page_recordings.rs:141 src/ui/stream_page_recordings.rs:222
 #: src/ui/stream_page_recordings.rs:415 src/ui/stream_page_recordings.rs:484
 #: src/ui/yt_live.rs:123 src/ui/yt_page_channels.rs:252
@@ -76,7 +77,7 @@ msgstr "Таймер сна"
 msgid "Show progress"
 msgstr "Показать ход выполнения"
 
-#: src/ui/app.rs:305 src/ui/app_dialogs.rs:359 src/ui/widgets.rs:795
+#: src/ui/app.rs:305 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
 msgid "Refresh"
 msgstr "Обновить"
 
@@ -112,7 +113,7 @@ msgid "Scan a music folder and fetch online metadata"
 msgstr "Просканируйте папку с музыкой и получите метаданные из интернета"
 
 #: src/ui/app.rs:528 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127
-#: src/ui/app_views_album.rs:603 src/ui/stats_page.rs:294
+#: src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr "Альбомы"
 
@@ -120,7 +121,7 @@ msgstr "Альбомы"
 msgid "No albums"
 msgstr "Нет альбомов"
 
-#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:680
+#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
 msgid "Singles"
 msgstr "Синглы"
 
@@ -276,16 +277,15 @@ msgstr "{done} МБ из {total} МБ"
 
 #: src/ui/app.rs:1117 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:936 src/ui/app_memo.rs:959 src/ui/app_playlist.rs:877
-#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
-#: src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:26
-#: src/ui/app_sections.rs:100 src/ui/app_settings_mcp.rs:129
-#: src/ui/app_views_handlers.rs:748 src/ui/app_views_sources.rs:278
-#: src/ui/app_views_sources.rs:474 src/ui/app_views_sources.rs:533
-#: src/ui/podcasts_page.rs:1023 src/ui/setup.rs:699
-#: src/ui/stream_page_stations.rs:53 src/ui/stream_page_stations.rs:404
-#: src/ui/stream_page_stations.rs:452 src/ui/sync_share_ui.rs:159
-#: src/ui/widgets.rs:915 src/ui/widgets.rs:942 src/ui/widgets.rs:1018
-#: src/ui/yt_live.rs:167
+#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657 src/ui/app_rec_edit.rs:693
+#: src/ui/app_search.rs:26 src/ui/app_sections.rs:100
+#: src/ui/app_settings_mcp.rs:129 src/ui/app_views_handlers.rs:748
+#: src/ui/app_views_sources.rs:278 src/ui/app_views_sources.rs:474
+#: src/ui/app_views_sources.rs:533 src/ui/podcasts_page.rs:1023
+#: src/ui/setup.rs:699 src/ui/stream_page_stations.rs:53
+#: src/ui/stream_page_stations.rs:404 src/ui/stream_page_stations.rs:452
+#: src/ui/sync_share_ui.rs:159 src/ui/widgets.rs:915 src/ui/widgets.rs:942
+#: src/ui/widgets.rs:1018 src/ui/yt_live.rs:167
 msgid "Cancel"
 msgstr "Отмена"
 
@@ -307,7 +307,7 @@ msgstr "Эквалайзер для этого трека"
 msgid "Playback speed"
 msgstr "Скорость воспроизведения"
 
-#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1279
+#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1293
 msgid "Shuffle"
 msgstr "Перемешать"
 
@@ -430,8 +430,7 @@ msgstr "Выбрать собственное изображение"
 msgid "Info"
 msgstr "Сведения"
 
-#: src/ui/app_dialogs.rs:177 src/ui/app_views_album.rs:630
-#: src/ui/fs_row.rs:377
+#: src/ui/app_dialogs.rs:177 src/ui/app_views_album.rs:635 src/ui/fs_row.rs:377
 msgid "Play album"
 msgstr "Воспроизвести альбом"
 
@@ -451,39 +450,39 @@ msgstr "Сначала новые"
 msgid "Album order"
 msgstr "Порядок альбомов"
 
-#: src/ui/app_dialogs.rs:229
+#: src/ui/app_dialogs.rs:235
 msgid "Play hits only"
 msgstr "Играть только хиты"
 
-#: src/ui/app_dialogs.rs:252 src/ui/app_settings_meta.rs:130
+#: src/ui/app_dialogs.rs:258 src/ui/app_settings_meta.rs:130
 #: src/ui/app_yt_glue.rs:576 src/ui/podcasts_page_detail.rs:197
 msgid "Download"
 msgstr "Загрузить"
 
-#: src/ui/app_dialogs.rs:271
+#: src/ui/app_dialogs.rs:277
 msgid "Remove from favorites"
 msgstr "Удалить из избранного"
 
-#: src/ui/app_dialogs.rs:273
+#: src/ui/app_dialogs.rs:279
 msgid "Add to favorites"
 msgstr "Добавить в избранное"
 
-#: src/ui/app_dialogs.rs:291
+#: src/ui/app_dialogs.rs:297
 msgid "Add to queue"
 msgstr "Добавить в очередь"
 
-#: src/ui/app_dialogs.rs:296 src/ui/app_playlist.rs:781
+#: src/ui/app_dialogs.rs:302 src/ui/app_playlist.rs:781
 msgid "Add to playlist"
 msgstr "Добавить в плейлист"
 
-#: src/ui/app_dialogs.rs:302 src/ui/podcasts_page_detail.rs:240
+#: src/ui/app_dialogs.rs:308 src/ui/podcasts_page_detail.rs:240
 #: src/ui/podcasts_page_detail.rs:407 src/ui/stream_page_stations.rs:335
 #: src/ui/sync_share_ui.rs:129 src/ui/yt_live.rs:144
 #: src/ui/yt_page_detail.rs:177
 msgid "Equalizer settings"
 msgstr "Настройки эквалайзера"
 
-#: src/ui/app_dialogs.rs:308 src/ui/app_memo.rs:814 src/ui/app_playlist.rs:716
+#: src/ui/app_dialogs.rs:314 src/ui/app_memo.rs:814 src/ui/app_playlist.rs:716
 #: src/ui/podcasts_page_detail.rs:257 src/ui/podcasts_page_detail.rs:420
 #: src/ui/smb_page.rs:121 src/ui/stream_page_recordings.rs:249
 #: src/ui/stream_page_stations.rs:346 src/ui/yt_page_channels.rs:261
@@ -491,7 +490,7 @@ msgstr "Настройки эквалайзера"
 msgid "Share"
 msgstr "Поделиться"
 
-#: src/ui/app_dialogs.rs:344 src/ui/app_dialogs.rs:350
+#: src/ui/app_dialogs.rs:350 src/ui/app_dialogs.rs:356
 #: src/ui/app_favorites.rs:759 src/ui/app_settings_menu.rs:222
 #: src/ui/app_views_ctx.rs:361 src/ui/app_views_ctx.rs:377
 #: src/ui/app_views_ctx.rs:766 src/ui/app_views_ctx.rs:788
@@ -501,14 +500,14 @@ msgstr "Поделиться"
 msgid "Artist"
 msgstr "Исполнитель"
 
-#: src/ui/app_dialogs.rs:345 src/ui/app_dialogs.rs:348
-#: src/ui/app_dialogs.rs:351 src/ui/app_favorites.rs:254
+#: src/ui/app_dialogs.rs:351 src/ui/app_dialogs.rs:354
+#: src/ui/app_dialogs.rs:357 src/ui/app_favorites.rs:254
 #: src/ui/app_views_ctx.rs:381 src/ui/app_views_ctx.rs:770
 #: src/ui/app_views_ctx.rs:821
 msgid "Audiobook"
 msgstr "Аудиокнига"
 
-#: src/ui/app_dialogs.rs:346 src/ui/app_dialogs.rs:349
+#: src/ui/app_dialogs.rs:352 src/ui/app_dialogs.rs:355
 #: src/ui/app_favorites.rs:256 src/ui/app_favorites.rs:758
 #: src/ui/app_settings_menu.rs:221 src/ui/app_views_ctx.rs:383
 #: src/ui/app_views_ctx.rs:510 src/ui/app_views_ctx.rs:772
@@ -517,21 +516,21 @@ msgstr "Аудиокнига"
 msgid "Album"
 msgstr "Альбом"
 
-#: src/ui/app_dialogs.rs:352 src/ui/app_favorites.rs:760
+#: src/ui/app_dialogs.rs:358 src/ui/app_favorites.rs:760
 #: src/ui/app_settings_menu.rs:223 src/ui/setup.rs:244
 msgid "Folder"
 msgstr "Папка"
 
-#: src/ui/app_dialogs.rs:354 src/ui/app_favorites.rs:761
+#: src/ui/app_dialogs.rs:360 src/ui/app_favorites.rs:761
 #: src/ui/app_settings_menu.rs:224
 msgid "Track"
 msgstr "Трек"
 
-#: src/ui/app_dialogs.rs:509
+#: src/ui/app_dialogs.rs:517
 msgid "Nothing here to share"
 msgstr "Здесь нечем поделиться"
 
-#: src/ui/app_dialogs.rs:549 src/ui/podcasts_page_detail.rs:44
+#: src/ui/app_dialogs.rs:557 src/ui/podcasts_page_detail.rs:44
 #: src/ui/stream_page.rs:695 src/ui/stream_page.rs:716
 #: src/ui/stream_page.rs:745 src/ui/yt_live.rs:200
 #: src/ui/yt_page_channels.rs:85 src/ui/yt_page_channels.rs:98
@@ -539,7 +538,7 @@ msgstr "Здесь нечем поделиться"
 msgid "Refreshing …"
 msgstr "Обновление …"
 
-#: src/ui/app_dialogs.rs:566
+#: src/ui/app_dialogs.rs:574
 msgid "Added {n} tracks to the queue"
 msgstr "В очередь добавлено треков: {n}"
 
@@ -806,10 +805,9 @@ msgid "Edit"
 msgstr "Редактировать"
 
 #: src/ui/app_memo.rs:792 src/ui/app_memo.rs:807 src/ui/app_memo.rs:894
-#: src/ui/app_memo.rs:905 src/ui/app_playlist.rs:733
-#: src/ui/app_playlist.rs:878 src/ui/app_rec_edit.rs:301
-#: src/ui/app_views_sources.rs:397 src/ui/app_views_sources.rs:475
-#: src/ui/stream_page_stations.rs:405
+#: src/ui/app_memo.rs:905 src/ui/app_playlist.rs:733 src/ui/app_playlist.rs:878
+#: src/ui/app_rec_edit.rs:301 src/ui/app_views_sources.rs:397
+#: src/ui/app_views_sources.rs:475 src/ui/stream_page_stations.rs:405
 msgid "Rename"
 msgstr "Переименовать"
 
@@ -964,88 +962,84 @@ msgstr "Переименовать плейлист"
 msgid "Added {n} to the playlist"
 msgstr "В плейлист добавлено: {n}"
 
-#: src/ui/app_popularity.rs:97
+#: src/ui/app_popularity.rs:96
 msgid "{int} M"
 msgstr "{int} млн"
 
-#: src/ui/app_popularity.rs:100
+#: src/ui/app_popularity.rs:99
 msgid "{int}.{frac} M"
 msgstr "{int},{frac} млн"
 
-#: src/ui/app_popularity.rs:105
+#: src/ui/app_popularity.rs:104
 msgid "{int} k"
 msgstr "{int} тыс."
 
-#: src/ui/app_popularity.rs:219
+#: src/ui/app_popularity.rs:218
 msgid "Popularity (Deezer)"
 msgstr "Популярность (Deezer)"
 
-#: src/ui/app_popularity.rs:224
+#: src/ui/app_popularity.rs:223
 msgid "Hit"
 msgstr "Хит"
 
-#: src/ui/app_popularity.rs:226
+#: src/ui/app_popularity.rs:225
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "№ {n} среди самых популярных песен: {artist}"
 
-#: src/ui/app_popularity.rs:236
+#: src/ui/app_popularity.rs:235
 msgid "Fans (Deezer)"
 msgstr "Поклонники (Deezer)"
 
-#: src/ui/app_popularity.rs:240
-msgid "Go to the hits"
-msgstr "К хитам"
-
-#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
-msgid "Best-known songs"
-msgstr "Самые известные песни"
-
-#: src/ui/app_popularity.rs:265
-msgid "Hits on this album"
-msgstr "Хиты этого альбома"
-
-#: src/ui/app_popularity.rs:378
+#: src/ui/app_popularity.rs:341
 msgid "Could not look up the hits"
 msgstr "Не удалось получить хиты"
 
-#: src/ui/app_popularity.rs:401
+#: src/ui/app_popularity.rs:364
 msgid "Looking up the hits …"
 msgstr "Поиск хитов …"
 
-#: src/ui/app_popularity.rs:404
+#: src/ui/app_popularity.rs:367
 msgid "Needs an internet connection"
 msgstr "Требуется подключение к интернету"
 
-#: src/ui/app_popularity.rs:412
+#: src/ui/app_popularity.rs:375
 msgid "No popularity data for this artist"
 msgstr "Нет данных о популярности этого исполнителя"
 
-#: src/ui/app_popularity.rs:417
+#: src/ui/app_popularity.rs:380
 msgid "No hits in the library"
 msgstr "В библиотеке нет хитов"
 
-#: src/ui/app_popularity.rs:507
+#: src/ui/app_popularity.rs:469
+msgid "Go to the hits"
+msgstr "К хитам"
+
+#: src/ui/app_popularity.rs:474 src/ui/app_popularity.rs:535
+msgid "Best-known songs"
+msgstr "Самые известные песни"
+
+#: src/ui/app_popularity.rs:534
 msgid "Hits"
 msgstr "Хиты"
 
-#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+#: src/ui/app_popularity.rs:621 src/ui/app_views_album.rs:1068
 msgid "Missing — tap to add"
 msgstr "Отсутствует — нажмите, чтобы добавить"
 
-#: src/ui/app_popularity.rs:559
+#: src/ui/app_popularity.rs:623
 msgid "Not in the library"
 msgstr "Нет в библиотеке"
 
-#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_popularity.rs:675 src/ui/app_streaming.rs:824
 #: src/ui/app_views_handlers.rs:786
 msgid "Enable YouTube in the settings to use this"
 msgstr "Включите YouTube в настройках, чтобы этим пользоваться"
 
-#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+#: src/ui/app_popularity.rs:678 src/ui/app_views_handlers.rs:796
 msgid "Searching online …"
 msgstr "Поиск в интернете …"
 
-#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_popularity.rs:712 src/ui/app_streaming.rs:867
 #: src/ui/app_views_handlers.rs:866
 msgid "Not found on YouTube"
 msgstr "На YouTube не найдено"
@@ -1115,8 +1109,7 @@ msgstr "Сбросить все правки?"
 
 #: src/ui/app_rec_edit.rs:654
 msgid "This removes every marked cut and restores the full recording."
-msgstr ""
-"Все отмеченные вырезки будут убраны, а запись восстановлена полностью."
+msgstr "Все отмеченные вырезки будут убраны, а запись восстановлена полностью."
 
 #: src/ui/app_rec_edit.rs:658
 msgid "Discard"
@@ -1480,8 +1473,8 @@ msgstr "MCP-сервер"
 
 #: src/ui/app_settings_mcp.rs:24
 msgid ""
-"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST"
-" http://127.0.0.1:8770/mcp with the bearer token below."
+"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST "
+"http://127.0.0.1:8770/mcp with the bearer token below."
 msgstr ""
 "Открывает библиотеку и воспроизведение для MCP-хоста (например, Claude). "
 "Конечная точка: POST http://127.0.0.1:8770/mcp с указанным ниже bearer-"
@@ -1573,11 +1566,9 @@ msgid "Read music data"
 msgstr "Читать музыкальные данные"
 
 #: src/ui/app_settings_meta.rs:30
-msgid ""
-"Complete missing cover art, photos and tracks from open online sources."
+msgid "Complete missing cover art, photos and tracks from open online sources."
 msgstr ""
-"Дополняйте недостающие обложки, фото и треки из открытых интернет-"
-"источников."
+"Дополняйте недостающие обложки, фото и треки из открытых интернет-источников."
 
 #: src/ui/app_settings_meta.rs:34
 msgid "Fetch automatically"
@@ -1594,8 +1585,8 @@ msgstr "AcoustID"
 
 #: src/ui/app_settings_meta.rs:53
 msgid ""
-"Optional key for fingerprint-based track detection (free at "
-"acoustid.org/new-application)."
+"Optional key for fingerprint-based track detection (free at acoustid.org/new-"
+"application)."
 msgstr ""
 "Необязательный ключ для распознавания треков по отпечатку (бесплатно на "
 "acoustid.org/new-application)."
@@ -1735,8 +1726,8 @@ msgstr "Масштабирует значки меню (на телефоне, �
 
 #: src/ui/app_settings_view.rs:162
 msgid ""
-"How artist tags like \"A feat. B\" are listed. The tags themselves are never"
-" changed."
+"How artist tags like \"A feat. B\" are listed. The tags themselves are never "
+"changed."
 msgstr ""
 "Как отображаются теги исполнителей вида «A feat. B». Сами теги никогда не "
 "изменяются."
@@ -1951,24 +1942,24 @@ msgstr "Папка с музыкой не задана — выберите её
 msgid "Undo"
 msgstr "Отменить"
 
-#: src/ui/app_views_album.rs:591
+#: src/ui/app_views_album.rs:596
 msgid "No tracks"
 msgstr "Нет треков"
 
-#: src/ui/app_views_album.rs:593
+#: src/ui/app_views_album.rs:598
 msgid "There are no songs for this artist in the library."
 msgstr "В библиотеке нет песен этого исполнителя."
 
-#: src/ui/app_views_album.rs:1166
+#: src/ui/app_views_album.rs:1173
 msgid "Checking for missing tracks …"
 msgstr "Проверка отсутствующих треков …"
 
-#: src/ui/app_views_album.rs:1358 src/ui/app_views_ctx.rs:393
+#: src/ui/app_views_album.rs:1367 src/ui/app_views_ctx.rs:393
 #: src/ui/app_views_ctx.rs:783 src/ui/app_views_ctx.rs:843
 msgid "Year"
 msgstr "Год"
 
-#: src/ui/app_views_album.rs:1360
+#: src/ui/app_views_album.rs:1369
 msgid "Years"
 msgstr "Годы"
 
@@ -2061,8 +2052,8 @@ msgstr "Загрузка …"
 
 #: src/ui/app_views_handlers.rs:744
 msgid ""
-"“{title}” is missing from this album. Search for it online and add it to the"
-" album?"
+"“{title}” is missing from this album. Search for it online and add it to the "
+"album?"
 msgstr ""
 "«{title}» отсутствует в этом альбоме. Найти в интернете и добавить в альбом?"
 
@@ -2309,8 +2300,8 @@ msgstr "Клиент OAuth"
 
 #: src/ui/gdrive_page.rs:260
 msgid ""
-"Google requires an OAuth client per app: create one of type “Desktop app” in"
-" the Google Cloud console (with the Drive API enabled) and paste its ID and "
+"Google requires an OAuth client per app: create one of type “Desktop app” in "
+"the Google Cloud console (with the Drive API enabled) and paste its ID and "
 "secret here."
 msgstr ""
 "Google требует отдельный клиент OAuth для каждого приложения: создайте "
@@ -2331,11 +2322,11 @@ msgstr "Войти через Google"
 
 #: src/ui/gdrive_page.rs:286
 msgid ""
-"The browser opens Google's sign-in page; Emilia only asks for read access to"
-" your Drive. Return here afterwards."
+"The browser opens Google's sign-in page; Emilia only asks for read access to "
+"your Drive. Return here afterwards."
 msgstr ""
-"В браузере откроется страница входа Google; Emilia запрашивает только доступ"
-" на чтение к вашему Google Диску. После этого вернитесь сюда."
+"В браузере откроется страница входа Google; Emilia запрашивает только доступ "
+"на чтение к вашему Google Диску. После этого вернитесь сюда."
 
 #: src/ui/gdrive_page.rs:316
 msgid "Folder in My Drive (e.g. /Music)"
@@ -2647,8 +2638,8 @@ msgid ""
 "and info, lyrics, favorites, the queue, playlists and sharing."
 msgstr ""
 "Треки, альбомы, исполнители и файлы содержат больше, чем показывает список: "
-"обложки и сведения, текст песни, избранное, очередь, плейлисты и возможность"
-" поделиться."
+"обложки и сведения, текст песни, избранное, очередь, плейлисты и возможность "
+"поделиться."
 
 #: src/ui/setup.rs:623
 msgid "Right-click"
@@ -2673,11 +2664,11 @@ msgstr "Выберите папку с музыкой"
 
 #: src/ui/setup.rs:653
 msgid ""
-"Pick the folder that already holds your collection. You can add more sources"
-" later in Settings."
+"Pick the folder that already holds your collection. You can add more sources "
+"later in Settings."
 msgstr ""
-"Укажите папку, где уже лежит ваша коллекция. Другие источники можно добавить"
-" позже в настройках."
+"Укажите папку, где уже лежит ваша коллекция. Другие источники можно добавить "
+"позже в настройках."
 
 #: src/ui/setup.rs:657
 msgid "Choose a folder for your music"
@@ -2870,13 +2861,13 @@ msgstr "Записывайте текущую песню во время вещ�
 
 #: src/ui/stream_page.rs:384
 msgid ""
-"Songs are recognized from the title a station broadcasts while it plays, and"
-" collected here — so you can play them back later (from your library, "
+"Songs are recognized from the title a station broadcasts while it plays, and "
+"collected here — so you can play them back later (from your library, "
 "otherwise via YouTube). This only works for stations that transmit the "
 "current title."
 msgstr ""
-"Песни распознаются по названию, которое станция передаёт во время вещания, и"
-" собираются здесь — чтобы вы могли воспроизвести их позже (из своей "
+"Песни распознаются по названию, которое станция передаёт во время вещания, и "
+"собираются здесь — чтобы вы могли воспроизвести их позже (из своей "
 "библиотеки, а иначе через YouTube). Это работает только для станций, "
 "передающих название текущего трека."
 
@@ -2901,8 +2892,7 @@ msgid "No logo found"
 msgstr "Логотип не найден"
 
 #: src/ui/stream_page.rs:844 src/ui/stream_page.rs:860
-#: src/ui/stream_page.rs:876 src/ui/yt_live.rs:238
-#: src/ui/yt_page_search.rs:165
+#: src/ui/stream_page.rs:876 src/ui/yt_live.rs:238 src/ui/yt_page_search.rs:165
 msgid "Nothing found"
 msgstr "Ничего не найдено"
 
@@ -3348,8 +3338,8 @@ msgstr "Удалить эту трансляцию?"
 
 #: src/ui/yt_page.rs:165
 msgid ""
-"YouTube isn't working right now – update yt-dlp in the settings, or wait for"
-" a newer release."
+"YouTube isn't working right now – update yt-dlp in the settings, or wait for "
+"a newer release."
 msgstr ""
 "YouTube сейчас не работает — обновите yt-dlp в настройках или дождитесь "
 "более новой версии."
@@ -3392,8 +3382,8 @@ msgstr "Нет трансляций"
 
 #: src/ui/yt_page.rs:324
 msgid ""
-"Search YouTube for live streams, such as lofi radio, and add them here. They"
-" are only streamed, never downloaded."
+"Search YouTube for live streams, such as lofi radio, and add them here. They "
+"are only streamed, never downloaded."
 msgstr ""
 "Найдите на YouTube прямые трансляции, например lofi-радио, и добавьте их "
 "сюда. Они только транслируются и никогда не загружаются."
@@ -3600,6 +3590,9 @@ msgstr "Сохранение «{title}» в плейлисты …"
 msgid "Could not load playlist"
 msgstr "Не удалось загрузить плейлист"
 
+#~ msgid "Hits on this album"
+#~ msgstr "Хиты этого альбома"
+
 #~ msgid "Hits in the library"
 #~ msgstr "Хиты в библиотеке"
 
@@ -3625,8 +3618,8 @@ msgstr "Не удалось загрузить плейлист"
 #~ msgstr "Найти станцию по всему миру по названию"
 
 #~ msgid ""
-#~ "Add a local folder or connect a Nextcloud, an SMB share or Google Drive as "
-#~ "another tab."
+#~ "Add a local folder or connect a Nextcloud, an SMB share or Google Drive "
+#~ "as another tab."
 #~ msgstr ""
 #~ "Добавьте локальную папку или подключите Nextcloud, общую папку SMB или "
 #~ "Google Drive как ещё одну вкладку."
@@ -3638,13 +3631,13 @@ msgstr "Не удалось загрузить плейлист"
 #~ msgstr "Пересканировать папку"
 
 #~ msgid ""
-#~ "YouTube isn't working right now – it changed and the installed yt-dlp can't "
-#~ "read it. Look for a newer version of the app or update yt-dlp in the "
-#~ "settings. If neither helps, please wait for a new yt-dlp release."
+#~ "YouTube isn't working right now – it changed and the installed yt-dlp "
+#~ "can't read it. Look for a newer version of the app or update yt-dlp in "
+#~ "the settings. If neither helps, please wait for a new yt-dlp release."
 #~ msgstr ""
 #~ "YouTube сейчас не работает: он изменился, и установленный yt-dlp не может "
-#~ "его прочитать. Поищите более новую версию приложения или обновите yt-dlp в "
-#~ "настройках. Если ничто не помогает, дождитесь нового выпуска yt-dlp."
+#~ "его прочитать. Поищите более новую версию приложения или обновите yt-dlp "
+#~ "в настройках. Если ничто не помогает, дождитесь нового выпуска yt-dlp."
 
 #~ msgid "Long press for details of the current track"
 #~ msgstr "Удерживайте для просмотра сведений о текущем треке"
@@ -3691,19 +3684,19 @@ msgstr "Не удалось загрузить плейлист"
 #~ msgstr "Буфер записи (минуты)"
 
 #~ msgid ""
-#~ "Keep the last minutes of a station so you can record a song after it played."
-#~ " 0 turns it off."
+#~ "Keep the last minutes of a station so you can record a song after it "
+#~ "played. 0 turns it off."
 #~ msgstr ""
-#~ "Сохраняет последние минуты станции, чтобы можно было записать песню после её"
-#~ " проигрывания. 0 отключает."
+#~ "Сохраняет последние минуты станции, чтобы можно было записать песню после "
+#~ "её проигрывания. 0 отключает."
 
 #~ msgid ""
-#~ "Search and play YouTube, follow channels, add videos/playlists to your music"
-#~ " or keep them offline. May be restricted in some countries."
+#~ "Search and play YouTube, follow channels, add videos/playlists to your "
+#~ "music or keep them offline. May be restricted in some countries."
 #~ msgstr ""
-#~ "Ищите и воспроизводите YouTube, следите за каналами, добавляйте "
-#~ "видео/плейлисты в свою музыку или храните их офлайн. Может быть ограничено в"
-#~ " некоторых странах."
+#~ "Ищите и воспроизводите YouTube, следите за каналами, добавляйте видео/"
+#~ "плейлисты в свою музыку или храните их офлайн. Может быть ограничено в "
+#~ "некоторых странах."
 
 #~ msgid "Enable YouTube"
 #~ msgstr "Включить YouTube"
@@ -3713,8 +3706,8 @@ msgstr "Не удалось загрузить плейлист"
 
 #~ msgid "Required tool – downloaded into the app data folder (not bundled)."
 #~ msgstr ""
-#~ "Необходимый инструмент — загружается в папку данных приложения (не входит в "
-#~ "комплект)."
+#~ "Необходимый инструмент — загружается в папку данных приложения (не входит "
+#~ "в комплект)."
 
 #~ msgid "Properties"
 #~ msgstr "Свойства"

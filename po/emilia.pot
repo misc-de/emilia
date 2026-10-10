@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-10 06:53+0000\n"
+"POT-Creation-Date: 2026-10-10 07:57+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -25,7 +25,7 @@ msgstr ""
 msgid "Pause"
 msgstr ""
 
-#: src/core/tray.rs:89 src/ui/app_dialogs.rs:179 src/ui/app_favorites.rs:311 src/ui/app_memo.rs:635 src/ui/app_memo.rs:774 src/ui/app_playlist.rs:342 src/ui/app_playlist.rs:532 src/ui/app_queue.rs:186 src/ui/app_streaming.rs:567 src/ui/app_views_album.rs:726 src/ui/app_views_album.rs:1037 src/ui/app_views_album.rs:1261 src/ui/card_list.rs:151 src/ui/fs_row.rs:407 src/ui/stream_page_recordings.rs:141 src/ui/stream_page_recordings.rs:222 src/ui/stream_page_recordings.rs:415 src/ui/stream_page_recordings.rs:484 src/ui/yt_live.rs:123 src/ui/yt_page_channels.rs:252 src/ui/yt_page_detail.rs:129 src/ui/yt_playlists.rs:237
+#: src/core/tray.rs:89 src/ui/app_dialogs.rs:179 src/ui/app_favorites.rs:311 src/ui/app_memo.rs:635 src/ui/app_memo.rs:774 src/ui/app_playlist.rs:342 src/ui/app_playlist.rs:532 src/ui/app_popularity.rs:593 src/ui/app_queue.rs:186 src/ui/app_streaming.rs:567 src/ui/app_views_album.rs:731 src/ui/app_views_album.rs:1044 src/ui/app_views_album.rs:1280 src/ui/card_list.rs:151 src/ui/fs_row.rs:407 src/ui/stream_page_recordings.rs:141 src/ui/stream_page_recordings.rs:222 src/ui/stream_page_recordings.rs:415 src/ui/stream_page_recordings.rs:484 src/ui/yt_live.rs:123 src/ui/yt_page_channels.rs:252 src/ui/yt_page_detail.rs:129 src/ui/yt_playlists.rs:237
 msgid "Play"
 msgstr ""
 
@@ -65,7 +65,7 @@ msgstr ""
 msgid "Show progress"
 msgstr ""
 
-#: src/ui/app.rs:305 src/ui/app_dialogs.rs:359 src/ui/widgets.rs:795
+#: src/ui/app.rs:305 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
 msgid "Refresh"
 msgstr ""
 
@@ -97,7 +97,7 @@ msgstr ""
 msgid "Scan a music folder and fetch online metadata"
 msgstr ""
 
-#: src/ui/app.rs:528 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127 src/ui/app_views_album.rs:603 src/ui/stats_page.rs:294
+#: src/ui/app.rs:528 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127 src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr ""
 
@@ -105,7 +105,7 @@ msgstr ""
 msgid "No albums"
 msgstr ""
 
-#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:680
+#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
 msgid "Singles"
 msgstr ""
 
@@ -266,7 +266,7 @@ msgstr ""
 msgid "Playback speed"
 msgstr ""
 
-#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1279
+#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1293
 msgid "Shuffle"
 msgstr ""
 
@@ -374,7 +374,7 @@ msgstr ""
 msgid "Info"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:177 src/ui/app_views_album.rs:630 src/ui/fs_row.rs:377
+#: src/ui/app_dialogs.rs:177 src/ui/app_views_album.rs:635 src/ui/fs_row.rs:377
 msgid "Play album"
 msgstr ""
 
@@ -394,67 +394,67 @@ msgstr ""
 msgid "Album order"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:229
+#: src/ui/app_dialogs.rs:235
 msgid "Play hits only"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:252 src/ui/app_settings_meta.rs:130 src/ui/app_yt_glue.rs:576 src/ui/podcasts_page_detail.rs:197
+#: src/ui/app_dialogs.rs:258 src/ui/app_settings_meta.rs:130 src/ui/app_yt_glue.rs:576 src/ui/podcasts_page_detail.rs:197
 msgid "Download"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:271
+#: src/ui/app_dialogs.rs:277
 msgid "Remove from favorites"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:273
+#: src/ui/app_dialogs.rs:279
 msgid "Add to favorites"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:291
+#: src/ui/app_dialogs.rs:297
 msgid "Add to queue"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:296 src/ui/app_playlist.rs:781
+#: src/ui/app_dialogs.rs:302 src/ui/app_playlist.rs:781
 msgid "Add to playlist"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:302 src/ui/podcasts_page_detail.rs:240 src/ui/podcasts_page_detail.rs:407 src/ui/stream_page_stations.rs:335 src/ui/sync_share_ui.rs:129 src/ui/yt_live.rs:144 src/ui/yt_page_detail.rs:177
+#: src/ui/app_dialogs.rs:308 src/ui/podcasts_page_detail.rs:240 src/ui/podcasts_page_detail.rs:407 src/ui/stream_page_stations.rs:335 src/ui/sync_share_ui.rs:129 src/ui/yt_live.rs:144 src/ui/yt_page_detail.rs:177
 msgid "Equalizer settings"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:308 src/ui/app_memo.rs:814 src/ui/app_playlist.rs:716 src/ui/podcasts_page_detail.rs:257 src/ui/podcasts_page_detail.rs:420 src/ui/smb_page.rs:121 src/ui/stream_page_recordings.rs:249 src/ui/stream_page_stations.rs:346 src/ui/yt_page_channels.rs:261 src/ui/yt_page_detail.rs:196
+#: src/ui/app_dialogs.rs:314 src/ui/app_memo.rs:814 src/ui/app_playlist.rs:716 src/ui/podcasts_page_detail.rs:257 src/ui/podcasts_page_detail.rs:420 src/ui/smb_page.rs:121 src/ui/stream_page_recordings.rs:249 src/ui/stream_page_stations.rs:346 src/ui/yt_page_channels.rs:261 src/ui/yt_page_detail.rs:196
 msgid "Share"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:344 src/ui/app_dialogs.rs:350 src/ui/app_favorites.rs:759 src/ui/app_settings_menu.rs:222 src/ui/app_views_ctx.rs:361 src/ui/app_views_ctx.rs:377 src/ui/app_views_ctx.rs:766 src/ui/app_views_ctx.rs:788 src/ui/app_views_ctx.rs:813 src/ui/app_views_ctx.rs:866 src/ui/stream_page_recordings.rs:195 src/ui/stream_page_recordings.rs:472 src/ui/yt_page_detail.rs:100
+#: src/ui/app_dialogs.rs:350 src/ui/app_dialogs.rs:356 src/ui/app_favorites.rs:759 src/ui/app_settings_menu.rs:222 src/ui/app_views_ctx.rs:361 src/ui/app_views_ctx.rs:377 src/ui/app_views_ctx.rs:766 src/ui/app_views_ctx.rs:788 src/ui/app_views_ctx.rs:813 src/ui/app_views_ctx.rs:866 src/ui/stream_page_recordings.rs:195 src/ui/stream_page_recordings.rs:472 src/ui/yt_page_detail.rs:100
 msgid "Artist"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:345 src/ui/app_dialogs.rs:348 src/ui/app_dialogs.rs:351 src/ui/app_favorites.rs:254 src/ui/app_views_ctx.rs:381 src/ui/app_views_ctx.rs:770 src/ui/app_views_ctx.rs:821
+#: src/ui/app_dialogs.rs:351 src/ui/app_dialogs.rs:354 src/ui/app_dialogs.rs:357 src/ui/app_favorites.rs:254 src/ui/app_views_ctx.rs:381 src/ui/app_views_ctx.rs:770 src/ui/app_views_ctx.rs:821
 msgid "Audiobook"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:346 src/ui/app_dialogs.rs:349 src/ui/app_favorites.rs:256 src/ui/app_favorites.rs:758 src/ui/app_settings_menu.rs:221 src/ui/app_views_ctx.rs:383 src/ui/app_views_ctx.rs:510 src/ui/app_views_ctx.rs:772 src/ui/app_views_ctx.rs:823 src/ui/stream_page_recordings.rs:198 src/ui/yt_page_detail.rs:106
+#: src/ui/app_dialogs.rs:352 src/ui/app_dialogs.rs:355 src/ui/app_favorites.rs:256 src/ui/app_favorites.rs:758 src/ui/app_settings_menu.rs:221 src/ui/app_views_ctx.rs:383 src/ui/app_views_ctx.rs:510 src/ui/app_views_ctx.rs:772 src/ui/app_views_ctx.rs:823 src/ui/stream_page_recordings.rs:198 src/ui/yt_page_detail.rs:106
 msgid "Album"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:352 src/ui/app_favorites.rs:760 src/ui/app_settings_menu.rs:223 src/ui/setup.rs:244
+#: src/ui/app_dialogs.rs:358 src/ui/app_favorites.rs:760 src/ui/app_settings_menu.rs:223 src/ui/setup.rs:244
 msgid "Folder"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:354 src/ui/app_favorites.rs:761 src/ui/app_settings_menu.rs:224
+#: src/ui/app_dialogs.rs:360 src/ui/app_favorites.rs:761 src/ui/app_settings_menu.rs:224
 msgid "Track"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:509
+#: src/ui/app_dialogs.rs:517
 msgid "Nothing here to share"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:549 src/ui/podcasts_page_detail.rs:44 src/ui/stream_page.rs:695 src/ui/stream_page.rs:716 src/ui/stream_page.rs:745 src/ui/yt_live.rs:200 src/ui/yt_page_channels.rs:85 src/ui/yt_page_channels.rs:98 src/ui/yt_page_detail.rs:36 src/ui/yt_playlists.rs:41
+#: src/ui/app_dialogs.rs:557 src/ui/podcasts_page_detail.rs:44 src/ui/stream_page.rs:695 src/ui/stream_page.rs:716 src/ui/stream_page.rs:745 src/ui/yt_live.rs:200 src/ui/yt_page_channels.rs:85 src/ui/yt_page_channels.rs:98 src/ui/yt_page_detail.rs:36 src/ui/yt_playlists.rs:41
 msgid "Refreshing …"
 msgstr ""
 
-#: src/ui/app_dialogs.rs:566
+#: src/ui/app_dialogs.rs:574
 msgid "Added {n} tracks to the queue"
 msgstr ""
 
@@ -848,87 +848,83 @@ msgstr ""
 msgid "Added {n} to the playlist"
 msgstr ""
 
-#: src/ui/app_popularity.rs:97
+#: src/ui/app_popularity.rs:96
 msgid "{int} M"
 msgstr ""
 
-#: src/ui/app_popularity.rs:100
+#: src/ui/app_popularity.rs:99
 msgid "{int}.{frac} M"
 msgstr ""
 
-#: src/ui/app_popularity.rs:105
+#: src/ui/app_popularity.rs:104
 msgid "{int} k"
 msgstr ""
 
-#: src/ui/app_popularity.rs:219
+#: src/ui/app_popularity.rs:218
 msgid "Popularity (Deezer)"
 msgstr ""
 
-#: src/ui/app_popularity.rs:224
+#: src/ui/app_popularity.rs:223
 msgid "Hit"
 msgstr ""
 
-#: src/ui/app_popularity.rs:226
+#: src/ui/app_popularity.rs:225
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr ""
 
-#: src/ui/app_popularity.rs:236
+#: src/ui/app_popularity.rs:235
 msgid "Fans (Deezer)"
 msgstr ""
 
-#: src/ui/app_popularity.rs:240
-msgid "Go to the hits"
-msgstr ""
-
-#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
-msgid "Best-known songs"
-msgstr ""
-
-#: src/ui/app_popularity.rs:265
-msgid "Hits on this album"
-msgstr ""
-
-#: src/ui/app_popularity.rs:378
+#: src/ui/app_popularity.rs:341
 msgid "Could not look up the hits"
 msgstr ""
 
-#: src/ui/app_popularity.rs:401
+#: src/ui/app_popularity.rs:364
 msgid "Looking up the hits …"
 msgstr ""
 
-#: src/ui/app_popularity.rs:404
+#: src/ui/app_popularity.rs:367
 msgid "Needs an internet connection"
 msgstr ""
 
-#: src/ui/app_popularity.rs:412
+#: src/ui/app_popularity.rs:375
 msgid "No popularity data for this artist"
 msgstr ""
 
-#: src/ui/app_popularity.rs:417
+#: src/ui/app_popularity.rs:380
 msgid "No hits in the library"
 msgstr ""
 
-#: src/ui/app_popularity.rs:507
+#: src/ui/app_popularity.rs:469
+msgid "Go to the hits"
+msgstr ""
+
+#: src/ui/app_popularity.rs:474 src/ui/app_popularity.rs:535
+msgid "Best-known songs"
+msgstr ""
+
+#: src/ui/app_popularity.rs:534
 msgid "Hits"
 msgstr ""
 
-#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+#: src/ui/app_popularity.rs:621 src/ui/app_views_album.rs:1068
 msgid "Missing — tap to add"
 msgstr ""
 
-#: src/ui/app_popularity.rs:559
+#: src/ui/app_popularity.rs:623
 msgid "Not in the library"
 msgstr ""
 
-#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
+#: src/ui/app_popularity.rs:675 src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
 msgid "Enable YouTube in the settings to use this"
 msgstr ""
 
-#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+#: src/ui/app_popularity.rs:678 src/ui/app_views_handlers.rs:796
 msgid "Searching online …"
 msgstr ""
 
-#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
+#: src/ui/app_popularity.rs:712 src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
 msgid "Not found on YouTube"
 msgstr ""
 
@@ -1746,23 +1742,23 @@ msgstr ""
 msgid "Undo"
 msgstr ""
 
-#: src/ui/app_views_album.rs:591
+#: src/ui/app_views_album.rs:596
 msgid "No tracks"
 msgstr ""
 
-#: src/ui/app_views_album.rs:593
+#: src/ui/app_views_album.rs:598
 msgid "There are no songs for this artist in the library."
 msgstr ""
 
-#: src/ui/app_views_album.rs:1166
+#: src/ui/app_views_album.rs:1173
 msgid "Checking for missing tracks …"
 msgstr ""
 
-#: src/ui/app_views_album.rs:1358 src/ui/app_views_ctx.rs:393 src/ui/app_views_ctx.rs:783 src/ui/app_views_ctx.rs:843
+#: src/ui/app_views_album.rs:1367 src/ui/app_views_ctx.rs:393 src/ui/app_views_ctx.rs:783 src/ui/app_views_ctx.rs:843
 msgid "Year"
 msgstr ""
 
-#: src/ui/app_views_album.rs:1360
+#: src/ui/app_views_album.rs:1369
 msgid "Years"
 msgstr ""
 

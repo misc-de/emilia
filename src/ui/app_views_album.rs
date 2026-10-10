@@ -210,18 +210,23 @@ fn release_dir(t: &Track) -> &std::path::Path {
 }
 
 /// Edge of the cover in an album page's header (logical px).
-const ALBUM_HEADER_COVER: i32 = 128;
+pub(crate) const ALBUM_HEADER_COVER: i32 = 128;
 
 /// What an album page's header shows (see [`App::album_header`]).
-struct AlbumHeader<'a> {
-    cover: Option<&'a gtk::gdk::Texture>,
-    album: &'a str,
-    artist: &'a str,
-    year: Option<i32>,
+pub(crate) struct AlbumHeader<'a> {
+    pub(crate) cover: Option<&'a gtk::gdk::Texture>,
+    /// Shown in place of a missing cover.
+    pub(crate) icon: &'a str,
+    pub(crate) album: &'a str,
+    pub(crate) artist: &'a str,
+    pub(crate) year: Option<i32>,
     /// The page's tracks in the order shown — the order "Play" queues.
-    tracks: Vec<&'a Track>,
+    pub(crate) tracks: Vec<&'a Track>,
     /// Key of the "Play" icon in the page's play-mark registry.
-    mark: String,
+    pub(crate) mark: String,
+    /// "Play"/"Shuffle" fill the queue with the tracks (replacing it) instead
+    /// of playing them as the context (a song list such as an artist's hits).
+    pub(crate) as_queue: bool,
 }
 
 /// One section of an album page: the tracks of one release folder and disc,
@@ -993,6 +998,7 @@ impl App {
                 sender,
                 AlbumHeader {
                     cover: cover.as_ref(),
+                    icon: "media-optical-symbolic",
                     album,
                     artist: &display_artist,
                     year,
@@ -1001,6 +1007,7 @@ impl App {
                         .flat_map(|s| s.tracks.iter().copied())
                         .collect(),
                     mark,
+                    as_queue: false,
                 },
             ),
         );
@@ -1175,7 +1182,11 @@ impl App {
     /// The head of an album page: cover, title, "artist · year · N songs ·
     /// length", and the buttons that play the whole page — in the order shown,
     /// or shuffled. Next to each other on the desktop, stacked on the phone.
-    fn album_header(&self, sender: &ComponentSender<Self>, h: AlbumHeader) -> gtk::Widget {
+    pub(crate) fn album_header(
+        &self,
+        sender: &ComponentSender<Self>,
+        h: AlbumHeader,
+    ) -> gtk::Widget {
         let narrow = self.nav.narrow.get();
         let header = gtk::Box::builder()
             .orientation(if narrow {
@@ -1193,7 +1204,7 @@ impl App {
             .tightening_threshold(ALBUM_HEADER_COVER)
             .child(&crate::ui::widgets::rounded_image(
                 h.cover,
-                "media-optical-symbolic",
+                h.icon,
                 ALBUM_HEADER_COVER,
             ))
             .halign(if narrow {
@@ -1242,6 +1253,14 @@ impl App {
         text.append(&facts);
 
         let paths: Vec<String> = h.tracks.iter().map(|t| t.path.clone()).collect();
+        let as_queue = h.as_queue;
+        let play_msg = move |paths: Vec<String>, shuffle: bool| {
+            if as_queue {
+                Msg::Ctx(crate::ui::app_dialogs::CtxMsg::QueueTracks { paths, shuffle })
+            } else {
+                Msg::PlayTracks { paths, shuffle }
+            }
+        };
         let buttons = gtk::Box::builder()
             .spacing(12)
             .margin_top(6)
@@ -1265,12 +1284,7 @@ impl App {
             .build();
         {
             let (sender, paths) = (sender.clone(), paths.clone());
-            play_btn.connect_clicked(move |_| {
-                sender.input(Msg::PlayTracks {
-                    paths: paths.clone(),
-                    shuffle: false,
-                })
-            });
+            play_btn.connect_clicked(move |_| sender.input(play_msg(paths.clone(), false)));
         }
         let shuffle_btn = gtk::Button::builder()
             .child(
@@ -1283,12 +1297,7 @@ impl App {
             .build();
         {
             let sender = sender.clone();
-            shuffle_btn.connect_clicked(move |_| {
-                sender.input(Msg::PlayTracks {
-                    paths: paths.clone(),
-                    shuffle: true,
-                })
-            });
+            shuffle_btn.connect_clicked(move |_| sender.input(play_msg(paths.clone(), true)));
         }
         buttons.append(&play_btn);
         buttons.append(&shuffle_btn);

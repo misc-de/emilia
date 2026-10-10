@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-10 06:53+0000\n"
+"POT-Creation-Date: 2026-10-10 07:57+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -27,10 +27,10 @@ msgstr "Pauzeren"
 
 #: src/core/tray.rs:89 src/ui/app_dialogs.rs:179 src/ui/app_favorites.rs:311
 #: src/ui/app_memo.rs:635 src/ui/app_memo.rs:774 src/ui/app_playlist.rs:342
-#: src/ui/app_playlist.rs:532 src/ui/app_queue.rs:186
-#: src/ui/app_streaming.rs:567 src/ui/app_views_album.rs:726
-#: src/ui/app_views_album.rs:1037 src/ui/app_views_album.rs:1261
-#: src/ui/card_list.rs:151 src/ui/fs_row.rs:407
+#: src/ui/app_playlist.rs:532 src/ui/app_popularity.rs:593
+#: src/ui/app_queue.rs:186 src/ui/app_streaming.rs:567
+#: src/ui/app_views_album.rs:731 src/ui/app_views_album.rs:1044
+#: src/ui/app_views_album.rs:1280 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
 #: src/ui/stream_page_recordings.rs:141 src/ui/stream_page_recordings.rs:222
 #: src/ui/stream_page_recordings.rs:415 src/ui/stream_page_recordings.rs:484
 #: src/ui/yt_live.rs:123 src/ui/yt_page_channels.rs:252
@@ -76,7 +76,7 @@ msgstr "Slaaptimer"
 msgid "Show progress"
 msgstr "Voortgang tonen"
 
-#: src/ui/app.rs:305 src/ui/app_dialogs.rs:359 src/ui/widgets.rs:795
+#: src/ui/app.rs:305 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
 msgid "Refresh"
 msgstr "Vernieuwen"
 
@@ -112,7 +112,7 @@ msgid "Scan a music folder and fetch online metadata"
 msgstr "Scan een muziekmap en haal online metadata op"
 
 #: src/ui/app.rs:528 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127
-#: src/ui/app_views_album.rs:603 src/ui/stats_page.rs:294
+#: src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr "Albums"
 
@@ -120,7 +120,7 @@ msgstr "Albums"
 msgid "No albums"
 msgstr "Geen albums"
 
-#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:680
+#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
 msgid "Singles"
 msgstr "Singles"
 
@@ -277,16 +277,15 @@ msgstr "{done} MB van {total} MB"
 
 #: src/ui/app.rs:1117 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:936 src/ui/app_memo.rs:959 src/ui/app_playlist.rs:877
-#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
-#: src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:26
-#: src/ui/app_sections.rs:100 src/ui/app_settings_mcp.rs:129
-#: src/ui/app_views_handlers.rs:748 src/ui/app_views_sources.rs:278
-#: src/ui/app_views_sources.rs:474 src/ui/app_views_sources.rs:533
-#: src/ui/podcasts_page.rs:1023 src/ui/setup.rs:699
-#: src/ui/stream_page_stations.rs:53 src/ui/stream_page_stations.rs:404
-#: src/ui/stream_page_stations.rs:452 src/ui/sync_share_ui.rs:159
-#: src/ui/widgets.rs:915 src/ui/widgets.rs:942 src/ui/widgets.rs:1018
-#: src/ui/yt_live.rs:167
+#: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657 src/ui/app_rec_edit.rs:693
+#: src/ui/app_search.rs:26 src/ui/app_sections.rs:100
+#: src/ui/app_settings_mcp.rs:129 src/ui/app_views_handlers.rs:748
+#: src/ui/app_views_sources.rs:278 src/ui/app_views_sources.rs:474
+#: src/ui/app_views_sources.rs:533 src/ui/podcasts_page.rs:1023
+#: src/ui/setup.rs:699 src/ui/stream_page_stations.rs:53
+#: src/ui/stream_page_stations.rs:404 src/ui/stream_page_stations.rs:452
+#: src/ui/sync_share_ui.rs:159 src/ui/widgets.rs:915 src/ui/widgets.rs:942
+#: src/ui/widgets.rs:1018 src/ui/yt_live.rs:167
 msgid "Cancel"
 msgstr "Annuleren"
 
@@ -308,7 +307,7 @@ msgstr "Equalizer voor dit nummer"
 msgid "Playback speed"
 msgstr "Afspeelsnelheid"
 
-#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1279
+#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1293
 msgid "Shuffle"
 msgstr "Willekeurig"
 
@@ -342,8 +341,7 @@ msgstr "Wachtrij"
 #: src/ui/app_chrome.rs:115
 msgid ""
 "Reading in your music collection — this may take a moment the first time"
-msgstr ""
-"Je muziekcollectie wordt ingelezen — de eerste keer kan dit even duren"
+msgstr "Je muziekcollectie wordt ingelezen — de eerste keer kan dit even duren"
 
 #: src/ui/app_chrome.rs:117
 msgid "Updating …"
@@ -428,8 +426,7 @@ msgstr "Een aangepaste afbeelding kiezen"
 msgid "Info"
 msgstr "Info"
 
-#: src/ui/app_dialogs.rs:177 src/ui/app_views_album.rs:630
-#: src/ui/fs_row.rs:377
+#: src/ui/app_dialogs.rs:177 src/ui/app_views_album.rs:635 src/ui/fs_row.rs:377
 msgid "Play album"
 msgstr "Album afspelen"
 
@@ -449,39 +446,39 @@ msgstr "Nieuwste eerst"
 msgid "Album order"
 msgstr "Albumvolgorde"
 
-#: src/ui/app_dialogs.rs:229
+#: src/ui/app_dialogs.rs:235
 msgid "Play hits only"
 msgstr "Alleen hits afspelen"
 
-#: src/ui/app_dialogs.rs:252 src/ui/app_settings_meta.rs:130
+#: src/ui/app_dialogs.rs:258 src/ui/app_settings_meta.rs:130
 #: src/ui/app_yt_glue.rs:576 src/ui/podcasts_page_detail.rs:197
 msgid "Download"
 msgstr "Downloaden"
 
-#: src/ui/app_dialogs.rs:271
+#: src/ui/app_dialogs.rs:277
 msgid "Remove from favorites"
 msgstr "Uit favorieten verwijderen"
 
-#: src/ui/app_dialogs.rs:273
+#: src/ui/app_dialogs.rs:279
 msgid "Add to favorites"
 msgstr "Aan favorieten toevoegen"
 
-#: src/ui/app_dialogs.rs:291
+#: src/ui/app_dialogs.rs:297
 msgid "Add to queue"
 msgstr "Aan wachtrij toevoegen"
 
-#: src/ui/app_dialogs.rs:296 src/ui/app_playlist.rs:781
+#: src/ui/app_dialogs.rs:302 src/ui/app_playlist.rs:781
 msgid "Add to playlist"
 msgstr "Aan afspeellijst toevoegen"
 
-#: src/ui/app_dialogs.rs:302 src/ui/podcasts_page_detail.rs:240
+#: src/ui/app_dialogs.rs:308 src/ui/podcasts_page_detail.rs:240
 #: src/ui/podcasts_page_detail.rs:407 src/ui/stream_page_stations.rs:335
 #: src/ui/sync_share_ui.rs:129 src/ui/yt_live.rs:144
 #: src/ui/yt_page_detail.rs:177
 msgid "Equalizer settings"
 msgstr "Equalizer-instellingen"
 
-#: src/ui/app_dialogs.rs:308 src/ui/app_memo.rs:814 src/ui/app_playlist.rs:716
+#: src/ui/app_dialogs.rs:314 src/ui/app_memo.rs:814 src/ui/app_playlist.rs:716
 #: src/ui/podcasts_page_detail.rs:257 src/ui/podcasts_page_detail.rs:420
 #: src/ui/smb_page.rs:121 src/ui/stream_page_recordings.rs:249
 #: src/ui/stream_page_stations.rs:346 src/ui/yt_page_channels.rs:261
@@ -489,7 +486,7 @@ msgstr "Equalizer-instellingen"
 msgid "Share"
 msgstr "Delen"
 
-#: src/ui/app_dialogs.rs:344 src/ui/app_dialogs.rs:350
+#: src/ui/app_dialogs.rs:350 src/ui/app_dialogs.rs:356
 #: src/ui/app_favorites.rs:759 src/ui/app_settings_menu.rs:222
 #: src/ui/app_views_ctx.rs:361 src/ui/app_views_ctx.rs:377
 #: src/ui/app_views_ctx.rs:766 src/ui/app_views_ctx.rs:788
@@ -499,14 +496,14 @@ msgstr "Delen"
 msgid "Artist"
 msgstr "Artiest"
 
-#: src/ui/app_dialogs.rs:345 src/ui/app_dialogs.rs:348
-#: src/ui/app_dialogs.rs:351 src/ui/app_favorites.rs:254
+#: src/ui/app_dialogs.rs:351 src/ui/app_dialogs.rs:354
+#: src/ui/app_dialogs.rs:357 src/ui/app_favorites.rs:254
 #: src/ui/app_views_ctx.rs:381 src/ui/app_views_ctx.rs:770
 #: src/ui/app_views_ctx.rs:821
 msgid "Audiobook"
 msgstr "Luisterboek"
 
-#: src/ui/app_dialogs.rs:346 src/ui/app_dialogs.rs:349
+#: src/ui/app_dialogs.rs:352 src/ui/app_dialogs.rs:355
 #: src/ui/app_favorites.rs:256 src/ui/app_favorites.rs:758
 #: src/ui/app_settings_menu.rs:221 src/ui/app_views_ctx.rs:383
 #: src/ui/app_views_ctx.rs:510 src/ui/app_views_ctx.rs:772
@@ -515,21 +512,21 @@ msgstr "Luisterboek"
 msgid "Album"
 msgstr "Album"
 
-#: src/ui/app_dialogs.rs:352 src/ui/app_favorites.rs:760
+#: src/ui/app_dialogs.rs:358 src/ui/app_favorites.rs:760
 #: src/ui/app_settings_menu.rs:223 src/ui/setup.rs:244
 msgid "Folder"
 msgstr "Map"
 
-#: src/ui/app_dialogs.rs:354 src/ui/app_favorites.rs:761
+#: src/ui/app_dialogs.rs:360 src/ui/app_favorites.rs:761
 #: src/ui/app_settings_menu.rs:224
 msgid "Track"
 msgstr "Nummer"
 
-#: src/ui/app_dialogs.rs:509
+#: src/ui/app_dialogs.rs:517
 msgid "Nothing here to share"
 msgstr "Hier is niets om te delen"
 
-#: src/ui/app_dialogs.rs:549 src/ui/podcasts_page_detail.rs:44
+#: src/ui/app_dialogs.rs:557 src/ui/podcasts_page_detail.rs:44
 #: src/ui/stream_page.rs:695 src/ui/stream_page.rs:716
 #: src/ui/stream_page.rs:745 src/ui/yt_live.rs:200
 #: src/ui/yt_page_channels.rs:85 src/ui/yt_page_channels.rs:98
@@ -537,7 +534,7 @@ msgstr "Hier is niets om te delen"
 msgid "Refreshing …"
 msgstr "Vernieuwen …"
 
-#: src/ui/app_dialogs.rs:566
+#: src/ui/app_dialogs.rs:574
 msgid "Added {n} tracks to the queue"
 msgstr "{n} nummers toegevoegd aan de wachtrij"
 
@@ -719,8 +716,8 @@ msgid ""
 "The new language is loaded only after a restart. Restart now, or do it "
 "yourself later."
 msgstr ""
-"De nieuwe taal wordt pas na een herstart geladen. Start nu opnieuw op of doe"
-" het later zelf."
+"De nieuwe taal wordt pas na een herstart geladen. Start nu opnieuw op of doe "
+"het later zelf."
 
 #: src/ui/app_init.rs:1345
 msgid "Later"
@@ -801,10 +798,9 @@ msgid "Edit"
 msgstr "Bewerken"
 
 #: src/ui/app_memo.rs:792 src/ui/app_memo.rs:807 src/ui/app_memo.rs:894
-#: src/ui/app_memo.rs:905 src/ui/app_playlist.rs:733
-#: src/ui/app_playlist.rs:878 src/ui/app_rec_edit.rs:301
-#: src/ui/app_views_sources.rs:397 src/ui/app_views_sources.rs:475
-#: src/ui/stream_page_stations.rs:405
+#: src/ui/app_memo.rs:905 src/ui/app_playlist.rs:733 src/ui/app_playlist.rs:878
+#: src/ui/app_rec_edit.rs:301 src/ui/app_views_sources.rs:397
+#: src/ui/app_views_sources.rs:475 src/ui/stream_page_stations.rs:405
 msgid "Rename"
 msgstr "Hernoemen"
 
@@ -960,88 +956,84 @@ msgstr "Afspeellijst hernoemen"
 msgid "Added {n} to the playlist"
 msgstr "{n} toegevoegd aan de afspeellijst"
 
-#: src/ui/app_popularity.rs:97
+#: src/ui/app_popularity.rs:96
 msgid "{int} M"
 msgstr "{int} mln."
 
-#: src/ui/app_popularity.rs:100
+#: src/ui/app_popularity.rs:99
 msgid "{int}.{frac} M"
 msgstr "{int},{frac} mln."
 
-#: src/ui/app_popularity.rs:105
+#: src/ui/app_popularity.rs:104
 msgid "{int} k"
 msgstr "{int}k"
 
-#: src/ui/app_popularity.rs:219
+#: src/ui/app_popularity.rs:218
 msgid "Popularity (Deezer)"
 msgstr "Populariteit (Deezer)"
 
-#: src/ui/app_popularity.rs:224
+#: src/ui/app_popularity.rs:223
 msgid "Hit"
 msgstr "Hit"
 
-#: src/ui/app_popularity.rs:226
+#: src/ui/app_popularity.rs:225
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "Nr. {n} van de populairste nummers van {artist}"
 
-#: src/ui/app_popularity.rs:236
+#: src/ui/app_popularity.rs:235
 msgid "Fans (Deezer)"
 msgstr "Fans (Deezer)"
 
-#: src/ui/app_popularity.rs:240
-msgid "Go to the hits"
-msgstr "Naar de hits"
-
-#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
-msgid "Best-known songs"
-msgstr "Bekendste nummers"
-
-#: src/ui/app_popularity.rs:265
-msgid "Hits on this album"
-msgstr "Hits op dit album"
-
-#: src/ui/app_popularity.rs:378
+#: src/ui/app_popularity.rs:341
 msgid "Could not look up the hits"
 msgstr "Hits konden niet worden opgehaald"
 
-#: src/ui/app_popularity.rs:401
+#: src/ui/app_popularity.rs:364
 msgid "Looking up the hits …"
 msgstr "Hits opzoeken …"
 
-#: src/ui/app_popularity.rs:404
+#: src/ui/app_popularity.rs:367
 msgid "Needs an internet connection"
 msgstr "Vereist een internetverbinding"
 
-#: src/ui/app_popularity.rs:412
+#: src/ui/app_popularity.rs:375
 msgid "No popularity data for this artist"
 msgstr "Geen populariteitsgegevens voor deze artiest"
 
-#: src/ui/app_popularity.rs:417
+#: src/ui/app_popularity.rs:380
 msgid "No hits in the library"
 msgstr "Geen hits in de bibliotheek"
 
-#: src/ui/app_popularity.rs:507
+#: src/ui/app_popularity.rs:469
+msgid "Go to the hits"
+msgstr "Naar de hits"
+
+#: src/ui/app_popularity.rs:474 src/ui/app_popularity.rs:535
+msgid "Best-known songs"
+msgstr "Bekendste nummers"
+
+#: src/ui/app_popularity.rs:534
 msgid "Hits"
 msgstr "Hits"
 
-#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+#: src/ui/app_popularity.rs:621 src/ui/app_views_album.rs:1068
 msgid "Missing — tap to add"
 msgstr "Ontbreekt — tik om toe te voegen"
 
-#: src/ui/app_popularity.rs:559
+#: src/ui/app_popularity.rs:623
 msgid "Not in the library"
 msgstr "Niet in de bibliotheek"
 
-#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_popularity.rs:675 src/ui/app_streaming.rs:824
 #: src/ui/app_views_handlers.rs:786
 msgid "Enable YouTube in the settings to use this"
 msgstr "Schakel YouTube in bij de instellingen om dit te gebruiken"
 
-#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+#: src/ui/app_popularity.rs:678 src/ui/app_views_handlers.rs:796
 msgid "Searching online …"
 msgstr "Online zoeken …"
 
-#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_popularity.rs:712 src/ui/app_streaming.rs:867
 #: src/ui/app_views_handlers.rs:866
 msgid "Not found on YouTube"
 msgstr "Niet gevonden op YouTube"
@@ -1203,8 +1195,7 @@ msgstr ""
 #: src/ui/app_sections.rs:55
 msgid "Browse your music folder — and any extra sources — as a file tree."
 msgstr ""
-"Blader door je muziekmap — en eventuele extra bronnen — als een "
-"bestandsboom."
+"Blader door je muziekmap — en eventuele extra bronnen — als een bestandsboom."
 
 #: src/ui/app_sections.rs:57
 msgid "Every artist in your library, each opening to their albums and tracks."
@@ -1215,8 +1206,7 @@ msgid ""
 "Releases by a single artist with just a few tracks, kept apart from full "
 "albums."
 msgstr ""
-"Uitgaven van één artiest met maar een paar nummers, los van volledige "
-"albums."
+"Uitgaven van één artiest met maar een paar nummers, los van volledige albums."
 
 #: src/ui/app_sections.rs:63
 msgid "Every album in your library, sortable and grouped by initial or year."
@@ -1475,8 +1465,8 @@ msgstr "MCP-server"
 
 #: src/ui/app_settings_mcp.rs:24
 msgid ""
-"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST"
-" http://127.0.0.1:8770/mcp with the bearer token below."
+"Expose the library and playback to an MCP host (e.g. Claude). Endpoint: POST "
+"http://127.0.0.1:8770/mcp with the bearer token below."
 msgstr ""
 "Stelt de bibliotheek en het afspelen beschikbaar aan een MCP-host (bijv. "
 "Claude). Endpoint: POST http://127.0.0.1:8770/mcp met het bearer-token "
@@ -1552,9 +1542,9 @@ msgid ""
 "Artists, albums and tracks whose properties are visible nowhere – each the "
 "object that carries the setting. Use the eye to show them again."
 msgstr ""
-"Artiesten, albums en nummers waarvan de eigenschappen nergens zichtbaar zijn"
-" – telkens het object dat de instelling draagt. Gebruik het oog om ze weer "
-"te tonen."
+"Artiesten, albums en nummers waarvan de eigenschappen nergens zichtbaar zijn "
+"– telkens het object dat de instelling draagt. Gebruik het oog om ze weer te "
+"tonen."
 
 #: src/ui/app_settings_menu.rs:59
 msgid "Nothing hidden"
@@ -1569,10 +1559,8 @@ msgid "Read music data"
 msgstr "Muziekgegevens lezen"
 
 #: src/ui/app_settings_meta.rs:30
-msgid ""
-"Complete missing cover art, photos and tracks from open online sources."
-msgstr ""
-"Vul ontbrekende hoezen, foto's en nummers aan uit open online bronnen."
+msgid "Complete missing cover art, photos and tracks from open online sources."
+msgstr "Vul ontbrekende hoezen, foto's en nummers aan uit open online bronnen."
 
 #: src/ui/app_settings_meta.rs:34
 msgid "Fetch automatically"
@@ -1590,11 +1578,11 @@ msgstr "AcoustID"
 
 #: src/ui/app_settings_meta.rs:53
 msgid ""
-"Optional key for fingerprint-based track detection (free at "
-"acoustid.org/new-application)."
+"Optional key for fingerprint-based track detection (free at acoustid.org/new-"
+"application)."
 msgstr ""
-"Optionele sleutel voor nummerherkenning op basis van vingerafdruk (gratis op"
-" acoustid.org/new-application)."
+"Optionele sleutel voor nummerherkenning op basis van vingerafdruk (gratis op "
+"acoustid.org/new-application)."
 
 #: src/ui/app_settings_meta.rs:57
 msgid "AcoustID API key"
@@ -1619,10 +1607,10 @@ msgid ""
 "versions, you can update it to a newer one here. Turn the YouTube section "
 "itself on under Menu. May be restricted in some countries."
 msgstr ""
-"YouTube gebruikt het meegeleverde hulpprogramma yt-dlp. Omdat YouTube oudere"
-" versies vaak onbruikbaar maakt, kun je het hier bijwerken naar een "
-"nieuwere. Schakel de YouTube-sectie zelf in onder Menu. Kan in sommige "
-"landen beperkt zijn."
+"YouTube gebruikt het meegeleverde hulpprogramma yt-dlp. Omdat YouTube oudere "
+"versies vaak onbruikbaar maakt, kun je het hier bijwerken naar een nieuwere. "
+"Schakel de YouTube-sectie zelf in onder Menu. Kan in sommige landen beperkt "
+"zijn."
 
 #: src/ui/app_settings_meta.rs:123 src/ui/app_yt_glue.rs:566
 msgid "Installed (version {v})"
@@ -1733,8 +1721,8 @@ msgstr "Schaalt de menupictogrammen (mobiel, procent)"
 
 #: src/ui/app_settings_view.rs:162
 msgid ""
-"How artist tags like \"A feat. B\" are listed. The tags themselves are never"
-" changed."
+"How artist tags like \"A feat. B\" are listed. The tags themselves are never "
+"changed."
 msgstr ""
 "Hoe artiesttags als «A feat. B» worden weergegeven. De tags zelf worden "
 "nooit gewijzigd."
@@ -1950,24 +1938,24 @@ msgstr "Geen muziekmap ingesteld – kies er een bij de instellingen"
 msgid "Undo"
 msgstr "Ongedaan maken"
 
-#: src/ui/app_views_album.rs:591
+#: src/ui/app_views_album.rs:596
 msgid "No tracks"
 msgstr "Geen nummers"
 
-#: src/ui/app_views_album.rs:593
+#: src/ui/app_views_album.rs:598
 msgid "There are no songs for this artist in the library."
 msgstr "Er zijn geen nummers van deze artiest in de bibliotheek."
 
-#: src/ui/app_views_album.rs:1166
+#: src/ui/app_views_album.rs:1173
 msgid "Checking for missing tracks …"
 msgstr "Controleren op ontbrekende nummers …"
 
-#: src/ui/app_views_album.rs:1358 src/ui/app_views_ctx.rs:393
+#: src/ui/app_views_album.rs:1367 src/ui/app_views_ctx.rs:393
 #: src/ui/app_views_ctx.rs:783 src/ui/app_views_ctx.rs:843
 msgid "Year"
 msgstr "Jaar"
 
-#: src/ui/app_views_album.rs:1360
+#: src/ui/app_views_album.rs:1369
 msgid "Years"
 msgstr "Jaren"
 
@@ -2058,8 +2046,8 @@ msgstr "Downloaden …"
 
 #: src/ui/app_views_handlers.rs:744
 msgid ""
-"“{title}” is missing from this album. Search for it online and add it to the"
-" album?"
+"“{title}” is missing from this album. Search for it online and add it to the "
+"album?"
 msgstr ""
 "«{title}» ontbreekt in dit album. Online zoeken en aan het album toevoegen?"
 
@@ -2306,12 +2294,12 @@ msgstr "OAuth-client"
 
 #: src/ui/gdrive_page.rs:260
 msgid ""
-"Google requires an OAuth client per app: create one of type “Desktop app” in"
-" the Google Cloud console (with the Drive API enabled) and paste its ID and "
+"Google requires an OAuth client per app: create one of type “Desktop app” in "
+"the Google Cloud console (with the Drive API enabled) and paste its ID and "
 "secret here."
 msgstr ""
-"Google vereist per app een OAuth-client: maak in de Google Cloud Console een"
-" client van het type “Desktop-app” aan (met de Drive API ingeschakeld) en "
+"Google vereist per app een OAuth-client: maak in de Google Cloud Console een "
+"client van het type “Desktop-app” aan (met de Drive API ingeschakeld) en "
 "plak de ID en het secret hier."
 
 #: src/ui/gdrive_page.rs:264
@@ -2328,8 +2316,8 @@ msgstr "Aanmelden met Google"
 
 #: src/ui/gdrive_page.rs:286
 msgid ""
-"The browser opens Google's sign-in page; Emilia only asks for read access to"
-" your Drive. Return here afterwards."
+"The browser opens Google's sign-in page; Emilia only asks for read access to "
+"your Drive. Return here afterwards."
 msgstr ""
 "De browser opent de aanmeldpagina van Google; Emilia vraagt alleen "
 "leestoegang tot je Drive. Kom daarna hier terug."
@@ -2667,8 +2655,8 @@ msgstr "Kies je muziekmap"
 
 #: src/ui/setup.rs:653
 msgid ""
-"Pick the folder that already holds your collection. You can add more sources"
-" later in Settings."
+"Pick the folder that already holds your collection. You can add more sources "
+"later in Settings."
 msgstr ""
 "Kies de map waarin je collectie al staat. Je kunt later meer bronnen "
 "toevoegen bij Instellingen."
@@ -2865,8 +2853,8 @@ msgstr "Neem het huidige nummer op terwijl een zender speelt."
 
 #: src/ui/stream_page.rs:384
 msgid ""
-"Songs are recognized from the title a station broadcasts while it plays, and"
-" collected here — so you can play them back later (from your library, "
+"Songs are recognized from the title a station broadcasts while it plays, and "
+"collected here — so you can play them back later (from your library, "
 "otherwise via YouTube). This only works for stations that transmit the "
 "current title."
 msgstr ""
@@ -2896,8 +2884,7 @@ msgid "No logo found"
 msgstr "Geen logo gevonden"
 
 #: src/ui/stream_page.rs:844 src/ui/stream_page.rs:860
-#: src/ui/stream_page.rs:876 src/ui/yt_live.rs:238
-#: src/ui/yt_page_search.rs:165
+#: src/ui/stream_page.rs:876 src/ui/yt_live.rs:238 src/ui/yt_page_search.rs:165
 msgid "Nothing found"
 msgstr "Niets gevonden"
 
@@ -3079,8 +3066,8 @@ msgid ""
 "Scan this code on the other device — or copy the code below and paste it "
 "there."
 msgstr ""
-"Scan deze code op het andere apparaat — of kopieer de code hieronder en plak"
-" die daar."
+"Scan deze code op het andere apparaat — of kopieer de code hieronder en plak "
+"die daar."
 
 #: src/ui/sync_page.rs:593
 msgid "Pairing code …"
@@ -3208,8 +3195,8 @@ msgid ""
 "Send to offer this to the other device — it then reviews the list and "
 "chooses what to keep."
 msgstr ""
-"Met «Verzenden» bied je dit aan het andere apparaat aan — dat bekijkt dan de"
-" lijst en kiest wat het bewaart."
+"Met «Verzenden» bied je dit aan het andere apparaat aan — dat bekijkt dan de "
+"lijst en kiest wat het bewaart."
 
 #: src/ui/sync_share_ui.rs:74
 msgid "{n} YouTube items"
@@ -3340,8 +3327,8 @@ msgstr "Deze livestream verwijderen?"
 
 #: src/ui/yt_page.rs:165
 msgid ""
-"YouTube isn't working right now – update yt-dlp in the settings, or wait for"
-" a newer release."
+"YouTube isn't working right now – update yt-dlp in the settings, or wait for "
+"a newer release."
 msgstr ""
 "YouTube werkt momenteel niet – werk yt-dlp bij in de instellingen of wacht "
 "op een nieuwere versie."
@@ -3384,8 +3371,8 @@ msgstr "Geen livestreams"
 
 #: src/ui/yt_page.rs:324
 msgid ""
-"Search YouTube for live streams, such as lofi radio, and add them here. They"
-" are only streamed, never downloaded."
+"Search YouTube for live streams, such as lofi radio, and add them here. They "
+"are only streamed, never downloaded."
 msgstr ""
 "Zoek op YouTube naar livestreams, zoals lofi-radio, en voeg ze hier toe. Ze "
 "worden alleen gestreamd, nooit gedownload."
@@ -3590,6 +3577,9 @@ msgstr "«{title}» opslaan in afspeellijsten …"
 msgid "Could not load playlist"
 msgstr "Kon afspeellijst niet laden"
 
+#~ msgid "Hits on this album"
+#~ msgstr "Hits op dit album"
+
 #~ msgid "Hits in the library"
 #~ msgstr "Hits in de bibliotheek"
 
@@ -3615,8 +3605,8 @@ msgstr "Kon afspeellijst niet laden"
 #~ msgstr "Een zender wereldwijd op naam vinden"
 
 #~ msgid ""
-#~ "Add a local folder or connect a Nextcloud, an SMB share or Google Drive as "
-#~ "another tab."
+#~ "Add a local folder or connect a Nextcloud, an SMB share or Google Drive "
+#~ "as another tab."
 #~ msgstr ""
 #~ "Voeg een lokale map toe of verbind een Nextcloud, een SMB-share of Google "
 #~ "Drive als extra tabblad."
@@ -3628,14 +3618,14 @@ msgstr "Kon afspeellijst niet laden"
 #~ msgstr "Map opnieuw scannen"
 
 #~ msgid ""
-#~ "YouTube isn't working right now – it changed and the installed yt-dlp can't "
-#~ "read it. Look for a newer version of the app or update yt-dlp in the "
-#~ "settings. If neither helps, please wait for a new yt-dlp release."
+#~ "YouTube isn't working right now – it changed and the installed yt-dlp "
+#~ "can't read it. Look for a newer version of the app or update yt-dlp in "
+#~ "the settings. If neither helps, please wait for a new yt-dlp release."
 #~ msgstr ""
-#~ "YouTube werkt momenteel niet: het is gewijzigd en de geïnstalleerde yt-dlp "
-#~ "kan het niet lezen. Zoek naar een nieuwere versie van de app of werk yt-dlp "
-#~ "bij in de instellingen. Helpt geen van beide, wacht dan op een nieuwe yt-"
-#~ "dlp-versie."
+#~ "YouTube werkt momenteel niet: het is gewijzigd en de geïnstalleerde yt-"
+#~ "dlp kan het niet lezen. Zoek naar een nieuwere versie van de app of werk "
+#~ "yt-dlp bij in de instellingen. Helpt geen van beide, wacht dan op een "
+#~ "nieuwe yt-dlp-versie."
 
 #~ msgid "Long press for details of the current track"
 #~ msgstr "Lang ingedrukt houden voor details van het huidige nummer"
@@ -3681,18 +3671,18 @@ msgstr "Kon afspeellijst niet laden"
 #~ msgstr "Opnamebuffer (minuten)"
 
 #~ msgid ""
-#~ "Keep the last minutes of a station so you can record a song after it played."
-#~ " 0 turns it off."
+#~ "Keep the last minutes of a station so you can record a song after it "
+#~ "played. 0 turns it off."
 #~ msgstr ""
 #~ "Bewaar de laatste minuten van een zender zodat je een nummer kunt opnemen "
 #~ "nadat het is gespeeld. 0 schakelt het uit."
 
 #~ msgid ""
-#~ "Search and play YouTube, follow channels, add videos/playlists to your music"
-#~ " or keep them offline. May be restricted in some countries."
+#~ "Search and play YouTube, follow channels, add videos/playlists to your "
+#~ "music or keep them offline. May be restricted in some countries."
 #~ msgstr ""
-#~ "Doorzoek en speel YouTube, volg kanalen, voeg video's/afspeellijsten toe aan"
-#~ " je muziek of houd ze offline. Kan in sommige landen beperkt zijn."
+#~ "Doorzoek en speel YouTube, volg kanalen, voeg video's/afspeellijsten toe "
+#~ "aan je muziek of houd ze offline. Kan in sommige landen beperkt zijn."
 
 #~ msgid "Enable YouTube"
 #~ msgstr "YouTube inschakelen"
