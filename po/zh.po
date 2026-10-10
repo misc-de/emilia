@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 13:01+0000\n"
+"POT-Creation-Date: 2026-10-10 06:53+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -940,57 +940,91 @@ msgstr "重命名播放列表"
 msgid "Added {n} to the playlist"
 msgstr "已将 {n} 添加到播放列表"
 
-#: src/ui/app_popularity.rs:181
+#: src/ui/app_popularity.rs:97
+msgid "{int} M"
+msgstr "{int}百万"
+
+#: src/ui/app_popularity.rs:100
+msgid "{int}.{frac} M"
+msgstr "{int}.{frac}百万"
+
+#: src/ui/app_popularity.rs:105
+msgid "{int} k"
+msgstr "{int}千"
+
+#: src/ui/app_popularity.rs:219
 msgid "Popularity (Deezer)"
 msgstr "人气（Deezer）"
 
-#: src/ui/app_popularity.rs:188
+#: src/ui/app_popularity.rs:224
 msgid "Hit"
 msgstr "热门"
 
-#: src/ui/app_popularity.rs:190
+#: src/ui/app_popularity.rs:226
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "{artist} 最受欢迎歌曲第 {n} 名"
 
-#: src/ui/app_popularity.rs:206
+#: src/ui/app_popularity.rs:236
 msgid "Fans (Deezer)"
 msgstr "粉丝（Deezer）"
 
-#: src/ui/app_popularity.rs:210
+#: src/ui/app_popularity.rs:240
+msgid "Go to the hits"
+msgstr "查看热门歌曲"
+
+#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
 msgid "Best-known songs"
 msgstr "最知名的歌曲"
 
-#: src/ui/app_popularity.rs:215
-msgid "Hits in the library"
-msgstr "曲库中的热门歌曲"
-
-#: src/ui/app_popularity.rs:217
-msgid "{n} of {total}"
-msgstr "{n} / {total}"
-
-#: src/ui/app_popularity.rs:235
+#: src/ui/app_popularity.rs:265
 msgid "Hits on this album"
 msgstr "本专辑的热门歌曲"
 
-#: src/ui/app_popularity.rs:348
+#: src/ui/app_popularity.rs:378
 msgid "Could not look up the hits"
 msgstr "无法查询热门歌曲"
 
-#: src/ui/app_popularity.rs:371
+#: src/ui/app_popularity.rs:401
 msgid "Looking up the hits …"
 msgstr "正在查找热门歌曲 …"
 
-#: src/ui/app_popularity.rs:374
+#: src/ui/app_popularity.rs:404
 msgid "Needs an internet connection"
 msgstr "需要互联网连接"
 
-#: src/ui/app_popularity.rs:382
+#: src/ui/app_popularity.rs:412
 msgid "No popularity data for this artist"
 msgstr "没有此艺人的人气数据"
 
-#: src/ui/app_popularity.rs:387
+#: src/ui/app_popularity.rs:417
 msgid "No hits in the library"
 msgstr "曲库中没有热门歌曲"
+
+#: src/ui/app_popularity.rs:507
+msgid "Hits"
+msgstr "热门歌曲"
+
+#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+msgid "Missing — tap to add"
+msgstr "缺失——点按以添加"
+
+#: src/ui/app_popularity.rs:559
+msgid "Not in the library"
+msgstr "不在曲库中"
+
+#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_views_handlers.rs:786
+msgid "Enable YouTube in the settings to use this"
+msgstr "请先在设置中启用 YouTube 以使用此功能"
+
+#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+msgid "Searching online …"
+msgstr "正在在线搜索 …"
+
+#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_views_handlers.rs:866
+msgid "Not found on YouTube"
+msgstr "在 YouTube 上未找到"
 
 #: src/ui/app_queue.rs:61
 msgid "Clear queue"
@@ -1810,19 +1844,11 @@ msgstr "重新播放"
 msgid "Could not extract from buffer"
 msgstr "无法从缓冲区提取"
 
-#: src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
-msgid "Enable YouTube in the settings to use this"
-msgstr "请先在设置中启用 YouTube 以使用此功能"
-
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
 #: src/ui/app_streaming.rs:833
 msgid "Looking online …"
 msgstr "正在在线查找 …"
-
-#: src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
-msgid "Not found on YouTube"
-msgstr "在 YouTube 上未找到"
 
 #: src/ui/app_streaming.rs:1061
 msgid "Recording stopped"
@@ -1840,7 +1866,7 @@ msgstr "已删除录音"
 msgid "Download complete"
 msgstr "下载完成"
 
-#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:984
+#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:999
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "下载失败"
@@ -1872,10 +1898,6 @@ msgstr "没有曲目"
 #: src/ui/app_views_album.rs:593
 msgid "There are no songs for this artist in the library."
 msgstr "音乐库中没有此艺术家的歌曲。"
-
-#: src/ui/app_views_album.rs:1061
-msgid "Missing — tap to add"
-msgstr "缺失——点按以添加"
 
 #: src/ui/app_views_album.rs:1166
 msgid "Checking for missing tracks …"
@@ -1968,7 +1990,7 @@ msgstr "已从队列移除"
 msgid "Will play next"
 msgstr "将接下来播放"
 
-#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:964
+#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:979
 #: src/ui/podcasts_page.rs:151
 msgid "Downloading …"
 msgstr "正在下载 …"
@@ -1987,23 +2009,19 @@ msgstr "添加缺失的曲目"
 msgid "Search & add"
 msgstr "搜索并添加"
 
-#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:960
+#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:975
 msgid "Cannot determine the album folder"
 msgstr "无法确定专辑文件夹"
 
-#: src/ui/app_views_handlers.rs:796
-msgid "Searching online …"
-msgstr "正在在线搜索 …"
-
-#: src/ui/app_views_handlers.rs:871
+#: src/ui/app_views_handlers.rs:894
 msgid "Choose a version"
 msgstr "选择版本"
 
-#: src/ui/app_views_handlers.rs:885
+#: src/ui/app_views_handlers.rs:908
 msgid "Pick the version of “{title}” to add"
 msgstr "选择要添加的“{title}”版本"
 
-#: src/ui/app_views_handlers.rs:981
+#: src/ui/app_views_handlers.rs:996
 msgid "Track added"
 msgstr "已添加曲目"
 
@@ -3470,6 +3488,12 @@ msgstr "正在将“{title}”保存到播放列表 …"
 #: src/ui/yt_playlists.rs:449
 msgid "Could not load playlist"
 msgstr "无法加载播放列表"
+
+#~ msgid "Hits in the library"
+#~ msgstr "曲库中的热门歌曲"
+
+#~ msgid "{n} of {total}"
+#~ msgstr "{n} / {total}"
 
 #~ msgid "Updating feed …"
 #~ msgstr "正在更新订阅源 …"

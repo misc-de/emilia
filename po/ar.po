@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 13:01+0000\n"
+"POT-Creation-Date: 2026-10-10 06:53+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -985,57 +985,91 @@ msgstr "إعادة تسمية قائمة التشغيل"
 msgid "Added {n} to the playlist"
 msgstr "أُضيف {n} إلى قائمة التشغيل"
 
-#: src/ui/app_popularity.rs:181
+#: src/ui/app_popularity.rs:97
+msgid "{int} M"
+msgstr "{int} مليون"
+
+#: src/ui/app_popularity.rs:100
+msgid "{int}.{frac} M"
+msgstr "{int}٫{frac} مليون"
+
+#: src/ui/app_popularity.rs:105
+msgid "{int} k"
+msgstr "{int} ألف"
+
+#: src/ui/app_popularity.rs:219
 msgid "Popularity (Deezer)"
 msgstr "الشعبية (Deezer)"
 
-#: src/ui/app_popularity.rs:188
+#: src/ui/app_popularity.rs:224
 msgid "Hit"
 msgstr "أغنية ناجحة"
 
-#: src/ui/app_popularity.rs:190
+#: src/ui/app_popularity.rs:226
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "رقم {n} بين أشهر أغاني {artist}"
 
-#: src/ui/app_popularity.rs:206
+#: src/ui/app_popularity.rs:236
 msgid "Fans (Deezer)"
 msgstr "المعجبون (Deezer)"
 
-#: src/ui/app_popularity.rs:210
+#: src/ui/app_popularity.rs:240
+msgid "Go to the hits"
+msgstr "الانتقال إلى الأغاني الناجحة"
+
+#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
 msgid "Best-known songs"
 msgstr "أشهر الأغاني"
 
-#: src/ui/app_popularity.rs:215
-msgid "Hits in the library"
-msgstr "الأغاني الناجحة في المكتبة"
-
-#: src/ui/app_popularity.rs:217
-msgid "{n} of {total}"
-msgstr "{n} من {total}"
-
-#: src/ui/app_popularity.rs:235
+#: src/ui/app_popularity.rs:265
 msgid "Hits on this album"
 msgstr "الأغاني الناجحة في هذا الألبوم"
 
-#: src/ui/app_popularity.rs:348
+#: src/ui/app_popularity.rs:378
 msgid "Could not look up the hits"
 msgstr "تعذّر البحث عن الأغاني الناجحة"
 
-#: src/ui/app_popularity.rs:371
+#: src/ui/app_popularity.rs:401
 msgid "Looking up the hits …"
 msgstr "جارٍ البحث عن الأغاني الناجحة …"
 
-#: src/ui/app_popularity.rs:374
+#: src/ui/app_popularity.rs:404
 msgid "Needs an internet connection"
 msgstr "يتطلب اتصالًا بالإنترنت"
 
-#: src/ui/app_popularity.rs:382
+#: src/ui/app_popularity.rs:412
 msgid "No popularity data for this artist"
 msgstr "لا توجد بيانات شعبية لهذا الفنان"
 
-#: src/ui/app_popularity.rs:387
+#: src/ui/app_popularity.rs:417
 msgid "No hits in the library"
 msgstr "لا توجد أغانٍ ناجحة في المكتبة"
+
+#: src/ui/app_popularity.rs:507
+msgid "Hits"
+msgstr "الأغاني الناجحة"
+
+#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+msgid "Missing — tap to add"
+msgstr "مفقود — انقر للإضافة"
+
+#: src/ui/app_popularity.rs:559
+msgid "Not in the library"
+msgstr "ليست في المكتبة"
+
+#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_views_handlers.rs:786
+msgid "Enable YouTube in the settings to use this"
+msgstr "فعّل يوتيوب في الإعدادات لاستخدام هذا"
+
+#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+msgid "Searching online …"
+msgstr "جارٍ البحث عبر الإنترنت …"
+
+#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_views_handlers.rs:866
+msgid "Not found on YouTube"
+msgstr "لم يُعثر عليه في يوتيوب"
 
 #: src/ui/app_queue.rs:61
 msgid "Clear queue"
@@ -1873,19 +1907,11 @@ msgstr "إعادة التشغيل"
 msgid "Could not extract from buffer"
 msgstr "تعذّر الاستخراج من المخزن المؤقت"
 
-#: src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
-msgid "Enable YouTube in the settings to use this"
-msgstr "فعّل يوتيوب في الإعدادات لاستخدام هذا"
-
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
 #: src/ui/app_streaming.rs:833
 msgid "Looking online …"
 msgstr "جارٍ البحث عبر الإنترنت …"
-
-#: src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
-msgid "Not found on YouTube"
-msgstr "لم يُعثر عليه في يوتيوب"
 
 #: src/ui/app_streaming.rs:1061
 msgid "Recording stopped"
@@ -1903,7 +1929,7 @@ msgstr "حُذف التسجيل"
 msgid "Download complete"
 msgstr "اكتمل التنزيل"
 
-#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:984
+#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:999
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "فشل التنزيل"
@@ -1935,10 +1961,6 @@ msgstr "لا مقاطع"
 #: src/ui/app_views_album.rs:593
 msgid "There are no songs for this artist in the library."
 msgstr "لا توجد أغانٍ لهذا الفنان في المكتبة."
-
-#: src/ui/app_views_album.rs:1061
-msgid "Missing — tap to add"
-msgstr "مفقود — انقر للإضافة"
 
 #: src/ui/app_views_album.rs:1166
 msgid "Checking for missing tracks …"
@@ -2041,7 +2063,7 @@ msgstr "أُزيل من قائمة الانتظار"
 msgid "Will play next"
 msgstr "سيُشغَّل تاليًا"
 
-#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:964
+#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:979
 #: src/ui/podcasts_page.rs:151
 msgid "Downloading …"
 msgstr "جارٍ التنزيل …"
@@ -2062,23 +2084,19 @@ msgstr "إضافة المقطع المفقود"
 msgid "Search & add"
 msgstr "بحث وإضافة"
 
-#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:960
+#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:975
 msgid "Cannot determine the album folder"
 msgstr "تعذّر تحديد مجلد الألبوم"
 
-#: src/ui/app_views_handlers.rs:796
-msgid "Searching online …"
-msgstr "جارٍ البحث عبر الإنترنت …"
-
-#: src/ui/app_views_handlers.rs:871
+#: src/ui/app_views_handlers.rs:894
 msgid "Choose a version"
 msgstr "اختيار نسخة"
 
-#: src/ui/app_views_handlers.rs:885
+#: src/ui/app_views_handlers.rs:908
 msgid "Pick the version of “{title}” to add"
 msgstr "اختر نسخة «{title}» التي تريد إضافتها"
 
-#: src/ui/app_views_handlers.rs:981
+#: src/ui/app_views_handlers.rs:996
 msgid "Track added"
 msgstr "أُضيف المقطع"
 
@@ -3609,6 +3627,12 @@ msgstr "جارٍ حفظ «{title}» في قوائم التشغيل …"
 #: src/ui/yt_playlists.rs:449
 msgid "Could not load playlist"
 msgstr "تعذّر تحميل قائمة التشغيل"
+
+#~ msgid "Hits in the library"
+#~ msgstr "الأغاني الناجحة في المكتبة"
+
+#~ msgid "{n} of {total}"
+#~ msgstr "{n} من {total}"
 
 #~ msgid "Updating feed …"
 #~ msgstr "جارٍ تحديث الخلاصة …"

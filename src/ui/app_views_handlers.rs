@@ -866,7 +866,30 @@ impl App {
             self.toast(&gettext("Not found on YouTube"));
             return;
         }
+        let sender = sender.clone();
+        let picked_title = title.clone();
+        self.show_version_chooser(root, &title, &results, move |video_id| {
+            sender.input(Msg::DownloadMissingTrack {
+                artist: artist.clone(),
+                album: album.clone(),
+                disc,
+                position,
+                title: picked_title.clone(),
+                video_id,
+            });
+        });
+    }
 
+    /// Chooser among YouTube hits for a song (title, uploader, duration):
+    /// picking a row closes it and hands the video id to `on_pick`.
+    pub(crate) fn show_version_chooser(
+        &self,
+        root: &adw::ApplicationWindow,
+        title: &str,
+        results: &[crate::core::youtube::YtResult],
+        on_pick: impl Fn(String) + 'static,
+    ) {
+        let on_pick = std::rc::Rc::new(on_pick);
         let dialog = adw::Dialog::builder()
             .title(gettext("Choose a version"))
             .content_width(420)
@@ -883,7 +906,7 @@ impl App {
             &gtk::Label::builder()
                 .label(gettext_f(
                     "Pick the version of “{title}” to add",
-                    &[("title", &title)],
+                    &[("title", title)],
                 ))
                 .wrap(true)
                 .xalign(0.0)
@@ -898,7 +921,7 @@ impl App {
         let rows = results.len() as i32;
         dialog.set_content_height((220 + rows * 64).min(720));
 
-        for r in &results {
+        for r in results {
             let mut subtitle = String::new();
             if let Some(u) = r.uploader.as_deref().filter(|s| !s.trim().is_empty()) {
                 subtitle.push_str(u);
@@ -916,17 +939,9 @@ impl App {
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name("audio-x-generic-symbolic"));
             {
-                let (sender, dialog, video_id) = (sender.clone(), dialog.clone(), r.id.clone());
-                let (artist, album, title) = (artist.clone(), album.clone(), title.clone());
+                let (on_pick, dialog, video_id) = (on_pick.clone(), dialog.clone(), r.id.clone());
                 row.connect_activated(move |_| {
-                    sender.input(Msg::DownloadMissingTrack {
-                        artist: artist.clone(),
-                        album: album.clone(),
-                        disc,
-                        position,
-                        title: title.clone(),
-                        video_id: video_id.clone(),
-                    });
+                    on_pick(video_id.clone());
                     dialog.close();
                 });
             }
@@ -993,7 +1008,7 @@ impl App {
     }
 
     /// Build + show the phase spinner for the missing-track download.
-    fn show_missing_busy(&mut self, root: &adw::ApplicationWindow, text: &str) {
+    pub(crate) fn show_missing_busy(&mut self, root: &adw::ApplicationWindow, text: &str) {
         if let Some((d, _)) = self.libview.missing_busy.take() {
             d.close();
         }

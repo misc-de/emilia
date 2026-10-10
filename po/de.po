@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia 0.1.38\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 13:01+0000\n"
+"POT-Creation-Date: 2026-10-10 06:53+0000\n"
 "PO-Revision-Date: 2026-05-31 12:00+0000\n"
 "Last-Translator: Emilia authors\n"
 "Language-Team: German\n"
@@ -979,59 +979,93 @@ msgstr "Playlist umbenennen"
 msgid "Added {n} to the playlist"
 msgstr "{n} zur Playlist hinzugefügt"
 
-#: src/ui/app_popularity.rs:181
+#: src/ui/app_popularity.rs:97
+msgid "{int} M"
+msgstr "{int} Mio."
+
+#: src/ui/app_popularity.rs:100
+msgid "{int}.{frac} M"
+msgstr "{int},{frac} Mio."
+
+#: src/ui/app_popularity.rs:105
+msgid "{int} k"
+msgstr "{int} Tsd."
+
+#: src/ui/app_popularity.rs:219
 msgid "Popularity (Deezer)"
 msgstr "Beliebtheit (Deezer)"
 
-#: src/ui/app_popularity.rs:188
+#: src/ui/app_popularity.rs:224
 msgid "Hit"
 msgstr "Hit"
 
-#: src/ui/app_popularity.rs:190
+#: src/ui/app_popularity.rs:226
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "Platz {n} der beliebtesten Lieder von {artist}"
 
-#: src/ui/app_popularity.rs:206
+#: src/ui/app_popularity.rs:236
 msgid "Fans (Deezer)"
 msgstr "Fans (Deezer)"
 
-#: src/ui/app_popularity.rs:210
+# --- Remote (WebDAV) load feedback (de) ---
+#: src/ui/app_popularity.rs:240
+msgid "Go to the hits"
+msgstr "Zu den Hits"
+
+#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
 msgid "Best-known songs"
 msgstr "Bekannteste Lieder"
 
-#: src/ui/app_popularity.rs:215
-msgid "Hits in the library"
-msgstr "Hits in der Bibliothek"
-
-# --- Aktualisieren: Fortschritt + Ergebnis (Podcasts/YouTube) (de) ---
-#: src/ui/app_popularity.rs:217
-msgid "{n} of {total}"
-msgstr "{n} von {total}"
-
-#: src/ui/app_popularity.rs:235
+#: src/ui/app_popularity.rs:265
 msgid "Hits on this album"
 msgstr "Hits auf diesem Album"
 
 # --- Remote (WebDAV) load feedback (de) ---
-#: src/ui/app_popularity.rs:348
+#: src/ui/app_popularity.rs:378
 msgid "Could not look up the hits"
 msgstr "Hits konnten nicht abgefragt werden"
 
-#: src/ui/app_popularity.rs:371
+#: src/ui/app_popularity.rs:401
 msgid "Looking up the hits …"
 msgstr "Suche die Hits …"
 
-#: src/ui/app_popularity.rs:374
+#: src/ui/app_popularity.rs:404
 msgid "Needs an internet connection"
 msgstr "Benötigt eine Internetverbindung"
 
-#: src/ui/app_popularity.rs:382
+#: src/ui/app_popularity.rs:412
 msgid "No popularity data for this artist"
 msgstr "Keine Beliebtheitsdaten zu diesem Interpreten"
 
-#: src/ui/app_popularity.rs:387
+#: src/ui/app_popularity.rs:417
 msgid "No hits in the library"
 msgstr "Keine Hits in der Bibliothek"
+
+#: src/ui/app_popularity.rs:507
+msgid "Hits"
+msgstr "Hits"
+
+#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+msgid "Missing — tap to add"
+msgstr "Fehlt – zum Hinzufügen tippen"
+
+#: src/ui/app_popularity.rs:559
+msgid "Not in the library"
+msgstr "Nicht in der Bibliothek"
+
+#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_views_handlers.rs:786
+msgid "Enable YouTube in the settings to use this"
+msgstr "Aktiviere YouTube in den Einstellungen, um das zu nutzen"
+
+#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+msgid "Searching online …"
+msgstr "Suche im Netz …"
+
+#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_views_handlers.rs:866
+msgid "Not found on YouTube"
+msgstr "Auf YouTube nicht gefunden"
 
 #: src/ui/app_queue.rs:61
 msgid "Clear queue"
@@ -1886,19 +1920,11 @@ msgstr "Wiedergabe"
 msgid "Could not extract from buffer"
 msgstr "Konnte nicht aus dem Puffer extrahieren"
 
-#: src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
-msgid "Enable YouTube in the settings to use this"
-msgstr "Aktiviere YouTube in den Einstellungen, um das zu nutzen"
-
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
 #: src/ui/app_streaming.rs:833
 msgid "Looking online …"
 msgstr "Schaue im Netz nach …"
-
-#: src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
-msgid "Not found on YouTube"
-msgstr "Auf YouTube nicht gefunden"
 
 #: src/ui/app_streaming.rs:1061
 msgid "Recording stopped"
@@ -1916,7 +1942,7 @@ msgstr "Aufnahme gelöscht"
 msgid "Download complete"
 msgstr "Download abgeschlossen"
 
-#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:984
+#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:999
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "Download fehlgeschlagen"
@@ -1948,10 +1974,6 @@ msgstr "Keine Titel"
 #: src/ui/app_views_album.rs:593
 msgid "There are no songs for this artist in the library."
 msgstr "Für diesen Interpreten sind keine Lieder in der Bibliothek."
-
-#: src/ui/app_views_album.rs:1061
-msgid "Missing — tap to add"
-msgstr "Fehlt – zum Hinzufügen tippen"
 
 #: src/ui/app_views_album.rs:1166
 msgid "Checking for missing tracks …"
@@ -2050,7 +2072,7 @@ msgstr "Aus der Warteschlange entfernt"
 msgid "Will play next"
 msgstr "Zum nächsten Abspielen vorgemerkt"
 
-#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:964
+#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:979
 #: src/ui/podcasts_page.rs:151
 msgid "Downloading …"
 msgstr "Wird heruntergeladen …"
@@ -2071,24 +2093,20 @@ msgstr "Fehlenden Titel hinzufügen"
 msgid "Search & add"
 msgstr "Suchen & hinzufügen"
 
-#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:960
+#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:975
 msgid "Cannot determine the album folder"
 msgstr "Album-Ordner konnte nicht bestimmt werden"
 
-#: src/ui/app_views_handlers.rs:796
-msgid "Searching online …"
-msgstr "Suche im Netz …"
-
 # --- Missing-track chooser: pick a YouTube version (de) ---
-#: src/ui/app_views_handlers.rs:871
+#: src/ui/app_views_handlers.rs:894
 msgid "Choose a version"
 msgstr "Version auswählen"
 
-#: src/ui/app_views_handlers.rs:885
+#: src/ui/app_views_handlers.rs:908
 msgid "Pick the version of “{title}” to add"
 msgstr "Wähle die Version von „{title}“, die hinzugefügt werden soll"
 
-#: src/ui/app_views_handlers.rs:981
+#: src/ui/app_views_handlers.rs:996
 msgid "Track added"
 msgstr "Titel hinzugefügt"
 
@@ -3609,6 +3627,13 @@ msgstr "„{title}“ wird zu den Playlists gespeichert …"
 #: src/ui/yt_playlists.rs:449
 msgid "Could not load playlist"
 msgstr "Playlist konnte nicht geladen werden"
+
+#~ msgid "Hits in the library"
+#~ msgstr "Hits in der Bibliothek"
+
+# --- Aktualisieren: Fortschritt + Ergebnis (Podcasts/YouTube) (de) ---
+#~ msgid "{n} of {total}"
+#~ msgstr "{n} von {total}"
 
 #~ msgid "None"
 #~ msgstr "Keiner"

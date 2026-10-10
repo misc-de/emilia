@@ -446,6 +446,10 @@ pub(crate) struct NavState {
     pub(crate) pop_info: std::rc::Rc<std::cell::RefCell<Option<adw::ExpanderRow>>>,
     /// "Play hits only" row of the open detail dialog (shows lookup status).
     pub(crate) hits_row: std::rc::Rc<std::cell::RefCell<Option<adw::ActionRow>>>,
+    /// "Go to the hits" / "Best-known songs" rows of the open artist detail
+    /// dialog and their artist; shown once the popularity data is known.
+    pub(crate) pop_links:
+        std::rc::Rc<std::cell::RefCell<Option<(String, adw::ActionRow, adw::ActionRow)>>>,
     /// Remembered scroll position of the most recently left overview page.
     pub(crate) overview_scroll: std::rc::Rc<std::cell::RefCell<Option<(gtk::ScrolledWindow, f64)>>>,
     /// Narrow/mobile layout active (driven by the width breakpoint). The source

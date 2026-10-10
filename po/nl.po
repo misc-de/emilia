@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 13:01+0000\n"
+"POT-Creation-Date: 2026-10-10 06:53+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -960,57 +960,91 @@ msgstr "Afspeellijst hernoemen"
 msgid "Added {n} to the playlist"
 msgstr "{n} toegevoegd aan de afspeellijst"
 
-#: src/ui/app_popularity.rs:181
+#: src/ui/app_popularity.rs:97
+msgid "{int} M"
+msgstr "{int} mln."
+
+#: src/ui/app_popularity.rs:100
+msgid "{int}.{frac} M"
+msgstr "{int},{frac} mln."
+
+#: src/ui/app_popularity.rs:105
+msgid "{int} k"
+msgstr "{int}k"
+
+#: src/ui/app_popularity.rs:219
 msgid "Popularity (Deezer)"
 msgstr "Populariteit (Deezer)"
 
-#: src/ui/app_popularity.rs:188
+#: src/ui/app_popularity.rs:224
 msgid "Hit"
 msgstr "Hit"
 
-#: src/ui/app_popularity.rs:190
+#: src/ui/app_popularity.rs:226
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "Nr. {n} van de populairste nummers van {artist}"
 
-#: src/ui/app_popularity.rs:206
+#: src/ui/app_popularity.rs:236
 msgid "Fans (Deezer)"
 msgstr "Fans (Deezer)"
 
-#: src/ui/app_popularity.rs:210
+#: src/ui/app_popularity.rs:240
+msgid "Go to the hits"
+msgstr "Naar de hits"
+
+#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
 msgid "Best-known songs"
 msgstr "Bekendste nummers"
 
-#: src/ui/app_popularity.rs:215
-msgid "Hits in the library"
-msgstr "Hits in de bibliotheek"
-
-#: src/ui/app_popularity.rs:217
-msgid "{n} of {total}"
-msgstr "{n} van {total}"
-
-#: src/ui/app_popularity.rs:235
+#: src/ui/app_popularity.rs:265
 msgid "Hits on this album"
 msgstr "Hits op dit album"
 
-#: src/ui/app_popularity.rs:348
+#: src/ui/app_popularity.rs:378
 msgid "Could not look up the hits"
 msgstr "Hits konden niet worden opgehaald"
 
-#: src/ui/app_popularity.rs:371
+#: src/ui/app_popularity.rs:401
 msgid "Looking up the hits …"
 msgstr "Hits opzoeken …"
 
-#: src/ui/app_popularity.rs:374
+#: src/ui/app_popularity.rs:404
 msgid "Needs an internet connection"
 msgstr "Vereist een internetverbinding"
 
-#: src/ui/app_popularity.rs:382
+#: src/ui/app_popularity.rs:412
 msgid "No popularity data for this artist"
 msgstr "Geen populariteitsgegevens voor deze artiest"
 
-#: src/ui/app_popularity.rs:387
+#: src/ui/app_popularity.rs:417
 msgid "No hits in the library"
 msgstr "Geen hits in de bibliotheek"
+
+#: src/ui/app_popularity.rs:507
+msgid "Hits"
+msgstr "Hits"
+
+#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+msgid "Missing — tap to add"
+msgstr "Ontbreekt — tik om toe te voegen"
+
+#: src/ui/app_popularity.rs:559
+msgid "Not in the library"
+msgstr "Niet in de bibliotheek"
+
+#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_views_handlers.rs:786
+msgid "Enable YouTube in the settings to use this"
+msgstr "Schakel YouTube in bij de instellingen om dit te gebruiken"
+
+#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+msgid "Searching online …"
+msgstr "Online zoeken …"
+
+#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_views_handlers.rs:866
+msgid "Not found on YouTube"
+msgstr "Niet gevonden op YouTube"
 
 #: src/ui/app_queue.rs:61
 msgid "Clear queue"
@@ -1869,19 +1903,11 @@ msgstr "Opnieuw afspelen"
 msgid "Could not extract from buffer"
 msgstr "Kon niet uit de buffer halen"
 
-#: src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
-msgid "Enable YouTube in the settings to use this"
-msgstr "Schakel YouTube in bij de instellingen om dit te gebruiken"
-
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
 #: src/ui/app_streaming.rs:833
 msgid "Looking online …"
 msgstr "Online opzoeken …"
-
-#: src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
-msgid "Not found on YouTube"
-msgstr "Niet gevonden op YouTube"
 
 #: src/ui/app_streaming.rs:1061
 msgid "Recording stopped"
@@ -1899,7 +1925,7 @@ msgstr "Opname verwijderd"
 msgid "Download complete"
 msgstr "Download voltooid"
 
-#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:984
+#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:999
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "Download mislukt"
@@ -1931,10 +1957,6 @@ msgstr "Geen nummers"
 #: src/ui/app_views_album.rs:593
 msgid "There are no songs for this artist in the library."
 msgstr "Er zijn geen nummers van deze artiest in de bibliotheek."
-
-#: src/ui/app_views_album.rs:1061
-msgid "Missing — tap to add"
-msgstr "Ontbreekt — tik om toe te voegen"
 
 #: src/ui/app_views_album.rs:1166
 msgid "Checking for missing tracks …"
@@ -2029,7 +2051,7 @@ msgstr "Verwijderd uit wachtrij"
 msgid "Will play next"
 msgstr "Wordt hierna afgespeeld"
 
-#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:964
+#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:979
 #: src/ui/podcasts_page.rs:151
 msgid "Downloading …"
 msgstr "Downloaden …"
@@ -2049,23 +2071,19 @@ msgstr "Ontbrekend nummer toevoegen"
 msgid "Search & add"
 msgstr "Zoeken & toevoegen"
 
-#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:960
+#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:975
 msgid "Cannot determine the album folder"
 msgstr "Kan de albummap niet bepalen"
 
-#: src/ui/app_views_handlers.rs:796
-msgid "Searching online …"
-msgstr "Online zoeken …"
-
-#: src/ui/app_views_handlers.rs:871
+#: src/ui/app_views_handlers.rs:894
 msgid "Choose a version"
 msgstr "Kies een versie"
 
-#: src/ui/app_views_handlers.rs:885
+#: src/ui/app_views_handlers.rs:908
 msgid "Pick the version of “{title}” to add"
 msgstr "Kies de versie van «{title}» die je wilt toevoegen"
 
-#: src/ui/app_views_handlers.rs:981
+#: src/ui/app_views_handlers.rs:996
 msgid "Track added"
 msgstr "Nummer toegevoegd"
 
@@ -3571,6 +3589,12 @@ msgstr "«{title}» opslaan in afspeellijsten …"
 #: src/ui/yt_playlists.rs:449
 msgid "Could not load playlist"
 msgstr "Kon afspeellijst niet laden"
+
+#~ msgid "Hits in the library"
+#~ msgstr "Hits in de bibliotheek"
+
+#~ msgid "{n} of {total}"
+#~ msgstr "{n} van {total}"
 
 #~ msgid "Updating feed …"
 #~ msgstr "Feed bijwerken …"

@@ -58,8 +58,9 @@ impl ArtistPopularity {
         songs.into_iter().filter(|h| h.rank >= floor).collect()
     }
 
-    /// Every song of the top list, deduplicated by title, best first.
-    fn songs(&self) -> Vec<Hit> {
+    /// Every song of the top list (its best-known songs), deduplicated by
+    /// title – versions of one song count once –, best first.
+    pub fn songs(&self) -> Vec<Hit> {
         let mut out: Vec<Hit> = Vec::new();
         for t in &self.top {
             let key = title_key(&t.title);
@@ -115,25 +116,34 @@ fn is_plain(title: &str) -> bool {
     title_key(title) == normalize_name(title)
 }
 
+/// The local copy of a song (`key` as from [`title_key`]): among several
+/// versions the plain title wins, otherwise the first one in `local` order.
+pub fn find_local<T: Clone>(key: &str, local: &[(T, String)]) -> Option<T> {
+    let mut versions = local.iter().filter(|(_, t)| title_key(t) == key);
+    let first = versions.next()?;
+    let plain = std::iter::once(first)
+        .chain(versions)
+        .find(|(_, t)| is_plain(t));
+    Some(plain.unwrap_or(first).0.clone())
+}
+
 /// Picks the local tracks that are hits: one per hit song, in `hits` order.
-/// `local` is `(item, title)` in the caller's preferred order; among several
-/// local versions of a hit the plain title wins, otherwise the first one.
+/// `local` is `(item, title)` in the caller's preferred order (see
+/// [`find_local`]).
 pub fn pick_hits<T: Clone>(hits: &[Hit], local: &[(T, String)]) -> Vec<T> {
     hits.iter()
-        .filter_map(|h| {
-            let mut versions = local.iter().filter(|(_, t)| title_key(t) == h.key);
-            let first = versions.next()?;
-            let plain = std::iter::once(first)
-                .chain(versions)
-                .find(|(_, t)| is_plain(t));
-            Some(plain.unwrap_or(first).0.clone())
-        })
+        .filter_map(|h| find_local(&h.key, local))
         .collect()
 }
 
 /// Popularity score 0–100 from a Deezer rank (which tops out near 1,000,000).
 pub fn score(rank: u64) -> u64 {
     (rank / 10_000).min(100)
+}
+
+/// A score 0–100 as 0–5 stars in half steps (in tenths: 0, 5, 10 … 50).
+pub fn half_stars(score: u64) -> u64 {
+    (score.min(100) + 5) / 10 * 5
 }
 
 impl OnlineClient {
@@ -298,6 +308,27 @@ mod tests {
         // Radio Ga Ga first (better rank), only a live take exists locally;
         // Killer Queen as the plain studio title.
         assert_eq!(pick_hits(&hits, &local), vec![3, 2]);
+    }
+
+    #[test]
+    fn half_stars_round_to_half_steps() {
+        assert_eq!(half_stars(0), 0);
+        assert_eq!(half_stars(4), 0);
+        assert_eq!(half_stars(5), 5);
+        assert_eq!(half_stars(91), 45);
+        assert_eq!(half_stars(95), 50);
+        assert_eq!(half_stars(100), 50);
+    }
+
+    #[test]
+    fn songs_count_versions_once() {
+        let p = pop(&[
+            ("Bohemian Rhapsody", 950_000),
+            ("Bohemian Rhapsody (Live)", 580_000),
+            ("One Year Of Love", 440_000),
+        ]);
+        let titles: Vec<_> = p.songs().into_iter().map(|h| h.title).collect();
+        assert_eq!(titles, ["Bohemian Rhapsody", "One Year Of Love"]);
     }
 
     #[test]

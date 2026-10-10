@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-09 13:01+0000\n"
+"POT-Creation-Date: 2026-10-10 06:53+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -962,57 +962,91 @@ msgstr "Renombrar lista de reproducción"
 msgid "Added {n} to the playlist"
 msgstr "{n} añadida(s) a la lista de reproducción"
 
-#: src/ui/app_popularity.rs:181
+#: src/ui/app_popularity.rs:97
+msgid "{int} M"
+msgstr "{int} M"
+
+#: src/ui/app_popularity.rs:100
+msgid "{int}.{frac} M"
+msgstr "{int},{frac} M"
+
+#: src/ui/app_popularity.rs:105
+msgid "{int} k"
+msgstr "{int} mil"
+
+#: src/ui/app_popularity.rs:219
 msgid "Popularity (Deezer)"
 msgstr "Popularidad (Deezer)"
 
-#: src/ui/app_popularity.rs:188
+#: src/ui/app_popularity.rs:224
 msgid "Hit"
 msgstr "Éxito"
 
-#: src/ui/app_popularity.rs:190
+#: src/ui/app_popularity.rs:226
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "N.º {n} de las canciones más populares de {artist}"
 
-#: src/ui/app_popularity.rs:206
+#: src/ui/app_popularity.rs:236
 msgid "Fans (Deezer)"
 msgstr "Fans (Deezer)"
 
-#: src/ui/app_popularity.rs:210
+#: src/ui/app_popularity.rs:240
+msgid "Go to the hits"
+msgstr "Ir a los éxitos"
+
+#: src/ui/app_popularity.rs:247 src/ui/app_popularity.rs:508
 msgid "Best-known songs"
 msgstr "Canciones más conocidas"
 
-#: src/ui/app_popularity.rs:215
-msgid "Hits in the library"
-msgstr "Éxitos en la biblioteca"
-
-#: src/ui/app_popularity.rs:217
-msgid "{n} of {total}"
-msgstr "{n} de {total}"
-
-#: src/ui/app_popularity.rs:235
+#: src/ui/app_popularity.rs:265
 msgid "Hits on this album"
 msgstr "Éxitos de este álbum"
 
-#: src/ui/app_popularity.rs:348
+#: src/ui/app_popularity.rs:378
 msgid "Could not look up the hits"
 msgstr "No se pudieron consultar los éxitos"
 
-#: src/ui/app_popularity.rs:371
+#: src/ui/app_popularity.rs:401
 msgid "Looking up the hits …"
 msgstr "Buscando los éxitos …"
 
-#: src/ui/app_popularity.rs:374
+#: src/ui/app_popularity.rs:404
 msgid "Needs an internet connection"
 msgstr "Requiere conexión a Internet"
 
-#: src/ui/app_popularity.rs:382
+#: src/ui/app_popularity.rs:412
 msgid "No popularity data for this artist"
 msgstr "No hay datos de popularidad de este artista"
 
-#: src/ui/app_popularity.rs:387
+#: src/ui/app_popularity.rs:417
 msgid "No hits in the library"
 msgstr "No hay éxitos en la biblioteca"
+
+#: src/ui/app_popularity.rs:507
+msgid "Hits"
+msgstr "Éxitos"
+
+#: src/ui/app_popularity.rs:545 src/ui/app_views_album.rs:1061
+msgid "Missing — tap to add"
+msgstr "Falta — toca para añadir"
+
+#: src/ui/app_popularity.rs:559
+msgid "Not in the library"
+msgstr "No está en la biblioteca"
+
+#: src/ui/app_popularity.rs:615 src/ui/app_streaming.rs:824
+#: src/ui/app_views_handlers.rs:786
+msgid "Enable YouTube in the settings to use this"
+msgstr "Activa YouTube en los ajustes para usar esto"
+
+#: src/ui/app_popularity.rs:618 src/ui/app_views_handlers.rs:796
+msgid "Searching online …"
+msgstr "Buscando en línea …"
+
+#: src/ui/app_popularity.rs:652 src/ui/app_streaming.rs:867
+#: src/ui/app_views_handlers.rs:866
+msgid "Not found on YouTube"
+msgstr "No se encontró en YouTube"
 
 #: src/ui/app_queue.rs:61
 msgid "Clear queue"
@@ -1871,19 +1905,11 @@ msgstr "Volver a reproducir"
 msgid "Could not extract from buffer"
 msgstr "No se pudo extraer del búfer"
 
-#: src/ui/app_streaming.rs:824 src/ui/app_views_handlers.rs:786
-msgid "Enable YouTube in the settings to use this"
-msgstr "Activa YouTube en los ajustes para usar esto"
-
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
 #: src/ui/app_streaming.rs:833
 msgid "Looking online …"
 msgstr "Consultando en línea …"
-
-#: src/ui/app_streaming.rs:867 src/ui/app_views_handlers.rs:866
-msgid "Not found on YouTube"
-msgstr "No se encontró en YouTube"
 
 #: src/ui/app_streaming.rs:1061
 msgid "Recording stopped"
@@ -1901,7 +1927,7 @@ msgstr "Grabación eliminada"
 msgid "Download complete"
 msgstr "Descarga completada"
 
-#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:984
+#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:999
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "Error en la descarga"
@@ -1933,10 +1959,6 @@ msgstr "Sin pistas"
 #: src/ui/app_views_album.rs:593
 msgid "There are no songs for this artist in the library."
 msgstr "No hay canciones de este artista en la biblioteca."
-
-#: src/ui/app_views_album.rs:1061
-msgid "Missing — tap to add"
-msgstr "Falta — toca para añadir"
 
 #: src/ui/app_views_album.rs:1166
 msgid "Checking for missing tracks …"
@@ -2031,7 +2053,7 @@ msgstr "Eliminado de la cola"
 msgid "Will play next"
 msgstr "Se reproducirá a continuación"
 
-#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:964
+#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:979
 #: src/ui/podcasts_page.rs:151
 msgid "Downloading …"
 msgstr "Descargando …"
@@ -2051,23 +2073,19 @@ msgstr "Añadir pista que falta"
 msgid "Search & add"
 msgstr "Buscar y añadir"
 
-#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:960
+#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:975
 msgid "Cannot determine the album folder"
 msgstr "No se pudo determinar la carpeta del álbum"
 
-#: src/ui/app_views_handlers.rs:796
-msgid "Searching online …"
-msgstr "Buscando en línea …"
-
-#: src/ui/app_views_handlers.rs:871
+#: src/ui/app_views_handlers.rs:894
 msgid "Choose a version"
 msgstr "Elegir una versión"
 
-#: src/ui/app_views_handlers.rs:885
+#: src/ui/app_views_handlers.rs:908
 msgid "Pick the version of “{title}” to add"
 msgstr "Elige la versión de «{title}» que quieres añadir"
 
-#: src/ui/app_views_handlers.rs:981
+#: src/ui/app_views_handlers.rs:996
 msgid "Track added"
 msgstr "Pista añadida"
 
@@ -3579,6 +3597,12 @@ msgstr "Guardando «{title}» en las listas de reproducción …"
 #: src/ui/yt_playlists.rs:449
 msgid "Could not load playlist"
 msgstr "No se pudo cargar la lista de reproducción"
+
+#~ msgid "Hits in the library"
+#~ msgstr "Éxitos en la biblioteca"
+
+#~ msgid "{n} of {total}"
+#~ msgstr "{n} de {total}"
 
 #~ msgid "Updating feed …"
 #~ msgstr "Actualizando fuente …"

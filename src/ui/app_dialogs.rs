@@ -220,11 +220,17 @@ impl App {
         action_group.add(&play_row);
         play_row.set_visible(!is_current);
 
-        // "Play hits only" for an artist/album: its most popular songs (by a
-        // music database) that are in the library. The dialog stays open
-        // until they are found, so the row can report a lookup / no hits.
+        // An artist gets "Go to the hits" / "Best-known songs" (song lists by
+        // a music database) right below its play action; they show up once
+        // the popularity data is there.
         *self.nav.hits_row.borrow_mut() = None;
-        if !matches!(play_kind, PlayKind::Other) && self.hits_target(entry).is_some() {
+        *self.nav.pop_links.borrow_mut() = None;
+        if let Some(crate::ui::app_popularity::HitsTarget::Artist(name)) = self.hits_target(entry) {
+            self.add_pop_links(&action_group, &name);
+        } else if matches!(play_kind, PlayKind::Album) && self.hits_target(entry).is_some() {
+            // An album keeps "Play hits only": its songs among the artist's
+            // hits. The dialog stays open until they are found, so the row
+            // can report a lookup / no hits.
             let hits_row = adw::ActionRow::builder()
                 .title(gettext("Play hits only"))
                 .activatable(true)
@@ -378,6 +384,7 @@ impl App {
             let ctx_dialog = self.nav.ctx_dialog.clone();
             let pop_info = self.nav.pop_info.clone();
             let hits_row = self.nav.hits_row.clone();
+            let pop_links = self.nav.pop_links.clone();
             let this = dialog.clone();
             dialog.connect_closed(move |_| {
                 // Only clear if it's still us: a rebuild replaces the dialog and
@@ -388,6 +395,7 @@ impl App {
                     *ctx_play.borrow_mut() = None;
                     *pop_info.borrow_mut() = None;
                     *hits_row.borrow_mut() = None;
+                    *pop_links.borrow_mut() = None;
                 }
             });
         }
@@ -581,10 +589,31 @@ pub(crate) enum CtxMsg {
     CtxPlayArtist {
         newest_first: bool,
     },
-    /// "Play hits only" for the open artist/album.
+    /// "Play hits only" for the open album.
     CtxPlayHits,
     /// A popularity lookup (Deezer) returned. Boxed: large payload.
     PopularityFetched(Box<crate::ui::app_popularity::PopFetch>),
+    /// Open an artist's song list ("Go to the hits" / "Best-known songs").
+    OpenPopList {
+        artist: String,
+        list: crate::ui::app_popularity::PopList,
+    },
+    /// A song list row in the library was tapped: play the list from there.
+    PlayPopList {
+        queue: Vec<std::path::PathBuf>,
+        start: usize,
+    },
+    /// "+" on a song of the list missing from the library.
+    AddPopSong {
+        artist: String,
+        title: String,
+    },
+    /// YouTube hits for that song came back.
+    PopSongCandidates {
+        artist: String,
+        title: String,
+        results: Vec<crate::core::youtube::YtResult>,
+    },
     CtxAddQueue,
     CtxAddPlaylist,
     CtxEqualizer,
@@ -613,6 +642,14 @@ impl App {
             CtxMsg::CtxPlayArtist { newest_first } => self.on_ctx_play_artist(newest_first),
             CtxMsg::CtxPlayHits => self.on_ctx_play_hits(),
             CtxMsg::PopularityFetched(fetch) => self.on_popularity_fetched(*fetch),
+            CtxMsg::OpenPopList { artist, list } => self.open_pop_list(root, artist, list),
+            CtxMsg::PlayPopList { queue, start } => self.play_pop_list(queue, start),
+            CtxMsg::AddPopSong { artist, title } => self.add_pop_song(root, artist, title),
+            CtxMsg::PopSongCandidates {
+                artist,
+                title,
+                results,
+            } => self.on_pop_song_candidates(root, artist, title, results),
             CtxMsg::CtxAddQueue => self.on_ctx_add_queue(),
             CtxMsg::CtxAddPlaylist => self.open_add_to_playlist_dialog(root, sender),
             CtxMsg::CtxEqualizer => self.open_eq_dialog(root, sender),
