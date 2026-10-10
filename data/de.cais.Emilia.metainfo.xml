@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.52" date="2026-10-10">
+      <description>
+        <p>An artist's detail view now offers "Go to the hits" and "Best-known songs" right below "Play artist". Each opens a list of songs, most popular first, rated with up to five stars; different versions of a song appear only once. Songs from your library play with a tap, songs you don't have yet are greyed out and can be added via YouTube with "+", just like missing album tracks. A single song's popularity is now also shown as stars, and the fan count in compact form.</p>
+        <p xml:lang="de">Die Detailansicht eines Interpreten bietet jetzt direkt unter „Interpreten abspielen“ die Einträge „Zu den Hits“ und „Bekannteste Lieder“. Beide öffnen eine Liedliste, die erfolgreichsten zuerst, bewertet mit bis zu fünf Sternen; verschiedene Fassungen eines Liedes erscheinen nur einmal. Lieder aus der Bibliothek spielen per Antippen, noch fehlende sind abgeschwächt und lassen sich wie fehlende Albumtitel mit „+“ über YouTube hinzufügen. Die Beliebtheit eines einzelnen Liedes erscheint jetzt ebenfalls als Sterne, die Fan-Zahl in kompakter Form.</p>
+      </description>
+    </release>
     <release version="0.8.51" date="2026-10-09">
       <description>
         <p>Artists and albums get "Play hits only" in their detail view: it plays just the songs from your library that are among the artist's most popular ones, for an artist sorted by popularity, for an album in track order. Under "Info", artists now show their fan count, best-known songs and how many of their hits you have; albums list their hits, and a single song shows its popularity and, if it is a hit, its place among the artist's most popular songs. The data comes from Deezer and is kept for a month. Artist photos are also picked more reliably when several artists share a name.</p>
