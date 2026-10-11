@@ -75,8 +75,10 @@ fn search(wait: Duration) -> BTreeSet<String> {
 /// into their room groups: only a group's coordinator is listed, named after
 /// its room with the number of further rooms ("Küche +1").
 pub fn discover(wait: Duration) -> Vec<Device> {
-    // Google Cast devices answer mDNS, not SSDP: browse in parallel.
+    // Google Cast and AirPlay devices answer mDNS, not SSDP: browse in
+    // parallel.
     let cast = std::thread::spawn(move || cast_devices(wait));
+    let airplay = std::thread::spawn(move || airplay_devices(wait));
     let locations = search(wait);
     let agent = upnp::agent();
     let handles: Vec<_> = locations
@@ -95,8 +97,50 @@ pub fn discover(wait: Duration) -> Vec<Device> {
     devices.retain(|d| seen.insert(d.id.clone()));
     fold_sonos_groups(&agent, &mut devices);
     devices.extend(cast.join().unwrap_or_default());
+    // A speaker that also speaks DLNA/Cast is listed once, under that
+    // protocol (it fetches the stream itself — cheaper than pushing audio):
+    // same address and the same name (a grouped Sonos room carries a "+N").
+    let others: Vec<(String, String)> = devices
+        .iter()
+        .map(|d| (d.host.clone(), d.name.to_lowercase()))
+        .collect();
+    devices.extend(airplay.join().unwrap_or_default().into_iter().filter(|d| {
+        let name = d.name.to_lowercase();
+        !others.iter().any(|(host, other)| {
+            *host == d.host && (*other == name || other.starts_with(&format!("{name} +")))
+        })
+    }));
     devices.sort_by_key(|d| d.name.to_lowercase());
     devices
+}
+
+/// AirPlay 1 speakers from an mDNS browse of `_raop._tcp`. The instance is
+/// `<MAC>@<name>`; speakers that want a password are left out.
+fn airplay_devices(wait: Duration) -> Vec<Device> {
+    super::mdns::browse("_raop._tcp.local", wait)
+        .into_iter()
+        .filter(|i| i.txt.get("pw").map(String::as_str) != Some("true"))
+        .filter_map(|i| {
+            let addr = i.addr?;
+            let label = i.name.split("._raop").next().unwrap_or(&i.name);
+            let (mac, name) = label.split_once('@').unwrap_or(("", label));
+            Some(Device {
+                id: format!("raop:{mac}"),
+                name: name.to_string(),
+                model: i.txt.get("am").cloned().unwrap_or_default(),
+                kind: Kind::AirPlay,
+                location: format!("raop://{addr}:{}", i.port),
+                host: addr.to_string(),
+                port: i.port,
+                raop: Some((i.txt.get("cn").cloned(), i.txt.get("et").cloned())),
+                avt: None,
+                rc: None,
+                cm: None,
+                grc: None,
+                zgt: None,
+            })
+        })
+        .collect()
 }
 
 /// Google Cast devices from an mDNS browse of `_googlecast._tcp`. The TXT
@@ -122,6 +166,7 @@ fn cast_devices(wait: Duration) -> Vec<Device> {
                 location: format!("cast://{addr}:{}", i.port),
                 host: addr.to_string(),
                 port: if i.port == 0 { 8009 } else { i.port },
+                raop: None,
                 avt: None,
                 rc: None,
                 cm: None,

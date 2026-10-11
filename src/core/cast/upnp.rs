@@ -210,6 +210,7 @@ pub(crate) fn describe(agent: &ureq::Agent, location: &str) -> Option<Device> {
         location: location.to_string(),
         host: host_of(location).unwrap_or_default(),
         port: 0,
+        raop: None,
         avt: Some(avt),
         rc,
         cm,

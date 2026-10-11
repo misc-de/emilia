@@ -156,6 +156,9 @@ impl App {
                 if let Some(own) = self.dmr.handle.as_ref().map(|h| h.id().to_string()) {
                     devices.retain(|d| d.id != own);
                 }
+                if let Some(own) = self.dmr.airplay.as_ref().map(|h| h.id().to_string()) {
+                    devices.retain(|d| d.id != own);
+                }
                 // Keep the active speaker listed even if it missed this round.
                 if let Some(cur) = self.player.cast_device()
                     && !devices.iter().any(|d| d.id == cur.id)
@@ -211,12 +214,13 @@ impl App {
         ));
         for dev in &self.cast.devices {
             let icon = match dev.kind {
-                Kind::Sonos | Kind::Dlna | Kind::Cast => "audio-speakers-symbolic",
+                Kind::Sonos | Kind::Dlna | Kind::Cast | Kind::AirPlay => "audio-speakers-symbolic",
             };
             let subtitle = match dev.kind {
                 Kind::Sonos => format!("Sonos · {}", dev.host),
                 Kind::Cast if dev.model.is_empty() => format!("Google Cast · {}", dev.host),
                 Kind::Cast => format!("Google Cast · {} · {}", dev.model, dev.host),
+                Kind::AirPlay => format!("AirPlay · {}", dev.host),
                 Kind::Dlna => {
                     if dev.model.is_empty() {
                         dev.host.clone()
@@ -267,7 +271,7 @@ impl App {
             gettext_f("Playing on {name}", &[("name", &d.name)])
         } else if self.cast.searched && self.cast.devices.is_empty() {
             gettext(
-                "No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the same network are supported.",
+                "No speakers found. DLNA/UPnP renderers, Sonos, Google Cast and AirPlay devices in the same network are supported.",
             )
         } else {
             String::new()

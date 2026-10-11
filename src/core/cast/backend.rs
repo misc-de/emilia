@@ -57,6 +57,13 @@ pub(crate) fn open(dev: &Device) -> Result<Box<dyn Backend>> {
         Kind::Cast => Ok(Box::new(super::castv2::CastBackend::connect(
             &dev.host, dev.port,
         )?)),
+        Kind::AirPlay => {
+            let (cn, et) = dev.raop.clone().unwrap_or_default();
+            let caps = super::raop::Caps::from_txt(cn.as_deref(), et.as_deref());
+            Ok(Box::new(super::raop::RaopBackend::connect(
+                &dev.host, dev.port, caps,
+            )?))
+        }
         Kind::Sonos | Kind::Dlna => {
             let avt = dev
                 .avt

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:58+0000\n"
+"POT-Creation-Date: 2026-10-11 14:09+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Panga"
 msgid "Sleep timer"
 msgstr "Kipima muda cha kulala"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:256
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:260
 msgid "Play on"
 msgstr "Cheza kwenye"
 
@@ -348,33 +348,33 @@ msgstr "Foleni"
 msgid "Search again"
 msgstr "Tafuta tena"
 
-#: src/ui/app_cast.rs:205
+#: src/ui/app_cast.rs:208
 msgid "This device"
 msgstr "Kifaa hiki"
 
-#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:260
+#: src/ui/app_cast.rs:248 src/ui/app_cast.rs:264
 msgid "Receiving via AirPlay"
 msgstr "Inapokea kupitia AirPlay"
 
-#: src/ui/app_cast.rs:246 src/ui/app_cast.rs:262
+#: src/ui/app_cast.rs:250 src/ui/app_cast.rs:266
 msgid "Receiving via AirPlay: {title}"
 msgstr "Inapokea kupitia AirPlay: {title}"
 
-#: src/ui/app_cast.rs:253 src/ui/app_cast.rs:267
+#: src/ui/app_cast.rs:257 src/ui/app_cast.rs:271
 msgid "Playing on {name}"
 msgstr "Inacheza kwenye {name}"
 
-#: src/ui/app_cast.rs:265
+#: src/ui/app_cast.rs:269
 msgid "Searching for speakers in the network…"
 msgstr "Inatafuta spika kwenye mtandao…"
 
-#: src/ui/app_cast.rs:270
+#: src/ui/app_cast.rs:274
 msgid ""
-"No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
-" same network are supported."
+"No speakers found. DLNA/UPnP renderers, Sonos, Google Cast and AirPlay "
+"devices in the same network are supported."
 msgstr ""
-"Hakuna spika zilizopatikana. Vicheza DLNA/UPnP, Sonos na vifaa vya Google "
-"Cast kwenye mtandao huo huo vinatumika."
+"Hakuna spika zilizopatikana. Vicheza DLNA/UPnP na vifaa vya Sonos, Google "
+"Cast na AirPlay kwenye mtandao huo huo vinatumika."
 
 #: src/ui/app_chrome.rs:120
 msgid ""
@@ -1728,7 +1728,7 @@ msgstr ""
 msgid "Receive via AirPlay"
 msgstr "Pokea kupitia AirPlay"
 
-#: src/ui/app_settings_sound.rs:99
+#: src/ui/app_settings_sound.rs:100
 msgid "iPhone, iPad and Mac can play on this device (AirPlay 1)"
 msgstr "iPhone, iPad na Mac zinaweza kucheza kwenye kifaa hiki (AirPlay 1)"
 

@@ -21,6 +21,7 @@ pub mod castv2;
 pub mod discover;
 pub mod dmr;
 pub mod mdns;
+pub mod raop;
 pub mod serve;
 pub mod session;
 pub mod upnp;
@@ -37,6 +38,8 @@ pub enum Kind {
     Dlna,
     /// Google Cast (Chromecast, Nest speakers, Cast-enabled TVs/speakers).
     Cast,
+    /// AirPlay 1 (RAOP) speakers.
+    AirPlay,
 }
 
 /// A UPnP service of a renderer: its exact type (with the version the device
@@ -58,8 +61,11 @@ pub struct Device {
     pub kind: Kind,
     pub location: String,
     pub host: String,
-    /// Cast: the CASTV2 port (8009, other ports for speaker groups).
+    /// Cast: the CASTV2 port (8009, other ports for speaker groups);
+    /// AirPlay: the RTSP port.
     pub port: u16,
+    /// AirPlay: codecs (`cn`) and encryption types (`et`) from the TXT record.
+    pub raop: Option<(Option<String>, Option<String>)>,
     /// UPnP only (Cast devices have none of the services).
     pub avt: Option<Service>,
     pub rc: Option<Service>,

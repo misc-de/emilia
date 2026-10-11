@@ -57,6 +57,8 @@ pub enum AirPlayEvent {
 /// A running AirPlay receiver; dropping it stops it and withdraws the
 /// announcement.
 pub struct AirPlayHandle {
+    /// Our id as the cast picker sees AirPlay speakers (`raop:<MAC>`).
+    id: String,
     stop: Arc<AtomicBool>,
     _advert: mdns::Advert,
     port: u16,
@@ -82,7 +84,7 @@ struct Ctx {
 }
 
 /// The AirPort key from its PEM (base64 PKCS#1 DER).
-fn airport_key() -> Result<rsa::RsaPrivateKey> {
+pub(crate) fn airport_key() -> Result<rsa::RsaPrivateKey> {
     use rsa::pkcs1::DecodeRsaPrivateKey;
     let b64: String = AIRPORT_KEY
         .lines()
@@ -104,6 +106,11 @@ fn device_mac(seed: &str) -> [u8; 6] {
 }
 
 impl AirPlayHandle {
+    /// The id the cast picker gives this receiver, to leave ourselves out.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     pub fn start(name: &str, seed: &str) -> Result<(Self, async_channel::Receiver<AirPlayEvent>)> {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))?;
         let port = listener.local_addr()?.port();
@@ -168,6 +175,7 @@ impl AirPlayHandle {
         tracing::info!("AirPlay receiver \"{name}\" on port {port}");
         Ok((
             Self {
+                id: format!("raop:{mac_hex}"),
                 stop,
                 _advert: advert,
                 port,
@@ -337,7 +345,7 @@ fn parse_sdp(sdp: &str, key: &rsa::RsaPrivateKey) -> Result<Format> {
 /// The ALAC "magic cookie" FFmpeg's decoder wants: a 12-byte `alac` atom
 /// header plus the 24-byte ALACSpecificConfig built from the fmtp values
 /// (`352 0 16 40 10 14 2 255 0 0 44100`).
-fn alac_cookie(fmtp: &[u32]) -> Vec<u8> {
+pub(crate) fn alac_cookie(fmtp: &[u32]) -> Vec<u8> {
     let g = |i: usize, d: u32| fmtp.get(i).copied().unwrap_or(d);
     let mut c = Vec::with_capacity(36);
     c.extend_from_slice(&36u32.to_be_bytes());
@@ -454,7 +462,7 @@ impl Drop for Stream {
 
 /// Decrypts one audio payload in place: whole 16-byte blocks are AES-CBC
 /// (the IV restarts with every packet), the tail is plain.
-fn decrypt(payload: &mut [u8], key: &[u8; 16], iv: &[u8; 16]) {
+pub(crate) fn decrypt(payload: &mut [u8], key: &[u8; 16], iv: &[u8; 16]) {
     let cipher = Aes128::new(key.into());
     let mut prev = *iv;
     let (blocks, _tail) = payload.as_chunks_mut::<16>();
@@ -516,7 +524,7 @@ fn push_audio(live: &Mutex<Live>, packet: &[u8], fmt: &Format) {
 }
 
 /// Answers a timing request (NTP-style, packet type 0x52) on the timing port.
-fn timing_reply(req: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn timing_reply(req: &[u8]) -> Option<Vec<u8>> {
     if req.len() < 32 || req[1] & 0x7f != 0x52 {
         return None;
     }
@@ -528,7 +536,7 @@ fn timing_reply(req: &[u8]) -> Option<Vec<u8>> {
     Some(r)
 }
 
-fn ntp_now() -> [u8; 8] {
+pub(crate) fn ntp_now() -> [u8; 8] {
     let d = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
