@@ -211,10 +211,12 @@ impl App {
         ));
         for dev in &self.cast.devices {
             let icon = match dev.kind {
-                Kind::Sonos | Kind::Dlna => "audio-speakers-symbolic",
+                Kind::Sonos | Kind::Dlna | Kind::Cast => "audio-speakers-symbolic",
             };
             let subtitle = match dev.kind {
                 Kind::Sonos => format!("Sonos · {}", dev.host),
+                Kind::Cast if dev.model.is_empty() => format!("Google Cast · {}", dev.host),
+                Kind::Cast => format!("Google Cast · {} · {}", dev.model, dev.host),
                 Kind::Dlna => {
                     if dev.model.is_empty() {
                         dev.host.clone()
@@ -250,7 +252,7 @@ impl App {
             gettext_f("Playing on {name}", &[("name", &d.name)])
         } else if self.cast.searched && self.cast.devices.is_empty() {
             gettext(
-                "No speakers found. DLNA/UPnP renderers and Sonos in the same network are supported.",
+                "No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the same network are supported.",
             )
         } else {
             String::new()

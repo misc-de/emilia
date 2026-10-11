@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:24+0000\n"
+"POT-Creation-Date: 2026-10-11 13:35+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Panga"
 msgid "Sleep timer"
 msgstr "Kipima muda cha kulala"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:245
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
 msgid "Play on"
 msgstr "Cheza kwenye"
 
@@ -352,21 +352,21 @@ msgstr "Tafuta tena"
 msgid "This device"
 msgstr "Kifaa hiki"
 
-#: src/ui/app_cast.rs:242 src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
 msgid "Playing on {name}"
 msgstr "Inacheza kwenye {name}"
 
-#: src/ui/app_cast.rs:248
+#: src/ui/app_cast.rs:250
 msgid "Searching for speakers in the network…"
 msgstr "Inatafuta spika kwenye mtandao…"
 
-#: src/ui/app_cast.rs:253
+#: src/ui/app_cast.rs:255
 msgid ""
-"No speakers found. DLNA/UPnP renderers and Sonos in the same network are "
-"supported."
+"No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
+" same network are supported."
 msgstr ""
-"Hakuna spika zilizopatikana. Vicheza DLNA/UPnP na Sonos kwenye mtandao huo "
-"huo vinatumika."
+"Hakuna spika zilizopatikana. Vicheza DLNA/UPnP, Sonos na vifaa vya Google "
+"Cast kwenye mtandao huo huo vinatumika."
 
 #: src/ui/app_chrome.rs:120
 msgid ""

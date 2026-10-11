@@ -75,6 +75,8 @@ fn search(wait: Duration) -> BTreeSet<String> {
 /// into their room groups: only a group's coordinator is listed, named after
 /// its room with the number of further rooms ("Küche +1").
 pub fn discover(wait: Duration) -> Vec<Device> {
+    // Google Cast devices answer mDNS, not SSDP: browse in parallel.
+    let cast = std::thread::spawn(move || cast_devices(wait));
     let locations = search(wait);
     let agent = upnp::agent();
     let handles: Vec<_> = locations
@@ -92,8 +94,42 @@ pub fn discover(wait: Duration) -> Vec<Device> {
     let mut seen = BTreeSet::new();
     devices.retain(|d| seen.insert(d.id.clone()));
     fold_sonos_groups(&agent, &mut devices);
+    devices.extend(cast.join().unwrap_or_default());
     devices.sort_by_key(|d| d.name.to_lowercase());
     devices
+}
+
+/// Google Cast devices from an mDNS browse of `_googlecast._tcp`. The TXT
+/// record names them (`fn`), says the model (`md`) and the device id (`id`).
+fn cast_devices(wait: Duration) -> Vec<Device> {
+    super::mdns::browse("_googlecast._tcp.local", wait)
+        .into_iter()
+        .filter_map(|i| {
+            let addr = i.addr?;
+            let id = i.txt.get("id").cloned().unwrap_or_else(|| i.name.clone());
+            let name = i.txt.get("fn").cloned().unwrap_or_else(|| {
+                i.name
+                    .split("._googlecast")
+                    .next()
+                    .unwrap_or(&i.name)
+                    .to_string()
+            });
+            Some(Device {
+                id,
+                name,
+                model: i.txt.get("md").cloned().unwrap_or_default(),
+                kind: Kind::Cast,
+                location: format!("cast://{addr}:{}", i.port),
+                host: addr.to_string(),
+                port: if i.port == 0 { 8009 } else { i.port },
+                avt: None,
+                rc: None,
+                cm: None,
+                grc: None,
+                zgt: None,
+            })
+        })
+        .collect()
 }
 
 fn fold_sonos_groups(agent: &ureq::Agent, devices: &mut Vec<Device>) {

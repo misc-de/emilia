@@ -1,4 +1,5 @@
-//! Playing on network speakers ("cast"): UPnP/DLNA MediaRenderers and Sonos.
+//! Playing on network speakers ("cast"): UPnP/DLNA MediaRenderers, Sonos
+//! and Google Cast.
 //!
 //! The renderer pulls the audio itself over HTTP — Emilia only tells it what
 //! to fetch (SOAP `SetAVTransportURI` + `Play`) and serves the item from its
@@ -14,8 +15,11 @@
 //!
 //! Pure Rust on blocking threads, no tokio: the phone build has it too.
 
+pub mod backend;
+pub mod castv2;
 pub mod discover;
 pub mod dmr;
+pub mod mdns;
 pub mod serve;
 pub mod session;
 pub mod upnp;
@@ -30,6 +34,8 @@ pub use upnp::Meta;
 pub enum Kind {
     Sonos,
     Dlna,
+    /// Google Cast (Chromecast, Nest speakers, Cast-enabled TVs/speakers).
+    Cast,
 }
 
 /// A UPnP service of a renderer: its exact type (with the version the device
@@ -51,7 +57,10 @@ pub struct Device {
     pub kind: Kind,
     pub location: String,
     pub host: String,
-    pub avt: Service,
+    /// Cast: the CASTV2 port (8009, other ports for speaker groups).
+    pub port: u16,
+    /// UPnP only (Cast devices have none of the services).
+    pub avt: Option<Service>,
     pub rc: Option<Service>,
     pub cm: Option<Service>,
     /// Sonos: group volume on the coordinator.

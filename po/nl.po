@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:24+0000\n"
+"POT-Creation-Date: 2026-10-11 13:35+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Sorteren"
 msgid "Sleep timer"
 msgstr "Slaaptimer"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:245
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
 msgid "Play on"
 msgstr "Afspelen op"
 
@@ -351,21 +351,21 @@ msgstr "Opnieuw zoeken"
 msgid "This device"
 msgstr "Dit apparaat"
 
-#: src/ui/app_cast.rs:242 src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
 msgid "Playing on {name}"
 msgstr "Speelt af op {name}"
 
-#: src/ui/app_cast.rs:248
+#: src/ui/app_cast.rs:250
 msgid "Searching for speakers in the network…"
 msgstr "Luidsprekers zoeken in het netwerk…"
 
-#: src/ui/app_cast.rs:253
+#: src/ui/app_cast.rs:255
 msgid ""
-"No speakers found. DLNA/UPnP renderers and Sonos in the same network are "
-"supported."
+"No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
+" same network are supported."
 msgstr ""
-"Geen luidsprekers gevonden. DLNA/UPnP-renderers en Sonos in hetzelfde "
-"netwerk worden ondersteund."
+"Geen luidsprekers gevonden. DLNA/UPnP-renderers, Sonos en Google Cast-"
+"apparaten in hetzelfde netwerk worden ondersteund."
 
 #: src/ui/app_chrome.rs:120
 msgid ""

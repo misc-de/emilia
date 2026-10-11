@@ -1194,10 +1194,11 @@ mod tests {
         let agent = upnp::agent();
         let loc = format!("http://127.0.0.1:{}/dmr/desc.xml", h.shared.port);
         let dev = upnp::describe(&agent, &loc).expect("description");
+        let avt = dev.avt.clone().expect("AVTransport");
         assert_eq!(dev.name, "Test");
         assert_eq!(dev.id, h.id());
         assert_eq!(
-            upnp::transport_info(&agent, &dev.avt).unwrap(),
+            upnp::transport_info(&agent, &avt).unwrap(),
             "NO_MEDIA_PRESENT"
         );
         let mimes = upnp::sink_mimes(&agent, &dev).unwrap();
@@ -1208,9 +1209,9 @@ mod tests {
             ..Default::default()
         };
         let didl = upnp::didl("http://h/a.mp3", "audio/mpeg", &meta, None, false);
-        upnp::set_uri(&agent, &dev.avt, "http://h/a.mp3", &didl).unwrap();
-        assert_eq!(upnp::transport_info(&agent, &dev.avt).unwrap(), "STOPPED");
-        upnp::play(&agent, &dev.avt).unwrap();
+        upnp::set_uri(&agent, &avt, "http://h/a.mp3", &didl).unwrap();
+        assert_eq!(upnp::transport_info(&agent, &avt).unwrap(), "STOPPED");
+        upnp::play(&agent, &avt).unwrap();
         assert_eq!(
             rx.recv_blocking().unwrap(),
             DmrCommand::Load {
@@ -1227,8 +1228,8 @@ mod tests {
             dur_ms: Some(180_000),
             volume: 0.5,
         });
-        assert_eq!(upnp::transport_info(&agent, &dev.avt).unwrap(), "PLAYING");
-        let (pos, dur, uri) = upnp::position_info(&agent, &dev.avt).unwrap();
+        assert_eq!(upnp::transport_info(&agent, &avt).unwrap(), "PLAYING");
+        let (pos, dur, uri) = upnp::position_info(&agent, &avt).unwrap();
         assert_eq!(
             (pos, dur, uri.as_str()),
             (Some(61_000), Some(180_000), "http://h/a.mp3")
@@ -1236,11 +1237,11 @@ mod tests {
         assert_eq!(upnp::get_volume(&agent, &dev).unwrap(), 50);
         upnp::set_volume(&agent, &dev, 30).unwrap();
         assert_eq!(rx.recv_blocking().unwrap(), DmrCommand::Volume(0.3));
-        upnp::seek(&agent, &dev.avt, 90_000).unwrap();
+        upnp::seek(&agent, &avt, 90_000).unwrap();
         assert_eq!(rx.recv_blocking().unwrap(), DmrCommand::Seek(90_000));
-        upnp::pause(&agent, &dev.avt).unwrap();
+        upnp::pause(&agent, &avt).unwrap();
         assert_eq!(rx.recv_blocking().unwrap(), DmrCommand::Pause);
         // A local file is refused: the renderer only fetches over HTTP.
-        assert!(upnp::set_uri(&agent, &dev.avt, "file:///etc/passwd", "").is_err());
+        assert!(upnp::set_uri(&agent, &avt, "file:///etc/passwd", "").is_err());
     }
 }

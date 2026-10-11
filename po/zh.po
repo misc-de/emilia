@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:24+0000\n"
+"POT-Creation-Date: 2026-10-11 13:35+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "排序"
 msgid "Sleep timer"
 msgstr "睡眠定时器"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:245
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
 msgid "Play on"
 msgstr "播放到"
 
@@ -346,19 +346,19 @@ msgstr "重新搜索"
 msgid "This device"
 msgstr "本设备"
 
-#: src/ui/app_cast.rs:242 src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
 msgid "Playing on {name}"
 msgstr "正在 {name} 上播放"
 
-#: src/ui/app_cast.rs:248
+#: src/ui/app_cast.rs:250
 msgid "Searching for speakers in the network…"
 msgstr "正在搜索网络中的音箱…"
 
-#: src/ui/app_cast.rs:253
+#: src/ui/app_cast.rs:255
 msgid ""
-"No speakers found. DLNA/UPnP renderers and Sonos in the same network are "
-"supported."
-msgstr "未找到音箱。支持同一网络中的 DLNA/UPnP 渲染器和 Sonos。"
+"No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
+" same network are supported."
+msgstr "未找到音箱。支持同一网络中的 DLNA/UPnP 渲染器、Sonos 和 Google Cast 设备。"
 
 #: src/ui/app_chrome.rs:120
 msgid ""

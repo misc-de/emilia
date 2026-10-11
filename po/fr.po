@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:24+0000\n"
+"POT-Creation-Date: 2026-10-11 13:35+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Trier"
 msgid "Sleep timer"
 msgstr "Minuteur de veille"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:245
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
 msgid "Play on"
 msgstr "Lire sur"
 
@@ -357,21 +357,21 @@ msgstr "Rechercher à nouveau"
 msgid "This device"
 msgstr "Cet appareil"
 
-#: src/ui/app_cast.rs:242 src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
 msgid "Playing on {name}"
 msgstr "Lecture sur {name}"
 
-#: src/ui/app_cast.rs:248
+#: src/ui/app_cast.rs:250
 msgid "Searching for speakers in the network…"
 msgstr "Recherche d’enceintes sur le réseau…"
 
-#: src/ui/app_cast.rs:253
+#: src/ui/app_cast.rs:255
 msgid ""
-"No speakers found. DLNA/UPnP renderers and Sonos in the same network are "
-"supported."
+"No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
+" same network are supported."
 msgstr ""
-"Aucune enceinte trouvée. Les lecteurs DLNA/UPnP et Sonos du même réseau sont"
-" pris en charge."
+"Aucune enceinte trouvée. Les lecteurs DLNA/UPnP, Sonos et les appareils "
+"Google Cast du même réseau sont pris en charge."
 
 #: src/ui/app_chrome.rs:120
 msgid ""

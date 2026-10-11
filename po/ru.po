@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:24+0000\n"
+"POT-Creation-Date: 2026-10-11 13:35+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Сортировка"
 msgid "Sleep timer"
 msgstr "Таймер сна"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:245
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
 msgid "Play on"
 msgstr "Воспроизвести на"
 
@@ -350,21 +350,21 @@ msgstr "Искать снова"
 msgid "This device"
 msgstr "Это устройство"
 
-#: src/ui/app_cast.rs:242 src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
 msgid "Playing on {name}"
 msgstr "Воспроизводится на {name}"
 
-#: src/ui/app_cast.rs:248
+#: src/ui/app_cast.rs:250
 msgid "Searching for speakers in the network…"
 msgstr "Поиск колонок в сети…"
 
-#: src/ui/app_cast.rs:253
+#: src/ui/app_cast.rs:255
 msgid ""
-"No speakers found. DLNA/UPnP renderers and Sonos in the same network are "
-"supported."
+"No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
+" same network are supported."
 msgstr ""
-"Колонки не найдены. Поддерживаются рендереры DLNA/UPnP и Sonos в той же "
-"сети."
+"Колонки не найдены. Поддерживаются рендереры DLNA/UPnP, Sonos и устройства "
+"Google Cast в той же сети."
 
 #: src/ui/app_chrome.rs:120
 msgid ""

@@ -14,9 +14,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 
+use super::Device;
+use super::backend::{self, Backend, LoadItem};
 use super::serve::{self, Enc, Item};
-use super::upnp::{self, Meta};
-use super::{Device, Kind};
+use super::upnp::Meta;
 
 const POLL_PLAYING: Duration = Duration::from_millis(1000);
 const POLL_IDLE: Duration = Duration::from_secs(4);
@@ -34,7 +35,7 @@ pub enum Transport {
 }
 
 impl Transport {
-    fn parse(s: &str) -> Self {
+    pub(crate) fn parse(s: &str) -> Self {
         match s {
             "PLAYING" => Transport::Playing,
             "PAUSED_PLAYBACK" | "PAUSED_RECORDING" => Transport::Paused,
@@ -99,7 +100,7 @@ impl Session {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Mutex::new(Shared::default()));
         let worker = Worker {
-            agent: upnp::agent(),
+            backend: None,
             dev: device.clone(),
             shared: shared.clone(),
             mimes: None,
@@ -243,7 +244,8 @@ struct Loaded {
 }
 
 struct Worker {
-    agent: ureq::Agent,
+    /// Opened on the worker thread (a Cast device needs a TLS handshake).
+    backend: Option<Box<dyn Backend>>,
     dev: Device,
     shared: Arc<Mutex<Shared>>,
     /// The renderer's accepted MIME types (`None`: it did not say).
@@ -258,12 +260,24 @@ struct Worker {
 
 impl Worker {
     fn run(mut self, rx: Receiver<Cmd>) {
-        self.mimes = upnp::sink_mimes(&self.agent, &self.dev);
-        if let Ok(v) = upnp::get_volume(&self.agent, &self.dev)
+        let mut b = match backend::open(&self.dev) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("cast: cannot reach {}: {e:#}", self.dev.name);
+                if let Ok(mut s) = self.shared.lock() {
+                    s.dead = true;
+                }
+                self.emit(Event::Lost);
+                return;
+            }
+        };
+        self.mimes = b.accepts();
+        if let Ok(v) = b.volume()
             && let Ok(mut s) = self.shared.lock()
         {
             s.volume = Some(v);
         }
+        self.backend = Some(b);
         loop {
             let wait = if self.item.as_ref().is_some_and(|i| i.want_play) {
                 POLL_PLAYING
@@ -306,19 +320,25 @@ impl Worker {
                 if let Some(i) = &mut self.item {
                     i.want_play = false;
                 }
-                upnp::pause(&self.agent, &self.dev.avt)
+                self.b().pause()
             }
             Cmd::Stop => {
                 self.item = None;
-                upnp::stop(&self.agent, &self.dev.avt)
+                self.b().stop()
             }
             Cmd::Seek(ms) => self.seek(ms),
-            Cmd::Volume(v) => upnp::set_volume(&self.agent, &self.dev, v),
+            Cmd::Volume(v) => self.b().set_volume(v),
             Cmd::Quit => Ok(()),
         };
         if let Err(e) = res {
             tracing::warn!("cast command failed: {e:#}");
         }
+    }
+
+    fn b(&mut self) -> &mut dyn Backend {
+        self.backend
+            .as_deref_mut()
+            .expect("backend opened in run()")
     }
 
     fn supports(&self, mime: &str) -> bool {
@@ -430,12 +450,6 @@ impl Worker {
         if live {
             meta.duration_ms = None;
         }
-        // Sonos plays an endless MP3 stream only under its radio scheme.
-        let target = if live && self.dev.kind == Kind::Sonos && mime == "audio/mpeg" {
-            url.replacen("http://", "x-rincon-mp3radio://", 1)
-        } else {
-            url.clone()
-        };
         let art_url = meta
             .art_path
             .as_deref()
@@ -446,12 +460,22 @@ impl Worker {
                 serve::publish(Item::File(p), &name, &self.dev.host).ok()
             })
             .map(|(u, _)| u);
-        let didl = upnp::didl(&url, &mime, &meta, art_url.as_deref(), live);
-        let _ = upnp::stop(&self.agent, &self.dev.avt);
-        upnp::set_uri(&self.agent, &self.dev.avt, &target, &didl)?;
-        if play {
-            upnp::play(&self.agent, &self.dev.avt)?;
-        }
+        // A transcode already starts at the position; so does a backend that
+        // takes the start with the load (Cast).
+        let start_ms = if transcode.is_some() || live {
+            0
+        } else {
+            resume_ms.max(0)
+        };
+        let applied = self.b().load(&LoadItem {
+            url: &url,
+            mime: &mime,
+            meta: &meta,
+            art_url: art_url.as_deref(),
+            live,
+            play,
+            start_ms,
+        })?;
         if let Ok(mut s) = self.shared.lock() {
             s.dur_ms = meta.duration_ms;
             s.pos_ms = resume_ms.max(0);
@@ -461,7 +485,8 @@ impl Worker {
             uri: uri.to_string(),
             meta,
             token,
-            pending_seek: (resume_ms > 0 && transcode.is_none() && !live).then_some(resume_ms),
+            pending_seek: (resume_ms > 0 && transcode.is_none() && !live && !applied)
+                .then_some(resume_ms),
             transcode,
             live,
             loaded_at: Instant::now(),
@@ -480,7 +505,7 @@ impl Worker {
             // Loaded paused, never started: the start timeout counts from now.
             i.loaded_at = Instant::now();
         }
-        upnp::play(&self.agent, &self.dev.avt)
+        self.b().play()
     }
 
     fn seek(&mut self, ms: i64) -> Result<()> {
@@ -502,12 +527,19 @@ impl Worker {
             return Ok(());
         }
         self.settle = 2;
-        upnp::seek(&self.agent, &self.dev.avt, ms)
+        // A poll that ran between the app's seek and this one put the old
+        // position back: show the target again.
+        if let Ok(mut st) = self.shared.lock() {
+            st.pos_ms = ms;
+            st.pos_at = Some(Instant::now());
+        }
+        self.b().seek(ms)
     }
 
     fn poll(&mut self) {
-        let state = match upnp::transport_info(&self.agent, &self.dev.avt) {
-            Ok(s) => Transport::parse(&s),
+        let active = self.item.is_some();
+        let poll = match self.b().poll(active) {
+            Ok(p) => p,
             Err(e) => {
                 self.failures += 1;
                 tracing::debug!("cast poll failed ({}): {e:#}", self.failures);
@@ -521,23 +553,23 @@ impl Worker {
             }
         };
         self.failures = 0;
-        let (pos, dur, track_uri) = if self.item.is_some() {
-            upnp::position_info(&self.agent, &self.dev.avt).unwrap_or((None, None, String::new()))
-        } else {
-            (None, None, String::new())
-        };
+        let (state, pos, dur, track_uri) = (poll.state, poll.pos, poll.dur, poll.current);
         let mut events = Vec::new();
         let mut seek_now = None;
         if let Some(i) = &mut self.item {
             let offset = i.transcode.map(|(_, o)| o).unwrap_or(0);
             // Someone else put their own item on the renderer.
-            if !track_uri.is_empty()
-                && !track_uri.contains(&i.token)
-                && matches!(state, Transport::Playing | Transport::Transitioning)
+            if poll.lost
+                || !track_uri.is_empty()
+                    && !track_uri.contains(&i.token)
+                    && matches!(state, Transport::Playing | Transport::Transitioning)
             {
                 tracing::info!("cast: renderer taken over ({track_uri})");
                 self.item = None;
                 events.push(Event::Lost);
+            } else if poll.failed {
+                self.item = None;
+                events.push(Event::Error("renderer could not play the item".into()));
             } else {
                 match state {
                     Transport::Playing => {
@@ -582,7 +614,7 @@ impl Worker {
             self.settle = 2;
         }
         if let Some(ms) = seek_now
-            && let Err(e) = upnp::seek(&self.agent, &self.dev.avt, ms)
+            && let Err(e) = self.b().seek(ms)
         {
             tracing::warn!("cast resume seek failed: {e:#}");
         }
