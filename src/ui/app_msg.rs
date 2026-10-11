@@ -217,6 +217,8 @@ pub enum Msg {
     Lyrics(crate::ui::app_lyrics::LyricsMsg),
     /// CastMsg — see `crate::ui::app_cast`.
     Cast(crate::ui::app_cast::CastMsg),
+    /// A DLNA controller's command — see `crate::ui::app_dmr`.
+    Dmr(crate::core::cast::dmr::DmrCommand),
     /// ConcertMsg — see `crate::ui::app_concert`.
     Concert(crate::ui::app_concert::ConcertMsg),
     /// FavoriteMsg — see `crate::ui::app_favorites`.

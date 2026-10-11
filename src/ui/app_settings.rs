@@ -262,6 +262,8 @@ pub(crate) enum SettingMsg {
     SetLastSettingsPage(String),
     /// Gapless playback on/off (settings); persisted + pushed to the player.
     SetGapless(bool),
+    /// Receive from the network (DLNA renderer) on/off.
+    SetDmr(bool),
     /// Crossfade window in seconds (settings); persisted + pushed to the player.
     SetCrossfade(f64),
     /// How compound artist credits are listed (settings); persisted + applied
@@ -338,6 +340,13 @@ impl App {
                     .library
                     .set_setting("gapless", if on { "1" } else { "0" });
                 self.apply_playback_prefs();
+            }
+            SettingMsg::SetDmr(on) => {
+                self.dmr.enabled = on;
+                let _ = self
+                    .library
+                    .set_setting("dmr_enabled", if on { "1" } else { "0" });
+                self.apply_dmr(sender);
             }
             SettingMsg::SetCrossfade(secs) => {
                 self.settings.crossfade_secs = secs.clamp(0.0, 12.0);

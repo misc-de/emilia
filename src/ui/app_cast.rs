@@ -151,6 +151,11 @@ impl App {
                 self.cast.searching = false;
                 self.cast.searched = true;
                 self.cast.spinner.set_spinning(false);
+                // Never offer this app's own renderer: casting to ourselves
+                // would loop.
+                if let Some(own) = self.dmr.handle.as_ref().map(|h| h.id().to_string()) {
+                    devices.retain(|d| d.id != own);
+                }
                 // Keep the active speaker listed even if it missed this round.
                 if let Some(cur) = self.player.cast_device()
                     && !devices.iter().any(|d| d.id == cur.id)

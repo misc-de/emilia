@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:07+0000\n"
+"POT-Creation-Date: 2026-10-11 13:24+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -50,109 +50,109 @@ msgstr "上一曲"
 msgid "Quit Emilia"
 msgstr "退出 Emilia"
 
-#: src/ui/app.rs:254 src/ui/app.rs:429 src/ui/app.rs:1376 src/ui/setup.rs:701
+#: src/ui/app.rs:262 src/ui/app.rs:437 src/ui/app.rs:1384 src/ui/setup.rs:701
 msgid "Back"
 msgstr "返回"
 
-#: src/ui/app.rs:266 src/ui/app_search.rs:24 src/ui/app_search.rs:322
+#: src/ui/app.rs:274 src/ui/app_search.rs:24 src/ui/app_search.rs:322
 #: src/ui/widgets.rs:959
 msgid "Search"
 msgstr "搜索"
 
-#: src/ui/app.rs:275 src/ui/app_init.rs:904 src/ui/app_settings.rs:161
+#: src/ui/app.rs:283 src/ui/app_init.rs:906 src/ui/app_settings.rs:161
 #: src/ui/yt_page.rs:166
 msgid "Settings"
 msgstr "设置"
 
-#: src/ui/app.rs:285
+#: src/ui/app.rs:293
 msgid "Sort"
 msgstr "排序"
 
-#: src/ui/app.rs:295 src/ui/app_sleep.rs:37
+#: src/ui/app.rs:303 src/ui/app_sleep.rs:37
 msgid "Sleep timer"
 msgstr "睡眠定时器"
 
-#: src/ui/app.rs:303 src/ui/app_cast.rs:51 src/ui/app_cast.rs:229
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:245
 msgid "Play on"
 msgstr "播放到"
 
-#: src/ui/app.rs:313
+#: src/ui/app.rs:321
 msgid "Show progress"
 msgstr "显示进度"
 
-#: src/ui/app.rs:315 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
+#: src/ui/app.rs:323 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
 msgid "Refresh"
 msgstr "刷新"
 
-#: src/ui/app.rs:333 src/ui/sync_page.rs:334 src/ui/sync_page.rs:374
+#: src/ui/app.rs:341 src/ui/sync_page.rs:334 src/ui/sync_page.rs:374
 #: src/ui/sync_page.rs:407 src/ui/sync_page.rs:458 src/ui/sync_page.rs:522
 #: src/ui/sync_page.rs:1117 src/ui/sync_page.rs:1152 src/ui/sync_page.rs:1234
 msgid "Connect to share"
 msgstr "连接以分享"
 
-#: src/ui/app.rs:395 src/ui/sync_share_ui.rs:423
+#: src/ui/app.rs:403 src/ui/sync_share_ui.rs:423
 msgid "Files"
 msgstr "文件"
 
-#: src/ui/app.rs:471
+#: src/ui/app.rs:479
 msgid "Could not load the folder"
 msgstr "无法加载此文件夹"
 
-#: src/ui/app.rs:479
+#: src/ui/app.rs:487
 msgid "Retry"
 msgstr "重试"
 
-#: src/ui/app.rs:488 src/ui/app_search.rs:100 src/ui/app_settings_view.rs:160
+#: src/ui/app.rs:496 src/ui/app_search.rs:100 src/ui/app_settings_view.rs:160
 #: src/ui/stats_page.rs:290
 msgid "Artists"
 msgstr "艺术家"
 
-#: src/ui/app.rs:494
+#: src/ui/app.rs:502
 msgid "No artists"
 msgstr "没有艺术家"
 
-#: src/ui/app.rs:496 src/ui/app.rs:547
+#: src/ui/app.rs:504 src/ui/app.rs:555
 msgid "Scan a music folder and fetch online metadata"
 msgstr "扫描音乐文件夹并获取在线元数据"
 
-#: src/ui/app.rs:538 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127
+#: src/ui/app.rs:546 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127
 #: src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr "专辑"
 
-#: src/ui/app.rs:545
+#: src/ui/app.rs:553
 msgid "No albums"
 msgstr "没有专辑"
 
-#: src/ui/app.rs:589 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
+#: src/ui/app.rs:597 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
 msgid "Singles"
 msgstr "单曲"
 
-#: src/ui/app.rs:595
+#: src/ui/app.rs:603
 msgid "No singles"
 msgstr "没有单曲"
 
-#: src/ui/app.rs:597
+#: src/ui/app.rs:605
 msgid "Singles are one-artist releases with just a few tracks"
 msgstr "单曲是单一艺术家仅含少量曲目的发行作品"
 
-#: src/ui/app.rs:637 src/ui/app_search.rs:143
+#: src/ui/app.rs:645 src/ui/app_search.rs:143
 msgid "Compilations"
 msgstr "合辑"
 
-#: src/ui/app.rs:643
+#: src/ui/app.rs:651
 msgid "No compilations"
 msgstr "没有合辑"
 
-#: src/ui/app.rs:645
+#: src/ui/app.rs:653
 msgid "Compilations are albums with tracks by several artists"
 msgstr "合辑是收录多位艺术家曲目的专辑"
 
-#: src/ui/app.rs:685 src/ui/app.rs:726 src/ui/app_search.rs:151
+#: src/ui/app.rs:693 src/ui/app.rs:734 src/ui/app_search.rs:151
 msgid "Concerts"
 msgstr "演唱会"
 
-#: src/ui/app.rs:727
+#: src/ui/app.rs:735
 msgid ""
 "Here you can list your collected concerts. Via Import concerts you get an "
 "overview of likely concerts: albums with live, unplugged or concert in the "
@@ -163,123 +163,123 @@ msgstr ""
 "您可以在此列出收藏的演唱会。通过“导入演唱会”可获得可能的演唱会概览：名称中含有 live、unplugged 或 concert 的专辑，以及时长 "
 "30 分钟以上的单个文件。将它们标记为演唱会后即会显示在这里。您也可以随时通过选项添加演唱会。"
 
-#: src/ui/app.rs:737 src/ui/app_concert.rs:71
+#: src/ui/app.rs:745 src/ui/app_concert.rs:71
 msgid "Import concerts"
 msgstr "导入演唱会"
 
-#: src/ui/app.rs:742
+#: src/ui/app.rs:750
 msgid "I'll do it myself"
 msgstr "我自己来"
 
-#: src/ui/app.rs:747
+#: src/ui/app.rs:755
 msgid "Hide menu item"
 msgstr "隐藏菜单项"
 
-#: src/ui/app.rs:759
+#: src/ui/app.rs:767
 msgid "No concerts"
 msgstr "没有演唱会"
 
-#: src/ui/app.rs:760
+#: src/ui/app.rs:768
 msgid "Mark an album or a track as a concert via the options."
 msgstr "通过选项将专辑或曲目标记为演唱会。"
 
-#: src/ui/app.rs:766 src/ui/sync_share_ui.rs:468 src/ui/yt_page_search.rs:42
+#: src/ui/app.rs:774 src/ui/sync_share_ui.rs:468 src/ui/yt_page_search.rs:42
 msgid "Playlists"
 msgstr "播放列表"
 
-#: src/ui/app.rs:803
+#: src/ui/app.rs:811
 msgid "No playlists"
 msgstr "没有播放列表"
 
-#: src/ui/app.rs:804
+#: src/ui/app.rs:812
 msgid "Create a playlist or add tracks via the options."
 msgstr "创建播放列表或通过选项添加曲目。"
 
-#: src/ui/app.rs:814 src/ui/sync_share_ui.rs:469
+#: src/ui/app.rs:822 src/ui/sync_share_ui.rs:469
 msgid "Podcasts"
 msgstr "播客"
 
 #. Internet radio lives in its own relm4 component.
-#: src/ui/app.rs:820
+#: src/ui/app.rs:828
 msgid "Streaming"
 msgstr "在线播放"
 
-#: src/ui/app.rs:825 src/ui/sync_share_ui.rs:467
+#: src/ui/app.rs:833 src/ui/sync_share_ui.rs:467
 msgid "Favorites"
 msgstr "收藏"
 
-#: src/ui/app.rs:862
+#: src/ui/app.rs:870
 msgid "No favorites"
 msgstr "没有收藏"
 
-#: src/ui/app.rs:863
+#: src/ui/app.rs:871
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
 msgstr "在“更多信息”中用星标标记曲目、专辑或艺术家。"
 
-#: src/ui/app.rs:870 src/ui/app_settings_meta.rs:103
+#: src/ui/app.rs:878 src/ui/app_settings_meta.rs:103
 #: src/ui/sync_share_ui.rs:438
 msgid "YouTube"
 msgstr "YouTube"
 
-#: src/ui/app.rs:875 src/ui/app_search.rs:159
+#: src/ui/app.rs:883 src/ui/app_search.rs:159
 msgid "Audiobooks"
 msgstr "有声书"
 
-#: src/ui/app.rs:914
+#: src/ui/app.rs:922
 msgid "No audiobooks"
 msgstr "没有有声书"
 
-#: src/ui/app.rs:915
+#: src/ui/app.rs:923
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
 msgstr "通过属性将专辑、文件夹或曲目标记为有声书。"
 
-#: src/ui/app.rs:921 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
+#: src/ui/app.rs:929 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
 msgid "Memo"
 msgstr "备忘"
 
-#: src/ui/app.rs:938 src/ui/podcasts_page.rs:448 src/ui/stream_page.rs:280
+#: src/ui/app.rs:946 src/ui/podcasts_page.rs:448 src/ui/stream_page.rs:280
 #: src/ui/yt_page.rs:182
 msgid "Recently"
 msgstr "最近"
 
-#: src/ui/app.rs:945 src/ui/app_memo.rs:758 src/ui/app_views_ctx.rs:504
+#: src/ui/app.rs:953 src/ui/app_memo.rs:758 src/ui/app_views_ctx.rs:504
 msgid "Category"
 msgstr "分类"
 
-#: src/ui/app.rs:953
+#: src/ui/app.rs:961
 msgid "Add category"
 msgstr "添加分类"
 
-#: src/ui/app.rs:975
+#: src/ui/app.rs:983
 msgid "No memos yet"
 msgstr "暂无备忘"
 
-#: src/ui/app.rs:976
+#: src/ui/app.rs:984
 msgid "Use the microphone button in the player bar to record a voice memo."
 msgstr "使用播放栏中的麦克风按钮录制语音备忘。"
 
-#: src/ui/app.rs:987
+#: src/ui/app.rs:995
 msgid "Statistics"
 msgstr "统计"
 
-#: src/ui/app.rs:1055
+#: src/ui/app.rs:1063
 msgid "{done} of {total}"
 msgstr "{done} / {total}"
 
-#: src/ui/app.rs:1103
+#: src/ui/app.rs:1111
 msgid "{done} of {total} songs"
 msgstr "{done} / {total} 首歌曲"
 
-#: src/ui/app.rs:1116
+#: src/ui/app.rs:1124
 msgid "{done} MB of {total} MB"
 msgstr "{done} MB / {total} MB"
 
-#: src/ui/app.rs:1127 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
+#: src/ui/app.rs:1135 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:936 src/ui/app_memo.rs:959 src/ui/app_playlist.rs:877
 #: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
 #: src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:26
 #: src/ui/app_sections.rs:100 src/ui/app_settings_mcp.rs:129
-#: src/ui/app_views_handlers.rs:748 src/ui/app_views_sources.rs:278
+#: src/ui/app_views_handlers.rs:749 src/ui/app_views_sources.rs:278
 #: src/ui/app_views_sources.rs:474 src/ui/app_views_sources.rs:533
 #: src/ui/podcasts_page.rs:1023 src/ui/setup.rs:699
 #: src/ui/stream_page_stations.rs:53 src/ui/stream_page_stations.rs:404
@@ -291,90 +291,90 @@ msgstr "取消"
 
 # Mini-player: tap the song display to open the track detail view (added
 # 2026-06-07).
-#: src/ui/app.rs:1161
+#: src/ui/app.rs:1169
 msgid "Show details of the current track"
 msgstr "显示当前曲目的详细信息"
 
-#: src/ui/app.rs:1218
+#: src/ui/app.rs:1226
 msgid "Recording level"
 msgstr "录音电平"
 
-#: src/ui/app.rs:1282
+#: src/ui/app.rs:1290
 msgid "Equalizer for this track"
 msgstr "此曲目的均衡器"
 
-#: src/ui/app.rs:1295 src/ui/app.rs:1313
+#: src/ui/app.rs:1303 src/ui/app.rs:1321
 msgid "Playback speed"
 msgstr "播放速度"
 
-#: src/ui/app.rs:1341 src/ui/app_views_album.rs:1293
+#: src/ui/app.rs:1349 src/ui/app_views_album.rs:1293
 msgid "Shuffle"
 msgstr "随机播放"
 
-#: src/ui/app.rs:1359
+#: src/ui/app.rs:1367
 msgid "Repeat"
 msgstr "重复"
 
-#: src/ui/app.rs:1405 src/ui/podcasts_page_detail.rs:677
+#: src/ui/app.rs:1413 src/ui/podcasts_page_detail.rs:677
 #: src/ui/stream_page_stations.rs:238 src/ui/yt_live.rs:40
 #: src/ui/yt_page_detail.rs:339
 msgid "Play/Pause"
 msgstr "播放/暂停"
 
-#: src/ui/app.rs:1444
+#: src/ui/app.rs:1452
 msgid "Forward"
 msgstr "快进"
 
-#: src/ui/app.rs:1463 src/ui/app_dialogs.rs:91 src/ui/app_lyrics.rs:160
+#: src/ui/app.rs:1471 src/ui/app_dialogs.rs:91 src/ui/app_lyrics.rs:160
 #: src/ui/app_lyrics.rs:165
 msgid "Lyrics"
 msgstr "歌词"
 
-#: src/ui/app.rs:1475
+#: src/ui/app.rs:1483
 msgid "Show album"
 msgstr "显示专辑"
 
-#: src/ui/app.rs:1484 src/ui/app_queue.rs:51
+#: src/ui/app.rs:1492 src/ui/app_queue.rs:51
 msgid "Queue"
 msgstr "队列"
 
-#: src/ui/app_cast.rs:61
+#: src/ui/app_cast.rs:65
 msgid "Search again"
 msgstr "重新搜索"
 
-#: src/ui/app_cast.rs:189
+#: src/ui/app_cast.rs:205
 msgid "This device"
 msgstr "本设备"
 
-#: src/ui/app_cast.rs:226 src/ui/app_cast.rs:234
+#: src/ui/app_cast.rs:242 src/ui/app_cast.rs:250
 msgid "Playing on {name}"
 msgstr "正在 {name} 上播放"
 
-#: src/ui/app_cast.rs:232
+#: src/ui/app_cast.rs:248
 msgid "Searching for speakers in the network…"
 msgstr "正在搜索网络中的音箱…"
 
-#: src/ui/app_cast.rs:236
+#: src/ui/app_cast.rs:253
 msgid ""
 "No speakers found. DLNA/UPnP renderers and Sonos in the same network are "
 "supported."
 msgstr "未找到音箱。支持同一网络中的 DLNA/UPnP 渲染器和 Sonos。"
 
-#: src/ui/app_chrome.rs:115
+#: src/ui/app_chrome.rs:120
 msgid ""
 "Reading in your music collection — this may take a moment the first time"
 msgstr "正在读取你的音乐收藏——首次可能需要一些时间"
 
-#: src/ui/app_chrome.rs:117
+#: src/ui/app_chrome.rs:122
 msgid "Updating …"
 msgstr "正在更新 …"
 
-#: src/ui/app_chrome.rs:165 src/ui/app_init.rs:446
+#: src/ui/app_chrome.rs:170 src/ui/app_init.rs:446
 #: src/ui/app_views_sources.rs:169
 msgid "Music"
 msgstr "音乐"
 
-#: src/ui/app_chrome.rs:191
+#: src/ui/app_chrome.rs:196
 msgid "No music folder – please set one in settings"
 msgstr "没有音乐文件夹——请在设置中设置一个"
 
@@ -725,25 +725,25 @@ msgid "Note"
 msgstr "备注"
 
 # Restart-to-apply-language confirmation (added 2026-06-06).
-#: src/ui/app_init.rs:1342
+#: src/ui/app_init.rs:1346
 msgid "Restart to change the language?"
 msgstr "重启以更改语言？"
 
-#: src/ui/app_init.rs:1344
+#: src/ui/app_init.rs:1348
 msgid ""
 "The new language is loaded only after a restart. Restart now, or do it "
 "yourself later."
 msgstr "新语言仅在重启后加载。立即重启，或稍后自行重启。"
 
-#: src/ui/app_init.rs:1347
+#: src/ui/app_init.rs:1351
 msgid "Later"
 msgstr "稍后"
 
-#: src/ui/app_init.rs:1348
+#: src/ui/app_init.rs:1352
 msgid "Restart now"
 msgstr "立即重启"
 
-#: src/ui/app_init.rs:1510
+#: src/ui/app_init.rs:1514
 msgid "Import cancelled"
 msgstr "已取消导入"
 
@@ -1035,16 +1035,16 @@ msgid "Not in the library"
 msgstr "不在曲库中"
 
 #: src/ui/app_popularity.rs:675 src/ui/app_streaming.rs:824
-#: src/ui/app_views_handlers.rs:786
+#: src/ui/app_views_handlers.rs:787
 msgid "Enable YouTube in the settings to use this"
 msgstr "请先在设置中启用 YouTube 以使用此功能"
 
-#: src/ui/app_popularity.rs:678 src/ui/app_views_handlers.rs:796
+#: src/ui/app_popularity.rs:678 src/ui/app_views_handlers.rs:797
 msgid "Searching online …"
 msgstr "正在在线搜索 …"
 
 #: src/ui/app_popularity.rs:712 src/ui/app_streaming.rs:867
-#: src/ui/app_views_handlers.rs:866
+#: src/ui/app_views_handlers.rs:867
 msgid "Not found on YouTube"
 msgstr "在 YouTube 上未找到"
 
@@ -1299,7 +1299,7 @@ msgstr "菜单"
 msgid "Hidden"
 msgstr "已隐藏"
 
-#: src/ui/app_settings.rs:405
+#: src/ui/app_settings.rs:414
 msgid "Shown again"
 msgstr "已重新显示"
 
@@ -1643,6 +1643,21 @@ msgstr "交叉淡化"
 msgid "Seconds to overlap tracks (0 = off)"
 msgstr "曲目重叠的秒数（0 = 关闭）"
 
+#: src/ui/app_settings_sound.rs:81
+msgid "Network"
+msgstr "网络"
+
+#: src/ui/app_settings_sound.rs:84
+msgid "Receive music from the network"
+msgstr "接收来自网络的音乐"
+
+#: src/ui/app_settings_sound.rs:86
+msgid ""
+"Other apps in the local network can play on this device via DLNA/UPnP (e.g. "
+"BubbleUPnP, Home Assistant, another Emilia)"
+msgstr ""
+"本地网络中的其他应用可通过 DLNA/UPnP 在本设备上播放（例如 BubbleUPnP、Home Assistant、另一台 Emilia）"
+
 #: src/ui/app_settings_view.rs:32 src/ui/setup.rs:242
 msgid "Language"
 msgstr "语言"
@@ -1884,24 +1899,24 @@ msgstr "已移除电台"
 msgid "Recording deleted"
 msgstr "已删除录音"
 
-#: src/ui/app_update.rs:232
+#: src/ui/app_update.rs:234
 msgid "Download complete"
 msgstr "下载完成"
 
-#: src/ui/app_update.rs:236 src/ui/app_views_handlers.rs:999
+#: src/ui/app_update.rs:238 src/ui/app_views_handlers.rs:1000
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "下载失败"
 
-#: src/ui/app_update.rs:269
+#: src/ui/app_update.rs:271
 msgid "No new concert candidates found"
 msgstr "未找到新的可能演唱会"
 
-#: src/ui/app_update.rs:279
+#: src/ui/app_update.rs:281
 msgid "yt-dlp ready (version {v})"
 msgstr "yt-dlp 就绪（版本 {v}）"
 
-#: src/ui/app_update.rs:283
+#: src/ui/app_update.rs:285
 msgid "yt-dlp download failed"
 msgstr "yt-dlp 下载失败"
 
@@ -2012,38 +2027,38 @@ msgstr "已从队列移除"
 msgid "Will play next"
 msgstr "将接下来播放"
 
-#: src/ui/app_views_handlers.rs:470 src/ui/app_views_handlers.rs:979
+#: src/ui/app_views_handlers.rs:471 src/ui/app_views_handlers.rs:980
 #: src/ui/podcasts_page.rs:151
 msgid "Downloading …"
 msgstr "正在下载 …"
 
-#: src/ui/app_views_handlers.rs:744
+#: src/ui/app_views_handlers.rs:745
 msgid ""
 "“{title}” is missing from this album. Search for it online and add it to the"
 " album?"
 msgstr "此专辑缺少“{title}”。要在线搜索并将其添加到专辑吗？"
 
-#: src/ui/app_views_handlers.rs:747
+#: src/ui/app_views_handlers.rs:748
 msgid "Add missing track"
 msgstr "添加缺失的曲目"
 
-#: src/ui/app_views_handlers.rs:749
+#: src/ui/app_views_handlers.rs:750
 msgid "Search & add"
 msgstr "搜索并添加"
 
-#: src/ui/app_views_handlers.rs:791 src/ui/app_views_handlers.rs:975
+#: src/ui/app_views_handlers.rs:792 src/ui/app_views_handlers.rs:976
 msgid "Cannot determine the album folder"
 msgstr "无法确定专辑文件夹"
 
-#: src/ui/app_views_handlers.rs:894
+#: src/ui/app_views_handlers.rs:895
 msgid "Choose a version"
 msgstr "选择版本"
 
-#: src/ui/app_views_handlers.rs:908
+#: src/ui/app_views_handlers.rs:909
 msgid "Pick the version of “{title}” to add"
 msgstr "选择要添加的“{title}”版本"
 
-#: src/ui/app_views_handlers.rs:996
+#: src/ui/app_views_handlers.rs:997
 msgid "Track added"
 msgstr "已添加曲目"
 

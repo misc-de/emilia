@@ -373,6 +373,13 @@ pub(crate) struct CastState {
     pub(crate) searched: bool,
 }
 
+/// "Receive from the network" (DLNA renderer) – see `crate::ui::app_dmr`.
+#[derive(Default)]
+pub(crate) struct DmrState {
+    pub(crate) enabled: bool,
+    pub(crate) handle: Option<crate::core::cast::dmr::DmrHandle>,
+}
+
 /// A sleep-timer choice from the header popover.
 #[derive(Debug, Clone, Copy)]
 pub enum SleepChoice {

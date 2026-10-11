@@ -15,6 +15,7 @@
 //! Pure Rust on blocking threads, no tokio: the phone build has it too.
 
 pub mod discover;
+pub mod dmr;
 pub mod serve;
 pub mod session;
 pub mod upnp;

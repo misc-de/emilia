@@ -583,6 +583,8 @@ impl App {
         self.setup_sleep_button(&widgets.sleep_btn, sender);
         // Device picker for playing on network speakers.
         self.setup_cast_button(&widgets.cast_btn, sender);
+        // Emilia as a network speaker, if switched on.
+        self.apply_dmr(sender);
 
         // Hover over the seek bar → temporarily show the hovered chapter below the
         // title; on leaving, back to the current chapter (at the

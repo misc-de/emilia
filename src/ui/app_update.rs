@@ -189,6 +189,7 @@ impl App {
             Msg::Podcast(m) => self.update_podcast(m, root, &sender),
             Msg::Lyrics(m) => self.update_lyrics(m, root, &sender),
             Msg::Cast(m) => self.update_cast(m, &sender),
+            Msg::Dmr(cmd) => self.on_dmr(cmd),
             Msg::Concert(m) => self.update_concert(m, root, &sender),
             Msg::Favorite(m) => self.update_favorite(m, root, &sender),
             Msg::Cover(m) => self.update_cover(m, root, &sender),
@@ -200,6 +201,7 @@ impl App {
         // it when playback/recording starts) — see `tick_active`.
         self.sync_tick_active();
         self.sync_overlay_dismissable();
+        self.publish_dmr();
     }
 
     /// Body of [`Component::update_cmd`]: processes the results of the
@@ -351,5 +353,6 @@ impl App {
         }
         self.sync_tick_active();
         self.sync_overlay_dismissable();
+        self.publish_dmr();
     }
 }

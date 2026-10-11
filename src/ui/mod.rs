@@ -4,6 +4,7 @@ pub mod app_chrome;
 pub mod app_concert;
 pub mod app_covers;
 pub mod app_dialogs;
+pub mod app_dmr;
 pub mod app_episode_playback;
 pub mod app_eq;
 pub mod app_favorites;

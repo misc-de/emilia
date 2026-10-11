@@ -110,6 +110,8 @@ pub struct App {
     pub(crate) sleep: SleepState,
     /// Network-speaker picker (header cast button + popover).
     pub(crate) cast: CastState,
+    /// DLNA renderer (Emilia as a network speaker).
+    pub(crate) dmr: DmrState,
     /// Lyrics of the running track + open karaoke view.
     pub(crate) lyrics: LyricsState,
     pub(crate) toast_overlay: adw::ToastOverlay,
@@ -1714,6 +1716,11 @@ impl Component for App {
         let stream_page = launch_stream_page(&sender, &stream_sort);
         let setup_page = launch_setup_page(&sender);
 
+        // Receiving from the network (DLNA renderer) is opt-in.
+        let dmr_enabled = matches!(
+            library.get_setting("dmr_enabled").ok().flatten().as_deref(),
+            Some("1")
+        );
         // Gapless / crossfade preferences (read before `library` is moved into
         // the model). Gapless defaults on; crossfade defaults off (0 s).
         let gapless = !matches!(
@@ -1870,6 +1877,10 @@ impl Component for App {
             },
             sleep: SleepState::default(),
             cast: CastState::default(),
+            dmr: DmrState {
+                enabled: dmr_enabled,
+                handle: None,
+            },
             lyrics: LyricsState {
                 current: None,
                 for_path: None,

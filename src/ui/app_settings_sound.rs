@@ -75,6 +75,27 @@ impl App {
         playback_group.add(&xfade_row);
         page.add(&playback_group);
 
+        // Emilia as a network speaker (DLNA/UPnP renderer). Opt-in: while on,
+        // anyone in the local network can make the app play a URL.
+        let network_group = adw::PreferencesGroup::builder()
+            .title(gettext("Network"))
+            .build();
+        let dmr_row = adw::SwitchRow::builder()
+            .title(gettext("Receive music from the network"))
+            .subtitle(gettext(
+                "Other apps in the local network can play on this device via DLNA/UPnP (e.g. BubbleUPnP, Home Assistant, another Emilia)",
+            ))
+            .active(self.dmr.enabled)
+            .build();
+        {
+            let sender = sender.clone();
+            dmr_row.connect_active_notify(move |r| {
+                sender.input(Msg::Setting(SettingMsg::SetDmr(r.is_active())));
+            });
+        }
+        network_group.add(&dmr_row);
+        page.add(&network_group);
+
         page
     }
 }

@@ -236,7 +236,7 @@ pub(crate) fn esc(s: &str) -> String {
 }
 
 /// The text of every leaf element in `xml`, by local name (the last one wins).
-fn leaf_values(xml: &str) -> HashMap<String, String> {
+pub(crate) fn leaf_values(xml: &str) -> HashMap<String, String> {
     let mut reader = quick_xml::Reader::from_str(xml);
     let mut out = HashMap::new();
     let mut stack: Vec<String> = Vec::new();
