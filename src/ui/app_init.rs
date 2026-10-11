@@ -1193,7 +1193,9 @@ impl App {
             self.files.browse_dir = Some(path);
             self.load_dir(sender);
         }
-        // Read the new folder and (Wi-Fi + switch) fetch automatically.
+        // Read the new folder and (Wi-Fi + switch) fetch automatically. The
+        // user just picked it: show the import progress.
+        self.overlay_requested_at = Some(std::time::Instant::now());
         self.start_scan(sender, true, false);
     }
 

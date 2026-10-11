@@ -58,6 +58,12 @@ pub struct App {
     /// by the green spinning refresh button) until that button reopens it or
     /// the work ends.
     pub(crate) overlay_dismissed: bool,
+    /// When the user last asked for a refresh/scan (refresh button, new music
+    /// folder). Only a run starting shortly after such a request brings the
+    /// overlay up by itself; automatic runs (startup scan, background
+    /// podcast/YouTube updates) start tapped away — the spinning refresh
+    /// button shows them, and a click on it opens the overlay.
+    pub(crate) overlay_requested_at: Option<std::time::Instant>,
     /// Mirrors "the overlay is up for a refresh/scan and may be tapped away",
     /// for the click-outside gesture on the content (see
     /// [`App::sync_overlay_dismissable`]).
@@ -1780,6 +1786,7 @@ impl Component for App {
             },
             refresh_pending: 0,
             overlay_dismissed: false,
+            overlay_requested_at: None,
             overlay_dismissable: std::rc::Rc::new(std::cell::Cell::new(false)),
             overlay_was_busy: false,
             refresh_progress: None,

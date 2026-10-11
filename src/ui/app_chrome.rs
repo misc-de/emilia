@@ -44,14 +44,19 @@ impl App {
                 && (self.background_busy() || self.refresh_summary.is_some()))
     }
 
-    /// Called after every message: a run starting from idle forgets an earlier
-    /// tap-away (so its overlay shows again), and the flag the click-outside
-    /// gesture reads is kept current. The tap-away is deliberately *not* reset
-    /// when a run ends: its summary arrives just after, and must stay hidden.
+    /// Called after every message: a run starting from idle shows its overlay
+    /// only if the user just asked for it (see `overlay_requested_at`), and
+    /// the flag the click-outside gesture reads is kept current. The tap-away
+    /// is deliberately *not* reset when a run ends: its summary arrives just
+    /// after, and must stay hidden.
     pub(crate) fn sync_overlay_dismissable(&mut self) {
         let busy = self.background_busy();
         if busy && !self.overlay_was_busy {
-            self.overlay_dismissed = false;
+            let requested = self
+                .overlay_requested_at
+                .take()
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5));
+            self.overlay_dismissed = !requested;
         }
         self.overlay_was_busy = busy;
         self.overlay_dismissable.set(

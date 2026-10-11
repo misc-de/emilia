@@ -354,6 +354,7 @@ impl App {
             self.overlay_dismissed = false;
             return;
         }
+        self.overlay_requested_at = Some(std::time::Instant::now());
         // The header "refresh" button is context-aware: a full library re-scan
         // (local files + cloud sources) only belongs to the library views. Every
         // other section refreshes just its own content, so e.g. a podcast refresh
