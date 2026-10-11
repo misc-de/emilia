@@ -41,7 +41,7 @@ v3.0 or later** (`GPL-3.0-or-later`).
 - [rustls](https://github.com/rustls/rustls) + [ring](https://github.com/briansmith/ring) — TLS for the LAN sync server/client and online requests
 - [rcgen](https://github.com/rustls/rcgen) — self-signed certificates for device pairing
 - [x509-parser](https://github.com/rusticata/x509-parser)
-- [RustCrypto: sha2](https://github.com/RustCrypto/hashes), [base64](https://github.com/marshallpierce/rust-base64), [getrandom](https://github.com/rust-random/getrandom)
+- [RustCrypto](https://github.com/RustCrypto): `sha2`, `sha1`, `aes`, `rsa` (AirPlay 1 key exchange and audio encryption), [base64](https://github.com/marshallpierce/rust-base64), [getrandom](https://github.com/rust-random/getrandom)
 - [httparse](https://github.com/seanmonstar/httparse), [percent-encoding](https://github.com/servo/rust-url), [socket2](https://github.com/rust-lang/socket2)
 - [smb-rs](https://github.com/afiffon/smb-rs) (`smb`, with [sspi](https://github.com/Devolutions/sspi-rs) for NTLM) — pure-Rust SMB2/3 client for SMB share sources
 
@@ -87,6 +87,12 @@ services. Please respect their respective terms of use.
 - [Apple iTunes Search API](https://podcasts.apple.com/) — podcast directory search
 - [LRCLIB](https://lrclib.net/) — plain and time-synced lyrics
 - [YouTube](https://www.youtube.com/) — music source (via yt-dlp) and channel feeds
+
+## Network speakers
+
+- [shairport-sync](https://github.com/mikebrady/shairport-sync) — the reference for the AirPlay 1 (RAOP) protocol; Emilia's AirPlay receiver uses the well-known AirPort Express key exactly as published there.
+- [pyatv](https://github.com/postlund/pyatv) — an independent AirPlay sender used to test the receiver.
+- The UPnP/DLNA, Sonos and Google Cast (CASTV2) protocols are implemented from their public descriptions.
 
 ## Cloud & network storage
 

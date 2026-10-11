@@ -137,6 +137,16 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.54" date="2026-10-11">
+      <description>
+        <p>Music can now play on speakers in your network: the new "Play on" button at the top lists this device and every DLNA/UPnP renderer, Sonos room, Google Cast device and AirPlay speaker it finds. Pick one and whatever is playing moves over at its position; the queue, podcasts, radio and YouTube then all play there, with title, artist and cover on the speaker's display and its volume in the menu. Formats a speaker cannot play are converted on the fly.</p>
+        <p>Emilia can also be the speaker: under Settings → Sound → Network, "Receive music from the network" lets apps such as BubbleUPnP, Home Assistant or another Emilia play on this device via DLNA, and "Receive via AirPlay" lets iPhones, iPads and Macs stream to it. Both are off by default.</p>
+        <p>Refreshing the library or the podcast and YouTube subscriptions in the background no longer opens a progress window by itself; the spinning refresh button shows the activity, and tapping it opens the window.</p>
+        <p xml:lang="de">Musik kann jetzt auf Lautsprechern im Netzwerk laufen: Der neue Knopf „Wiedergabe auf“ oben listet dieses Gerät und alle gefundenen DLNA/UPnP-Renderer, Sonos-Räume, Google-Cast-Geräte und AirPlay-Lautsprecher. Wählt man einen aus, wandert das Laufende an seiner Stelle hinüber; Warteschlange, Podcasts, Radio und YouTube spielen dann dort, mit Titel, Interpret und Cover auf dem Display des Lautsprechers und seiner Lautstärke im Menü. Formate, die ein Lautsprecher nicht kann, werden unterwegs umgewandelt.</p>
+        <p xml:lang="de">Emilia kann auch selbst Lautsprecher sein: Unter Einstellungen → Klang → Netzwerk lässt „Musik aus dem Netzwerk empfangen“ Apps wie BubbleUPnP, Home Assistant oder eine andere Emilia per DLNA auf diesem Gerät abspielen, und „Über AirPlay empfangen“ lässt iPhone, iPad und Mac hierher streamen. Beides ist zunächst aus.</p>
+        <p xml:lang="de">Das Aktualisieren der Bibliothek und der Podcast- und YouTube-Abos im Hintergrund öffnet kein Fortschrittsfenster mehr von selbst; das drehende Aktualisieren-Symbol zeigt die Aktivität, ein Tipp darauf öffnet das Fenster.</p>
+      </description>
+    </release>
     <release version="0.8.53" date="2026-10-10">
       <description>
         <p>An artist's "Go to the hits" and "Best-known songs" now open as their own page, laid out like an album's track list: the artist photo with "Play" and "Shuffle" on top, then the songs most popular first with their stars and runtime. Playing hits, from these pages or with "Play hits only" on an album, now fills the queue with exactly those songs and replaces what was queued before. The album info no longer lists the album's hits.</p>
