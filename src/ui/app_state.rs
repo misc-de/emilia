@@ -373,11 +373,16 @@ pub(crate) struct CastState {
     pub(crate) searched: bool,
 }
 
-/// "Receive from the network" (DLNA renderer) – see `crate::ui::app_dmr`.
+/// "Receive from the network" (DLNA renderer, AirPlay receiver) – see
+/// `crate::ui::app_dmr`.
 #[derive(Default)]
 pub(crate) struct DmrState {
     pub(crate) enabled: bool,
     pub(crate) handle: Option<crate::core::cast::dmr::DmrHandle>,
+    pub(crate) airplay_enabled: bool,
+    pub(crate) airplay: Option<crate::core::cast::airplay::AirPlayHandle>,
+    /// An AirPlay sender is streaming: what it plays ("" until it says).
+    pub(crate) airplay_now: Option<String>,
 }
 
 /// A sleep-timer choice from the header popover.

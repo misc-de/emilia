@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:35+0000\n"
+"POT-Creation-Date: 2026-10-11 13:58+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Sortuj"
 msgid "Sleep timer"
 msgstr "Wyłącznik czasowy"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:256
 msgid "Play on"
 msgstr "Odtwarzaj na"
 
@@ -350,15 +350,23 @@ msgstr "Szukaj ponownie"
 msgid "This device"
 msgstr "To urządzenie"
 
-#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:260
+msgid "Receiving via AirPlay"
+msgstr "Odbieranie przez AirPlay"
+
+#: src/ui/app_cast.rs:246 src/ui/app_cast.rs:262
+msgid "Receiving via AirPlay: {title}"
+msgstr "Odbieranie przez AirPlay: {title}"
+
+#: src/ui/app_cast.rs:253 src/ui/app_cast.rs:267
 msgid "Playing on {name}"
 msgstr "Odtwarzanie na {name}"
 
-#: src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:265
 msgid "Searching for speakers in the network…"
 msgstr "Wyszukiwanie głośników w sieci…"
 
-#: src/ui/app_cast.rs:255
+#: src/ui/app_cast.rs:270
 msgid ""
 "No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
 " same network are supported."
@@ -1347,7 +1355,7 @@ msgstr "Menu"
 msgid "Hidden"
 msgstr "Ukryte"
 
-#: src/ui/app_settings.rs:414
+#: src/ui/app_settings.rs:423
 msgid "Shown again"
 msgstr "Pokazano ponownie"
 
@@ -1719,6 +1727,14 @@ msgstr ""
 "Inne aplikacje w sieci lokalnej mogą odtwarzać na tym urządzeniu przez "
 "DLNA/UPnP (np. BubbleUPnP, Home Assistant, inna Emilia)"
 
+#: src/ui/app_settings_sound.rs:98
+msgid "Receive via AirPlay"
+msgstr "Odbieraj przez AirPlay"
+
+#: src/ui/app_settings_sound.rs:99
+msgid "iPhone, iPad and Mac can play on this device (AirPlay 1)"
+msgstr "iPhone, iPad i Mac mogą odtwarzać na tym urządzeniu (AirPlay 1)"
+
 #: src/ui/app_settings_view.rs:32 src/ui/setup.rs:242
 msgid "Language"
 msgstr "Język"
@@ -1962,24 +1978,24 @@ msgstr "Usunięto stację"
 msgid "Recording deleted"
 msgstr "Usunięto nagranie"
 
-#: src/ui/app_update.rs:234
+#: src/ui/app_update.rs:235
 msgid "Download complete"
 msgstr "Pobieranie zakończone"
 
-#: src/ui/app_update.rs:238 src/ui/app_views_handlers.rs:1000
+#: src/ui/app_update.rs:239 src/ui/app_views_handlers.rs:1000
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "Pobieranie nie powiodło się"
 
-#: src/ui/app_update.rs:271
+#: src/ui/app_update.rs:272
 msgid "No new concert candidates found"
 msgstr "Nie znaleziono nowych potencjalnych koncertów"
 
-#: src/ui/app_update.rs:281
+#: src/ui/app_update.rs:282
 msgid "yt-dlp ready (version {v})"
 msgstr "yt-dlp gotowe (wersja {v})"
 
-#: src/ui/app_update.rs:285
+#: src/ui/app_update.rs:286
 msgid "yt-dlp download failed"
 msgstr "Pobieranie yt-dlp nie powiodło się"
 

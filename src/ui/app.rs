@@ -1716,9 +1716,17 @@ impl Component for App {
         let stream_page = launch_stream_page(&sender, &stream_sort);
         let setup_page = launch_setup_page(&sender);
 
-        // Receiving from the network (DLNA renderer) is opt-in.
+        // Receiving from the network (DLNA renderer, AirPlay) is opt-in.
         let dmr_enabled = matches!(
             library.get_setting("dmr_enabled").ok().flatten().as_deref(),
+            Some("1")
+        );
+        let airplay_enabled = matches!(
+            library
+                .get_setting("airplay_enabled")
+                .ok()
+                .flatten()
+                .as_deref(),
             Some("1")
         );
         // Gapless / crossfade preferences (read before `library` is moved into
@@ -1879,7 +1887,8 @@ impl Component for App {
             cast: CastState::default(),
             dmr: DmrState {
                 enabled: dmr_enabled,
-                handle: None,
+                airplay_enabled,
+                ..Default::default()
             },
             lyrics: LyricsState {
                 current: None,

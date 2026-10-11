@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:35+0000\n"
+"POT-Creation-Date: 2026-10-11 13:58+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -72,7 +72,7 @@ msgstr "Сортировка"
 msgid "Sleep timer"
 msgstr "Таймер сна"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:256
 msgid "Play on"
 msgstr "Воспроизвести на"
 
@@ -350,15 +350,23 @@ msgstr "Искать снова"
 msgid "This device"
 msgstr "Это устройство"
 
-#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:260
+msgid "Receiving via AirPlay"
+msgstr "Приём через AirPlay"
+
+#: src/ui/app_cast.rs:246 src/ui/app_cast.rs:262
+msgid "Receiving via AirPlay: {title}"
+msgstr "Приём через AirPlay: {title}"
+
+#: src/ui/app_cast.rs:253 src/ui/app_cast.rs:267
 msgid "Playing on {name}"
 msgstr "Воспроизводится на {name}"
 
-#: src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:265
 msgid "Searching for speakers in the network…"
 msgstr "Поиск колонок в сети…"
 
-#: src/ui/app_cast.rs:255
+#: src/ui/app_cast.rs:270
 msgid ""
 "No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the"
 " same network are supported."
@@ -1343,7 +1351,7 @@ msgstr "Меню"
 msgid "Hidden"
 msgstr "Скрытое"
 
-#: src/ui/app_settings.rs:414
+#: src/ui/app_settings.rs:423
 msgid "Shown again"
 msgstr "Показано снова"
 
@@ -1719,6 +1727,15 @@ msgstr ""
 "Другие приложения в локальной сети могут воспроизводить на этом устройстве "
 "через DLNA/UPnP (например, BubbleUPnP, Home Assistant, другая Emilia)"
 
+#: src/ui/app_settings_sound.rs:98
+msgid "Receive via AirPlay"
+msgstr "Принимать через AirPlay"
+
+#: src/ui/app_settings_sound.rs:99
+msgid "iPhone, iPad and Mac can play on this device (AirPlay 1)"
+msgstr ""
+"iPhone, iPad и Mac могут воспроизводить на этом устройстве (AirPlay 1)"
+
 #: src/ui/app_settings_view.rs:32 src/ui/setup.rs:242
 msgid "Language"
 msgstr "Язык"
@@ -1962,24 +1979,24 @@ msgstr "Станция удалена"
 msgid "Recording deleted"
 msgstr "Запись удалена"
 
-#: src/ui/app_update.rs:234
+#: src/ui/app_update.rs:235
 msgid "Download complete"
 msgstr "Загрузка завершена"
 
-#: src/ui/app_update.rs:238 src/ui/app_views_handlers.rs:1000
+#: src/ui/app_update.rs:239 src/ui/app_views_handlers.rs:1000
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "Не удалось загрузить"
 
-#: src/ui/app_update.rs:271
+#: src/ui/app_update.rs:272
 msgid "No new concert candidates found"
 msgstr "Новых вероятных концертов не найдено"
 
-#: src/ui/app_update.rs:281
+#: src/ui/app_update.rs:282
 msgid "yt-dlp ready (version {v})"
 msgstr "yt-dlp готов (версия {v})"
 
-#: src/ui/app_update.rs:285
+#: src/ui/app_update.rs:286
 msgid "yt-dlp download failed"
 msgstr "Не удалось загрузить yt-dlp"
 

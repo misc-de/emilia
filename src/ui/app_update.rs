@@ -190,6 +190,7 @@ impl App {
             Msg::Lyrics(m) => self.update_lyrics(m, root, &sender),
             Msg::Cast(m) => self.update_cast(m, &sender),
             Msg::Dmr(cmd) => self.on_dmr(cmd),
+            Msg::AirPlay(ev) => self.on_airplay(ev),
             Msg::Concert(m) => self.update_concert(m, root, &sender),
             Msg::Favorite(m) => self.update_favorite(m, root, &sender),
             Msg::Cover(m) => self.update_cover(m, root, &sender),

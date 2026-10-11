@@ -94,6 +94,20 @@ impl App {
             });
         }
         network_group.add(&dmr_row);
+        let airplay_row = adw::SwitchRow::builder()
+            .title(gettext("Receive via AirPlay"))
+            .subtitle(gettext(
+                "iPhone, iPad and Mac can play on this device (AirPlay 1)",
+            ))
+            .active(self.dmr.airplay_enabled)
+            .build();
+        {
+            let sender = sender.clone();
+            airplay_row.connect_active_notify(move |r| {
+                sender.input(Msg::Setting(SettingMsg::SetAirPlay(r.is_active())));
+            });
+        }
+        network_group.add(&airplay_row);
         page.add(&network_group);
 
         page

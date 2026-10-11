@@ -264,6 +264,8 @@ pub(crate) enum SettingMsg {
     SetGapless(bool),
     /// Receive from the network (DLNA renderer) on/off.
     SetDmr(bool),
+    /// Receive via AirPlay on/off.
+    SetAirPlay(bool),
     /// Crossfade window in seconds (settings); persisted + pushed to the player.
     SetCrossfade(f64),
     /// How compound artist credits are listed (settings); persisted + applied
@@ -346,6 +348,13 @@ impl App {
                 let _ = self
                     .library
                     .set_setting("dmr_enabled", if on { "1" } else { "0" });
+                self.apply_dmr(sender);
+            }
+            SettingMsg::SetAirPlay(on) => {
+                self.dmr.airplay_enabled = on;
+                let _ = self
+                    .library
+                    .set_setting("airplay_enabled", if on { "1" } else { "0" });
                 self.apply_dmr(sender);
             }
             SettingMsg::SetCrossfade(secs) => {

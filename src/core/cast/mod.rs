@@ -15,6 +15,7 @@
 //!
 //! Pure Rust on blocking threads, no tokio: the phone build has it too.
 
+pub mod airplay;
 pub mod backend;
 pub mod castv2;
 pub mod discover;

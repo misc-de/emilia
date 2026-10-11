@@ -971,8 +971,9 @@ dependencies = [
 
 [[package]]
 name = "emilia"
-version = "0.8.58"
+version = "0.8.59"
 dependencies = [
+ "aes",
  "anyhow",
  "async-channel",
  "axum",
@@ -998,11 +999,13 @@ dependencies = [
  "relm4-components",
  "rmcp",
  "rqrr",
+ "rsa",
  "rss",
  "rusqlite",
  "rustls",
  "serde",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "smb",
  "socket2",

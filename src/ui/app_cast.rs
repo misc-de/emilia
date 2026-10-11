@@ -237,7 +237,16 @@ impl App {
     /// Button highlight + tooltip, popover status line, rows and volume.
     pub(crate) fn sync_cast_ui(&self) {
         let dev = self.player.cast_device();
-        if let Some(d) = &dev {
+        let airplay = self.dmr.airplay_now.as_ref();
+        if let Some(now) = airplay {
+            self.cast.button.add_css_class("emilia-casting");
+            let text = if now.is_empty() {
+                gettext("Receiving via AirPlay")
+            } else {
+                gettext_f("Receiving via AirPlay: {title}", &[("title", now)])
+            };
+            self.cast.button.set_tooltip_text(Some(&text));
+        } else if let Some(d) = &dev {
             self.cast.button.add_css_class("emilia-casting");
             self.cast
                 .button
@@ -246,7 +255,13 @@ impl App {
             self.cast.button.remove_css_class("emilia-casting");
             self.cast.button.set_tooltip_text(Some(&gettext("Play on")));
         }
-        let status = if self.cast.searching {
+        let status = if let Some(now) = airplay.filter(|_| dev.is_none() && !self.cast.searching) {
+            if now.is_empty() {
+                gettext("Receiving via AirPlay")
+            } else {
+                gettext_f("Receiving via AirPlay: {title}", &[("title", now)])
+            }
+        } else if self.cast.searching {
             gettext("Searching for speakers in the network…")
         } else if let Some(d) = &dev {
             gettext_f("Playing on {name}", &[("name", &d.name)])

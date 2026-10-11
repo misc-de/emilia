@@ -219,6 +219,8 @@ pub enum Msg {
     Cast(crate::ui::app_cast::CastMsg),
     /// A DLNA controller's command — see `crate::ui::app_dmr`.
     Dmr(crate::core::cast::dmr::DmrCommand),
+    /// An AirPlay sender started/stopped streaming — see `crate::ui::app_dmr`.
+    AirPlay(crate::core::cast::airplay::AirPlayEvent),
     /// ConcertMsg — see `crate::ui::app_concert`.
     Concert(crate::ui::app_concert::ConcertMsg),
     /// FavoriteMsg — see `crate::ui::app_favorites`.

@@ -1,6 +1,8 @@
-//! A minimal mDNS/DNS-SD **browser**: one PTR query for a service type
+//! A minimal mDNS/DNS-SD **browser** — one PTR query for a service type
 //! (`_googlecast._tcp.local`), answers collected for a moment, instances
-//! assembled from the PTR, SRV, TXT and A records.
+//! assembled from the PTR, SRV, TXT and A records — and an equally small
+//! **responder** that announces one service of our own (the AirPlay
+//! receiver's `_raop._tcp`).
 //!
 //! The query goes out from an ephemeral port ("legacy unicast", RFC 6762
 //! §6.7): responders then answer unicast, directly to us, with everything
@@ -9,7 +11,9 @@
 //! tree (and the Flatpak's vendored sources) as it is.
 
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const MDNS_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
@@ -191,6 +195,174 @@ fn parse_packet(p: &[u8], rec: &mut Records) -> Option<()> {
     Some(())
 }
 
+// --- Responder -------------------------------------------------------------------
+
+/// One service we announce: `instance._service._tcp.local` on `host.local`.
+pub struct Advert {
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Advert {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+struct Service {
+    service: String,
+    instance: String,
+    host: String,
+    port: u16,
+    txt: Vec<String>,
+}
+
+const TTL: u32 = 120;
+
+/// Announces `instance` of `service` (e.g. `_raop._tcp.local`) on `port`,
+/// answering queries until the returned [`Advert`] is dropped (then says
+/// goodbye). `host` is a host label of our own (`emilia-1a2b`), resolved to
+/// our LAN address by this responder, so no system daemon is needed.
+pub fn advertise(
+    service: &str,
+    instance: &str,
+    host: &str,
+    port: u16,
+    txt: Vec<String>,
+) -> anyhow::Result<Advert> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    s.set_reuse_address(true)?;
+    #[cfg(unix)]
+    s.set_reuse_port(true)?;
+    s.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 5353).into())?;
+    s.join_multicast_v4(&MDNS_GROUP, &Ipv4Addr::UNSPECIFIED)?;
+    s.set_multicast_ttl_v4(255)?;
+    s.set_read_timeout(Some(Duration::from_millis(500)))?;
+    let sock: UdpSocket = s.into();
+    let svc = Service {
+        service: service.trim_end_matches('.').to_string(),
+        instance: format!("{instance}.{}", service.trim_end_matches('.')),
+        host: format!("{host}.local"),
+        port,
+        txt,
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = stop.clone();
+        std::thread::Builder::new()
+            .name("mdns-advert".into())
+            .spawn(move || respond_loop(sock, svc, stop))?;
+    }
+    Ok(Advert { stop })
+}
+
+fn our_ip() -> Ipv4Addr {
+    crate::core::sync::local_ip()
+        .parse()
+        .unwrap_or(Ipv4Addr::LOCALHOST)
+}
+
+fn push_rr(out: &mut Vec<u8>, name: &str, ty: u16, flush: bool, ttl: u32, rdata: &[u8]) {
+    push_name(out, name);
+    out.extend_from_slice(&ty.to_be_bytes());
+    out.extend_from_slice(&(if flush { 0x8001u16 } else { 1 }).to_be_bytes());
+    out.extend_from_slice(&ttl.to_be_bytes());
+    out.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+    out.extend_from_slice(rdata);
+}
+
+/// A response with all four records. `query` = (id, question bytes) for a
+/// legacy unicast answer, which must echo them.
+fn response(svc: &Service, ttl: u32, query: Option<(u16, &[u8])>) -> Vec<u8> {
+    let (id, question) = query.unwrap_or((0, &[]));
+    let qd = u16::from(!question.is_empty());
+    let mut p = Vec::with_capacity(512);
+    p.extend_from_slice(&id.to_be_bytes());
+    p.extend_from_slice(&0x8400u16.to_be_bytes());
+    p.extend_from_slice(&qd.to_be_bytes());
+    p.extend_from_slice(&4u16.to_be_bytes());
+    p.extend_from_slice(&[0, 0, 0, 0]);
+    p.extend_from_slice(question);
+    let mut inst = Vec::new();
+    push_name(&mut inst, &svc.instance);
+    // Legacy unicast answers must not carry the cache-flush bit.
+    let flush = query.is_none();
+    push_rr(&mut p, &svc.service, T_PTR, false, ttl, &inst);
+    let mut srv = vec![0, 0, 0, 0];
+    srv.extend_from_slice(&svc.port.to_be_bytes());
+    push_name(&mut srv, &svc.host);
+    push_rr(&mut p, &svc.instance, T_SRV, flush, ttl, &srv);
+    let mut txt = Vec::new();
+    for e in &svc.txt {
+        txt.push(e.len().min(255) as u8);
+        txt.extend_from_slice(&e.as_bytes()[..e.len().min(255)]);
+    }
+    push_rr(&mut p, &svc.instance, T_TXT, flush, ttl, &txt);
+    push_rr(&mut p, &svc.host, T_A, flush, ttl, &our_ip().octets());
+    p
+}
+
+/// The questions of a query: (name, type) plus the raw question section.
+fn questions(p: &[u8]) -> Option<(u16, Vec<(String, u16)>, Vec<u8>)> {
+    let flags = u16_at(p, 2)?;
+    if flags & 0x8000 != 0 {
+        return None; // a response, not a query
+    }
+    let id = u16_at(p, 0)?;
+    let qd = u16_at(p, 4)? as usize;
+    let mut pos = 12;
+    let mut out = Vec::new();
+    let mut raw = Vec::new();
+    for _ in 0..qd {
+        let (name, after) = read_name(p, pos)?;
+        let ty = u16_at(p, after)?;
+        // Re-encode uncompressed for the echo.
+        push_name(&mut raw, &name);
+        raw.extend_from_slice(&ty.to_be_bytes());
+        raw.extend_from_slice(&1u16.to_be_bytes());
+        out.push((name, ty));
+        pos = after + 4;
+    }
+    Some((id, out, raw))
+}
+
+fn respond_loop(sock: UdpSocket, svc: Service, stop: Arc<AtomicBool>) {
+    let group = SocketAddr::from((MDNS_GROUP, 5353));
+    // Announce twice, a second apart (RFC 6762 §8.3).
+    let _ = sock.send_to(&response(&svc, TTL, None), group);
+    let mut announced = 1;
+    let started = Instant::now();
+    let mut buf = [0u8; 9000];
+    while !stop.load(Ordering::Relaxed) {
+        if announced < 2 && started.elapsed() > Duration::from_secs(1) {
+            let _ = sock.send_to(&response(&svc, TTL, None), group);
+            announced += 1;
+        }
+        let Ok((n, from)) = sock.recv_from(&mut buf) else {
+            continue;
+        };
+        let Some((id, qs, raw)) = questions(&buf[..n]) else {
+            continue;
+        };
+        let ours = qs.iter().any(|(name, ty)| {
+            let name = name.to_ascii_lowercase();
+            (name == svc.service.to_ascii_lowercase() && matches!(*ty, T_PTR | 255))
+                || name == svc.instance.to_ascii_lowercase()
+                || (name == svc.host.to_ascii_lowercase() && matches!(*ty, T_A | 255))
+        });
+        if !ours {
+            continue;
+        }
+        if from.port() == 5353 {
+            let _ = sock.send_to(&response(&svc, TTL, None), group);
+        } else {
+            let _ = sock.send_to(&response(&svc, 10, Some((id, &raw))), from);
+        }
+    }
+    // Goodbye: TTL 0 tells caches to drop us.
+    let _ = sock.send_to(&response(&svc, 0, None), group);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +404,33 @@ mod tests {
         assert_eq!(i.addr, Some(Ipv4Addr::new(192, 168, 0, 50)));
         assert_eq!(i.txt.get("fn").map(String::as_str), Some("Küche"));
         assert_eq!(i.txt.get("md").map(String::as_str), Some("Nest Audio"));
+    }
+
+    #[test]
+    fn responder_answers_parse_back() {
+        let svc = Service {
+            service: "_raop._tcp.local".into(),
+            instance: "AABBCCDDEEFF@Emilia._raop._tcp.local".into(),
+            host: "emilia-1.local".into(),
+            port: 5000,
+            txt: vec!["txtvers=1".into(), "cn=0,1".into()],
+        };
+        let mut rec = Records::default();
+        parse_packet(&response(&svc, TTL, None), &mut rec).unwrap();
+        let found = rec.instances("_raop._tcp.local");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].port, 5000);
+        assert_eq!(found[0].txt.get("cn").map(String::as_str), Some("0,1"));
+        assert!(found[0].addr.is_some());
+        // A legacy unicast answer echoes id and question.
+        let q = build_query("_raop._tcp.local");
+        let (id, qs, raw) = questions(&q).unwrap();
+        assert_eq!(qs, vec![("_raop._tcp.local".to_string(), T_PTR)]);
+        let r = response(&svc, 10, Some((id, &raw)));
+        assert_eq!(u16_at(&r, 4), Some(1));
+        let mut rec = Records::default();
+        parse_packet(&r, &mut rec).unwrap();
+        assert_eq!(rec.instances("_raop._tcp.local").len(), 1);
     }
 
     #[test]

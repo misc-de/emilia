@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 13:35+0000\n"
+"POT-Creation-Date: 2026-10-11 13:58+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -61,7 +61,7 @@ msgstr ""
 msgid "Sleep timer"
 msgstr ""
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:247
+#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:256
 msgid "Play on"
 msgstr ""
 
@@ -306,15 +306,23 @@ msgstr ""
 msgid "This device"
 msgstr ""
 
-#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:252
+#: src/ui/app_cast.rs:244 src/ui/app_cast.rs:260
+msgid "Receiving via AirPlay"
+msgstr ""
+
+#: src/ui/app_cast.rs:246 src/ui/app_cast.rs:262
+msgid "Receiving via AirPlay: {title}"
+msgstr ""
+
+#: src/ui/app_cast.rs:253 src/ui/app_cast.rs:267
 msgid "Playing on {name}"
 msgstr ""
 
-#: src/ui/app_cast.rs:250
+#: src/ui/app_cast.rs:265
 msgid "Searching for speakers in the network…"
 msgstr ""
 
-#: src/ui/app_cast.rs:255
+#: src/ui/app_cast.rs:270
 msgid "No speakers found. DLNA/UPnP renderers, Sonos and Google Cast devices in the same network are supported."
 msgstr ""
 
@@ -1188,7 +1196,7 @@ msgstr ""
 msgid "Hidden"
 msgstr ""
 
-#: src/ui/app_settings.rs:414
+#: src/ui/app_settings.rs:423
 msgid "Shown again"
 msgstr ""
 
@@ -1524,6 +1532,14 @@ msgstr ""
 msgid "Other apps in the local network can play on this device via DLNA/UPnP (e.g. BubbleUPnP, Home Assistant, another Emilia)"
 msgstr ""
 
+#: src/ui/app_settings_sound.rs:98
+msgid "Receive via AirPlay"
+msgstr ""
+
+#: src/ui/app_settings_sound.rs:99
+msgid "iPhone, iPad and Mac can play on this device (AirPlay 1)"
+msgstr ""
+
 #: src/ui/app_settings_view.rs:32 src/ui/setup.rs:242
 msgid "Language"
 msgstr ""
@@ -1750,23 +1766,23 @@ msgstr ""
 msgid "Recording deleted"
 msgstr ""
 
-#: src/ui/app_update.rs:234
+#: src/ui/app_update.rs:235
 msgid "Download complete"
 msgstr ""
 
-#: src/ui/app_update.rs:238 src/ui/app_views_handlers.rs:1000 src/ui/podcasts_page.rs:891
+#: src/ui/app_update.rs:239 src/ui/app_views_handlers.rs:1000 src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr ""
 
-#: src/ui/app_update.rs:271
+#: src/ui/app_update.rs:272
 msgid "No new concert candidates found"
 msgstr ""
 
-#: src/ui/app_update.rs:281
+#: src/ui/app_update.rs:282
 msgid "yt-dlp ready (version {v})"
 msgstr ""
 
-#: src/ui/app_update.rs:285
+#: src/ui/app_update.rs:286
 msgid "yt-dlp download failed"
 msgstr ""
 
