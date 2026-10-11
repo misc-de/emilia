@@ -1,14 +1,14 @@
 # SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR THE Emilia'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the Emilia package.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 #
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: Emilia VERSION\n"
+"Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-10 07:57+0000\n"
+"POT-Creation-Date: 2026-10-11 13:07+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -41,257 +41,281 @@ msgstr ""
 msgid "Quit Emilia"
 msgstr ""
 
-#: src/ui/app.rs:252 src/ui/app.rs:419 src/ui/app.rs:1366 src/ui/setup.rs:701
+#: src/ui/app.rs:254 src/ui/app.rs:429 src/ui/app.rs:1376 src/ui/setup.rs:701
 msgid "Back"
 msgstr ""
 
-#: src/ui/app.rs:264 src/ui/app_search.rs:24 src/ui/app_search.rs:322 src/ui/widgets.rs:959
+#: src/ui/app.rs:266 src/ui/app_search.rs:24 src/ui/app_search.rs:322 src/ui/widgets.rs:959
 msgid "Search"
 msgstr ""
 
-#: src/ui/app.rs:273 src/ui/app_init.rs:902 src/ui/app_settings.rs:161 src/ui/yt_page.rs:166
+#: src/ui/app.rs:275 src/ui/app_init.rs:904 src/ui/app_settings.rs:161 src/ui/yt_page.rs:166
 msgid "Settings"
 msgstr ""
 
-#: src/ui/app.rs:283
+#: src/ui/app.rs:285
 msgid "Sort"
 msgstr ""
 
-#: src/ui/app.rs:293 src/ui/app_sleep.rs:37
+#: src/ui/app.rs:295 src/ui/app_sleep.rs:37
 msgid "Sleep timer"
 msgstr ""
 
-#: src/ui/app.rs:303
+#: src/ui/app.rs:303 src/ui/app_cast.rs:51 src/ui/app_cast.rs:229
+msgid "Play on"
+msgstr ""
+
+#: src/ui/app.rs:313
 msgid "Show progress"
 msgstr ""
 
-#: src/ui/app.rs:305 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
+#: src/ui/app.rs:315 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
 msgid "Refresh"
 msgstr ""
 
-#: src/ui/app.rs:323 src/ui/sync_page.rs:334 src/ui/sync_page.rs:374 src/ui/sync_page.rs:407 src/ui/sync_page.rs:458 src/ui/sync_page.rs:522 src/ui/sync_page.rs:1117 src/ui/sync_page.rs:1152 src/ui/sync_page.rs:1234
+#: src/ui/app.rs:333 src/ui/sync_page.rs:334 src/ui/sync_page.rs:374 src/ui/sync_page.rs:407 src/ui/sync_page.rs:458 src/ui/sync_page.rs:522 src/ui/sync_page.rs:1117 src/ui/sync_page.rs:1152 src/ui/sync_page.rs:1234
 msgid "Connect to share"
 msgstr ""
 
-#: src/ui/app.rs:385 src/ui/sync_share_ui.rs:423
+#: src/ui/app.rs:395 src/ui/sync_share_ui.rs:423
 msgid "Files"
 msgstr ""
 
-#: src/ui/app.rs:461
+#: src/ui/app.rs:471
 msgid "Could not load the folder"
 msgstr ""
 
-#: src/ui/app.rs:469
+#: src/ui/app.rs:479
 msgid "Retry"
 msgstr ""
 
-#: src/ui/app.rs:478 src/ui/app_search.rs:100 src/ui/app_settings_view.rs:160 src/ui/stats_page.rs:290
+#: src/ui/app.rs:488 src/ui/app_search.rs:100 src/ui/app_settings_view.rs:160 src/ui/stats_page.rs:290
 msgid "Artists"
 msgstr ""
 
-#: src/ui/app.rs:484
+#: src/ui/app.rs:494
 msgid "No artists"
 msgstr ""
 
-#: src/ui/app.rs:486 src/ui/app.rs:537
+#: src/ui/app.rs:496 src/ui/app.rs:547
 msgid "Scan a music folder and fetch online metadata"
 msgstr ""
 
-#: src/ui/app.rs:528 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127 src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
+#: src/ui/app.rs:538 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127 src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr ""
 
-#: src/ui/app.rs:535
+#: src/ui/app.rs:545
 msgid "No albums"
 msgstr ""
 
-#: src/ui/app.rs:579 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
+#: src/ui/app.rs:589 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
 msgid "Singles"
 msgstr ""
 
-#: src/ui/app.rs:585
+#: src/ui/app.rs:595
 msgid "No singles"
 msgstr ""
 
-#: src/ui/app.rs:587
+#: src/ui/app.rs:597
 msgid "Singles are one-artist releases with just a few tracks"
 msgstr ""
 
-#: src/ui/app.rs:627 src/ui/app_search.rs:143
+#: src/ui/app.rs:637 src/ui/app_search.rs:143
 msgid "Compilations"
 msgstr ""
 
-#: src/ui/app.rs:633
+#: src/ui/app.rs:643
 msgid "No compilations"
 msgstr ""
 
-#: src/ui/app.rs:635
+#: src/ui/app.rs:645
 msgid "Compilations are albums with tracks by several artists"
 msgstr ""
 
-#: src/ui/app.rs:675 src/ui/app.rs:716 src/ui/app_search.rs:151
+#: src/ui/app.rs:685 src/ui/app.rs:726 src/ui/app_search.rs:151
 msgid "Concerts"
 msgstr ""
 
-#: src/ui/app.rs:717
+#: src/ui/app.rs:727
 msgid "Here you can list your collected concerts. Via Import concerts you get an overview of likely concerts: albums with live, unplugged or concert in the name, plus single files of 30 minutes or more. Mark them as a concert and they'll appear here. You can also add concerts later at any time via the options."
 msgstr ""
 
-#: src/ui/app.rs:727 src/ui/app_concert.rs:71
+#: src/ui/app.rs:737 src/ui/app_concert.rs:71
 msgid "Import concerts"
 msgstr ""
 
-#: src/ui/app.rs:732
+#: src/ui/app.rs:742
 msgid "I'll do it myself"
 msgstr ""
 
-#: src/ui/app.rs:737
+#: src/ui/app.rs:747
 msgid "Hide menu item"
 msgstr ""
 
-#: src/ui/app.rs:749
+#: src/ui/app.rs:759
 msgid "No concerts"
 msgstr ""
 
-#: src/ui/app.rs:750
+#: src/ui/app.rs:760
 msgid "Mark an album or a track as a concert via the options."
 msgstr ""
 
-#: src/ui/app.rs:756 src/ui/sync_share_ui.rs:468 src/ui/yt_page_search.rs:42
+#: src/ui/app.rs:766 src/ui/sync_share_ui.rs:468 src/ui/yt_page_search.rs:42
 msgid "Playlists"
 msgstr ""
 
-#: src/ui/app.rs:793
+#: src/ui/app.rs:803
 msgid "No playlists"
 msgstr ""
 
-#: src/ui/app.rs:794
+#: src/ui/app.rs:804
 msgid "Create a playlist or add tracks via the options."
 msgstr ""
 
-#: src/ui/app.rs:804 src/ui/sync_share_ui.rs:469
+#: src/ui/app.rs:814 src/ui/sync_share_ui.rs:469
 msgid "Podcasts"
 msgstr ""
 
 #. Internet radio lives in its own relm4 component.
-#: src/ui/app.rs:810
+#: src/ui/app.rs:820
 msgid "Streaming"
 msgstr ""
 
-#: src/ui/app.rs:815 src/ui/sync_share_ui.rs:467
+#: src/ui/app.rs:825 src/ui/sync_share_ui.rs:467
 msgid "Favorites"
 msgstr ""
 
-#: src/ui/app.rs:852
+#: src/ui/app.rs:862
 msgid "No favorites"
 msgstr ""
 
-#: src/ui/app.rs:853
+#: src/ui/app.rs:863
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
 msgstr ""
 
-#: src/ui/app.rs:860 src/ui/app_settings_meta.rs:103 src/ui/sync_share_ui.rs:438
+#: src/ui/app.rs:870 src/ui/app_settings_meta.rs:103 src/ui/sync_share_ui.rs:438
 msgid "YouTube"
 msgstr ""
 
-#: src/ui/app.rs:865 src/ui/app_search.rs:159
+#: src/ui/app.rs:875 src/ui/app_search.rs:159
 msgid "Audiobooks"
 msgstr ""
 
-#: src/ui/app.rs:904
+#: src/ui/app.rs:914
 msgid "No audiobooks"
 msgstr ""
 
-#: src/ui/app.rs:905
+#: src/ui/app.rs:915
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
 msgstr ""
 
-#: src/ui/app.rs:911 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
+#: src/ui/app.rs:921 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
 msgid "Memo"
 msgstr ""
 
-#: src/ui/app.rs:928 src/ui/podcasts_page.rs:448 src/ui/stream_page.rs:280 src/ui/yt_page.rs:182
+#: src/ui/app.rs:938 src/ui/podcasts_page.rs:448 src/ui/stream_page.rs:280 src/ui/yt_page.rs:182
 msgid "Recently"
 msgstr ""
 
-#: src/ui/app.rs:935 src/ui/app_memo.rs:758 src/ui/app_views_ctx.rs:504
+#: src/ui/app.rs:945 src/ui/app_memo.rs:758 src/ui/app_views_ctx.rs:504
 msgid "Category"
 msgstr ""
 
-#: src/ui/app.rs:943
+#: src/ui/app.rs:953
 msgid "Add category"
 msgstr ""
 
-#: src/ui/app.rs:965
+#: src/ui/app.rs:975
 msgid "No memos yet"
 msgstr ""
 
-#: src/ui/app.rs:966
+#: src/ui/app.rs:976
 msgid "Use the microphone button in the player bar to record a voice memo."
 msgstr ""
 
-#: src/ui/app.rs:977
+#: src/ui/app.rs:987
 msgid "Statistics"
 msgstr ""
 
-#: src/ui/app.rs:1045
+#: src/ui/app.rs:1055
 msgid "{done} of {total}"
 msgstr ""
 
-#: src/ui/app.rs:1093
+#: src/ui/app.rs:1103
 msgid "{done} of {total} songs"
 msgstr ""
 
-#: src/ui/app.rs:1106
+#: src/ui/app.rs:1116
 msgid "{done} MB of {total} MB"
 msgstr ""
 
-#: src/ui/app.rs:1117 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167 src/ui/app_memo.rs:936 src/ui/app_memo.rs:959 src/ui/app_playlist.rs:877 src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657 src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:26 src/ui/app_sections.rs:100 src/ui/app_settings_mcp.rs:129 src/ui/app_views_handlers.rs:748 src/ui/app_views_sources.rs:278 src/ui/app_views_sources.rs:474 src/ui/app_views_sources.rs:533 src/ui/podcasts_page.rs:1023 src/ui/setup.rs:699 src/ui/stream_page_stations.rs:53 src/ui/stream_page_stations.rs:404 src/ui/stream_page_stations.rs:452 src/ui/sync_share_ui.rs:159 src/ui/widgets.rs:915 src/ui/widgets.rs:942 src/ui/widgets.rs:1018 src/ui/yt_live.rs:167
+#: src/ui/app.rs:1127 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167 src/ui/app_memo.rs:936 src/ui/app_memo.rs:959 src/ui/app_playlist.rs:877 src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657 src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:26 src/ui/app_sections.rs:100 src/ui/app_settings_mcp.rs:129 src/ui/app_views_handlers.rs:748 src/ui/app_views_sources.rs:278 src/ui/app_views_sources.rs:474 src/ui/app_views_sources.rs:533 src/ui/podcasts_page.rs:1023 src/ui/setup.rs:699 src/ui/stream_page_stations.rs:53 src/ui/stream_page_stations.rs:404 src/ui/stream_page_stations.rs:452 src/ui/sync_share_ui.rs:159 src/ui/widgets.rs:915 src/ui/widgets.rs:942 src/ui/widgets.rs:1018 src/ui/yt_live.rs:167
 msgid "Cancel"
 msgstr ""
 
-#: src/ui/app.rs:1151
+#: src/ui/app.rs:1161
 msgid "Show details of the current track"
 msgstr ""
 
-#: src/ui/app.rs:1208
+#: src/ui/app.rs:1218
 msgid "Recording level"
 msgstr ""
 
-#: src/ui/app.rs:1272
+#: src/ui/app.rs:1282
 msgid "Equalizer for this track"
 msgstr ""
 
-#: src/ui/app.rs:1285 src/ui/app.rs:1303
+#: src/ui/app.rs:1295 src/ui/app.rs:1313
 msgid "Playback speed"
 msgstr ""
 
-#: src/ui/app.rs:1331 src/ui/app_views_album.rs:1293
+#: src/ui/app.rs:1341 src/ui/app_views_album.rs:1293
 msgid "Shuffle"
 msgstr ""
 
-#: src/ui/app.rs:1349
+#: src/ui/app.rs:1359
 msgid "Repeat"
 msgstr ""
 
-#: src/ui/app.rs:1395 src/ui/podcasts_page_detail.rs:677 src/ui/stream_page_stations.rs:238 src/ui/yt_live.rs:40 src/ui/yt_page_detail.rs:339
+#: src/ui/app.rs:1405 src/ui/podcasts_page_detail.rs:677 src/ui/stream_page_stations.rs:238 src/ui/yt_live.rs:40 src/ui/yt_page_detail.rs:339
 msgid "Play/Pause"
 msgstr ""
 
-#: src/ui/app.rs:1434
+#: src/ui/app.rs:1444
 msgid "Forward"
 msgstr ""
 
-#: src/ui/app.rs:1453 src/ui/app_dialogs.rs:91 src/ui/app_lyrics.rs:160 src/ui/app_lyrics.rs:165
+#: src/ui/app.rs:1463 src/ui/app_dialogs.rs:91 src/ui/app_lyrics.rs:160 src/ui/app_lyrics.rs:165
 msgid "Lyrics"
 msgstr ""
 
-#: src/ui/app.rs:1465
+#: src/ui/app.rs:1475
 msgid "Show album"
 msgstr ""
 
-#: src/ui/app.rs:1474 src/ui/app_queue.rs:51
+#: src/ui/app.rs:1484 src/ui/app_queue.rs:51
 msgid "Queue"
+msgstr ""
+
+#: src/ui/app_cast.rs:61
+msgid "Search again"
+msgstr ""
+
+#: src/ui/app_cast.rs:189
+msgid "This device"
+msgstr ""
+
+#: src/ui/app_cast.rs:226 src/ui/app_cast.rs:234
+msgid "Playing on {name}"
+msgstr ""
+
+#: src/ui/app_cast.rs:232
+msgid "Searching for speakers in the network…"
+msgstr ""
+
+#: src/ui/app_cast.rs:236
+msgid "No speakers found. DLNA/UPnP renderers and Sonos in the same network are supported."
 msgstr ""
 
 #: src/ui/app_chrome.rs:115
@@ -619,23 +643,23 @@ msgstr ""
 msgid "Note"
 msgstr ""
 
-#: src/ui/app_init.rs:1340
+#: src/ui/app_init.rs:1342
 msgid "Restart to change the language?"
 msgstr ""
 
-#: src/ui/app_init.rs:1342
+#: src/ui/app_init.rs:1344
 msgid "The new language is loaded only after a restart. Restart now, or do it yourself later."
 msgstr ""
 
-#: src/ui/app_init.rs:1345
+#: src/ui/app_init.rs:1347
 msgid "Later"
 msgstr ""
 
-#: src/ui/app_init.rs:1346
+#: src/ui/app_init.rs:1348
 msgid "Restart now"
 msgstr ""
 
-#: src/ui/app_init.rs:1508
+#: src/ui/app_init.rs:1510
 msgid "Import cancelled"
 msgstr ""
 
@@ -776,7 +800,7 @@ msgstr ""
 msgid "Stream not reachable – playback stopped"
 msgstr ""
 
-#: src/ui/app_playback.rs:938
+#: src/ui/app_playback.rs:940
 msgid "Audio output lost – playback paused"
 msgstr ""
 
@@ -1714,23 +1738,23 @@ msgstr ""
 msgid "Recording deleted"
 msgstr ""
 
-#: src/ui/app_update.rs:231
+#: src/ui/app_update.rs:232
 msgid "Download complete"
 msgstr ""
 
-#: src/ui/app_update.rs:235 src/ui/app_views_handlers.rs:999 src/ui/podcasts_page.rs:891
+#: src/ui/app_update.rs:236 src/ui/app_views_handlers.rs:999 src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr ""
 
-#: src/ui/app_update.rs:268
+#: src/ui/app_update.rs:269
 msgid "No new concert candidates found"
 msgstr ""
 
-#: src/ui/app_update.rs:278
+#: src/ui/app_update.rs:279
 msgid "yt-dlp ready (version {v})"
 msgstr ""
 
-#: src/ui/app_update.rs:282
+#: src/ui/app_update.rs:283
 msgid "yt-dlp download failed"
 msgstr ""
 

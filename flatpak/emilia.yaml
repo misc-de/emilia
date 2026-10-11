@@ -45,6 +45,8 @@ build-commands:
     /app/share/icons/hicolor/scalable/actions/emilia-share-symbolic.svg
   - install -Dm644 data/icons/hicolor/scalable/actions/emilia-sleep-symbolic.svg
     /app/share/icons/hicolor/scalable/actions/emilia-sleep-symbolic.svg
+  - install -Dm644 data/icons/hicolor/scalable/actions/emilia-cast-symbolic.svg
+    /app/share/icons/hicolor/scalable/actions/emilia-cast-symbolic.svg
   - install -Dm644 data/icons/hicolor/scalable/actions/emilia-filter-symbolic.svg
     /app/share/icons/hicolor/scalable/actions/emilia-filter-symbolic.svg
   - install -Dm644 data/icons/hicolor/scalable/actions/emilia-longpress-symbolic.svg

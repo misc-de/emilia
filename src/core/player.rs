@@ -24,6 +24,9 @@ use anyhow::{Result, anyhow};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
+mod cast_route;
+use cast_route::{CastCallbacks, CastCbSlot, CastSlot};
+
 /// Whether a remote-supplied URI (station / podcast episode / WebDAV stream) may
 /// be handed to `playbin`. Restricts to network streaming schemes so a hostile
 /// feed or station entry can never make the player open a **local** resource
@@ -498,6 +501,11 @@ pub struct Player {
     /// output just died may no longer answer a position query; recovery then
     /// resumes from here.
     last_pos_ms: Rc<Cell<i64>>,
+    /// Network renderer playback runs on instead of the decks (see
+    /// `cast_route`); `None` = local playback.
+    cast: CastSlot,
+    /// The app callbacks, kept for the cast route's renderer events.
+    cast_cbs: CastCbSlot,
 }
 
 impl Player {
@@ -523,6 +531,8 @@ impl Player {
             recovery: Rc::new(SinkRecovery::default()),
             net: Rc::new(NetRecovery::default()),
             last_pos_ms: Rc::new(Cell::new(0)),
+            cast: Rc::new(RefCell::new(None)),
+            cast_cbs: Rc::new(RefCell::new(None)),
         })
     }
 
@@ -558,6 +568,8 @@ impl Player {
     /// into for gapless playback. The app sets it to the next sequential **local**
     /// track, or `None` to fall back to the normal end-of-track path.
     pub fn arm_next_gapless(&self, uri: Option<String>) {
+        // A renderer advances through the app's end-of-track path instead.
+        let uri = uri.filter(|_| !self.cast_active());
         if let Ok(mut g) = self.next_uri.lock() {
             *g = uri;
         }
@@ -589,6 +601,8 @@ impl Player {
     /// slider. Applies to both decks so a running crossfade follows along.
     pub fn set_master_volume(&self, vol: f64) {
         self.master.set(vol.clamp(0.0, 1.0));
+        // Casting: the desktop's slider drives the speaker that is audible.
+        self.set_cast_volume(vol);
         let gain = self.gain();
         for deck in &self.decks {
             deck.apply_gain(gain);
@@ -624,6 +638,9 @@ impl Player {
     /// `playbin3` only re-reads `uri` on a state change, so the deck is reset to
     /// `Ready` first.
     fn hard_load(&self, uri: &str, resume_ms: i64) -> Result<()> {
+        if self.cast_active() {
+            return self.cast_load(uri, resume_ms);
+        }
         self.recovery.cancel();
         self.net.reset();
         self.cancel_crossfade();
@@ -670,7 +687,7 @@ impl Player {
     /// (normally 0 for a sequential advance).
     pub fn crossfade_to(&self, uri: &str, resume_ms: i64) -> Result<()> {
         let secs = self.crossfade_secs();
-        if secs <= 0.0 {
+        if secs <= 0.0 || self.cast_active() {
             return self.hard_load(uri, resume_ms);
         }
         self.recovery.cancel();
@@ -782,6 +799,12 @@ impl Player {
         let on_ready = Rc::new(on_ready);
         let on_stream_start = Rc::new(on_stream_start);
         let on_toc = Rc::new(on_toc);
+        *self.cast_cbs.borrow_mut() = Some(CastCallbacks {
+            eos: on_eos.clone(),
+            error: on_error.clone(),
+            lost: on_output_lost.clone(),
+            ready: on_ready.clone(),
+        });
 
         for idx in 0..self.decks.len() {
             let deck = &self.decks[idx];
@@ -1084,6 +1107,9 @@ impl Player {
     }
 
     pub fn pause(&self) {
+        if self.cast_active() {
+            return self.cast_pause();
+        }
         // Pausing mid-crossfade would leave the outgoing deck playing → snap to
         // the active deck first.
         if self.fade_source.borrow().is_some() {
@@ -1098,6 +1124,9 @@ impl Player {
     /// Playing without content, which callers used to report to the desktop as
     /// "playing" (silently, forever).
     pub fn resume(&self) -> bool {
+        if self.cast_active() {
+            return self.cast_resume();
+        }
         if !self.has_content() {
             return false;
         }
@@ -1142,12 +1171,18 @@ impl Player {
     /// to resume or seek in. `stop()` tears the pipeline down, so this is false
     /// after it (and before the first track of a session).
     pub fn has_content(&self) -> bool {
+        if self.cast_active() {
+            return self.cast_has_content();
+        }
         self.cur()
             .property::<Option<String>>("uri")
             .is_some_and(|uri| !uri.is_empty())
     }
 
     pub fn stop(&self) {
+        if self.cast_active() {
+            return self.cast_stop();
+        }
         self.recovery.cancel();
         self.net.cancel();
         self.cancel_crossfade();
@@ -1156,6 +1191,9 @@ impl Player {
     }
 
     pub fn position_ms(&self) -> Option<i64> {
+        if self.cast_active() {
+            return self.cast_position();
+        }
         // While a lost output is being reopened the deck sits at 0 (or in
         // `Null`) until the armed seek lands; report where it will resume, so
         // the resume point saved meanwhile is not reset to the start.
@@ -1184,6 +1222,9 @@ impl Player {
     }
 
     pub fn duration_ms(&self) -> Option<i64> {
+        if self.cast_active() {
+            return self.cast_duration();
+        }
         let dur = self
             .cur()
             .query_duration::<gst::ClockTime>()
@@ -1205,6 +1246,9 @@ impl Player {
     /// Whether a broken network stream is being re-opened right now (the UI
     /// shows its loading spinner meanwhile).
     pub fn is_reconnecting(&self) -> bool {
+        if self.cast_active() {
+            return false;
+        }
         self.net.reconnecting.get()
     }
 
@@ -1214,6 +1258,10 @@ impl Player {
     /// source there is no EOS to end it, so the deck (and the audio sink) would
     /// stay awake with the position frozen or ticking on forever.
     pub fn seek_ms(&self, ms: i64) -> Result<()> {
+        if self.cast_active() {
+            self.cast_seek(ms);
+            return Ok(());
+        }
         let mut target = ms.max(0);
         if let Some(dur) = self.duration_ms().filter(|&d| d > 0) {
             target = target.min(dur);
@@ -1233,6 +1281,9 @@ impl Player {
     pub fn set_rate(&self, rate: f64) {
         let rate = rate.clamp(0.25, 2.0);
         self.rate.set(rate);
+        if self.cast_active() {
+            return;
+        }
         if let Some(pos) = self.cur().query_position::<gst::ClockTime>() {
             rate_seek(self.cur(), rate, pos);
         }
@@ -1242,7 +1293,7 @@ impl Player {
     /// Used after a gapless continuation (a new segment starts at rate 1.0).
     pub fn reapply_rate(&self) {
         let r = self.rate.get();
-        if (r - 1.0).abs() <= 1e-3 {
+        if (r - 1.0).abs() <= 1e-3 || self.cast_active() {
             return;
         }
         if let Some(pos) = self.cur().query_position::<gst::ClockTime>() {

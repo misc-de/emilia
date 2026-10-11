@@ -102,6 +102,8 @@ pub struct App {
     pub(crate) mini: MiniState,
     /// Sleep-timer state (header zzz button + countdown / fade-out).
     pub(crate) sleep: SleepState,
+    /// Network-speaker picker (header cast button + popover).
+    pub(crate) cast: CastState,
     /// Lyrics of the running track + open karaoke view.
     pub(crate) lyrics: LyricsState,
     pub(crate) toast_overlay: adw::ToastOverlay,
@@ -291,6 +293,14 @@ impl Component for App {
                         pack_end = &gtk::MenuButton {
                             set_icon_name: "emilia-sleep-symbolic",
                             set_tooltip_text: Some(&gettext("Sleep timer")),
+                        },
+                        // Play on a network speaker (DLNA / Sonos). The popover
+                        // (device list + speaker volume) is built in
+                        // `setup_cast_button`; searching starts when it opens.
+                        #[name = "cast_btn"]
+                        pack_end = &gtk::MenuButton {
+                            set_icon_name: "emilia-cast-symbolic",
+                            set_tooltip_text: Some(&gettext("Play on")),
                         },
                         // While a refresh/scan runs the icon turns green and
                         // spins; a click then only brings the progress overlay
@@ -1852,6 +1862,7 @@ impl Component for App {
                 hovering_seek: std::rc::Rc::new(std::cell::Cell::new(false)),
             },
             sleep: SleepState::default(),
+            cast: CastState::default(),
             lyrics: LyricsState {
                 current: None,
                 for_path: None,

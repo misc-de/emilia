@@ -1,4 +1,5 @@
 pub mod app;
+pub mod app_cast;
 pub mod app_chrome;
 pub mod app_concert;
 pub mod app_covers;

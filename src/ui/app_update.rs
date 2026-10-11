@@ -188,6 +188,7 @@ impl App {
             Msg::Yt(m) => self.update_yt(m, root, &sender),
             Msg::Podcast(m) => self.update_podcast(m, root, &sender),
             Msg::Lyrics(m) => self.update_lyrics(m, root, &sender),
+            Msg::Cast(m) => self.update_cast(m, &sender),
             Msg::Concert(m) => self.update_concert(m, root, &sender),
             Msg::Favorite(m) => self.update_favorite(m, root, &sender),
             Msg::Cover(m) => self.update_cover(m, root, &sender),

@@ -107,7 +107,7 @@ fn parse_target(path: &str, secret: &str) -> Option<(i64, String)> {
 /// Parses a single `bytes=` range (`a-b`, `a-`, `-n`) into
 /// `(start, inclusive end)`; `None` for no/unsupported ranges (→ full body).
 /// `total` is needed for suffix ranges and may be unknown (`None`).
-fn parse_range(header: &str, total: Option<u64>) -> Option<(u64, Option<u64>)> {
+pub(crate) fn parse_range(header: &str, total: Option<u64>) -> Option<(u64, Option<u64>)> {
     let spec = header.trim().strip_prefix("bytes=")?.trim();
     if spec.contains(',') {
         return None; // multi-range → serve everything
@@ -142,7 +142,7 @@ fn resolve(source_id: i64) -> Option<Backend> {
     Backend::from_source(&src)
 }
 
-fn content_type(rel: &str) -> &'static str {
+pub(crate) fn content_type(rel: &str) -> &'static str {
     match rel
         .rsplit('.')
         .next()

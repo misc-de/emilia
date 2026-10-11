@@ -924,6 +924,8 @@ impl App {
                 }
             }
             TransportMsg::OutputLost => {
+                // A speaker that was taken over ends the cast session.
+                self.sync_cast_ui();
                 if !self.mini.playing {
                     return;
                 }

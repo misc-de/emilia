@@ -215,6 +215,8 @@ pub enum Msg {
     Podcast(crate::ui::app_episode_playback::PodcastMsg),
     /// LyricsMsg — see `crate::ui::app_lyrics`.
     Lyrics(crate::ui::app_lyrics::LyricsMsg),
+    /// CastMsg — see `crate::ui::app_cast`.
+    Cast(crate::ui::app_cast::CastMsg),
     /// ConcertMsg — see `crate::ui::app_concert`.
     Concert(crate::ui::app_concert::ConcertMsg),
     /// FavoriteMsg — see `crate::ui::app_favorites`.

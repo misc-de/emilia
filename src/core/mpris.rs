@@ -313,6 +313,15 @@ impl Mpris {
     ) {
         let artist = artist.filter(|s| !s.is_empty()).map(str::to_owned);
         let album = album.filter(|s| !s.is_empty()).map(str::to_owned);
+        // Every playback path reports its track here, so the cast route reads
+        // the speaker's display metadata from the same place.
+        crate::core::cast::set_now_playing(crate::core::cast::NowPlaying {
+            title: title.to_string(),
+            artist: artist.clone(),
+            album: album.clone(),
+            length_ms,
+            art_path: art_path.filter(|s| !s.is_empty()).map(str::to_owned),
+        });
         let art_uri = art_path
             .filter(|s| !s.is_empty())
             .and_then(|p| glib::filename_to_uri(p, None).ok())

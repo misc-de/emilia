@@ -353,6 +353,26 @@ pub(crate) struct SleepState {
     pub(crate) status_label: gtk::Label,
 }
 
+/// Network-speaker picker: the header cast button, its popover widgets and
+/// the renderers found by the last search (see `crate::ui::app_cast`).
+#[derive(Default)]
+pub(crate) struct CastState {
+    pub(crate) button: gtk::MenuButton,
+    pub(crate) list: gtk::ListBox,
+    pub(crate) status: gtk::Label,
+    pub(crate) spinner: gtk::Spinner,
+    pub(crate) volume_box: gtk::Box,
+    pub(crate) volume: gtk::Scale,
+    /// Set while the scale is moved from code, so its handler does not echo
+    /// the value back to the speaker.
+    pub(crate) volume_guard: std::rc::Rc<std::cell::Cell<bool>>,
+    pub(crate) devices: Vec<crate::core::cast::Device>,
+    pub(crate) searching: bool,
+    /// A search has finished at least once (an empty list then means
+    /// "nothing found", not "not searched yet").
+    pub(crate) searched: bool,
+}
+
 /// A sleep-timer choice from the header popover.
 #[derive(Debug, Clone, Copy)]
 pub enum SleepChoice {

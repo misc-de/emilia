@@ -1,5 +1,6 @@
 pub mod album_group;
 pub mod artist;
+pub mod cast;
 pub mod category;
 pub mod concert;
 pub mod cover;

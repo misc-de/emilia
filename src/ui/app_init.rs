@@ -581,6 +581,8 @@ impl App {
         self.rebuild_source_tabs();
         // Build the sleep-timer popover (presets) onto the header zzz button.
         self.setup_sleep_button(&widgets.sleep_btn, sender);
+        // Device picker for playing on network speakers.
+        self.setup_cast_button(&widgets.cast_btn, sender);
 
         // Hover over the seek bar → temporarily show the hovered chapter below the
         // title; on leaving, back to the current chapter (at the
@@ -1387,7 +1389,7 @@ impl App {
                  button.emilia-busy, button.emilia-sync-busy { color: @success_color; }\
                  button.emilia-busy image { animation: emilia-spin 1.2s linear infinite; }\
                  button.emilia-sync-busy image { animation: emilia-blink 1.4s ease-in-out infinite; }\
-                 button.sleep-armed { color: @accent_color; }\
+                 button.sleep-armed, button.emilia-casting { color: @accent_color; }\
                  /* The album header's play button is a blue pill: the running-entry \
                     accent of its play mark would vanish blue on blue. */\
                  button.emilia-album-play image.accent { color: inherit; }\
