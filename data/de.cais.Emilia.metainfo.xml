@@ -137,6 +137,16 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.55" date="2026-10-22">
+      <description>
+        <p>While an artist's hits or best-known songs are playing, the "Play" button on top of the list now turns into "Pause" and pauses or resumes instead of starting over; album pages show "Pause" the same way.</p>
+        <p>Hit lists now pick the original recording: when a song is in the library several times, instrumental, live, remix, demo or un-mastered versions, recognised by the song or the album name, only play when there is no other copy.</p>
+        <p>Security updates for the TLS and network libraries.</p>
+        <p xml:lang="de">Während die Hits oder die bekanntesten Lieder eines Künstlers laufen, wird der Knopf „Abspielen“ über der Liste jetzt zu „Pause“ und hält an bzw. spielt weiter, statt von vorn zu beginnen; Albumseiten zeigen „Pause“ genauso.</p>
+        <p xml:lang="de">Hit-Listen nehmen jetzt die Originalaufnahme: Liegt ein Song mehrfach in der Bibliothek, kommen Instrumental-, Live-, Remix-, Demo- oder Un-mastered-Fassungen, erkannt am Song- oder Albumnamen, nur noch zum Zug, wenn es keine andere Kopie gibt.</p>
+        <p xml:lang="de">Sicherheitsupdates für die TLS- und Netzwerkbibliotheken.</p>
+      </description>
+    </release>
     <release version="0.8.54" date="2026-10-11">
       <description>
         <p>Music can now play on speakers in your network: the new "Play on" button at the top lists this device and every DLNA/UPnP renderer, Sonos room, Google Cast device and AirPlay speaker it finds. Pick one and whatever is playing moves over at its position; the queue, podcasts, radio and YouTube then all play there, with title, artist and cover on the speaker's display and its volume in the menu. Formats a speaker cannot play are converted on the fly.</p>
