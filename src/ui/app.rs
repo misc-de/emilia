@@ -1849,6 +1849,7 @@ impl Component for App {
                 queue: Vec::new(),
                 queue_pos: 0,
                 user_queue: Vec::new(),
+                queue_source: None,
                 shuffle: false,
                 shuffle_order: Default::default(),
                 repeat: repeat_on,

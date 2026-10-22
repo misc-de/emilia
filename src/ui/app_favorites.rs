@@ -58,7 +58,8 @@ pub(crate) struct EntryMarks<'a>(pub(crate) &'a Marks);
 impl PlaybackSink for EntryMarks<'_> {
     fn apply_playback(&self, state: &PlaybackState) {
         self.0
-            .apply_all(state.playing, |key| match key.split_once('\u{1}') {
+            .apply_all(state.playing, |mark| match mark.split_once('\u{1}') {
+                Some(_) if state.list.as_deref() == Some(mark) => true,
                 Some((scope, key)) => {
                     entry_is_active(state.path.as_deref(), state.album.as_deref(), scope, key)
                 }

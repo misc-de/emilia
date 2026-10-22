@@ -1396,7 +1396,7 @@ impl App {
                  button.sleep-armed, button.emilia-casting { color: @accent_color; }\
                  /* The album header's play button is a blue pill: the running-entry \
                     accent of its play mark would vanish blue on blue. */\
-                 button.emilia-album-play image.accent { color: inherit; }\
+                 button.emilia-album-play .accent { color: inherit; }\
                  button.emilia-bigplay, button.emilia-record-dot { min-width: 46px; min-height: 46px; padding: 0px; }\
                  button.emilia-songline { min-height: 0px; padding-top: 6px; padding-bottom: 6px; }\
                  button.emilia-bigplay image, button.emilia-record-dot image { -gtk-icon-size: 34px; }\

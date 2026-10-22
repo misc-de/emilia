@@ -240,6 +240,10 @@ pub(crate) struct TransportState {
     /// playing an album/song. Its entries jump ahead of the rest of the context
     /// (spliced in by `play_next`) and are consumed as they play.
     pub(crate) user_queue: Vec<PathBuf>,
+    /// The song list (its play-mark key, e.g. an artist's hits) the queue was
+    /// last filled from, with its songs — so the list's "Play" can show that
+    /// it is the one running (see [`crate::ui::app::App::playing_list`]).
+    pub(crate) queue_source: Option<(String, std::collections::HashSet<PathBuf>)>,
     pub(crate) shuffle: bool,
     /// Random order of the queue indices for shuffle, and how far it has got.
     pub(crate) shuffle_order: crate::core::queue::ShuffleOrder,

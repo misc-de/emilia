@@ -1254,9 +1254,15 @@ impl App {
 
         let paths: Vec<String> = h.tracks.iter().map(|t| t.path.clone()).collect();
         let as_queue = h.as_queue;
+        let mark = h.mark.clone();
         let play_msg = move |paths: Vec<String>, shuffle: bool| {
             if as_queue {
-                Msg::Ctx(crate::ui::app_dialogs::CtxMsg::QueueTracks { paths, shuffle })
+                Msg::Ctx(crate::ui::app_dialogs::CtxMsg::QueueTracks {
+                    paths,
+                    shuffle,
+                    list: mark.clone(),
+                    whole: true,
+                })
             } else {
                 Msg::PlayTracks { paths, shuffle }
             }
@@ -1270,20 +1276,18 @@ impl App {
                 gtk::Align::Start
             })
             .build();
-        // "Play": its icon is a play mark like the rows' (registered under the
-        // page's own key), so it shows a pause while this page is playing.
+        // "Play": a play mark like the rows' (registered under the page's own
+        // key), so it turns into "Pause" while this page is playing.
         let active = self.entry_is_active_key(&h.mark);
-        let play_icon = crate::ui::play_mark::marker(active, self.mini.playing);
-        self.libview.page_marks.add(h.mark.clone(), &play_icon);
-        let play_box = gtk::Box::builder().spacing(6).build();
-        play_box.append(&play_icon);
-        play_box.append(&gtk::Label::new(Some(&gettext("Play"))));
+        let play_content = adw::ButtonContent::new();
+        crate::ui::play_mark::apply(&play_content, active, self.mini.playing);
+        self.libview.page_marks.add(h.mark.clone(), &play_content);
         let play_btn = gtk::Button::builder()
-            .child(&play_box)
+            .child(&play_content)
             .css_classes(["pill", "suggested-action", "emilia-album-play"])
             .build();
         {
-            let (sender, paths) = (sender.clone(), paths.clone());
+            let (sender, paths, play_msg) = (sender.clone(), paths.clone(), play_msg.clone());
             play_btn.connect_clicked(move |_| sender.input(play_msg(paths.clone(), false)));
         }
         let shuffle_btn = gtk::Button::builder()
@@ -1308,6 +1312,9 @@ impl App {
 
     /// [`Self::entry_is_active`] for a [`crate::ui::app_favorites::mark_key`].
     fn entry_is_active_key(&self, mark: &str) -> bool {
+        if self.playing_list() == Some(mark) {
+            return true;
+        }
         let (scope, key) = mark.split_once('\u{1}').unwrap_or(("", mark));
         self.entry_is_active(scope, key, self.playing_album().as_deref())
     }

@@ -599,10 +599,15 @@ pub(crate) enum CtxMsg {
         list: crate::ui::app_popularity::PopList,
     },
     /// Fill the queue with these tracks (replacing it) and play them – the
-    /// hit lists' "Play"/"Shuffle" and row play buttons.
+    /// hit lists' "Play"/"Shuffle" and row play buttons. `list` is the
+    /// play-mark key of the song list they come from; `whole` marks the
+    /// list's own "Play", which pauses/resumes while that list is running
+    /// (a row's button does so for its own song).
     QueueTracks {
         paths: Vec<String>,
         shuffle: bool,
+        list: String,
+        whole: bool,
     },
     /// "+" on a song of the list missing from the library.
     AddPopSong {
@@ -644,9 +649,12 @@ impl App {
             CtxMsg::CtxPlayHits => self.on_ctx_play_hits(),
             CtxMsg::PopularityFetched(fetch) => self.on_popularity_fetched(*fetch),
             CtxMsg::OpenPopList { artist, list } => self.open_pop_page(sender, artist, list),
-            CtxMsg::QueueTracks { paths, shuffle } => {
-                self.queue_and_play(paths.into_iter().map(Into::into).collect(), shuffle)
-            }
+            CtxMsg::QueueTracks {
+                paths,
+                shuffle,
+                list,
+                whole,
+            } => self.on_queue_tracks(paths, shuffle, list, whole),
             CtxMsg::AddPopSong { artist, title } => self.add_pop_song(root, artist, title),
             CtxMsg::PopSongCandidates {
                 artist,

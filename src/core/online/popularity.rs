@@ -100,9 +100,7 @@ impl ArtistPopularity {
 /// live take share one key. Falls back to the full title when stripping would
 /// leave nothing ("(Untitled)").
 pub fn title_key(title: &str) -> String {
-    let cut = title.find(['(', '[']).map_or(title, |i| &title[..i]);
-    let cut = cut.split(" - ").next().unwrap_or(cut);
-    let key = normalize_name(cut);
+    let key = normalize_name(title_key_cut(title));
     if key.is_empty() {
         normalize_name(title)
     } else {
@@ -110,27 +108,70 @@ pub fn title_key(title: &str) -> String {
     }
 }
 
-/// Whether a local title is the plain song (no version note), preferred when
-/// a hit exists several times locally (studio album vs. live / best-of).
-fn is_plain(title: &str) -> bool {
-    title_key(title) == normalize_name(title)
+/// Words in a title's version note or in an album name that mark a take other
+/// than the original recording – an instrumental album repeats the song titles
+/// unchanged, so the album name is the only hint there.
+const OTHER_TAKE: &[&str] = &[
+    "instrumental",
+    "instrumentals",
+    "a cappella",
+    "acapella",
+    "karaoke",
+    "live",
+    "remix",
+    "remixes",
+    "demo",
+    "demos",
+    "un mastered",
+    "unmastered",
+    "rehearsal",
+    "outtakes",
+    "bootleg",
+    "rarities",
+];
+
+fn marks_other_take(text: &str) -> bool {
+    let padded = format!(" {} ", normalize_name(text));
+    OTHER_TAKE
+        .iter()
+        .any(|w| padded.contains(&format!(" {w} ")))
 }
 
-/// The local copy of a song (`key` as from [`title_key`]): among several
-/// versions the plain title wins, otherwise the first one in `local` order.
-pub fn find_local<T: Clone>(key: &str, local: &[(T, String)]) -> Option<T> {
-    let mut versions = local.iter().filter(|(_, t)| title_key(t) == key);
-    let first = versions.next()?;
-    let plain = std::iter::once(first)
-        .chain(versions)
-        .find(|(_, t)| is_plain(t));
-    Some(plain.unwrap_or(first).0.clone())
+/// How far a local copy is from the original recording: 0 the plain title on
+/// a regular album, 1 a harmless version note ("feat. …", "Remastered"),
+/// 2 an instrumental, live, remix, demo … take by its title or its album.
+fn version_distance(title: &str, album: &str) -> u8 {
+    let note = title.get(title_key_cut(title).len()..).unwrap_or("");
+    if marks_other_take(note) || marks_other_take(album) {
+        2
+    } else if title_key(title) != normalize_name(title) {
+        1
+    } else {
+        0
+    }
+}
+
+/// The part of `title` that [`title_key`] keys on (before any version note).
+fn title_key_cut(title: &str) -> &str {
+    let cut = title.find(['(', '[']).map_or(title, |i| &title[..i]);
+    cut.split(" - ").next().unwrap_or(cut)
+}
+
+/// The local copy of a song (`key` as from [`title_key`]) among `local`
+/// (`(item, title, album)`): the version closest to the original recording
+/// (see [`version_distance`]), the first one in `local` order among equals.
+pub fn find_local<T: Clone>(key: &str, local: &[(T, String, String)]) -> Option<T> {
+    local
+        .iter()
+        .filter(|(_, t, _)| title_key(t) == key)
+        .min_by_key(|(_, t, a)| version_distance(t, a))
+        .map(|(item, _, _)| item.clone())
 }
 
 /// Picks the local tracks that are hits: one per hit song, in `hits` order.
-/// `local` is `(item, title)` in the caller's preferred order (see
+/// `local` is `(item, title, album)` in the caller's preferred order (see
 /// [`find_local`]).
-pub fn pick_hits<T: Clone>(hits: &[Hit], local: &[(T, String)]) -> Vec<T> {
+pub fn pick_hits<T: Clone>(hits: &[Hit], local: &[(T, String, String)]) -> Vec<T> {
     hits.iter()
         .filter_map(|h| find_local(&h.key, local))
         .collect()
@@ -300,14 +341,58 @@ mod tests {
     fn pick_hits_follows_hit_order_and_prefers_the_plain_version() {
         let hits = pop(&[("Radio Ga Ga", 900_000), ("Killer Queen", 800_000)]).hits();
         let local = vec![
-            (1, "Killer Queen (Live)".to_string()),
-            (2, "Killer Queen".to_string()),
-            (3, "Radio Ga Ga (Live Aid)".to_string()),
-            (4, "Mustapha".to_string()),
+            (
+                1,
+                "Killer Queen (Live)".to_string(),
+                "Live Killers".to_string(),
+            ),
+            (
+                2,
+                "Killer Queen".to_string(),
+                "Sheer Heart Attack".to_string(),
+            ),
+            (
+                3,
+                "Radio Ga Ga (Live Aid)".to_string(),
+                "Live Aid".to_string(),
+            ),
+            (4, "Mustapha".to_string(), "Jazz".to_string()),
         ];
         // Radio Ga Ga first (better rank), only a live take exists locally;
         // Killer Queen as the plain studio title.
         assert_eq!(pick_hits(&hits, &local), vec![3, 2]);
+    }
+
+    #[test]
+    fn find_local_skips_takes_marked_by_their_album() {
+        let s = |t: &str, a: &str| (t.to_string(), a.to_string());
+        let local: Vec<(u8, String, String)> = [
+            s("Feel Good Inc.", "'Demon Days' Instrumentals"),
+            s("Feel Good Inc.", "Gorillaz (Un-mastered Tracks)"),
+            s("Feel Good Inc. (Stanton Warriors remix)", "D-Sides"),
+            s(
+                "Feel Good Inc.",
+                "Demon Days Live at the Manchester Opera House",
+            ),
+            s("Feel Good Inc. (feat. De La Soul)", "Greatest Hits"),
+            s("Feel Good Inc.", "Demon Days"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (t, a))| (i as u8, t, a))
+        .collect();
+        // The plain title on a regular album, though it comes last.
+        assert_eq!(find_local("feel good inc", &local), Some(5));
+        // Without it, a harmless note beats the other takes.
+        assert_eq!(find_local("feel good inc", &local[..5]), Some(4));
+        // Only other takes: the first of them, rather than nothing.
+        assert_eq!(find_local("feel good inc", &local[..4]), Some(0));
+        // "Live" in a song's own name isn't a version note.
+        assert_eq!(version_distance("Live Forever", "Definitely Maybe"), 0);
+        assert_eq!(
+            version_distance("Dirty Harry (instrumental)", "Dirty Harry"),
+            2
+        );
     }
 
     #[test]

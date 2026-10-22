@@ -168,10 +168,13 @@ impl App {
             HitsTarget::Artist(name) => {
                 // Oldest first: among several copies of a song, the original
                 // album's comes before a later best-of.
-                let local: Vec<(PathBuf, String)> = self
+                let local: Vec<(PathBuf, String, String)> = self
                     .artist_tracks_ordered(name, false)
                     .into_iter()
-                    .map(|t| (PathBuf::from(t.path), t.title))
+                    .map(|t| {
+                        let album = t.album.unwrap_or_default();
+                        (PathBuf::from(t.path), t.title, album)
+                    })
                     .collect();
                 pick_hits(&hits, &local)
             }
@@ -380,17 +383,56 @@ impl App {
             self.set_hits_status(&gettext("No hits in the library"));
             return;
         }
-        self.queue_and_play(files, false);
+        self.queue_and_play(files, false, None);
+    }
+
+    /// A song list's "Play"/"Shuffle" or row play button (see
+    /// [`CtxMsg::QueueTracks`]): pauses/resumes when it's the running list's
+    /// "Play" or the row of the song playing, starts the songs otherwise.
+    pub(crate) fn on_queue_tracks(
+        &mut self,
+        paths: Vec<String>,
+        shuffle: bool,
+        list: String,
+        whole: bool,
+    ) {
+        if !shuffle {
+            if whole && self.playing_list() == Some(list.as_str()) {
+                if self.mini.playing {
+                    self.save_resume();
+                }
+                self.flip_playing();
+                return;
+            }
+            if !whole
+                && let Some(first) = paths.first()
+                && self.toggle_if_active_file(std::path::Path::new(first))
+            {
+                return;
+            }
+        }
+        self.queue_and_play(
+            paths.into_iter().map(Into::into).collect(),
+            shuffle,
+            Some(list),
+        );
     }
 
     /// Hits are played through the queue: `files` (shuffled on request)
     /// replace whatever was queued and the running context, so the queue
     /// shows exactly these songs, and playback starts with the first one.
+    /// `list` is the song list they come from (see [`CtxMsg::QueueTracks`]).
     /// Closes the detail view.
-    pub(crate) fn queue_and_play(&mut self, mut files: Vec<PathBuf>, shuffle: bool) {
+    pub(crate) fn queue_and_play(
+        &mut self,
+        mut files: Vec<PathBuf>,
+        shuffle: bool,
+        list: Option<String>,
+    ) {
         if files.is_empty() {
             return;
         }
+        self.transport.queue_source = list.map(|mark| (mark, files.iter().cloned().collect()));
         if shuffle {
             for i in (1..files.len()).rev() {
                 let j = gtk::glib::random_int_range(0, i as i32 + 1) as usize;
@@ -512,12 +554,12 @@ impl App {
         };
         // Oldest first: among several copies of a song, the original album's
         // comes before a later best-of.
-        let local: Vec<(crate::model::Track, String)> = self
+        let local: Vec<(crate::model::Track, String, String)> = self
             .artist_tracks_ordered(&artist, false)
             .into_iter()
             .map(|t| {
-                let title = t.title.clone();
-                (t, title)
+                let (title, album) = (t.title.clone(), t.album.clone().unwrap_or_default());
+                (t, title, album)
             })
             .collect();
         let entries: Vec<(Hit, Option<crate::model::Track>)> = songs
@@ -573,6 +615,7 @@ impl App {
             },
         ));
 
+        let list_mark = mark_key(list_key, &artist);
         let can_add = self.youtube.enabled;
         let group = adw::PreferencesGroup::new();
         for (place, (hit, track)) in entries.iter().enumerate() {
@@ -594,11 +637,13 @@ impl App {
                             self.entry_is_active("track", &path, None),
                             self.mini.playing,
                             {
-                                let sender = sender.clone();
+                                let (sender, list_mark) = (sender.clone(), list_mark.clone());
                                 move || {
                                     sender.input(Msg::Ctx(CtxMsg::QueueTracks {
                                         paths: rest.clone(),
                                         shuffle: false,
+                                        list: list_mark.clone(),
+                                        whole: false,
                                     }))
                                 }
                             },

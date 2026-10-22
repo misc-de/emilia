@@ -55,7 +55,19 @@ impl App {
             // The "in queue" marker reflects the explicit user queue, not the
             // active context (the album currently playing through).
             queued: self.transport.user_queue.iter().cloned().collect(),
+            list: self.playing_list().map(str::to_string),
         }
+    }
+
+    /// Play-mark key of the song list (an artist's hits, …) that is running:
+    /// the one the queue was filled from, as long as the current track and
+    /// the whole playback context still come from it — playing anything else
+    /// replaces the context, which ends the list.
+    pub(crate) fn playing_list(&self) -> Option<&str> {
+        let (mark, songs) = self.transport.queue_source.as_ref()?;
+        let current = self.transport.queue.get(self.transport.queue_pos)?;
+        (songs.contains(current) && self.transport.queue.iter().all(|p| songs.contains(p)))
+            .then_some(mark.as_str())
     }
 
     /// Pushes the current playback state to every list that marks a row.

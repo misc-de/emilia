@@ -18,6 +18,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use crate::i18n::gettext;
+
 /// Icon of a row: a pause while this entry is the one running, a play icon in
 /// every other case.
 pub(crate) fn icon_name(active: bool, playing: bool) -> &'static str {
@@ -42,6 +44,14 @@ pub(crate) fn apply(widget: &impl IsA<gtk::Widget>, active: bool, playing: bool)
         button.set_icon_name(icon);
     } else if let Some(image) = widget.downcast_ref::<gtk::Image>() {
         image.set_icon_name(Some(icon));
+    } else if let Some(content) = widget.downcast_ref::<adw::ButtonContent>() {
+        // A labelled control (a page header's) says what a click does.
+        content.set_icon_name(icon);
+        content.set_label(&if active && playing {
+            gettext("Pause")
+        } else {
+            gettext("Play")
+        });
     }
     crate::ui::widgets::set_class(widget, "accent", active);
     // Clear the dimming a recycled row may still carry from an earlier build.
@@ -144,6 +154,9 @@ pub(crate) struct PlaybackState {
     /// Explicitly enqueued tracks ("Add to queue") — drives the queue marker,
     /// which is deliberately *not* the same as the running playback context.
     pub(crate) queued: HashSet<PathBuf>,
+    /// Play-mark key of the song list running through the queue (see
+    /// [`crate::ui::app::App::playing_list`]).
+    pub(crate) list: Option<String>,
 }
 
 /// A list that marks which of its rows is the one playing.
