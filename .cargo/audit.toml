@@ -16,6 +16,6 @@ ignore = [
     # key there is the AirPort Express key every AirPlay 1 device uses — it
     # has been public since 2011, so the side channel has nothing secret to
     # leak. sspi pins the 0.10 release candidate and no fixed release exists
-    # (re-checked 2026-10-11).
+    # (re-checked 2026-10-27).
     "RUSTSEC-2023-0071",
 ]

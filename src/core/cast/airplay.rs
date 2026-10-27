@@ -328,7 +328,7 @@ fn parse_sdp(sdp: &str, key: &rsa::RsaPrivateKey) -> Result<Format> {
                 .collect();
         } else if let Some(v) = line.strip_prefix("a=rsaaeskey:") {
             let wrapped = b64(v)?;
-            let raw = key.decrypt(rsa::Oaep::new::<sha1::Sha1>(), &wrapped)?;
+            let raw = key.decrypt(rsa::Oaep::<sha1::Sha1>::new(), &wrapped)?;
             f.aes_key = Some(
                 raw.try_into()
                     .map_err(|_| anyhow!("AES key is not 16 bytes"))?,
@@ -780,22 +780,24 @@ mod tests {
 
     /// System randomness for the test's RSA encryption.
     struct TestRng;
-    impl rsa::rand_core::RngCore for TestRng {
-        fn next_u32(&mut self) -> u32 {
+    impl rsa::rand_core::TryRng for TestRng {
+        type Error = rsa::rand_core::Infallible;
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
             let mut b = [0u8; 4];
-            self.fill_bytes(&mut b);
-            u32::from_le_bytes(b)
+            self.try_fill_bytes(&mut b)?;
+            Ok(u32::from_le_bytes(b))
         }
-        fn next_u64(&mut self) -> u64 {
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
             let mut b = [0u8; 8];
-            self.fill_bytes(&mut b);
-            u64::from_le_bytes(b)
+            self.try_fill_bytes(&mut b)?;
+            Ok(u64::from_le_bytes(b))
         }
-        fn fill_bytes(&mut self, dst: &mut [u8]) {
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
             getrandom::getrandom(dst).unwrap();
+            Ok(())
         }
     }
-    impl rsa::rand_core::CryptoRng for TestRng {}
+    impl rsa::rand_core::TryCryptoRng for TestRng {}
 
     #[test]
     fn sdp_unwraps_the_aes_key() {
@@ -804,7 +806,7 @@ mod tests {
         let aes_key = [7u8; 16];
         let mut rng = TestRng;
         let wrapped = public
-            .encrypt(&mut rng, rsa::Oaep::new::<sha1::Sha1>(), &aes_key)
+            .encrypt(&mut rng, rsa::Oaep::<sha1::Sha1>::new(), &aes_key)
             .unwrap();
         let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD_NO_PAD.encode(b);
         let sdp = format!(

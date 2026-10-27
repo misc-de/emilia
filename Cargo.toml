@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.56"
+version = "0.8.57"
 edition = "2024"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -44,15 +44,15 @@ quick-xml = "0.41"
 # SMB2/3 client for "SMB share" music sources — pure Rust (NTLM via `sspi`), so
 # the Flatpak needs neither libsmbclient nor a gvfs backend on the host. The
 # synchronous `multi_threaded` model is used (no tokio); see src/core/smb.rs.
-smb = { version = "0.11.2", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
+smb = { version = "0.12.1", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
 percent-encoding = "2"
 # AirPlay 1 (RAOP): the AirPort key signs the Apple-Challenge and unwraps
 # the sender's AES key (RSA-OAEP/SHA-1); AES-128-CBC decrypts the audio.
 # Pinned to exactly the versions `sspi` (SMB) already pulls in, so the
 # Flatpak's vendored sources stay the same.
-rsa = { version = "=0.10.0-rc.9", default-features = false, features = ["std", "encoding", "sha1"] }
-sha1 = { version = "=0.11.0-rc.2", default-features = false }
-aes = "=0.9.0-rc.1"
+rsa = { version = "=0.10.0-rc.18", default-features = false, features = ["std", "encoding", "sha1"] }
+sha1 = { version = "=0.11.0", default-features = false }
+aes = "=0.9.3"
 gstreamer-app = "0.23"
 # QR *decoding* (camera scanner). default-features off → drop the heavy `image`
 # integration; we feed a raw grayscale buffer via `prepare_from_greyscale`.

@@ -142,9 +142,11 @@
         <p>A hit list ends once you play something else: starting an artist, an album or a playlist after an artist's hits no longer carries on with the rest of the hits after the first song. Songs you queued yourself stay in the queue.</p>
         <p>A song added with "+" from a hit list now turns playable in the open list as soon as it is in the library.</p>
         <p>Radio stations and podcasts reconnect right away when the network changes, for example when Wi-Fi drops and mobile data takes over, instead of waiting for the next retry.</p>
+        <p>Security update for the cryptography libraries behind SMB shares and AirPlay.</p>
         <p xml:lang="de">Eine Hit-Liste endet, sobald etwas anderes gespielt wird: Wer nach den Hits eines Künstlers einen Künstler, ein Album oder eine Playlist startet, bekommt nach dem ersten Lied nicht mehr die restlichen Hits. Selbst in die Warteschlange gelegte Lieder bleiben drin.</p>
         <p xml:lang="de">Ein Lied, das aus einer Hit-Liste mit „+“ hinzugefügt wird, ist in der offenen Liste jetzt abspielbar, sobald es in der Bibliothek liegt.</p>
         <p xml:lang="de">Radiosender und Podcasts verbinden sich sofort neu, wenn das Netz wechselt, etwa wenn das WLAN wegbricht und Mobilfunk übernimmt, statt auf den nächsten Versuch zu warten.</p>
+        <p xml:lang="de">Sicherheitsupdate für die Kryptografie-Bibliotheken hinter SMB-Freigaben und AirPlay.</p>
       </description>
     </release>
     <release version="0.8.55" date="2026-10-22">

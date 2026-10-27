@@ -553,7 +553,7 @@ impl RaopBackend {
         );
         if self.caps.encrypt {
             let public = rsa::RsaPublicKey::from(&airport_key()?);
-            let wrapped = public.encrypt(&mut SysRng, rsa::Oaep::new::<sha1::Sha1>(), &self.key)?;
+            let wrapped = public.encrypt(&mut SysRng, rsa::Oaep::<sha1::Sha1>::new(), &self.key)?;
             sdp.push_str(&format!(
                 "a=rsaaeskey:{}\r\na=aesiv:{}\r\n",
                 b64(&wrapped),
@@ -694,19 +694,21 @@ impl RaopBackend {
 /// System randomness for RSA-OAEP.
 struct SysRng;
 
-impl rsa::rand_core::RngCore for SysRng {
-    fn next_u32(&mut self) -> u32 {
-        u32::from_le_bytes(random::<4>())
+impl rsa::rand_core::TryRng for SysRng {
+    type Error = rsa::rand_core::Infallible;
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(u32::from_le_bytes(random::<4>()))
     }
-    fn next_u64(&mut self) -> u64 {
-        u64::from_le_bytes(random::<8>())
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(u64::from_le_bytes(random::<8>()))
     }
-    fn fill_bytes(&mut self, dst: &mut [u8]) {
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
         let _ = getrandom::getrandom(dst);
+        Ok(())
     }
 }
 
-impl rsa::rand_core::CryptoRng for SysRng {}
+impl rsa::rand_core::TryCryptoRng for SysRng {}
 
 impl Backend for RaopBackend {
     fn accepts(&mut self) -> Option<Vec<String>> {
