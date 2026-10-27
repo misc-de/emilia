@@ -831,6 +831,9 @@ pub(crate) enum TransportMsg {
     /// and the player parked the track paused at its position → show it as
     /// paused; Play continues there on whatever output exists then.
     OutputLost,
+    /// `GNetworkMonitor` reported a change (with the new availability) → let
+    /// a broken network stream reconnect at once.
+    NetworkChanged(bool),
     /// The freshly loaded pipeline prerolled (buffered enough to play) → clear
     /// the loading spinner of a slow source (Nextcloud/YouTube).
     PlaybackReady,
@@ -960,6 +963,7 @@ impl App {
                     self.skip_current_track();
                 }
             }
+            TransportMsg::NetworkChanged(available) => self.player.network_changed(available),
             TransportMsg::OutputLost => {
                 // A speaker that was taken over ends the cast session.
                 self.sync_cast_ui();

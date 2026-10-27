@@ -61,6 +61,17 @@ impl App {
             );
         }
 
+        // A network change (Wi-Fi gone, mobile data taking over) lets a
+        // broken stream reconnect at once instead of waiting out its retry
+        // delay.
+        {
+            use gtk::gio::prelude::NetworkMonitorExt;
+            let sender = sender.clone();
+            gtk::gio::NetworkMonitor::default().connect_network_changed(move |_, available| {
+                sender.input(Msg::Transport(TransportMsg::NetworkChanged(available)))
+            });
+        }
+
         // During playback, regularly save the resume position, so that
         // an audio drama also resumes there after a crash/close.
         {

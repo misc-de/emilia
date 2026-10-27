@@ -221,6 +221,13 @@ const NET_STABLE_MS: u64 = 30_000;
 const NET_STALL_MS: u64 = 10_000;
 const NET_ATTEMPT_TIMEOUT_MS: u64 = 20_000;
 
+/// For this long after the network changed (Wi-Fi gone, mobile data taking
+/// over), a position that stands still only [`NET_SUSPECT_STALL_MS`] already
+/// counts as a broken connection: the stream's socket may sit on a route that
+/// is gone, and the buffered audio running out is the first sign of it.
+const NET_SUSPECT_WINDOW_MS: u64 = 30_000;
+const NET_SUSPECT_STALL_MS: u64 = 2_000;
+
 /// Recovery state after a network stream (station, podcast episode, remote
 /// file) broke off: the source gives up once its own retries fail, and the
 /// deck then sits in an error state that nothing restarts on its own.
@@ -243,6 +250,8 @@ struct NetRecovery {
     resume_at: Cell<i64>,
     /// Between the loss and the reconnect having prerolled again.
     reconnecting: Cell<bool>,
+    /// When the network last changed (see [`Player::network_changed`]).
+    changed_at: Cell<Option<std::time::Instant>>,
 }
 
 impl NetRecovery {
@@ -1083,8 +1092,14 @@ impl Player {
                 since = std::time::Instant::now();
                 return gst::glib::ControlFlow::Continue;
             }
+            let suspect = net
+                .changed_at
+                .get()
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(NET_SUSPECT_WINDOW_MS));
             let limit = if attempt_running {
                 NET_ATTEMPT_TIMEOUT_MS
+            } else if suspect {
+                NET_SUSPECT_STALL_MS
             } else {
                 NET_STALL_MS
             };
@@ -1104,6 +1119,43 @@ impl Player {
             }
             gst::glib::ControlFlow::Continue
         });
+    }
+
+    /// The network changed (the app forwards `GNetworkMonitor`'s signal). Once
+    /// it is available again, a broken stream doesn't sit out its retry delay:
+    /// a pending reconnect - or an attempt still stuck on the old route -
+    /// starts right away, with the quick retries afresh. A stream that still
+    /// seems to play is watched more closely for a while instead (see
+    /// [`NET_SUSPECT_STALL_MS`]): a healthy connection keeps playing, one left
+    /// on the vanished Wi-Fi runs dry within its buffer.
+    pub fn network_changed(&self, available: bool) {
+        let net = &self.net;
+        if !available || !net.enabled.get() || net.ok_at.get().is_none() {
+            return;
+        }
+        net.changed_at.set(Some(std::time::Instant::now()));
+        let pending = net.timer.borrow_mut().take();
+        let attempt_running = net.reconnecting.get() && pending.is_none();
+        if let Some(id) = pending {
+            id.remove();
+        } else if !attempt_running {
+            return;
+        }
+        let deck = self.cur_deck();
+        if !is_network_deck(&deck.bin) {
+            net.cancel();
+            return;
+        }
+        tracing::info!("Network changed – reconnecting the stream now");
+        net.attempts.set(0);
+        let _ = deck.bin.set_state(gst::State::Null);
+        reopen_deck(
+            &deck.bin,
+            net.resume_at.get(),
+            self.wants_playing.get(),
+            &deck.fresh_load,
+            &deck.pending_seek_ms,
+        );
     }
 
     pub fn pause(&self) {
