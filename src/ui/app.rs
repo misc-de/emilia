@@ -1868,6 +1868,7 @@ impl Component for App {
                 skip_count: 0,
                 forced_start_ms: None,
                 fresh_start: false,
+                from_user_queue: false,
                 last_finished: None,
                 resume_current: None,
             },

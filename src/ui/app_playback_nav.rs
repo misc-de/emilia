@@ -330,6 +330,7 @@ impl App {
             self.transport.queue_pos = queue::splice_after(&mut self.transport.queue, pos, path);
             // The context length changed → let the shuffle order rebuild.
             self.transport.shuffle_order.clear();
+            self.transport.from_user_queue = true;
             self.play_current_fresh();
             self.refresh_queue_icons();
             self.reload_queue_list();

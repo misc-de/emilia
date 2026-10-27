@@ -70,6 +70,27 @@ impl App {
             .then_some(mark.as_str())
     }
 
+    /// A song list (an artist's hits, …) plays through the user queue, so its
+    /// songs not yet reached would jump ahead of whatever is started next.
+    /// Once the context has been replaced by something else (an artist, an
+    /// album, …), the list is over: its leftover songs leave the user queue.
+    /// A single song slipped in between (see
+    /// [`crate::ui::app_state::TransportState::interrupted_queue`]) only
+    /// pauses the list.
+    fn end_replaced_list(&mut self) {
+        let t = &mut self.transport;
+        let Some((_, songs)) = t.queue_source.as_ref() else {
+            return;
+        };
+        if t.interrupted_queue.is_some() || t.queue.iter().all(|p| songs.contains(p)) {
+            return;
+        }
+        t.user_queue.retain(|p| !songs.contains(p));
+        t.queue_source = None;
+        self.save_queue();
+        self.reload_queue_list();
+    }
+
     /// Pushes the current playback state to every list that marks a row.
     ///
     /// The mechanism differs per list — a factory message, recycled rows, a
@@ -359,6 +380,10 @@ impl App {
         let restored_session = self.transport.resume_current.take();
         let forced_ms = self.transport.forced_start_ms.take();
         let stepping_back = std::mem::take(&mut self.transport.skip_history_push);
+        let from_user_queue = std::mem::take(&mut self.transport.from_user_queue);
+        if !from_user_queue {
+            self.end_replaced_list();
+        }
         // Something is starting, so there is no finished track waiting to be
         // replayed any more (see `play_prev`).
         self.transport.last_finished = None;

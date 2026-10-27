@@ -311,6 +311,11 @@ pub(crate) struct TransportState {
     /// half-heard earlier visit — even for an audiobook, whose next chapter
     /// begins at its beginning. Consumed (reset to `false`) by `play_current`.
     pub(crate) fresh_start: bool,
+    /// One-shot marker that the next `play_current` starts a track `play_next`
+    /// just spliced in from the user queue — the context grew, it was not
+    /// replaced, so a running song list (see [`Self::queue_source`]) goes on.
+    /// Consumed by `play_current`.
+    pub(crate) from_user_queue: bool,
 }
 
 /// Mini-player / now-playing strip state, grouped off the `App` god-object.
