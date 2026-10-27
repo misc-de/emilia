@@ -1796,6 +1796,7 @@ impl Component for App {
                 loading_label: None,
                 gallery_tried: std::cell::RefCell::new(std::collections::HashSet::new()),
                 album_page: std::rc::Rc::new(std::cell::RefCell::new(None)),
+                pop_page: Default::default(),
                 missing_busy: None,
                 page_marks: Default::default(),
             },

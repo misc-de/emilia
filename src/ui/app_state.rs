@@ -177,6 +177,11 @@ pub(crate) struct LibView {
     /// because the renderer runs behind a `&self`.
     pub(crate) album_page:
         std::rc::Rc<std::cell::RefCell<Option<crate::ui::app_views::AlbumPageRef>>>,
+    /// The song-list subpage (an artist's hits / best-known songs) last
+    /// opened: artist, list and its content box — refilled in place once a
+    /// song added from it is in the library.
+    pub(crate) pop_page:
+        std::cell::RefCell<Option<(String, crate::ui::app_popularity::PopList, gtk::Box)>>,
     /// Modal phase-spinner shown while a missing track is searched/downloaded;
     /// the label is updated as the phase advances, and it is closed when done.
     pub(crate) missing_busy: Option<(adw::Dialog, gtk::Label)>,

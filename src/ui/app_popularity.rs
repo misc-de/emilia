@@ -543,11 +543,61 @@ impl App {
         artist: String,
         list: PopList,
     ) {
-        use crate::ui::app_favorites::mark_key;
-        use crate::ui::entry_row::EntryRow;
-        let Some(Some(pop)) = self.cached_artist_pop(&artist) else {
+        // The content box is kept (in `libview.pop_page`) so a song added
+        // from the list can refill it in place.
+        let content = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        if !self.fill_pop_content(sender, &content, &artist, list) {
+            return;
+        }
+        *self.libview.pop_page.borrow_mut() = Some((artist.clone(), list, content.clone()));
+
+        let dialog = self.nav.ctx_dialog.borrow().clone();
+        if let Some(d) = dialog {
+            d.close();
+        }
+        self.push_subpage(&format!("{artist} – {}", pop_list_title(list)), &content);
+    }
+
+    /// The library changed (a song of the list was just added, …): rebuilds
+    /// the open song-list page, so the new song turns from greyed to playable.
+    pub(crate) fn refill_pop_page(&self, sender: &relm4::ComponentSender<Self>) {
+        let page = self.libview.pop_page.borrow().clone();
+        let Some((artist, list, content)) = page else {
             return;
         };
+        // A page left with "back" is gone for good.
+        if content.root().is_none() {
+            *self.libview.pop_page.borrow_mut() = None;
+            return;
+        }
+        self.fill_pop_content(sender, &content, &artist, list);
+    }
+
+    /// (Re)builds the header and rows of a song-list page into `content`
+    /// (cleared first); `false` when the artist's song lists aren't known.
+    fn fill_pop_content(
+        &self,
+        sender: &relm4::ComponentSender<Self>,
+        content: &gtk::Box,
+        artist: &str,
+        list: PopList,
+    ) -> bool {
+        use crate::ui::app_favorites::mark_key;
+        use crate::ui::entry_row::EntryRow;
+        let artist = artist.to_string();
+        let Some(Some(pop)) = self.cached_artist_pop(&artist) else {
+            return false;
+        };
+        while let Some(child) = content.first_child() {
+            content.remove(&child);
+        }
         let songs = match list {
             PopList::Hits => pop.hits(),
             PopList::Known => pop.songs(),
@@ -572,10 +622,7 @@ impl App {
         let present: Vec<&crate::model::Track> =
             entries.iter().filter_map(|(_, t)| t.as_ref()).collect();
         let paths: Vec<String> = present.iter().map(|t| t.path.clone()).collect();
-        let title = match list {
-            PopList::Hits => gettext("Hits"),
-            PopList::Known => gettext("Best-known songs"),
-        };
+        let title = pop_list_title(list);
         let cover = self
             .library
             .get_artist_meta(&artist)
@@ -589,14 +636,6 @@ impl App {
                 )
             });
 
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(12)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
         let list_key = match list {
             PopList::Hits => "hits",
             PopList::Known => "known",
@@ -700,12 +739,7 @@ impl App {
             group.add(&row);
         }
         content.append(&group);
-
-        let dialog = self.nav.ctx_dialog.borrow().clone();
-        if let Some(d) = dialog {
-            d.close();
-        }
-        self.push_subpage(&format!("{artist} – {title}"), &content);
+        true
     }
 
     /// "+" on a missing song: search YouTube for it; the hits come back as
@@ -766,6 +800,14 @@ impl App {
                 artist: Some(artist.clone()),
             });
         });
+    }
+}
+
+/// Heading of a song-list page.
+fn pop_list_title(list: PopList) -> String {
+    match list {
+        PopList::Hits => gettext("Hits"),
+        PopList::Known => gettext("Best-known songs"),
     }
 }
 

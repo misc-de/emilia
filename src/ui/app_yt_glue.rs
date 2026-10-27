@@ -798,7 +798,10 @@ impl App {
                 self.libview.loading = o.is_some();
                 self.libview.loading_label = o;
             }
-            YtMsg::YtLibraryChanged => self.reload_library_overviews(),
+            YtMsg::YtLibraryChanged => {
+                self.reload_library_overviews();
+                self.refill_pop_page(sender);
+            }
             YtMsg::YtPlaylistsChanged => self.reload_playlists(sender),
             YtMsg::PushYtSubpage => {
                 let taken = self.yt_subpage.borrow_mut().take();
