@@ -137,6 +137,16 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.57" date="2026-11-04">
+      <description>
+        <p>Songs downloaded from YouTube now get their tags from a music database: title, artist, album, year, track and disc number, genre and cover, and no longer the video title or channel name. If the database doesn't know a song, it keeps a cleaned-up title.</p>
+        <p>A missing song added with "+" from a hit list now always takes its place in the list. It could end up tagged with another artist of a same-named song, and then stayed greyed in the list for good.</p>
+        <p>Emilia now starts without a background image; turn it on under Settings → Design. A background you already picked stays.</p>
+        <p xml:lang="de">Von YouTube heruntergeladene Lieder bekommen ihre Tags jetzt aus einer Musikdatenbank: Titel, Künstler, Album, Jahr, Track- und CD-Nummer, Genre und Cover, statt Videotitel und Kanalname. Kennt die Datenbank ein Lied nicht, bleibt ein bereinigter Titel.</p>
+        <p xml:lang="de">Ein fehlendes Lied, das aus einer Hit-Liste mit „+“ hinzugefügt wird, nimmt jetzt immer seinen Platz in der Liste ein. Bisher konnte es die Tags eines gleichnamigen Lieds eines anderen Künstlers bekommen und blieb dann dauerhaft grau.</p>
+        <p xml:lang="de">Emilia startet jetzt ohne Hintergrundbild; einschalten lässt es sich unter Einstellungen → Design. Ein bereits gewählter Hintergrund bleibt.</p>
+      </description>
+    </release>
     <release version="0.8.56" date="2026-10-27">
       <description>
         <p>A hit list ends once you play something else: starting an artist, an album or a playlist after an artist's hits no longer carries on with the rest of the hits after the first song. Songs you queued yourself stay in the queue.</p>
