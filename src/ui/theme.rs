@@ -168,7 +168,7 @@ impl BgFilter {
 /// The user-configurable design options (besides scaling).
 #[derive(Clone, Default)]
 pub(crate) struct DesignSettings {
-    /// Master switch for the whole background feature (default on). When on and
+    /// Master switch for the whole background feature (default off). When on and
     /// no `custom_bg` is set, the built-in light/dark concert default is shown.
     pub(crate) background_on: bool,
     /// A user-chosen background image (already copied into the app data dir).

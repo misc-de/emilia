@@ -192,14 +192,19 @@ pub(crate) fn read_design_settings(lib: &Library) -> crate::ui::theme::DesignSet
     if legacy_soft {
         set_design(lib, "design_bg_soft_scale", "1");
     }
+    let custom_bg = get_design(lib, "design_bg_path")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let use_cover_bg = matches!(get_design(lib, "design_use_cover_bg").as_deref(), Some("1"));
     crate::ui::theme::DesignSettings {
+        // Off until asked for. The switch used to default to on, so someone who
+        // picked an image or the cover without ever touching it has it stored
+        // as unset — their background stays.
         background_on: get_design(lib, "design_background_on")
             .map(|s| s != "0")
-            .unwrap_or(true),
-        custom_bg: get_design(lib, "design_bg_path")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from),
-        use_cover_bg: matches!(get_design(lib, "design_use_cover_bg").as_deref(), Some("1")),
+            .unwrap_or(custom_bg.is_some() || use_cover_bg),
+        custom_bg,
+        use_cover_bg,
         bg_filter,
         bg_filter_strength,
         bg_nav: get_design(lib, "design_bg_nav")

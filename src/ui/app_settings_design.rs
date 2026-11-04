@@ -273,7 +273,7 @@ impl App {
         root: &adw::ApplicationWindow,
         sender: &ComponentSender<Self>,
     ) -> adw::PreferencesGroup {
-        // Background: a master switch turns the whole feature on/off (default on);
+        // Background: a master switch turns the whole feature on/off (default off);
         // the image/filter/transparency options below apply while it is on. With
         // it on and no custom image chosen, the built-in light/dark default shows.
         let bg_group = adw::PreferencesGroup::builder()
