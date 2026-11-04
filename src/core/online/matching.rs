@@ -2,6 +2,7 @@
 //! decides whether a hit is plausible, plus the parsing of raw ICY stream
 //! titles into search candidates for recordings.
 
+use super::popularity::{title_key, title_key_cut, version_distance};
 use super::{TrackTags, recording_cover_file, shared_client};
 
 /// Fetches a cover (+ album name) for a **clean** artist/title pair (no station
@@ -16,14 +17,112 @@ pub fn track_cover(artist: &str, title: &str) -> Option<(Vec<u8>, Option<String>
         .flatten()
 }
 
-/// Looks up the canonical tags of a track in a music database (Deezer), so a
+/// How many hits of a search [`official_track_tags`] looks through: the song
+/// asked for is often not the most relevant one (a remix, a best-of, …).
+pub(super) const OFFICIAL_SEARCH_LIMIT: u32 = 25;
+/// How many different albums of a song's hits are looked up to find the one it
+/// came out on. Each is a request, on a path only a download takes.
+pub(super) const OFFICIAL_ALBUM_CHECKS: usize = 5;
+
+/// Looks up the official tags of a song in a music database (Deezer), so a
 /// download can be tagged from real metadata instead of a YouTube channel name
-/// and video title. `artist` is only a *hint*: it narrows the search, but the
-/// returned artist is the database's. Tried hint-first, then title-only — a
-/// channel like "NoCopyrightSounds" would otherwise sink every search.
+/// and video title. `candidates` are the `(artist, title)` pairs it might be,
+/// best guess first; the first one Deezer knows wins.
+///
+/// A hit has to be this very song by this very artist, see
+/// [`official_hits`]: a song tagged with another artist's name lands in that
+/// artist's folder and never shows up where it was asked for, which is far worse
+/// than plain tags — so there is deliberately no search by title alone.
+///
+/// `None` when nothing fits; the caller then keeps what it had. **Network.**
+pub fn official_track_tags(candidates: &[(String, String)]) -> Option<TrackTags> {
+    let client = shared_client();
+    for (artist, title) in candidates {
+        let (artist, title) = (artist.trim(), title.trim());
+        if artist.is_empty() || title.is_empty() {
+            continue;
+        }
+        match client.find_official_track(artist, title) {
+            Ok(Some(tags)) => return Some(tags),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("Track lookup failed ({title}): {e}");
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// The searches for a song, most precise first: the structured one misses many
+/// tracks ("Die Toten Hosen" / "Tage wie diese" finds nothing), plain text does
+/// not. Each with the whole credit, then its main artist ("A feat. B" → "A", but
+/// "AC/DC" must stay whole). `title` without its version note goes last, as a
+/// note YouTube made up ("[NCS Release]") sinks the search.
+pub(super) fn official_queries(artist: &str, title: &str) -> Vec<String> {
+    let main = main_artist(artist);
+    let mut names = vec![artist];
+    if main != artist && !main.is_empty() {
+        names.push(main.as_str());
+    }
+    let core = title_key_cut(title).trim();
+    let mut queries = Vec::new();
+    for name in &names {
+        queries.push(format!(
+            "artist:\"{}\" track:\"{}\"",
+            name.replace('"', " "),
+            title.replace('"', " ")
+        ));
+        queries.push(format!("{name} {title}"));
+    }
+    if !core.is_empty() && core != title {
+        queries.extend(names.iter().map(|name| format!("{name} {core}")));
+    }
+    queries
+}
+
+/// Which of the `(title, artist, album)` hits are the song `title` by `artist`:
+/// the same [`title_key`] and the same artist, as that's what makes it the same
+/// entry for the song lists. Only those closest to the version asked for (plain
+/// → the original, not a live album; "Song (Live)" → a live take), in their
+/// order of relevance.
+pub(super) fn official_hits<'a>(
+    hits: impl Iterator<Item = (&'a str, &'a str, &'a str)>,
+    artist: &str,
+    title: &str,
+) -> Vec<usize> {
+    let (key, wanted) = (title_key(title), version_distance(title, ""));
+    let fitting: Vec<(usize, u8)> = hits
+        .enumerate()
+        .filter(|(_, (t, a, _))| title_key(t) == key && same_artist(a, artist))
+        .map(|(i, (t, _, album))| (i, version_distance(t, album).abs_diff(wanted)))
+        .collect();
+    let closest = fitting.iter().map(|(_, d)| *d).min();
+    fitting
+        .into_iter()
+        .filter(|(_, d)| Some(*d) == closest)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Whether the credit `credit` names `artist`: spelled alike apart from
+/// punctuation ("P!nk", "AC/DC"), by the library's own rules ("A feat. B" is
+/// B's too), or the same main artist.
+fn same_artist(credit: &str, artist: &str) -> bool {
+    let artist_key = crate::core::artist::norm_key(artist);
+    !artist_key.is_empty()
+        && (normalize_name(credit) == normalize_name(artist)
+            || crate::core::artist::credit_matches(credit, &artist_key)
+            || normalize_name(&main_artist(credit)) == normalize_name(&main_artist(artist)))
+}
+
+/// Looks up the tags of a track by its title, `artist` being only a *hint*: it
+/// narrows the search, but the returned artist is the database's. Tried
+/// hint-first, then title-only, so it may well be someone else's song of that
+/// name — for tags to save, use [`official_track_tags`].
 ///
 /// `None` when nothing plausible was found; the caller then keeps what it had.
-pub fn track_tags(artist: Option<&str>, title: &str) -> Option<TrackTags> {
+fn track_tags(artist: Option<&str>, title: &str) -> Option<TrackTags> {
     let title = title.trim();
     if title.is_empty() {
         return None;
@@ -272,6 +371,90 @@ fn remove_ci(haystack: &str, needle: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The first of [`official_hits`] among `(title, artist, album)`.
+    fn pick(
+        hits: &[(&'static str, &'static str, &'static str)],
+        a: &str,
+        t: &str,
+    ) -> Option<usize> {
+        official_hits(hits.iter().copied(), a, t).first().copied()
+    }
+
+    #[test]
+    fn official_hit_is_never_another_artists_song_of_that_name() {
+        // Found by the old title-only fallback: the download went to this
+        // artist's folder and stayed "missing" in Die Toten Hosen's list.
+        let hits = [(
+            "Komplett im Arsch",
+            "Feine Sahne Fischfilet",
+            "Scheitern und Verstehen",
+        )];
+        assert_eq!(pick(&hits, "Die Toten Hosen", "Komplett im Arsch"), None);
+    }
+
+    #[test]
+    fn official_hit_is_never_a_longer_title() {
+        // A loose prefix match would rename the song, hiding it from its list.
+        let hits = [("Love Me Do", "The Beatles", "Please Please Me")];
+        assert_eq!(pick(&hits, "The Beatles", "Love"), None);
+    }
+
+    #[test]
+    fn official_hit_prefers_the_version_asked_for() {
+        let hits = [
+            ("Song", "A", "Live in Berlin"),
+            ("Song (Remastered)", "A", "Best Of"),
+            ("Song", "A", "First Album"),
+        ];
+        assert_eq!(pick(&hits, "A", "Song"), Some(2));
+        let hits = [("Song", "A", "First Album"), ("Song (Live)", "A", "Tour")];
+        assert_eq!(pick(&hits, "A", "Song (Live)"), Some(1));
+        // All equally close ones stay in, in Deezer's order: their release
+        // decides among them.
+        let hits = [
+            ("Song", "A", "Best Of"),
+            ("Song (Live)", "A", "Tour"),
+            ("Song", "A", "Album"),
+        ];
+        assert_eq!(official_hits(hits.iter().copied(), "A", "Song"), [0, 2]);
+    }
+
+    #[test]
+    fn official_hit_knows_the_artist_by_other_spellings() {
+        assert_eq!(pick(&[("Song", "P!NK", "X")], "p!nk", "Song"), Some(0));
+        assert_eq!(pick(&[("Song", "AC/DC", "X")], "AC DC", "Song"), Some(0));
+        assert_eq!(pick(&[("Song", "A feat. B", "X")], "B", "Song"), Some(0));
+        assert_eq!(pick(&[("Song", "A", "X")], "A & B", "Song"), Some(0));
+        assert_eq!(
+            pick(&[("Song", "Queen Latifah", "X")], "Queen", "Song"),
+            None
+        );
+    }
+
+    #[test]
+    fn official_queries_also_search_without_a_version_note() {
+        let q = official_queries("Alan Walker", "Fade [NCS Release]");
+        assert_eq!(
+            q,
+            [
+                "artist:\"Alan Walker\" track:\"Fade [NCS Release]\"",
+                "Alan Walker Fade [NCS Release]",
+                "Alan Walker Fade",
+            ]
+        );
+        assert_eq!(official_queries("A", "Song").len(), 2);
+        // A credit is tried whole first: "AC/DC" isn't an artist called "AC".
+        assert_eq!(
+            official_queries("A feat. B", "Song"),
+            [
+                "artist:\"A feat. B\" track:\"Song\"",
+                "A feat. B Song",
+                "artist:\"A\" track:\"Song\"",
+                "A Song",
+            ]
+        );
+    }
     #[test]
     fn main_artist_drops_featured_guests() {
         assert_eq!(

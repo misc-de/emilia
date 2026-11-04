@@ -10,7 +10,9 @@ use serde::Deserialize;
 
 use super::{
     AcoustIdMatch, CanonicalTrack, IMAGE_RETRY_MAX, ReleaseMatch, TrackTags, USER_AGENT,
-    escape_lucene, percent_encode, shrink_image,
+    escape_lucene,
+    matching::{OFFICIAL_ALBUM_CHECKS, OFFICIAL_SEARCH_LIMIT, official_hits, official_queries},
+    percent_encode, shrink_image,
 };
 use crate::core::fingerprint;
 use crate::core::net;
@@ -361,43 +363,125 @@ impl OnlineClient {
     /// `artist:"…" track:"…"` or plain free text); `title` stands in when the
     /// hit carries none.
     pub(super) fn search_track_query(&self, q: &str, title: &str) -> Result<Option<TrackTags>> {
+        let Some(hit) = self.search_track_hits(q, 1)?.into_iter().next() else {
+            return Ok(None);
+        };
+        let (mut tags, cover_url) = hit_tags(hit, title);
+        // The cover is a second request and may well fail — the tags are still
+        // worth returning without it.
+        tags.cover = match cover_url {
+            Some(u) => self.get_image(&u)?,
+            None => None,
+        };
+        Ok(Some(tags))
+    }
+
+    /// Deezer's track hits for a raw search query, most relevant first.
+    fn search_track_hits(&self, q: &str, limit: u32) -> Result<Vec<DzTrack>> {
         let url = format!(
-            "https://api.deezer.com/search/track?q={}&limit=1",
+            "https://api.deezer.com/search/track?q={}&limit={limit}",
             percent_encode(q)
         );
         let search: DzTrackSearch = match self.call_get(&url)? {
             Some(resp) => net::json_capped(resp, net::MAX_JSON_BYTES)?,
-            None => return Ok(None),
+            None => return Ok(Vec::new()),
         };
-        let Some(hit) = search.data.into_iter().next() else {
-            return Ok(None);
+        Ok(search.data)
+    }
+
+    /// The database's complete tags for exactly this song by exactly this
+    /// artist (see [`super::official_track_tags`]), or `None` when Deezer has no
+    /// such recording. `Err` only for a failed request of the search itself.
+    pub(super) fn find_official_track(
+        &self,
+        artist: &str,
+        title: &str,
+    ) -> Result<Option<TrackTags>> {
+        for q in official_queries(artist, title) {
+            let hits = self.search_track_hits(&q, OFFICIAL_SEARCH_LIMIT)?;
+            let fitting = official_hits(
+                hits.iter().map(|h| {
+                    (
+                        h.title.as_deref().unwrap_or(""),
+                        h.artist
+                            .as_ref()
+                            .and_then(|a| a.name.as_deref())
+                            .unwrap_or(""),
+                        h.album
+                            .as_ref()
+                            .and_then(|a| a.title.as_deref())
+                            .unwrap_or(""),
+                    )
+                }),
+                artist,
+                title,
+            );
+            if !fitting.is_empty() {
+                return Ok(Some(self.complete_tags(hits, &fitting, title)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The tags of the release a song belongs to, among the `fitting` `hits`: a
+    /// search ranks a best-of as highly as the album the song came out on, so
+    /// the first few different albums are looked at to find that one. Plus what
+    /// a search hit doesn't carry (position, year, genre) and its cover — all
+    /// extra requests that may each fail, as artist, title and album already are
+    /// what the download needs most.
+    fn complete_tags(&self, hits: Vec<DzTrack>, fitting: &[usize], title: &str) -> TrackTags {
+        let album_id = |i: &usize| hits[*i].album.as_ref().and_then(|a| a.id);
+        let mut checked: Vec<(usize, Option<DzAlbumInfo>)> = Vec::new();
+        let mut seen: Vec<Option<u64>> = Vec::new();
+        for i in fitting {
+            if !seen.contains(&album_id(i)) {
+                seen.push(album_id(i));
+                let info = album_id(i).and_then(|id| self.get_deezer(&format!("album/{id}")));
+                checked.push((*i, info));
+                if checked.len() == OFFICIAL_ALBUM_CHECKS {
+                    break;
+                }
+            }
+        }
+        let best = pick_release(checked.iter().map(|(_, info)| {
+            let info = info.as_ref();
+            (
+                info.and_then(|a| a.record_type.as_deref()).unwrap_or(""),
+                info.and_then(|a| a.release_date.as_deref()).unwrap_or(""),
+            )
+        }));
+        let (index, album) = checked.swap_remove(best);
+        let Some(hit) = hits.into_iter().nth(index) else {
+            return TrackTags::default();
         };
-        let non_empty = |s: String| Some(s).filter(|s| !s.trim().is_empty());
-        let album = hit.album;
-        let cover_url = album
-            .as_ref()
-            .and_then(|a| {
-                [&a.cover_big, &a.cover_medium, &a.cover]
-                    .into_iter()
-                    .flatten()
-                    .find(|u| !u.is_empty())
-            })
-            .cloned();
-        // The cover is a second request and may well fail — the tags are still
-        // worth returning without it.
-        let cover = match cover_url {
-            Some(u) => self.get_image(&u)?,
-            None => None,
-        };
-        Ok(Some(TrackTags {
-            artist: hit.artist.and_then(|a| a.name).and_then(non_empty),
-            title: hit
-                .title
-                .and_then(non_empty)
-                .unwrap_or_else(|| title.to_string()),
-            album: album.and_then(|a| a.title).and_then(non_empty),
-            cover,
-        }))
+        let track_id = hit.id;
+        let (mut tags, cover_url) = hit_tags(hit, title);
+        tags.cover = cover_url.and_then(|u| self.get_image(&u).ok().flatten());
+        if let Some(album) = album {
+            tags.year = album.release_date.as_deref().and_then(release_year);
+            tags.genre = album
+                .genres
+                .and_then(|g| g.data.into_iter().next())
+                .and_then(|g| g.name)
+                .filter(|n| !n.trim().is_empty());
+        }
+        let detail: Option<DzTrackDetail> =
+            track_id.and_then(|id| self.get_deezer(&format!("track/{id}")));
+        if let Some(detail) = detail {
+            tags.track_no = detail.track_position.filter(|n| *n > 0);
+            tags.disc_no = detail.disk_number.filter(|n| *n > 0);
+            tags.year = tags
+                .year
+                .or_else(|| detail.release_date.as_deref().and_then(release_year));
+        }
+        tags
+    }
+
+    /// One optional Deezer object: `None` also when the request fails.
+    fn get_deezer<T: serde::de::DeserializeOwned>(&self, path: &str) -> Option<T> {
+        let url = format!("https://api.deezer.com/{path}");
+        let resp = self.call_get(&url).ok().flatten()?;
+        net::json_capped(resp, net::MAX_JSON_BYTES).ok()
     }
 
     /// Loads several images of an album from the Cover Art Archive (front, back,
@@ -708,6 +792,51 @@ pub(super) struct DzArtist {
     picture_xl: Option<String>,
 }
 
+/// A Deezer track hit as tags (`title` stands in when it carries none), plus
+/// the address of its cover — fetching that is up to the caller.
+fn hit_tags(hit: DzTrack, title: &str) -> (TrackTags, Option<String>) {
+    let non_empty = |s: String| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+    let album = hit.album;
+    let cover_url = album
+        .as_ref()
+        .and_then(|a| {
+            [&a.cover_big, &a.cover_medium, &a.cover]
+                .into_iter()
+                .flatten()
+                .find(|u| !u.is_empty())
+        })
+        .cloned();
+    let tags = TrackTags {
+        artist: hit.artist.and_then(|a| a.name).and_then(non_empty),
+        title: hit
+            .title
+            .and_then(non_empty)
+            .unwrap_or_else(|| title.to_string()),
+        album: album.and_then(|a| a.title).and_then(non_empty),
+        ..Default::default()
+    };
+    (tags, cover_url)
+}
+
+/// The year of a Deezer date ("2012-03-23"); it also reports "0000-00-00".
+fn release_year(date: &str) -> Option<i32> {
+    date.get(..4)?.parse().ok().filter(|y| *y > 0)
+}
+
+/// Which of the `(record_type, release_date)` releases a song came out on: a
+/// compilation only if there's nothing else, then the earliest year; within a
+/// year an album rather than its advance single. The first among equals, the
+/// most relevant one.
+fn pick_release<'a>(releases: impl Iterator<Item = (&'a str, &'a str)>) -> usize {
+    releases
+        .enumerate()
+        .min_by_key(|(_, (kind, date))| {
+            let year = release_year(date).unwrap_or(i32::MAX);
+            (*kind == "compile", year, *kind != "album")
+        })
+        .map_or(0, |(i, _)| i)
+}
+
 #[derive(Deserialize)]
 struct DzTrackSearch {
     #[serde(default)]
@@ -717,11 +846,47 @@ struct DzTrackSearch {
 #[derive(Deserialize)]
 struct DzTrack {
     #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
     title: Option<String>,
     #[serde(default)]
     artist: Option<DzTrackArtist>,
     #[serde(default)]
     album: Option<DzAlbum>,
+}
+
+/// `/track/{id}`: what a search hit doesn't carry.
+#[derive(Deserialize)]
+struct DzTrackDetail {
+    #[serde(default)]
+    track_position: Option<u32>,
+    #[serde(default)]
+    disk_number: Option<u32>,
+    #[serde(default)]
+    release_date: Option<String>,
+}
+
+/// `/album/{id}`: when and as what it came out, and its genres.
+#[derive(Deserialize)]
+struct DzAlbumInfo {
+    #[serde(default)]
+    record_type: Option<String>,
+    #[serde(default)]
+    release_date: Option<String>,
+    #[serde(default)]
+    genres: Option<DzGenreList>,
+}
+
+#[derive(Deserialize)]
+struct DzGenreList {
+    #[serde(default)]
+    data: Vec<DzGenre>,
+}
+
+#[derive(Deserialize)]
+struct DzGenre {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -732,6 +897,8 @@ struct DzTrackArtist {
 
 #[derive(Deserialize)]
 struct DzAlbum {
+    #[serde(default)]
+    id: Option<u64>,
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
@@ -812,6 +979,34 @@ fn parse_year(date: &str) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_year_reads_a_deezer_date() {
+        assert_eq!(super::release_year("2012-03-23"), Some(2012));
+        assert_eq!(super::release_year("0000-00-00"), None);
+        assert_eq!(super::release_year(""), None);
+    }
+
+    #[test]
+    fn release_of_a_song_is_the_earliest_that_isnt_a_compilation() {
+        let pick = |r: &[(&'static str, &'static str)]| super::pick_release(r.iter().copied());
+        // A later best-of is not where the song came from …
+        assert_eq!(pick(&[("album", "2006-01-01"), ("album", "1993-05-01")]), 1);
+        // … nor is a compilation, however early.
+        assert_eq!(
+            pick(&[("compile", "1990-01-01"), ("album", "2001-01-01")]),
+            1
+        );
+        // The album over its advance single from the same year.
+        assert_eq!(
+            pick(&[("single", "2012-03-23"), ("album", "2012-05-04")]),
+            1
+        );
+        // An unknown date loses; among equals the most relevant one.
+        assert_eq!(pick(&[("album", ""), ("album", "2001-01-01")]), 1);
+        assert_eq!(pick(&[("album", "2001-01-01"), ("album", "2001-06-01")]), 0);
+        assert_eq!(pick(&[("", ""), ("", "")]), 0);
+    }
+
     fn dz(name: &str, fans: u64) -> DzArtist {
         DzArtist {
             id: fans,

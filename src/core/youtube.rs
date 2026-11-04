@@ -387,14 +387,17 @@ fn clean_video_id(s: &str) -> Option<String> {
 
 /// Normalises a channel/uploader name into an artist name: YouTube Music
 /// auto-channels are `"<Artist> - Topic"` and official channels often end in
-/// `"VEVO"` – strip both so the external-DB (Deezer/MusicBrainz) query matches.
+/// `"VEVO"` or `" Official"` – strip those so the external-DB
+/// (Deezer/MusicBrainz) query matches.
 pub fn clean_channel_name(name: &str) -> String {
     let mut s = name.trim();
     if let Some(stripped) = s.strip_suffix(" - Topic") {
         s = stripped.trim();
     }
-    if let Some(stripped) = s.strip_suffix("VEVO") {
-        s = stripped.trim_end();
+    for suffix in ["VEVO", " Official"] {
+        if let Some(stripped) = s.strip_suffix(suffix) {
+            s = stripped.trim_end();
+        }
     }
     s.to_string()
 }
@@ -405,6 +408,7 @@ pub fn clean_channel_name(name: &str) -> String {
 fn strip_title_noise(raw: &str) -> String {
     const NOISE: &[&str] = &[
         "official",
+        "offiziell",
         "video",
         "audio",
         "lyric",
@@ -438,16 +442,19 @@ fn strip_title_noise(raw: &str) -> String {
 /// detail view. Music titles are usually `"Artist - Title"`, sometimes
 /// `"Artist - Album - Title"`; Topic/auto uploads often carry just the song
 /// name, so the channel (cleaned of "- Topic"/"VEVO") is the artist fallback.
-/// En/em dashes are treated like the `" - "` separator; trailing tag groups
-/// (e.g. "(Official Video)") are dropped first.
+/// En/em dashes, `//`, `|` and `•` are treated like the `" - "` separator, the
+/// quotes around a name are dropped; trailing tag groups (e.g. "(Official
+/// Video)") are dropped first.
 pub fn split_title(raw: &str, channel: Option<&str>) -> (Option<String>, Option<String>, String) {
     let cleaned = strip_title_noise(raw);
     // YouTube uses a spaced hyphen / en dash / em dash between artist and title;
     // splitting on the *spaced* form avoids breaking names like "Twenty-One".
-    let normalized = cleaned.replace(" – ", " - ").replace(" — ", " - ");
+    let normalized = [" – ", " — ", " // ", " | ", " • "]
+        .iter()
+        .fold(cleaned.clone(), |t, sep| t.replace(sep, " - "));
     let parts: Vec<&str> = normalized
         .split(" - ")
-        .map(str::trim)
+        .map(|p| p.trim().trim_matches(['"', '„', '“', '”', '«', '»']).trim())
         .filter(|s| !s.is_empty())
         .collect();
     let chan_artist = channel
@@ -760,20 +767,8 @@ pub fn find_download(video_id: &str) -> Option<PathBuf> {
 }
 
 /// Transcodes a downloaded audio file to a tagged MP3 at `dest` via ffmpeg
-/// (present in the GNOME runtime). Embeds title/artist/album so the library
-/// scanner reads proper metadata. **Blocking – worker threads only.**
-pub fn transcode_to_mp3(
-    source: &Path,
-    dest: &Path,
-    title: &str,
-    artist: Option<&str>,
-    album: Option<&str>,
-) -> Result<()> {
-    transcode_to_mp3_meta(source, dest, title, artist, album, None, None, None)
-}
-
-/// Like [`transcode_to_mp3`] but also embeds track/disc number and year — used
-/// when filling a specific slot of a known album (the missing-track feature).
+/// (present in the GNOME runtime). Embeds the tags so the library scanner reads
+/// proper metadata. **Blocking – worker threads only.**
 #[allow(clippy::too_many_arguments)]
 pub fn transcode_to_mp3_meta(
     source: &Path,
@@ -784,6 +779,7 @@ pub fn transcode_to_mp3_meta(
     track_no: Option<u32>,
     disc: Option<u32>,
     year: Option<i32>,
+    genre: Option<&str>,
 ) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -809,6 +805,9 @@ pub fn transcode_to_mp3_meta(
     }
     if let Some(y) = year {
         cmd.args(["-metadata", &format!("date={y}")]);
+    }
+    if let Some(g) = genre.filter(|s| !s.trim().is_empty()) {
+        cmd.args(["-metadata", &format!("genre={g}")]);
     }
     cmd.arg(dest);
     let status = proc::status_timeout(&mut cmd, DOWNLOAD_TIMEOUT)?;
@@ -1069,6 +1068,131 @@ mod tests {
         assert_eq!(release_age_days("2026.13.01"), None);
         assert_eq!(release_age_days("2026.07"), None);
         assert_eq!(release_age_days(""), None);
+    }
+
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|(a, t)| (a.to_string(), t.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn candidates_of_a_plain_artist_title_video() {
+        assert_eq!(
+            video_candidates(
+                "Madonna & Sabrina Carpenter - Bring Your Love (Official Visualizer)",
+                Some("Madonna"),
+            ),
+            pairs(&[
+                ("Madonna & Sabrina Carpenter", "Bring Your Love"),
+                ("Bring Your Love", "Madonna & Sabrina Carpenter"),
+                ("Madonna", "Bring Your Love"),
+                ("Madonna", "Madonna & Sabrina Carpenter"),
+            ])
+        );
+    }
+
+    #[test]
+    fn candidates_of_titles_with_other_separators() {
+        let c = video_candidates(
+            "Die Toten Hosen // „Tage wie diese\" [Offizielles Musikvideo]",
+            Some("DIE TOTEN HOSEN"),
+        );
+        assert_eq!(
+            c[0],
+            ("Die Toten Hosen".to_string(), "Tage wie diese".to_string())
+        );
+        let c = video_candidates(
+            "Die Toten Hosen | Tage wie diese | English Subtitles & Original Lyrics",
+            Some("LaLa Lyrics"),
+        );
+        assert!(c.contains(&("Die Toten Hosen".to_string(), "Tage wie diese".to_string())));
+        let c = video_candidates("Die Toten Hosen • Tage wie diese • Karaoke", None);
+        assert!(c.contains(&("Die Toten Hosen".to_string(), "Tage wie diese".to_string())));
+    }
+
+    #[test]
+    fn candidates_turn_a_title_naming_the_channel_on_its_second_side() {
+        let c = video_candidates(
+            "Tom's Diner (Cover) - AnnenMayKantereit x Giant Rooks",
+            Some("AnnenMayKantereit"),
+        );
+        assert_eq!(
+            c[0],
+            (
+                "AnnenMayKantereit x Giant Rooks".to_string(),
+                "Tom's Diner (Cover)".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn candidates_of_a_song_name_without_an_artist() {
+        assert_eq!(
+            video_candidates("Song (Official Video)", Some("ArtistVEVO")),
+            pairs(&[("Artist", "Song")])
+        );
+        assert_eq!(
+            video_candidates("Song", Some("Queen Official")),
+            pairs(&[("Queen", "Song")])
+        );
+        assert!(video_candidates("Song", None).is_empty());
+    }
+
+    #[test]
+    fn candidates_trust_a_topic_channel_first() {
+        let c = video_candidates("Song - Remastered 2011", Some("Artist - Topic"));
+        assert_eq!(
+            c[0],
+            ("Artist".to_string(), "Song - Remastered 2011".to_string())
+        );
+    }
+
+    #[test]
+    fn candidates_without_the_channel_doubling_itself() {
+        assert_eq!(
+            video_candidates("Artist - Song", Some("Artist")),
+            pairs(&[("Artist", "Song")])
+        );
+    }
+
+    #[test]
+    fn tags_keep_the_artist_a_song_list_asked_for() {
+        use crate::core::online::TrackTags;
+        let found = || TrackTags {
+            artist: Some("P!NK".into()),
+            title: "Song (Remastered)".into(),
+            album: Some("Album".into()),
+            year: Some(2001),
+            ..Default::default()
+        };
+        let guess = || (Some("Pink".to_string()), "Song".to_string());
+        // Named by the caller: its spelling stays, the rest is the database's.
+        let t = resolve_tags(Some("Pink"), guess(), Some(found()));
+        assert_eq!(t.artist.as_deref(), Some("Pink"));
+        assert_eq!(t.title, "Song (Remastered)");
+        assert_eq!(t.album.as_deref(), Some("Album"));
+        assert_eq!(t.year, Some(2001));
+        // Only guessed from the video: the database knows better.
+        let t = resolve_tags(None, guess(), Some(found()));
+        assert_eq!(t.artist.as_deref(), Some("P!NK"));
+        // Unknown to the database: the cleaned-up guess.
+        let t = resolve_tags(None, guess(), None);
+        assert_eq!(t.artist.as_deref(), Some("Pink"));
+        assert_eq!(t.title, "Song");
+        assert_eq!(t.album, None);
+    }
+
+    #[test]
+    fn tags_never_name_the_platform_as_album() {
+        use crate::core::online::TrackTags;
+        let found = TrackTags {
+            title: "Song".into(),
+            album: Some("YouTube".into()),
+            ..Default::default()
+        };
+        let t = resolve_tags(None, (None, "Song".into()), Some(found));
+        assert_eq!(t.album, None);
     }
 
     #[test]
@@ -1537,6 +1661,86 @@ impl RawEntry {
     }
 }
 
+/// The `(artist, title)` pairs a video's title might stand for, best guess
+/// first — to be tried against a music database. "Artist - Song" is the usual
+/// form, but "Song - Artist" exists too, and a title naming the channel on its
+/// second side is that form. An auto-generated "… - Topic" channel is the artist
+/// and its title the plain song name, whatever dashes that has.
+fn video_candidates(raw_title: &str, channel: Option<&str>) -> Vec<(String, String)> {
+    let (first_side, album, second_side) = split_title(raw_title, channel);
+    let chan = channel
+        .map(clean_channel_name)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut push = |artist: &str, title: &str| {
+        let pair = (artist.to_string(), title.to_string());
+        if !out.contains(&pair) {
+            out.push(pair);
+        }
+    };
+    if let Some(c) = chan.as_deref()
+        && channel.is_some_and(|name| name.trim_end().ends_with(" - Topic"))
+    {
+        push(c, &strip_title_noise(raw_title));
+    }
+    if let Some(a) = first_side.as_deref() {
+        let b = second_side.as_str();
+        // Not for a title with no separator, whose first side is the channel.
+        let two_sided =
+            album.is_none() && !chan.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(a));
+        let mentions = |side: &str| {
+            chan.as_deref()
+                .is_some_and(|c| side.to_lowercase().contains(&c.to_lowercase()))
+        };
+        if two_sided && mentions(b) && !mentions(a) {
+            push(b, a);
+        }
+        push(a, b);
+        if two_sided {
+            push(b, a);
+        }
+        // "Artist | Song | English Subtitles" reads like "Artist - Album - Song".
+        if let Some(middle) = album.as_deref() {
+            push(a, middle);
+        }
+        if let Some(c) = chan.as_deref() {
+            push(c, b);
+            if two_sided {
+                push(c, a);
+            }
+        }
+    }
+    out
+}
+
+/// The tags a download gets: the music database's where it found the song (no
+/// platform name as an album), else the best guess. An artist named by the
+/// caller stays as it is — the song list it came from finds the new song only
+/// under that name, and the database may well spell it differently.
+fn resolve_tags(
+    caller_artist: Option<&str>,
+    guess: (Option<String>, String),
+    found: Option<crate::core::online::TrackTags>,
+) -> crate::core::online::TrackTags {
+    let (guess_artist, guess_title) = guess;
+    let named = caller_artist.map(str::to_string);
+    match found {
+        Some(t) => crate::core::online::TrackTags {
+            artist: named.or(t.artist).or(guess_artist),
+            album: t
+                .album
+                .filter(|a| !crate::core::placeholder::is_platform_tag(a)),
+            ..t
+        },
+        None => crate::core::online::TrackTags {
+            artist: named.or(guess_artist),
+            title: guess_title,
+            ..Default::default()
+        },
+    }
+}
+
 /// Result of [`add_to_library`].
 pub enum AddOutcome {
     Added,
@@ -1599,40 +1803,44 @@ pub fn add_to_library_progress(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| title_hint.to_string());
 
-    // What YouTube offers is a channel name and a title like
-    // "Artist - Song (Official Video)". Split that into artist/title first …
-    let (split_artist, _, split_title) = split_title(
-        &raw_title,
-        meta.as_ref().and_then(|m| m.uploader.as_deref()),
-    );
-    // … but a caller that passes an `artist_hint` took *both* hints from a
-    // better source than YouTube (a station's song recognition), so its pair
-    // wins over anything derived from the video.
-    let (hint_artist, lookup_title) = match artist_hint.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(a) => (
-            Some(a.to_string()),
+    let channel = meta.as_ref().and_then(|m| m.uploader.as_deref());
+    // A caller that passes an `artist_hint` took *both* hints from a better
+    // source than YouTube (a song list, a station's song recognition), so its
+    // pair wins over anything derived from the video. Otherwise there's only a
+    // channel name and a title like "Artist - Song (Official Video)".
+    let caller_artist = artist_hint.map(str::trim).filter(|s| !s.is_empty());
+    let candidates = match caller_artist {
+        Some(a) => vec![(
+            a.to_string(),
             match title_hint.trim() {
-                "" => split_title,
+                "" => split_title(&raw_title, channel).2,
                 t => t.to_string(),
             },
-        ),
-        None => (split_artist, split_title),
+        )],
+        None => video_candidates(&raw_title, channel),
     };
+    // The cleaned-up best guess, for a song the music database doesn't know.
+    let guess = candidates
+        .first()
+        .cloned()
+        .map(|(a, t)| (Some(a), t))
+        .unwrap_or_else(|| (None, split_title(&raw_title, channel).2));
     // Finally let a music database have the say on the actual tags.
-    let (artist, title, album, dz_cover) =
-        match crate::core::online::track_tags(hint_artist.as_deref(), &lookup_title) {
-            // Never file a download under the platform it came from: "YouTube"
-            // is not an album, neither as a tag nor as a folder.
-            Some(t) => (
-                t.artist.or(hint_artist),
-                t.title,
-                t.album
-                    .filter(|a| !crate::core::placeholder::is_platform_tag(a)),
-                t.cover,
-            ),
-            // Nothing found online — the cleaned-up hints still beat the raw title.
-            None => (hint_artist, lookup_title, None, None),
-        };
+    let tags = resolve_tags(
+        caller_artist,
+        guess,
+        crate::core::online::official_track_tags(&candidates),
+    );
+    let crate::core::online::TrackTags {
+        artist,
+        title,
+        album,
+        cover: dz_cover,
+        year,
+        track_no,
+        disc_no,
+        genre,
+    } = tags;
 
     let mut dest = PathBuf::from(music_dir);
     dest.push("YouTube");
@@ -1660,12 +1868,22 @@ pub fn add_to_library_progress(
             .map_err(|e| e.to_string())?,
     };
     on(AddProgress::Processing);
-    transcode_to_mp3(&source, &dest, &title, artist.as_deref(), album.as_deref())
-        .map_err(|e| e.to_string())?;
+    transcode_to_mp3_meta(
+        &source,
+        &dest,
+        &title,
+        artist.as_deref(),
+        album.as_deref(),
+        track_no,
+        disc_no,
+        year,
+        genre.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
     let dest_str = dest.to_string_lossy().into_owned();
-    if let Some(bytes) = cover.and_then(|c| std::fs::read(c).ok()) {
-        crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
-    } else if let Some(bytes) = dz_cover {
+    // The database's cover belongs to these tags; the one handed in was looked
+    // up from what YouTube said (or is the video's thumbnail).
+    if let Some(bytes) = dz_cover.or_else(|| cover.and_then(|c| std::fs::read(c).ok())) {
         crate::core::online::store_track_cover_bytes(&dest_str, &bytes);
     }
     if let Ok(lib) = crate::core::db::Library::open() {
@@ -1675,9 +1893,9 @@ pub fn add_to_library_progress(
             title,
             artist,
             album,
-            genre: None,
-            track_no: None,
-            disc_no: None,
+            genre,
+            track_no,
+            disc_no,
             // The transcoded file is the truth (yt-dlp reports the *video*
             // length, which the mp3 need not match); its metadata is the fallback.
             duration_ms: crate::core::scanner::read_meta(&dest).2.or_else(|| {
@@ -1685,7 +1903,7 @@ pub fn add_to_library_progress(
                     .map(|s| s.saturating_mul(1000))
             }),
             resume_ms: 0,
-            year: None,
+            year,
         };
         let _ = lib.upsert_track(&track);
         // Link the video id to its on-disk copy so a later `yt:<id>` selection
@@ -1731,6 +1949,7 @@ pub fn add_video_to_album(
         Some(track_no),
         disc,
         year,
+        None,
     )
     .map_err(|e| e.to_string())?;
 

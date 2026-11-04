@@ -89,6 +89,24 @@ fn smoke_deezer_artist_popularity() {
 
 // ---- LRCLIB ---------------------------------------------------------------
 
+/// A download's official tags: complete for a song Deezer has, and never
+/// another artist's song of the same name.
+#[test]
+#[ignore]
+fn smoke_deezer_official_track_tags() {
+    let pair = |a: &str, t: &str| vec![(a.to_string(), t.to_string())];
+    let tags = crate::core::online::official_track_tags(&pair("Daft Punk", "One More Time"))
+        .expect("no tags for Daft Punk – One More Time");
+    assert_eq!(tags.artist.as_deref(), Some("Daft Punk"));
+    assert!(tags.album.is_some(), "no album");
+    assert!(tags.year.is_some(), "no year");
+    assert!(tags.track_no.is_some(), "no track number");
+    assert!(tags.cover.is_some(), "no cover");
+
+    let other = crate::core::online::official_track_tags(&pair("Daft Punk", "Bohemian Rhapsody"));
+    assert!(other.is_none(), "took another artist's song");
+}
+
 #[test]
 #[ignore]
 fn smoke_lrclib_lyrics() {

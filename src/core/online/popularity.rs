@@ -140,7 +140,7 @@ fn marks_other_take(text: &str) -> bool {
 /// How far a local copy is from the original recording: 0 the plain title on
 /// a regular album, 1 a harmless version note ("feat. …", "Remastered"),
 /// 2 an instrumental, live, remix, demo … take by its title or its album.
-fn version_distance(title: &str, album: &str) -> u8 {
+pub(super) fn version_distance(title: &str, album: &str) -> u8 {
     let note = title.get(title_key_cut(title).len()..).unwrap_or("");
     if marks_other_take(note) || marks_other_take(album) {
         2
@@ -152,7 +152,7 @@ fn version_distance(title: &str, album: &str) -> u8 {
 }
 
 /// The part of `title` that [`title_key`] keys on (before any version note).
-fn title_key_cut(title: &str) -> &str {
+pub(super) fn title_key_cut(title: &str) -> &str {
     let cut = title.find(['(', '[']).map_or(title, |i| &title[..i]);
     cut.split(" - ").next().unwrap_or(cut)
 }

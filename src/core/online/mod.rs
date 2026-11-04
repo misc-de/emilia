@@ -97,6 +97,7 @@ pub struct CanonicalTrack {
 /// Canonical tags of a single track, as a music database (Deezer) knows them.
 /// Used to tag a download from its *real* metadata instead of a YouTube channel
 /// name and video title.
+#[derive(Default)]
 pub struct TrackTags {
     /// The database's artist — not the uploader/channel.
     pub artist: Option<String>,
@@ -104,6 +105,14 @@ pub struct TrackTags {
     pub album: Option<String>,
     /// Front cover of the single/album, if one could be fetched.
     pub cover: Option<Vec<u8>>,
+    /// Release year of the album (only from [`official_track_tags`]).
+    pub year: Option<i32>,
+    /// Position on the album (only from [`official_track_tags`]).
+    pub track_no: Option<u32>,
+    /// Disc of the album (only from [`official_track_tags`]).
+    pub disc_no: Option<u32>,
+    /// Genre of the album (only from [`official_track_tags`]).
+    pub genre: Option<String>,
 }
 
 impl TrackTags {
@@ -204,6 +213,7 @@ mod tests {
             title: "T".into(),
             album: Some("Album".into()),
             cover,
+            ..Default::default()
         };
         assert_eq!(tags(None).into_cover(), None);
         assert_eq!(
