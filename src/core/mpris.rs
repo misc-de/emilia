@@ -6,7 +6,7 @@
 //! on the UI thread – no thread bridging needed. If no D-Bus is reachable
 //! (e.g. headless), setup fails silently and all calls are no-ops.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::glib;
@@ -131,6 +131,8 @@ impl Current {
 pub struct Mpris {
     player: Slot,
     current: Rc<RefCell<Current>>,
+    /// The status last reported by the app, published once the player is up.
+    status: Rc<Cell<PlaybackStatus>>,
 }
 
 impl Mpris {
@@ -156,7 +158,12 @@ impl Mpris {
         // stale instance cannot fight over the same MPRIS name.
         let suffix = format!("Emilia.instance{}", std::process::id());
 
+        let current = Rc::new(RefCell::new(Current::default()));
+        let status = Rc::new(Cell::new(PlaybackStatus::Stopped));
+
         let slot_for_task = slot.clone();
+        let current_for_task = current.clone();
+        let status_for_task = status.clone();
         glib::spawn_future_local(async move {
             // (Re)build the service in a loop: if `run()` ever returns — most
             // often because the session D-Bus connection dropped across a
@@ -258,8 +265,23 @@ impl Mpris {
                 // can push state. `run()` returns a 'static future, so the borrow
                 // ends here and the player can move into the slot.
                 let run_fut = player.run();
-                *slot_for_task.borrow_mut() = Some(Rc::new(player));
+                let player = Rc::new(player);
+                *slot_for_task.borrow_mut() = Some(player.clone());
                 tracing::debug!("MPRIS service ready");
+                // What the app reported while the slot was empty: a file opened at
+                // start plays before the service is up, and a reconnect starts with
+                // a blank player.
+                let metadata = {
+                    let cur = current_for_task.borrow();
+                    cur.set.then(|| cur.build())
+                };
+                let last_status = status_for_task.get();
+                glib::spawn_future_local(async move {
+                    let _ = player.set_playback_status(last_status).await;
+                    if let Some(metadata) = metadata {
+                        let _ = player.set_metadata(metadata).await;
+                    }
+                });
                 let _ = run_fut.await;
                 // Service ended (D-Bus dropped) → clear the slot and rebuild after
                 // a short delay.
@@ -271,7 +293,8 @@ impl Mpris {
 
         Mpris {
             player: slot,
-            current: Rc::new(RefCell::new(Current::default())),
+            current,
+            status,
         }
     }
 
@@ -289,6 +312,7 @@ impl Mpris {
     }
 
     fn set_status(&self, status: PlaybackStatus) {
+        self.status.set(status);
         let Some(player) = self.player.borrow().clone() else {
             return;
         };
