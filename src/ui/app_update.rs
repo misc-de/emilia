@@ -150,6 +150,7 @@ impl App {
             Msg::StartupOnline => self.on_startup_online(&sender),
             Msg::FingerprintCurrent(path) => self.fetch_focus_track(&sender, &path),
             Msg::Mpris(cmd) => self.handle_mpris(root, cmd),
+            Msg::OpenFiles(uris) => self.open_uris_from_desktop(root, &uris),
             Msg::Mcp(cmd) => self.handle_mcp(cmd, root, &sender),
             Msg::McpSetting(m) => self.update_mcp_setting(m),
             Msg::NavUp => self.on_nav_up(&sender),

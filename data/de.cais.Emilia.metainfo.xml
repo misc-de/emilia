@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.58" date="2026-11-06">
+      <description>
+        <p>Emilia now plays an audio file you tap in a file manager, also when it is already open. Several files become the queue.</p>
+        <p xml:lang="de">Emilia spielt jetzt eine Audiodatei ab, die im Dateimanager angetippt wird, auch wenn sie schon offen ist. Mehrere Dateien werden zur Warteschlange.</p>
+      </description>
+    </release>
     <release version="0.8.57" date="2026-11-04">
       <description>
         <p>Songs downloaded from YouTube now get their tags from a music database: title, artist, album, year, track and disc number, genre and cover, and no longer the video title or channel name. If the database doesn't know a song, it keeps a cleaned-up title.</p>

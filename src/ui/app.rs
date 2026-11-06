@@ -1681,6 +1681,16 @@ impl Component for App {
             move |cmd| sender.input(Msg::Mpris(cmd))
         });
 
+        // Files from the command line. A later start hands its files over to this
+        // instance and ends, so this also runs while Emilia is already open.
+        {
+            let sender = sender.clone();
+            relm4::main_application().connect_open(move |_, files, _| {
+                let uris = files.iter().map(|f| f.uri().to_string()).collect();
+                sender.input(Msg::OpenFiles(uris));
+            });
+        }
+
         let toast_overlay = adw::ToastOverlay::new();
         let concerts_list = gtk::ListBox::new();
         let playlists_list = gtk::ListBox::new();

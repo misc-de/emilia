@@ -80,6 +80,34 @@ impl App {
         }
     }
 
+    /// Files handed over by the desktop. One takes the route of `OpenUri`, several
+    /// become the queue in the order given; what isn't a local file is left out.
+    pub(crate) fn open_uris_from_desktop(
+        &mut self,
+        root: &adw::ApplicationWindow,
+        uris: &[String],
+    ) {
+        root.present();
+        if let [uri] = uris {
+            self.open_uri_from_desktop(uri);
+            return;
+        }
+        let files: Vec<std::path::PathBuf> = uris
+            .iter()
+            .filter_map(|uri| gtk::glib::filename_from_uri(uri).ok())
+            .map(|(path, _)| path)
+            .filter(|path| path.is_file())
+            .collect();
+        if files.is_empty() {
+            tracing::warn!("Nothing to play in {} handed-over files", uris.len());
+            return;
+        }
+        self.transport.queue = files;
+        self.transport.queue_pos = 0;
+        self.play_current();
+        self.refresh_queue_icons();
+    }
+
     /// Length of what is playing, from the pipeline (authoritative) or the last
     /// value the tick saw. `None` for a live stream, which has no end to run
     /// past.

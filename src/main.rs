@@ -7,6 +7,10 @@ mod i18n;
 mod model;
 mod ui;
 
+use std::time::Duration;
+
+use relm4::gtk::gio::prelude::ApplicationExt;
+use relm4::gtk::{gio, glib};
 use relm4::{RelmApp, adw};
 
 const APP_ID: &str = "de.cais.Emilia";
@@ -52,7 +56,22 @@ fn main() {
     };
     i18n::init(lang);
 
-    let gtk_app = adw::Application::builder().application_id(APP_ID).build();
+    // HANDLES_OPEN: files on the command line (`%U` in the desktop entry) arrive
+    // through the `open` signal, see `App::init`.
+    let gtk_app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
+
+    // A later start only hands over to the running instance and has to end then.
+    // `RelmApp::run` closes with one blocking main-loop iteration, and in such a
+    // process nothing would ever wake it, so it would stay around for good.
+    gtk_app.connect_handle_local_options(|app, _| {
+        if app.register(gio::Cancellable::NONE).is_ok() && app.is_remote() {
+            glib::timeout_add_local(Duration::from_millis(100), || glib::ControlFlow::Continue);
+        }
+        -1 // Carry on as usual
+    });
 
     let app = RelmApp::from_app(gtk_app);
     app.run::<ui::app::App>(());

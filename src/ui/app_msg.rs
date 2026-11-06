@@ -124,6 +124,8 @@ pub enum Msg {
     SyncImported,
     /// Command from the lock screen / from media keys (MPRIS).
     Mpris(crate::core::mpris::MprisCommand),
+    /// Files handed over at start or by a later start (a tap in a file manager).
+    OpenFiles(Vec<String>),
     /// Command from the embedded MCP server (see [`crate::ui::app_mcp`]).
     Mcp(crate::core::mcp::McpCommand),
     /// MCP-server settings (backend mode / LAN exposure / bearer token)
