@@ -924,7 +924,10 @@ pub fn embed_cover(
     } else {
         MimeType::Jpeg
     };
-    let pic = Picture::new_unchecked(PictureType::CoverFront, Some(mime), None, image.to_vec());
+    let pic = Picture::unchecked(image.to_vec())
+        .pic_type(PictureType::CoverFront)
+        .mime_type(mime)
+        .build();
     tag.push_picture(pic);
     if let Err(e) = tag.save_to_path(path, WriteOptions::default()) {
         tracing::debug!("Could not embed cover into {}: {e}", path.display());

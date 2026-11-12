@@ -152,7 +152,7 @@ pub struct TokenSet {
 
 fn random_urlsafe(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    getrandom::getrandom(&mut buf).expect("system randomness not available");
+    getrandom::fill(&mut buf).expect("system randomness not available");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
 }
 

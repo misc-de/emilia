@@ -16,9 +16,9 @@ use quick_xml::events::Event;
 /// slightly wrong than truncated.
 pub fn push_text(buf: &mut String, ev: &Event) {
     match ev {
-        Event::Text(t) => buf.push_str(&t.xml10_content().unwrap_or_default()),
+        Event::Text(t) => buf.push_str(&t.xml10_content()),
         Event::GeneralRef(r) => {
-            let name = r.decode().unwrap_or_default();
+            let name = r.xml10_content();
             let raw = format!("&{name};");
             match quick_xml::escape::unescape(&raw) {
                 Ok(s) => buf.push_str(&s),

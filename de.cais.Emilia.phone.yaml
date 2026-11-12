@@ -5,8 +5,8 @@
 # (`--no-default-features`). Beide teilen sich die Modul-Dateien unter flatpak/.
 #
 # Lokal bauen & installieren:
-#   flatpak install flathub org.gnome.Platform//49 org.gnome.Sdk//49 \
-#       org.freedesktop.Sdk.Extension.rust-stable//25.08
+#   flatpak install flathub org.gnome.Platform//51 org.gnome.Sdk//51 \
+#       org.freedesktop.Sdk.Extension.rust-stable//26.08
 #   flatpak-builder --user --install --force-clean build-dir de.cais.Emilia.phone.yaml
 #   flatpak run de.cais.Emilia
 #
@@ -18,7 +18,7 @@
 #       Cargo.lock -o generated-sources.json
 id: de.cais.Emilia
 runtime: org.gnome.Platform
-runtime-version: '49'
+runtime-version: '51'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable

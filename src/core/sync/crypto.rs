@@ -69,14 +69,14 @@ pub fn spki_fingerprint(cert_der: &[u8]) -> Result<String> {
 /// Random base64url token with `n` bytes of entropy.
 pub fn generate_token(n: usize) -> String {
     let mut buf = vec![0u8; n];
-    getrandom::getrandom(&mut buf).expect("system randomness not available");
+    getrandom::fill(&mut buf).expect("system randomness not available");
     URL_SAFE_NO_PAD.encode(buf)
 }
 
 /// Random hex ID (for the persistent device ID in the settings).
 pub fn random_hex(n: usize) -> String {
     let mut buf = vec![0u8; n];
-    getrandom::getrandom(&mut buf).expect("system randomness not available");
+    getrandom::fill(&mut buf).expect("system randomness not available");
     let mut s = String::with_capacity(n * 2);
     for b in buf {
         s.push_str(&format!("{b:02x}"));

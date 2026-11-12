@@ -56,7 +56,7 @@ fn start() -> Result<Proxy> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
     let mut buf = [0u8; 24];
-    getrandom::getrandom(&mut buf).map_err(|e| anyhow!("no randomness: {e}"))?;
+    getrandom::fill(&mut buf).map_err(|e| anyhow!("no randomness: {e}"))?;
     let secret = buf.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let secret_for_thread = secret.clone();
     std::thread::Builder::new()

@@ -22,8 +22,8 @@ use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::StreamableHttpService;
@@ -42,10 +42,12 @@ struct EmiliaServer {
 }
 
 impl ServerHandler for EmiliaServer {
-    fn get_info(&self) -> ServerInfo {
-        let mut info = ServerInfo::default();
+    fn get_info(&self) -> ServerConfig {
+        let mut info = ServerConfig::default();
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
-        info.server_info = Implementation::from_build_env();
+        // Same identity as the lean backend. Not `Implementation::from_build_env`:
+        // that expands `env!` inside rmcp and so reports "rmcp" and rmcp's version.
+        info.server_info = Implementation::new("emilia", env!("CARGO_PKG_VERSION"));
         info
     }
 
@@ -66,7 +68,7 @@ impl ServerHandler for EmiliaServer {
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<CallToolResponse, McpError> {
         let args = request
             .arguments
             .map(Value::Object)
@@ -78,19 +80,18 @@ impl ServerHandler for EmiliaServer {
         let name = request.name.to_string();
         let dispatched =
             tokio::task::spawn_blocking(move || tools::dispatch(&ctx, &name, &args)).await;
-        match dispatched {
+        let result = match dispatched {
             Ok(Ok(value)) => {
                 let text = serde_json::to_string_pretty(&value).unwrap_or_default();
-                Ok(CallToolResult::success(vec![Content::text(text)]))
+                CallToolResult::success(vec![ContentBlock::text(text)])
             }
-            Ok(Err(e)) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "error: {e}"
-            ))])),
+            Ok(Err(e)) => CallToolResult::error(vec![ContentBlock::text(format!("error: {e}"))]),
             // The blocking task panicked or was cancelled — surface it as a tool error.
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Err(e) => CallToolResult::error(vec![ContentBlock::text(format!(
                 "error: dispatch task failed: {e}"
-            ))])),
-        }
+            ))]),
+        };
+        Ok(result.into())
     }
 }
 
@@ -212,5 +213,126 @@ mod tests {
         assert!(tools.len() >= 10);
         assert!(tools.iter().any(|t| t.name == "search_library"));
         assert!(tools.iter().all(|t| !t.input_schema.is_empty()));
+    }
+
+    /// End-to-end over a real TCP socket through rmcp's Streamable HTTP
+    /// transport: bearer auth, the initialize handshake (session id), tools/list
+    /// and a tools/call that maps to a playback command. Guards the glue against
+    /// rmcp API/protocol changes on upgrades. Binds its own ephemeral port, so it
+    /// never shares the app's MCP port.
+    #[test]
+    fn sdk_roundtrip_over_tcp() {
+        use crate::core::mcp::{command::McpCommand, state};
+        use std::sync::Mutex;
+
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let sink = log.clone();
+        let ctx = Arc::new(McpContext {
+            now: state::new_handle(),
+            control: Arc::new(move |c| sink.lock().unwrap().push(c)),
+            jobs: Arc::new(crate::core::mcp::jobs::Jobs::default()),
+            sync: crate::core::mcp::new_sync_handle(),
+        });
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let handle = {
+            let stop = stop.clone();
+            std::thread::spawn(move || serve(ctx, "secret-token".into(), listener, None, stop))
+        };
+
+        let base = format!("http://127.0.0.1:{port}/mcp");
+        let auth = "Bearer secret-token";
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .build();
+        // Streamable HTTP answers a request either as plain JSON or as an SSE
+        // stream; pick the JSON-RPC message out of whichever arrives.
+        let post = |session: Option<&str>, body: Value| {
+            let mut req = agent
+                .post(&base)
+                .set("Authorization", auth)
+                .set("Accept", "application/json, text/event-stream");
+            if let Some(id) = session {
+                req = req.set("Mcp-Session-Id", id);
+            }
+            req.send_json(body).map_err(Box::new)
+        };
+        let message = |resp: ureq::Response| -> Value {
+            let text = resp.into_string().unwrap();
+            text.lines()
+                .filter_map(|l| l.strip_prefix("data:"))
+                .chain(std::iter::once(text.as_str()))
+                .filter_map(|d| serde_json::from_str::<Value>(d.trim()).ok())
+                .find(|v| v.get("id").is_some())
+                .unwrap_or_else(|| panic!("no JSON-RPC response in {text:?}"))
+        };
+
+        // Missing token → 401 (the server may need a moment to come up).
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match agent
+                .post(&base)
+                .send_json(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" }))
+            {
+                Err(ureq::Error::Status(401, _)) => break,
+                Err(ureq::Error::Transport(_)) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                other => panic!("missing bearer must be rejected, got {other:?}"),
+            }
+        }
+
+        let init = post(
+            None,
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "emilia-test", "version": "1" }
+            }}),
+        )
+        .expect("initialize ok");
+        let session = init
+            .header("Mcp-Session-Id")
+            .expect("session id")
+            .to_string();
+        let init = message(init);
+        assert_eq!(init["result"]["serverInfo"]["name"], json!("emilia"));
+        assert_eq!(
+            init["result"]["serverInfo"]["version"],
+            json!(env!("CARGO_PKG_VERSION"))
+        );
+        assert!(init["result"]["capabilities"]["tools"].is_object());
+
+        post(
+            Some(&session),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        )
+        .expect("initialized ok");
+
+        let list = message(
+            post(
+                Some(&session),
+                json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+            )
+            .expect("list ok"),
+        );
+        assert!(list["result"]["tools"].as_array().unwrap().len() >= 10);
+
+        let call = message(
+            post(
+                Some(&session),
+                json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+                    "name": "playback_control", "arguments": { "action": "next" }
+                }}),
+            )
+            .expect("call ok"),
+        );
+        assert_eq!(call["result"]["isError"], json!(false));
+        assert_eq!(log.lock().unwrap().as_slice(), &[McpCommand::Next]);
+
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap().expect("server exits cleanly");
     }
 }

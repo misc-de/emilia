@@ -9,7 +9,7 @@ mod ui;
 
 use std::time::Duration;
 
-use relm4::gtk::gio::prelude::ApplicationExt;
+use relm4::gtk::gio::prelude::{ApplicationExt, ApplicationExtManual};
 use relm4::gtk::{gio, glib};
 use relm4::{RelmApp, adw};
 
@@ -102,7 +102,7 @@ fn main() {
         if app.register(gio::Cancellable::NONE).is_ok() && app.is_remote() {
             glib::timeout_add_local(Duration::from_millis(100), || glib::ControlFlow::Continue);
         }
-        -1 // Carry on as usual
+        std::ops::ControlFlow::Continue(()) // Carry on as usual
     });
 
     let app = RelmApp::from_app(gtk_app);

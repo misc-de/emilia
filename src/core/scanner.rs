@@ -57,7 +57,7 @@ pub fn read_album_year_genre(path: &Path) -> (Option<String>, Option<u32>, Optio
         .genre()
         .map(|c| c.trim().to_string())
         .filter(|s| !s.is_empty());
-    (album, tag.year(), genre)
+    (album, tag.date().map(|d| u32::from(d.year)), genre)
 }
 
 /// Reads the (unsynchronized) lyrics from the tags, if present.
@@ -65,7 +65,7 @@ pub fn read_album_year_genre(path: &Path) -> (Option<String>, Option<u32>, Optio
 pub fn read_lyrics(path: &Path) -> Option<String> {
     let tagged = lofty::read_from_path(path).ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
-    tag.get_string(&lofty::tag::ItemKey::Lyrics)
+    tag.get_string(lofty::tag::ItemKey::Lyrics)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
@@ -191,8 +191,8 @@ pub fn read_track_detailed(path: &Path) -> Result<(Track, Option<String>)> {
                 .filter(|s| !s.trim().is_empty()),
             tag.track(),
             tag.disk(),
-            tag.year().map(|y| y as i32),
-            tag.get_string(&lofty::tag::ItemKey::Composer)
+            tag.date().map(|d| i32::from(d.year)),
+            tag.get_string(lofty::tag::ItemKey::Composer)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
         ),
@@ -289,14 +289,16 @@ pub fn write_tags(path: &Path, edit: &TagEdit) -> Result<()> {
             Some(t) => {
                 tag.insert_text(ItemKey::AlbumArtist, t);
             }
-            None => tag.remove_key(&ItemKey::AlbumArtist),
+            None => tag.remove_key(ItemKey::AlbumArtist),
         }
     }
     if let Some(y) = edit.year {
-        if y == 0 {
-            tag.remove_year();
-        } else {
-            tag.set_year(y);
+        match u16::try_from(y) {
+            Ok(year) if year > 0 => tag.set_date(lofty::tag::items::Timestamp {
+                year,
+                ..Default::default()
+            }),
+            _ => tag.remove_date(),
         }
     }
     if let Some(n) = edit.track_no {

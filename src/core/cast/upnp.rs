@@ -65,7 +65,7 @@ fn parse_description(xml: &str) -> Description {
         };
         match &ev {
             Event::Start(e) => {
-                let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                let name = e.local_name().as_ref().to_owned();
                 if name == "device" {
                     device_depth += 1;
                 }
@@ -250,7 +250,7 @@ pub(crate) fn leaf_values(xml: &str) -> HashMap<String, String> {
         };
         match &ev {
             Event::Start(e) => {
-                stack.push(String::from_utf8_lossy(e.local_name().as_ref()).into_owned());
+                stack.push(e.local_name().as_ref().to_owned());
                 text.clear();
             }
             Event::End(_) => {
@@ -449,16 +449,16 @@ fn parse_zone_groups(xml: &str) -> Vec<SonosGroup> {
         let attr = |name: &str| {
             e.attributes()
                 .flatten()
-                .find(|a| a.key.as_ref() == name.as_bytes())
+                .find(|a| a.key.as_ref() == name)
                 .and_then(|a| a.normalized_value(quick_xml::XmlVersion::Implicit1_0).ok())
                 .map(|v| v.into_owned())
         };
         match e.local_name().as_ref() {
-            b"ZoneGroup" => out.push(SonosGroup {
+            "ZoneGroup" => out.push(SonosGroup {
                 coordinator: attr("Coordinator").unwrap_or_default(),
                 members: 0,
             }),
-            b"ZoneGroupMember" if attr("Invisible").as_deref() != Some("1") => {
+            "ZoneGroupMember" if attr("Invisible").as_deref() != Some("1") => {
                 if let Some(g) = out.last_mut() {
                     g.members += 1;
                 }

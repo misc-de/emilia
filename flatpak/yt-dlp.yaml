@@ -13,8 +13,8 @@ build-commands:
   - install -Dm755 yt-dlp /app/bin/yt-dlp
 sources:
   - type: file
-    url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp
-    sha256: 1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
+    url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp
+    sha256: e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3
     x-checker-data:
       type: json
       url: https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest

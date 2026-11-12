@@ -10,14 +10,11 @@ name: chromaprint
 buildsystem: cmake-ninja
 config-opts:
   - -DCMAKE_BUILD_TYPE=Release
-  # Chromaprint 1.5.1 deklariert cmake_minimum_required < 3.5; neuere CMake
-  # (SDK) lehnt das sonst ab.
-  - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   - -DBUILD_TOOLS=ON
   - -DBUILD_TESTS=OFF
   - -DFFT_LIB=kissfft
   - -DAUDIO_PROCESSOR_LIB=swresample
 sources:
   - type: archive
-    url: https://github.com/acoustid/chromaprint/releases/download/v1.6.0/chromaprint-1.6.0.tar.gz
-    sha256: 9d33482e56a1389a37a0d6742c376139fa43e3b8a63d29003222b93db2cb40da
+    url: https://github.com/acoustid/chromaprint/releases/download/v1.6.2/chromaprint-1.6.2.tar.gz
+    sha256: d54ada62c16b2db396d3251ec54fc7a58909c163131a1cfcf7fa6407dbc14360

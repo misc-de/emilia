@@ -426,11 +426,10 @@ fn parse_propfind(xml: &str) -> Vec<RawEntry> {
 }
 
 /// Local element name without namespace prefix (`d:href` → `href`).
-fn local_name(qname: &[u8]) -> String {
-    let s = String::from_utf8_lossy(qname);
-    match s.rsplit_once(':') {
+fn local_name(qname: &str) -> String {
+    match qname.rsplit_once(':') {
         Some((_, local)) => local.to_string(),
-        None => s.to_string(),
+        None => qname.to_string(),
     }
 }
 

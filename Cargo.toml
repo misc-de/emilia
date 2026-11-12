@@ -1,29 +1,30 @@
 [package]
 name = "emilia"
-version = "0.8.58"
+version = "0.8.59"
 edition = "2024"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-relm4 = { version = "0.9", features = ["libadwaita", "gnome_46"] }
-relm4-components = "0.9"
-gtk = { version = "0.9", package = "gtk4" }
-adw = { version = "0.7", package = "libadwaita", features = ["v1_5"] }
-gstreamer = "0.23"
-lofty = "0.22"
+relm4 = { version = "0.11", features = ["libadwaita", "gnome_46"] }
+relm4-components = "0.11"
+gtk = { version = "0.11", package = "gtk4" }
+adw = { version = "0.9", package = "libadwaita", features = ["v1_5"] }
+gstreamer = "0.25"
+lofty = "0.25"
 rusqlite = { version = "0.42", features = ["bundled"] }
-dirs = "5"
+dirs = "7"
 ureq = { version = "2", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
-mpris-server = "0.10.0"
-# Already pulled in transitively by mpris-server; declared directly to call the
-# XDG camera portal (blocking API) in the QR scanner, so the desktop Flatpak
-# needs no `--device=all`. See src/core/sync/scanner.rs.
+mpris-server = "0.11"
+# Declared directly to call the XDG camera portal (blocking API) in the QR
+# scanner, so the desktop Flatpak needs no `--device=all`. See
+# src/core/sync/scanner.rs. Stays on 5.x: zbus 6 dropped the blocking API, and
+# ksni (tray) still pulls in zbus 5 anyway, so this adds no extra crate.
 zbus = "5"
 rss = { version = "2.1.0", default-features = false }
 gettext-rs = { version = "0.8", features = ["gettext-system"] }
@@ -35,12 +36,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "tls1
 x509-parser = "0.18.1"
 # sha2 0.10: the `sspi` crate (NTLM for the SMB client) pins sha2 0.11.0-rc.2, which
 # cannot coexist with a stable 0.11 in one lockfile; 0.10 has the same API.
-sha2 = "0.10"
-base64 = "0.22"
-getrandom = "0.2"
+sha2 = "0.11"
+base64 = "0.23"
+getrandom = "0.4"
 qrcode = { version = "0.14.1", default-features = false }
 async-channel = "2.5"
-quick-xml = "0.41"
+quick-xml = "0.42"
 # SMB2/3 client for "SMB share" music sources — pure Rust (NTLM via `sspi`), so
 # the Flatpak needs neither libsmbclient nor a gvfs backend on the host. The
 # synchronous `multi_threaded` model is used (no tokio); see src/core/smb.rs.
@@ -53,7 +54,7 @@ percent-encoding = "2"
 rsa = { version = "=0.10.0-rc.18", default-features = false, features = ["std", "encoding", "sha1"] }
 sha1 = { version = "=0.11.0", default-features = false }
 aes = "=0.9.3"
-gstreamer-app = "0.23"
+gstreamer-app = "0.25"
 # QR *decoding* (camera scanner). default-features off → drop the heavy `image`
 # integration; we feed a raw grayscale buffer via `prepare_from_greyscale`.
 rqrr = { version = "0.11", default-features = false }
@@ -64,17 +65,17 @@ ksni = { version = "0.3", default-features = false, features = ["async-io", "blo
 # X11 backend access for the optional "hide from taskbar" window hint
 # (`_NET_WM_STATE_SKIP_TASKBAR`). GTK4 dropped the high-level setter, so we send
 # the EWMH client message ourselves; no-op on Wayland. See src/ui/app_tray.rs.
-gdk4-x11 = "0.9"
-x11rb = "0.13"
+gdk4-x11 = "0.11"
+x11rb = "0.14"
 # Optional "Tokio SDK" MCP backend (the lean JSON-RPC backend needs none of
 # this). rmcp's streamable-HTTP transport pulls in an async (tokio/axum/hyper)
 # HTTP stack, so the whole group sits behind the `mcp-sdk` feature (on by
 # default; phone builds pass `--no-default-features`). See src/core/mcp.
-rmcp = { version = "1", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
+rmcp = { version = "3", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"], optional = true }
 # TLS for the "public (LAN)" SDK case, reusing the same rustls 0.23 identity as
 # device sync. Pinned to the matching rustls major.
-axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"], optional = true }
+axum-server = { version = "0.9", default-features = false, features = ["tls-rustls-no-provider"], optional = true }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "time", "io-util"], optional = true }
 
 [features]

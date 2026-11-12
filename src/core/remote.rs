@@ -299,7 +299,7 @@ pub fn parse_remote_meta(buf: Vec<u8>) -> RemoteMeta {
         m.genre = clean(tag.genre());
         m.track_no = tag.track();
         m.disc_no = tag.disk();
-        m.year = tag.year().map(|y| y as i32);
+        m.year = tag.date().map(|d| i32::from(d.year));
     }
     m
 }

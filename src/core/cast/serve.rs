@@ -84,7 +84,7 @@ static SERVER: OnceLock<std::result::Result<Server, String>> = OnceLock::new();
 
 fn random_hex(n: usize) -> Result<String> {
     let mut buf = vec![0u8; n];
-    getrandom::getrandom(&mut buf).map_err(|e| anyhow!("no randomness: {e}"))?;
+    getrandom::fill(&mut buf).map_err(|e| anyhow!("no randomness: {e}"))?;
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 

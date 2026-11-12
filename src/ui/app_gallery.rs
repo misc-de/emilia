@@ -71,7 +71,9 @@ mod square_bin {
     }
 
     glib::wrapper! {
-        pub struct SquareBin(ObjectSubclass<imp::SquareBin>) @extends gtk::Widget;
+        pub struct SquareBin(ObjectSubclass<imp::SquareBin>)
+            @extends gtk::Widget,
+            @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
     }
 
     impl SquareBin {

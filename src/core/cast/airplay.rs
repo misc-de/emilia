@@ -793,7 +793,7 @@ mod tests {
             Ok(u64::from_le_bytes(b))
         }
         fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
-            getrandom::getrandom(dst).unwrap();
+            getrandom::fill(dst).unwrap();
             Ok(())
         }
     }

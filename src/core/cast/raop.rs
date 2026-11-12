@@ -390,7 +390,7 @@ impl Drop for RaopBackend {
 
 fn random<const N: usize>() -> [u8; N] {
     let mut b = [0u8; N];
-    let _ = getrandom::getrandom(&mut b);
+    let _ = getrandom::fill(&mut b);
     b
 }
 
@@ -703,7 +703,7 @@ impl rsa::rand_core::TryRng for SysRng {
         Ok(u64::from_le_bytes(random::<8>()))
     }
     fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
-        let _ = getrandom::getrandom(dst);
+        let _ = getrandom::fill(dst);
         Ok(())
     }
 }
