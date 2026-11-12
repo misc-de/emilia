@@ -1472,6 +1472,7 @@ impl App {
                  listview.emilia-card-list { background: none; }\
                  listview.emilia-card-list > row { background: none; padding: 0; border: none; box-shadow: none; }\
                  listview.emilia-card-list > row:hover, listview.emilia-card-list > row:selected { background: none; }\
+                 listview.emilia-card-list list.emilia-card-host { background: none; border: none; box-shadow: none; }\
                  listview.emilia-card-list row.emilia-card { background-color: @card_bg_color; border-left: 1px solid @card_shade_color; border-right: 1px solid @card_shade_color; border-bottom: 1px solid @card_shade_color; }\
                  listview.emilia-card-list row.emilia-card.emilia-sec-top { border-top: 1px solid @card_shade_color; border-top-left-radius: 12px; border-top-right-radius: 12px; }\
                  listview.emilia-card-list row.emilia-card.emilia-sec-bottom { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }\

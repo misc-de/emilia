@@ -22,6 +22,11 @@
 //!   so it cannot capture an index; it reads the position the row currently
 //!   holds out of a cell.
 //!
+//! The `ActionRow` sits in a one-row `gtk::ListBox` of its own: libadwaita 1.9
+//! warns about every `AdwPreferencesRow` whose parent is not a list box (and
+//! GTK asserts when such a row takes focus). The box selects nothing and claims
+//! no click, so a tap still reaches the `ListView`'s `activate`.
+//!
 //! Section headings are drawn inside the row (a label above the `ActionRow`,
 //! shown on the first row of each section) rather than through GTK's
 //! `SectionModel`. That keeps the existing look — heading on the window
@@ -64,6 +69,8 @@ mod imp {
     /// The recycled row widget: heading label above an `adw::ActionRow`.
     pub struct CardRow {
         pub header: gtk::Label,
+        /// One-row list box holding `row` (see the module docs).
+        pub host: gtk::ListBox,
         pub row: adw::ActionRow,
         /// Square image frame the cover is set into.
         pub thumb: adw::Bin,
@@ -94,6 +101,7 @@ mod imp {
         fn default() -> Self {
             Self {
                 header: crate::ui::app_gallery::section_header_label(""),
+                host: gtk::ListBox::new(),
                 row: adw::ActionRow::new(),
                 thumb: widgets::thumb_frame("media-optical-symbolic", 48),
                 duration: gtk::Label::new(None),
@@ -189,8 +197,12 @@ mod imp {
             ));
             self.row.add_controller(click);
 
+            self.host.set_selection_mode(gtk::SelectionMode::None);
+            self.host.add_css_class("emilia-card-host");
+            self.host.append(&self.row);
+
             obj.append(&self.header);
-            obj.append(&self.row);
+            obj.append(&self.host);
         }
 
         fn dispose(&self) {
