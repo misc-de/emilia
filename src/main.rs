@@ -15,13 +15,45 @@ use relm4::{RelmApp, adw};
 
 const APP_ID: &str = "de.cais.Emilia";
 
+/// Inside the Flatpak, a device without a DRM render node has no GPU the
+/// runtime's Mesa can drive — e.g. libhybris phones, whose Android GPU driver
+/// only the host can load. GTK would then pick Vulkan on lavapipe, which loads
+/// LLVM and compiles shaders on every start; the Cairo renderer starts about
+/// 1 s sooner there (measured on a MediaTek/Mali phone: 3.4 s → 2.2 s cold,
+/// 2.35 s → 1.45 s warm to the first frame). Outside the Flatpak the host may
+/// render through libhybris without a render node, so nothing changes there,
+/// and an explicit `GSK_RENDERER` always wins.
+fn software_only_renderer() -> bool {
+    if std::env::var_os("GSK_RENDERER").is_some()
+        || !std::path::Path::new("/.flatpak-info").exists()
+    {
+        return false;
+    }
+    let has_render_node = std::fs::read_dir("/dev/dri").is_ok_and(|dir| {
+        dir.flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with("renderD"))
+    });
+    !has_render_node
+}
+
 fn main() {
+    // Decided before anything else runs: setting the variable is only sound
+    // while the process is still single-threaded, and GTK reads it on startup.
+    let cairo_fallback = software_only_renderer();
+    if cairo_fallback {
+        // SAFETY: no other thread exists yet (first statement of `main`).
+        unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "emilia=info".into()),
         )
         .init();
+    if cairo_fallback {
+        tracing::info!("no GPU render node in the sandbox, using the Cairo renderer");
+    }
 
     // Route panics through tracing as well. The default hook only writes to
     // stderr, which is nowhere to be seen when the app was started from a
