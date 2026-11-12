@@ -137,6 +137,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.59" date="2026-11-12">
+      <description>
+        <p>Emilia now runs on the GNOME 51 platform, and all of its components are up to date, including yt-dlp for YouTube and fpcalc for track recognition. The update downloads the new platform once.</p>
+        <p>In the MCP "Tokio SDK" mode, the server now reports itself as Emilia with its version.</p>
+        <p xml:lang="de">Emilia läuft jetzt auf der GNOME-51-Plattform, und alle Bestandteile sind auf dem neuesten Stand, darunter yt-dlp für YouTube und fpcalc für die Titelerkennung. Das Update lädt die neue Plattform einmalig herunter.</p>
+        <p xml:lang="de">Im MCP-Modus „Tokio SDK“ meldet sich der Server jetzt als Emilia mit seiner Version.</p>
+      </description>
+    </release>
     <release version="0.8.58" date="2026-11-12">
       <description>
         <p>Emilia now plays an audio file you tap in a file manager, also when it is already open. Several files become the queue.</p>
