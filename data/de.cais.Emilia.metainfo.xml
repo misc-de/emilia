@@ -137,10 +137,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
-    <release version="0.8.58" date="2026-11-06">
+    <release version="0.8.58" date="2026-11-12">
       <description>
         <p>Emilia now plays an audio file you tap in a file manager, also when it is already open. Several files become the queue.</p>
+        <p>Emilia starts about a second faster on phones whose graphics driver the Flatpak can't use, such as libhybris phones.</p>
+        <p>The lock screen now shows a file that Emilia was opened with right away, instead of staying on "Stopped" until the next track.</p>
         <p xml:lang="de">Emilia spielt jetzt eine Audiodatei ab, die im Dateimanager angetippt wird, auch wenn sie schon offen ist. Mehrere Dateien werden zur Warteschlange.</p>
+        <p xml:lang="de">Emilia startet etwa eine Sekunde schneller auf Handys, deren Grafiktreiber das Flatpak nicht nutzen kann, etwa libhybris-Handys.</p>
+        <p xml:lang="de">Der Sperrbildschirm zeigt eine Datei, mit der Emilia geöffnet wurde, jetzt sofort an, statt bis zum nächsten Titel auf „Gestoppt“ zu stehen.</p>
       </description>
     </release>
     <release version="0.8.57" date="2026-11-04">
