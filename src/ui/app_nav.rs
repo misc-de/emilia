@@ -19,7 +19,9 @@ impl App {
         if !visible {
             let visible_count = SECTIONS
                 .iter()
-                .filter(|(n, _, _)| !self.nav.hidden_sections.contains(*n))
+                .filter(|(n, _, _)| {
+                    !self.nav.hidden_sections.contains(*n) && crate::ui::app::section_available(n)
+                })
                 .count();
             if visible_count <= 1 {
                 return;
@@ -66,7 +68,9 @@ impl App {
     pub(crate) fn refresh_nav_visibility(&self) {
         let visible_count = SECTIONS
             .iter()
-            .filter(|(n, _, _)| !self.nav.hidden_sections.contains(*n))
+            .filter(|(n, _, _)| {
+                !self.nav.hidden_sections.contains(*n) && crate::ui::app::section_available(n)
+            })
             .count();
         let single = visible_count <= 1;
         self.nav.nav_hidden.set(single);

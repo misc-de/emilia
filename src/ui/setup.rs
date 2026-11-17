@@ -112,7 +112,7 @@ impl Component for SetupPage {
         let enabled = SECTIONS
             .iter()
             .map(|(name, _, _)| *name)
-            .filter(|n| *n != "youtube" && crate::ui::app::section_available(n))
+            .filter(|n| *n != "youtube")
             .collect();
 
         let model = SetupPage {
@@ -578,6 +578,8 @@ impl SetupPage {
             .css_classes(["boxed-list"])
             .build();
         for (name, label, icon) in SECTIONS {
+            // Not offered here (FM radio without support, or not yet probed):
+            // no row, but it stays on, so it shows once support is confirmed.
             if !crate::ui::app::section_available(name) {
                 continue;
             }

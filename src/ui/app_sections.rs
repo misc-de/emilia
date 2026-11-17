@@ -36,12 +36,13 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 15] = [
     ("stats", "Statistics", "emilia-stats-symbolic"),
 ];
 
-/// Whether a section can be shown on this device at all: FM radio only with
-/// a tuner. An unavailable section is hidden and left out of the menu
+/// Whether a section can be shown on this device at all: FM radio only where
+/// the platform supports it (tuner and its sound, probed at startup — hidden
+/// until confirmed). An unavailable section is hidden and left out of the menu
 /// settings and the setup assistant, whatever the user's choice says.
 pub(crate) fn section_available(name: &str) -> bool {
     match name {
-        "fm" => crate::core::fm::available(),
+        "fm" => crate::core::fm::supported(),
         _ => true,
     }
 }

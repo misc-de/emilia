@@ -184,11 +184,12 @@ glib::wrapper! {
 }
 
 /// Registers the `emilia-fm://` source with GStreamer (idempotent). Only on a
-/// device with a tuner: elsewhere the scheme stays unknown.
+/// device with a tuner: elsewhere the scheme stays unknown. (Whether the
+/// platform also carries the sound decides whether the FM section shows.)
 pub fn register() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        if !fm::available() {
+        if !fm::tuner_present() {
             return;
         }
         if let Err(e) = gst::Element::register(

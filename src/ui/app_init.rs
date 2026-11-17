@@ -11,7 +11,7 @@ use crate::i18n::gettext;
 use crate::ui::app::{
     ActiveSource, App, AppWidgets, Cmd, Msg, SECTIONS, SORTABLE_SECTIONS, SortCrit, guarded_resume,
     initial_gallery_columns, online_available, relaunch_for_language_change, save_window_state,
-    section_available, section_meta,
+    section_meta,
 };
 use crate::ui::app_playback::{CURRENT_PATH_KEY, CURRENT_POS_KEY, TransportMsg};
 use crate::ui::app_settings::SettingMsg;
@@ -176,12 +176,6 @@ impl App {
                 .as_deref(),
             Some("1")
         );
-        // Sections this device cannot offer (FM radio without a tuner).
-        for (name, _, _) in SECTIONS {
-            if !section_available(name) {
-                hidden_sections.insert(name.to_string());
-            }
-        }
         if !youtube_enabled {
             hidden_sections.insert("youtube".to_string());
         }
@@ -424,6 +418,17 @@ impl App {
         }
         self.fm_page
             .emit(crate::ui::fm_page::FmInput::SetWindow(root.clone()));
+        // FM radio shows only where the platform supports it. The tuner check
+        // is a single ioctl; whether the sound server carries the tuner's
+        // sound takes a moment to ask, so that runs off the GTK thread and
+        // the section appears when it is confirmed.
+        if crate::core::fm::tuner_present() {
+            let input = sender.input_sender().clone();
+            std::thread::spawn(move || {
+                let ok = crate::core::fm::probe_support();
+                input.emit(Msg::Fm(crate::ui::app_fm::FmMsg::Supported(ok)));
+            });
+        }
         // Bring the StreamPage component up to the current chrome state + load.
         {
             use crate::ui::stream_page::StreamInput as SI;
@@ -845,7 +850,10 @@ impl App {
                     continue;
                 };
                 let btn = gtk::ToggleButton::builder().build();
-                btn.set_visible(!self.nav.hidden_sections.contains(name));
+                btn.set_visible(
+                    !self.nav.hidden_sections.contains(name)
+                        && crate::ui::app::section_available(name),
+                );
                 btn.add_css_class("flat");
                 // Highlight the active menu item blue on the icon (CSS `:checked`).
                 btn.add_css_class("emilia-nav-btn");

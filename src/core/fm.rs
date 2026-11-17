@@ -23,7 +23,7 @@ use std::io;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 /// The tuner's character device.
 pub const DEVICE: &str = "/dev/fm";
@@ -39,9 +39,90 @@ pub const STEP: u16 = 10;
 /// Where a first start tunes to.
 pub const FREQ_DEFAULT: u16 = 10000;
 
-/// Whether this device has an FM tuner.
-pub fn available() -> bool {
-    Path::new(DEVICE).exists()
+/// Node property by which an audio service may mark that it carries the
+/// tuner's sound even while it keeps [`SOURCE`] out of the lists.
+pub const SUPPORT_PROPERTY: &str = "audio-hal-bridge.fm";
+
+/// Whether the device has a tuner that speaks this driver's interface: the
+/// device opens for reading and writing and answers "is it powered up?"
+/// (asking switches nothing on). Cheap, no audio involved.
+pub fn tuner_present() -> bool {
+    if !Path::new(DEVICE).exists() {
+        return false;
+    }
+    let Ok(file) = OpenOptions::new().read(true).write(true).open(DEVICE) else {
+        return false;
+    };
+    let mut powered: u32 = 0;
+    ioctl(&file, IOCTL_IS_POWERED_UP, &mut powered).is_ok()
+}
+
+/// What the platform offers for FM, once [`probe_support`] ran.
+const SUPPORT_UNKNOWN: u8 = 0;
+const SUPPORT_YES: u8 = 1;
+const SUPPORT_NO: u8 = 2;
+static SUPPORT: AtomicU8 = AtomicU8::new(SUPPORT_UNKNOWN);
+
+/// Whether FM radio works on this platform: a tuner ([`tuner_present`]) *and*
+/// an audio service that carries its sound ([`sound_present`]). `false` until
+/// [`probe_support`] confirmed it.
+pub fn supported() -> bool {
+    SUPPORT.load(Ordering::SeqCst) == SUPPORT_YES
+}
+
+/// Finds out whether FM works here (see [`supported`]) and remembers it.
+/// Blocking — the audio check asks the sound server — so run it off the GTK
+/// thread.
+pub fn probe_support() -> bool {
+    let ok = tuner_present() && sound_present();
+    SUPPORT.store(if ok { SUPPORT_YES } else { SUPPORT_NO }, Ordering::SeqCst);
+    tracing::info!(
+        "FM radio {}",
+        if ok {
+            "supported"
+        } else {
+            "not supported here"
+        }
+    );
+    ok
+}
+
+/// Whether the sound server carries the tuner's sound: a node named
+/// [`SOURCE`], or any node marked with [`SUPPORT_PROPERTY`]. Asked through
+/// GStreamer's device monitor — over the PulseAudio protocol in the Flatpak,
+/// the same way playback records the source.
+fn sound_present() -> bool {
+    use gstreamer as gst;
+    use gstreamer::prelude::*;
+    if gst::init().is_err() {
+        return false;
+    }
+    let monitor = gst::DeviceMonitor::new();
+    monitor.add_filter(Some("Audio/Source"), None);
+    monitor.add_filter(Some("Audio/Sink"), None);
+    if monitor.start().is_err() {
+        return false;
+    }
+    let found = monitor.devices().iter().any(|d| {
+        let props = d.properties();
+        let prop = |key: &str| {
+            props
+                .as_ref()
+                .and_then(|p| p.get::<String>(key).ok())
+                .unwrap_or_default()
+        };
+        // The pulse provider names the source in "internal-name", the
+        // PipeWire provider in its properties.
+        let internal = if d.has_property("internal-name") {
+            d.property::<Option<String>>("internal-name")
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        internal == SOURCE || prop("node.name") == SOURCE || prop(SUPPORT_PROPERTY) == "true"
+    });
+    monitor.stop();
+    found
 }
 
 /// The playback URI of a frequency.
@@ -95,6 +176,7 @@ const fn iowr(nr: u64) -> u64 {
 const IOCTL_POWERUP: u64 = iowr(0);
 const IOCTL_POWERDOWN: u64 = iowr(1);
 const IOCTL_TUNE: u64 = iowr(2);
+const IOCTL_IS_POWERED_UP: u64 = iowr(24);
 const IOCTL_SOFT_MUTE_TUNE: u64 = iowr(63);
 
 /// `struct fm_tune_parm` of the connac2x driver (with `deemphasis`; 8 bytes).

@@ -28,6 +28,8 @@ pub(crate) enum FmMsg {
     Tune(u16),
     /// The saved stations changed (names shown while playing).
     StationsChanged,
+    /// The startup probe found out whether the platform supports FM.
+    Supported(bool),
 }
 
 impl App {
@@ -52,6 +54,24 @@ impl App {
             FmMsg::Tune(freq) => {
                 if self.fm.playing.is_some() {
                     self.fm_retune(freq);
+                }
+            }
+            FmMsg::Supported(ok) => {
+                // Hidden until now (`section_available`): show its button,
+                // unless the user hid the section.
+                self.refresh_nav_visibility();
+                // Restored as the last open section, but not supported (any
+                // more): go to the first section that is shown.
+                if !ok && self.nav.view_stack.visible_child_name().as_deref() == Some("fm") {
+                    let next = self
+                        .nav
+                        .section_order
+                        .iter()
+                        .copied()
+                        .find(|n| *n != "fm" && !self.nav.hidden_sections.contains(*n));
+                    if let Some(next) = next {
+                        self.nav.view_stack.set_visible_child_name(next);
+                    }
                 }
             }
             FmMsg::StationsChanged => {
