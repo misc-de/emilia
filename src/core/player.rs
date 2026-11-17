@@ -520,6 +520,8 @@ pub struct Player {
 impl Player {
     pub fn new() -> Result<Self> {
         gst::init()?;
+        // `emilia-fm://` playback (phones with an FM tuner only).
+        crate::core::fm_src::register();
         let d0 = Deck::make()?;
         let d1 = Deck::make()?;
         if d0.equalizer.is_none() {
@@ -640,6 +642,13 @@ impl Player {
             return Err(anyhow!("Refusing to play non-network URI: {uri}"));
         }
         self.hard_load(uri, resume_ms)
+    }
+
+    /// Plays the FM tuner on `freq` (`emilia-fm://`, see [`crate::core::fm_src`]).
+    /// Its own entry point: [`Self::play_uri`] takes network schemes only, and
+    /// this URI is built here, never taken from a feed or station list.
+    pub fn play_fm(&self, freq: u16) -> Result<()> {
+        self.hard_load(&crate::core::fm::uri(freq), 0)
     }
 
     /// Explicit (user-initiated) load on the active deck: cancels any crossfade,

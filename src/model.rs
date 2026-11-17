@@ -256,6 +256,15 @@ pub struct StreamItem {
     pub country: Option<String>,
 }
 
+/// A saved FM radio station (favorite): a frequency with a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FmStation {
+    pub id: i64,
+    /// 10 kHz units (9860 = 98.6 MHz), see [`crate::core::fm`].
+    pub freq: u16,
+    pub name: String,
+}
+
 /// A song recorded from a station (timeshift recording). Stored as a tagged
 /// audio file at `path`.
 #[derive(Debug, Clone)]

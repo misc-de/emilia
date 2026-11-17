@@ -310,6 +310,24 @@ pub(crate) fn launch_yt_page(
         })
 }
 
+/// Launches the [`FmPage`](crate::ui::fm_page::FmPage) component and forwards
+/// its output into the root component's [`Msg`].
+pub(crate) fn launch_fm_page(
+    sender: &ComponentSender<App>,
+) -> relm4::Controller<crate::ui::fm_page::FmPage> {
+    use crate::ui::app_fm::FmMsg;
+    crate::ui::fm_page::FmPage::builder()
+        .launch(())
+        .forward(sender.input_sender(), |out| {
+            use crate::ui::fm_page::FmOutput as O;
+            match out {
+                O::Toggle(freq) => Msg::Fm(FmMsg::Toggle(freq)),
+                O::Tune(freq) => Msg::Fm(FmMsg::Tune(freq)),
+                O::StationsChanged => Msg::Fm(FmMsg::StationsChanged),
+            }
+        })
+}
+
 /// Launches the [`StreamPage`](crate::ui::stream_page::StreamPage)
 /// component and forwards its output into the root component's [`Msg`].
 pub(crate) fn launch_stream_page(

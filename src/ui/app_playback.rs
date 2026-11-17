@@ -131,6 +131,7 @@ impl App {
         // The recording/station rows have their own change guard (they are also
         // refreshed from the per-second tick), so they stay a separate push.
         self.sync_stream_page_icons();
+        self.sync_fm_page();
         // The queue/next track may have changed (add/remove/reorder) → keep the
         // armed gapless follow in step with the new "next".
         self.arm_gapless();
@@ -485,6 +486,7 @@ impl App {
         self.transport.playing_path = Some(path);
         self.podcasts.playing_episode_url = None;
         self.streaming.playing_stream = None;
+        self.fm.playing = None;
         self.youtube.playing_live = None;
         self.files.playing_remote = false;
         self.youtube.playing_video_id = Some(video_id.clone());
@@ -544,6 +546,7 @@ impl App {
         // remote file active anymore.
         self.podcasts.playing_episode_url = None;
         self.streaming.playing_stream = None;
+        self.fm.playing = None;
         self.youtube.playing_live = None;
         self.files.playing_remote = false;
         // Album shortcut in the player bar: only for a local track (not for a
@@ -933,6 +936,15 @@ impl App {
                 // A live stream whose address expired restarts (or stops).
                 if self.youtube.playing_live.is_some() {
                     self.yt_live_ended();
+                    return;
+                }
+                // FM: no tuner, or no sound source for it (an audio service
+                // without FM support). Stop, and say why on the FM page.
+                if self.fm.playing.is_some() {
+                    if !self.mini.playing {
+                        return;
+                    }
+                    self.fm_failed();
                     return;
                 }
                 // Streams/episodes have no "next" → don't skip on their errors.

@@ -1699,3 +1699,54 @@ fn albums_overview_counts_physical_copies_once() {
     assert_eq!(card.track_count, 3);
     assert_eq!(card.total_duration_ms, Some(780_000));
 }
+
+#[test]
+fn fm_stations_save_rename_move_delete() {
+    let lib = Library::open_in_memory().unwrap();
+    assert!(lib.fm_stations().unwrap().is_empty());
+    let a = lib.save_fm_station(9860, "98.6 MHz").unwrap();
+    let b = lib.save_fm_station(8800, "Radio B").unwrap();
+    // Order of saving, not of frequency.
+    let names: Vec<_> = lib
+        .fm_stations()
+        .unwrap()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(names, ["98.6 MHz", "Radio B"]);
+    // Saving a known frequency renames it, keeps id and place.
+    assert_eq!(lib.save_fm_station(9860, "Radio A").unwrap(), a);
+    assert_eq!(lib.fm_station_at(9860).unwrap().unwrap().name, "Radio A");
+    lib.move_fm_station(b, -1).unwrap();
+    let freqs: Vec<_> = lib
+        .fm_stations()
+        .unwrap()
+        .into_iter()
+        .map(|s| s.freq)
+        .collect();
+    assert_eq!(freqs, [8800, 9860]);
+    // Past the ends: no change.
+    lib.move_fm_station(b, -1).unwrap();
+    assert_eq!(lib.fm_stations().unwrap()[0].id, b);
+    lib.rename_fm_station(b, "B2").unwrap();
+    lib.delete_fm_station(a).unwrap();
+    let left = lib.fm_stations().unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].name, "B2");
+    assert!(lib.fm_station_at(9860).unwrap().is_none());
+    // A new one goes to the end.
+    lib.save_fm_station(10000, "C").unwrap();
+    assert_eq!(lib.fm_stations().unwrap()[1].freq, 10000);
+}
+
+#[test]
+fn fm_last_freq_defaults_and_snaps() {
+    let lib = Library::open_in_memory().unwrap();
+    assert_eq!(lib.fm_last_freq(), crate::core::fm::FREQ_DEFAULT);
+    lib.set_fm_last_freq(9860);
+    assert_eq!(lib.fm_last_freq(), 9860);
+    lib.set_setting("fm_last_freq", "9864").unwrap();
+    assert_eq!(lib.fm_last_freq(), 9860);
+    lib.set_setting("fm_last_freq", "junk").unwrap();
+    assert_eq!(lib.fm_last_freq(), crate::core::fm::FREQ_DEFAULT);
+}

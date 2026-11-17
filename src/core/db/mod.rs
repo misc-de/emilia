@@ -13,6 +13,7 @@ mod attempts;
 mod category;
 mod eq;
 mod favorites;
+mod fm;
 mod gallery;
 mod heard;
 mod lyrics;

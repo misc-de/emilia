@@ -71,7 +71,11 @@ impl App {
         let single = visible_count <= 1;
         self.nav.nav_hidden.set(single);
         for (name, _is_sidebar, btn) in &self.nav.nav_buttons {
-            btn.set_visible(!self.nav.hidden_sections.contains(*name) && !single);
+            btn.set_visible(
+                !self.nav.hidden_sections.contains(*name)
+                    && crate::ui::app::section_available(name)
+                    && !single,
+            );
         }
         (self.nav.apply_chrome)();
     }

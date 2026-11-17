@@ -7,6 +7,8 @@ pub mod cover;
 pub mod db;
 pub mod dupes;
 pub mod fingerprint;
+pub mod fm;
+pub mod fm_src;
 pub mod gdrive;
 pub mod http;
 pub mod lyrics;

@@ -18,7 +18,7 @@ use crate::ui::app::{App, Msg};
 /// and can be reordered by the user.
 // The labels are English gettext `msgid`s; translate them at the display site
 // with `gettext()` (see usage in `build_nav` / `win_title`).
-pub(crate) const SECTIONS: [(&str, &str, &str); 14] = [
+pub(crate) const SECTIONS: [(&str, &str, &str); 15] = [
     ("favorites", "Favorites", "emilia-favorite-symbolic"),
     ("files", "Files", "folder-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
@@ -28,12 +28,23 @@ pub(crate) const SECTIONS: [(&str, &str, &str); 14] = [
     ("concerts", "Concerts", "ticket-special-symbolic"),
     ("podcasts", "Podcasts", "podcast-symbolic"),
     ("streaming", "Streaming", "internet-radio-symbolic"),
+    ("fm", "FM Radio", "emilia-fm-radio-symbolic"),
     ("youtube", "YouTube", "im-youtube-symbolic"),
     ("audiobooks", "Audiobooks", "emilia-audiobook-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
     ("memo", "Memo", "audio-input-microphone-symbolic"),
     ("stats", "Statistics", "emilia-stats-symbolic"),
 ];
+
+/// Whether a section can be shown on this device at all: FM radio only with
+/// a tuner. An unavailable section is hidden and left out of the menu
+/// settings and the setup assistant, whatever the user's choice says.
+pub(crate) fn section_available(name: &str) -> bool {
+    match name {
+        "fm" => crate::core::fm::available(),
+        _ => true,
+    }
+}
 
 /// Returns (tooltip/label as msgid, icon) of a section by its
 /// stack name. Translate the label at the display site with `gettext()`.
@@ -72,6 +83,9 @@ pub(crate) fn section_description(name: &str) -> String {
         "streaming" => {
             gettext("Internet radio stations, with an optional buffer to record what just played.")
         }
+        "fm" => gettext(
+            "The phone's FM tuner: tune by dial, seek and save stations. A wired headset is the antenna.",
+        ),
         "youtube" => gettext(
             "Search and play YouTube, follow channels and keep videos offline. Needs the yt-dlp tool.",
         ),

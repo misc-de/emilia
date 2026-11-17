@@ -503,6 +503,15 @@ impl Library {
             -- filter is the second axis.
             CREATE INDEX IF NOT EXISTS idx_memo_recorded ON memo(recorded_at);
             CREATE INDEX IF NOT EXISTS idx_memo_category ON memo(category_id);
+            -- FM radio favorites (phones with a tuner, see core/fm.rs). `freq`
+            -- in 10 kHz units (9860 = 98.6 MHz); `position` = the user's order.
+            CREATE TABLE IF NOT EXISTS fm_station (
+                id       INTEGER PRIMARY KEY,
+                freq     INTEGER NOT NULL UNIQUE,
+                name     TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                added_at INTEGER
+            );
             "#,
         )?;
 

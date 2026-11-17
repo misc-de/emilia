@@ -112,7 +112,7 @@ impl Component for SetupPage {
         let enabled = SECTIONS
             .iter()
             .map(|(name, _, _)| *name)
-            .filter(|n| *n != "youtube")
+            .filter(|n| *n != "youtube" && crate::ui::app::section_available(n))
             .collect();
 
         let model = SetupPage {
@@ -578,6 +578,9 @@ impl SetupPage {
             .css_classes(["boxed-list"])
             .build();
         for (name, label, icon) in SECTIONS {
+            if !crate::ui::app::section_available(name) {
+                continue;
+            }
             let row = adw::SwitchRow::builder()
                 .title(gettext(label))
                 .subtitle(crate::ui::app::section_description(name))

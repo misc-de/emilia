@@ -418,7 +418,15 @@ impl App {
     /// Player-bar play/pause: pause/resume the running file/station/episode,
     /// restart finished playback, or start the user queue.
     pub(crate) fn on_toggle_play(&mut self) {
-        if self.mini.playing {
+        if self.mini.playing && self.fm.playing.is_some() {
+            // FM pauses by stopping (the tuner goes off); resuming restarts it.
+            self.fm_pause();
+        } else if !self.mini.playing
+            && let Some(freq) = self.fm.playing
+        {
+            self.play_fm(freq);
+            return;
+        } else if self.mini.playing {
             self.save_resume();
             self.player.pause();
             self.mini.playing = false;

@@ -117,6 +117,7 @@ impl App {
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = None;
+                self.fm.playing = None;
                 self.youtube.playing_live = None;
                 self.youtube.playing_video_id = None;
                 self.files.playing_remote = true;
@@ -228,6 +229,8 @@ impl App {
             self.podcast_step(1);
         } else if self.streaming.playing_stream.is_some() {
             self.station_step(1);
+        } else if self.fm.playing.is_some() {
+            self.fm_step(1);
         } else if self.youtube.playing_live.is_some() {
             self.yt_live_step(1);
         } else if self.files.playing_remote {
@@ -243,6 +246,8 @@ impl App {
             self.podcast_step(-1);
         } else if self.streaming.playing_stream.is_some() {
             self.station_step(-1);
+        } else if self.fm.playing.is_some() {
+            self.fm_step(-1);
         } else if self.youtube.playing_live.is_some() {
             self.yt_live_step(-1);
         } else if self.files.playing_remote {

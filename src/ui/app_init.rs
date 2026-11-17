@@ -11,7 +11,7 @@ use crate::i18n::gettext;
 use crate::ui::app::{
     ActiveSource, App, AppWidgets, Cmd, Msg, SECTIONS, SORTABLE_SECTIONS, SortCrit, guarded_resume,
     initial_gallery_columns, online_available, relaunch_for_language_change, save_window_state,
-    section_meta,
+    section_available, section_meta,
 };
 use crate::ui::app_playback::{CURRENT_PATH_KEY, CURRENT_POS_KEY, TransportMsg};
 use crate::ui::app_settings::SettingMsg;
@@ -176,6 +176,12 @@ impl App {
                 .as_deref(),
             Some("1")
         );
+        // Sections this device cannot offer (FM radio without a tuner).
+        for (name, _, _) in SECTIONS {
+            if !section_available(name) {
+                hidden_sections.insert(name.to_string());
+            }
+        }
         if !youtube_enabled {
             hidden_sections.insert("youtube".to_string());
         }
@@ -416,6 +422,8 @@ impl App {
             self.yt_page
                 .emit(YI::SetGalleryView(self.libview.gallery_view));
         }
+        self.fm_page
+            .emit(crate::ui::fm_page::FmInput::SetWindow(root.clone()));
         // Bring the StreamPage component up to the current chrome state + load.
         {
             use crate::ui::stream_page::StreamInput as SI;
@@ -1394,6 +1402,12 @@ impl App {
                  button.emilia-busy image { animation: emilia-spin 1.2s linear infinite; }\
                  button.emilia-sync-busy image { animation: emilia-blink 1.4s ease-in-out infinite; }\
                  button.sleep-armed, button.emilia-casting { color: @accent_color; }\
+                 /* FM radio page: the frequency large, the dial in a card, a \
+                    large round play button, the station on the dial marked. */\
+                 label.fm-freq { font-size: 3.6em; font-weight: 800; font-feature-settings: \"tnum\"; }\
+                 frame.fm-dial-frame { border-radius: 12px; background-color: alpha(currentColor, 0.04); }\
+                 button.fm-play { min-width: 56px; min-height: 56px; -gtk-icon-size: 24px; }\
+                 row.fm-current { background-color: alpha(@accent_bg_color, 0.12); }\
                  /* The album header's play button is a blue pill: the running-entry \
                     accent of its play mark would vanish blue on blue. */\
                  button.emilia-album-play .accent { color: inherit; }\

@@ -1,6 +1,6 @@
 [package]
 name = "emilia"
-version = "0.8.59"
+version = "0.8.60"
 edition = "2024"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
@@ -20,6 +20,8 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
+# ioctls of the FM tuner (/dev/fm, src/core/fm.rs); already in the lockfile via other crates.
+libc = "0.2"
 mpris-server = "0.11"
 # Declared directly to call the XDG camera portal (blocking API) in the QR
 # scanner, so the desktop Flatpak needs no `--device=all`. See

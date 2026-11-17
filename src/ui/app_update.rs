@@ -185,6 +185,7 @@ impl App {
             Msg::Sort(m) => self.update_sort(m, &sender),
             Msg::Eq(m) => self.update_eq(m),
             Msg::Stream(m) => self.update_stream(m, root, &sender),
+            Msg::Fm(m) => self.update_fm(m, root, &sender),
             Msg::Edit(m) => self.update_edit(m, root, &sender),
             Msg::Yt(m) => self.update_yt(m, root, &sender),
             Msg::Podcast(m) => self.update_podcast(m, root, &sender),

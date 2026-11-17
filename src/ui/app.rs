@@ -24,7 +24,7 @@ pub(crate) use crate::ui::app_sections::*;
 pub(crate) use crate::ui::app_state::*;
 use crate::ui::app_streaming::StreamMsg;
 use crate::ui::app_wiring::{
-    launch_cloud_page, launch_gdrive_page, launch_podcasts_page, launch_setup_page,
+    launch_cloud_page, launch_fm_page, launch_gdrive_page, launch_podcasts_page, launch_setup_page,
     launch_smb_page, launch_stream_page, launch_sync_page, launch_yt_page,
 };
 use crate::ui::card_list::CardList;
@@ -131,6 +131,8 @@ pub struct App {
     pub(crate) memo: crate::ui::app_memo::MemoState,
     /// YouTube page state (optional feature, gated behind `youtube_enabled`).
     pub(crate) youtube: YoutubeState,
+    /// FM radio transport state (phones with a tuner; see `app_fm.rs`).
+    pub(crate) fm: crate::ui::app_fm::FmState,
     /// Source ids that are currently **not reachable** (Nextcloud offline) –
     /// controls the red "Disconnected" hint on their covers/photos/songs.
     pub(crate) offline_sources: std::collections::HashSet<i64>,
@@ -168,6 +170,8 @@ pub struct App {
     /// Internet-radio page, extracted into its own relm4 component. The timeshift
     /// recorder and playback stay on `App` (see `app_streaming.rs`).
     pub(crate) stream_page: relm4::Controller<crate::ui::stream_page::StreamPage>,
+    /// FM radio page (dial, seek, saved stations); playback in `app_fm.rs`.
+    pub(crate) fm_page: relm4::Controller<crate::ui::fm_page::FmPage>,
     /// First-run setup assistant, shown once on the very first launch.
     pub(crate) setup_page: relm4::Controller<crate::ui::setup::SetupPage>,
     /// Runtime theming: app scaling + design options (colors, blurred background).
@@ -829,6 +833,12 @@ impl Component for App {
                                 &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
                                     append: model.stream_page.widget(),
+                                },
+                            // FM radio lives in its own relm4 component (hidden without a tuner).
+                            add_titled_with_icon[Some("fm"), &gettext("FM Radio"), "emilia-fm-radio-symbolic"] =
+                                &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    append: model.fm_page.widget(),
                                 },
                             add_titled_with_icon[Some("favorites"), &gettext("Favorites"), "emilia-favorite-symbolic"] =
                                 &gtk::Box {
@@ -1724,6 +1734,7 @@ impl Component for App {
             std::rc::Rc::new(std::cell::RefCell::new(None));
         let yt_page = launch_yt_page(&sender, &yt_subpage, &yt_sort);
         let stream_page = launch_stream_page(&sender, &stream_sort);
+        let fm_page = launch_fm_page(&sender);
         let setup_page = launch_setup_page(&sender);
 
         // Receiving from the network (DLNA renderer, AirPlay) is opt-in.
@@ -2001,6 +2012,8 @@ impl Component for App {
             yt_page,
             yt_subpage,
             stream_page,
+            fm_page,
+            fm: Default::default(),
             setup_page,
             theme,
             tray,

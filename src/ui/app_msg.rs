@@ -209,6 +209,8 @@ pub enum Msg {
     Memo(crate::ui::app_memo::MemoMsg),
     /// StreamMsg — see `crate::ui::app_streaming`.
     Stream(crate::ui::app_streaming::StreamMsg),
+    /// FmMsg — see `crate::ui::app_fm`.
+    Fm(crate::ui::app_fm::FmMsg),
     /// EditMsg — see `crate::ui::app_rec_edit`.
     Edit(crate::ui::app_rec_edit::EditMsg),
     /// YtMsg — see `crate::ui::app_yt_glue`.

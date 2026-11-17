@@ -110,6 +110,11 @@ fn rebuild_section_rows(
     }
     let names: Vec<&'static str> = order.borrow().clone();
     for (idx, &name) in names.iter().enumerate() {
+        // Not on this device (FM radio without a tuner): no row. `idx` stays the
+        // index into the full order, which the drag & drop moves work on.
+        if !crate::ui::app::section_available(name) {
+            continue;
+        }
         let Some((label, _icon)) = crate::ui::app::section_meta(name) else {
             continue;
         };

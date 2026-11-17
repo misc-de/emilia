@@ -53,6 +53,7 @@ impl App {
                 self.transport.playing_path = None;
                 self.podcasts.playing_episode_url = None;
                 self.streaming.playing_stream = Some(id);
+                self.fm.playing = None;
                 self.youtube.playing_video_id = None;
                 self.youtube.playing_live = None;
                 self.files.playing_remote = false;
@@ -700,6 +701,7 @@ impl App {
             self.player.stop();
             self.mini.playing = false;
             self.streaming.playing_stream = None;
+            self.fm.playing = None;
             self.youtube.playing_live = None;
             self.mini.now_playing = None;
             self.mpris.set_playing(false);
@@ -729,6 +731,7 @@ impl App {
                         self.transport.playing_path = Some(path);
                         self.podcasts.playing_episode_url = None;
                         self.streaming.playing_stream = None;
+                        self.fm.playing = None;
                         self.youtube.playing_live = None;
                         self.mpris.set_playing(true);
                     }

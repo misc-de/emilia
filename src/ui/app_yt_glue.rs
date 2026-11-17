@@ -377,6 +377,7 @@ impl App {
         self.transport.playing_path = None;
         self.podcasts.playing_episode_url = None;
         self.streaming.playing_stream = None;
+        self.fm.playing = None;
         self.streaming.stream_title = None;
         self.youtube.playing_video_id = None;
         self.youtube.playing_live = Some(video_id.clone());

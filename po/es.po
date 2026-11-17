@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Emilia VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 14:09+0000\n"
+"POT-Creation-Date: 2026-11-17 16:35+0000\n"
 "PO-Revision-Date: 2026-06-05 11:00+0000\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -21,16 +21,18 @@ msgstr ""
 msgid "Show / Hide"
 msgstr "Mostrar / Ocultar"
 
-#: src/core/tray.rs:87 src/ui/app_rec_edit.rs:605 src/ui/yt_live.rs:121
+#: src/core/tray.rs:87 src/ui/app_rec_edit.rs:605 src/ui/fm_page.rs:626
+#: src/ui/play_mark.rs:51 src/ui/yt_live.rs:121
 msgid "Pause"
 msgstr "Pausar"
 
-#: src/core/tray.rs:89 src/ui/app_dialogs.rs:179 src/ui/app_favorites.rs:311
+#: src/core/tray.rs:89 src/ui/app_dialogs.rs:179 src/ui/app_favorites.rs:312
 #: src/ui/app_memo.rs:635 src/ui/app_memo.rs:774 src/ui/app_playlist.rs:342
-#: src/ui/app_playlist.rs:532 src/ui/app_popularity.rs:593
-#: src/ui/app_queue.rs:186 src/ui/app_streaming.rs:567
+#: src/ui/app_playlist.rs:532 src/ui/app_popularity.rs:675
+#: src/ui/app_queue.rs:186 src/ui/app_streaming.rs:568
 #: src/ui/app_views_album.rs:731 src/ui/app_views_album.rs:1044
-#: src/ui/app_views_album.rs:1280 src/ui/card_list.rs:151 src/ui/fs_row.rs:407
+#: src/ui/card_list.rs:159 src/ui/fm_page.rs:377 src/ui/fm_page.rs:628
+#: src/ui/fs_row.rs:407 src/ui/play_mark.rs:53
 #: src/ui/stream_page_recordings.rs:141 src/ui/stream_page_recordings.rs:222
 #: src/ui/stream_page_recordings.rs:415 src/ui/stream_page_recordings.rs:484
 #: src/ui/yt_live.rs:123 src/ui/yt_page_channels.rs:252
@@ -38,7 +40,7 @@ msgstr "Pausar"
 msgid "Play"
 msgstr "Reproducir"
 
-#: src/core/tray.rs:99 src/ui/setup.rs:707
+#: src/core/tray.rs:99 src/ui/setup.rs:710
 msgid "Next"
 msgstr "Siguiente"
 
@@ -50,109 +52,109 @@ msgstr "Anterior"
 msgid "Quit Emilia"
 msgstr "Salir de Emilia"
 
-#: src/ui/app.rs:262 src/ui/app.rs:437 src/ui/app.rs:1384 src/ui/setup.rs:701
+#: src/ui/app.rs:266 src/ui/app.rs:441 src/ui/app.rs:1394 src/ui/setup.rs:704
 msgid "Back"
 msgstr "Atrás"
 
-#: src/ui/app.rs:274 src/ui/app_search.rs:24 src/ui/app_search.rs:322
+#: src/ui/app.rs:278 src/ui/app_search.rs:24 src/ui/app_search.rs:322
 #: src/ui/widgets.rs:959
 msgid "Search"
 msgstr "Buscar"
 
-#: src/ui/app.rs:283 src/ui/app_init.rs:906 src/ui/app_settings.rs:161
+#: src/ui/app.rs:287 src/ui/app_init.rs:914 src/ui/app_settings.rs:161
 #: src/ui/yt_page.rs:166
 msgid "Settings"
 msgstr "Ajustes"
 
-#: src/ui/app.rs:293
+#: src/ui/app.rs:297
 msgid "Sort"
 msgstr "Ordenar"
 
-#: src/ui/app.rs:303 src/ui/app_sleep.rs:37
+#: src/ui/app.rs:307 src/ui/app_sleep.rs:37
 msgid "Sleep timer"
 msgstr "Temporizador de apagado"
 
-#: src/ui/app.rs:311 src/ui/app_cast.rs:55 src/ui/app_cast.rs:260
+#: src/ui/app.rs:315 src/ui/app_cast.rs:55 src/ui/app_cast.rs:260
 msgid "Play on"
 msgstr "Reproducir en"
 
-#: src/ui/app.rs:321
+#: src/ui/app.rs:325
 msgid "Show progress"
 msgstr "Mostrar progreso"
 
-#: src/ui/app.rs:323 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
+#: src/ui/app.rs:327 src/ui/app_dialogs.rs:365 src/ui/widgets.rs:795
 msgid "Refresh"
 msgstr "Actualizar"
 
-#: src/ui/app.rs:341 src/ui/sync_page.rs:334 src/ui/sync_page.rs:374
+#: src/ui/app.rs:345 src/ui/sync_page.rs:334 src/ui/sync_page.rs:374
 #: src/ui/sync_page.rs:407 src/ui/sync_page.rs:458 src/ui/sync_page.rs:522
 #: src/ui/sync_page.rs:1117 src/ui/sync_page.rs:1152 src/ui/sync_page.rs:1234
 msgid "Connect to share"
 msgstr "Conectar para compartir"
 
-#: src/ui/app.rs:403 src/ui/sync_share_ui.rs:423
+#: src/ui/app.rs:407 src/ui/sync_share_ui.rs:423
 msgid "Files"
 msgstr "Archivos"
 
-#: src/ui/app.rs:479
+#: src/ui/app.rs:483
 msgid "Could not load the folder"
 msgstr "No se pudo cargar la carpeta"
 
-#: src/ui/app.rs:487
+#: src/ui/app.rs:491
 msgid "Retry"
 msgstr "Reintentar"
 
-#: src/ui/app.rs:496 src/ui/app_search.rs:100 src/ui/app_settings_view.rs:160
+#: src/ui/app.rs:500 src/ui/app_search.rs:100 src/ui/app_settings_view.rs:160
 #: src/ui/stats_page.rs:290
 msgid "Artists"
 msgstr "Artistas"
 
-#: src/ui/app.rs:502
+#: src/ui/app.rs:506
 msgid "No artists"
 msgstr "Sin artistas"
 
-#: src/ui/app.rs:504 src/ui/app.rs:555
+#: src/ui/app.rs:508 src/ui/app.rs:559
 msgid "Scan a music folder and fetch online metadata"
 msgstr "Analiza una carpeta de música y obtén metadatos en línea"
 
-#: src/ui/app.rs:546 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127
+#: src/ui/app.rs:550 src/ui/app_playlist.rs:310 src/ui/app_search.rs:127
 #: src/ui/app_views_album.rs:608 src/ui/stats_page.rs:294
 msgid "Albums"
 msgstr "Álbumes"
 
-#: src/ui/app.rs:553
+#: src/ui/app.rs:557
 msgid "No albums"
 msgstr "Sin álbumes"
 
-#: src/ui/app.rs:597 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
+#: src/ui/app.rs:601 src/ui/app_search.rs:135 src/ui/app_views_album.rs:685
 msgid "Singles"
 msgstr "Sencillos"
 
-#: src/ui/app.rs:603
+#: src/ui/app.rs:607
 msgid "No singles"
 msgstr "Sin sencillos"
 
-#: src/ui/app.rs:605
+#: src/ui/app.rs:609
 msgid "Singles are one-artist releases with just a few tracks"
 msgstr "Los sencillos son lanzamientos de un solo artista con pocas pistas"
 
-#: src/ui/app.rs:645 src/ui/app_search.rs:143
+#: src/ui/app.rs:649 src/ui/app_search.rs:143
 msgid "Compilations"
 msgstr "Recopilatorios"
 
-#: src/ui/app.rs:651
+#: src/ui/app.rs:655
 msgid "No compilations"
 msgstr "Sin recopilatorios"
 
-#: src/ui/app.rs:653
+#: src/ui/app.rs:657
 msgid "Compilations are albums with tracks by several artists"
 msgstr "Los recopilatorios son álbumes con pistas de varios artistas"
 
-#: src/ui/app.rs:693 src/ui/app.rs:734 src/ui/app_search.rs:151
+#: src/ui/app.rs:697 src/ui/app.rs:738 src/ui/app_search.rs:151
 msgid "Concerts"
 msgstr "Conciertos"
 
-#: src/ui/app.rs:735
+#: src/ui/app.rs:739
 msgid ""
 "Here you can list your collected concerts. Via Import concerts you get an "
 "overview of likely concerts: albums with live, unplugged or concert in the "
@@ -166,129 +168,135 @@ msgstr ""
 "concierto y aparecerán aquí. También puedes añadir conciertos en cualquier "
 "momento desde las opciones."
 
-#: src/ui/app.rs:745 src/ui/app_concert.rs:71
+#: src/ui/app.rs:749 src/ui/app_concert.rs:71
 msgid "Import concerts"
 msgstr "Importar conciertos"
 
-#: src/ui/app.rs:750
+#: src/ui/app.rs:754
 msgid "I'll do it myself"
 msgstr "Lo haré yo mismo"
 
-#: src/ui/app.rs:755
+#: src/ui/app.rs:759
 msgid "Hide menu item"
 msgstr "Ocultar elemento de menú"
 
-#: src/ui/app.rs:767
+#: src/ui/app.rs:771
 msgid "No concerts"
 msgstr "Sin conciertos"
 
-#: src/ui/app.rs:768
+#: src/ui/app.rs:772
 msgid "Mark an album or a track as a concert via the options."
 msgstr "Marca un álbum o una pista como concierto desde las opciones."
 
-#: src/ui/app.rs:774 src/ui/sync_share_ui.rs:468 src/ui/yt_page_search.rs:42
+#: src/ui/app.rs:778 src/ui/sync_share_ui.rs:468 src/ui/yt_page_search.rs:42
 msgid "Playlists"
 msgstr "Listas de reproducción"
 
-#: src/ui/app.rs:811
+#: src/ui/app.rs:815
 msgid "No playlists"
 msgstr "Sin listas de reproducción"
 
-#: src/ui/app.rs:812
+#: src/ui/app.rs:816
 msgid "Create a playlist or add tracks via the options."
 msgstr "Crea una lista de reproducción o añade pistas desde las opciones."
 
-#: src/ui/app.rs:822 src/ui/sync_share_ui.rs:469
+#: src/ui/app.rs:826 src/ui/sync_share_ui.rs:469
 msgid "Podcasts"
 msgstr "Pódcasts"
 
 #. Internet radio lives in its own relm4 component.
-#: src/ui/app.rs:828
+#: src/ui/app.rs:832
 msgid "Streaming"
 msgstr "Streaming"
 
-#: src/ui/app.rs:833 src/ui/sync_share_ui.rs:467
+#. FM radio lives in its own relm4 component (hidden without a tuner).
+#: src/ui/app.rs:838
+msgid "FM Radio"
+msgstr "Radio FM"
+
+#: src/ui/app.rs:843 src/ui/sync_share_ui.rs:467
 msgid "Favorites"
 msgstr "Favoritos"
 
-#: src/ui/app.rs:870
+#: src/ui/app.rs:880
 msgid "No favorites"
 msgstr "Sin favoritos"
 
-#: src/ui/app.rs:871
+#: src/ui/app.rs:881
 msgid "Mark tracks, albums or artists with the star under \"More info\"."
 msgstr ""
 "Marca pistas, álbumes o artistas con la estrella en «Más información»."
 
-#: src/ui/app.rs:878 src/ui/app_settings_meta.rs:103
+#: src/ui/app.rs:888 src/ui/app_settings_meta.rs:103
 #: src/ui/sync_share_ui.rs:438
 msgid "YouTube"
 msgstr "YouTube"
 
-#: src/ui/app.rs:883 src/ui/app_search.rs:159
+#: src/ui/app.rs:893 src/ui/app_search.rs:159
 msgid "Audiobooks"
 msgstr "Audiolibros"
 
-#: src/ui/app.rs:922
+#: src/ui/app.rs:932
 msgid "No audiobooks"
 msgstr "Sin audiolibros"
 
-#: src/ui/app.rs:923
+#: src/ui/app.rs:933
 msgid "Mark albums, folders or tracks as audiobooks via the properties."
 msgstr ""
 "Marca álbumes, carpetas o pistas como audiolibros desde las propiedades."
 
-#: src/ui/app.rs:929 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
+#: src/ui/app.rs:939 src/ui/app_memo.rs:137 src/ui/app_memo.rs:139
 msgid "Memo"
 msgstr "Notas de voz"
 
-#: src/ui/app.rs:946 src/ui/podcasts_page.rs:448 src/ui/stream_page.rs:280
+#: src/ui/app.rs:956 src/ui/podcasts_page.rs:448 src/ui/stream_page.rs:280
 #: src/ui/yt_page.rs:182
 msgid "Recently"
 msgstr "Recientes"
 
-#: src/ui/app.rs:953 src/ui/app_memo.rs:758 src/ui/app_views_ctx.rs:504
+#: src/ui/app.rs:963 src/ui/app_memo.rs:758 src/ui/app_views_ctx.rs:504
 msgid "Category"
 msgstr "Categoría"
 
-#: src/ui/app.rs:961
+#: src/ui/app.rs:971
 msgid "Add category"
 msgstr "Añadir categoría"
 
-#: src/ui/app.rs:983
+#: src/ui/app.rs:993
 msgid "No memos yet"
 msgstr "Aún no hay notas de voz"
 
-#: src/ui/app.rs:984
+#: src/ui/app.rs:994
 msgid "Use the microphone button in the player bar to record a voice memo."
 msgstr ""
 "Usa el botón del micrófono en la barra del reproductor para grabar una nota "
 "de voz."
 
-#: src/ui/app.rs:995
+#: src/ui/app.rs:1005
 msgid "Statistics"
 msgstr "Estadísticas"
 
-#: src/ui/app.rs:1063
+#: src/ui/app.rs:1073
 msgid "{done} of {total}"
 msgstr "{done} de {total}"
 
-#: src/ui/app.rs:1111
+#: src/ui/app.rs:1121
 msgid "{done} of {total} songs"
 msgstr "{done} de {total} canciones"
 
-#: src/ui/app.rs:1124
+#: src/ui/app.rs:1134
 msgid "{done} MB of {total} MB"
 msgstr "{done} MB de {total} MB"
 
-#: src/ui/app.rs:1135 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
+#: src/ui/app.rs:1145 src/ui/app_covers.rs:41 src/ui/app_memo.rs:167
 #: src/ui/app_memo.rs:936 src/ui/app_memo.rs:959 src/ui/app_playlist.rs:877
 #: src/ui/app_queue.rs:73 src/ui/app_rec_edit.rs:657
 #: src/ui/app_rec_edit.rs:693 src/ui/app_search.rs:26
-#: src/ui/app_sections.rs:100 src/ui/app_settings_mcp.rs:129
+#: src/ui/app_sections.rs:114 src/ui/app_settings_mcp.rs:129
 #: src/ui/app_views_handlers.rs:749 src/ui/app_views_sources.rs:278
 #: src/ui/app_views_sources.rs:474 src/ui/app_views_sources.rs:533
-#: src/ui/podcasts_page.rs:1023 src/ui/setup.rs:699
+#: src/ui/fm_page.rs:776 src/ui/fm_page.rs:804 src/ui/fm_page.rs:828
+#: src/ui/podcasts_page.rs:1023 src/ui/setup.rs:702
 #: src/ui/stream_page_stations.rs:53 src/ui/stream_page_stations.rs:404
 #: src/ui/stream_page_stations.rs:452 src/ui/sync_share_ui.rs:159
 #: src/ui/widgets.rs:915 src/ui/widgets.rs:942 src/ui/widgets.rs:1018
@@ -298,50 +306,50 @@ msgstr "Cancelar"
 
 # Mini-player: tap the song display to open the track detail view (added
 # 2026-06-07).
-#: src/ui/app.rs:1169
+#: src/ui/app.rs:1179
 msgid "Show details of the current track"
 msgstr "Mostrar los detalles de la pista actual"
 
-#: src/ui/app.rs:1226
+#: src/ui/app.rs:1236
 msgid "Recording level"
 msgstr "Nivel de grabación"
 
-#: src/ui/app.rs:1290
+#: src/ui/app.rs:1300
 msgid "Equalizer for this track"
 msgstr "Ecualizador para esta pista"
 
-#: src/ui/app.rs:1303 src/ui/app.rs:1321
+#: src/ui/app.rs:1313 src/ui/app.rs:1331
 msgid "Playback speed"
 msgstr "Velocidad de reproducción"
 
-#: src/ui/app.rs:1349 src/ui/app_views_album.rs:1293
+#: src/ui/app.rs:1359 src/ui/app_views_album.rs:1297
 msgid "Shuffle"
 msgstr "Aleatorio"
 
-#: src/ui/app.rs:1367
+#: src/ui/app.rs:1377
 msgid "Repeat"
 msgstr "Repetir"
 
-#: src/ui/app.rs:1413 src/ui/podcasts_page_detail.rs:677
+#: src/ui/app.rs:1423 src/ui/podcasts_page_detail.rs:677
 #: src/ui/stream_page_stations.rs:238 src/ui/yt_live.rs:40
 #: src/ui/yt_page_detail.rs:339
 msgid "Play/Pause"
 msgstr "Reproducir/Pausar"
 
-#: src/ui/app.rs:1452
+#: src/ui/app.rs:1462
 msgid "Forward"
 msgstr "Avanzar"
 
-#: src/ui/app.rs:1471 src/ui/app_dialogs.rs:91 src/ui/app_lyrics.rs:160
+#: src/ui/app.rs:1481 src/ui/app_dialogs.rs:91 src/ui/app_lyrics.rs:160
 #: src/ui/app_lyrics.rs:165
 msgid "Lyrics"
 msgstr "Letras"
 
-#: src/ui/app.rs:1483
+#: src/ui/app.rs:1493
 msgid "Show album"
 msgstr "Mostrar álbum"
 
-#: src/ui/app.rs:1492 src/ui/app_queue.rs:51
+#: src/ui/app.rs:1502 src/ui/app_queue.rs:51
 msgid "Queue"
 msgstr "Cola"
 
@@ -387,7 +395,7 @@ msgstr ""
 msgid "Updating …"
 msgstr "Actualizando …"
 
-#: src/ui/app_chrome.rs:170 src/ui/app_init.rs:446
+#: src/ui/app_chrome.rs:170 src/ui/app_init.rs:454
 #: src/ui/app_views_sources.rs:169
 msgid "Music"
 msgstr "Música"
@@ -441,11 +449,12 @@ msgstr "Carátula / foto"
 msgid "Upload a new image or remove the current one?"
 msgstr "¿Subir una imagen nueva o eliminar la actual?"
 
-#: src/ui/app_covers.rs:42 src/ui/app_favorites.rs:287
-#: src/ui/app_favorites.rs:296 src/ui/app_settings_design.rs:313
+#: src/ui/app_covers.rs:42 src/ui/app_favorites.rs:288
+#: src/ui/app_favorites.rs:297 src/ui/app_settings_design.rs:313
 #: src/ui/app_views_sources.rs:102 src/ui/app_views_sources.rs:433
-#: src/ui/podcasts_page.rs:1024 src/ui/stream_page_stations.rs:369
-#: src/ui/yt_live.rs:168 src/ui/yt_page_channels.rs:289
+#: src/ui/fm_page.rs:718 src/ui/fm_page.rs:829 src/ui/podcasts_page.rs:1024
+#: src/ui/stream_page_stations.rs:369 src/ui/yt_live.rs:168
+#: src/ui/yt_page_channels.rs:289
 msgid "Remove"
 msgstr "Eliminar"
 
@@ -492,7 +501,7 @@ msgid "Play hits only"
 msgstr "Reproducir solo éxitos"
 
 #: src/ui/app_dialogs.rs:258 src/ui/app_settings_meta.rs:130
-#: src/ui/app_yt_glue.rs:576 src/ui/podcasts_page_detail.rs:197
+#: src/ui/app_yt_glue.rs:577 src/ui/podcasts_page_detail.rs:197
 msgid "Download"
 msgstr "Descargar"
 
@@ -528,7 +537,7 @@ msgid "Share"
 msgstr "Compartir"
 
 #: src/ui/app_dialogs.rs:350 src/ui/app_dialogs.rs:356
-#: src/ui/app_favorites.rs:759 src/ui/app_settings_menu.rs:222
+#: src/ui/app_favorites.rs:760 src/ui/app_settings_menu.rs:227
 #: src/ui/app_views_ctx.rs:361 src/ui/app_views_ctx.rs:377
 #: src/ui/app_views_ctx.rs:766 src/ui/app_views_ctx.rs:788
 #: src/ui/app_views_ctx.rs:813 src/ui/app_views_ctx.rs:866
@@ -538,28 +547,28 @@ msgid "Artist"
 msgstr "Artista"
 
 #: src/ui/app_dialogs.rs:351 src/ui/app_dialogs.rs:354
-#: src/ui/app_dialogs.rs:357 src/ui/app_favorites.rs:254
+#: src/ui/app_dialogs.rs:357 src/ui/app_favorites.rs:255
 #: src/ui/app_views_ctx.rs:381 src/ui/app_views_ctx.rs:770
 #: src/ui/app_views_ctx.rs:821
 msgid "Audiobook"
 msgstr "Audiolibro"
 
 #: src/ui/app_dialogs.rs:352 src/ui/app_dialogs.rs:355
-#: src/ui/app_favorites.rs:256 src/ui/app_favorites.rs:758
-#: src/ui/app_settings_menu.rs:221 src/ui/app_views_ctx.rs:383
+#: src/ui/app_favorites.rs:257 src/ui/app_favorites.rs:759
+#: src/ui/app_settings_menu.rs:226 src/ui/app_views_ctx.rs:383
 #: src/ui/app_views_ctx.rs:510 src/ui/app_views_ctx.rs:772
 #: src/ui/app_views_ctx.rs:823 src/ui/stream_page_recordings.rs:198
 #: src/ui/yt_page_detail.rs:106
 msgid "Album"
 msgstr "Álbum"
 
-#: src/ui/app_dialogs.rs:358 src/ui/app_favorites.rs:760
-#: src/ui/app_settings_menu.rs:223 src/ui/setup.rs:244
+#: src/ui/app_dialogs.rs:358 src/ui/app_favorites.rs:761
+#: src/ui/app_settings_menu.rs:228 src/ui/setup.rs:244
 msgid "Folder"
 msgstr "Carpeta"
 
-#: src/ui/app_dialogs.rs:360 src/ui/app_favorites.rs:761
-#: src/ui/app_settings_menu.rs:224
+#: src/ui/app_dialogs.rs:360 src/ui/app_favorites.rs:762
+#: src/ui/app_settings_menu.rs:229
 msgid "Track"
 msgstr "Pista"
 
@@ -579,7 +588,7 @@ msgstr "Actualizando …"
 msgid "Added {n} tracks to the queue"
 msgstr "{n} pistas añadidas a la cola"
 
-#: src/ui/app_episode_playback.rs:256
+#: src/ui/app_episode_playback.rs:257
 msgid "Podcast removed"
 msgstr "Pódcast eliminado"
 
@@ -700,22 +709,30 @@ msgstr "la transmisión en directo"
 msgid "Applies while this live stream plays."
 msgstr "Se aplica mientras se reproduce esta transmisión en directo."
 
-#: src/ui/app_favorites.rs:279 src/ui/app_queue.rs:200
-#: src/ui/app_settings_menu.rs:124
+#: src/ui/app_favorites.rs:280 src/ui/app_queue.rs:200
+#: src/ui/app_settings_menu.rs:129
 msgid "Drag to reorder"
 msgstr "Arrastra para reordenar"
 
-#: src/ui/app_favorites.rs:295
+#: src/ui/app_favorites.rs:296
 msgid "Remove this entry?"
 msgstr "¿Eliminar esta entrada?"
 
-#: src/ui/app_favorites.rs:662
+#: src/ui/app_favorites.rs:663
 msgid "Added to favorites"
 msgstr "Añadido a favoritos"
 
-#: src/ui/app_favorites.rs:664
+#: src/ui/app_favorites.rs:665
 msgid "Removed from favorites"
 msgstr "Eliminado de favoritos"
+
+#: src/ui/app_fm.rs:81
+msgid "FM radio"
+msgstr "Radio FM"
+
+#: src/ui/app_fm.rs:127
+msgid "FM radio could not start"
+msgstr "No se pudo iniciar la radio FM"
 
 #: src/ui/app_helpers.rs:648 src/ui/app_helpers.rs:659 src/ui/app_views.rs:60
 #: src/ui/app_views_ctx.rs:739 src/ui/sync_share_ui.rs:289
@@ -735,24 +752,24 @@ msgstr[1] "{n} álbumes"
 msgid "Listened"
 msgstr "Escuchado"
 
-#: src/ui/app_init.rs:434
+#: src/ui/app_init.rs:442
 msgid "Idea"
 msgstr "Idea"
 
-#: src/ui/app_init.rs:434
+#: src/ui/app_init.rs:442
 msgid "Task"
 msgstr "Tarea"
 
-#: src/ui/app_init.rs:434 src/ui/stream_page_recordings.rs:215
+#: src/ui/app_init.rs:442 src/ui/stream_page_recordings.rs:215
 msgid "Note"
 msgstr "Nota"
 
 # Restart-to-apply-language confirmation (added 2026-06-06).
-#: src/ui/app_init.rs:1346
+#: src/ui/app_init.rs:1354
 msgid "Restart to change the language?"
 msgstr "¿Reiniciar para cambiar el idioma?"
 
-#: src/ui/app_init.rs:1348
+#: src/ui/app_init.rs:1356
 msgid ""
 "The new language is loaded only after a restart. Restart now, or do it "
 "yourself later."
@@ -760,15 +777,15 @@ msgstr ""
 "El nuevo idioma se carga solo después de reiniciar. Reinicia ahora o hazlo "
 "tú mismo más tarde."
 
-#: src/ui/app_init.rs:1351
+#: src/ui/app_init.rs:1359
 msgid "Later"
 msgstr "Más tarde"
 
-#: src/ui/app_init.rs:1352
+#: src/ui/app_init.rs:1360
 msgid "Restart now"
 msgstr "Reiniciar ahora"
 
-#: src/ui/app_init.rs:1514
+#: src/ui/app_init.rs:1529
 msgid "Import cancelled"
 msgstr "Importación cancelada"
 
@@ -808,7 +825,7 @@ msgstr "Nota de voz eliminada"
 msgid "Category removed"
 msgstr "Categoría eliminada"
 
-#: src/ui/app_memo.rs:337 src/ui/app_streaming.rs:199
+#: src/ui/app_memo.rs:337 src/ui/app_streaming.rs:200
 #: src/ui/stream_page_recordings.rs:105
 msgid "Recording …"
 msgstr "Grabando …"
@@ -829,7 +846,7 @@ msgstr "Nueva categoría"
 msgid "Recorded"
 msgstr "Grabado"
 
-#: src/ui/app_memo.rs:739 src/ui/app_sections.rs:350
+#: src/ui/app_memo.rs:739 src/ui/app_sections.rs:369
 #: src/ui/stream_page_stations.rs:91 src/ui/yt_page_lists.rs:100
 msgid "Length"
 msgstr "Duración"
@@ -842,6 +859,7 @@ msgstr "Editar"
 #: src/ui/app_memo.rs:905 src/ui/app_playlist.rs:733
 #: src/ui/app_playlist.rs:878 src/ui/app_rec_edit.rs:301
 #: src/ui/app_views_sources.rs:397 src/ui/app_views_sources.rs:475
+#: src/ui/fm_page.rs:715 src/ui/fm_page.rs:805
 #: src/ui/stream_page_stations.rs:405
 msgid "Rename"
 msgstr "Renombrar"
@@ -909,19 +927,19 @@ msgstr "Mover a General"
 msgid "Delete memos"
 msgstr "Eliminar notas de voz"
 
-#: src/ui/app_playback.rs:620
+#: src/ui/app_playback.rs:660
 msgid "No playable tracks"
 msgstr "No hay pistas reproducibles"
 
-#: src/ui/app_playback.rs:625
+#: src/ui/app_playback.rs:665
 msgid "Skipping unavailable track"
 msgstr "Omitiendo pista no disponible"
 
-#: src/ui/app_playback.rs:917
+#: src/ui/app_playback.rs:969
 msgid "Stream not reachable – playback stopped"
 msgstr "Transmisión no disponible: reproducción detenida"
 
-#: src/ui/app_playback.rs:940
+#: src/ui/app_playback.rs:993
 msgid "Audio output lost – playback paused"
 msgstr "Salida de audio perdida – reproducción en pausa"
 
@@ -979,7 +997,7 @@ msgstr "Eliminar lista de reproducción"
 msgid "New playlist"
 msgstr "Nueva lista de reproducción"
 
-#: src/ui/app_playlist.rs:802 src/ui/app_sections.rs:349
+#: src/ui/app_playlist.rs:802 src/ui/app_sections.rs:368
 #: src/ui/podcasts_page_lists.rs:29 src/ui/stream_page_stations.rs:83
 #: src/ui/stream_page_stations.rs:89 src/ui/stream_page_stations.rs:98
 #: src/ui/yt_page_lists.rs:50 src/ui/yt_page_lists.rs:98
@@ -1010,75 +1028,75 @@ msgstr "{int},{frac} M"
 msgid "{int} k"
 msgstr "{int} mil"
 
-#: src/ui/app_popularity.rs:218
+#: src/ui/app_popularity.rs:221
 msgid "Popularity (Deezer)"
 msgstr "Popularidad (Deezer)"
 
-#: src/ui/app_popularity.rs:223
+#: src/ui/app_popularity.rs:226
 msgid "Hit"
 msgstr "Éxito"
 
-#: src/ui/app_popularity.rs:225
+#: src/ui/app_popularity.rs:228
 msgid "No. {n} of the most popular songs by {artist}"
 msgstr "N.º {n} de las canciones más populares de {artist}"
 
-#: src/ui/app_popularity.rs:235
+#: src/ui/app_popularity.rs:238
 msgid "Fans (Deezer)"
 msgstr "Fans (Deezer)"
 
-#: src/ui/app_popularity.rs:341
+#: src/ui/app_popularity.rs:344
 msgid "Could not look up the hits"
 msgstr "No se pudieron consultar los éxitos"
 
-#: src/ui/app_popularity.rs:364
+#: src/ui/app_popularity.rs:367
 msgid "Looking up the hits …"
 msgstr "Buscando los éxitos …"
 
-#: src/ui/app_popularity.rs:367
+#: src/ui/app_popularity.rs:370
 msgid "Needs an internet connection"
 msgstr "Requiere conexión a Internet"
 
-#: src/ui/app_popularity.rs:375
+#: src/ui/app_popularity.rs:378
 msgid "No popularity data for this artist"
 msgstr "No hay datos de popularidad de este artista"
 
-#: src/ui/app_popularity.rs:380
+#: src/ui/app_popularity.rs:383
 msgid "No hits in the library"
 msgstr "No hay éxitos en la biblioteca"
 
-#: src/ui/app_popularity.rs:469
+#: src/ui/app_popularity.rs:511
 msgid "Go to the hits"
 msgstr "Ir a los éxitos"
 
-#: src/ui/app_popularity.rs:474 src/ui/app_popularity.rs:535
+#: src/ui/app_popularity.rs:516 src/ui/app_popularity.rs:810
 msgid "Best-known songs"
 msgstr "Canciones más conocidas"
 
-#: src/ui/app_popularity.rs:534
-msgid "Hits"
-msgstr "Éxitos"
-
-#: src/ui/app_popularity.rs:621 src/ui/app_views_album.rs:1068
+#: src/ui/app_popularity.rs:705 src/ui/app_views_album.rs:1068
 msgid "Missing — tap to add"
 msgstr "Falta — toca para añadir"
 
-#: src/ui/app_popularity.rs:623
+#: src/ui/app_popularity.rs:707
 msgid "Not in the library"
 msgstr "No está en la biblioteca"
 
-#: src/ui/app_popularity.rs:675 src/ui/app_streaming.rs:824
+#: src/ui/app_popularity.rs:754 src/ui/app_streaming.rs:827
 #: src/ui/app_views_handlers.rs:787
 msgid "Enable YouTube in the settings to use this"
 msgstr "Activa YouTube en los ajustes para usar esto"
 
-#: src/ui/app_popularity.rs:678 src/ui/app_views_handlers.rs:797
+#: src/ui/app_popularity.rs:757 src/ui/app_views_handlers.rs:797
 msgid "Searching online …"
 msgstr "Buscando en línea …"
 
-#: src/ui/app_popularity.rs:712 src/ui/app_streaming.rs:867
+#: src/ui/app_popularity.rs:791 src/ui/app_streaming.rs:870
 #: src/ui/app_views_handlers.rs:867
 msgid "Not found on YouTube"
 msgstr "No se encontró en YouTube"
+
+#: src/ui/app_popularity.rs:809
+msgid "Hits"
+msgstr "Éxitos"
 
 #: src/ui/app_queue.rs:61
 msgid "Clear queue"
@@ -1112,7 +1130,7 @@ msgstr "Cola vaciada"
 msgid "Play from the playhead"
 msgstr "Reproducir desde el cursor"
 
-#: src/ui/app_rec_edit.rs:259 src/ui/app_streaming.rs:770
+#: src/ui/app_rec_edit.rs:259 src/ui/app_streaming.rs:773
 #: src/ui/stream_page_recordings.rs:305
 msgid "File not found"
 msgstr "Archivo no encontrado"
@@ -1134,8 +1152,10 @@ msgid "Zoom in"
 msgstr "Acercar"
 
 #: src/ui/app_rec_edit.rs:436 src/ui/app_rec_edit.rs:694
-#: src/ui/app_streaming.rs:550 src/ui/app_views_sources.rs:534
-#: src/ui/cloud_page.rs:317 src/ui/gdrive_page.rs:335 src/ui/smb_page.rs:176
+#: src/ui/app_streaming.rs:551 src/ui/app_views_sources.rs:534
+#: src/ui/cloud_page.rs:317 src/ui/fm_page.rs:407 src/ui/fm_page.rs:636
+#: src/ui/fm_page.rs:748 src/ui/fm_page.rs:776 src/ui/gdrive_page.rs:335
+#: src/ui/smb_page.rs:176
 msgid "Save"
 msgstr "Guardar"
 
@@ -1229,22 +1249,22 @@ msgstr ""
 "Encuentra artistas, álbumes, canciones, emisoras, grabaciones, vídeos y "
 "notas de voz."
 
-#: src/ui/app_sections.rs:54
+#: src/ui/app_sections.rs:65
 msgid "Quick access to the tracks, albums and artists you starred."
 msgstr ""
 "Acceso rápido a las pistas, álbumes y artistas que marcaste con estrella."
 
-#: src/ui/app_sections.rs:55
+#: src/ui/app_sections.rs:66
 msgid "Browse your music folder — and any extra sources — as a file tree."
 msgstr ""
 "Explora tu carpeta de música — y cualquier fuente adicional — como un árbol "
 "de archivos."
 
-#: src/ui/app_sections.rs:57
+#: src/ui/app_sections.rs:68
 msgid "Every artist in your library, each opening to their albums and tracks."
 msgstr "Cada artista de tu biblioteca, que abre sus álbumes y pistas."
 
-#: src/ui/app_sections.rs:60
+#: src/ui/app_sections.rs:71
 msgid ""
 "Releases by a single artist with just a few tracks, kept apart from full "
 "albums."
@@ -1252,34 +1272,42 @@ msgstr ""
 "Lanzamientos de un solo artista con pocas pistas, separados de los álbumes "
 "completos."
 
-#: src/ui/app_sections.rs:63
+#: src/ui/app_sections.rs:74
 msgid "Every album in your library, sortable and grouped by initial or year."
 msgstr "Cada álbum de tu biblioteca, ordenable y agrupado por inicial o año."
 
-#: src/ui/app_sections.rs:66
+#: src/ui/app_sections.rs:77
 msgid ""
 "Albums with tracks by several artists, such as samplers and soundtracks."
 msgstr ""
 "Álbumes con pistas de varios artistas, como recopilatorios y bandas sonoras."
 
-#: src/ui/app_sections.rs:69
+#: src/ui/app_sections.rs:80
 msgid "Live and concert recordings you marked, kept apart from your albums."
 msgstr ""
 "Grabaciones de conciertos y directos que marcaste, separadas de tus álbumes."
 
-#: src/ui/app_sections.rs:71
+#: src/ui/app_sections.rs:82
 msgid "Subscribe to podcast feeds and play or download their episodes."
 msgstr ""
 "Suscríbete a fuentes de podcasts y reproduce o descarga sus episodios."
 
-#: src/ui/app_sections.rs:73
+#: src/ui/app_sections.rs:84
 msgid ""
 "Internet radio stations, with an optional buffer to record what just played."
 msgstr ""
 "Emisoras de radio por Internet, con un búfer opcional para grabar lo que "
 "acaba de sonar."
 
-#: src/ui/app_sections.rs:76
+#: src/ui/app_sections.rs:87
+msgid ""
+"The phone's FM tuner: tune by dial, seek and save stations. A wired headset "
+"is the antenna."
+msgstr ""
+"El sintonizador FM del teléfono: sintoniza con el dial, busca y guarda "
+"emisoras. Unos auriculares con cable hacen de antena."
+
+#: src/ui/app_sections.rs:90
 msgid ""
 "Search and play YouTube, follow channels and keep videos offline. Needs the "
 "yt-dlp tool."
@@ -1287,7 +1315,7 @@ msgstr ""
 "Busca y reproduce YouTube, sigue canales y guarda vídeos sin conexión. "
 "Necesita la herramienta yt-dlp."
 
-#: src/ui/app_sections.rs:79
+#: src/ui/app_sections.rs:93
 msgid ""
 "Albums, folders or tracks you marked as audiobooks, resuming where you left "
 "off."
@@ -1295,32 +1323,32 @@ msgstr ""
 "Álbumes, carpetas o pistas que marcaste como audiolibros, retomando donde lo"
 " dejaste."
 
-#: src/ui/app_sections.rs:81
+#: src/ui/app_sections.rs:95
 msgid "Your own playlists, arranged in any order you like."
 msgstr "Tus propias listas de reproducción, en el orden que quieras."
 
-#: src/ui/app_sections.rs:82
+#: src/ui/app_sections.rs:96
 msgid "Quick voice notes recorded with the microphone."
 msgstr "Notas de voz rápidas grabadas con el micrófono."
 
-#: src/ui/app_sections.rs:83
+#: src/ui/app_sections.rs:97
 msgid "Listening statistics and your most-played artists and tracks."
 msgstr "Estadísticas de escucha y tus artistas y pistas más reproducidos."
 
-#: src/ui/app_sections.rs:352 src/ui/stream_page_stations.rs:90
+#: src/ui/app_sections.rs:371 src/ui/stream_page_stations.rs:90
 #: src/ui/stream_page_stations.rs:99 src/ui/yt_page_lists.rs:99
 msgid "Date"
 msgstr "Fecha"
 
-#: src/ui/app_sections.rs:353
+#: src/ui/app_sections.rs:372
 msgid "Number of songs"
 msgstr "Número de canciones"
 
-#: src/ui/app_sections.rs:354
+#: src/ui/app_sections.rs:373
 msgid "Custom order"
 msgstr "Orden personalizado"
 
-#: src/ui/app_sections.rs:355
+#: src/ui/app_sections.rs:374
 msgid "Date added"
 msgstr "Fecha de adición"
 
@@ -1658,15 +1686,15 @@ msgstr ""
 "versiones antiguas, puedes actualizarla a una más reciente aquí. Activa la "
 "sección de YouTube en Menú. Puede estar restringido en algunos países."
 
-#: src/ui/app_settings_meta.rs:123 src/ui/app_yt_glue.rs:566
+#: src/ui/app_settings_meta.rs:123 src/ui/app_yt_glue.rs:567
 msgid "Installed (version {v})"
 msgstr "Instalado (versión {v})"
 
-#: src/ui/app_settings_meta.rs:124 src/ui/app_yt_glue.rs:563
+#: src/ui/app_settings_meta.rs:124 src/ui/app_yt_glue.rs:564
 msgid "Working …"
 msgstr "Procesando …"
 
-#: src/ui/app_settings_meta.rs:128 src/ui/app_yt_glue.rs:574
+#: src/ui/app_settings_meta.rs:128 src/ui/app_yt_glue.rs:575
 msgid "Update"
 msgstr "Actualizar"
 
@@ -1917,86 +1945,86 @@ msgstr "Mostrar descripción"
 msgid "Unknown year"
 msgstr "Año desconocido"
 
-#: src/ui/app_state.rs:197
+#: src/ui/app_state.rs:202
 msgid "Reading music data"
 msgstr "Leyendo datos de música"
 
-#: src/ui/app_streaming.rs:254
+#: src/ui/app_streaming.rs:255
 msgid "Recording stopped (stream ended)"
 msgstr "Grabación detenida (la transmisión terminó)"
 
-#: src/ui/app_streaming.rs:366
+#: src/ui/app_streaming.rs:367
 msgid "Recording"
 msgstr "Grabación"
 
-#: src/ui/app_streaming.rs:439
+#: src/ui/app_streaming.rs:440
 msgid "Talk"
 msgstr "Locución"
 
-#: src/ui/app_streaming.rs:530
+#: src/ui/app_streaming.rs:531
 msgid "Recently detected"
 msgstr "Detectado recientemente"
 
-#: src/ui/app_streaming.rs:535
+#: src/ui/app_streaming.rs:536
 msgid "Nothing buffered yet"
 msgstr "Aún no hay nada en el búfer"
 
-#: src/ui/app_streaming.rs:545
+#: src/ui/app_streaming.rs:546
 msgid "Beginning missing"
 msgstr "Falta el principio"
 
-#: src/ui/app_streaming.rs:583
+#: src/ui/app_streaming.rs:584
 msgid "Replay – {name}"
 msgstr "Volver a reproducir – {name}"
 
-#: src/ui/app_streaming.rs:615
+#: src/ui/app_streaming.rs:616
 msgid "Enable the recording buffer in the settings first"
 msgstr "Activa primero el búfer de grabación en los ajustes"
 
-#: src/ui/app_streaming.rs:726
+#: src/ui/app_streaming.rs:728
 msgid "Replay"
 msgstr "Volver a reproducir"
 
-#: src/ui/app_streaming.rs:738 src/ui/app_streaming.rs:752
+#: src/ui/app_streaming.rs:741 src/ui/app_streaming.rs:755
 msgid "Could not extract from buffer"
 msgstr "No se pudo extraer del búfer"
 
 #. No local copy → show a spinner while the online lookup runs; it is
 #. closed again in `on_heard_resolved` once the search returns.
-#: src/ui/app_streaming.rs:833
+#: src/ui/app_streaming.rs:836
 msgid "Looking online …"
 msgstr "Consultando en línea …"
 
-#: src/ui/app_streaming.rs:1061
+#: src/ui/app_streaming.rs:1064
 msgid "Recording stopped"
 msgstr "Grabación detenida"
 
-#: src/ui/app_streaming.rs:1084
+#: src/ui/app_streaming.rs:1087
 msgid "Station removed"
 msgstr "Emisora eliminada"
 
-#: src/ui/app_streaming.rs:1091
+#: src/ui/app_streaming.rs:1094
 msgid "Recording deleted"
 msgstr "Grabación eliminada"
 
-#: src/ui/app_update.rs:235
+#: src/ui/app_update.rs:237
 msgid "Download complete"
 msgstr "Descarga completada"
 
-#: src/ui/app_update.rs:239 src/ui/app_views_handlers.rs:1000
+#: src/ui/app_update.rs:241 src/ui/app_views_handlers.rs:1000
 #: src/ui/podcasts_page.rs:891
 msgid "Download failed"
 msgstr "Error en la descarga"
 
-#: src/ui/app_update.rs:272
+#: src/ui/app_update.rs:274
 msgid "No new concert candidates found"
 msgstr "No se encontraron nuevos posibles conciertos"
 
-#: src/ui/app_update.rs:282
+#: src/ui/app_update.rs:284
 msgid "yt-dlp ready (version {v})"
 msgstr "yt-dlp listo (versión {v})"
 
-#: src/ui/app_update.rs:286
+#: src/ui/app_update.rs:288
 msgid "yt-dlp download failed"
 msgstr "Error al descargar yt-dlp"
 
@@ -2020,12 +2048,12 @@ msgstr "No hay canciones de este artista en la biblioteca."
 msgid "Checking for missing tracks …"
 msgstr "Comprobando si faltan pistas …"
 
-#: src/ui/app_views_album.rs:1367 src/ui/app_views_ctx.rs:393
+#: src/ui/app_views_album.rs:1374 src/ui/app_views_ctx.rs:393
 #: src/ui/app_views_ctx.rs:783 src/ui/app_views_ctx.rs:843
 msgid "Year"
 msgstr "Año"
 
-#: src/ui/app_views_album.rs:1369
+#: src/ui/app_views_album.rs:1376
 msgid "Years"
 msgstr "Años"
 
@@ -2189,7 +2217,7 @@ msgstr "Cambiar carpeta de música"
 msgid "Rename source"
 msgstr "Renombrar fuente"
 
-#: src/ui/app_views_sources.rs:506 src/ui/setup.rs:670
+#: src/ui/app_views_sources.rs:506 src/ui/setup.rs:673
 msgid "Choose music folder"
 msgstr "Elegir carpeta de música"
 
@@ -2216,35 +2244,35 @@ msgstr "Iniciando la lista «{title}» …"
 msgid "Playlist is empty"
 msgstr "La lista de reproducción está vacía"
 
-#: src/ui/app_yt_glue.rs:442
+#: src/ui/app_yt_glue.rs:443
 msgid "Could not play live stream"
 msgstr "No se pudo reproducir la emisión en directo"
 
-#: src/ui/app_yt_glue.rs:463
+#: src/ui/app_yt_glue.rs:464
 msgid "The live stream is not available"
 msgstr "La emisión en directo no está disponible"
 
-#: src/ui/app_yt_glue.rs:501
+#: src/ui/app_yt_glue.rs:502
 msgid "Could not play video"
 msgstr "No se pudo reproducir el vídeo"
 
-#: src/ui/app_yt_glue.rs:513
+#: src/ui/app_yt_glue.rs:514
 msgid "Updating yt-dlp …"
 msgstr "Actualizando yt-dlp …"
 
-#: src/ui/app_yt_glue.rs:515
+#: src/ui/app_yt_glue.rs:516
 msgid "Downloading yt-dlp …"
 msgstr "Descargando yt-dlp …"
 
-#: src/ui/app_yt_glue.rs:567
+#: src/ui/app_yt_glue.rs:568
 msgid "Not installed"
 msgstr "No instalado"
 
-#: src/ui/app_yt_glue.rs:593
+#: src/ui/app_yt_glue.rs:594
 msgid "Download yt-dlp in the settings to use YouTube"
 msgstr "Descarga yt-dlp en los ajustes para usar YouTube"
 
-#: src/ui/app_yt_glue.rs:818
+#: src/ui/app_yt_glue.rs:822
 msgid "Channel removed"
 msgstr "Canal eliminado"
 
@@ -2331,6 +2359,126 @@ msgstr "Probando …"
 #: src/ui/cloud_page.rs:550 src/ui/gdrive_page.rs:570 src/ui/smb_page.rs:270
 msgid "Could not save this source"
 msgstr "No se pudo guardar esta fuente"
+
+#: src/ui/fm_dial.rs:49
+msgid "Drag to tune, tap to jump to a frequency"
+msgstr "Arrastra para sintonizar, toca para saltar a una frecuencia"
+
+#: src/ui/fm_page.rs:236
+msgid ""
+"FM radio could not start: the phone's audio service offers no FM sound. It "
+"needs the source “hal_fm_input” (audio-hal-bridge with FM support)."
+msgstr ""
+"No se pudo iniciar la radio FM: el servicio de audio del teléfono no ofrece "
+"sonido FM. Necesita la fuente «hal_fm_input» (audio-hal-bridge con soporte "
+"FM)."
+
+#: src/ui/fm_page.rs:262 src/ui/fm_page.rs:281
+msgid ""
+"No station found. Is a wired headset plugged in? Its cable is the antenna."
+msgstr ""
+"No se encontró ninguna emisora. ¿Están conectados unos auriculares con "
+"cable? Su cable es la antena."
+
+#: src/ui/fm_page.rs:273
+msgid "Scanning … {freq}"
+msgstr "Buscando … {freq}"
+
+#: src/ui/fm_page.rs:284
+msgid "{n} station found"
+msgid_plural "{n} stations found"
+msgstr[0] "{n} emisora encontrada"
+msgstr[1] "{n} emisoras encontradas"
+
+#: src/ui/fm_page.rs:369
+msgid "Search for the previous station"
+msgstr "Buscar la emisora anterior"
+
+#: src/ui/fm_page.rs:372
+msgid "Down 0.1 MHz"
+msgstr "0,1 MHz menos"
+
+#: src/ui/fm_page.rs:385
+msgid "Up 0.1 MHz"
+msgstr "0,1 MHz más"
+
+#: src/ui/fm_page.rs:390
+msgid "Search for the next station"
+msgstr "Buscar la emisora siguiente"
+
+#: src/ui/fm_page.rs:420
+msgid "Scan band"
+msgstr "Explorar banda"
+
+#: src/ui/fm_page.rs:423
+msgid "Search the whole band for stations"
+msgstr "Buscar emisoras en toda la banda"
+
+#: src/ui/fm_page.rs:450
+msgid "Saved stations"
+msgstr "Emisoras guardadas"
+
+#: src/ui/fm_page.rs:460
+msgid ""
+"Tune in to a station and tap “Save” to keep it here. The buttons of your "
+"headset step through the saved stations."
+msgstr ""
+"Sintoniza una emisora y toca «Guardar» para conservarla aquí. Con los "
+"botones de tus auriculares pasas por las emisoras guardadas."
+
+#: src/ui/fm_page.rs:477
+msgid "Found stations"
+msgstr "Emisoras encontradas"
+
+#: src/ui/fm_page.rs:496
+msgid ""
+"FM radio needs a wired headset: its cable is the antenna. The sound can "
+"still play on the speaker or over Bluetooth."
+msgstr ""
+"La radio FM necesita unos auriculares con cable: su cable es la antena. El "
+"sonido puede salir igualmente por el altavoz o por Bluetooth."
+
+#: src/ui/fm_page.rs:568
+msgid "The FM tuner does not respond: {error}"
+msgstr "El sintonizador FM no responde: {error}"
+
+#: src/ui/fm_page.rs:578 src/ui/podcasts_page.rs:755 src/ui/stream_page.rs:605
+#: src/ui/yt_channels.rs:40
+msgid "Searching …"
+msgstr "Buscando …"
+
+#: src/ui/fm_page.rs:633
+msgid "Saved"
+msgstr "Guardada"
+
+#: src/ui/fm_page.rs:716
+msgid "Move up"
+msgstr "Subir"
+
+#: src/ui/fm_page.rs:717
+msgid "Move down"
+msgstr "Bajar"
+
+#: src/ui/fm_page.rs:723
+msgid "More"
+msgstr "Más"
+
+#: src/ui/fm_page.rs:768
+msgid "Save {freq}"
+msgstr "Guardar {freq}"
+
+#: src/ui/fm_page.rs:769
+msgid "A name for the station:"
+msgstr "Nombre de la emisora:"
+
+#: src/ui/fm_page.rs:796 src/ui/stream_page_stations.rs:316
+#: src/ui/stream_page_stations.rs:396
+msgid "Rename station"
+msgstr "Renombrar emisora"
+
+#: src/ui/fm_page.rs:824
+msgid "Remove “{name}”?"
+msgstr "¿Eliminar «{name}»?"
 
 #: src/ui/fs_row.rs:397
 msgid "Downloaded"
@@ -2490,11 +2638,6 @@ msgstr "Sin pódcasts"
 #: src/ui/podcasts_page.rs:557
 msgid "Subscribe to a podcast via its feed address (RSS)."
 msgstr "Suscríbete a un pódcast mediante su dirección de fuente (RSS)."
-
-#: src/ui/podcasts_page.rs:755 src/ui/stream_page.rs:605
-#: src/ui/yt_channels.rs:40
-msgid "Searching …"
-msgstr "Buscando …"
 
 #: src/ui/podcasts_page.rs:779
 msgid "Loading feed …"
@@ -2692,11 +2835,11 @@ msgstr ""
 "Elige los elementos de menú que quieres ver. Puedes mostrarlos, ocultarlos y"
 " reordenarlos en cualquier momento en Ajustes."
 
-#: src/ui/setup.rs:606
+#: src/ui/setup.rs:609
 msgid "Every entry has a menu"
 msgstr "Cada entrada tiene un menú"
 
-#: src/ui/setup.rs:609
+#: src/ui/setup.rs:612
 msgid ""
 "Tracks, albums, artists and files hold more than the list shows: cover art "
 "and info, lyrics, favorites, the queue, playlists and sharing."
@@ -2705,28 +2848,28 @@ msgstr ""
 "lista: carátula e información, letras, favoritos, la cola, listas de "
 "reproducción y compartir."
 
-#: src/ui/setup.rs:623
+#: src/ui/setup.rs:626
 msgid "Right-click"
 msgstr "Clic derecho"
 
-#: src/ui/setup.rs:624
+#: src/ui/setup.rs:627
 msgid "With a mouse: click an entry with the right mouse button."
 msgstr "Con un ratón: haz clic en una entrada con el botón derecho."
 
-#: src/ui/setup.rs:628
+#: src/ui/setup.rs:631
 msgid "Press and hold"
 msgstr "Mantener pulsado"
 
-#: src/ui/setup.rs:629
+#: src/ui/setup.rs:632
 msgid ""
 "On a touchscreen: touch an entry and keep your finger down for a moment."
 msgstr "En una pantalla táctil: toca una entrada y mantén el dedo un momento."
 
-#: src/ui/setup.rs:651
+#: src/ui/setup.rs:654
 msgid "Choose your music folder"
 msgstr "Elige tu carpeta de música"
 
-#: src/ui/setup.rs:653
+#: src/ui/setup.rs:656
 msgid ""
 "Pick the folder that already holds your collection. You can add more sources"
 " later in Settings."
@@ -2734,15 +2877,15 @@ msgstr ""
 "Elige la carpeta que ya contiene tu colección. Puedes añadir más fuentes más"
 " tarde en Ajustes."
 
-#: src/ui/setup.rs:657
+#: src/ui/setup.rs:660
 msgid "Choose a folder for your music"
 msgstr "Elige una carpeta para tu música"
 
-#: src/ui/setup.rs:659
+#: src/ui/setup.rs:662
 msgid "This is where downloads and recordings will be stored."
 msgstr "Aquí se guardarán las descargas y grabaciones."
 
-#: src/ui/setup.rs:705
+#: src/ui/setup.rs:708
 msgid "Get started"
 msgstr "Empezar"
 
@@ -3028,10 +3171,6 @@ msgstr "Quitar de la lista"
 #: src/ui/stream_page_stations.rs:306
 msgid "Replay (buffer)"
 msgstr "Volver a reproducir (búfer)"
-
-#: src/ui/stream_page_stations.rs:316 src/ui/stream_page_stations.rs:396
-msgid "Rename station"
-msgstr "Renombrar emisora"
 
 #: src/ui/stream_page_stations.rs:325 src/ui/stream_page_stations.rs:437
 msgid "Change logo"
