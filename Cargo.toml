@@ -1,13 +1,12 @@
 [package]
 name = "emilia"
-version = "0.8.61"
+version = "0.8.62"
 edition = "2024"
 description = "Adaptiver Musik- & Hörspielplayer für Phosh (GTK4/libadwaita)"
 license = "GPL-3.0-or-later"
 
 [dependencies]
 relm4 = { version = "0.11", features = ["libadwaita", "gnome_46"] }
-relm4-components = "0.11"
 gtk = { version = "0.11", package = "gtk4" }
 adw = { version = "0.9", package = "libadwaita", features = ["v1_5"] }
 gstreamer = "0.25"
