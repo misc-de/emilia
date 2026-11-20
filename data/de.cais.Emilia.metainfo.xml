@@ -137,6 +137,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.60" date="2026-11-20">
+      <description>
+        <p>New FM radio section for phones with a MediaTek tuner and a matching sound source: tune by dragging or tapping the dial, search for the next station or scan the whole band, save stations as favorites and pick them straight from the list. Previous and next, also from headset or Bluetooth buttons, switch between the saved stations. A wired headset serves as the antenna. The section only shows on devices that support it.</p>
+        <p>All components are up to date.</p>
+        <p xml:lang="de">Neuer Bereich UKW-Radio für Telefone mit MediaTek-Tuner und passender Tonquelle: Sender per Ziehen oder Tippen auf der Skala einstellen, zum nächsten Sender suchen oder das ganze Band absuchen, Sender als Favoriten speichern und direkt aus der Liste wählen. Vor und Zurück, auch über Headset- oder Bluetooth-Tasten, wechseln zwischen den gespeicherten Sendern. Ein Kabel-Headset dient als Antenne. Der Bereich erscheint nur auf Geräten, die das unterstützen.</p>
+        <p xml:lang="de">Alle Bestandteile sind auf dem neuesten Stand.</p>
+      </description>
+    </release>
     <release version="0.8.59" date="2026-11-12">
       <description>
         <p>Emilia now runs on the GNOME 51 platform, and all of its components are up to date, including yt-dlp for YouTube and fpcalc for track recognition. The update downloads the new platform once.</p>
