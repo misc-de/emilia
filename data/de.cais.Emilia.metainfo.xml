@@ -137,6 +137,14 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.61" date="2026-11-22">
+      <description>
+        <p>The QR code scan for device sync now always asks the camera portal first and only then falls back to the camera directly. This lets it reach cameras that exist only through PipeWire, as on phones with a camera bridge, and it says that no camera was found instead of showing a test pattern.</p>
+        <p>Security update for a component used to handle web addresses.</p>
+        <p xml:lang="de">Der QR-Code-Scan für die Geräte-Synchronisierung fragt jetzt immer zuerst das Kamera-Portal und greift erst danach direkt auf die Kamera zu. So erreicht er auch Kameras, die es nur über PipeWire gibt, etwa auf Telefonen mit Kamera-Bridge, und meldet, dass keine Kamera gefunden wurde, statt ein Testbild zu zeigen.</p>
+        <p xml:lang="de">Sicherheitsupdate für einen Baustein, der Webadressen verarbeitet.</p>
+      </description>
+    </release>
     <release version="0.8.60" date="2026-11-20">
       <description>
         <p>New FM radio section for phones with a MediaTek tuner and a matching sound source: tune by dragging or tapping the dial, search for the next station or scan the whole band, save stations as favorites and pick them straight from the list. Previous and next, also from headset or Bluetooth buttons, switch between the saved stations. A wired headset serves as the antenna. The section only shows on devices that support it.</p>
