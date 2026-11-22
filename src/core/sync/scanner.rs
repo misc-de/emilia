@@ -414,6 +414,15 @@ mod tests {
         use gstreamer as gst;
         use gstreamer::prelude::*;
         gst::init().unwrap();
+        // The test sources live in gst-plugins-base; without it there is
+        // nothing to look for.
+        if ["videotestsrc", "audiotestsrc"]
+            .iter()
+            .any(|f| gst::ElementFactory::find(f).is_none())
+        {
+            eprintln!("skipped: gst-plugins-base test sources not installed");
+            return;
+        }
         let launch = |desc: &str| {
             gst::parse::launch(desc)
                 .unwrap()

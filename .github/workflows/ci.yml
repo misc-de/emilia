@@ -30,6 +30,7 @@ jobs:
             build-essential pkg-config \
             libgtk-4-dev libadwaita-1-dev libdbus-1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
             gettext desktop-file-utils appstream
 
       - uses: dtolnay/rust-toolchain@stable
