@@ -22,10 +22,17 @@
 //!   `v4l2src`/`autovideosrc` reach it from inside the sandbox — `droidcamsrc`
 //!   (a host-only gst-droid plugin) is neither present nor needed there. The
 //!   portal does **not** reliably expose these loopbacks, so that build sets
-//!   `EMILIA_CAMERA_SRC` to bypass it (and keeps `--device=all`).
+//!   `EMILIA_CAMERA_SRC` as its fallback (and keeps `--device=all`).
+//! - **Halium with a PipeWire camera bridge (e.g. Plinius)**: the HAL cameras
+//!   are PipeWire nodes and there is no usable V4L2 device, so only the portal
+//!   reaches them. That is why the portal is always asked first, even when
+//!   `EMILIA_CAMERA_SRC` is set.
 //!
-//! Set `EMILIA_CAMERA_SRC` to bypass the portal and pick a direct source for a
-//! specific port (e.g. `v4l2src device=/dev/video2` or `libcamerasrc`).
+//! Set `EMILIA_CAMERA_SRC` to pick the direct fallback source for a specific
+//! port (e.g. `v4l2src device=/dev/video2` or `libcamerasrc`). If the portal
+//! pipeline cannot be started, the direct source is tried as well. When
+//! `autovideosrc` finds no camera it silently plays a test pattern; that case
+//! is reported as "no camera found" instead.
 //!
 //! **Call only on the main thread** – pipeline, timer, bus watch and paintable
 //! all hang off the GLib main loop or GDK.
@@ -70,22 +77,80 @@ impl Scanner {
         gst::init()?;
 
         // Prefer the XDG **camera portal**: it hands back a PipeWire fd, so the
-        // desktop Flatpak needs no `--device=all` (raw `/dev/video*`). An explicit
-        // `EMILIA_CAMERA_SRC` skips the portal and uses the direct source — needed
-        // on Halium (FuriOS/Droidian), where the portal does not expose the V4L2
-        // loopbacks. If the portal is absent, denied or has no camera, fall back to
-        // the direct source (which still works under `--device=all`).
-        let camera_fd = if std::env::var_os("EMILIA_CAMERA_SRC").is_some() {
-            None
-        } else {
-            portal_camera_fd_bounded()
-        };
-        let src = match &camera_fd {
-            Some(fd) => format!("pipewiresrc fd={}", fd.as_raw_fd()),
-            None => camera_source(),
-        };
+        // desktop Flatpak needs no `--device=all` (raw `/dev/video*`), and it is
+        // the only way to cameras that exist solely as PipeWire nodes (Plinius).
+        // `EMILIA_CAMERA_SRC` only picks the direct fallback source: if the
+        // portal is absent, denied, has no camera or its pipeline cannot be
+        // started, the direct source is used (works under `--device=all`, e.g.
+        // the V4L2 loopbacks on FuriOS/Droidian).
         let have_preview = gst::ElementFactory::find("gtk4paintablesink").is_some();
+        let mut portal = None;
+        if let Some(fd) = portal_camera_fd_bounded() {
+            match Started::launch(&format!("pipewiresrc fd={}", fd.as_raw_fd()), have_preview) {
+                Ok(started) => portal = Some((started, fd)),
+                Err(e) => tracing::warn!("Portal camera failed ({e}); using the direct source"),
+            }
+        }
+        let (started, camera_fd) = match portal {
+            Some((started, fd)) => (started, Some(fd)),
+            None => (Started::launch(&camera_source(), have_preview)?, None),
+        };
+        let Started {
+            pipeline,
+            appsink,
+            paintable,
+            guard,
+        } = started;
 
+        // Poll + decode the newest frame on the main thread.
+        let mut on_decode = on_decode;
+        let decode_source = gst::glib::timeout_add_local(POLL_INTERVAL, move || {
+            if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::ZERO)
+                && let Some(text) = decode_sample(&sample)
+                && !text.is_empty()
+            {
+                on_decode(text);
+            }
+            gst::glib::ControlFlow::Continue
+        });
+
+        Ok((
+            Scanner {
+                pipeline,
+                _bus_watch: guard,
+                decode_source: Some(decode_source),
+                _camera_fd: camera_fd,
+            },
+            paintable,
+        ))
+    }
+
+    /// Stops the pipeline (idempotent).
+    pub fn stop(&self) {
+        let _ = self.pipeline.set_state(gst::State::Null);
+    }
+}
+
+impl Drop for Scanner {
+    fn drop(&mut self) {
+        if let Some(id) = self.decode_source.take() {
+            id.remove();
+        }
+        self.stop();
+    }
+}
+
+/// A camera pipeline that is already PLAYING, before the decode timer is attached.
+struct Started {
+    pipeline: gst::Pipeline,
+    appsink: gst_app::AppSink,
+    paintable: Option<gdk::Paintable>,
+    guard: gst::bus::BusWatchGuard,
+}
+
+impl Started {
+    /// Builds the scanner pipeline around the source `src` and starts it.
+    fn launch(src: &str, have_preview: bool) -> Result<Started> {
         // Down-scale + cap the framerate: QR codes decode fine at 640×480 and it
         // keeps per-frame CPU low on phones. The decode branch is single-plane
         // GRAY8 for rqrr; `drop=true max-buffers=1` keeps only the newest frame.
@@ -136,46 +201,38 @@ impl Scanner {
             })
             .map_err(|_| anyhow!("bus watch failed"))?;
 
+        let fail = |msg: &str| {
+            let _ = pipeline.set_state(gst::State::Null);
+            anyhow!("{msg}")
+        };
         pipeline
             .set_state(gst::State::Playing)
-            .map_err(|_| anyhow!("camera could not be started (no accessible camera?)"))?;
+            .map_err(|_| fail("camera could not be started (no accessible camera?)"))?;
 
-        // Poll + decode the newest frame on the main thread.
-        let mut on_decode = on_decode;
-        let decode_source = gst::glib::timeout_add_local(POLL_INTERVAL, move || {
-            if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::ZERO)
-                && let Some(text) = decode_sample(&sample)
-                && !text.is_empty()
-            {
-                on_decode(text);
-            }
-            gst::glib::ControlFlow::Continue
-        });
+        // `autovideosrc` falls back to `videotestsrc` when it finds no working
+        // camera (e.g. only raw ISP nodes under /dev/video*). Its child is
+        // created on NULL→READY, so it is in place once `set_state` returned.
+        if uses_test_source(&pipeline) {
+            return Err(fail("no camera found"));
+        }
 
-        Ok((
-            Scanner {
-                pipeline,
-                _bus_watch: guard,
-                decode_source: Some(decode_source),
-                _camera_fd: camera_fd,
-            },
+        Ok(Started {
+            pipeline,
+            appsink,
             paintable,
-        ))
-    }
-
-    /// Stops the pipeline (idempotent).
-    pub fn stop(&self) {
-        let _ = self.pipeline.set_state(gst::State::Null);
+            guard,
+        })
     }
 }
 
-impl Drop for Scanner {
-    fn drop(&mut self) {
-        if let Some(id) = self.decode_source.take() {
-            id.remove();
-        }
-        self.stop();
-    }
+/// Whether the pipeline (including nested bins such as `autovideosrc`) contains
+/// a `videotestsrc`, i.e. shows a test pattern instead of a camera.
+fn uses_test_source(pipeline: &gst::Pipeline) -> bool {
+    pipeline.iterate_recurse().into_iter().any(|el| {
+        el.ok()
+            .and_then(|el| el.factory())
+            .is_some_and(|f| f.name() == "videotestsrc")
+    })
 }
 
 /// How long [`Scanner::start`] waits for the camera portal (including the time
@@ -348,5 +405,24 @@ mod tests {
         assert_eq!(grids.len(), 1);
         let (_meta, content) = grids[0].decode().unwrap();
         assert_eq!(content, payload);
+    }
+
+    /// A test pattern hidden inside a nested bin (as `autovideosrc` does when
+    /// it finds no camera) must be recognised; a real source must not be.
+    #[test]
+    fn test_pattern_is_detected_in_nested_bins() {
+        use gstreamer as gst;
+        use gstreamer::prelude::*;
+        gst::init().unwrap();
+        let launch = |desc: &str| {
+            gst::parse::launch(desc)
+                .unwrap()
+                .downcast::<gst::Pipeline>()
+                .unwrap()
+        };
+        let nested = launch("bin.( videotestsrc ! queue ) ! fakesink");
+        assert!(super::uses_test_source(&nested));
+        let other = launch("audiotestsrc ! fakesink");
+        assert!(!super::uses_test_source(&other));
     }
 }
