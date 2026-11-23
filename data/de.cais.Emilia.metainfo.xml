@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.62" date="2026-11-23">
+      <description>
+        <p>Podcast episodes and files streamed from a server no longer fall silent for several seconds after about five minutes of playback. Some podcast servers dropped the connection while the download waited, and the sound only came back once the player had reconnected. Streams now load at playback speed, so the connection stays open.</p>
+        <p xml:lang="de">Podcast-Folgen und von einem Server gestreamte Dateien verstummen nicht mehr nach etwa fünf Minuten für mehrere Sekunden. Manche Podcast-Server trennten die Verbindung, während der Download wartete, und der Ton kam erst zurück, wenn der Player neu verbunden hatte. Streams laden jetzt im Abspieltempo, sodass die Verbindung offen bleibt.</p>
+      </description>
+    </release>
     <release version="0.8.61" date="2026-11-22">
       <description>
         <p>The QR code scan for device sync now always asks the camera portal first and only then falls back to the camera directly. This lets it reach cameras that exist only through PipeWire, as on phones with a camera bridge, and it says that no camera was found instead of showing a test pattern.</p>
