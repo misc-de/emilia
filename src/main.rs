@@ -36,12 +36,30 @@ fn software_only_renderer() -> bool {
     !has_render_node
 }
 
+/// GStreamer's `souphttpsrc` streams podcast episodes and remote files through
+/// libsoup, which speaks HTTP/2 to CDNs that offer it. There libsoup takes one
+/// 6 MiB flow-control window of an episode in a burst and grants more only once
+/// playback has used it up. Several CDNs (Megaphone/Akamai, measured on a phone
+/// with GStreamer 1.28.6) drop the connection while it waits, and libsoup
+/// leaves the read blocked without an error: after about five minutes the audio
+/// stops until the player's stall watchdog reconnects ten seconds later. Over
+/// HTTP/1.1, TCP flow control paces the download at playback speed and the
+/// connection never sits idle. An explicit `SOUP_FORCE_HTTP1` always wins.
+fn wants_soup_http1(current: Option<std::ffi::OsString>) -> bool {
+    current.is_none()
+}
+
 fn main() {
+    // Before any thread exists, like the renderer choice below.
+    if wants_soup_http1(std::env::var_os("SOUP_FORCE_HTTP1")) {
+        // SAFETY: no other thread exists yet (first statement of `main`).
+        unsafe { std::env::set_var("SOUP_FORCE_HTTP1", "1") };
+    }
     // Decided before anything else runs: setting the variable is only sound
     // while the process is still single-threaded, and GTK reads it on startup.
     let cairo_fallback = software_only_renderer();
     if cairo_fallback {
-        // SAFETY: no other thread exists yet (first statement of `main`).
+        // SAFETY: no other thread exists yet (start of `main`).
         unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
     }
 
@@ -107,4 +125,16 @@ fn main() {
 
     let app = RelmApp::from_app(gtk_app);
     app.run::<ui::app::App>(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wants_soup_http1;
+
+    #[test]
+    fn soup_http1_is_forced_unless_the_user_set_it() {
+        assert!(wants_soup_http1(None));
+        assert!(!wants_soup_http1(Some("0".into())));
+        assert!(!wants_soup_http1(Some("1".into())));
+    }
 }
