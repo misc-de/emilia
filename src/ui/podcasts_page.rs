@@ -23,6 +23,7 @@ use relm4::{adw, gtk};
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::{PodcastView, SortCrit};
+use crate::ui::media_list::{MediaItem, MediaList};
 
 /// How many feeds "Refresh all" fetches at once (plain HTTP, cheap).
 const FEED_REFRESH_THREADS: usize = 8;
@@ -52,17 +53,6 @@ fn cache_missing_feed_images() -> bool {
         .filter(|url| crate::core::online::cache_podcast_image(url).is_some())
         .count()
         > 0
-}
-
-/// A listening-progress line of a list row, kept so the transport tick can
-/// refresh it in place instead of rebuilding the whole list.
-pub(super) struct EpisodeRow {
-    /// Audio URL of the episode the line belongs to.
-    pub(super) url: String,
-    /// The line itself (emptied and refilled on every update).
-    pub(super) row: gtk::Box,
-    /// Episode length from the feed, if it states one.
-    pub(super) total_secs: Option<i64>,
 }
 
 /// One-line outcome of a "refresh all", shown briefly in the loading overlay:
@@ -214,26 +204,21 @@ pub(crate) struct PodcastsPage {
     pub(super) sort_slot: crate::ui::app_sort::SortSlot,
     /// Newest episodes across all subscriptions (for the "Newest" view).
     pub(super) newest_items: Vec<crate::model::EpisodeRef>,
-    /// Container of the "Newest" list (filled imperatively in `reload_newest`).
-    pub(super) newest_list: gtk::Box,
+    /// The "Newest" list (virtualised; filled in `reload_newest`).
+    pub(super) newest_list: MediaList,
     /// Recently (partly) heard episodes (for the "Recently" view).
     pub(super) recent_items: Vec<crate::model::RecentEpisode>,
-    /// Container of the "Recently" list (filled imperatively in `reload_recent`).
-    pub(super) recent_list: gtk::Box,
+    /// The "Recently" list (virtualised; filled in `reload_recent`).
+    pub(super) recent_list: MediaList,
+    /// Episode list of the podcast subpage opened last (virtualised), kept so
+    /// play/pause and the live progress reach its rows.
+    pub(super) episode_list: RefCell<Option<MediaList>>,
     /// Hits of the last podcast search (iTunes), for the subscribe dialog.
     pub(super) podcast_search_results: Vec<crate::core::podcast::PodcastSearchResult>,
     /// The last podcast search hit a network/service error (vs. no hits).
     pub(super) podcast_search_failed: bool,
     /// While the subscribe search dialog is open: (dialog, hit list).
     pub(super) podcast_search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
-    /// Play/pause buttons of the visible episode rows (audio URL → button).
-    /// Play/pause controls of the episode rows, keyed by audio URL.
-    pub(super) episode_marks: crate::ui::play_mark::Marks,
-    /// Listening-progress lines of the visible rows, so the per-second transport
-    /// tick can update the running episode's bar in place (rebuilding the list
-    /// on every tick would be far too expensive — and made the progress look
-    /// frozen until the user switched tabs).
-    pub(super) episode_progress_rows: Rc<RefCell<Vec<EpisodeRow>>>,
     /// "Play" row of an open episode detail dialog (row, audio URL).
     pub(super) ctx_episode_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
     /// "Download" column of an open episode detail dialog (value label, progress
@@ -245,7 +230,7 @@ pub(crate) struct PodcastsPage {
     /// NavigationView; since its `Msg` must be `Send` it cannot carry the
     /// (`!Send`) `gtk::Box` through a message, so we park the built page here and
     /// only signal `PushSubpage` (a unit) — the parent then pushes it.
-    pub(super) subpage_slot: Rc<RefCell<Option<(String, gtk::Box)>>>,
+    pub(super) subpage_slot: Rc<RefCell<Option<(String, gtk::Widget)>>>,
 }
 
 #[derive(Debug)]
@@ -421,7 +406,7 @@ pub(crate) enum PodcastsCmd {
 #[relm4::component(pub(crate))]
 impl Component for PodcastsPage {
     type Init = (
-        Rc<RefCell<Option<(String, gtk::Box)>>>,
+        Rc<RefCell<Option<(String, gtk::Widget)>>>,
         crate::ui::app_sort::SortSlot,
     );
     type Input = PodcastsInput;
@@ -479,14 +464,8 @@ impl Component for PodcastsPage {
                 #[watch]
                 set_visible: model.podcast_view == PodcastView::Recent && !model.recent_items.is_empty(),
                 #[local_ref]
-                recent_list -> gtk::Box {
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_spacing: 6,
-                    set_valign: gtk::Align::Start,
+                recent_view -> gtk::ListView {
                     set_margin_top: 10,
-                    set_margin_bottom: 12,
-                    set_margin_start: 12,
-                    set_margin_end: 12,
                 },
             },
             adw::StatusPage {
@@ -504,14 +483,8 @@ impl Component for PodcastsPage {
                 #[watch]
                 set_visible: model.podcast_view == PodcastView::Newest && !model.newest_items.is_empty(),
                 #[local_ref]
-                newest_list -> gtk::Box {
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_spacing: 6,
-                    set_valign: gtk::Align::Start,
+                newest_view -> gtk::ListView {
                     set_margin_top: 0,
-                    set_margin_bottom: 12,
-                    set_margin_start: 12,
-                    set_margin_end: 12,
                 },
             },
             adw::StatusPage {
@@ -571,8 +544,28 @@ impl Component for PodcastsPage {
         // temporary in-memory DB (logged) instead of panicking the UI thread.
         let library = Library::open_or_memory();
         let podcasts_list = gtk::ListBox::new();
-        let newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let newest_list = MediaList::new(
+            "microphone-symbolic",
+            {
+                let sender = sender.clone();
+                move |i, _| sender.input(PodcastsInput::ShowEpisodeDetail(i))
+            },
+            episode_toggle(&sender),
+        );
+        let recent_list = MediaList::new(
+            "microphone-symbolic",
+            {
+                let sender = sender.clone();
+                move |_, item: &MediaItem| {
+                    sender.input(PodcastsInput::ShowEpisodeDetailByUrl {
+                        url: item.key.clone(),
+                    })
+                }
+            },
+            episode_toggle(&sender),
+        );
+        let newest_view = newest_list.widget().clone();
+        let recent_view = recent_list.widget().clone();
         let podcasts_gallery = gtk::FlowBox::new();
         // Restore the persisted overview sort (default: by name, ascending) + the
         // grouping/gallery choices.
@@ -619,9 +612,10 @@ impl Component for PodcastsPage {
             podcasts_gallery: podcasts_gallery.clone(),
             podcast_view: PodcastView::Newest,
             newest_items: Vec::new(),
-            newest_list: newest_list.clone(),
+            newest_list,
             recent_items: Vec::new(),
-            recent_list: recent_list.clone(),
+            recent_list,
+            episode_list: RefCell::new(None),
             overview_sort,
             overview_no_group,
             gallery_override,
@@ -631,8 +625,6 @@ impl Component for PodcastsPage {
             podcast_search_results: Vec::new(),
             podcast_search_failed: false,
             podcast_search: Rc::new(RefCell::new(None)),
-            episode_marks: Default::default(),
-            episode_progress_rows: Rc::new(RefCell::new(Vec::new())),
             ctx_episode_play: Rc::new(RefCell::new(None)),
             ctx_episode_download: Rc::new(RefCell::new(None)),
             downloading_episodes: HashMap::new(),
@@ -667,7 +659,7 @@ impl Component for PodcastsPage {
                 self.playing = playing;
                 self.refresh_episode_icons();
                 if switched {
-                    self.reload_recent(&sender);
+                    self.reload_recent();
                 }
             }
             PodcastsInput::EpisodeProgressTick {
@@ -679,12 +671,12 @@ impl Component for PodcastsPage {
                 // Only worth a rebuild while the episode is still missing from
                 // "Recently" — afterwards the tick keeps its row current.
                 if !self.recent_items.iter().any(|e| e.audio_url == url) {
-                    self.reload_recent(&sender);
+                    self.reload_recent();
                 }
             }
             PodcastsInput::EpisodeFinished { url } => {
                 self.apply_episode_progress(&url, 0, 0, true);
-                self.reload_recent(&sender);
+                self.reload_recent();
             }
             PodcastsInput::SetGalleryView(on) => {
                 self.gallery_view = on;
@@ -704,8 +696,8 @@ impl Component for PodcastsPage {
                 // (it changes as episodes are listened to; without this the
                 // lists keep the state of the last full reload).
                 match view {
-                    PodcastView::Recent => self.reload_recent(&sender),
-                    PodcastView::Newest => self.reload_newest(&sender),
+                    PodcastView::Recent => self.reload_recent(),
+                    PodcastView::Newest => self.reload_newest(),
                     _ => {}
                 }
                 // The sort button only shows on the subscription overview.
@@ -1043,6 +1035,19 @@ impl PodcastsPage {
     /// the global `gallery_view`.
     pub(super) fn gallery_on(&self) -> bool {
         self.gallery_override.unwrap_or(self.gallery_view)
+    }
+}
+
+/// Play button handler of the episode lists: toggles the row's episode.
+pub(super) fn episode_toggle(
+    sender: &ComponentSender<PodcastsPage>,
+) -> impl Fn(usize, &MediaItem) + 'static {
+    let sender = sender.clone();
+    move |_, item| {
+        let _ = sender.output(PodcastsOutput::ToggleEpisode {
+            url: item.key.clone(),
+            title: item.title.clone(),
+        });
     }
 }
 

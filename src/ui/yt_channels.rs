@@ -86,14 +86,6 @@ pub(super) fn fmt_published(iso: &str) -> String {
         .unwrap_or_else(|| iso.to_string())
 }
 
-/// A right-aligned, subtle duration label for a video row.
-pub(super) fn duration_chip(secs: i64) -> gtk::Label {
-    let lbl = gtk::Label::new(Some(&fmt_duration(secs)));
-    lbl.set_valign(gtk::Align::Center);
-    lbl.set_css_classes(&["dim-label", "numeric"]);
-    lbl
-}
-
 /// Formats a duration in **seconds** as `M:SS` or `H:MM:SS` (display only) —
 /// YouTube reports lengths in seconds, the rest of the app in milliseconds.
 pub(crate) fn fmt_duration(secs: i64) -> String {
@@ -299,17 +291,6 @@ pub(crate) fn refresh_channel_videos(
     // A channel cached for the first time reports no "new" videos — the count
     // is meant for refreshes of an already-known channel.
     Some((title.to_string(), if seen.is_empty() { 0 } else { fresh }))
-}
-
-/// A watch-progress widget of a list row, kept so the transport tick can update
-/// it in place while the video plays.
-pub(super) struct WatchRow {
-    /// Video the widget belongs to.
-    pub(super) video_id: String,
-    /// The widget itself (emptied and refilled on every update).
-    pub(super) row: gtk::Box,
-    /// Runtime in seconds, as the list knows it.
-    pub(super) total_secs: Option<i64>,
 }
 
 /// One-line outcome of a "refresh all", shown briefly in the loading overlay:

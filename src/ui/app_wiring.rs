@@ -207,7 +207,7 @@ pub(crate) fn launch_gdrive_page(
 /// component and forwards its output into the root component's [`Msg`].
 pub(crate) fn launch_podcasts_page(
     sender: &ComponentSender<App>,
-    podcast_subpage: &std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
+    podcast_subpage: &std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Widget)>>>,
     podcast_sort: &crate::ui::app_sort::SortSlot,
 ) -> relm4::Controller<crate::ui::podcasts_page::PodcastsPage> {
     crate::ui::podcasts_page::PodcastsPage::builder()
@@ -244,7 +244,7 @@ pub(crate) fn launch_podcasts_page(
 /// component and forwards its output into the root component's [`Msg`].
 pub(crate) fn launch_yt_page(
     sender: &ComponentSender<App>,
-    yt_subpage: &std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
+    yt_subpage: &std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Widget)>>>,
     yt_sort: &crate::ui::app_sort::SortSlot,
 ) -> relm4::Controller<crate::ui::yt_page::YtPage> {
     crate::ui::yt_page::YtPage::builder()

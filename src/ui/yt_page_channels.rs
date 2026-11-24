@@ -11,6 +11,7 @@ use crate::core::db::Library;
 use crate::core::youtube::{self, YtKind};
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::YtView;
+use crate::ui::media_list::{MediaItem, MediaList};
 use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 use crate::ui::yt_channels::{
     fill_channel_videos, fmt_published, refresh_channel_videos, store_channel,
@@ -165,60 +166,72 @@ impl YtPage {
             .and_then(|(_, _, _, t, _)| t.as_deref())
             .and_then(crate::core::online::youtube_thumb_path);
 
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        let group = adw::PreferencesGroup::builder()
-            .title(count_title(title, videos.len()).as_str())
-            .build();
+        let page_title = gettext_f("Channel – {title}", &[("title", title)]);
         if videos.is_empty() {
+            let content = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .margin_top(12)
+                .margin_bottom(12)
+                .margin_start(12)
+                .margin_end(12)
+                .build();
+            let group = adw::PreferencesGroup::builder()
+                .title(count_title(title, 0).as_str())
+                .build();
             group.add(
                 &adw::ActionRow::builder()
                     .title(gettext("No videos"))
                     .build(),
             );
+            content.append(&group);
+            *self.channel_list.borrow_mut() = None;
+            self.push_subpage(sender, page_title, content);
+            return;
         }
         let watched = self.library.all_yt_progress().unwrap_or_default();
-        for v in &videos {
-            // Subtitle: upload date (the runtime sits on the right, like the
-            // podcast lists; repeating it here would be noise).
-            let subtitle = channel_video_subtitle(v.published.as_deref());
-            let cover = crate::core::online::youtube_cover_path(&v.video_id)
-                .or_else(|| {
-                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
-                })
-                .or_else(|| channel_thumb.clone());
-            let card = self.video_card(
-                sender,
-                &v.video_id,
-                &v.title,
-                &subtitle,
-                cover.as_deref(),
-                v.duration,
-                watched.get(&v.video_id),
-                {
-                    let (sender, vid, t) = (sender.clone(), v.video_id.clone(), v.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowVideoDetail {
-                            video_id: vid.clone(),
-                            title: t.clone(),
-                        });
-                    }
-                },
-            );
-            group.add(&card);
-        }
-        content.append(&group);
-        self.push_subpage(
-            sender,
-            gettext_f("Channel – {title}", &[("title", title)]),
-            content,
+        let items: Vec<_> = videos
+            .iter()
+            .map(|v| {
+                let cover = crate::core::online::youtube_cover_path(&v.video_id)
+                    .or_else(|| {
+                        crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(
+                            &v.video_id,
+                        ))
+                    })
+                    .or_else(|| channel_thumb.clone());
+                // Subtitle: upload date (the runtime sits on the right, like the
+                // podcast lists; repeating it here would be noise).
+                crate::ui::yt_page_lists::video_item(
+                    &v.video_id,
+                    &v.title,
+                    channel_video_subtitle(v.published.as_deref()),
+                    cover,
+                    v.duration,
+                    watched.get(&v.video_id),
+                )
+            })
+            .collect();
+        // The channel's name heads the list as the first row's section heading,
+        // so it scrolls with the videos like the group title used to.
+        let headers = vec![format!("{title} ({})", items.len()); items.len()];
+        let list = MediaList::new(
+            "audio-x-generic-symbolic",
+            {
+                let sender = sender.clone();
+                move |_, item: &MediaItem| {
+                    sender.input(YtInput::ShowVideoDetail {
+                        video_id: item.key.clone(),
+                        title: item.title.clone(),
+                    });
+                }
+            },
+            crate::ui::yt_page::video_play(sender),
         );
+        list.widget().set_margin_top(12);
+        list.set_items(items, Some(headers));
+        let view = list.widget().clone();
+        *self.channel_list.borrow_mut() = Some(list);
+        self.push_subpage(sender, page_title, view);
     }
 
     /// Subscription detail of a channel.

@@ -33,7 +33,8 @@ use crate::core::youtube::{self, YtKind, YtResult};
 use crate::i18n::{gettext, gettext_f};
 use crate::ui::app::{SortCrit, YtView};
 use crate::ui::app_sort::read_sort;
-use crate::ui::yt_channels::{WatchRow, refresh_summary_text};
+use crate::ui::media_list::{MediaItem, MediaList};
+use crate::ui::yt_channels::refresh_summary_text;
 use crate::ui::yt_page_channels::cache_missing_channel_thumbs;
 use crate::ui::yt_page_lists::read_channel_view_prefs;
 // Still reached as `crate::ui::yt_page::…` from `app_init.rs` / `app_views_handlers.rs`.
@@ -91,9 +92,14 @@ pub(crate) struct YtPage {
     pub(super) channels_list: gtk::ListBox,
     pub(super) channels_gallery: gtk::FlowBox,
     pub(super) newest_items: Vec<crate::model::YtVideoRef>,
-    pub(super) newest_list: gtk::Box,
+    /// The "Newest" list (virtualised; filled in `reload_yt_newest`).
+    pub(super) newest_list: MediaList,
     pub(super) recent_items: Vec<crate::model::YtRecent>,
-    pub(super) recent_list: gtk::Box,
+    /// The "Recent" list (virtualised; filled in `reload_yt_recent`).
+    pub(super) recent_list: MediaList,
+    /// Video list of the channel subpage opened last (virtualised), kept so
+    /// play/pause and the live progress reach its rows.
+    pub(super) channel_list: RefCell<Option<MediaList>>,
     /// Saved live streams (Live tab).
     pub(super) live_items: Vec<crate::model::YtLive>,
     pub(super) live_list: gtk::ListBox,
@@ -111,9 +117,6 @@ pub(crate) struct YtPage {
     pub(super) search: Rc<RefCell<Option<(adw::Dialog, gtk::ListBox)>>>,
     /// Play/pause controls of the video rows, keyed by video id.
     pub(super) video_marks: crate::ui::play_mark::Marks,
-    /// Watch-progress widgets of the visible rows (long-form items only), so the
-    /// per-second transport tick can advance them without rebuilding the list.
-    pub(super) watch_progress_rows: Rc<RefCell<Vec<WatchRow>>>,
     pub(super) ctx_video_play: Rc<RefCell<Option<(adw::ActionRow, String)>>>,
     pub(super) ctx_video_download: Rc<RefCell<Option<(adw::ActionRow, gtk::Image, String)>>>,
     pub(super) ctx_video_meta:
@@ -125,7 +128,7 @@ pub(crate) struct YtPage {
     pub(super) playlist_songs_cache: HashMap<String, Vec<YtResult>>,
     pub(super) pl_cover_slots: Vec<(String, adw::Bin)>,
     /// Hand-off slot for built subpages (the `!Send` widget can't ride a message).
-    subpage_slot: Rc<RefCell<Option<(String, gtk::Box)>>>,
+    subpage_slot: Rc<RefCell<Option<(String, gtk::Widget)>>>,
     /// Live "adding to library" progress popup (video detail → library add),
     /// kept so async [`YtCmd::AddLibProgress`] commands can drive its bar/label.
     pub(super) progress_popup: Rc<RefCell<Option<ProgressPopup>>>,
@@ -144,7 +147,7 @@ pub(super) struct ProgressPopup {
 #[relm4::component(pub(crate))]
 impl Component for YtPage {
     type Init = (
-        Rc<RefCell<Option<(String, gtk::Box)>>>,
+        Rc<RefCell<Option<(String, gtk::Widget)>>>,
         crate::ui::app_sort::SortSlot,
     );
     type Input = YtInput;
@@ -220,14 +223,8 @@ impl Component for YtPage {
                 #[watch]
                 set_visible: model.yt_view == YtView::Newest && !model.newest_items.is_empty(),
                 #[local_ref]
-                yt_newest_list -> gtk::Box {
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_spacing: 6,
-                    set_valign: gtk::Align::Start,
+                yt_newest_view -> gtk::ListView {
                     set_margin_top: 10,
-                    set_margin_bottom: 12,
-                    set_margin_start: 12,
-                    set_margin_end: 12,
                 },
             },
             adw::StatusPage {
@@ -245,14 +242,8 @@ impl Component for YtPage {
                 #[watch]
                 set_visible: model.yt_view == YtView::Recent && !model.recent_items.is_empty(),
                 #[local_ref]
-                yt_recent_list -> gtk::Box {
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_spacing: 6,
-                    set_valign: gtk::Align::Start,
+                yt_recent_view -> gtk::ListView {
                     set_margin_top: 10,
-                    set_margin_bottom: 12,
-                    set_margin_start: 12,
-                    set_margin_end: 12,
                 },
             },
             adw::StatusPage {
@@ -337,8 +328,58 @@ impl Component for YtPage {
         let library = Library::open_or_memory();
         let yt_channels_list = gtk::ListBox::new();
         let yt_channels_gallery = gtk::FlowBox::new();
-        let yt_newest_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let yt_recent_list = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let yt_newest_list = MediaList::new(
+            "audio-x-generic-symbolic",
+            {
+                let sender = sender.clone();
+                move |i, _| sender.input(YtInput::ShowNewestDetail(i))
+            },
+            video_play(&sender),
+        );
+        // "Recent" mixes videos with playlists: a playlist card opens on a tap,
+        // starts the whole playlist from its button and has its own detail view.
+        let yt_recent_list = MediaList::new(
+            "audio-x-generic-symbolic",
+            {
+                let sender = sender.clone();
+                move |_, item: &MediaItem| {
+                    let (key, title) = (item.key.clone(), item.title.clone());
+                    sender.input(if item.activatable {
+                        YtInput::ShowPlaylistDetail { url: key, title }
+                    } else {
+                        YtInput::ShowVideoDetail {
+                            video_id: key,
+                            title,
+                        }
+                    });
+                }
+            },
+            {
+                let sender = sender.clone();
+                let play_video = video_play(&sender);
+                move |i, item: &MediaItem| {
+                    if item.activatable {
+                        let _ = sender.output(YtOutput::StartPlaylist {
+                            url: item.key.clone(),
+                            title: item.title.clone(),
+                        });
+                    } else {
+                        play_video(i, item);
+                    }
+                }
+            },
+        );
+        {
+            let sender = sender.clone();
+            yt_recent_list.connect_activate(move |_, item| {
+                sender.input(YtInput::OpenRecentPlaylist {
+                    url: item.key.clone(),
+                    title: item.title.clone(),
+                });
+            });
+        }
+        let yt_newest_view = yt_newest_list.widget().clone();
+        let yt_recent_view = yt_recent_list.widget().clone();
         let yt_live_list = gtk::ListBox::new();
         // Restore the persisted subscriptions sort (default: by name, ascending) +
         // the grouping/gallery choices.
@@ -371,9 +412,10 @@ impl Component for YtPage {
             channels_list: yt_channels_list.clone(),
             channels_gallery: yt_channels_gallery.clone(),
             newest_items: Vec::new(),
-            newest_list: yt_newest_list.clone(),
+            newest_list: yt_newest_list,
             recent_items: Vec::new(),
-            recent_list: yt_recent_list.clone(),
+            recent_list: yt_recent_list,
+            channel_list: RefCell::new(None),
             live_items: Vec::new(),
             live_list: yt_live_list.clone(),
             search_results: Vec::new(),
@@ -382,7 +424,6 @@ impl Component for YtPage {
             search_seq: 0,
             search: Rc::new(RefCell::new(None)),
             video_marks: Default::default(),
-            watch_progress_rows: Rc::new(RefCell::new(Vec::new())),
             ctx_video_play: Rc::new(RefCell::new(None)),
             ctx_video_download: Rc::new(RefCell::new(None)),
             ctx_video_meta: Rc::new(RefCell::new(None)),
@@ -712,10 +753,21 @@ impl YtPage {
         &self,
         sender: &ComponentSender<Self>,
         title: String,
-        content: gtk::Box,
+        content: impl IsA<gtk::Widget>,
     ) {
-        *self.subpage_slot.borrow_mut() = Some((title, content));
+        *self.subpage_slot.borrow_mut() = Some((title, content.upcast()));
         let _ = sender.output(YtOutput::PushSubpage);
+    }
+}
+
+/// Play button handler of the video lists: plays/pauses the row's video.
+pub(super) fn video_play(sender: &ComponentSender<YtPage>) -> impl Fn(usize, &MediaItem) + 'static {
+    let sender = sender.clone();
+    move |_, item| {
+        sender.input(YtInput::PlayVideo {
+            video_id: item.key.clone(),
+            title: item.title.clone(),
+        });
     }
 }
 

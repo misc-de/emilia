@@ -15,7 +15,8 @@ use relm4::{adw, gtk};
 
 use crate::core::db::Library;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
-use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
+use crate::ui::app_helpers::cover_widget;
+use crate::ui::media_list::{MediaItem, MediaList};
 use crate::ui::podcasts_page::{
     EpisodeDownload, PodcastsCmd, PodcastsInput, PodcastsOutput, PodcastsPage,
     fetch_and_store_podcast,
@@ -469,113 +470,113 @@ impl PodcastsPage {
             .and_then(|(_, _, img, _)| img.as_deref())
             .and_then(crate::core::online::podcast_image_path);
 
-        let content = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        let group = adw::PreferencesGroup::builder()
-            .title(
-                format!(
-                    "{} ({})",
-                    gtk::glib::markup_escape_text(title),
-                    episodes.len()
-                )
-                .as_str(),
-            )
-            .build();
-
+        let page_title = gettext_f("Podcast – {title}", &[("title", title)]);
         if episodes.is_empty() {
+            let content = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .margin_top(12)
+                .margin_bottom(12)
+                .margin_start(12)
+                .margin_end(12)
+                .build();
+            let group = adw::PreferencesGroup::builder()
+                .title(format!("{} (0)", gtk::glib::markup_escape_text(title)).as_str())
+                .build();
             group.add(
                 &adw::ActionRow::builder()
                     .title(gettext("No episodes"))
                     .build(),
             );
+            content.append(&group);
+            *self.episode_list.borrow_mut() = None;
+            *self.subpage_slot.borrow_mut() = Some((page_title, content.upcast()));
+            let _ = sender.output(PodcastsOutput::PushSubpage);
+            return;
         }
-        for (i, ep) in episodes.iter().enumerate() {
-            let mut subtitle = String::new();
-            if let Some(p) = &ep.published {
-                subtitle.push_str(p.trim());
-            }
-            if let Some(d) = &ep.duration {
-                if !subtitle.is_empty() {
-                    subtitle.push_str(" · ");
+
+        let items: Vec<MediaItem> = episodes
+            .iter()
+            .map(|ep| {
+                let mut subtitle = String::new();
+                if let Some(p) = &ep.published {
+                    subtitle.push_str(p.trim());
                 }
-                subtitle.push_str(d.trim());
-            }
-            // Listening progress on its own line below published/duration, the
-            // same wording as "Newest". Finished episodes read "Listened";
-            // in-progress ones show elapsed [/ total].
-            let (position_ms, finished) =
-                progress.get(&ep.audio_url).copied().unwrap_or((0, false));
-            if finished {
-                if !subtitle.is_empty() {
-                    subtitle.push('\n');
+                if let Some(d) = &ep.duration {
+                    if !subtitle.is_empty() {
+                        subtitle.push_str(" · ");
+                    }
+                    subtitle.push_str(d.trim());
                 }
-                subtitle.push_str(&gettext("Listened"));
-            } else if position_ms > 0 {
-                let elapsed = crate::ui::app_helpers::fmt_duration(position_ms);
-                let total_secs = ep
-                    .duration
-                    .as_deref()
-                    .and_then(crate::core::podcast::duration_secs)
-                    .filter(|s| *s > 0);
-                if !subtitle.is_empty() {
-                    subtitle.push('\n');
-                }
-                subtitle.push_str(&match total_secs {
-                    Some(secs) => gettext_f(
-                        "{position} of {total} listened",
-                        &[
-                            ("position", &elapsed),
-                            ("total", &crate::ui::app_helpers::fmt_duration(secs * 1000)),
-                        ],
-                    ),
-                    None => gettext_f("{position} listened", &[("position", &elapsed)]),
-                });
-            }
-            // Not activatable: like a library track, the episode plays via its
-            // play button; long press / right click opens the detail view.
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&ep.title))
-                .subtitle(gtk::glib::markup_escape_text(&subtitle))
-                .build();
-            row.add_css_class("emilia-flush");
-            if finished || position_ms > 0 {
-                row.set_subtitle_lines(2);
-            }
-            row.add_prefix(&cover_widget(cover.as_deref(), "microphone-symbolic"));
-            row.add_suffix(&self.episode_play_button(sender, &ep.audio_url, &ep.title));
-            on_secondary_click(&row, {
-                let sender = sender.clone();
-                move || {
-                    sender.input(PodcastsInput::ShowPodcastEpisodeDetail {
-                        podcast_id: id,
-                        index: i,
+                // Listening progress on its own line below published/duration,
+                // the same wording as "Newest". Finished episodes read
+                // "Listened"; in-progress ones show elapsed [/ total].
+                let (position_ms, finished) =
+                    progress.get(&ep.audio_url).copied().unwrap_or((0, false));
+                if finished {
+                    if !subtitle.is_empty() {
+                        subtitle.push('\n');
+                    }
+                    subtitle.push_str(&gettext("Listened"));
+                } else if position_ms > 0 {
+                    let elapsed = crate::ui::app_helpers::fmt_duration(position_ms);
+                    let total_secs = ep
+                        .duration
+                        .as_deref()
+                        .and_then(crate::core::podcast::duration_secs)
+                        .filter(|s| *s > 0);
+                    if !subtitle.is_empty() {
+                        subtitle.push('\n');
+                    }
+                    subtitle.push_str(&match total_secs {
+                        Some(secs) => gettext_f(
+                            "{position} of {total} listened",
+                            &[
+                                ("position", &elapsed),
+                                ("total", &crate::ui::app_helpers::fmt_duration(secs * 1000)),
+                            ],
+                        ),
+                        None => gettext_f("{position} listened", &[("position", &elapsed)]),
                     });
                 }
-            });
-            on_long_press(&row, {
+                MediaItem {
+                    title: ep.title.clone(),
+                    subtitle,
+                    image: cover.clone(),
+                    duration: None,
+                    progress: None,
+                    key: ep.audio_url.clone(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        // The podcast's name heads the list as the first row's section heading,
+        // so it scrolls with the episodes like the group title used to.
+        let heading = format!("{title} ({})", items.len());
+        let headers = vec![heading; items.len()];
+        // Not activatable: like a library track, the episode plays via its play
+        // button; long press / right click opens the detail view.
+        let list = MediaList::new(
+            "microphone-symbolic",
+            {
                 let sender = sender.clone();
-                move || {
+                move |index, _| {
                     sender.input(PodcastsInput::ShowPodcastEpisodeDetail {
                         podcast_id: id,
-                        index: i,
+                        index,
                     });
                 }
-            });
-            group.add(&row);
-        }
-        content.append(&group);
+            },
+            crate::ui::podcasts_page::episode_toggle(sender),
+        );
+        list.widget().set_margin_top(12);
+        list.set_items(items, Some(headers));
+        let view = list.widget().clone().upcast::<gtk::Widget>();
+        *self.episode_list.borrow_mut() = Some(list);
         // Park the built page and ask the parent to push it. The play/pause
         // icons are refreshed only *after* the parent has mounted the subpage
-        // (it echoes `PlaybackStateChanged` back), because `refresh_episode_icons`
-        // drops rows whose widgets aren't realized yet.
-        *self.subpage_slot.borrow_mut() =
-            Some((gettext_f("Podcast – {title}", &[("title", title)]), content));
+        // (it echoes `PlaybackStateChanged` back); rows scrolling in later read
+        // the state when they are bound.
+        *self.subpage_slot.borrow_mut() = Some((page_title, view));
         let _ = sender.output(PodcastsOutput::PushSubpage);
     }
 
@@ -666,32 +667,10 @@ impl PodcastsPage {
         }
     }
 
-    /// Play/Pause button (suffix) for an entry row: tap = toggle episode.
-    pub(super) fn episode_play_button(
-        &self,
-        sender: &ComponentSender<Self>,
-        url: &str,
-        title: &str,
-    ) -> gtk::Button {
-        let active = self.playing_url.as_deref() == Some(url);
-        let btn = crate::ui::play_mark::button(&gettext("Play/Pause"), active, self.playing);
-        {
-            let (sender, url, title) = (sender.clone(), url.to_string(), title.to_string());
-            btn.connect_clicked(move |_| {
-                let _ = sender.output(PodcastsOutput::ToggleEpisode {
-                    url: url.clone(),
-                    title: title.clone(),
-                });
-            });
-        }
-        self.episode_marks.add(url.to_string(), &btn);
-        btn
-    }
-
-    /// Refreshes the progress line of every visible row of `url` — driven by the
-    /// transport's per-second tick, so the bar in "Newest"/"Recently"/a podcast's
-    /// episode list moves along with playback instead of only after a rebuild.
-    /// Rows whose widget left the tree are dropped along the way.
+    /// Moves the progress line of `url` in "Newest"/"Recently" along — driven by
+    /// the transport's per-second tick, so the bar follows playback instead of
+    /// only updating after a rebuild. (A podcast's own episode list states the
+    /// progress as text and is refreshed when it is opened again.)
     pub(super) fn apply_episode_progress(
         &self,
         url: &str,
@@ -699,26 +678,25 @@ impl PodcastsPage {
         duration_ms: i64,
         finished: bool,
     ) {
-        let mut rows = self.episode_progress_rows.borrow_mut();
-        rows.retain(|r| r.row.root().is_some());
-        for entry in rows.iter().filter(|r| r.url == url) {
-            // The feed's length wins (it is what the row shows elsewhere); the
-            // player's duration fills in for feeds that state none.
-            let total = entry
-                .total_secs
-                .or_else(|| (duration_ms > 0).then_some(duration_ms / 1000));
-            fill_progress_row(&entry.row, position_ms, total, finished);
+        // The feed's length wins (it is what the row shows elsewhere); the
+        // player's duration fills in for feeds that state none.
+        for list in [&self.newest_list, &self.recent_list] {
+            list.apply_progress(url, position_ms, duration_ms, finished);
         }
     }
 
-    /// Updates the Play/Pause icons of all visible entry rows and the "Play" row
-    /// of an open detail dialog. Detached rows are discarded in the process.
+    /// Updates the Play/Pause icons of the episode lists and the "Play" row of
+    /// an open detail dialog.
     pub(super) fn refresh_episode_icons(&self) {
         let active = self.playing_url.clone();
         let playing = self.playing;
         let is_active = |url: &str| playing && active.as_deref() == Some(url);
-        self.episode_marks
-            .apply_all(playing, |url| active.as_deref() == Some(url));
+        for list in [&self.newest_list, &self.recent_list] {
+            list.set_playback(active.as_deref(), playing);
+        }
+        if let Some(list) = self.episode_list.borrow().as_ref() {
+            list.set_playback(active.as_deref(), playing);
+        }
         if let Some((row, url)) = self.ctx_episode_play.borrow().as_ref() {
             row.set_visible(!is_active(url));
         }

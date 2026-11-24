@@ -161,12 +161,12 @@ pub struct App {
     pub(crate) podcasts_page: relm4::Controller<crate::ui::podcasts_page::PodcastsPage>,
     /// Hand-off slot for episode subpages built by the PodcastsPage component
     /// (read in `Msg::Podcast(PodcastMsg::PushPodcastSubpage)`, then pushed onto the shared nav).
-    pub(crate) podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
+    pub(crate) podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Widget)>>>,
     /// YouTube page, extracted into its own relm4 component. Transport + yt-dlp
     /// settings stay on `App` (see `app_yt_glue.rs`).
     pub(crate) yt_page: relm4::Controller<crate::ui::yt_page::YtPage>,
     /// Hand-off slot for subpages built by the YtPage component.
-    pub(crate) yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>>,
+    pub(crate) yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Widget)>>>,
     /// Internet-radio page, extracted into its own relm4 component. The timeshift
     /// recorder and playback stay on `App` (see `app_streaming.rs`).
     pub(crate) stream_page: relm4::Controller<crate::ui::stream_page::StreamPage>,
@@ -1727,10 +1727,10 @@ impl Component for App {
         let yt_sort: crate::ui::app_sort::SortSlot = Default::default();
         // Shared hand-off slot for episode subpages built by the component (its
         // `!Send` widget can't ride on the parent's `Send` `Msg`).
-        let podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
+        let podcast_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Widget)>>> =
             std::rc::Rc::new(std::cell::RefCell::new(None));
         let podcasts_page = launch_podcasts_page(&sender, &podcast_subpage, &podcast_sort);
-        let yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Box)>>> =
+        let yt_subpage: std::rc::Rc<std::cell::RefCell<Option<(String, gtk::Widget)>>> =
             std::rc::Rc::new(std::cell::RefCell::new(None));
         let yt_page = launch_yt_page(&sender, &yt_subpage, &yt_sort);
         let stream_page = launch_stream_page(&sender, &stream_sort);

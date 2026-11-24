@@ -16,11 +16,9 @@ use crate::core::panic_guard::catch_or;
 use crate::core::youtube;
 use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::ui::app::YtView;
-use crate::ui::app_helpers::{cover_widget, fill_progress_row, on_long_press, on_secondary_click};
 use crate::ui::widgets::{action_row, detail_box, present_detail_refreshable};
 use crate::ui::yt_channels::{
-    CHANNEL_REFRESH_THREADS, WatchRow, duration_chip, ensure_channel_image, fmt_duration,
-    refresh_channel_videos,
+    CHANNEL_REFRESH_THREADS, ensure_channel_image, fmt_duration, refresh_channel_videos,
 };
 use crate::ui::yt_page::{ProgressPopup, YtCmd, YtInput, YtOutput, YtPage};
 
@@ -328,126 +326,9 @@ impl YtPage {
         }
     }
 
-    /// Play/Pause button (suffix) for a video row.
-    fn video_play_button(
-        &self,
-        sender: &ComponentSender<Self>,
-        video_id: &str,
-        title: &str,
-    ) -> gtk::Button {
-        let active = self.playing_video_id.as_deref() == Some(video_id);
-        let btn = crate::ui::play_mark::button(&gettext("Play/Pause"), active, self.playing);
-        {
-            let (sender, vid, t) = (sender.clone(), video_id.to_string(), title.to_string());
-            btn.connect_clicked(move |_| {
-                sender.input(YtInput::PlayVideo {
-                    video_id: vid.clone(),
-                    title: t.clone(),
-                });
-            });
-        }
-        self.video_marks.add(video_id.to_string(), &btn);
-        btn
-    }
-
-    /// A video row built like the podcast lists: cover, title and subtitle in a
-    /// text column with the progress line underneath (long-form items only),
-    /// then the runtime and the play button. A `AdwActionRow` has no room under
-    /// its subtitle, so the row is a plain box — the progress line then reads
-    /// exactly like the one in "Newest"/"Recently" for podcasts. The box is
-    /// wrapped in a list-box row and laid out like an `emilia-flush`
-    /// `AdwActionRow` (cover flush left, 8 px to the text, plain title weight),
-    /// so it looks the same as the streaming/album rows next to it.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn video_card(
-        &self,
-        sender: &ComponentSender<Self>,
-        video_id: &str,
-        title: &str,
-        subtitle: &str,
-        cover: Option<&str>,
-        duration: Option<i64>,
-        watched: Option<&(i64, bool)>,
-        on_detail: impl Fn() + Clone + 'static,
-    ) -> gtk::ListBoxRow {
-        let card = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .build();
-        let top = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(8)
-            .margin_top(3)
-            .margin_bottom(3)
-            .margin_start(3)
-            .margin_end(12)
-            .build();
-        top.append(&cover_widget(cover, "audio-x-generic-symbolic"));
-        let text = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .hexpand(true)
-            .valign(gtk::Align::Center)
-            .build();
-        let title_lbl = gtk::Label::builder()
-            .label(title)
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        text.append(&title_lbl);
-        if !subtitle.trim().is_empty() {
-            let sub = gtk::Label::builder()
-                .label(subtitle)
-                .xalign(0.0)
-                .ellipsize(gtk::pango::EllipsizeMode::End)
-                .build();
-            sub.add_css_class("dim-label");
-            text.append(&sub);
-        }
-        if let Some(prow) = self.watch_progress_widget(video_id, duration, watched) {
-            text.append(&prow);
-        }
-        top.append(&text);
-        if let Some(d) = duration.filter(|d| *d > 0) {
-            top.append(&duration_chip(d));
-        }
-        top.append(&self.video_play_button(sender, video_id, title));
-        card.append(&top);
-        // A tap on the card deliberately does nothing: playback is the play
-        // button's job, so a stray tap while scrolling a feed cannot start a
-        // video. Same rule as the playlist track rows. The detail view is on
-        // long press / right click below.
-        on_secondary_click(&card, on_detail.clone());
-        on_long_press(&card, on_detail);
-        crate::ui::app_helpers::card_row(&card)
-    }
-
-    /// Watch-progress suffix for a row, for **long-form** items only (talks,
-    /// streams, podcasts — a song keeps its plain row). Returns `None` for
-    /// anything shorter than [`youtube::LONGFORM_SECS`]; otherwise a widget that
-    /// is registered for the live tick and starts out hidden until there is
-    /// something to show.
-    fn watch_progress_widget(
-        &self,
-        video_id: &str,
-        total_secs: Option<i64>,
-        progress: Option<&(i64, bool)>,
-    ) -> Option<gtk::Box> {
-        if !youtube::is_longform(total_secs) {
-            return None;
-        }
-        let row = crate::ui::app_helpers::progress_row_box();
-        let (position_ms, finished) = progress.copied().unwrap_or((0, false));
-        fill_progress_row(&row, position_ms, total_secs, finished);
-        self.watch_progress_rows.borrow_mut().push(WatchRow {
-            video_id: video_id.to_string(),
-            row: row.clone(),
-            total_secs,
-        });
-        Some(row)
-    }
-
-    /// Refreshes the watch-progress widgets of every visible row of `video_id`
-    /// (driven by the transport tick). Rows that left the widget tree are
-    /// dropped along the way.
+    /// Moves the watch-progress line of `video_id` along in every list (driven
+    /// by the transport tick); the player's duration fills in for videos whose
+    /// length is unknown.
     pub(super) fn apply_watch_progress(
         &self,
         video_id: &str,
@@ -455,13 +336,11 @@ impl YtPage {
         duration_ms: i64,
         finished: bool,
     ) {
-        let mut rows = self.watch_progress_rows.borrow_mut();
-        rows.retain(|r| r.row.root().is_some());
-        for entry in rows.iter().filter(|r| r.video_id == video_id) {
-            let total = entry
-                .total_secs
-                .or_else(|| (duration_ms > 0).then_some(duration_ms / 1000));
-            fill_progress_row(&entry.row, position_ms, total, finished);
+        for list in [&self.newest_list, &self.recent_list] {
+            list.apply_progress(video_id, position_ms, duration_ms, finished);
+        }
+        if let Some(list) = self.channel_list.borrow().as_ref() {
+            list.apply_progress(video_id, position_ms, duration_ms, finished);
         }
     }
 
@@ -473,6 +352,12 @@ impl YtPage {
         let is_active = |vid: &str| playing && active.as_deref() == Some(vid);
         self.video_marks
             .apply_all(playing, |vid| active.as_deref() == Some(vid));
+        for list in [&self.newest_list, &self.recent_list] {
+            list.set_playback(active.as_deref(), playing);
+        }
+        if let Some(list) = self.channel_list.borrow().as_ref() {
+            list.set_playback(active.as_deref(), playing);
+        }
         if let Some((row, vid)) = self.ctx_video_play.borrow().as_ref() {
             row.set_visible(!is_active(vid));
         }

@@ -16,9 +16,10 @@ use crate::i18n::{gettext, gettext_f, ngettext_n};
 use crate::model::{YtRecent, YtVideoRef};
 use crate::ui::app::{SortCrit, YtView};
 use crate::ui::app_gallery::{gallery_cell, spawn_gallery_decode};
-use crate::ui::app_helpers::{cover_widget, on_long_press, on_secondary_click};
+use crate::ui::app_helpers::{cover_widget, on_secondary_click};
 use crate::ui::app_sort::sort_popover;
 use crate::ui::app_views::natural_key;
+use crate::ui::media_list::{MediaItem, Progress};
 use crate::ui::yt_channels::{fmt_duration, fmt_published, yt_pubdate_key};
 use crate::ui::yt_page::{YtInput, YtOutput, YtPage};
 
@@ -236,7 +237,7 @@ impl YtPage {
             }
             self.channels_list.invalidate_headers();
         }
-        self.reload_yt_newest(sender);
+        self.reload_yt_newest();
         self.reload_yt_recent(sender);
     }
 
@@ -290,14 +291,8 @@ impl YtPage {
     }
 
     /// Builds the "Newest videos" list across all subscribed channels.
-    fn reload_yt_newest(&mut self, sender: &ComponentSender<Self>) {
+    fn reload_yt_newest(&mut self) {
         self.newest_items = newest_videos(self.library.all_videos().unwrap_or_default());
-        while let Some(child) = self.newest_list.first_child() {
-            self.newest_list.remove(&child);
-        }
-        if self.newest_items.is_empty() {
-            return;
-        }
         let (today, yesterday, week_start) = crate::core::podcast::recent_day_buckets();
         let buckets = DayBuckets {
             today,
@@ -307,19 +302,12 @@ impl YtPage {
         };
         // Stored watch positions in one query, instead of one per row.
         let watched = self.library.all_yt_progress().unwrap_or_default();
-        let mut cur_bucket: Option<usize> = None;
-        let mut group: Option<adw::PreferencesGroup> = None;
-        for (i, v) in self.newest_items.iter().enumerate() {
-            let b = buckets.bucket_of(yt_pubdate_key(v.published.as_deref()));
-            if cur_bucket != Some(b) {
-                cur_bucket = Some(b);
-                let g = adw::PreferencesGroup::builder()
-                    .title(newest_bucket_title(b))
-                    .build();
-                self.newest_list.append(&g);
-                group = Some(g);
-            }
-            let subtitle = newest_subtitle(&v.channel_title, v.published.as_deref());
+        let mut items = Vec::with_capacity(self.newest_items.len());
+        let mut headers = Vec::with_capacity(self.newest_items.len());
+        for v in &self.newest_items {
+            headers.push(newest_bucket_title(
+                buckets.bucket_of(yt_pubdate_key(v.published.as_deref())),
+            ));
             let cover = crate::core::online::youtube_cover_path(&v.video_id)
                 .or_else(|| {
                     crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&v.video_id))
@@ -329,23 +317,16 @@ impl YtPage {
                         .as_deref()
                         .and_then(crate::core::online::youtube_thumb_path)
                 });
-            let row = self.video_card(
-                sender,
+            items.push(video_item(
                 &v.video_id,
                 &v.title,
-                &subtitle,
-                cover.as_deref(),
+                newest_subtitle(&v.channel_title, v.published.as_deref()),
+                cover,
                 v.duration,
                 watched.get(&v.video_id),
-                {
-                    let sender = sender.clone();
-                    move || sender.input(YtInput::ShowNewestDetail(i))
-                },
-            );
-            if let Some(g) = &group {
-                g.add(&row);
-            }
+            ));
         }
+        self.newest_list.set_items(items, Some(headers));
         self.refresh_yt_icons();
     }
 
@@ -357,101 +338,76 @@ impl YtPage {
         // Refresh the title-bar sort control (visibility depends on emptiness);
         // before the early-return below so the empty case hides it too.
         self.rebuild_sort(sender);
-        while let Some(child) = self.recent_list.first_child() {
-            self.recent_list.remove(&child);
-        }
-        if self.recent_items.is_empty() {
-            return;
-        }
         let watched = self.library.all_yt_progress().unwrap_or_default();
-        let group = adw::PreferencesGroup::new();
-        for r in &self.recent_items {
-            let row = adw::ActionRow::builder()
-                .title(gtk::glib::markup_escape_text(&r.title))
-                .activatable(true)
-                .build();
-            row.add_css_class("emilia-flush");
-            if r.kind == "playlist" {
-                row.set_subtitle(&recent_playlist_subtitle(r.count, r.total_duration));
-                let cover = r.thumbnail.as_deref().and_then(|t| {
-                    if std::path::Path::new(t).exists() {
-                        Some(t.to_string())
-                    } else {
-                        crate::core::online::youtube_thumb_path(t)
-                    }
-                });
-                row.add_prefix(&cover_widget(cover.as_deref(), "view-list-symbolic"));
-                let btn = gtk::Button::builder()
-                    .icon_name("media-playback-start-symbolic")
-                    .valign(gtk::Align::Center)
-                    .tooltip_text(gettext("Start Playlist"))
-                    .build();
-                btn.add_css_class("flat");
-                {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    btn.connect_clicked(move |_| {
-                        let _ = sender.output(YtOutput::StartPlaylist {
-                            url: url.clone(),
-                            title: t.clone(),
-                        });
+        let items = self
+            .recent_items
+            .iter()
+            .map(|r| {
+                if r.kind == "playlist" {
+                    // A playlist: a tap opens it, the button starts it (see the
+                    // list's handlers in `init`).
+                    let cover = r.thumbnail.as_deref().and_then(|t| {
+                        if std::path::Path::new(t).exists() {
+                            Some(t.to_string())
+                        } else {
+                            crate::core::online::youtube_thumb_path(t)
+                        }
                     });
+                    return MediaItem {
+                        title: r.title.clone(),
+                        subtitle: recent_playlist_subtitle(r.count, r.total_duration),
+                        image: cover,
+                        key: r.video_id.clone(),
+                        placeholder: Some("view-list-symbolic"),
+                        activatable: true,
+                        ..Default::default()
+                    };
                 }
-                row.add_suffix(&btn);
-                {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    row.connect_activated(move |_| {
-                        sender.input(YtInput::OpenRecentPlaylist {
-                            url: url.clone(),
-                            title: t.clone(),
-                        });
-                    });
-                }
-                on_secondary_click(&row, {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowPlaylistDetail {
-                            url: url.clone(),
-                            title: t.clone(),
-                        });
-                    }
+                let cover = crate::core::online::youtube_cover_path(&r.video_id).or_else(|| {
+                    crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&r.video_id))
                 });
-                on_long_press(&row, {
-                    let (sender, url, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowPlaylistDetail {
-                            url: url.clone(),
-                            title: t.clone(),
-                        })
-                    }
-                });
-                group.add(&row);
-                continue;
-            }
-            let cover = crate::core::online::youtube_cover_path(&r.video_id).or_else(|| {
-                crate::core::online::youtube_thumb_path(&youtube::thumbnail_url(&r.video_id))
-            });
-            let card = self.video_card(
-                sender,
-                &r.video_id,
-                &r.title,
-                r.artist.as_deref().unwrap_or_default(),
-                cover.as_deref(),
-                r.duration,
-                watched.get(&r.video_id),
-                {
-                    let (sender, vid, t) = (sender.clone(), r.video_id.clone(), r.title.clone());
-                    move || {
-                        sender.input(YtInput::ShowVideoDetail {
-                            video_id: vid.clone(),
-                            title: t.clone(),
-                        });
-                    }
-                },
-            );
-            group.add(&card);
-        }
-        self.recent_list.append(&group);
+                video_item(
+                    &r.video_id,
+                    &r.title,
+                    r.artist.clone().unwrap_or_default(),
+                    cover,
+                    r.duration,
+                    watched.get(&r.video_id),
+                )
+            })
+            .collect();
+        // One untitled card for the whole list.
+        self.recent_list.set_items(items, None);
         self.refresh_yt_icons();
+    }
+}
+
+/// A video card for the lists: the runtime on the right and — for long-form
+/// videos only (talks, streams; a song keeps its plain row) — a watch-progress
+/// line that the transport tick moves along.
+pub(super) fn video_item(
+    video_id: &str,
+    title: &str,
+    subtitle: String,
+    cover: Option<String>,
+    duration: Option<i64>,
+    watched: Option<&(i64, bool)>,
+) -> MediaItem {
+    let (position_ms, finished) = watched.copied().unwrap_or((0, false));
+    MediaItem {
+        title: title.to_string(),
+        subtitle,
+        image: cover,
+        duration: duration
+            .filter(|d| *d > 0)
+            .map(crate::ui::yt_channels::fmt_duration),
+        progress: youtube::is_longform(duration).then_some(Progress {
+            position_ms,
+            total_secs: duration,
+            finished,
+        }),
+        key: video_id.to_string(),
+        ..Default::default()
     }
 }
 

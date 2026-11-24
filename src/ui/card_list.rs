@@ -507,7 +507,11 @@ impl CardList {
 /// the neighbour is `None`, which differs from any heading and so correctly
 /// marks the boundary. Without headings the whole list is a single card, so only
 /// its first and last row are rounded.
-fn section_edges(position: usize, total: usize, headers: Option<&[String]>) -> (bool, bool) {
+pub(crate) fn section_edges(
+    position: usize,
+    total: usize,
+    headers: Option<&[String]>,
+) -> (bool, bool) {
     match headers {
         Some(labels) => {
             let cur = labels.get(position);

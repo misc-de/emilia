@@ -53,6 +53,27 @@ pub(crate) struct InitState {
 
 /// Mobile top-bar nav icon size for a user offset (-50..=50 %, the mobile-only
 /// "Menu icon size" setting). Base is 34 px (see the nav build below).
+/// Whether GTK draws with the Cairo software renderer — set by `main` when the
+/// Flatpak sandbox has no GPU render node (the phone), or forced by the user.
+fn software_rendering() -> bool {
+    std::env::var("GSK_RENDERER").is_ok_and(|r| r.eq_ignore_ascii_case("cairo"))
+}
+
+/// libadwaita's cards and boxed lists carry a soft drop shadow (two blurred
+/// layers, 3 px and 6 px). The Cairo renderer blurs those in software on every
+/// frame that touches them, and while scrolling that is every frame: measured on
+/// the phone (1080×2400 at scale 2.27) a podcast episode list took 131 ms per
+/// frame, 34 ms with the boxed-list shadow gone and 29 ms with sharp outlines
+/// instead of all blurred shadows. So under Cairo the shadows keep their
+/// outline but lose the blur; the `.osd` variants keep having none.
+const SHARP_SHADOWS_CSS: &str = "\
+    list.boxed-list, list.content, list.boxed-list-separate > row, .card \
+      { box-shadow: 0 0 0 1px alpha(black, 0.03), 0 1px 0 1px alpha(black, 0.07); }\
+    .osd list.boxed-list, .osd list.content, .osd list.boxed-list-separate > row, \
+    list.osd.boxed-list, list.osd.content, list.boxed-list-separate > row.osd, \
+    .osd .card, .card.osd { box-shadow: none; }\
+    box.emilia-fastscroll { box-shadow: 0 0 0 1px alpha(black, 0.2); }";
+
 pub(crate) fn mobile_nav_icon_px(offset: i32) -> i32 {
     let f = 1.0 + (offset.clamp(-50, 50) as f64) / 100.0;
     (34.0 * f).round().clamp(10.0, 64.0) as i32
@@ -1495,8 +1516,12 @@ impl App {
                  listview.emilia-card-list > row { background: none; padding: 0; border: none; box-shadow: none; }\
                  listview.emilia-card-list > row:hover, listview.emilia-card-list > row:selected { background: none; }\
                  listview.emilia-card-list list.emilia-card-host { background: none; border: none; box-shadow: none; }\
-                 listview.emilia-card-list row.emilia-card { background-color: @card_bg_color; border-left: 1px solid @card_shade_color; border-right: 1px solid @card_shade_color; border-bottom: 1px solid @card_shade_color; }\
-                 listview.emilia-card-list row.emilia-card.emilia-sec-top { border-top: 1px solid @card_shade_color; border-top-left-radius: 12px; border-top-right-radius: 12px; }\
+                 /* The card outline is drawn as inset shadows, not as a \
+                    `border`: a translucent border on only some sides takes the \
+                    Cairo renderer (the phone) a slow masked path per row, \
+                    ~90 ms a frame while scrolling, against ~0 for these. */\
+                 listview.emilia-card-list row.emilia-card { background-color: @card_bg_color; box-shadow: inset 1px 0 @card_shade_color, inset -1px 0 @card_shade_color, inset 0 -1px @card_shade_color; }\
+                 listview.emilia-card-list row.emilia-card.emilia-sec-top { box-shadow: inset 1px 0 @card_shade_color, inset -1px 0 @card_shade_color, inset 0 -1px @card_shade_color, inset 0 1px @card_shade_color; border-top-left-radius: 12px; border-top-right-radius: 12px; }\
                  listview.emilia-card-list row.emilia-card.emilia-sec-bottom { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }\
                  listview.emilia-card-list.emilia-sectioned row.emilia-card.emilia-sec-bottom { margin-bottom: 6px; }",
             );
@@ -1505,6 +1530,15 @@ impl App {
                 &css,
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
+            if software_rendering() {
+                let sharp = gtk::CssProvider::new();
+                sharp.load_from_string(SHARP_SHADOWS_CSS);
+                gtk::style_context_add_provider_for_display(
+                    &display,
+                    &sharp,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                );
+            }
         }
     }
 

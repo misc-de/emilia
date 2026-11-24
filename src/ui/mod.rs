@@ -61,6 +61,7 @@ pub mod fm_dial;
 pub mod fm_page;
 pub mod fs_row;
 pub mod gdrive_page;
+pub mod media_list;
 pub mod play_mark;
 pub mod podcasts_page;
 pub mod podcasts_page_detail;

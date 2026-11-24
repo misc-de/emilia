@@ -556,7 +556,7 @@ impl App {
 
     /// Wraps a content into a scrollable subpage (with header bar +
     /// back arrow) and pushes it onto the navigation stack.
-    pub(crate) fn push_subpage(&self, title: &str, content: &gtk::Box) {
+    pub(crate) fn push_subpage(&self, title: &str, content: &impl IsA<gtk::Widget>) {
         self.push_subpage_inner(title, content, true);
     }
 
@@ -609,7 +609,7 @@ impl App {
         }
     }
 
-    fn push_subpage_inner(&self, title: &str, content: &gtk::Box, swipe_back: bool) {
+    fn push_subpage_inner(&self, title: &str, content: &impl IsA<gtk::Widget>, swipe_back: bool) {
         self.remember_overview_scroll();
 
         let scroller = gtk::ScrolledWindow::builder()

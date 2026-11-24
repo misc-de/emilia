@@ -221,7 +221,10 @@ pub fn cover_frame(placeholder_icon: &str, size: i32) -> gtk::AspectFrame {
 pub fn thumb_frame(placeholder_icon: &str, size: i32) -> adw::Bin {
     let bin = adw::Bin::new();
     bin.set_size_request(size, size);
-    bin.set_overflow(gtk::Overflow::Hidden);
+    // No `Overflow::Hidden`: the cover arrives with its corners already rounded
+    // (see [`set_cover_thumb`]). Clipping it to the card's rounded outline
+    // instead costs the Cairo renderer (the phone) a masked paint per cover on
+    // every frame — measured at about half the frame rate while scrolling.
     bin.set_halign(gtk::Align::Start);
     bin.set_valign(gtk::Align::Center);
     bin.set_hexpand(false);
@@ -315,33 +318,121 @@ pub fn set_cover_texture(frame: &gtk::AspectFrame, texture: &gtk::gdk::Texture) 
 /// the row is single- or two-line. The size is taken from the frame.
 pub fn set_cover_thumb(bin: &adw::Bin, texture: &gtk::gdk::Texture) {
     let size = bin.height_request().max(1);
-    // Downscale to a **square** display texture: cover-scale preserving the aspect
-    // ratio (smaller side → `size`), then centre-crop to `size`×`size`. This keeps
-    // non-square thumbnails (e.g. 16:9 YouTube covers) from being stretched, while
-    // the fixed-size texture still stops a Paintable's natural size from growing
-    // the frame on taller (multi-line) rows.
+    // Rendered at the device's pixel size, so the cover is drawn about 1:1
+    // instead of a `size`-pixel texture stretched by the display scale (blurry,
+    // and a filtered upscale per frame for the Cairo renderer).
+    let px = ((size as f64) * device_scale(bin)).ceil() as i32;
+    let radius = THUMB_RADIUS * px as f64 / size as f64;
+    let shown = rounded_square_thumb(texture, px, radius).unwrap_or_else(|| texture.clone());
+    let img = gtk::Image::from_paintable(Some(&shown));
+    img.set_pixel_size(size);
+    bin.set_child(Some(&img));
+}
+
+/// Corner radius of libadwaita's `.card`, the style the thumbnail frame wears.
+const THUMB_RADIUS: f64 = 12.0;
+
+/// Rounded thumbnails already made, so a recycled list row rebinding to a cover
+/// does not redo the scaling. Keyed by the source texture (held, so its address
+/// cannot be reused) and the pixel size.
+const ROUNDED_CACHE_CAP: usize = 512;
+
+thread_local! {
+    static ROUNDED_THUMBS: RefCell<HashMap<(usize, i32), (gtk::gdk::Texture, gtk::gdk::Texture)>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Pixels per logical pixel where `widget` is shown: its surface's (fractional)
+/// scale once it is on screen, otherwise the largest monitor scale — a list
+/// row is often filled before it is realized.
+fn device_scale(widget: &impl IsA<gtk::Widget>) -> f64 {
+    if let Some(scale) = widget
+        .native()
+        .and_then(|n| n.surface())
+        .map(|s| s.scale())
+        .filter(|s| *s > 0.0)
+    {
+        return scale;
+    }
+    gtk::gdk::Display::default()
+        .map(|d| {
+            let monitors = d.monitors();
+            (0..monitors.n_items())
+                .filter_map(|i| monitors.item(i).and_downcast::<gtk::gdk::Monitor>())
+                .map(|m| m.scale())
+                .fold(1.0, f64::max)
+        })
+        .unwrap_or(1.0)
+}
+
+/// `texture` cover-scaled and centre-cropped to a `px`×`px` square (so 16:9
+/// YouTube covers are not stretched, and a fixed-size texture cannot grow the
+/// frame on taller rows), with corners of `radius` pixels made transparent.
+fn rounded_square_thumb(
+    texture: &gtk::gdk::Texture,
+    px: i32,
+    radius: f64,
+) -> Option<gtk::gdk::Texture> {
+    use gtk::glib::translate::ToGlibPtr;
+    let src_ptr: *mut gtk::gdk::ffi::GdkTexture = texture.to_glib_none().0;
+    let key = (src_ptr as usize, px);
+    if let Some(hit) = ROUNDED_THUMBS.with(|c| c.borrow().get(&key).map(|(_, t)| t.clone())) {
+        return Some(hit);
+    }
     // `pixbuf_get_from_texture` is deprecated since GTK 4.12; deliberately kept
     // until a deprecation-free downscale is visually verified (thumbnail size).
     #[allow(deprecated)]
-    let square = gtk::gdk::pixbuf_get_from_texture(texture).map(|pb| {
-        let (w, h) = (pb.width().max(1), pb.height().max(1));
-        let scale = (size as f64 / w as f64).max(size as f64 / h as f64);
-        let sw = ((w as f64 * scale).round() as i32).max(size);
-        let sh = ((h as f64 * scale).round() as i32).max(size);
-        let scaled = pb
-            .scale_simple(sw, sh, gtk::gdk_pixbuf::InterpType::Bilinear)
-            .unwrap_or(pb);
-        let x = (scaled.width() - size).max(0) / 2;
-        let y = (scaled.height() - size).max(0) / 2;
-        scaled.new_subpixbuf(x, y, size, size)
+    let pb = gtk::gdk::pixbuf_get_from_texture(texture)?;
+    let (w, h) = (pb.width().max(1), pb.height().max(1));
+    let scale = (px as f64 / w as f64).max(px as f64 / h as f64);
+    let sw = ((w as f64 * scale).round() as i32).max(px);
+    let sh = ((h as f64 * scale).round() as i32).max(px);
+    let scaled = pb.scale_simple(sw, sh, gtk::gdk_pixbuf::InterpType::Bilinear)?;
+    let (x0, y0) = ((sw - px) / 2, (sh - px) / 2);
+
+    let n = scaled.n_channels() as usize;
+    let stride = scaled.rowstride() as usize;
+    let bytes = scaled.read_pixel_bytes();
+    let data: &[u8] = &bytes;
+    let side = px as usize;
+    let mut out = vec![0u8; side * side * 4];
+    for y in 0..side {
+        for x in 0..side {
+            let i = (y0 as usize + y) * stride + (x0 as usize + x) * n;
+            let o = (y * side + x) * 4;
+            out[o..o + 3].copy_from_slice(&data[i..i + 3]);
+            let alpha = if n == 4 { data[i + 3] as f64 } else { 255.0 };
+            out[o + 3] = (alpha * corner_coverage(x, y, side, radius)).round() as u8;
+        }
+    }
+    let tex: gtk::gdk::Texture = gtk::gdk::MemoryTexture::new(
+        px,
+        px,
+        gtk::gdk::MemoryFormat::R8g8b8a8,
+        &gtk::glib::Bytes::from_owned(out),
+        side * 4,
+    )
+    .upcast();
+    ROUNDED_THUMBS.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= ROUNDED_CACHE_CAP {
+            c.clear();
+        }
+        c.insert(key, (texture.clone(), tex.clone()));
     });
-    let tex = square.map(|pb| gtk::gdk::Texture::for_pixbuf(&pb));
-    let img = match &tex {
-        Some(t) => gtk::Image::from_paintable(Some(t)),
-        None => gtk::Image::from_paintable(Some(texture)),
-    };
-    img.set_pixel_size(size);
-    bin.set_child(Some(&img));
+    Some(tex)
+}
+
+/// How much of pixel (`x`, `y`) lies inside a `side`×`side` square with corners
+/// rounded to `radius` (anti-aliased over one pixel): 1 inside, 0 outside.
+fn corner_coverage(x: usize, y: usize, side: usize, radius: f64) -> f64 {
+    let (fx, fy, s) = (x as f64 + 0.5, y as f64 + 0.5, side as f64);
+    // Distance to the nearest corner circle's centre; only the corner squares
+    // are affected, everywhere else the clamp lands on the pixel itself.
+    let cx = fx.clamp(radius, s - radius);
+    let cy = fy.clamp(radius, s - radius);
+    let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+    (radius - d + 0.5).clamp(0.0, 1.0)
 }
 
 /// Process-wide background decoder for list thumbnails. [`crate::ui::app::cover_widget`]
@@ -1117,7 +1208,23 @@ pub fn busy_dialog(text: &str, width: i32) -> (adw::Dialog, gtk::Label) {
 
 #[cfg(test)]
 mod tests {
-    use super::{DecodeQueue, esc, source_stamp, write_thumb_file};
+    use super::{DecodeQueue, corner_coverage, esc, source_stamp, write_thumb_file};
+
+    /// The rounded thumbnail keeps its middle and edges opaque and clears only
+    /// the very corners, with a soft one-pixel edge in between.
+    #[test]
+    fn corner_mask_clears_only_the_corners() {
+        let (side, r) = (100, 25.0);
+        assert_eq!(corner_coverage(50, 50, side, r), 1.0);
+        assert_eq!(corner_coverage(0, 50, side, r), 1.0);
+        assert_eq!(corner_coverage(50, 99, side, r), 1.0);
+        for (x, y) in [(0, 0), (99, 0), (0, 99), (99, 99)] {
+            assert_eq!(corner_coverage(x, y, side, r), 0.0, "corner {x},{y}");
+        }
+        // On the arc itself: partly covered.
+        let edge = corner_coverage(7, 7, side, r);
+        assert!(edge > 0.0 && edge < 1.0, "{edge}");
+    }
 
     fn queue_with(bursts: &[(u64, &[&str])]) -> DecodeQueue {
         let mut q = DecodeQueue { bursts: Vec::new() };
