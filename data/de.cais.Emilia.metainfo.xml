@@ -137,6 +137,12 @@
   <url type="homepage">https://cais.de</url>
 
   <releases>
+    <release version="0.8.63" date="2026-11-24">
+      <description>
+        <p>Long lists now scroll smoothly on phones. A podcast's episode list, the newest and recently played episodes, and the YouTube lists only build the rows on screen, and shadows and rounded covers no longer slow down drawing without graphics acceleration. On a test phone, a list of 800 episodes went from about 4 to 35–40 frames per second. Covers in lists are also sharper on high-resolution screens.</p>
+        <p xml:lang="de">Lange Listen scrollen auf Handys jetzt flüssig. Die Episodenliste eines Podcasts, die neuesten und zuletzt gehörten Folgen sowie die YouTube-Listen bauen nur noch die sichtbaren Zeilen, und Schatten und abgerundete Cover bremsen das Zeichnen ohne Grafikbeschleunigung nicht mehr aus. Auf einem Testhandy stieg eine Liste mit 800 Folgen von etwa 4 auf 35–40 Bilder pro Sekunde. Cover in Listen sind auf hochauflösenden Bildschirmen außerdem schärfer.</p>
+      </description>
+    </release>
     <release version="0.8.62" date="2026-11-23">
       <description>
         <p>Podcast episodes and files streamed from a server no longer fall silent for several seconds after about five minutes of playback. Some podcast servers dropped the connection while the download waited, and the sound only came back once the player had reconnected. Streams now load at playback speed, so the connection stays open.</p>

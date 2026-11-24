@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "emilia"
-version = "0.8.64"
+version = "0.8.65"
 dependencies = [
  "aes",
  "anyhow",
